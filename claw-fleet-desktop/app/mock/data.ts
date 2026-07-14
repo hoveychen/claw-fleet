@@ -21,7 +21,12 @@ export const MOCK_CHAT_WORKSPACE = "/Users/demo/.fleet/chat";
 const MOCK_SESSIONS_SEED: Array<
   Omit<
     SessionInfo,
-    "pendingToolBatch" | "compactCount" | "compactPreTokens" | "compactPostTokens" | "compactCostUsd"
+    | "totalInputTokens"
+    | "pendingToolBatch"
+    | "compactCount"
+    | "compactPreTokens"
+    | "compactPostTokens"
+    | "compactCostUsd"
   >
 > = [
   // ── 1. Active main session: "claw-fleet" (this project) — thinking ──
@@ -448,6 +453,7 @@ const MOCK_SESSIONS_SEED: Array<
 // generated SessionInfo requires them; fill trivial defaults here rather than on
 // every seed literal above.
 export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
+  totalInputTokens: 0,
   pendingToolBatch: false,
   compactCount: 0,
   compactPreTokens: 0,
@@ -476,6 +482,7 @@ function mkSession(
     tokenSpeed: 0,
     agentTokenSpeed: o.tokenSpeed ?? 0,
     totalOutputTokens: 20_000,
+    totalInputTokens: o.totalInputTokens ?? 0,
     totalCostUsd: 0,
     agentTotalCostUsd: 0,
     costSpeedUsdPerMin: 0,
