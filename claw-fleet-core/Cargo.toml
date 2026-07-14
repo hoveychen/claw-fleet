@@ -40,14 +40,8 @@ conch-parser = "0.1.1"
 shell-words = "1.1.1"
 ctrlc = { version = "3", features = ["termination"] }
 git2 = { version = "0.18", default-features = false }
-# Feishu WebSocket long-connection — hand-rolled minimal larkws client
-# (outbound, no public webhook, works behind a firewall). Frame codec via the
-# standalone, clean `lark-websocket-protobuf` crate (crates.io, no submodule
-# baggage); connection / heartbeat / fragment-reassembly / dispatch are
-# hand-written in feishu.rs.
+# Outbound WebSocket long-connection for the mobile relay channel.
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
-lark-websocket-protobuf = "0.1"
-prost = "0.13"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation", "Win32_System_Console"] }

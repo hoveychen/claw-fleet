@@ -1,6 +1,6 @@
 //! `fleet-hooks-server` — Phase 4 P2 entry point for the hook endpoints
 //! (`/guard/*`, `/elicitation/*`, `/plan-approval/*`, `/accounts`, `/llm/*`,
-//! `/feishu/*`, `/audit`, `/daily_report`, `/search`).
+//! `/audit`, `/daily_report`, `/search`).
 //!
 //! Phase 4 P1 extracted `fleet serve`'s body to
 //! `claw_fleet_core::hooks_server::serve`, so this binary now calls the
