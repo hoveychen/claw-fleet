@@ -1,8 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-mod feishu;
-
 use claw_fleet_core::account::{fetch_account_info_blocking as fetch_account_info, AccountInfo, UsageStats};
 use claw_fleet_core::agent_source::{build_sources, find_source_for_path};
 use claw_fleet_core::memory;
