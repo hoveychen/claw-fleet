@@ -19,7 +19,7 @@ import { CHAT_HIDDEN, CHAT_ONLY, matchesWorkspaceFilter } from "./HistoryView";
 import { LiteDecisionHistory } from "./LiteDecisionHistory";
 import { LiteSessionCard } from "./LiteSessionCard";
 import { MarkControl } from "./MarkControl";
-import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
+import { NewSessionForm, distinctWorkspaces, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
 import { StopControl, canControl } from "./StopControl";
 import { TodayUsageBadge } from "./TodayUsageBadge";
@@ -112,12 +112,12 @@ export function LiteApp() {
       (s) => !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint),
     );
     // Workspace dropdown options (chat workspace is pinned separately below).
-    const byPath = new Map<string, string>();
-    for (const s of adhoc) {
-      if (s.workspacePath === chatPath) continue;
-      byPath.set(s.workspacePath, s.workspaceName);
-    }
-    const workspaces = [...byPath.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    // Mirrors the launcher/History: distinctWorkspaces drops temp cwds and
+    // folds worktree checkouts onto their repo root (matchesWorkspaceFilter
+    // compares on repoRootPath so the folded option still selects them all).
+    const workspaces = distinctWorkspaces(adhoc, Number.MAX_SAFE_INTEGER, chatPath)
+      .map((w) => [w.path, w.name] as [string, string])
+      .sort((a, b) => a[1].localeCompare(b[1]));
     const activeCount = adhoc.filter((s) => LIVE_STATUSES.has(s.status)).length;
     const unreadSessions = adhoc.filter((s) => sessionUnread(s, readOverrides[s.id]));
     const q = query.trim().toLowerCase();

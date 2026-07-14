@@ -22,6 +22,7 @@ export type RateLimitState = { resetsAt: string, limitType: RateLimitType, parse
 export type SessionInfo = { id: string, workspacePath: string, workspaceName: string, ideName: string | null, 
 entrypoint: string | null, isSubagent: boolean, parentSessionId: string | null, agentType: string | null, agentDescription: string | null, slug: string | null, aiTitle: string | null, status: SessionStatus, tokenSpeed: number, 
 agentTokenSpeed: number, totalOutputTokens: number, 
+totalInputTokens: number, 
 totalCostUsd: number, 
 agentTotalCostUsd: number, 
 costSpeedUsdPerMin: number, lastMessagePreview: string | null, lastActivityMs: number, createdAtMs: number, jsonlPath: string, model: string | null, thinkingLevel: string | null, pid: number | null, 
@@ -49,6 +50,7 @@ export type RateLimitType = "sessionLimit" | "weeklyLimit" | "opusLimit" | "sonn
 
 export type TodayUsage = { 
 date: string, 
+inputTokens: number, 
 outputTokens: number, 
 costUsd: number, 
 agentCostUsd: number, 
@@ -162,7 +164,8 @@ updatedSecsAgo: number, };
 
 export type AuditRiskLevel = "medium" | "high" | "critical";
 
-export type AuditEvent = { sessionId: string, workspaceName: string, agentSource: string, toolName: string, commandSummary: string, fullCommand: string, riskLevel: AuditRiskLevel, riskTags: Array<string>, timestamp: string, jsonlPath: string, };
+export type AuditEvent = { sessionId: string, workspaceName: string, 
+workspacePath: string, agentSource: string, toolName: string, commandSummary: string, fullCommand: string, riskLevel: AuditRiskLevel, riskTags: Array<string>, timestamp: string, jsonlPath: string, };
 
 export type AuditSummary = { events: Array<AuditEvent>, totalSessionsScanned: number, };
 

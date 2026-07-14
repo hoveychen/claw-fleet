@@ -323,6 +323,10 @@ pub(crate) enum PlanCommands {
         plan_id: String,
         #[arg(long)]
         title: String,
+        /// Parent plan id. Marks this as a child (side-branch) plan: when it
+        /// completes, Fleet points you back at the parent to keep going.
+        #[arg(long)]
+        parent: Option<String>,
     },
     /// Append a pending task to a plan.
     Add {

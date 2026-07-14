@@ -47,13 +47,20 @@ export function TodayUsageBadge({
   }, []);
 
   const cost = usage?.costUsd ?? 0;
-  const tokens = usage?.outputTokens ?? 0;
+  // Total tokens = input + output, matching the daily report's口径 (the report
+  // sums `totalInputTokens + totalOutputTokens`). Older behaviour showed output
+  // only, which read far smaller than the same day's report.
+  const inputTokens = usage?.inputTokens ?? 0;
+  const outputTokens = usage?.outputTokens ?? 0;
+  const tokens = inputTokens + outputTokens;
   const label = t("today_usage.title", "今日累计");
-  const breakdown =
+  const costBreakdown =
     usage && usage.fleetCostUsd > 0
       ? `\nagent $${usage.agentCostUsd.toFixed(2)} + fleet $${usage.fleetCostUsd.toFixed(2)}`
       : "";
-  const title = `${label}: $${cost.toFixed(2)} · ${fmtTokens(tokens)} tok${breakdown}`;
+  const tokenBreakdown =
+    usage && tokens > 0 ? `\nin ${fmtTokens(inputTokens)} + out ${fmtTokens(outputTokens)}` : "";
+  const title = `${label}: $${cost.toFixed(2)} · ${fmtTokens(tokens)} tok${tokenBreakdown}${costBreakdown}`;
 
   // Compact one-line variant for narrow chrome (lite mode's drag bar):
   // "$x · xK tok" on a single row, no section title.

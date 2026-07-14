@@ -12,7 +12,11 @@ pub(crate) fn cmd_plan(action: PlanCommands) {
             plan_mutate_checkbox(&cwd, &plan_id, &task, false)
         }
         PlanCommands::Resume { plan_id, task } => plan_resume(&cwd, &plan_id, task.as_deref()),
-        PlanCommands::Create { plan_id, title } => plan_create(&cwd, &plan_id, &title),
+        PlanCommands::Create {
+            plan_id,
+            title,
+            parent,
+        } => plan_create(&cwd, &plan_id, &title, parent.as_deref()),
         PlanCommands::Add { plan_id, task, text } => plan_add(&cwd, &plan_id, &task, &text),
         PlanCommands::Migrate { path } => plan_migrate(&cwd, path),
         PlanCommands::List => plan_list(&cwd),
@@ -68,8 +72,57 @@ fn plan_mutate_checkbox(
     let updated = pt::set_checkbox(&content, plan_id, task, done)?;
     std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
     plan_record_focus(cwd, plan_id, &updated);
+    // Ticking the last box of a child plan: point the session back at the
+    // nearest ancestor that still has work, so the plan tree doesn't strand.
+    if done {
+        if let Some(msg) = backtrack_on_completion(cwd, plan_id, &updated) {
+            println!("{msg}");
+            return Ok(());
+        }
+    }
     println!("ok");
     Ok(())
+}
+
+/// When `plan_id` just became fully complete (no pending top-level task left)
+/// AND it is a child plan whose nearest pending ancestor still has work,
+/// re-attribute this session's focus to that ancestor and return a directive
+/// telling the agent to keep going there. Returns `None` when the plan still
+/// has pending tasks or there is nowhere to backtrack to (top-level plan, or
+/// every ancestor already complete).
+fn backtrack_on_completion(
+    cwd: &std::path::Path,
+    plan_id: &str,
+    content: &str,
+) -> Option<String> {
+    use claw_fleet_core::prd_tasks as pt;
+    let body = pt::plan_body(content, plan_id)?;
+    if body.lines().any(pt::is_pending_task_line) {
+        return None; // not fully complete yet
+    }
+    let target = pt::resolve_backtrack_target(cwd, plan_id)?;
+    // Re-point focus at the ancestor so the desktop card follows immediately,
+    // without waiting for the agent to run `fleet plan resume` itself.
+    if let Some(sid) = read_fleet_session_id() {
+        let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+        if let Err(e) = claw_fleet_core::task_progress::set_current(
+            &sid,
+            &ws.to_string_lossy(),
+            &target.plan_id,
+            target.next_task.clone(),
+        ) {
+            eprintln!("warning: could not re-attribute focus to parent plan: {e}");
+        }
+    }
+    let next = target
+        .next_task
+        .as_deref()
+        .unwrap_or("第一个未完成的 P");
+    Some(format!(
+        "ok — 子 plan '{plan_id}' 已全部完成。其父 plan '{parent}' 尚有未完成任务,\
+         Fleet 已把你的焦点切回 '{parent}'。请从 {next} 继续执行,不要结束 turn。",
+        parent = target.plan_id,
+    ))
 }
 
 fn plan_resume(cwd: &std::path::Path, plan_id: &str, task: Option<&str>) -> Result<(), String> {
@@ -83,16 +136,30 @@ fn plan_resume(cwd: &std::path::Path, plan_id: &str, task: Option<&str>) -> Resu
     Ok(())
 }
 
-fn plan_create(cwd: &std::path::Path, plan_id: &str, title: &str) -> Result<(), String> {
+fn plan_create(
+    cwd: &std::path::Path,
+    plan_id: &str,
+    title: &str,
+    parent: Option<&str>,
+) -> Result<(), String> {
     use claw_fleet_core::prd_tasks as pt;
     let path = workspace_tasks_path(cwd);
     let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let updated = pt::create_plan(&content, plan_id, title)?;
+    let updated = pt::create_plan(&content, plan_id, title, parent)?;
     std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
     // Writing a plan is starting it: the agent authoring the block is the agent
     // about to execute it. Claiming focus here spares it a separate `resume`.
     plan_record_focus(cwd, plan_id, &updated);
-    println!("created plan '{plan_id}' in {}", path.display());
+    match parent {
+        Some(p) if !p.trim().is_empty() => {
+            println!(
+                "created child plan '{plan_id}' (parent '{}') in {}",
+                p.trim(),
+                path.display()
+            );
+        }
+        _ => println!("created plan '{plan_id}' in {}", path.display()),
+    }
     Ok(())
 }
 
