@@ -32,12 +32,20 @@ export const NEW_SESSION_ENTRYPOINT = "claw-fleet-newsession";
  *  and it stays resumable, same as a "新会话" spawn. */
 export const HANDOFF_ENTRYPOINT = "claw-fleet-handoff";
 
-/** True for sessions Fleet itself launched (the "新会话" button or the handoff
- *  relay). These are the sessions the 启动台 lists and that the detail view
- *  can resume; other entrypoints (cli, claude-vscode, …) are read-only here. */
+/** Codex has no `CLAUDE_CODE_ENTRYPOINT`; the Codex scanner surfaces the rollout
+ *  `originator` in the same `entrypoint` field, and Fleet-launched Codex sessions
+ *  carry `originator === "fleet"` — mirrors codex_launch::CODEX_FLEET_ORIGINATOR. */
+export const CODEX_FLEET_ORIGINATOR = "fleet";
+
+/** True for sessions Fleet itself launched (the "新会话" button, the handoff
+ *  relay, or a Fleet-spawned Codex session). These are the sessions the 启动台
+ *  lists and that the detail view can resume; other entrypoints/originators
+ *  (cli, claude-vscode, codex_exec, …) are read-only here. */
 export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
   return (
-    entrypoint === NEW_SESSION_ENTRYPOINT || entrypoint === HANDOFF_ENTRYPOINT
+    entrypoint === NEW_SESSION_ENTRYPOINT ||
+    entrypoint === HANDOFF_ENTRYPOINT ||
+    entrypoint === CODEX_FLEET_ORIGINATOR
   );
 }
 
