@@ -1,0 +1,32 @@
+/* Segmented 技能 / 插件 switch. Matches the pill-tab idiom AuditView renders in
+   its banner center, so the two pages read as one surface. */
+.tab_bar {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+
+.tab_btn {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--color-text-dim);
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.tab_btn:hover {
+  color: var(--color-text);
+}
+
+.tab_active {
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-weight: 600;
+}
