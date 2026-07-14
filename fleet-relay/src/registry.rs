@@ -2,6 +2,10 @@
 //! same secret and routes frames between the two roles.
 //!
 //! A channel id is `hex(sha256(secret))`; the raw secret is never stored.
+//! With mobile end-to-end encryption the `secret` handed in is the opaque
+//! HKDF-derived channel token, so the bucket is `hex(sha256(channel_token))` —
+//! the routing math is unchanged and the relay still only ever sees the token
+//! and ciphertext, never the pairing secret or the plaintext `msg` bodies.
 //! Connections push serialized frames through unbounded senders so the
 //! registry stays synchronous and unit-testable without real sockets.
 
