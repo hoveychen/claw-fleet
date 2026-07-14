@@ -159,7 +159,7 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
                 <div className={styles.today}>
                   <span className={styles.todayCost}>${todayUsage.costUsd.toFixed(2)}</span>
                   <span className={styles.todayTokens}>
-                    {t("{0} 输出 token", fmtTokens(todayUsage.outputTokens))}
+                    {t("{0} token", fmtTokens(todayUsage.inputTokens + todayUsage.outputTokens))}
                   </span>
                 </div>
                 <div className={styles.divider} />

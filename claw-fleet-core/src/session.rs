@@ -91,6 +91,14 @@ pub struct SessionInfo {
     /// reconciles with the global aggregate.
     pub agent_token_speed: f64,
     pub total_output_tokens: u64,
+    /// Last finalized turn's total input tokens (`input_tokens +
+    /// cache_creation_input_tokens + cache_read_input_tokens`) — i.e. the current
+    /// context-window size, reset by each compaction. Matches the per-session
+    /// `total_input_tokens` the daily report derives (`daily_report.rs`), so
+    /// "today's cumulative" can sum input on the same口径. `0` when no usage seen
+    /// yet or for sources (e.g. Codex) that don't track it.
+    #[serde(default)]
+    pub total_input_tokens: u64,
     /// Cumulative USD cost for this session alone (main or subagent).
     pub total_cost_usd: f64,
     /// Cost of this session + all its subagents' costs (main sessions only).
@@ -2338,8 +2346,11 @@ pub fn parse_session_info(
     // gate is applied later in `apply_pid_liveness`.
     let pending_tool_batch = has_pending_noninteractive_tool_batch(&last_n);
     let stats = acc.stats();
-    let context_percent = acc
-        .context_usage()
+    let ctx_usage = acc.context_usage();
+    // Last-turn total input (input + cache_creation + cache_read) — the current
+    // context-window size, same value the daily report sums per session.
+    let total_input_tokens = ctx_usage.as_ref().map(|(used, _, _)| *used).unwrap_or(0);
+    let context_percent = ctx_usage
         .and_then(|(used, model, max)| compute_context_percent(used, Some(&model), max));
     let last_message_preview = extract_last_text(&last_n);
 
@@ -2382,6 +2393,7 @@ pub fn parse_session_info(
         token_speed: stats.token_speed,
         agent_token_speed: stats.token_speed,
         total_output_tokens: stats.total_output_tokens,
+        total_input_tokens,
         total_cost_usd: stats.total_cost_usd,
         agent_total_cost_usd: stats.total_cost_usd,
         cost_speed_usd_per_min: stats.cost_speed_usd_per_min,
@@ -3138,6 +3150,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         token_speed: 0.0,
         agent_token_speed: 0.0,
         total_output_tokens: 0,
+        total_input_tokens: 0,
         total_cost_usd: 0.0,
         agent_total_cost_usd: 0.0,
         cost_speed_usd_per_min: 0.0,
@@ -3445,6 +3458,7 @@ mod tests {
             token_speed: 10.0,
             agent_token_speed: 10.0,
             total_output_tokens: 500,
+            total_input_tokens: 0,
             total_cost_usd: 0.0,
             agent_total_cost_usd: 0.0,
             cost_speed_usd_per_min: 0.0,
