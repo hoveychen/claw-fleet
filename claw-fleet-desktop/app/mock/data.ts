@@ -260,41 +260,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     lastOutcome: null,
   },
 
-  // ── 3. Cursor session: "mobile-app" — streaming ──
-  {
-    id: "sess-mobile-cursor",
-    workspacePath: "/Users/demo/workspace/mobile-app",
-    workspaceName: "mobile-app",
-    ideName: "Cursor",
-    entrypoint: null,
-    isSubagent: false,
-    parentSessionId: null,
-    agentType: null,
-    agentDescription: null,
-    slug: null,
-    aiTitle: "Add dark mode toggle to settings screen",
-    status: "streaming",
-    tokenSpeed: 35.8,
-    agentTokenSpeed: 35.8,
-    totalOutputTokens: 67890,
-    totalCostUsd: 0,
-    agentTotalCostUsd: 0,
-    costSpeedUsdPerMin: 0,
-    lastMessagePreview: "Implementing the ThemeProvider wrapper...",
-    lastActivityMs: NOW - 500,
-    createdAtMs: NOW - 15 * MIN,
-    jsonlPath: "/Users/demo/.cursor/agent-transcripts/sess-mobile-cursor.jsonl",
-    model: "claude-sonnet-4-20250514",
-    thinkingLevel: null,
-    pid: 34567,
-    pidPrecise: false,
-    procAlive: false,
-    lastSkill: null,
-    contextPercent: null,
-    agentSource: "cursor",
-    lastOutcome: ["feature_added"],
-  },
-
   // ── 4. Codex session: "data-pipeline" — processing ──
   {
     id: "sess-codex-pipeline",
@@ -365,40 +330,6 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     lastOutcome: ["needs_input"],
   },
 
-  // ── 6. OpenClaw session: "ml-training" — active ──
-  {
-    id: "sess-openclaw-ml",
-    workspacePath: "/Users/demo/workspace/ml-training",
-    workspaceName: "ml-training",
-    ideName: "Terminal",
-    entrypoint: null,
-    isSubagent: false,
-    parentSessionId: null,
-    agentType: null,
-    agentDescription: null,
-    slug: null,
-    aiTitle: "Fine-tune classification model hyperparameters",
-    status: "thinking",
-    tokenSpeed: 9.1,
-    agentTokenSpeed: 9.1,
-    totalOutputTokens: 41200,
-    totalCostUsd: 0,
-    agentTotalCostUsd: 0,
-    costSpeedUsdPerMin: 0,
-    lastMessagePreview: "Evaluating learning rate schedules...",
-    lastActivityMs: NOW - 12000,
-    createdAtMs: NOW - 50 * MIN,
-    jsonlPath: "/Users/demo/.openclaw/sessions/sess-openclaw-ml.jsonl",
-    model: "claude-opus-4-20250805",
-    thinkingLevel: null,
-    pid: 67890,
-    pidPrecise: true,
-    procAlive: false,
-    lastSkill: null,
-    contextPercent: null,
-    agentSource: "openclaw",
-    lastOutcome: null,
-  },
 
   // ── 7. Idle session: "docs-site" ──
   {
@@ -828,7 +759,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       timestamp: new Date(NOW - 25 * MIN).toISOString(),
       message: {
         role: "user",
-        content: "I need to create a mock mode for this Tauri desktop app so we can take screenshots for the README. The mock should show realistic session data with multiple agent types (Claude Code, Cursor, Codex, OpenClaw) in various states.",
+        content: "I need to create a mock mode for this Tauri desktop app so we can take screenshots for the README. The mock should show realistic session data with multiple agent types (Claude Code, Codex) in various states.",
       },
     },
     {
@@ -900,7 +831,7 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         content: [
           {
             type: "text",
-            text: "I've identified all the Tauri IPC calls. Now let me create the mock data module with sessions covering:\n\n- **Claude Code**: Main sessions + subagents (explore, plan, general-purpose)\n- **Cursor**: Streaming session\n- **Codex**: Processing session\n- **OpenClaw**: Thinking session\n- Various statuses: thinking, executing, streaming, processing, waitingInput, delegating, idle\n\nI'll also mock the usage data, memory panel, and account info.",
+            text: "I've identified all the Tauri IPC calls. Now let me create the mock data module with sessions covering:\n\n- **Claude Code**: Main sessions + subagents (explore, plan, general-purpose)\n- **Codex**: Processing session\n- Various statuses: thinking, executing, streaming, processing, waitingInput, delegating, idle\n\nI'll also mock the usage data, memory panel, and account info.",
           },
           {
             type: "tool_use",
@@ -1144,7 +1075,7 @@ export const MOCK_WAITING_ALERTS: WaitingAlert[] = [
     summary: "The API spec at /v2/users has breaking changes. Update docs to match?",
     detectedAtMs: NOW - 5 * MIN,
     jsonlPath: "/Users/demo/.claude/projects/docs-site/sess-docs-idle.jsonl",
-    source: "cursor",
+    source: "claude-code",
   },
 ];
 
@@ -1186,19 +1117,6 @@ export const MOCK_ACCOUNT_INFO = {
   },
 };
 
-export const MOCK_CURSOR_USAGE = {
-  email: "developer@example.com",
-  signUpType: "email",
-  membershipType: "pro",
-  subscriptionStatus: "active",
-  totalPrompts: 1847,
-  dailyStats: [],
-  usage: [
-    { name: "Prompts", used: 347, limit: 500, utilization: 0.694, resetsAt: new Date(NOW + 18 * HOUR).toISOString() },
-    { name: "Fast Agent Credits", used: 12, limit: 50, utilization: 0.24, resetsAt: new Date(NOW + 18 * HOUR).toISOString() },
-  ],
-};
-
 export const MOCK_CODEX_USAGE = {
   limitId: "codex-standard",
   limitName: "Standard",
@@ -1206,32 +1124,6 @@ export const MOCK_CODEX_USAGE = {
   primary: { usedPercent: 35, windowDurationMins: 300, resetsAt: NOW + 2 * HOUR },
   secondary: { usedPercent: 18, windowDurationMins: 10080, resetsAt: NOW + 4 * 24 * HOUR },
   credits: { hasCredits: true, unlimited: false, balance: "$42.50" },
-};
-
-// Shape must match OpenClawUsageInfo / OpenClawSessionUsage in usageStore.ts —
-// the previous {contextPercent, maxContext, usedContext} shape left
-// ageSecs/model undefined and the usage card rendered " (NaNd ago)".
-export const MOCK_OPENCLAW_USAGE = {
-  sessions: [
-    {
-      sessionId: "sess-openclaw-ml",
-      agentId: "main",
-      model: "claude-opus-4-20250805",
-      contextTokens: 200000,
-      totalTokens: 124000,
-      percentUsed: 62,
-      ageSecs: 15 * 60,
-    },
-  ],
-};
-
-export const MOCK_OPENCLAW_ACCOUNT = {
-  version: "0.4.2",
-  defaultModel: "claude-opus-4-20250805",
-  providers: [
-    { provider: "anthropic", authType: "api_key", status: "active", label: "Anthropic Direct", expiresAt: null, remainingMs: null },
-    { provider: "openrouter", authType: "api_key", status: "active", label: "OpenRouter", expiresAt: null, remainingMs: null },
-  ],
 };
 
 // ── Memory panel ────────────────────────────────────────────────────────────
@@ -1307,8 +1199,6 @@ export const MOCK_MEMORY_HISTORY = [
 
 export const MOCK_SOURCES_CONFIG = [
   { name: "claude-code", enabled: true, available: true },
-  { name: "cursor", enabled: true, available: true },
-  { name: "openclaw", enabled: true, available: true },
   { name: "codex", enabled: true, available: true },
 ];
 
@@ -1318,7 +1208,7 @@ export const MOCK_SETUP_STATUS = {
   cli_installed: true,
   claude_dir_exists: true,
   has_sessions: true,
-  detected_tools: { cli: true, vscode: true, openclaw: true, cursor: true, codex: true },
+  detected_tools: { cli: true, vscode: true, codex: true },
 };
 
 // ── Hooks setup plan ────────────────────────────────────────────────────────
@@ -1405,30 +1295,6 @@ export const MOCK_AUDIT_EVENTS: AuditEvent[] = [
     jsonlPath: "/Users/demo/.codex/sessions/sess-codex-pipeline.jsonl",
   },
   {
-    sessionId: "sess-mobile-cursor",
-    workspaceName: "mobile-app",
-    agentSource: "cursor",
-    toolName: "Bash",
-    commandSummary: "chmod 777 /etc/passwd",
-    fullCommand: "chmod 777 /etc/passwd",
-    riskLevel: "critical",
-    riskTags: ["permission-change", "system-file", "security"],
-    timestamp: new Date(NOW - 15 * MIN).toISOString(),
-    jsonlPath: "/Users/demo/.cursor/agent-transcripts/sess-mobile-cursor.jsonl",
-  },
-  {
-    sessionId: "sess-openclaw-ml",
-    workspaceName: "ml-training",
-    agentSource: "openclaw",
-    toolName: "Bash",
-    commandSummary: "pip install --break-system-packages torch",
-    fullCommand: "pip install --break-system-packages torch torchvision",
-    riskLevel: "medium",
-    riskTags: ["system-packages", "pip-install"],
-    timestamp: new Date(NOW - 30 * MIN).toISOString(),
-    jsonlPath: "/Users/demo/.openclaw/sessions/sess-openclaw-ml.jsonl",
-  },
-  {
     sessionId: "sess-infra-idle",
     workspaceName: "infra-terraform",
     agentSource: "claude-code",
@@ -1463,8 +1329,6 @@ export const MOCK_AUDIT_SUMMARY: AuditSummary = {
 
 export const MOCK_DETECTED_TOOLS = [
   { name: "Claude Code", path: "/usr/local/bin/claude", version: "1.0.33" },
-  { name: "Cursor", path: "/Applications/Cursor.app", version: "0.50.1" },
-  { name: "OpenClaw", path: "/usr/local/bin/openclaw", version: "0.4.2" },
   { name: "Codex", path: "/usr/local/bin/codex", version: "0.1.5" },
 ];
 
@@ -1483,8 +1347,8 @@ export const MOCK_DAILY_REPORT: DailyReport = {
   generatedAt: NOW - 2 * HOUR,
   sessionIds: [
     "sess-fleet-main", "sess-fleet-explore", "sess-fleet-gp", "sess-fleet-test", "sess-fleet-review",
-    "sess-api-main", "sess-api-plan", "sess-mobile-cursor", "sess-codex-pipeline",
-    "sess-web-waiting", "sess-openclaw-ml", "sess-docs-idle", "sess-infra-idle",
+    "sess-api-main", "sess-api-plan", "sess-codex-pipeline",
+    "sess-web-waiting", "sess-docs-idle", "sess-infra-idle",
   ],
   aiSummary: `## Daily Summary
 
@@ -1493,7 +1357,6 @@ export const MOCK_DAILY_REPORT: DailyReport = {
 ### Highlights
 - **claw-fleet**: Built the full mock/demo mode — mock data module, Tauri IPC interception, and automated screenshot pipeline. Delegated explore, test, and review tasks to subagents for parallel execution.
 - **api-server**: Diagnosed and fixed a JWT issuer mismatch that was causing 401 errors after the v2 migration. Root cause: hardcoded issuer string wasn't updated.
-- **mobile-app** (Cursor): Dark mode toggle implementation progressing via Cursor agent.
 - **data-pipeline** (Codex): Spark job partitioning analysis underway with o3 reasoning model.
 
 ### Observations
@@ -1577,18 +1440,6 @@ export const MOCK_DAILY_REPORT: DailyReport = {
         ],
       },
       {
-        workspacePath: "/Users/demo/workspace/mobile-app",
-        workspaceName: "mobile-app",
-        sessionCount: 1,
-        subagentCount: 0,
-        totalInputTokens: 124_000,
-        totalOutputTokens: 67_890,
-        toolCalls: 38,
-        sessions: [
-          { id: "sess-mobile-cursor", title: "Add dark mode toggle to settings screen", lastMessage: "Implementing the ThemeProvider wrapper...", model: "claude-sonnet-4-20250514", isSubagent: false, outputTokens: 67890, agentSource: "cursor" },
-        ],
-      },
-      {
         workspacePath: "/Users/demo/workspace/data-pipeline",
         workspaceName: "data-pipeline",
         sessionCount: 1,
@@ -1612,24 +1463,10 @@ export const MOCK_DAILY_REPORT: DailyReport = {
           { id: "sess-web-waiting", title: "Refactor shared components into design system", lastMessage: "Should I proceed with breaking changes to the Button component API?", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 123400, agentSource: "claude-code" },
         ],
       },
-      {
-        workspacePath: "/Users/demo/workspace/ml-training",
-        workspaceName: "ml-training",
-        sessionCount: 1,
-        subagentCount: 0,
-        totalInputTokens: 66_350,
-        totalOutputTokens: 41_200,
-        toolCalls: 20,
-        sessions: [
-          { id: "sess-openclaw-ml", title: "Fine-tune classification model hyperparameters", lastMessage: "Evaluating learning rate schedules...", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 41200, agentSource: "openclaw" },
-        ],
-      },
     ],
     sourceBreakdown: {
       "claude-code": 9,
-      "cursor": 1,
       "codex": 1,
-      "openclaw": 1,
     },
     hourlyActivity: [
       0, 0, 0, 0, 0, 0, 0, 0,  // 00:00–07:00

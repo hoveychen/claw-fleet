@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ClaudeIcon, CursorIcon, CodexIcon, OpenClawIcon } from "./SessionCard";
+import { ClaudeIcon, CodexIcon } from "./SessionCard";
 import styles from "./AccountInfo.module.css";
 
 interface AccountInfoData {
@@ -14,29 +14,6 @@ interface AccountInfoData {
   five_hour: unknown;
   seven_day: unknown;
   seven_day_sonnet: unknown;
-}
-
-interface OpenClawProviderInfo {
-  provider: string;
-  authType: string;
-  status: string;
-  label: string;
-  expiresAt: number | null;
-  remainingMs: number | null;
-}
-
-interface OpenClawAccountInfoData {
-  version: string;
-  defaultModel: string;
-  providers: OpenClawProviderInfo[];
-}
-
-interface CursorAccountInfoData {
-  email: string;
-  signUpType: string;
-  membershipType: string;
-  subscriptionStatus: string;
-  totalPrompts: number;
 }
 
 interface CodexUsageData {
@@ -60,18 +37,6 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
   const [logPath, setLogPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // OpenClaw account state
-  const [openclawInfo, setOpenclawInfo] = useState<OpenClawAccountInfoData | null>(null);
-  const [openclawError, setOpenclawError] = useState<string | null>(null);
-  const [openclawLoading, setOpenclawLoading] = useState(false);
-  const [hasOpenclaw, setHasOpenclaw] = useState(false);
-
-  // Cursor account state
-  const [cursorInfo, setCursorInfo] = useState<CursorAccountInfoData | null>(null);
-  const [cursorError, setCursorError] = useState<string | null>(null);
-  const [cursorLoading, setCursorLoading] = useState(false);
-  const [hasCursor, setHasCursor] = useState(false);
-
   // Codex account state
   const [codexInfo, setCodexInfo] = useState<CodexUsageData | null>(null);
   const [codexError, setCodexError] = useState<string | null>(null);
@@ -81,16 +46,8 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
   useEffect(() => {
     invoke<string>("get_platform").then((p) => setIsMacOS(p === "macos"));
     loadAccount();
-    invoke<{ detected_tools: { openclaw: boolean; cursor: boolean; codex: boolean } }>("check_setup_status")
+    invoke<{ detected_tools: { codex: boolean } }>("check_setup_status")
       .then((s) => {
-        if (s.detected_tools.openclaw) {
-          setHasOpenclaw(true);
-          loadOpenclawAccount();
-        }
-        if (s.detected_tools.cursor) {
-          setHasCursor(true);
-          loadCursorAccount();
-        }
         if (s.detected_tools.codex) {
           setHasCodex(true);
           loadCodexAccount();
@@ -112,32 +69,6 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
       }
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function loadOpenclawAccount() {
-    setOpenclawLoading(true);
-    setOpenclawError(null);
-    try {
-      const data = await invoke<OpenClawAccountInfoData>("get_source_account", { source: "openclaw" });
-      setOpenclawInfo(data);
-    } catch (e) {
-      setOpenclawError(String(e));
-    } finally {
-      setOpenclawLoading(false);
-    }
-  }
-
-  async function loadCursorAccount() {
-    setCursorLoading(true);
-    setCursorError(null);
-    try {
-      const data = await invoke<CursorAccountInfoData>("get_source_account", { source: "cursor" });
-      setCursorInfo(data);
-    } catch (e) {
-      setCursorError(String(e));
-    } finally {
-      setCursorLoading(false);
     }
   }
 
@@ -219,56 +150,6 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
             }
           />
         </section>
-      )}
-
-      {hasOpenclaw && (
-        <>
-          <div className={styles.section_divider} />
-          {openclawLoading && <p className={styles.dim}>{t("account.loading")}</p>}
-          {openclawError && (
-            <div className={styles.error}>
-              <p>{openclawError}</p>
-              <button className={styles.retry} onClick={loadOpenclawAccount}>{t("account.retry")}</button>
-            </div>
-          )}
-          {openclawInfo && (
-            <section className={styles.section}>
-              <Row label={t("account.auth")} value="OpenClaw" icon={<OpenClawIcon />} />
-              <Row label={t("account.openclaw_version")} value={openclawInfo.version} />
-              <Row label={t("account.openclaw_model")} value={openclawInfo.defaultModel} />
-              {openclawInfo.providers.map((p) => (
-                <Row
-                  key={p.label}
-                  label={p.provider}
-                  value={`${p.authType} (${p.status})${p.remainingMs != null ? ` — ${Math.round(p.remainingMs / 3600000)}h left` : ""}`}
-                />
-              ))}
-            </section>
-          )}
-        </>
-      )}
-
-      {hasCursor && (
-        <>
-          <div className={styles.section_divider} />
-          {cursorLoading && <p className={styles.dim}>{t("account.loading")}</p>}
-          {cursorError && (
-            <div className={styles.error}>
-              <p>{cursorError}</p>
-              <button className={styles.retry} onClick={loadCursorAccount}>{t("account.retry")}</button>
-            </div>
-          )}
-          {cursorInfo && (
-            <section className={styles.section}>
-              <Row label={t("account.auth")} value="Cursor" icon={<CursorIcon />} />
-              <Row label={t("account.email")} value={cursorInfo.email} />
-              <Row label={t("account.cursor_plan")} value={cursorInfo.membershipType} />
-              <Row label={t("account.cursor_status")} value={cursorInfo.subscriptionStatus} />
-              <Row label={t("account.cursor_sign_up")} value={cursorInfo.signUpType} />
-              <Row label={t("account.cursor_prompts")} value={String(cursorInfo.totalPrompts)} />
-            </section>
-          )}
-        </>
       )}
 
       {hasCodex && (

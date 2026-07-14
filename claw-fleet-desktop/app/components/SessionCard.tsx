@@ -68,9 +68,9 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
   // mirrors the auto-resume gate in `auto_resume.rs::should_auto_resume`:
   //  - not a subagent (`agent-*` transcripts can't be resumed)
   //  - not attached to an interactive IDE (ideName == null); an IDE session
-  //    (VS Code / Claude app / Cursor) should be resumed from the editor, not
+  //    (VS Code / Claude app) should be resumed from the editor, not
   //    by firing a detached headless `claude --resume` behind it
-  //  - a claude-code transcript (`claude --resume` can't load cursor/codex/…)
+  //  - a claude-code transcript (`claude --resume` can't load codex/…)
   const canResume =
     !session.isSubagent && !session.ideName && session.agentSource === "claude-code";
   return (
@@ -147,15 +147,6 @@ export function ClaudeIcon() {
   );
 }
 
-export function CursorIcon() {
-  // Official Cursor logo (from CodexBar/ProviderIcon-cursor.svg)
-  return (
-    <svg viewBox="0 0 100 100" width="11" height="11" fill="currentColor" aria-hidden>
-      <path d="M84.0704 28.9353L51.9066 10.4454C50.8738 9.85153 49.5994 9.85153 48.5666 10.4454L16.4043 28.9353C15.536 29.4345 15 30.3576 15 31.3575V68.6425C15 69.6424 15.536 70.5655 16.4043 71.0647L48.5681 89.5546C49.6009 90.1485 50.8753 90.1485 51.9081 89.5546L84.0719 71.0647C84.9402 70.5655 85.4762 69.6424 85.4762 68.6425V31.3575C85.4762 30.3576 84.9402 29.4345 84.0719 28.9353H84.0704ZM82.0501 32.8519L51.0006 86.4003C50.7907 86.7611 50.2366 86.6138 50.2366 86.1958V51.1329C50.2366 50.4322 49.8606 49.7842 49.2506 49.4324L18.7553 31.9017C18.3929 31.6927 18.5409 31.141 18.9606 31.141H81.0595C81.9414 31.141 82.4925 32.0927 82.0516 32.8534H82.0501V32.8519Z" opacity="0.85" />
-    </svg>
-  );
-}
-
 export function CodexIcon() {
   // Official OpenAI logo (from CodexBar/ProviderIcon-codex.svg)
   return (
@@ -183,29 +174,10 @@ export function CopilotIcon() {
   );
 }
 
-export function OpenClawIcon() {
-  // Official OpenClaw favicon lobster (from openclaw/openclaw ui/public/favicon.svg), monochrome
-  return (
-    <svg viewBox="0 0 120 120" width="11" height="11" fill="currentColor" aria-hidden>
-      <g opacity="0.85">
-        <path d="M60 10 C30 10 15 35 15 55 C15 75 30 95 45 100 L45 110 L55 110 L55 100 C55 100 60 102 65 100 L65 110 L75 110 L75 100 C90 95 105 75 105 55 C105 35 90 10 60 10Z"/>
-        <path d="M20 45 C5 40 0 50 5 60 C10 70 20 65 25 55 C28 48 25 45 20 45Z"/>
-        <path d="M100 45 C115 40 120 50 115 60 C110 70 100 65 95 55 C92 48 95 45 100 45Z"/>
-        <path d="M45 15 Q35 5 30 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" fill="none"/>
-        <path d="M75 15 Q85 5 90 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" fill="none"/>
-      </g>
-    </svg>
-  );
-}
-
 export function AgentSourceIcon({ source }: { source: string }) {
   switch (source) {
     case "claude-code":
       return <ClaudeIcon />;
-    case "cursor":
-      return <CursorIcon />;
-    case "openclaw":
-      return <OpenClawIcon />;
     case "codex":
       return <CodexIcon />;
     case "gemini":
