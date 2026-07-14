@@ -149,6 +149,14 @@ pub fn try_read_response(id: &str) -> Option<GuardResponse> {
 
 /// Write a guard response.  Called by the desktop app.
 pub fn write_response(resp: &GuardResponse) -> Result<(), String> {
+    // Only a live pending request may be answered. A missing request file means
+    // an unknown/already-consumed id; report it as such so the HTTP layer can
+    // return 404 instead of a raw 500 (the old `fs::write` ENOENT when the
+    // channel dir never existed). A real request's dir always exists, so this
+    // never rejects a valid response.
+    if !request_path(&resp.id).map(|p| p.exists()).unwrap_or(false) {
+        return Err(format!("no pending request for id {}", resp.id));
+    }
     let path = response_path(&resp.id).ok_or("cannot determine home dir")?;
     let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write response: {e}"))
