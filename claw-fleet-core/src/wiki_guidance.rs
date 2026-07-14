@@ -32,7 +32,7 @@ fn claude_md_path() -> Option<PathBuf> {
 /// everything else English).
 pub fn render_guidance(locale: &str) -> String {
     if locale == "zh" {
-        return "# Fleet Wiki 知识库 (managed by Claude Fleet — do not edit)\n\
+        return "# Fleet Wiki 知识库 (managed by Claw Fleet — do not edit)\n\
 \n\
 当你产出**值得留存**的 HTML 报告、可交互 demo 或 markdown 文档(调研报告、\
 架构说明、性能分析、数据可视化等)时,完成后用 Fleet 的 wiki 知识库归档,\
@@ -95,7 +95,7 @@ workspace。\n\
 会 → wiki。\n"
             .to_string();
     }
-    "# Fleet Wiki knowledge base (managed by Claude Fleet — do not edit)\n\
+    "# Fleet Wiki knowledge base (managed by Claw Fleet — do not edit)\n\
 \n\
 When you produce a **durable** HTML report, interactive demo, or markdown \
 document (research reports, architecture notes, performance analyses, data \
