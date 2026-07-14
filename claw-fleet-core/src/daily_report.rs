@@ -49,6 +49,11 @@ pub struct DailyMetrics {
     pub projects: Vec<ProjectMetrics>,
     pub source_breakdown: HashMap<String, u32>,
     pub hourly_activity: [u32; 24],
+    /// Per-type decision-card analytics for the day (elicitation / fleet-ask /
+    /// plan-approval). Defaults to empty for reports generated before this
+    /// field existed.
+    #[serde(default)]
+    pub decision_cards: crate::decision_history::DecisionCardStats,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -713,6 +718,7 @@ pub fn generate_report_from_sessions(
             projects,
             source_breakdown,
             hourly_activity,
+            decision_cards: crate::decision_history::compute_stats_for_date(date),
         },
         ai_summary: None,
         ai_summary_generated_at: None,
@@ -1616,6 +1622,7 @@ mod tests {
                     m
                 },
                 hourly_activity: [0; 24],
+                decision_cards: Default::default(),
             },
             ai_summary: None,
             ai_summary_generated_at: None,

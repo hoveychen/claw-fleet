@@ -332,6 +332,243 @@ pub fn build_fleet_ask_record(
     }
 }
 
+// ── Daily decision-card stats ────────────────────────────────────────────────
+
+/// Per-type aggregate for one day's decision cards. `elicitation` and
+/// `fleet-ask` are option-based so `recommendedHit` / `withRecommendation` /
+/// `otherPick` are meaningful; `plan-approval` only populates the outcome
+/// counters (approve counts as `answered`, reject as `declined`).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionTypeStats {
+    /// Total cards of this type whose `requestedAt` falls on the day.
+    pub triggered: u32,
+    /// Terminal outcome = answered (fleet-ask) / approved (plan-approval).
+    pub answered: u32,
+    /// Declined / cancelled / rejected.
+    pub declined: u32,
+    /// Desktop consumer disappeared mid-flight.
+    pub heartbeat_lost: u32,
+    /// Wait window elapsed with no response.
+    pub timeout: u32,
+    /// Answered cards whose first question presented an explicit
+    /// `(Recommended)` option — the denominator for the hit rate.
+    pub with_recommendation: u32,
+    /// Answered cards where the user picked that recommended option.
+    pub recommended_hit: u32,
+    /// Answered cards where the user's first-question pick was NOT one of the
+    /// offered options (the "Other" free-text escape hatch).
+    pub other_pick: u32,
+    /// Sum of answer latency (resolvedAt − requestedAt) over answered cards.
+    pub latency_secs_sum: f64,
+    /// Count of answered cards contributing to `latencySecsSum` (the divisor
+    /// for the average). May be < `answered` if a timestamp failed to parse.
+    pub latency_count: u32,
+}
+
+/// A day's decision-card analytics, keyed by card type
+/// (`elicitation` | `fleet-ask` | `plan-approval`). Embedded in `DailyMetrics`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionCardStats {
+    #[serde(default)]
+    pub by_type: BTreeMap<String, DecisionTypeStats>,
+}
+
+/// Parse an RFC-3339 timestamp and return its local calendar date (YYYY-MM-DD).
+fn local_date_of(ts: &str) -> Option<String> {
+    let dt = chrono::DateTime::parse_from_rfc3339(ts).ok()?;
+    Some(
+        dt.with_timezone(&chrono::Local)
+            .format("%Y-%m-%d")
+            .to_string(),
+    )
+}
+
+fn add_latency(s: &mut DecisionTypeStats, requested_at: &str, resolved_at: &str) {
+    if let (Ok(a), Ok(b)) = (
+        chrono::DateTime::parse_from_rfc3339(requested_at),
+        chrono::DateTime::parse_from_rfc3339(resolved_at),
+    ) {
+        let secs = (b - a).num_milliseconds() as f64 / 1000.0;
+        if secs >= 0.0 {
+            s.latency_secs_sum += secs;
+            s.latency_count += 1;
+        }
+    }
+}
+
+/// Label suffix that marks the recommended option in a card.
+fn is_recommended_label(label: &str) -> bool {
+    label.trim_end().ends_with("(Recommended)")
+}
+
+fn accumulate_first_q_elicitation(s: &mut DecisionTypeStats, r: &ElicitationRecord) {
+    let Some(q) = r.questions.first() else {
+        return;
+    };
+    let rec_label = q
+        .options
+        .iter()
+        .map(|o| o.label.as_str())
+        .find(|l| is_recommended_label(l));
+    let Some(sel) = r.answers.get(&q.question) else {
+        return;
+    };
+    if sel.other {
+        s.other_pick += 1;
+    }
+    if let Some(rl) = rec_label {
+        s.with_recommendation += 1;
+        if !sel.other && sel.label == rl {
+            s.recommended_hit += 1;
+        }
+    }
+}
+
+fn accumulate_first_q_fleet_ask(s: &mut DecisionTypeStats, r: &FleetAskRecord) {
+    let Some(q) = r.questions.first() else {
+        return;
+    };
+    // Form-only / html-only cards have no options; skip pick classification.
+    if q.options.is_empty() {
+        return;
+    }
+    let Some(ans) = r.answers.get(&q.question) else {
+        return;
+    };
+    // The fleet-ask answer map stores the picked option's label verbatim;
+    // anything not matching a listed option came through the "Other" input.
+    let matched_option = q.options.iter().any(|o| o.label == *ans);
+    if !matched_option {
+        s.other_pick += 1;
+    }
+    if let Some(rl) = q
+        .options
+        .iter()
+        .map(|o| o.label.as_str())
+        .find(|l| is_recommended_label(l))
+    {
+        s.with_recommendation += 1;
+        if ans == rl {
+            s.recommended_hit += 1;
+        }
+    }
+}
+
+/// Fold one record into `stats` if its `requestedAt` local date matches `date`.
+/// `user-prompt` records are ignored. Public within the crate for unit tests.
+fn accumulate_record(stats: &mut DecisionCardStats, rec: &DecisionHistoryRecord, date: &str) {
+    let (type_key, requested_at, resolved_at) = match rec {
+        DecisionHistoryRecord::Elicitation(r) => {
+            ("elicitation", &r.requested_at, &r.resolved_at)
+        }
+        DecisionHistoryRecord::FleetAsk(r) => ("fleet-ask", &r.requested_at, &r.resolved_at),
+        DecisionHistoryRecord::PlanApproval(r) => {
+            ("plan-approval", &r.requested_at, &r.resolved_at)
+        }
+        DecisionHistoryRecord::UserPrompt(_) => return,
+    };
+    if local_date_of(requested_at).as_deref() != Some(date) {
+        return;
+    }
+    let s = stats.by_type.entry(type_key.to_string()).or_default();
+    s.triggered += 1;
+
+    match rec {
+        DecisionHistoryRecord::Elicitation(r) => match r.outcome {
+            ElicitationOutcome::Answered => {
+                s.answered += 1;
+                add_latency(s, requested_at, resolved_at);
+                accumulate_first_q_elicitation(s, r);
+            }
+            ElicitationOutcome::Declined => s.declined += 1,
+            ElicitationOutcome::HeartbeatLost => s.heartbeat_lost += 1,
+            ElicitationOutcome::Timeout => s.timeout += 1,
+        },
+        DecisionHistoryRecord::FleetAsk(r) => match r.outcome {
+            FleetAskOutcome::Answered => {
+                s.answered += 1;
+                add_latency(s, requested_at, resolved_at);
+                accumulate_first_q_fleet_ask(s, r);
+            }
+            FleetAskOutcome::Cancelled => s.declined += 1,
+            FleetAskOutcome::HeartbeatLost => s.heartbeat_lost += 1,
+            FleetAskOutcome::Timeout => s.timeout += 1,
+        },
+        DecisionHistoryRecord::PlanApproval(r) => match r.outcome {
+            PlanApprovalOutcome::Approved | PlanApprovalOutcome::ApprovedWithEdits => {
+                s.answered += 1;
+                add_latency(s, requested_at, resolved_at);
+            }
+            PlanApprovalOutcome::Rejected => s.declined += 1,
+            PlanApprovalOutcome::HeartbeatLost => s.heartbeat_lost += 1,
+            PlanApprovalOutcome::Timeout => s.timeout += 1,
+        },
+        DecisionHistoryRecord::UserPrompt(_) => {}
+    }
+}
+
+/// Scan `~/.fleet/decision-history/*.jsonl` and aggregate every decision card
+/// whose `requestedAt` falls on `date` (local calendar day).
+///
+/// Files whose mtime is strictly before the start of `date` are skipped: since
+/// records are only ever appended and `resolvedAt >= requestedAt`, such a file
+/// cannot hold a card requested on `date`. This keeps the scan cheap even with
+/// thousands of per-session history files.
+pub fn compute_stats_for_date(date: &str) -> DecisionCardStats {
+    use chrono::TimeZone;
+
+    let mut stats = DecisionCardStats::default();
+    let Some(dir) = history_dir() else {
+        return stats;
+    };
+
+    // Compute the start-of-day SystemTime for mtime pruning.
+    let start_sys: Option<std::time::SystemTime> = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .and_then(|ndt| chrono::Local.from_local_datetime(&ndt).single())
+        .and_then(|dt| {
+            let secs = dt.timestamp();
+            (secs >= 0).then(|| {
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64)
+            })
+        });
+
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return stats;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        if let Some(start) = start_sys {
+            if let Ok(meta) = entry.metadata() {
+                if let Ok(mtime) = meta.modified() {
+                    if mtime < start {
+                        continue;
+                    }
+                }
+            }
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Ok(rec) = serde_json::from_str::<DecisionHistoryRecord>(line) {
+                accumulate_record(&mut stats, &rec, date);
+            }
+        }
+    }
+    stats
+}
+
 // ── Storage ──────────────────────────────────────────────────────────────────
 
 fn history_dir() -> Option<PathBuf> {
@@ -1027,6 +1264,238 @@ mod tests {
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id(), "elic-1");
         assert_eq!(listed[1].id(), "fa-1");
+    }
+
+    // ── Decision-card stats ──────────────────────────────────────────────
+
+    /// Build an elicitation request whose first option is explicitly marked
+    /// `(Recommended)`.
+    fn recommended_request(session_id: &str, id: &str) -> ElicitationRequest {
+        ElicitationRequest {
+            parked: false,
+            id: id.into(),
+            session_id: session_id.into(),
+            workspace_name: "claude-fleet".into(),
+            ai_title: None,
+            timestamp: "2026-04-28T02:00:00Z".into(),
+            questions: vec![ElicitationQuestion {
+                question: "Which approach?".into(),
+                header: "Approach".into(),
+                multi_select: false,
+                options: vec![
+                    ElicitationOption {
+                        label: "Do it inline (Recommended)".into(),
+                        description: "fast".into(),
+                        preview: None,
+                    },
+                    ElicitationOption {
+                        label: "Refactor first".into(),
+                        description: "clean".into(),
+                        preview: None,
+                    },
+                ],
+            }],
+        }
+    }
+
+    /// Accumulate a record using the day derived from its own requestedAt so
+    /// the local-timezone date filter always matches, regardless of the host
+    /// timezone the test runs in.
+    fn accumulate_self(stats: &mut DecisionCardStats, rec: &DecisionHistoryRecord) {
+        let ts = match rec {
+            DecisionHistoryRecord::Elicitation(r) => &r.requested_at,
+            DecisionHistoryRecord::FleetAsk(r) => &r.requested_at,
+            DecisionHistoryRecord::PlanApproval(r) => &r.requested_at,
+            DecisionHistoryRecord::UserPrompt(u) => &u.sent_at,
+        };
+        let date = local_date_of(ts).expect("parse date");
+        accumulate_record(stats, rec, &date);
+    }
+
+    #[test]
+    fn stats_count_recommended_hit() {
+        let req = recommended_request("s", "c1");
+        let mut answers = HashMap::new();
+        answers.insert("Which approach?".into(), "Do it inline (Recommended)".into());
+        let rec = build_elicitation_record(
+            &req,
+            ElicitationOutcome::Answered,
+            &answers,
+            "2026-04-28T02:00:05Z".into(),
+        );
+        let mut stats = DecisionCardStats::default();
+        accumulate_self(&mut stats, &DecisionHistoryRecord::Elicitation(rec));
+        let s = &stats.by_type["elicitation"];
+        assert_eq!(s.triggered, 1);
+        assert_eq!(s.answered, 1);
+        assert_eq!(s.with_recommendation, 1);
+        assert_eq!(s.recommended_hit, 1);
+        assert_eq!(s.other_pick, 0);
+        assert_eq!(s.latency_count, 1);
+        assert!((s.latency_secs_sum - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn stats_count_other_pick_over_recommended() {
+        let req = recommended_request("s", "c2");
+        let mut answers = HashMap::new();
+        // User typed something not in the option list → "Other".
+        answers.insert("Which approach?".into(), "Just delete the whole module".into());
+        let rec = build_elicitation_record(
+            &req,
+            ElicitationOutcome::Answered,
+            &answers,
+            "2026-04-28T02:00:03Z".into(),
+        );
+        let mut stats = DecisionCardStats::default();
+        accumulate_self(&mut stats, &DecisionHistoryRecord::Elicitation(rec));
+        let s = &stats.by_type["elicitation"];
+        assert_eq!(s.answered, 1);
+        assert_eq!(s.with_recommendation, 1, "card offered a recommended option");
+        assert_eq!(s.recommended_hit, 0);
+        assert_eq!(s.other_pick, 1);
+    }
+
+    #[test]
+    fn stats_no_recommendation_denominator_zero() {
+        // sample_request has two plain options, neither marked (Recommended).
+        let req = sample_request("s", "c3");
+        let mut answers = HashMap::new();
+        answers.insert("Pick one?".into(), "A".into());
+        let rec = build_elicitation_record(
+            &req,
+            ElicitationOutcome::Answered,
+            &answers,
+            "2026-04-28T00:00:02Z".into(),
+        );
+        let mut stats = DecisionCardStats::default();
+        accumulate_self(&mut stats, &DecisionHistoryRecord::Elicitation(rec));
+        let s = &stats.by_type["elicitation"];
+        assert_eq!(s.answered, 1);
+        assert_eq!(s.with_recommendation, 0);
+        assert_eq!(s.recommended_hit, 0);
+        assert_eq!(s.other_pick, 0);
+    }
+
+    #[test]
+    fn stats_count_non_answered_outcomes() {
+        let mut stats = DecisionCardStats::default();
+        for (id, outcome) in [
+            ("t1", ElicitationOutcome::Timeout),
+            ("t2", ElicitationOutcome::Declined),
+            ("t3", ElicitationOutcome::HeartbeatLost),
+        ] {
+            let req = sample_request("s", id);
+            let rec = build_elicitation_record(
+                &req,
+                outcome,
+                &HashMap::new(),
+                "2026-04-28T00:00:02Z".into(),
+            );
+            accumulate_self(&mut stats, &DecisionHistoryRecord::Elicitation(rec));
+        }
+        let s = &stats.by_type["elicitation"];
+        assert_eq!(s.triggered, 3);
+        assert_eq!(s.answered, 0);
+        assert_eq!(s.timeout, 1);
+        assert_eq!(s.declined, 1);
+        assert_eq!(s.heartbeat_lost, 1);
+        assert_eq!(s.latency_count, 0);
+    }
+
+    #[test]
+    fn stats_fleet_ask_matched_vs_other() {
+        // Matched option → not other; recommended present → hit.
+        let mut req = sample_fleet_ask_request("s", "fa1");
+        req.questions[0].options = vec![
+            crate::mcp_ipc::FleetAskOption {
+                label: "Commit now (Recommended)".into(),
+                description: "ship".into(),
+                preview: None,
+            },
+            crate::mcp_ipc::FleetAskOption {
+                label: "Hold".into(),
+                description: "wait".into(),
+                preview: None,
+            },
+        ];
+        let q = req.questions[0].question.clone();
+
+        let mut hit_ans = BTreeMap::new();
+        hit_ans.insert(q.clone(), "Commit now (Recommended)".into());
+        let hit = build_fleet_ask_record(
+            &req,
+            FleetAskOutcome::Answered,
+            hit_ans,
+            "2026-05-28T00:00:04Z".into(),
+        );
+
+        let mut other_ans = BTreeMap::new();
+        other_ans.insert(q, "actually revert everything".into());
+        let other = build_fleet_ask_record(
+            &req,
+            FleetAskOutcome::Answered,
+            other_ans,
+            "2026-05-28T00:00:04Z".into(),
+        );
+
+        let mut stats = DecisionCardStats::default();
+        accumulate_self(&mut stats, &DecisionHistoryRecord::FleetAsk(hit));
+        accumulate_self(&mut stats, &DecisionHistoryRecord::FleetAsk(other));
+        let s = &stats.by_type["fleet-ask"];
+        assert_eq!(s.triggered, 2);
+        assert_eq!(s.answered, 2);
+        assert_eq!(s.with_recommendation, 2);
+        assert_eq!(s.recommended_hit, 1);
+        assert_eq!(s.other_pick, 1);
+    }
+
+    #[test]
+    fn stats_plan_approval_outcomes() {
+        let mk = |id: &str, outcome: PlanApprovalOutcome| {
+            let req = PlanApprovalRequest {
+                parked: false,
+                id: id.into(),
+                session_id: "s".into(),
+                workspace_name: "claude-fleet".into(),
+                ai_title: None,
+                timestamp: "2026-06-01T00:00:00Z".into(),
+                plan_content: "do stuff".into(),
+                plan_file_path: None,
+            };
+            DecisionHistoryRecord::PlanApproval(build_plan_approval_record(
+                &req,
+                outcome,
+                None,
+                "2026-06-01T00:00:10Z".into(),
+            ))
+        };
+        let mut stats = DecisionCardStats::default();
+        accumulate_self(&mut stats, &mk("p1", PlanApprovalOutcome::Approved));
+        accumulate_self(&mut stats, &mk("p2", PlanApprovalOutcome::Rejected));
+        let s = &stats.by_type["plan-approval"];
+        assert_eq!(s.triggered, 2);
+        assert_eq!(s.answered, 1);
+        assert_eq!(s.declined, 1);
+        assert_eq!(s.with_recommendation, 0);
+        assert_eq!(s.latency_count, 1);
+    }
+
+    #[test]
+    fn stats_date_filter_excludes_other_days() {
+        let req = recommended_request("s", "c-other-day");
+        let mut answers = HashMap::new();
+        answers.insert("Which approach?".into(), "Refactor first".into());
+        let rec = build_elicitation_record(
+            &req,
+            ElicitationOutcome::Answered,
+            &answers,
+            "2026-04-28T02:00:05Z".into(),
+        );
+        let mut stats = DecisionCardStats::default();
+        // Ask for a different day than the record's requestedAt.
+        accumulate_record(&mut stats, &DecisionHistoryRecord::Elicitation(rec), "2020-01-01");
+        assert!(stats.by_type.is_empty(), "record on another day must be excluded");
     }
 
     /// `list_session_decisions` used to be a synchronous Tauri command, so the
