@@ -389,6 +389,16 @@ fn remote_endpoints() -> HashSet<String> {
         r#"\.(?:{calls})(?:::<[^>]*>)?\(\s*(?:claw_fleet_core::)?routes::([A-Z][A-Z0-9_]*)"#
     ))
     .unwrap();
+    // Migrated format-string calls: the leading path segment is now a `{}`
+    // filled by a route const as the first format arg, e.g.
+    // `.get(&format!("{}?slug={}", claw_fleet_core::routes::WIKI_DOC, …))` or
+    // `.get(&format!("{}{}/account", …::SOURCES_PREFIX, …))`. Neither `fmt`
+    // (needs a literal `/`) nor `cref` (needs `routes::` right after the `(`)
+    // sees these, so resolve the first-arg const back to its path here.
+    let fmt_cref = Regex::new(&format!(
+        r#"\.(?:{calls})(?:::<[^>]*>)?\(\s*&?\s*format!\(\s*"\{{\}}[^"]*"\s*,\s*(?:claw_fleet_core::)?routes::([A-Z][A-Z0-9_]*)"#
+    ))
+    .unwrap();
     let mut out = HashSet::new();
     for c in lit.captures_iter(&src) {
         out.insert(norm_path(&c[1]));
@@ -397,6 +407,11 @@ fn remote_endpoints() -> HashSet<String> {
         out.insert(norm_path(&c[1]));
     }
     for c in cref.captures_iter(&src) {
+        if let Some(p) = consts.get(&c[1]) {
+            out.insert(norm_path(p));
+        }
+    }
+    for c in fmt_cref.captures_iter(&src) {
         if let Some(p) = consts.get(&c[1]) {
             out.insert(norm_path(p));
         }
@@ -418,6 +433,14 @@ fn hooks_server_routes() -> (HashSet<String>, Vec<String>) {
     }
     let pre = Regex::new(r#"starts_with\(\s*"(/[^"]*)""#).unwrap();
     let mut prefixes: Vec<String> = pre.captures_iter(&src).map(|c| c[1].to_string()).collect();
+    // Migrated prefix guard: `starts_with(crate::routes::SOURCES_PREFIX)` —
+    // the string literal is now a const, so resolve it back to its path.
+    let pre_cref = Regex::new(r#"starts_with\(\s*(?:crate::)?routes::([A-Z][A-Z0-9_]*)"#).unwrap();
+    for c in pre_cref.captures_iter(&src) {
+        if let Some(p) = consts.get(&c[1]) {
+            prefixes.push(p.clone());
+        }
+    }
     // `crate::routes::NAME =>` / `routes::NAME if … =>` arm patterns.
     let cref = Regex::new(r#"(?:crate::)?routes::([A-Z][A-Z0-9_]*)\s*(?:=>|if\b|\|)"#).unwrap();
     for c in cref.captures_iter(&src) {
