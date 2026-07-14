@@ -21,11 +21,16 @@ sha2 = "0.10"
 # hyper-client (native-tls) over the default isahc-client: isahc drags in libcurl,
 # which is worse to ship in the container image than libssl.
 web-push = { version = "0.11", default-features = false, features = ["hyper-client"] }
-# HarmonyOS Push Kit needs plain HTTPS POSTs (OAuth2 token + REST send) with
-# JSON; web-push can't send arbitrary requests and hand-rolling hyper is noise.
-# native-tls (not rustls) reuses the same TLS stack web-push already links.
+# HarmonyOS Push Kit (元服务 service-notification channel) needs plain HTTPS
+# POSTs with JSON; web-push can't send arbitrary requests and hand-rolling hyper
+# is noise. native-tls (not rustls) reuses the same TLS stack web-push links.
 reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json"] }
 p256 = { version = "0.13", features = ["arithmetic"] }
+# Push Kit's v1 service_notification endpoint authenticates with a self-signed
+# PS256 (RSA-PSS-SHA256) JWT built from the AGC service-account key. Neither the
+# std lib nor the existing `p256` crate (elliptic-curve only) can do RSA-PSS, so
+# a JWT lib is required; jsonwebtoken covers signing + the kid header cleanly.
+jsonwebtoken = "9"
 base64 = "0.22"
 rand = "0.8"
 log = "0.4"
@@ -34,3 +39,7 @@ env_logger = "0.11"
 [dev-dependencies]
 tempfile = "3"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect"] }
+# Dev-only: lets the e2e test seal/open with the REAL crypto the desktop and
+# phone use, proving the relay blind-forwards genuine ciphertext. Does NOT touch
+# the shipped relay binary — the relay itself holds no key and does no crypto.
+claw-fleet-core = { path = "../claw-fleet-core", default-features = false }

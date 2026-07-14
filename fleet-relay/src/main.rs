@@ -85,8 +85,9 @@ async fn main() {
     match &harmony {
         Some(_) => log::info!("HarmonyOS Push Kit channel enabled (RELAY_HARMONY_* set)"),
         None => log::info!(
-            "HarmonyOS Push Kit channel disabled — set RELAY_HARMONY_CLIENT_ID / \
-             RELAY_HARMONY_CLIENT_SECRET / RELAY_HARMONY_PROJECT_ID to enable"
+            "HarmonyOS Push Kit channel disabled — set RELAY_HARMONY_PROJECT_ID / \
+             RELAY_HARMONY_APP_ID / RELAY_HARMONY_TEMPLATE_ID / RELAY_HARMONY_KEY_ID / \
+             RELAY_HARMONY_SUB_ACCOUNT / RELAY_HARMONY_PRIVATE_KEY to enable"
         ),
     }
 
