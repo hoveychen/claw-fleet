@@ -610,18 +610,13 @@
       "description": "环境检查通过。在任意项目目录里启动一次 Claude Code 会话，Fleet 就会自动发现并展示它。"
     },
     "features": {
-      "title": "你可以做什么",
-      "description": "Claw Fleet 不只是会话监控器 —— 以下功能已为你准备就绪。",
       "ai_summary_title": "AI 每日摘要",
-      "ai_summary_desc": "自动生成 Agent 每日工作叙述，一键复制 Markdown 用于站会汇报。",
-      "lessons_title": "经验总结",
-      "lessons_desc": "AI 从会话日志中提取失误并转化为 CLAUDE.md 规则 —— 让你的 Agent 越用越聪明。",
       "live_status_title": "实时状态仪表盘",
-      "live_status_desc": "8 种实时状态，支持父子 Agent 层级关系。可直接从仪表盘停止卡住的 Agent。",
-      "audit_title": "安全审计",
-      "audit_desc": "每条 Shell 命令都经过扫描和风险分级，在危险操作变成事故前拦截它们。",
-      "memory_title": "记忆浏览器",
-      "memory_desc": "所有项目的 CLAUDE.md 文件和记忆条目，汇聚在一处浏览管理。"
+      "audit_title": "安全审计"
+    },
+    "advanced": {
+      "title": "高级设置",
+      "description": "通知、安全审计、交互模式等——都有合理默认值，之后也可在设置中调整"
     },
     "settings_appearance": {
       "title": "外观",

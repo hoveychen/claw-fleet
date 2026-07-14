@@ -613,18 +613,13 @@
       "description": "Environment checks passed. Start a Claude Code session in any project directory and Fleet will pick it up automatically."
     },
     "features": {
-      "title": "What you can do",
-      "description": "Claw Fleet is more than a session monitor — here's what's waiting for you.",
       "ai_summary_title": "AI Daily Summaries",
-      "ai_summary_desc": "Auto-generated narrative of what your agents accomplished each day. Copy as Markdown for standups.",
-      "lessons_title": "Lessons Learned",
-      "lessons_desc": "AI extracts mistakes from session logs and turns them into CLAUDE.md rules — your fleet gets smarter over time.",
       "live_status_title": "Live Status Dashboard",
-      "live_status_desc": "8 real-time statuses with parent-child agent hierarchies. Kill stuck agents from the dashboard.",
-      "audit_title": "Security Audit",
-      "audit_desc": "Every shell command scanned and risk-classified. Catch dangerous operations before they become incidents.",
-      "memory_title": "Memory Browser",
-      "memory_desc": "All CLAUDE.md files and memory entries across projects, browsable in one place."
+      "audit_title": "Security Audit"
+    },
+    "advanced": {
+      "title": "Advanced settings",
+      "description": "Notifications, guard, interaction modes — sensible defaults, adjustable later in Settings"
     },
     "settings_appearance": {
       "title": "Appearance",

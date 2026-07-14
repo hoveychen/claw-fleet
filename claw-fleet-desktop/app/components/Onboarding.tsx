@@ -307,43 +307,25 @@ function CelebrationView({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-// ── Feature highlights card ──────────────────────────────────────────────
+// ── Header feature highlights ─────────────────────────────────────────────
+// Compressed from the old full-width FeaturesCard: three pills under the
+// welcome subtitle instead of a scroll-eating card.
 
-interface FeatureItem {
-  icon: string;
-  titleKey: string;
-  descKey: string;
-}
-
-const FEATURES: FeatureItem[] = [
-  { icon: "\u{1F4CA}", titleKey: "onboarding.features.ai_summary_title", descKey: "onboarding.features.ai_summary_desc" },
-  { icon: "\u{1F9E0}", titleKey: "onboarding.features.lessons_title", descKey: "onboarding.features.lessons_desc" },
-  { icon: "\u{1F6A6}", titleKey: "onboarding.features.live_status_title", descKey: "onboarding.features.live_status_desc" },
-  { icon: "\u{1F6E1}", titleKey: "onboarding.features.audit_title", descKey: "onboarding.features.audit_desc" },
-  { icon: "\u{1F4DD}", titleKey: "onboarding.features.memory_title", descKey: "onboarding.features.memory_desc" },
+const HIGHLIGHTS = [
+  { icon: "\u{1F4CA}", titleKey: "onboarding.features.ai_summary_title" },
+  { icon: "\u{1F6A6}", titleKey: "onboarding.features.live_status_title" },
+  { icon: "\u{1F6E1}", titleKey: "onboarding.features.audit_title" },
 ];
 
-function FeaturesCard() {
+function HeaderHighlights() {
   const { t } = useTranslation();
-
   return (
-    <div className={`${styles.card} ${styles.card_info}`}>
-      <div className={styles.card_header}>
-        <span className={styles.card_icon}>&#x2728;</span>
-        <span className={styles.card_title}>{t("onboarding.features.title")}</span>
-      </div>
-      <p className={styles.card_description}>{t("onboarding.features.description")}</p>
-      <div className={styles.feature_list}>
-        {FEATURES.map((f, i) => (
-          <div key={i} className={styles.feature_item}>
-            <span className={styles.feature_icon}>{f.icon}</span>
-            <div className={styles.feature_text}>
-              <span className={styles.feature_title}>{t(f.titleKey)}</span>
-              <span className={styles.hint}>{t(f.descKey)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
+    <div className={styles.highlights}>
+      {HIGHLIGHTS.map((h) => (
+        <span key={h.titleKey} className={styles.highlight}>
+          <span aria-hidden>{h.icon}</span> {t(h.titleKey)}
+        </span>
+      ))}
     </div>
   );
 }
@@ -915,6 +897,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   const sessions = useSessionsStore((s) => s.sessions);
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [celebrating, setCelebrating] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const prevSessionCount = useRef(0);
 
   // Compute which features are unseen (used in whats_new mode to filter cards).
@@ -1335,6 +1318,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
               <img src="/app-icon.png" className={styles.logo} alt="Claw Fleet" />
               <h1 className={styles.title}>{t("onboarding.welcome")}</h1>
               <p className={styles.subtitle}>{t("onboarding.subtitle")}</p>
+              <HeaderHighlights />
             </div>
 
             {/* Diagnostics area: a local spinner while detection runs, issue
@@ -1354,68 +1338,81 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             ) : null}
 
             <div className={styles.cards}>
-              <FeaturesCard />
-            </div>
-
-            <div className={styles.cards}>
               <AppearanceCard />
             </div>
 
-            {hasMultipleSources && sources.length > 0 && (
-              <div className={styles.cards}>
-                <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
-              </div>
-            )}
-
-            {noIssues && (
-              <div className={styles.cards}>
-                <NotificationSettingsCard
-                  notifMode={notifMode}
-                  onNotifModeChange={handleNotifModeChange}
-                  ttsMode={ttsMode}
-                  onTtsModeChange={handleTtsModeChange}
-                  chimePreset={chimePreset}
-                  onChimeChange={handleChimeChange}
-                  personalizedMascot={personalizedMascot}
-                  onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
-                  userTitle={userTitle}
-                  onUserTitleChange={handleUserTitleChange}
-                />
-                {hasClaudeCode && hooksPlan && (
-                  <HooksSetupCard
-                    hooksPlan={hooksPlan}
-                    onInstall={handleInstallHooks}
-                    status={hooksStatus}
-                    errorMsg={hooksError}
-                    guardEnabled={guardEnabled}
-                    onToggleGuard={handleToggleGuard}
-                    elicitationEnabled={elicitationEnabled}
-                    onToggleElicitation={handleToggleElicitation}
-                    planApprovalEnabled={planApprovalEnabled}
-                    onTogglePlanApproval={handleTogglePlanApproval}
+            {/* Everything below has sensible defaults — collapsed by default
+                so the first screen stays scannable. Also reachable later via
+                Settings. */}
+            <div className={styles.advanced}>
+              <button
+                type="button"
+                className={styles.advanced_toggle}
+                onClick={() => setAdvancedOpen((v) => !v)}
+                aria-expanded={advancedOpen}
+              >
+                <span className={styles.advanced_title}>{t("onboarding.advanced.title")}</span>
+                <span className={styles.advanced_hint}>{t("onboarding.advanced.description")}</span>
+                <span
+                  className={`${styles.advanced_chevron} ${advancedOpen ? styles.advanced_chevron_open : ""}`}
+                  aria-hidden
+                >
+                  &#x25BE;
+                </span>
+              </button>
+              {advancedOpen && (
+                <div className={styles.cards}>
+                  {hasMultipleSources && sources.length > 0 && (
+                    <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
+                  )}
+                  <NotificationSettingsCard
+                    notifMode={notifMode}
+                    onNotifModeChange={handleNotifModeChange}
+                    ttsMode={ttsMode}
+                    onTtsModeChange={handleTtsModeChange}
+                    chimePreset={chimePreset}
+                    onChimeChange={handleChimeChange}
+                    personalizedMascot={personalizedMascot}
+                    onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
+                    userTitle={userTitle}
+                    onUserTitleChange={handleUserTitleChange}
                   />
-                )}
-                {hasClaudeCode && (
-                  <InteractionModeCard
-                    enabled={interactionModeEnabled}
-                    onToggle={handleToggleInteractionMode}
-                    elicitationEnabled={elicitationEnabled}
-                  />
-                )}
-                {hasClaudeCode && (
-                  <PrdModeCard
-                    enabled={prdModeEnabled}
-                    onToggle={handleTogglePrdMode}
-                  />
-                )}
-                {hasClaudeCode && (
-                  <WikiGuidanceCard
-                    enabled={wikiGuidanceEnabled}
-                    onToggle={handleToggleWikiGuidance}
-                  />
-                )}
-              </div>
-            )}
+                  {hasClaudeCode && hooksPlan && (
+                    <HooksSetupCard
+                      hooksPlan={hooksPlan}
+                      onInstall={handleInstallHooks}
+                      status={hooksStatus}
+                      errorMsg={hooksError}
+                      guardEnabled={guardEnabled}
+                      onToggleGuard={handleToggleGuard}
+                      elicitationEnabled={elicitationEnabled}
+                      onToggleElicitation={handleToggleElicitation}
+                      planApprovalEnabled={planApprovalEnabled}
+                      onTogglePlanApproval={handleTogglePlanApproval}
+                    />
+                  )}
+                  {hasClaudeCode && (
+                    <InteractionModeCard
+                      enabled={interactionModeEnabled}
+                      onToggle={handleToggleInteractionMode}
+                      elicitationEnabled={elicitationEnabled}
+                    />
+                  )}
+                  {hasClaudeCode && (
+                    <PrdModeCard
+                      enabled={prdModeEnabled}
+                      onToggle={handleTogglePrdMode}
+                    />
+                  )}
+                  {hasClaudeCode && (
+                    <WikiGuidanceCard
+                      enabled={wikiGuidanceEnabled}
+                      onToggle={handleToggleWikiGuidance}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Environment is fine: green card. Without a session yet it
                 doubles as the "go run your first session" nudge — the main
