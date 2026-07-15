@@ -250,19 +250,21 @@
     .term-body .y { color: #fbbf24; }
     .term-body .b { color: #7dd3fc; }
 
-    /* ── Phone mock ── */
-    .phone {
-      width: 280px; margin: 0 auto; background: var(--card); border: 1px solid var(--border-strong);
-      border-radius: 34px; box-shadow: var(--shadow-raised); padding: 14px 12px 20px; position: relative;
+    /* ── Phone collage (real mobile-web screenshots in device bezels) ── */
+    .phones { position: relative; width: 320px; height: 440px; margin: 0 auto; }
+    .device {
+      position: absolute; width: 208px; padding: 8px; background: var(--card);
+      border: 1px solid var(--border-strong); border-radius: 32px; box-shadow: var(--shadow-raised);
     }
-    .phone::before { content: ""; display: block; width: 78px; height: 5px; border-radius: 100px; background: var(--border-strong); margin: 2px auto 12px; }
-    .phone-head { display: flex; justify-content: space-between; align-items: center; padding: 0 8px 10px; }
-    .phone-head .ph-t { font-weight: 700; font-size: 14px; }
-    .phone-head .ph-cost { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); }
-    .phone .q-card { padding: 11px 12px; }
-    .phone .q-text { font-size: 12.5px; }
-    .phone .gc-actions { margin-top: 8px; }
-    .phone .gc-btn { font-size: 12px; padding: 6px 13px; }
+    .device .screen {
+      position: relative; aspect-ratio: 39 / 61; border-radius: 24px; overflow: hidden;
+      background: var(--paper); border: 1px solid var(--border-soft);
+    }
+    .device .screen img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+    .device .notch { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 46px; height: 5px; border-radius: 100px; background: var(--border-strong); z-index: 2; }
+    .device.back  { top: 0; right: 0; transform: rotate(3deg); z-index: 1; }
+    .device.front { bottom: 0; left: 0; transform: rotate(-2.5deg); z-index: 2; }
+    @media (max-width: 900px) { .phones { transform: scale(0.92); } }
 
     /* ── Pillar-extra strip (quiet list, not cards) ── */
     .extras { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--card); }
@@ -498,24 +500,14 @@ data-pipeline  <span class="b">delegating</span>  84 tok/s  $6.40<br>
   <section class="section" id="anywhere">
     <div class="two-col flip">
       <div class="reveal" style="text-align:center">
-        <div class="phone">
-          <div class="phone-head"><span class="ph-t">Decisions</span><span class="ph-cost">today $12.40 · 1.2M tok</span></div>
-          <div class="queue">
-            <div class="q-card">
-              <div class="q-icon">⛨</div>
-              <div class="q-body">
-                <div class="q-kind">guard · api-server</div>
-                <div class="q-text">Allow <code>npx prisma migrate</code>?</div>
-                <div class="gc-actions"><span class="gc-btn gc-deny">Block</span><span class="gc-btn gc-allow">Allow</span></div>
-              </div>
-            </div>
-            <div class="q-card">
-              <div class="q-icon">?</div>
-              <div class="q-body">
-                <div class="q-kind">question · web-frontend</div>
-                <div class="q-text">"Ship behind a feature flag?"</div>
-              </div>
-            </div>
+        <div class="phones">
+          <div class="device back">
+            <div class="notch"></div>
+            <div class="screen"><img src="screenshots/03_mobile_tasks.png" alt="Claw Fleet mobile web: live task list with stop/interrupt controls" loading="lazy"></div>
+          </div>
+          <div class="device front">
+            <div class="notch"></div>
+            <div class="screen"><img src="screenshots/02_mobile_decisions.png" alt="Claw Fleet mobile web: a decision card asking you to pick a rollout window" loading="lazy"></div>
           </div>
         </div>
       </div>
