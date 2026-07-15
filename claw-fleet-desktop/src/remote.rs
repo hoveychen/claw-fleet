@@ -2090,6 +2090,10 @@ fn connect_remote_start_probe(
             // /resume_session POST keeps failing.
             let mut ar_last_fire: HashMap<String, std::time::Instant> = HashMap::new();
             let mut ar_failures: HashMap<String, u32> = HashMap::new();
+            // Per-session server-error retry budget (incremented on fire, reset
+            // when the session leaves ServerErrored) — the probe-side analogue of
+            // the local scheduler's `auto_resume_server_errors` cap.
+            let mut ar_server_errors: HashMap<String, u32> = HashMap::new();
             let busy_statuses = [
                 SessionStatus::Thinking,
                 SessionStatus::Executing,
@@ -2191,6 +2195,66 @@ fn connect_remote_start_probe(
                                         "remote auto_resume: fire failed {session_id}: {e}"
                                     ));
                                 }
+                            }
+                        }
+                    }
+
+                    // ── Transient server_error retries (remote) ──────────────
+                    // Same immediate-retry policy as the local scheduler, fired
+                    // via /resume_session on the probe host. Capped per episode
+                    // by ar_server_errors so a persistent error can't loop.
+                    if config.enabled && config.retry_server_errors {
+                        let errored: std::collections::HashSet<String> = s
+                            .iter()
+                            .filter(|sess| {
+                                sess.status
+                                    == claw_fleet_core::session::SessionStatus::ServerErrored
+                            })
+                            .map(|sess| sess.id.clone())
+                            .collect();
+                        ar_server_errors.retain(|id, _| errored.contains(id));
+                        let max_retries = config.max_server_error_retries;
+                        let se_candidates =
+                            claw_fleet_core::auto_resume::select_server_error_retries(
+                                &s,
+                                &config,
+                                |id| {
+                                    ar_last_fire
+                                        .get(id)
+                                        .is_some_and(|t| t.elapsed() < AR_DEBOUNCE)
+                                        || ar_server_errors
+                                            .get(id)
+                                            .is_some_and(|&n| n >= max_retries)
+                                        || s.iter().any(|sess| sess.id == *id && sess.proc_alive)
+                                },
+                                AR_MAX_PER_TICK,
+                            );
+                        for (session_id, workspace_path) in se_candidates {
+                            ar_last_fire.insert(session_id.clone(), std::time::Instant::now());
+                            *ar_server_errors.entry(session_id.clone()).or_insert(0) += 1;
+                            let agent_source = s
+                                .iter()
+                                .find(|sess| sess.id == session_id)
+                                .map(|sess| sess.agent_source.clone())
+                                .unwrap_or_else(|| "claude-code".to_string());
+                            let req = claw_fleet_core::auto_resume::ResumeSessionRequest {
+                                session_id: session_id.clone(),
+                                workspace_path,
+                                prompt: None,
+                                model: None,
+                                effort: None,
+                                permission_mode: None,
+                                agent_source,
+                            };
+                            match probe2
+                                .post_json_ok(claw_fleet_core::routes::RESUME_SESSION, &req)
+                            {
+                                Ok(()) => crate::log_debug(&format!(
+                                    "remote server_error_retry: fired {session_id}"
+                                )),
+                                Err(e) => crate::log_debug(&format!(
+                                    "remote server_error_retry: fire failed {session_id}: {e}"
+                                )),
                             }
                         }
                     }
