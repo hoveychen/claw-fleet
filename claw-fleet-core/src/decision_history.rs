@@ -9,9 +9,10 @@
 //! cleaned up.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -834,8 +835,19 @@ pub fn sync_user_prompts_from_jsonl(
     // Poison-tolerant: a panicking appender must not wedge the history sync.
     let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    let content = match fs::read_to_string(jsonl_path) {
-        Ok(c) => c,
+    // Incremental scan: on the first sync of a session we read the whole
+    // transcript, but each later sync (every SessionDetail open, every decision
+    // poll) resumes from the byte offset where the previous scan stopped and
+    // reads only the lines appended since. A 50 MB transcript was otherwise
+    // re-read and re-parsed in full on every open (~35 ms, under the global
+    // lock). The offset only ever advances past *complete* lines, so it can
+    // never skip an unprocessed prompt; if the file is shorter than the cached
+    // offset (rotated / a different session reusing the id) the scan resets to
+    // the start. The `existing`-id de-dup below stays as a correctness backstop
+    // independent of the offset.
+    let start_offset = cached_sync_offset(session_id, jsonl_path);
+    let (content, new_offset) = match read_appended_lines(jsonl_path, start_offset) {
+        Ok(pair) => pair,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(format!("read {}: {e}", jsonl_path.display())),
     };
@@ -862,7 +874,61 @@ pub fn sync_user_prompts_from_jsonl(
             eprintln!("decision_history: append user prompt failed: {e}");
         }
     }
+    store_sync_offset(session_id, jsonl_path, new_offset);
     Ok(())
+}
+
+/// Per-session byte offset into the transcript where the last
+/// [`sync_user_prompts_from_jsonl`] scan stopped, so the next scan reads only
+/// what was appended since. Keyed by `session_id`; the stored path guards
+/// against a stale offset if the same id ever maps to a different file.
+/// In-memory only — after a process restart the first sync re-reads in full,
+/// which the id de-dup makes harmless.
+static SYNC_OFFSETS: LazyLock<Mutex<HashMap<String, (PathBuf, u64)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The cached offset to resume from, or 0 when this session hasn't been scanned
+/// in this process or the cached entry was for a different path.
+fn cached_sync_offset(session_id: &str, jsonl_path: &Path) -> u64 {
+    let map = SYNC_OFFSETS.lock().unwrap_or_else(|e| e.into_inner());
+    match map.get(session_id) {
+        Some((path, off)) if path == jsonl_path => *off,
+        _ => 0,
+    }
+}
+
+fn store_sync_offset(session_id: &str, jsonl_path: &Path, offset: u64) {
+    let mut map = SYNC_OFFSETS.lock().unwrap_or_else(|e| e.into_inner());
+    map.insert(session_id.to_string(), (jsonl_path.to_path_buf(), offset));
+}
+
+/// Read the transcript from `offset` to EOF, returning **all** appended text
+/// (for parsing) together with the offset to resume from next time.
+///
+/// The returned text includes a trailing line with no final newline — matching
+/// the old `read_to_string().lines()`, which processed a last unterminated line
+/// too, so a finished transcript's closing prompt is never dropped. The resume
+/// offset, however, only advances **past the last newline**: an unterminated
+/// trailing line (the CLI mid-write, or a genuinely final line) is therefore
+/// re-read on the next scan, where the id de-dup makes reprocessing a no-op.
+/// This keeps the offset from ever skipping a line that later gains content.
+///
+/// If `offset` is past the current end (file truncated or replaced) the read
+/// restarts from 0. No appended bytes yields an empty string and an unchanged
+/// offset.
+fn read_appended_lines(path: &Path, offset: u64) -> std::io::Result<(String, u64)> {
+    let mut file = File::open(path)?;
+    let size = file.metadata()?.len();
+    let start = if offset <= size { offset } else { 0 };
+    file.seek(SeekFrom::Start(start))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    let resume = match buf.iter().rposition(|&b| b == b'\n') {
+        Some(i) => start + (i + 1) as u64,
+        None => start,
+    };
+    let text = String::from_utf8_lossy(&buf).into_owned();
+    Ok((text, resume))
 }
 
 /// Parse a single jsonl line into a `UserPromptRecord`, applying the filter
@@ -947,6 +1013,77 @@ fn parse_user_prompt_line(line: &str, session_id: &str) -> Option<UserPromptReco
 mod tests {
     use super::*;
     use crate::elicitation::{ElicitationOption, ElicitationQuestion, ElicitationRequest};
+
+    fn tmp_jsonl(name: &str, content: &[u8]) -> std::path::PathBuf {
+        let p = std::env::temp_dir()
+            .join(format!("dh_incr_{}_{}.jsonl", name, std::process::id()));
+        std::fs::write(&p, content).unwrap();
+        p
+    }
+
+    #[test]
+    fn incremental_read_from_zero_returns_all_lines() {
+        let p = tmp_jsonl("all", b"line1\nline2\nline3\n");
+        let (text, off) = read_appended_lines(&p, 0).unwrap();
+        assert_eq!(text, "line1\nline2\nline3\n");
+        assert_eq!(off, 18);
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
+    fn incremental_read_resumes_and_sees_only_appended() {
+        let p = tmp_jsonl("resume", b"a\nb\n");
+        let (_t1, off1) = read_appended_lines(&p, 0).unwrap();
+        assert_eq!(off1, 4);
+        // Append more, resume from the previous offset.
+        {
+            let mut f = OpenOptions::new().append(true).open(&p).unwrap();
+            f.write_all(b"c\nd\n").unwrap();
+        }
+        let (t2, off2) = read_appended_lines(&p, off1).unwrap();
+        assert_eq!(t2, "c\nd\n");
+        assert_eq!(off2, 8);
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
+    fn incremental_read_returns_final_unterminated_line_but_offset_stops_before_it() {
+        // No trailing newline: the last line is still returned for parsing
+        // (a finished transcript's closing prompt must not be dropped), but the
+        // resume offset stops before it so the next scan re-reads it.
+        let p = tmp_jsonl("partial", b"whole\npart");
+        let (text, off) = read_appended_lines(&p, 0).unwrap();
+        assert_eq!(text, "whole\npart");
+        assert_eq!(off, 6, "resume offset stops before the unterminated 'part'");
+        // Finish the line; next read from `off` picks up just the completion.
+        {
+            let mut f = OpenOptions::new().append(true).open(&p).unwrap();
+            f.write_all(b"ial\n").unwrap();
+        }
+        let (t2, off2) = read_appended_lines(&p, off).unwrap();
+        assert_eq!(t2, "partial\n");
+        assert_eq!(off2, 14);
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
+    fn incremental_read_resets_when_file_shorter_than_offset() {
+        let p = tmp_jsonl("trunc", b"x\ny\n");
+        // Cached offset points past a now-shorter file → restart from 0.
+        let (text, off) = read_appended_lines(&p, 9999).unwrap();
+        assert_eq!(text, "x\ny\n");
+        assert_eq!(off, 4);
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
+    fn incremental_read_no_new_bytes_is_empty() {
+        let p = tmp_jsonl("noop", b"a\nb\n");
+        let (text, off) = read_appended_lines(&p, 4).unwrap();
+        assert_eq!(text, "");
+        assert_eq!(off, 4);
+        std::fs::remove_file(p).ok();
+    }
 
     // real_home_dir() reads $FLEET_HOME, so tests must serialize and override it.
     // Uses the crate-wide `crate::session::fleet_home_lock` so tests in
