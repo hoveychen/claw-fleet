@@ -11,6 +11,8 @@ pub(crate) fn cmd_handoff(
     note: Option<&str>,
     plan: Option<&str>,
     next: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
     action: Option<HandoffCommands>,
 ) {
     match action {
@@ -91,13 +93,27 @@ pub(crate) fn cmd_handoff(
     // fall back to the shell cwd only when there is no transcript to read.
     let ws = claw_fleet_core::session::resolve_session_cwd(&sid).unwrap_or_else(|| shell_cwd.clone());
     // The successor continues this session's work, so it must continue on this
-    // session's model and effort rather than the CLI default. The model is only
-    // discoverable from the transcript (Claude Code exports no model env var);
-    // effort is handed to us directly.
-    let model = claw_fleet_core::session::resolve_session_model_spec(&sid);
-    let effort = std::env::var("CLAUDE_EFFORT")
-        .ok()
-        .filter(|e| !e.trim().is_empty());
+    // session's model and effort rather than the CLI default. An explicit
+    // `--model` / `--effort` flag wins; otherwise we auto-resolve. The model is
+    // recovered from Fleet's launch-spec when Fleet launched the session, else
+    // reconstructed from the transcript (Claude Code exports no model env var) —
+    // the latter is unreliable when the last turn ran on a rate-limit fallback,
+    // which is exactly why the flag override exists. Effort otherwise comes from
+    // CLAUDE_EFFORT, handed to us directly.
+    let model = model
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+        .or_else(|| claw_fleet_core::session::resolve_session_model_spec(&sid));
+    let effort = effort
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            std::env::var("CLAUDE_EFFORT")
+                .ok()
+                .filter(|e| !e.trim().is_empty())
+        });
     // Fleet stamps `FLEET_AGENT_SOURCE` on the sessions it launches (Codex sets
     // it to "codex"; Claude sessions have no stamp). Absent → "claude-code", the
     // historical default, so the successor is relayed on the same tool.
