@@ -1680,6 +1680,7 @@ pub fn run() {
             search_sessions,
             get_messages,
             get_messages_tail,
+            get_tool_result_full,
             get_skill_history,
             get_workflow_trees,
             get_task_token_breakdown,

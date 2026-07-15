@@ -345,7 +345,14 @@ pub(crate) fn route_messages(
                         None => source.get_messages(&file_path),
                     };
                     match result {
-                        Ok(messages) => {
+                        Ok(mut messages) => {
+                            // Trim oversized tool output before it crosses the
+                            // HTTP boundary, mirroring LocalBackend. Only the
+                            // tail path (SessionDetail) is trimmed; a full
+                            // `get_messages` fetch keeps everything intact.
+                            if tail.is_some() {
+                                crate::message_trim::trim_messages_for_transport(&mut messages);
+                            }
                             let body = serde_json::to_string(&messages).unwrap_or_default();
                             let _ = request.respond(
                                 tiny_http::Response::from_string(body).with_header(json_header),
@@ -359,6 +366,35 @@ pub(crate) fn route_messages(
                     let _ = request.respond(tiny_http::Response::empty(404));
                 }
             }
+
+/// Full, untrimmed tool output for one `tool_use_id`. The remote counterpart of
+/// `Backend::get_tool_result_full`, called when the reader expands a card whose
+/// tail payload was trimmed by [`crate::message_trim`].
+pub(crate) fn route_tool_result(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    let tool_use_id = query.get("tool_use_id").map(|s| s.as_str()).unwrap_or("");
+    match crate::message_trim::extract_full_tool_result(
+        std::path::Path::new(&file_path),
+        tool_use_id,
+    ) {
+        Ok(value) => {
+            let body = serde_json::to_string(&value).unwrap_or_default();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body).with_header(json_header),
+            );
+        }
+        Err(_) => {
+            let _ = request.respond(tiny_http::Response::empty(404));
+        }
+    }
+}
 
 pub(crate) fn route_file_size(
     ctx: &ServeCtx,

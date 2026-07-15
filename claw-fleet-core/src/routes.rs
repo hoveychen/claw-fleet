@@ -70,6 +70,7 @@ pub const MEMORIES: &str = "/memories";
 pub const MEMORY_CONTENT: &str = "/memory_content";
 pub const MEMORY_HISTORY: &str = "/memory_history";
 pub const MESSAGES: &str = "/messages";
+pub const TOOL_RESULT: &str = "/tool-result";
 pub const MOBILE_RELAY_CONFIG: &str = "/mobile-relay/config";
 pub const MOBILE_RELAY_QR: &str = "/mobile-relay/qr";
 pub const MOBILE_RELAY_ROTATE: &str = "/mobile-relay/rotate";

@@ -1778,7 +1778,14 @@ impl Backend for LocalBackend {
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
         match find_source_for_path(&self.sources, path) {
-            Some(source) => source.get_messages_tail(path, n),
+            Some(source) => {
+                let mut msgs = source.get_messages_tail(path, n)?;
+                // Truncate oversized tool output before it crosses the Tauri IPC
+                // boundary — it renders inside collapsed cards and is fetched in
+                // full on expand via `get_tool_result_full`.
+                claw_fleet_core::message_trim::trim_messages_for_transport(&mut msgs);
+                Ok(msgs)
+            }
             None => Err(format!("No agent source can handle path: {path}")),
         }
     }

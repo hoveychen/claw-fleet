@@ -613,6 +613,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::MESSAGES => route_messages(ctx, request, &query, json_header, path),
 
+            crate::routes::TOOL_RESULT => route_tool_result(ctx, request, &query, json_header, path),
+
             crate::routes::FILE_SIZE => route_file_size(ctx, request, &query, json_header, path),
 
             crate::routes::TAIL => route_tail(ctx, request, &query, json_header, path),

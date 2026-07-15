@@ -358,6 +358,19 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn get_tool_result_full(
+        &self,
+        path: &str,
+        tool_use_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        self.probe.get(&format!(
+            "{}?path={}&tool_use_id={}",
+            claw_fleet_core::routes::TOOL_RESULT,
+            encode_path(path),
+            encode_path(tool_use_id),
+        ))
+    }
+
     fn interrupt_pid(&self, pid: u32) -> Result<(), String> {
         self.probe.get_ok(&format!("{}?pid={}", claw_fleet_core::routes::INTERRUPT, pid))
     }
