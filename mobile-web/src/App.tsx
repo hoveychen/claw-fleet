@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Inbox, ListChecks, MoreHorizontal, Plus } from "lucide-react";
 import styles from "./App.module.css";
-import { enablePush, pushState, resyncPush, type PushState } from "./push";
+import {
+  disablePush,
+  enablePush,
+  isPushOptedOut,
+  pushState,
+  resyncPush,
+  type PushState,
+} from "./push";
 import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
 import { RelayClient, gzipSupported, binarySupported } from "./relay";
@@ -105,6 +112,9 @@ export function App() {
   const [todayUsage, setTodayUsage] = useState<TodayUsage | null>(null);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   const [push, setPush] = useState<PushState>(pushState);
+  // Sub-state below "granted": the user can turn notifications off even while
+  // the browser permission stays granted. Persisted so it survives reloads.
+  const [pushOptedOut, setPushOptedOut] = useState<boolean>(isPushOptedOut);
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
   // 知识库文档是一条链而不是单页：`[[slug]]` 站内跳转往上叠一篇，返回逐篇退回。
   const [wikiStack, setWikiStack] = useState<WikiDoc[]>([]);
@@ -344,15 +354,25 @@ export function App() {
   // relay — otherwise the banner just vanishes while no push is wired.
   // enablePush is idempotent: it reuses an existing subscription and only
   // creates one when missing, and requestPermission() no-ops once granted.
+  // Skip the auto-(re)subscribe when the user has explicitly opted out —
+  // otherwise a mount/focus would immediately resurrect the subscription they
+  // just turned off (browser permission stays "granted" after disabling).
   useEffect(() => {
-    if (push === "granted" && clientRef.current) {
+    if (push === "granted" && !pushOptedOut && clientRef.current) {
       void enablePush(clientRef.current);
     }
-  }, [push]);
+  }, [push, pushOptedOut]);
 
   const handleEnablePush = useCallback(async () => {
     if (!clientRef.current) return;
     setPush(await enablePush(clientRef.current));
+    setPushOptedOut(false);
+  }, []);
+
+  const handleDisablePush = useCallback(async () => {
+    if (!clientRef.current) return;
+    await disablePush(clientRef.current);
+    setPushOptedOut(true);
   }, []);
 
   // Optimistic read stamps: the server re-derives lastReadMs on its next scan,
@@ -515,7 +535,9 @@ export function App() {
             connected={connected}
             agentOnline={agentOnline}
             push={push}
+            pushOptedOut={pushOptedOut}
             onEnablePush={handleEnablePush}
+            onDisablePush={handleDisablePush}
             onOpenRepo={() => setShowRepo(true)}
             onOpenUsage={() => setShowUsage(true)}
           />

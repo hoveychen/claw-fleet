@@ -26,6 +26,24 @@ export function pushState(): PushState {
   });
 }
 
+// A user who explicitly turns notifications OFF still has a "granted" browser
+// permission (the browser gives no API to revoke it — only the OS settings do),
+// so `pushState()` alone can't tell "on" from "off". We persist the opt-out so
+// the auto-(re)subscribe paths (mount effect + reconnect resync) don't
+// resurrect a subscription the user just removed. Follows theme.ts / wakeLock.ts
+// localStorage "1"/"0" convention.
+const PUSH_OPT_OUT_KEY = "fleet:push-opt-out";
+
+export function isPushOptedOut(): boolean {
+  if (typeof localStorage === "undefined") return false;
+  return localStorage.getItem(PUSH_OPT_OUT_KEY) === "1";
+}
+
+export function setPushOptedOut(optedOut: boolean): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(PUSH_OPT_OUT_KEY, optedOut ? "1" : "0");
+}
+
 function urlBase64ToUint8Array(base64: string): Uint8Array {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
   const normalized = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -60,16 +78,36 @@ export async function enablePush(client: RelayClient): Promise<PushState> {
   // Tag the platform so the relay can route Web Push vs HarmonyOS Push Kit
   // subscriptions on the same channel (relay defaults absent platform to web).
   client.pushSubscribe({ ...subscription.toJSON(), platform: "web" });
+  // Enabling clears any prior explicit opt-out.
+  setPushOptedOut(false);
   return "granted";
 }
 
 /** Re-register an existing subscription after a reconnect (no prompts). */
 export async function resyncPush(client: RelayClient): Promise<void> {
-  if (pushState() !== "granted") return;
+  if (pushState() !== "granted" || isPushOptedOut()) return;
   try {
     const registration = await navigator.serviceWorker.ready;
     const subscription = await registration.pushManager.getSubscription();
     if (subscription) client.pushSubscribe({ ...subscription.toJSON(), platform: "web" });
+  } catch {
+    // best-effort
+  }
+}
+
+/** Turn notifications off: tell the relay to drop the subscription, unsubscribe
+ *  in the browser, and persist the opt-out so nothing re-subscribes. Sends the
+ *  unsubscribe frame BEFORE `subscription.unsubscribe()` so the endpoint the
+ *  relay keys on is still available. Best-effort — always records the opt-out. */
+export async function disablePush(client: RelayClient): Promise<void> {
+  setPushOptedOut(true);
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      client.pushUnsubscribe({ endpoint: subscription.endpoint, platform: "web" });
+      await subscription.unsubscribe();
+    }
   } catch {
     // best-effort
   }
