@@ -359,11 +359,17 @@ interface DetailState {
   appendMessages: (msgs: RawMessage[]) => void;
 }
 
-/** Initial number of tail messages to render when SessionDetail opens.
- * Big enough to cover the active conversation context for the vast majority
- * of sessions, small enough to keep the IPC payload + first React render fast
- * even on multi-megabyte jsonl files. */
-export const INITIAL_TAIL = 500;
+/** Initial number of tail messages to fetch when SessionDetail opens.
+ *
+ * Kept just above `MessageList`'s render window (PAGE_SIZE = 100) rather than
+ * far above it: only the last ~100 rows are ever rendered on open, so fetching
+ * 500 shipped ~400 messages across the Tauri IPC boundary that were parsed,
+ * held in memory, and never drawn. On a multi-megabyte jsonl that meant a
+ * ~43 MB payload per open (measured on a 50 MB / 866-line transcript) for a
+ * 100-row render — the dominant cost of the "detail tab takes 10s" stall. 150
+ * keeps a one-page buffer so the first "load earlier" reveals from memory
+ * before touching disk, while cutting the payload ~3x. */
+export const INITIAL_TAIL = 150;
 
 /** How much further back we go each time the user clicks "load earlier". */
 export const LOAD_EARLIER_STEP = 1000;
