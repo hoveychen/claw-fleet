@@ -12,6 +12,7 @@ import {
   Square,
   WifiOff,
 } from "lucide-react";
+import { AgentSourceIcon } from "./AgentSourceIcon";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
@@ -427,6 +428,9 @@ export function TasksView({
             <div key={s.id} className={styles.card} onClick={() => onOpenSession(s)}>
               <div className={styles.cardHead}>
                 {tone && <span className={styles.statusDot} data-tone={tone} />}
+                <span className={styles.sourceIcon} title={s.agentSource || "claude-code"}>
+                  <AgentSourceIcon source={s.agentSource} />
+                </span>
                 <span className={styles.title}>{title}</span>
                 {unread && <span className={styles.unreadDot} />}
                 <span className={styles.time}>{timeAgo(s.lastActivityMs)}</span>
