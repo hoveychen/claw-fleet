@@ -11,17 +11,33 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct AutoResumeConfig {
     pub enabled: bool,
     /// Don't auto-resume if the configured wait window is longer than this.
     /// Manual "Resume now" always works; this only gates the scheduler.
     pub max_wait_hours: u64,
+    /// Auto-retry Fleet-headless sessions that hit a transient `server_error`
+    /// (the "Server error mid-response / Response stalled mid-stream" family).
+    /// Independent of the rate-limit `enabled` gate above? No — it is ANDed with
+    /// `enabled`, so turning the whole feature off also stops server-error
+    /// retries; this flag lets a user keep rate-limit resume on but opt out of
+    /// server-error retries specifically.
+    pub retry_server_errors: bool,
+    /// Give up after this many consecutive server-error retries for one session
+    /// so a persistently-failing turn (or a server that stays down) stops
+    /// re-firing forever. Enforced by the scheduler's per-session retry counter.
+    pub max_server_error_retries: u32,
 }
 
 impl Default for AutoResumeConfig {
     fn default() -> Self {
-        Self { enabled: true, max_wait_hours: 12 }
+        Self {
+            enabled: true,
+            max_wait_hours: 12,
+            retry_server_errors: true,
+            max_server_error_retries: 3,
+        }
     }
 }
 
@@ -201,6 +217,54 @@ pub fn select_resume_candidates(
     sessions
         .iter()
         .filter(|s| should_auto_resume(s, config, now, usage))
+        .filter(|s| !skip(&s.id))
+        .take(slots)
+        .map(|s| (s.id.clone(), s.workspace_path.clone()))
+        .collect()
+}
+
+/// Decide whether a `ServerErrored` session is eligible for an immediate retry.
+///
+/// Unlike [`should_auto_resume`] there is NO `resets_at` / usage gate — a
+/// server error is transient, so the resume fires as soon as the scheduler's
+/// debounce and per-session attempt cap allow. Eligibility requires ALL of:
+/// - `config.enabled` AND `config.retry_server_errors` (the feature is on)
+/// - the session is NOT a subagent (`agent-*` transcripts can't be resumed)
+/// - the session is NOT attached to an interactive IDE (`ide_name == None`) —
+///   same rule as auto-resume: never fire a detached headless `claude --resume`
+///   behind the user's open editor
+/// - the session is in `ServerErrored` state
+pub fn should_retry_server_error(
+    session: &crate::session::SessionInfo,
+    config: &AutoResumeConfig,
+) -> bool {
+    if !config.enabled || !config.retry_server_errors {
+        return false;
+    }
+    // Same non-resumable gates as auto-resume: subagent transcripts can't be
+    // resumed, and IDE-attached sessions must not be resumed headlessly behind
+    // the user's editor.
+    if session.is_subagent || session.ide_name.is_some() {
+        return false;
+    }
+    session.status == crate::session::SessionStatus::ServerErrored
+}
+
+/// Pick which `ServerErrored` sessions to retry this tick, bounded by `slots`
+/// (the free concurrency slots the caller computed as `cap - in_flight`) — the
+/// same runaway guard [`select_resume_candidates`] uses. `skip(id)` passes over
+/// sessions still within the debounce window or that have exhausted their
+/// per-session server-error retry budget. Results preserve session-list order
+/// and never exceed `slots`.
+pub fn select_server_error_retries(
+    sessions: &[crate::session::SessionInfo],
+    config: &AutoResumeConfig,
+    skip: impl Fn(&str) -> bool,
+    slots: usize,
+) -> Vec<(String, String)> {
+    sessions
+        .iter()
+        .filter(|s| should_retry_server_error(s, config))
         .filter(|s| !skip(&s.id))
         .take(slots)
         .map(|s| (s.id.clone(), s.workspace_path.clone()))
@@ -478,7 +542,7 @@ mod tests {
 
     #[test]
     fn eligible_when_reset_passed_and_wait_within_window() {
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         // reset was 2 minutes ago — past the 60s grace — original wait was 5h
         let s = mk_session(
             SessionStatus::RateLimited,
@@ -533,7 +597,7 @@ mod tests {
         // Hint says reset is still 60 min away, so the hint gate blocks. But the
         // live account's five_hour metric has dropped to 0.1 — a window reset or
         // foxy account swap — so the recovery path makes it eligible now.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(60, 5)));
         let snap = usage(Utc::now().timestamp_millis(), Some(0.10));
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None)); // hint gate alone: blocked
@@ -545,7 +609,7 @@ mod tests {
         // Even with the account fully recovered, a job whose original wait
         // exceeds max_wait_hours stays blocked — the safety valve applies to the
         // recovery path too, not just the hint path.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(60, 24)));
         let snap = usage(Utc::now().timestamp_millis(), Some(0.05));
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), Some(&snap)));
@@ -553,7 +617,7 @@ mod tests {
 
     #[test]
     fn blocked_when_still_waiting() {
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         // reset is 10 minutes away
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(10, 5)));
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
@@ -561,7 +625,7 @@ mod tests {
 
     #[test]
     fn blocked_when_wait_exceeds_max() {
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         // reset was 1 min ago, but the original wait was 24h (weekly limit) — skip.
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-1, 24)));
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
@@ -569,7 +633,7 @@ mod tests {
 
     #[test]
     fn blocked_when_disabled() {
-        let cfg = AutoResumeConfig { enabled: false, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: false, max_wait_hours: 12, ..Default::default() };
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-1, 5)));
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
@@ -581,7 +645,7 @@ mod tests {
         // `claude --resume <id> -p continue` behind the user's editor is exactly
         // what we must not do — auto-resume is only for Fleet-spawned headless
         // sessions (`ide_name == None`).
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
         s.ide_name = Some("Visual Studio Code".into());
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
@@ -594,7 +658,7 @@ mod tests {
         // resume *form* is dispatched by source at spawn time. A codex session
         // that carries a valid, elapsed rate_limit is therefore eligible — same
         // as an equivalent claude-code session.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
         s.agent_source = "codex".into();
         assert!(should_auto_resume(&s, &cfg, Utc::now(), None));
@@ -627,7 +691,7 @@ mod tests {
         // A codex secondary (short, 5h) window whose reset has passed is
         // auto-resume eligible — same as a claude session limit. Source is no
         // longer a gate (P6); the codex reset judgment (P7) supplies the state.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let mut s = mk_session(SessionStatus::RateLimited, None);
         s.agent_source = "codex".into();
         // reset was 2 min ago (past the 60s grace); 5h window → wait 5h ≤ 12h.
@@ -640,7 +704,7 @@ mod tests {
         // A codex primary (weekly, 10080-min) window is too long to auto-resume
         // unattended — the max_wait_hours valve blocks it exactly like a claude
         // weekly limit, because error_timestamp is set to the window start.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let mut s = mk_session(SessionStatus::RateLimited, None);
         s.agent_source = "codex".into();
         // Even with the reset already passed, the 7-day wait exceeds max_wait.
@@ -652,7 +716,7 @@ mod tests {
     fn codex_secondary_window_blocked_before_reset() {
         // Before the secondary window's reset (+grace), the hint gate blocks —
         // and codex has no claude usage metric, so there's no early-recovery path.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let mut s = mk_session(SessionStatus::RateLimited, None);
         s.agent_source = "codex".into();
         // reset is 30 min out.
@@ -666,7 +730,7 @@ mod tests {
         // rate-limit population lands in M2 P7), so a codex session is not an
         // auto-resume candidate — it fails the `Some(rl)` check, not a source
         // string check.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let mut s = mk_session(SessionStatus::RateLimited, None);
         s.agent_source = "codex".into();
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
@@ -683,7 +747,7 @@ mod tests {
         // Five eligible sessions but only 2 concurrency slots free → fire 2.
         // This is the core defense against the 40GB runaway: a tick that finds
         // hundreds of eligible sessions must not spawn hundreds of processes.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let sessions: Vec<SessionInfo> =
             (0..5).map(|i| mk_eligible_with_id(&format!("s{i}"))).collect();
         let picked = select_resume_candidates(&sessions, &cfg, Utc::now(), None, |_| false, 2);
@@ -694,7 +758,7 @@ mod tests {
 
     #[test]
     fn select_zero_slots_fires_nothing() {
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let sessions = vec![mk_eligible_with_id("s0")];
         let picked = select_resume_candidates(&sessions, &cfg, Utc::now(), None, |_| false, 0);
         assert!(picked.is_empty(), "no slots → fire nothing");
@@ -702,12 +766,108 @@ mod tests {
 
     #[test]
     fn select_skips_predicate_matches() {
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let sessions: Vec<SessionInfo> =
             (0..3).map(|i| mk_eligible_with_id(&format!("s{i}"))).collect();
         // Skip s1 (e.g. debounced / backed off) → only s0, s2 within 5 slots.
         let picked =
             select_resume_candidates(&sessions, &cfg, Utc::now(), None, |id| id == "s1", 5);
+        let ids: Vec<&str> = picked.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["s0", "s2"]);
+    }
+
+    #[test]
+    fn legacy_config_without_new_fields_parses_and_preserves_enabled() {
+        // A pre-existing auto_resume.json written before the server-error fields
+        // existed must still deserialize (container `#[serde(default)]`) — and
+        // must NOT silently flip `enabled`. The new fields take their defaults.
+        let legacy = r#"{"enabled": false, "maxWaitHours": 6}"#;
+        let cfg: AutoResumeConfig = serde_json::from_str(legacy).expect("legacy config parses");
+        assert!(!cfg.enabled, "enabled must be preserved, not reset to default");
+        assert_eq!(cfg.max_wait_hours, 6);
+        assert!(cfg.retry_server_errors, "new flag defaults on");
+        assert_eq!(cfg.max_server_error_retries, 3);
+    }
+
+    // ── server-error retry tests ───────────────────────────────────────────
+
+    fn mk_server_errored() -> SessionInfo {
+        mk_session(SessionStatus::ServerErrored, None)
+    }
+
+    #[test]
+    fn server_error_retry_eligible_when_headless_and_errored() {
+        let cfg = AutoResumeConfig::default(); // enabled + retry_server_errors
+        assert!(should_retry_server_error(&mk_server_errored(), &cfg));
+    }
+
+    #[test]
+    fn server_error_retry_blocked_when_feature_disabled() {
+        let mut cfg = AutoResumeConfig::default();
+        cfg.enabled = false;
+        assert!(!should_retry_server_error(&mk_server_errored(), &cfg));
+    }
+
+    #[test]
+    fn server_error_retry_blocked_when_flag_off() {
+        // enabled (rate-limit resume on) but the server-error opt-out is set.
+        let mut cfg = AutoResumeConfig::default();
+        cfg.retry_server_errors = false;
+        assert!(!should_retry_server_error(&mk_server_errored(), &cfg));
+    }
+
+    #[test]
+    fn server_error_retry_blocked_when_subagent() {
+        let cfg = AutoResumeConfig::default();
+        let mut s = mk_server_errored();
+        s.is_subagent = true;
+        assert!(!should_retry_server_error(&s, &cfg));
+    }
+
+    #[test]
+    fn server_error_retry_blocked_when_ide_attached() {
+        let cfg = AutoResumeConfig::default();
+        let mut s = mk_server_errored();
+        s.ide_name = Some("Visual Studio Code".into());
+        assert!(!should_retry_server_error(&s, &cfg));
+    }
+
+    #[test]
+    fn server_error_retry_blocked_when_status_not_errored() {
+        let cfg = AutoResumeConfig::default();
+        // A RateLimited session is owned by the resets_at path, not this one.
+        let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
+        assert!(!should_retry_server_error(&s, &cfg));
+        assert!(!should_retry_server_error(&mk_session(SessionStatus::Idle, None), &cfg));
+    }
+
+    #[test]
+    fn select_server_error_caps_to_slots() {
+        let cfg = AutoResumeConfig::default();
+        let sessions: Vec<SessionInfo> = (0..5)
+            .map(|i| {
+                let mut s = mk_server_errored();
+                s.id = format!("s{i}");
+                s
+            })
+            .collect();
+        let picked = select_server_error_retries(&sessions, &cfg, |_| false, 2);
+        assert_eq!(picked.len(), 2, "must not exceed available slots");
+        assert_eq!(picked[0].0, "s0");
+        assert_eq!(picked[1].0, "s1");
+    }
+
+    #[test]
+    fn select_server_error_skips_predicate() {
+        let cfg = AutoResumeConfig::default();
+        let sessions: Vec<SessionInfo> = (0..3)
+            .map(|i| {
+                let mut s = mk_server_errored();
+                s.id = format!("s{i}");
+                s
+            })
+            .collect();
+        let picked = select_server_error_retries(&sessions, &cfg, |id| id == "s1", 5);
         let ids: Vec<&str> = picked.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["s0", "s2"]);
     }
@@ -747,7 +907,7 @@ mod tests {
         // (observed 21303/21303 success=false in the field). They must never be
         // auto-resume candidates regardless of rate-limit state, or the failed
         // resume leaves them RateLimited and they re-fire forever with no cap.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
         s.is_subagent = true;
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
@@ -755,14 +915,14 @@ mod tests {
 
     #[test]
     fn blocked_when_status_not_rate_limited() {
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let s = mk_session(SessionStatus::Idle, Some(mk_rl(-1, 5)));
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[test]
     fn blocked_when_no_rate_limit_payload() {
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let s = mk_session(SessionStatus::RateLimited, None);
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
@@ -773,7 +933,7 @@ mod tests {
         // server can still hand back 429 for ~tens of seconds. Wait at least
         // 60s past reset before firing so we don't burn a spawn on a bouncing
         // boundary.
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         // reset was 30s ago — still inside the 60s grace window
         let resets_at = Utc::now() - Duration::seconds(30);
         let error_timestamp = resets_at - Duration::hours(5);
@@ -960,7 +1120,7 @@ mod tests {
         s.agent_source = "codex".into();
         s.rate_limit = Some(codex_state("secondary", 300, Utc::now() - Duration::minutes(2)));
 
-        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
         let picked =
             select_resume_candidates(std::slice::from_ref(&s), &cfg, Utc::now(), None, |_| false, 4);
         assert_eq!(picked.len(), 1, "constructed codex rate-limit must be selected");

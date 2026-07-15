@@ -79,7 +79,13 @@ pub fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
     // streaming). Unlike WaitingInput/Delegating there is no age at which a
     // rate-limited session resumes generating, so zero it immediately. The
     // RateLimited *status* is preserved so the UI can still show the limit card.
-    if matches!(info.status, SessionStatus::RateLimited) {
+    // ServerErrored is the same shape: the turn ended in an API error with a
+    // burst of tokens frozen in the 5-minute window, and it won't resume
+    // generating on its own — zero the ghost speed exactly like RateLimited.
+    if matches!(
+        info.status,
+        SessionStatus::RateLimited | SessionStatus::ServerErrored
+    ) {
         info.token_speed = 0.0;
         info.agent_token_speed = 0.0;
         info.cost_speed_usd_per_min = 0.0;
@@ -602,6 +608,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 | SessionStatus::Processing
                 | SessionStatus::WaitingInput
                 | SessionStatus::RateLimited
+                | SessionStatus::ServerErrored
         );
         let b_active = matches!(
             b.status,
@@ -612,6 +619,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 | SessionStatus::Processing
                 | SessionStatus::WaitingInput
                 | SessionStatus::RateLimited
+                | SessionStatus::ServerErrored
         );
         b_active
             .cmp(&a_active)
@@ -651,6 +659,7 @@ pub fn sort_sessions(sessions: &mut Vec<SessionInfo>) {
                 | SessionStatus::Processing
                 | SessionStatus::WaitingInput
                 | SessionStatus::RateLimited
+                | SessionStatus::ServerErrored
         );
         let b_active = matches!(
             b.status,
@@ -661,6 +670,7 @@ pub fn sort_sessions(sessions: &mut Vec<SessionInfo>) {
                 | SessionStatus::Processing
                 | SessionStatus::WaitingInput
                 | SessionStatus::RateLimited
+                | SessionStatus::ServerErrored
         );
         b_active
             .cmp(&a_active)

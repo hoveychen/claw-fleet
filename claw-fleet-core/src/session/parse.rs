@@ -671,8 +671,13 @@ pub fn parse_session_info(
     // real turn is a rate_limit API error, the session is stuck regardless
     // of mtime / streaming heuristics.
     let rate_limit = detect_rate_limit(&last_n);
+    // Rate-limit has priority; a transient server_error is the next-highest
+    // signal (it also supersedes mtime/streaming heuristics because the last
+    // real turn ended in an API error, not fresh activity).
     let status = if rate_limit.is_some() {
         SessionStatus::RateLimited
+    } else if detect_server_error(&last_n) {
+        SessionStatus::ServerErrored
     } else {
         determine_status(&last_n, file_age_secs, content_age_secs, hook_state)
     };

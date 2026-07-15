@@ -633,6 +633,7 @@ fn status_label(s: &session::SessionStatus) -> &'static str {
         Delegating => "delegating",
         Idle => "idle",
         RateLimited => "rate limited",
+        ServerErrored => "server error",
         Stuck => "stuck",
     }
 }
