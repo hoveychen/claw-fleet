@@ -20,3 +20,19 @@ if (!("navigator" in globalThis)) {
     value: { language: "en" },
   });
 }
+// i18n.ts 顶层还读 window.location.hash（langFromHash),而 node 无 window。
+// 提供最小 shim(含 location.hash + 定时器),让 import 期访问 window 的模块能加载。
+// 各测试仍可在 beforeEach 用自己的 windowShim 覆盖它。
+if (!("window" in globalThis)) {
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    writable: true,
+    value: {
+      location: { origin: "http://localhost", hash: "" },
+      setTimeout: (fn: () => void, ms?: number) => setTimeout(fn, ms) as unknown as number,
+      clearTimeout: (id: number) => clearTimeout(id),
+      setInterval: (fn: () => void, ms?: number) => setInterval(fn, ms) as unknown as number,
+      clearInterval: (id: number) => clearInterval(id),
+    },
+  });
+}
