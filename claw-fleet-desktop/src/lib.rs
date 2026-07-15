@@ -367,6 +367,7 @@ impl Backend for NullBackend {
             prd_context_installed: false,
             prd_discipline_installed: false,
             wiki_guidance_installed: false,
+            model_guidance_installed: false,
             idle_hooks_installed: false,
         }
     }
@@ -470,6 +471,12 @@ impl Backend for NullBackend {
         Err("backend not ready".into())
     }
     fn remove_wiki_guidance(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn apply_model_guidance(&self, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn remove_model_guidance(&self) -> Result<(), String> {
         Err("backend not ready".into())
     }
     fn apply_prd_mode(&self, _: &str, _: &str) -> Result<(), String> {
