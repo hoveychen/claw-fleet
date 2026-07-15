@@ -52,6 +52,7 @@
     "delegating": "委托中",
     "idle": "空闲",
     "rateLimited": "速率限制",
+    "serverErrored": "服务器错误",
     "stuck": "卡死"
   },
   "rateLimit": {
@@ -59,6 +60,10 @@
     "resetsNow": "已到恢复时间",
     "estimated": "~",
     "resumeNow": "立即恢复 (claude --resume -p continue)"
+  },
+  "serverError": {
+    "retrying": "自动重试中",
+    "resumeNow": "立即重试 (claude --resume -p continue)"
   },
   "theme": {
     "light": "浅色",

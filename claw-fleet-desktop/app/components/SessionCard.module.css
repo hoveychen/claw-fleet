@@ -161,6 +161,9 @@
 .badge_delegating  { color: var(--badge-delegating-fg); }
 .badge_idle        { color: var(--color-text-dim); }
 .badge_rateLimited { color: #b91c1c; }
+/* Transient server error, auto-retrying. Amber (not the rate-limit red) reads
+   as "recovering on its own" rather than "blocked waiting for quota". */
+.badge_serverErrored { color: #d97706; }
 /* Wedged mid tool-batch. Orange-red keeps it distinct from the darker
    rate-limit red — a different failure that needs a different action (⎋). */
 .badge_stuck       { color: #ea580c; font-weight: 600; }
