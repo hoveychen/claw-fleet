@@ -428,6 +428,13 @@ export class RelayClient {
     return this.sendRaw({ type: "push_subscribe", subscription });
   }
 
+  /** Remove a previously registered subscription from this channel. The relay
+   *  matches a web sub by `endpoint` (harmony by `openId`), so the same shape
+   *  passed to `pushSubscribe` works here too. */
+  pushUnsubscribe(subscription: unknown): boolean {
+    return this.sendRaw({ type: "push_unsubscribe", subscription });
+  }
+
   private failPending(message: string) {
     for (const [, entry] of this.pending) {
       window.clearTimeout(entry.timer);

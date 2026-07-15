@@ -18,7 +18,10 @@ interface Props {
   connected: boolean;
   agentOnline: boolean;
   push: PushState;
+  /** True when the user turned notifications off while permission stays granted. */
+  pushOptedOut: boolean;
   onEnablePush: () => void;
+  onDisablePush: () => void;
   onOpenRepo: () => void;
   onOpenUsage: () => void;
 }
@@ -27,7 +30,9 @@ export function MoreView({
   connected,
   agentOnline,
   push,
+  pushOptedOut,
   onEnablePush,
+  onDisablePush,
   onOpenRepo,
   onOpenUsage,
 }: Props) {
@@ -155,7 +160,15 @@ export function MoreView({
           <div className={styles.row}>
             <span className={styles.rowLabel}>{t("通知")}</span>
             {push === "granted" ? (
-              <span className={styles.rowValue}>{t("已开启")}</span>
+              pushOptedOut ? (
+                <button className={styles.actionButton} onClick={onEnablePush}>
+                  {t("开启")}
+                </button>
+              ) : (
+                <button className={styles.actionButton} onClick={onDisablePush}>
+                  {t("停用")}
+                </button>
+              )
             ) : push === "denied" ? (
               <span className={styles.rowValue}>{t("已拒绝")}</span>
             ) : push === "unsupported" || push === "unsupported-harmony" ? (
