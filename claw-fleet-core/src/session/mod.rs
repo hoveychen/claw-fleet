@@ -43,6 +43,10 @@ pub enum SessionStatus {
     Idle,         // no recent activity
     RateLimited,  // last assistant message was isApiErrorMessage + error=rate_limit;
                   // details (resets_at, limit_type) live on SessionInfo.rate_limit
+    ServerErrored, // last assistant message was isApiErrorMessage + error=server_error
+                   // (the transient "Server error mid-response / Response stalled
+                   // mid-stream" family). Unlike RateLimited it resumes immediately
+                   // — the auto-resume scheduler retries Fleet-headless sessions.
     Stuck,        // Fleet-spawned, process alive, but wedged mid tool-use batch:
                   // a non-interactive tool_use has been missing its tool_result
                   // for minutes (STUCK_TOOL_BATCH_FLOOR_SECS). The turn is
@@ -462,6 +466,91 @@ mod tests {
             ),
         ];
         assert!(detect_rate_limit(&lines).is_none());
+    }
+
+    // ── detect_server_error tests ──────────────────────────────────────────
+
+    #[test]
+    fn server_error_detect_basic() {
+        // The "Server error mid-response / Response stalled mid-stream" family:
+        // isApiErrorMessage + error=="server_error" as the terminal entry.
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "server_error",
+                "API Error: Response stalled mid-stream. The response above may be incomplete.",
+                "2026-07-15T10:00:00.000Z",
+            ),
+        ];
+        assert!(
+            detect_server_error(&lines),
+            "a terminal server_error entry must be detected"
+        );
+    }
+
+    #[test]
+    fn server_error_ignored_when_rate_limit() {
+        // A rate_limit is NOT a transient server error — it has its own
+        // resets_at-gated path and must not be retried immediately.
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "rate_limit",
+                "You've hit your weekly limit · resets Apr 20, 10am (Asia/Shanghai)",
+                "2026-07-15T10:00:00.000Z",
+            ),
+        ];
+        assert!(!detect_server_error(&lines));
+    }
+
+    #[test]
+    fn server_error_ignored_when_permanent_error() {
+        // Permanent errors (auth, invalid_request) must NEVER be treated as
+        // retryable — retrying them burns spawns forever.
+        for err in ["authentication_failed", "invalid_request", "model_not_found"] {
+            let lines = vec![
+                user_msg(),
+                api_error_msg(err, "API Error", "2026-07-15T10:00:00.000Z"),
+            ];
+            assert!(
+                !detect_server_error(&lines),
+                "permanent error {err} must not be retryable"
+            );
+        }
+    }
+
+    #[test]
+    fn server_error_stale_when_real_turn_follows() {
+        // The session already resumed past the error: a real assistant turn
+        // exists after it, so the earlier server_error is stale.
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "server_error",
+                "API Error: Server error mid-response. The response above may be incomplete.",
+                "2026-07-15T10:00:00.000Z",
+            ),
+            user_msg(),
+            assistant_msg(vec![text_block("recovered")], Some("end_turn")),
+        ];
+        assert!(
+            !detect_server_error(&lines),
+            "a real turn after the error must clear server_error"
+        );
+    }
+
+    #[test]
+    fn server_error_ignored_when_no_api_error_flag() {
+        // A plain assistant message mentioning the phrase but lacking
+        // isApiErrorMessage must not trigger detection.
+        let lines = vec![
+            user_msg(),
+            assistant_msg(
+                vec![text_block("API Error: Server error mid-response (quoted in prose)")],
+                Some("end_turn"),
+            ),
+        ];
+        assert!(!detect_server_error(&lines));
     }
 
     #[test]

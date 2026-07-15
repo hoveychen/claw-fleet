@@ -183,7 +183,13 @@ fn is_drainable(session: &crate::session::SessionInfo) -> bool {
     if session.proc_alive {
         return false;
     }
-    if matches!(session.status, crate::session::SessionStatus::RateLimited) {
+    // Auto-resume owns both RateLimited and ServerErrored recovery; draining a
+    // pending message would race the retry path, so skip both.
+    if matches!(
+        session.status,
+        crate::session::SessionStatus::RateLimited
+            | crate::session::SessionStatus::ServerErrored
+    ) {
         return false;
     }
     if crate::parked::has_parked_for_session(&session.id) {
