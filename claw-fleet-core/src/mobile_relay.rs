@@ -258,6 +258,48 @@ const CLIENT_STALE_MS: u64 = 40_000;
 
 static CLIENTS_REGISTRY: Mutex<Option<HashMap<String, MobileClientInfo>>> = Mutex::new(None);
 
+/// Session ids we've already spawned this process, mapped to their pid. Guards
+/// the idempotent-resend case: the phone resends `spawn_session` with the same
+/// preassigned `session_id` when the reply frame was lost (relay delivery is
+/// best-effort, see fleet-relay `registry::forward`). Without this a resend would
+/// launch a second `claude --session-id S`. Keyed on the phone-preassigned id;
+/// only recorded when the tool actually honored it (see `record_if_dedupable`).
+static SPAWNED_SESSIONS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+
+/// Prior pid for an already-spawned preassigned session id, or `None` if this id
+/// has not been spawned in this process.
+fn spawned_session_pid(id: &str) -> Option<u32> {
+    SPAWNED_SESSIONS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(id).copied())
+}
+
+/// Record a spawn so a later resend of the same preassigned id is deduped.
+/// Only records when the tool honored the phone-preassigned id
+/// (`resp_session_id == preassigned`): claude threads `--session-id` through, so
+/// the two match and the resend is recoverable; codex mints its own thread id and
+/// ignores the preassigned one, so there is no stable key to dedup on and we must
+/// not record (a resend of a codex spawn is not recoverable by preassigned id —
+/// same contract `serve_spawn_session` documents).
+fn record_if_dedupable(preassigned: Option<&str>, resp_session_id: Option<&str>, pid: u32) {
+    let Some(id) = preassigned.map(str::trim).filter(|s| !s.is_empty()) else {
+        return;
+    };
+    // Only record when the tool honored the preassigned id: claude threads
+    // `--session-id` so resp == preassigned; codex mints its own id (resp != id)
+    // and is not dedupable by preassigned key.
+    if resp_session_id != Some(id) {
+        return;
+    }
+    SPAWNED_SESSIONS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(id.to_string(), pid);
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1481,6 +1523,24 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
     // ignores the preassigned one, so a dropped reply for a codex spawn is not
     // recoverable by preassigned id — the phone must read the real id off the
     // reply frame.
+    // Idempotent-resend guard: the phone resends this same req (same preassigned
+    // session_id) when the reply frame was lost in transit. If we already spawned
+    // this id, return the prior success instead of launching a duplicate process.
+    let preassigned: Option<String> = req
+        .session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(id) = preassigned.as_deref() {
+        if let Some(pid) = spawned_session_pid(id) {
+            return serde_json::to_value(crate::session_launch::SpawnSessionResponse {
+                pid,
+                session_id: Some(id.to_string()),
+            })
+            .map_err(|e| e.to_string());
+        }
+    }
     let spec = crate::agent_source::SpawnSpec {
         workspace_path: req.workspace_path.clone(),
         prompt: req.prompt.clone(),
@@ -1492,6 +1552,7 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
     };
     let resp =
         crate::agent_source::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;
+    record_if_dedupable(preassigned.as_deref(), resp.session_id.as_deref(), resp.pid);
     serde_json::to_value(resp).map_err(|e| e.to_string())
 }
 
@@ -1935,6 +1996,35 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
 mod tests {
     use super::*;
     use crate::session::fleet_home_lock;
+
+    // ── spawn_session idempotent-resend dedup (方案 C 桌面去重) ──────────────
+
+    #[test]
+    fn dedup_unknown_id_is_none() {
+        assert_eq!(spawned_session_pid("dedup-never-spawned-xyz"), None);
+    }
+
+    #[test]
+    fn dedup_records_claude_but_not_codex() {
+        // claude honors the phone-preassigned id (resp id == preassigned) → a
+        // resend of the same id must find the prior pid and be deduped.
+        record_if_dedupable(Some("dedup-claude-id"), Some("dedup-claude-id"), 111);
+        assert_eq!(spawned_session_pid("dedup-claude-id"), Some(111));
+
+        // codex mints its own thread id and ignores the preassigned one (resp id
+        // != preassigned) → NOT dedupable, so a resend of the preassigned id must
+        // not find a cached pid (it would return the wrong session otherwise).
+        record_if_dedupable(Some("dedup-phone-preassigned"), Some("dedup-codex-real"), 222);
+        assert_eq!(spawned_session_pid("dedup-phone-preassigned"), None);
+    }
+
+    #[test]
+    fn dedup_ignores_blank_preassigned() {
+        record_if_dedupable(Some("   "), Some("whatever"), 333);
+        record_if_dedupable(None, Some("whatever"), 333);
+        // Nothing recorded under a blank/None key — spawned_session_pid("") stays None.
+        assert_eq!(spawned_session_pid(""), None);
+    }
 
     fn with_temp_home<F: FnOnce()>(f: F) {
         let _guard = fleet_home_lock();
