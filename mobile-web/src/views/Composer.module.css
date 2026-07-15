@@ -116,6 +116,10 @@
   font-size: 11.5px;
   color: var(--color-text-secondary);
   max-width: 60vw;
+}
+
+.attachName {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -124,6 +128,7 @@
 .attachRemove {
   display: inline-flex;
   align-items: center;
+  flex: none;
   border: none;
   background: none;
   color: var(--color-text-dim);
