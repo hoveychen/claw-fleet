@@ -241,6 +241,14 @@ pub trait Backend: Send + Sync {
         let start = all.len().saturating_sub(n);
         Ok(all[start..].to_vec())
     }
+    /// Full, untrimmed tool output for one `tool_use_id` in `path`. The tail
+    /// payload from `get_messages_tail` truncates oversized tool output for
+    /// transport (see [`crate::message_trim`]); the frontend calls this when the
+    /// reader expands a card flagged `_fleetTruncated`. Default impl reads the
+    /// transcript directly; RemoteBackend overrides to go over HTTP.
+    fn get_tool_result_full(&self, path: &str, tool_use_id: &str) -> Result<Value, String> {
+        crate::message_trim::extract_full_tool_result(std::path::Path::new(path), tool_use_id)
+    }
     /// Gracefully interrupt the agent at `pid`: tears down the in-flight tool
     /// call but leaves the transcript resumable. See
     /// [`crate::session::interrupt_pid_impl`] for the signal semantics.
