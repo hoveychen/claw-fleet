@@ -9,7 +9,7 @@
 //!
 //! Business frames live inside `msg.payload` and are Fleet-specific:
 //!   agent → client: `decision_created{kind,request}` / `decision_resolved{kind,id}`
-//!                   / `sessions{sessions}` / `reply{req_id,ok,data}`
+//!                   / `sessions{sessions}` / `ack{req_id}` / `reply{req_id,ok,data}`
 //!   client → agent: `answer{kind,id,...}` / `req{req_id,method,params}`
 //!                   / `client_hello{clientId,label,platform,pushSubscribed,supportsGzip,supportsBinary}` (presence)
 //!                   / `client_bye{clientId}`

@@ -1,7 +1,7 @@
 // WebSocket client for fleet-relay. Speaks the relay envelope
 // (auth/msg/notify/presence/agent_status) and the Fleet business frames
 // inside msg.payload (decision_created / decision_resolved / sessions /
-// answer / req / reply) — see claw-fleet-core/src/mobile_relay.rs.
+// answer / req / ack / reply) — see claw-fleet-core/src/mobile_relay.rs.
 
 import { t } from "./i18n";
 import { deriveKeys, isSealed, open, openBytes, seal, type SealedBox } from "./relayCrypto";
@@ -122,7 +122,16 @@ export class RelayClient {
   private reqPrefix = crypto.randomUUID();
   private pending = new Map<
     string,
-    { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number }
+    {
+      resolve: (v: unknown) => void;
+      reject: (e: Error) => void;
+      timer: number;
+      // 方案 A: fired once when the desktop's early `ack{req_id}` lands, before
+      // the final reply — lets a caller confirm the submit reached the desktop
+      // without waiting out the timeout. `acked` guards against a double fire.
+      onAck?: () => void;
+      acked?: boolean;
+    }
   >();
   private reconnectDelay = 1000;
   private closed = false;
@@ -310,6 +319,18 @@ export class RelayClient {
         this.handlers.onSessions?.((payload.sessions ?? []) as SessionInfo[]);
         break;
       }
+      case "ack": {
+        // Early submit-ack (方案 A): the desktop received a write req and is now
+        // processing it. Fire the caller's onAck once; the promise still settles
+        // on the eventual reply / timeout.
+        const reqId = String(payload.req_id ?? "");
+        const entry = this.pending.get(reqId);
+        if (entry?.onAck && !entry.acked) {
+          entry.acked = true;
+          entry.onAck();
+        }
+        break;
+      }
       case "reply": {
         const reqId = String(payload.req_id ?? "");
         const entry = this.pending.get(reqId);
@@ -363,7 +384,12 @@ export class RelayClient {
 
   /** Data request to the agent (pending_snapshot / task_plans / …).
    *  `timeoutMs` overrides the default for slow methods (LLM analysis). */
-  request<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
+  request<T>(
+    method: string,
+    params?: Record<string, unknown>,
+    timeoutMs?: number,
+    onAck?: () => void,
+  ): Promise<T> {
     const reqId = `${this.reqPrefix}-${++this.reqSeq}`;
     return new Promise<T>((resolve, reject) => {
       // Sealing is async, so probe the socket up front (not via sendPayload's
@@ -380,6 +406,7 @@ export class RelayClient {
         resolve: resolve as (v: unknown) => void,
         reject,
         timer,
+        onAck,
       });
       // Only the body is encrypted; reqId/pending bookkeeping is unchanged. If
       // the seal/send fails (socket dropped mid-flight, crypto error), clear the
