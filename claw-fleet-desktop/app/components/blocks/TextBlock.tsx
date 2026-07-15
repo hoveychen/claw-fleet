@@ -14,6 +14,17 @@ import { PathChip, type PathLinkContext } from "../../markdown/pathLinks";
 import { parsePathRef } from "../../markdown/pathRef";
 import styles from "./TextBlock.module.css";
 
+/** Above this many characters, a fenced code block is rendered as a plain
+ *  <pre> instead of being tokenised by Prism.
+ *
+ *  `react-syntax-highlighter`'s Prism pass is synchronous and runs on mount, so
+ *  every large block in the initial render window blocks the main thread at
+ *  once — the second half of the "detail tab takes 10s" stall (the first being
+ *  the oversized initial fetch; see INITIAL_TAIL). Small snippets — the common
+ *  case — still get full highlighting; only the big command dumps / file bodies
+ *  that were never worth reading token-coloured fall back to plain text. */
+const MAX_HIGHLIGHT_CHARS = 8000;
+
 /** Recursively walk React children and highlight matching terms in string nodes. */
 function highlightChildren(children: ReactNode, regex: RegExp): ReactNode {
   if (typeof children === "string") {
@@ -97,6 +108,12 @@ export const TextBlock = memo(function TextBlock({
               return <MermaidBlock code={String(children).replace(/\n$/, "")} />;
             }
             if (isBlock && match) {
+              const codeText = String(children).replace(/\n$/, "");
+              // Big blocks skip Prism: its tokeniser runs synchronously on
+              // mount, so highlighting every large block in the initial window
+              // at once is what stalls the main thread. Plain <pre> renders
+              // instantly and stays copy-able.
+              const tooLargeToHighlight = codeText.length > MAX_HIGHLIGHT_CHARS;
               return (
                 <div className={styles.code_wrapper}>
                   <span className={styles.code_lang}>{match[1]}</span>
@@ -110,18 +127,34 @@ export const TextBlock = memo(function TextBlock({
                   >
                     Copy
                   </button>
-                  <SyntaxHighlighter
-                    style={oneDark}
-                    language={match[1]}
-                    PreTag="pre"
-                    customStyle={{
-                      margin: 0,
-                      borderRadius: "0 0 6px 6px",
-                      fontSize: "12px",
-                    }}
-                  >
-                    {String(children).replace(/\n$/, "")}
-                  </SyntaxHighlighter>
+                  {tooLargeToHighlight ? (
+                    <pre
+                      style={{
+                        margin: 0,
+                        borderRadius: "0 0 6px 6px",
+                        fontSize: "12px",
+                        background: "#282c34",
+                        color: "#abb2bf",
+                        padding: "1em",
+                        overflow: "auto",
+                      }}
+                    >
+                      {codeText}
+                    </pre>
+                  ) : (
+                    <SyntaxHighlighter
+                      style={oneDark}
+                      language={match[1]}
+                      PreTag="pre"
+                      customStyle={{
+                        margin: 0,
+                        borderRadius: "0 0 6px 6px",
+                        fontSize: "12px",
+                      }}
+                    >
+                      {codeText}
+                    </SyntaxHighlighter>
+                  )}
                 </div>
               );
             }
