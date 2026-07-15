@@ -870,7 +870,7 @@ fn build_session_from_sqlite(
     let mut last_activity_ms = (thread.updated_at as u64) * 1000;
 
     // For recently active sessions, read the rollout file for precise status.
-    let (status, token_speed, total_output_tokens, last_message_preview, model, thinking_level, context_percent) =
+    let (status, token_speed, total_output_tokens, last_message_preview, model, thinking_level, context_percent, rate_limit) =
         if age_secs < 600.0 && rollout_path.exists() {
             // Update last_activity_ms from file mtime for sub-second precision.
             if let Ok(meta) = fs::metadata(&rollout_path) {
@@ -894,6 +894,22 @@ fn build_session_from_sqlite(
                         let last_n = &all_parsed[last_n_start..];
 
                         let st = determine_status(last_n, file_age.as_secs_f64());
+                        // Rate-limit from this session's own rollout (Fleet-owned +
+                        // cut-off + reached window). Overrides status so auto-resume
+                        // can continue it after reset.
+                        let originator_in = extract_session_meta(&all_parsed)
+                            .and_then(|m| m.get("originator").and_then(|o| o.as_str()))
+                            .filter(|s| !s.is_empty());
+                        let rl = codex_rollout_rate_limit(
+                            &all_parsed,
+                            originator_in,
+                            chrono::Utc::now(),
+                        );
+                        let st = if rl.is_some() {
+                            crate::session::SessionStatus::RateLimited
+                        } else {
+                            st
+                        };
                         let (spd, tok) = compute_token_stats(&all_parsed);
                         let preview = extract_last_text(last_n);
                         let mdl = extract_model(&all_parsed).or_else(|| thread.model.clone());
@@ -912,7 +928,7 @@ fn build_session_from_sqlite(
                         };
                         let tok = if tok > 0 { tok } else { thread.tokens_used as u64 };
                         let ctx = extract_context_percent(&all_parsed, mdl.as_deref());
-                        (st, spd, tok, preview, mdl, tl, ctx)
+                        (st, spd, tok, preview, mdl, tl, ctx, rl)
                     } else {
                         (
                             determine_status_from_age(file_age.as_secs_f64()),
@@ -920,6 +936,7 @@ fn build_session_from_sqlite(
                             thread.tokens_used as u64,
                             None,
                             thread.model.clone(),
+                            None,
                             None,
                             None,
                         )
@@ -933,6 +950,7 @@ fn build_session_from_sqlite(
                         thread.model.clone(),
                         None,
                         None,
+                        None,
                     )
                 }
             } else {
@@ -942,6 +960,7 @@ fn build_session_from_sqlite(
                     thread.tokens_used as u64,
                     None,
                     thread.model.clone(),
+                    None,
                     None,
                     None,
                 )
@@ -961,6 +980,7 @@ fn build_session_from_sqlite(
                 thread.tokens_used as u64,
                 preview,
                 thread.model.clone(),
+                None,
                 None,
                 None,
             )
@@ -1041,7 +1061,7 @@ fn build_session_from_sqlite(
         context_percent,
         agent_source: "codex".to_string(),
         last_outcome: None,
-        rate_limit: None,
+        rate_limit,
         todos: None,
         background_tasks: Vec::new(),
         task_plan: None, handoff: None, user_mark: None, last_read_ms: None,        compact_count: 0,
@@ -1582,6 +1602,18 @@ fn parse_codex_session(
         .filter(|s| !s.is_empty())
         .map(str::to_string);
 
+    // Rate-limit: a Fleet-owned session cut off by the shared account limit is
+    // surfaced as RateLimited (with the reset payload) so auto-resume continues
+    // it after reset. `codex_rollout_rate_limit` reads the reached window from
+    // this session's own rollout — no account→session attribution guessing.
+    let rate_limit =
+        codex_rollout_rate_limit(&all_parsed, entrypoint.as_deref(), chrono::Utc::now());
+    let status = if rate_limit.is_some() {
+        crate::session::SessionStatus::RateLimited
+    } else {
+        status
+    };
+
     let uri = build_uri(rollout_path)?;
 
     Some(SessionInfo {
@@ -1623,7 +1655,7 @@ fn parse_codex_session(
         context_percent,
         agent_source: "codex".to_string(),
         last_outcome: None,
-        rate_limit: None,
+        rate_limit,
         todos: None,
         background_tasks: Vec::new(),
         task_plan: None, handoff: None, user_mark: None, last_read_ms: None,        compact_count: 0,
@@ -2344,6 +2376,68 @@ pub fn codex_rate_limit_state_from_rollout(
         ..Default::default()
     };
     codex_rate_limit_state_from_usage(&usage, now)
+}
+
+/// Find the most recent `token_count.rate_limits` object in a Codex rollout —
+/// the session's latest view of the shared account limit (Codex embeds it in
+/// every `token_count` event).
+fn last_rollout_rate_limits(parsed: &[Value]) -> Option<&Value> {
+    parsed.iter().rev().find_map(|v| {
+        let p = v.get("payload")?;
+        if p.get("type")?.as_str()? != "token_count" {
+            return None;
+        }
+        p.get("rate_limits").filter(|rl| !rl.is_null())
+    })
+}
+
+/// Whether a Codex rollout ends WITHOUT a clean turn completion — the analogue
+/// of "the turn was cut off". A session that finished normally (last turn
+/// boundary is `turn_complete`/`task_complete`) is NOT treated as rate-limited
+/// even if its last usage snapshot happens to report a reached window; only a
+/// session that stopped mid-work (last boundary is
+/// `turn_started`/`turn_aborted`/`error`) is a resume candidate.
+fn codex_last_turn_incomplete(parsed: &[Value]) -> bool {
+    for v in parsed.iter().rev() {
+        if v.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+            continue;
+        }
+        match v
+            .get("payload")
+            .and_then(|p| p.get("type"))
+            .and_then(|t| t.as_str())
+        {
+            Some("turn_complete") | Some("task_complete") => return false,
+            Some("turn_started") | Some("turn_aborted") | Some("error") => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Decide the rate-limit state for a Codex session from its **own rollout**, for
+/// [`crate::auto_resume`]. Returns `Some` only when ALL hold:
+/// - the session is Fleet-owned (`originator == "fleet"`) — Fleet only resumes
+///   sessions it launched, matching the Claude auto-resume gate;
+/// - the last turn did not complete cleanly ([`codex_last_turn_incomplete`]);
+/// - the latest `token_count.rate_limits` reports a reached window
+///   ([`codex_rate_limit_state_from_rollout`]).
+///
+/// The auto-resume scheduler's own guards (reset grace, `max_wait_hours`,
+/// backoff, concurrency cap) bound what actually gets re-spawned, so a
+/// false-positive here is capped rather than a runaway.
+fn codex_rollout_rate_limit(
+    parsed: &[Value],
+    entrypoint: Option<&str>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<crate::session::RateLimitState> {
+    if !crate::session_launch::is_fleet_owned_entrypoint(entrypoint) {
+        return None;
+    }
+    if !codex_last_turn_incomplete(parsed) {
+        return None;
+    }
+    codex_rate_limit_state_from_rollout(last_rollout_rate_limits(parsed)?, now)
 }
 
 /// Locate a runnable Codex binary.
