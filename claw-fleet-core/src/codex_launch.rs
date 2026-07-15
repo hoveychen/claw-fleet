@@ -131,6 +131,41 @@ pub fn resolve_launch_token(token: &str) -> Option<String> {
     (!id.is_empty()).then_some(id)
 }
 
+/// Pure precedence between the two env-carried session ids: `FLEET_SESSION_ID`
+/// (Fleet-stamped) wins over `CLAUDE_CODE_SESSION_ID` (Claude Code's own), and
+/// an empty value never counts. Split out so it can be tested without touching
+/// the real environment. See [`resolve_fleet_session_id_from_env`].
+fn fleet_or_claude_session_id(fleet: Option<String>, claude: Option<String>) -> Option<String> {
+    fleet
+        .filter(|s| !s.is_empty())
+        .or_else(|| claude.filter(|s| !s.is_empty()))
+}
+
+/// Resolve the current process's Fleet session id from the environment, across
+/// agent sources. This is the single precedence shared by the `fleet mcp`
+/// server ([`crate::mcp_server`]) and the `fleet` CLI (`read_fleet_session_id`),
+/// so a decision card or a `fleet plan` call attributes to the right session
+/// whether it came from Claude or Codex:
+///   1. `FLEET_SESSION_ID`        — Fleet-stamped (Codex resume + explicit)
+///   2. `CLAUDE_CODE_SESSION_ID`  — Claude Code exposes this to MCP/hooks
+///   3. `FLEET_CODEX_LAUNCH_TOKEN` → thread id via [`resolve_launch_token`]
+///      (a new Codex spawn, whose thread id isn't minted until after launch, so
+///      Fleet injects a token up front and writes the token→id note later)
+///
+/// Returns `None` when none resolve to a non-empty id.
+pub fn resolve_fleet_session_id_from_env() -> Option<String> {
+    if let Some(id) = fleet_or_claude_session_id(
+        std::env::var("FLEET_SESSION_ID").ok(),
+        std::env::var("CLAUDE_CODE_SESSION_ID").ok(),
+    ) {
+        return Some(id);
+    }
+    std::env::var(FLEET_CODEX_LAUNCH_TOKEN_ENV)
+        .ok()
+        .filter(|t| !t.is_empty())
+        .and_then(|t| resolve_launch_token(&t))
+}
+
 // ── Spawn-pid notes (new-session liveness) ───────────────────────────────────
 //
 // A freshly spawned `codex exec` does NOT carry its thread id in argv — Codex
@@ -224,6 +259,67 @@ fn apply_codex_launch_env(cmd: &mut std::process::Command) {
     cmd.env("FLEET_AGENT_SOURCE", FLEET_AGENT_SOURCE_CODEX);
 }
 
+/// Quote a value as a TOML basic string for a Codex `-c key=<value>` override.
+///
+/// Codex parses the `value` of a `-c` override as TOML, falling back to a raw
+/// literal only when the parse fails. An unquoted path usually survives as a
+/// literal, but a value containing spaces / brackets / quotes would be
+/// mis-parsed — so we always emit a properly-escaped TOML basic string, which
+/// parses deterministically regardless of the content.
+fn toml_basic_string(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Args that bridge a Fleet-spawned Codex session to Fleet's Decision Panel
+/// (`fleet__ask` / `fleet__render_a2ui` cards), appended before the `--` prompt
+/// separator by the exec/resume arg builders.
+///
+/// Two pieces, both verified against codex-cli 0.144.4:
+///
+/// 1. **`--dangerously-bypass-approvals-and-sandbox`.** In headless `codex exec`
+///    (stdin = /dev/null, no interactive approval channel), Codex *auto-cancels*
+///    every MCP `tools/call` — the call surfaces as
+///    `error: "user cancelled MCP tool call"` and never reaches the server. Only
+///    with this bypass does the tool call go through, block awaiting the user's
+///    Decision-Panel answer, and relay it back. The bypass ALSO disables Codex's
+///    shell-command sandbox (Codex flags it EXTREMELY DANGEROUS); that trade-off
+///    is accepted deliberately for Fleet-launched headless sessions, which have
+///    no interactive approver anyway.
+///
+/// 2. **`-c mcp_servers.fleet.*` overrides.** Register the `fleet mcp` stdio
+///    server per-invocation (no global `~/.codex/config.toml` mutation — the
+///    Claude analogue mutates `~/.claude.json`, but Codex accepts inline `-c`
+///    overrides so we keep the user's config untouched). `session_env` is passed
+///    as the MCP server's own `env` so `fleet mcp` can attribute the card to
+///    this session and resolve its workspace: a new spawn passes
+///    `FLEET_CODEX_LAUNCH_TOKEN` (the thread id isn't minted yet) + the
+///    workspace as `CLAUDE_PROJECT_DIR`; a resume passes `FLEET_SESSION_ID`
+///    directly (see [`crate::mcp_server`] for the resolution).
+///
+/// Returns empty when no `fleet` binary can be resolved to point Codex at — the
+/// session still runs, just without the Decision-Panel bridge.
+pub fn fleet_decision_card_args(session_env: &[(String, String)]) -> Vec<String> {
+    let Some(fleet) = crate::fleet_cli::resolve_fleet_binary() else {
+        crate::log_debug(
+            "fleet_decision_card_args: no fleet binary resolved; skipping Decision-Panel bridge",
+        );
+        return Vec::new();
+    };
+    let fleet = fleet.to_string_lossy().into_owned();
+    let mut args = vec![
+        "--dangerously-bypass-approvals-and-sandbox".to_string(),
+        "-c".to_string(),
+        format!("mcp_servers.fleet.command={}", toml_basic_string(&fleet)),
+        "-c".to_string(),
+        format!("mcp_servers.fleet.args=[{}]", toml_basic_string("mcp")),
+    ];
+    for (k, v) in session_env {
+        args.push("-c".to_string());
+        args.push(format!("mcp_servers.fleet.env.{}={}", k, toml_basic_string(v)));
+    }
+    args
+}
+
 /// Build the `codex exec` argv for a headless spawn.
 ///
 /// `workspace_path` is passed to Codex via `-C` (Codex's own working-dir flag)
@@ -235,11 +331,16 @@ fn apply_codex_launch_env(cmd: &mut std::process::Command) {
 /// Effort maps to Codex's `-c model_reasoning_effort=<value>` config override
 /// (Codex has no `--effort` flag). Validation of the value against Codex's
 /// accepted set is left to Codex; blank model/effort are dropped.
+///
+/// `pre_prompt_args` (e.g. [`fleet_decision_card_args`]) are inserted verbatim
+/// **before** the `--` separator, so they are parsed as flags and never as part
+/// of the prompt. Pass an empty slice for none.
 pub fn build_codex_exec_args(
     workspace_path: &str,
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    pre_prompt_args: &[String],
 ) -> Vec<String> {
     let mut args = vec![
         "exec".to_string(),
@@ -256,7 +357,9 @@ pub fn build_codex_exec_args(
         args.push("-c".to_string());
         args.push(format!("model_reasoning_effort={e}"));
     }
-    // Everything after `--` is the prompt, verbatim.
+    // Flags (bypass + MCP overrides) must precede `--`; everything after `--`
+    // is the prompt, verbatim.
+    args.extend(pre_prompt_args.iter().cloned());
     args.push("--".to_string());
     args.push(prompt.to_string());
     args
@@ -315,11 +418,21 @@ pub fn spawn_new_codex_session(
             .map_err(|e| format!("create stderr log dir {}: {e}", parent.display()))?;
     }
 
-    let args = build_codex_exec_args(&workspace_path, prompt, model, effort);
-
     // Token the child reads back (via `FLEET_CODEX_LAUNCH_TOKEN`) to learn its
     // own thread id once `thread.started` lands and we write the note below.
     let launch_token = uuid::Uuid::new_v4().to_string();
+
+    // Bridge this session to Fleet's Decision Panel: the thread id isn't minted
+    // yet, so the `fleet mcp` server is handed the launch token (resolved back to
+    // the thread id by `mcp_server`) plus the workspace as `CLAUDE_PROJECT_DIR`.
+    let decision_args = fleet_decision_card_args(&[
+        (
+            FLEET_CODEX_LAUNCH_TOKEN_ENV.to_string(),
+            launch_token.clone(),
+        ),
+        ("CLAUDE_PROJECT_DIR".to_string(), workspace_path.clone()),
+    ]);
+    let args = build_codex_exec_args(&workspace_path, prompt, model, effort, &decision_args);
 
     crate::log_debug(&format!(
         "new_codex_session: {} exec … (cwd={}, model={:?}, effort={:?}, token={})",
@@ -461,11 +574,15 @@ pub fn spawn_new_codex_session(
 /// builder there is **no `-C`** — `codex exec resume` has no working-dir flag;
 /// it scopes by the child's cwd, and the explicit thread id takes precedence
 /// over cwd filtering anyway. Blank model/effort are dropped.
+///
+/// `pre_prompt_args` (e.g. [`fleet_decision_card_args`]) are inserted before the
+/// `--` separator, same as the spawn builder. Pass an empty slice for none.
 pub fn build_codex_resume_args(
     session_id: &str,
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    pre_prompt_args: &[String],
 ) -> Vec<String> {
     let mut args = vec![
         "exec".to_string(),
@@ -482,6 +599,7 @@ pub fn build_codex_resume_args(
         args.push("-c".to_string());
         args.push(format!("model_reasoning_effort={e}"));
     }
+    args.extend(pre_prompt_args.iter().cloned());
     args.push("--".to_string());
     args.push(prompt.to_string());
     args
@@ -528,7 +646,14 @@ pub fn resume_codex_session(
             .map_err(|e| format!("create stderr log dir {}: {e}", parent.display()))?;
     }
 
-    let args = build_codex_resume_args(session_id, prompt, model, effort);
+    // Bridge to Fleet's Decision Panel: a resume already knows its thread id, so
+    // hand `fleet mcp` the session id directly (no launch-token indirection) plus
+    // the workspace as `CLAUDE_PROJECT_DIR`.
+    let decision_args = fleet_decision_card_args(&[
+        ("FLEET_SESSION_ID".to_string(), session_id.to_string()),
+        ("CLAUDE_PROJECT_DIR".to_string(), workspace_path.clone()),
+    ]);
+    let args = build_codex_resume_args(session_id, prompt, model, effort, &decision_args);
 
     // A resume may carry its own `--model` / `--effort`; record them so the
     // launch note describes what the session is running *now* (same as the
@@ -692,6 +817,73 @@ mod tests {
     }
 
     #[test]
+    fn fleet_session_id_precedence_fleet_over_claude() {
+        // FLEET_SESSION_ID wins over CLAUDE_CODE_SESSION_ID; empty never counts;
+        // Claude is the fallback. Mirrors the CLI's read_fleet_session_id order
+        // so a card/plan call attributes identically across both crates.
+        assert_eq!(
+            fleet_or_claude_session_id(Some("fleet".into()), Some("claude".into())),
+            Some("fleet".into())
+        );
+        assert_eq!(
+            fleet_or_claude_session_id(Some(String::new()), Some("claude".into())),
+            Some("claude".into()),
+            "empty FLEET_SESSION_ID falls back to Claude"
+        );
+        assert_eq!(
+            fleet_or_claude_session_id(None, Some("claude".into())),
+            Some("claude".into())
+        );
+        assert_eq!(fleet_or_claude_session_id(None, None), None);
+    }
+
+    #[test]
+    fn resolve_session_id_from_env_uses_codex_launch_token() {
+        // The codex new-spawn attribution seam: with no FLEET_SESSION_ID /
+        // CLAUDE_CODE_SESSION_ID but a FLEET_CODEX_LAUNCH_TOKEN whose note Fleet
+        // wrote, the shared resolver must return the recorded thread id — this is
+        // how a `fleet__ask` card from a fresh codex session gets attributed.
+        // Guards all three env vars under the fleet-home lock TmpHome holds.
+        let _home = TmpHome::new("resolve-token");
+        let prev_fleet = std::env::var_os("FLEET_SESSION_ID");
+        let prev_claude = std::env::var_os("CLAUDE_CODE_SESSION_ID");
+        let prev_token = std::env::var_os(FLEET_CODEX_LAUNCH_TOKEN_ENV);
+        unsafe {
+            std::env::remove_var("FLEET_SESSION_ID");
+            std::env::remove_var("CLAUDE_CODE_SESSION_ID");
+            std::env::set_var(FLEET_CODEX_LAUNCH_TOKEN_ENV, "tok-resolve");
+        }
+        record_launch_token("tok-resolve", "019f-thread-xyz");
+        assert_eq!(
+            resolve_fleet_session_id_from_env().as_deref(),
+            Some("019f-thread-xyz"),
+            "codex launch token must resolve to the recorded thread id"
+        );
+        // FLEET_SESSION_ID, when present, must win over the token path.
+        unsafe { std::env::set_var("FLEET_SESSION_ID", "explicit-sid") };
+        assert_eq!(
+            resolve_fleet_session_id_from_env().as_deref(),
+            Some("explicit-sid"),
+            "explicit FLEET_SESSION_ID outranks the launch token"
+        );
+        // Restore prior env so sibling tests are unaffected.
+        unsafe {
+            match prev_fleet {
+                Some(v) => std::env::set_var("FLEET_SESSION_ID", v),
+                None => std::env::remove_var("FLEET_SESSION_ID"),
+            }
+            match prev_claude {
+                Some(v) => std::env::set_var("CLAUDE_CODE_SESSION_ID", v),
+                None => std::env::remove_var("CLAUDE_CODE_SESSION_ID"),
+            }
+            match prev_token {
+                Some(v) => std::env::set_var(FLEET_CODEX_LAUNCH_TOKEN_ENV, v),
+                None => std::env::remove_var(FLEET_CODEX_LAUNCH_TOKEN_ENV),
+            }
+        }
+    }
+
+    #[test]
     fn launch_token_rejects_path_traversal() {
         let _home = TmpHome::new("token-traversal");
         // A token that could escape the store dir must resolve to nothing and
@@ -703,7 +895,7 @@ mod tests {
 
     #[test]
     fn arg_builder_minimal_has_exec_json_cwd_and_prompt_after_dashdash() {
-        let args = build_codex_exec_args("/ws", "do the thing", None, None);
+        let args = build_codex_exec_args("/ws", "do the thing", None, None, &[]);
         assert_eq!(args[0], "exec");
         assert!(args.contains(&"--json".to_string()));
         // -C <ws>
@@ -718,8 +910,55 @@ mod tests {
     }
 
     #[test]
+    fn toml_basic_string_escapes_backslash_and_quote() {
+        assert_eq!(toml_basic_string("plain"), "\"plain\"");
+        assert_eq!(toml_basic_string("/abs/fleet"), "\"/abs/fleet\"");
+        // A backslash and a double-quote must both be escaped so Codex's TOML
+        // parser reads the value back verbatim (Windows paths, odd names).
+        assert_eq!(toml_basic_string(r#"a\b"#), r#""a\\b""#);
+        assert_eq!(toml_basic_string(r#"a"b"#), r#""a\"b""#);
+    }
+
+    #[test]
+    fn exec_builder_inserts_pre_prompt_args_before_dashdash() {
+        // The bypass flag + `-c mcp_servers.*` overrides MUST land before `--`,
+        // or Codex would swallow them into the prompt. This is the correctness
+        // property fleet_decision_card_args depends on.
+        let pre = vec![
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            "-c".to_string(),
+            "mcp_servers.fleet.command=\"/bin/fleet\"".to_string(),
+        ];
+        let args = build_codex_exec_args("/ws", "the prompt", None, None, &pre);
+        let dd = args.iter().position(|a| a == "--").expect("has --");
+        let bypass = args
+            .iter()
+            .position(|a| a == "--dangerously-bypass-approvals-and-sandbox")
+            .expect("has bypass flag");
+        assert!(bypass < dd, "bypass flag must precede --");
+        assert!(
+            args.iter().position(|a| a.starts_with("mcp_servers.fleet.command")).unwrap() < dd,
+            "mcp override must precede --"
+        );
+        assert_eq!(args.last().unwrap(), "the prompt", "prompt stays last");
+    }
+
+    #[test]
+    fn resume_builder_inserts_pre_prompt_args_before_dashdash() {
+        let pre = vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
+        let args = build_codex_resume_args("tid", "cont", None, None, &pre);
+        let dd = args.iter().position(|a| a == "--").expect("has --");
+        let bypass = args
+            .iter()
+            .position(|a| a == "--dangerously-bypass-approvals-and-sandbox")
+            .expect("has bypass flag");
+        assert!(bypass < dd, "bypass flag must precede --");
+        assert_eq!(args.last().unwrap(), "cont", "prompt stays last");
+    }
+
+    #[test]
     fn arg_builder_maps_model_and_effort() {
-        let args = build_codex_exec_args("/ws", "hi", Some("gpt-5.6-sol"), Some("high"));
+        let args = build_codex_exec_args("/ws", "hi", Some("gpt-5.6-sol"), Some("high"), &[]);
         let mi = args.iter().position(|a| a == "-m").expect("has -m");
         assert_eq!(args[mi + 1], "gpt-5.6-sol");
         // effort → `-c model_reasoning_effort=high`
@@ -732,7 +971,7 @@ mod tests {
 
     #[test]
     fn arg_builder_drops_blank_model_and_effort() {
-        let args = build_codex_exec_args("/ws", "hi", Some("  "), Some(""));
+        let args = build_codex_exec_args("/ws", "hi", Some("  "), Some(""), &[]);
         assert!(!args.contains(&"-m".to_string()));
         assert!(!args.iter().any(|a| a.starts_with("model_reasoning_effort=")));
     }
@@ -885,7 +1124,7 @@ mod tests {
 
     #[test]
     fn resume_arg_builder_minimal_has_exec_resume_id_and_prompt_after_dashdash() {
-        let args = build_codex_resume_args("019f-abc", "keep going", None, None);
+        let args = build_codex_resume_args("019f-abc", "keep going", None, None, &[]);
         assert_eq!(args[0], "exec");
         assert_eq!(args[1], "resume");
         assert_eq!(args[2], "019f-abc", "thread id is resume's first positional");
@@ -902,7 +1141,7 @@ mod tests {
 
     #[test]
     fn resume_arg_builder_maps_model_and_effort() {
-        let args = build_codex_resume_args("tid", "hi", Some("gpt-5.6-sol"), Some("high"));
+        let args = build_codex_resume_args("tid", "hi", Some("gpt-5.6-sol"), Some("high"), &[]);
         let mi = args.iter().position(|a| a == "-m").expect("has -m");
         assert_eq!(args[mi + 1], "gpt-5.6-sol");
         let ci = args
@@ -914,7 +1153,7 @@ mod tests {
 
     #[test]
     fn resume_arg_builder_drops_blank_model_and_effort() {
-        let args = build_codex_resume_args("tid", "hi", Some(" "), Some(""));
+        let args = build_codex_resume_args("tid", "hi", Some(" "), Some(""), &[]);
         assert!(!args.contains(&"-m".to_string()));
         assert!(!args.iter().any(|a| a.starts_with("model_reasoning_effort=")));
     }
@@ -963,6 +1202,60 @@ mod tests {
         }
         assert!(done.load(std::sync::atomic::Ordering::SeqCst), "resume on_exit never fired");
         assert!(ok.load(std::sync::atomic::Ordering::SeqCst), "resume exited non-zero");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    /// Live end-to-end (P3 acceptance): a Fleet-spawned codex session must reach
+    /// Fleet's Decision Panel via `fleet__ask`. Spawns real `codex exec` with the
+    /// exact wiring [`fleet_decision_card_args`] emits (bypass + `-c
+    /// mcp_servers.fleet.*` pointing at the built `fleet` binary) and asserts
+    /// codex invokes the `fleet` MCP server's `fleet__ask` tool.
+    ///
+    /// Ignored: needs a real codex binary + model AND a Fleet decision consumer.
+    /// Run against a *test* consumer (or with no consumer, asserting the
+    /// "consumer not running" tool_error) so it does not queue a card into a live
+    /// Fleet desktop. Verified manually 2026-07-15: with the real `fleet mcp`
+    /// server the tool call reaches `handle_fleet_ask_call` and the card is
+    /// attributed to the codex session id (launch token → thread id).
+    ///   `cargo test -p claw-fleet-core codex_launch::tests::live_decision_card -- --ignored`
+    #[test]
+    #[ignore = "spawns real codex + needs a decision consumer; run manually"]
+    fn live_decision_card_reaches_fleet_ask() {
+        let fleet = crate::fleet_cli::resolve_fleet_binary()
+            .expect("a fleet binary must be resolvable for the MCP bridge");
+        let codex = crate::codex_source::find_codex_binary().expect("codex binary");
+        let ws = std::env::temp_dir().join(format!("fleet-codex-card-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+
+        let decision_args = fleet_decision_card_args(&[(
+            "CLAUDE_PROJECT_DIR".to_string(),
+            ws.to_string_lossy().into_owned(),
+        )]);
+        assert!(
+            decision_args.iter().any(|a| a == "--dangerously-bypass-approvals-and-sandbox"),
+            "bypass flag present"
+        );
+        let prompt = "Call the fleet__ask MCP tool from the \"fleet\" server with a single \
+                      yes/no question, then reply with what it returned.";
+        let args = build_codex_exec_args(
+            &ws.to_string_lossy(),
+            prompt,
+            None,
+            None,
+            &decision_args,
+        );
+        let out = crate::process_util::command(&codex)
+            .args(&args)
+            .current_dir(&ws)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("codex exec runs");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("\"server\":\"fleet\"") && stdout.contains("fleet__ask"),
+            "codex must invoke the fleet server's fleet__ask tool; stdout:\n{stdout}"
+        );
+        let _ = fleet; // fleet path is baked into decision_args above
         let _ = std::fs::remove_dir_all(&ws);
     }
 
