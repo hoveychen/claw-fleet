@@ -25,6 +25,12 @@ import {
   ToolUseBlock as ToolUseBlockComp,
 } from "./blocks/ToolUseBlock";
 import { DecisionToolCard, hasDecisionQuestions } from "./blocks/DecisionToolCard";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  ToolResultFetchContext,
+  type ToolResultFetch,
+  type FullToolResult,
+} from "./blocks/toolResultFetch";
 import { UserContent } from "./blocks/UserContent";
 import { CopyButton } from "./CopyButton";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
@@ -453,6 +459,10 @@ interface Props {
    *  chips. Callers that know the session's workspace pass it; InspectModal
    *  and other context-free callers leave it out and paths stay inert. */
   paths?: PathLinkContext;
+  /** The session's transcript path. Lets a tool card recover the full output
+   *  the tail payload truncated (`get_tool_result_full`). Omit and truncated
+   *  cards show only their inline preview. */
+  jsonlPath?: string;
 }
 
 /** Messages revealed per click, and the initial size of the render window. */
@@ -471,6 +481,7 @@ export function MessageList({
   fullyLoaded = true,
   isLoadingEarlier = false,
   paths,
+  jsonlPath,
 }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
@@ -490,6 +501,33 @@ export function MessageList({
 
   const resultMap = useMemo(() => buildResultMap(messages), [messages]);
   const metaMap = useMemo(() => buildToolResultMetaMap(messages), [messages]);
+
+  // tool_use_ids whose output the backend truncated for transport. Their cards
+  // fetch the full body on expand (see toolResultFetch + Rust message_trim).
+  const truncatedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const msg of messages) {
+      if (!msg._fleetTruncated) continue;
+      const content = msg.message?.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        if (block.type === "tool_result") ids.add((block as ToolResultBlock).tool_use_id);
+      }
+    }
+    return ids;
+  }, [messages]);
+
+  // Provide on-demand full-output recovery only when we have both a jsonl path
+  // to fetch from and at least one truncated card — otherwise leave the context
+  // null so cards render their inline content unchanged.
+  const toolFetch = useMemo<ToolResultFetch | null>(() => {
+    if (!jsonlPath || truncatedIds.size === 0) return null;
+    return {
+      truncatedIds,
+      fetchFull: (toolUseId: string) =>
+        invoke<FullToolResult>("get_tool_result_full", { jsonlPath, toolUseId }),
+    };
+  }, [jsonlPath, truncatedIds]);
 
   // Only records that actually occupy a row. Excluding the 32% of user records
   // that carry nothing but tool results keeps the render window honest (a
@@ -680,6 +718,7 @@ export function MessageList({
   }
 
   return (
+    <ToolResultFetchContext.Provider value={toolFetch}>
     <div ref={listRef} className={`${styles.list} ${searchTerms ? styles.list_searching : ""}`}>
       {searchTerms && (
         <div className={styles.search_nav}>
@@ -750,5 +789,6 @@ export function MessageList({
       )}
       <div ref={bottomRef} />
     </div>
+    </ToolResultFetchContext.Provider>
   );
 }
