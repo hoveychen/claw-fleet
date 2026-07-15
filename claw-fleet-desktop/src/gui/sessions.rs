@@ -50,6 +50,23 @@ pub(crate) fn get_messages_tail(
     state.backend.read().unwrap().get_messages_tail(&jsonl_path, tail)
 }
 
+/// Full, untrimmed tool output for one `tool_use_id`. `get_messages_tail`
+/// truncates oversized tool output for transport; the frontend calls this when
+/// the reader expands a card flagged `_fleetTruncated`. `(async)` for the same
+/// reason as `get_messages_tail` — it reads the whole transcript.
+#[tauri::command(async)]
+pub(crate) fn get_tool_result_full(
+    jsonl_path: String,
+    tool_use_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .get_tool_result_full(&jsonl_path, &tool_use_id)
+}
+
 #[tauri::command]
 pub(crate) fn get_skill_history(
     jsonl_path: String,
