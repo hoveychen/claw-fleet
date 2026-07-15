@@ -238,6 +238,56 @@ pub fn clear_spawn_pid(thread_id: &str) {
     }
 }
 
+/// Codex's analogue of the Claude `Stop` hook (`fleet session idle`).
+///
+/// Claude Code fires `fleet session idle` from its `Stop` hook when a turn ends;
+/// that entrypoint marks the session idle, consumes any pending `fleet handoff`
+/// relay, and re-arms stranded loop timers (see
+/// `fleet-cli/commands/session::cmd_session_idle`). Codex has no hook system and
+/// reads none of `~/.claude/settings.json`, so a Codex turn ending would
+/// otherwise trigger none of this — a `fleet handoff` registered by a Codex
+/// session would write its pending file and never fire.
+///
+/// A headless `codex exec` turn ends when the process exits, which is exactly
+/// when the spawn/resume reaper thread reaps the child. That reaper is Fleet's
+/// only in-process signal of a Codex turn boundary, so it calls this to mirror
+/// the Claude Stop hook. Every step is idempotent and errors are swallowed to a
+/// log (a relay problem must never take the reaper down), matching
+/// `cmd_session_idle`.
+///
+/// One asymmetry: Claude clears the idle sentinel from its `UserPromptSubmit`
+/// hook (`fleet session resume`); Codex has no such hook, so a Codex idle
+/// sentinel is never cleared. That is harmless today — nothing reads the idle
+/// sentinel for card state (the supervisor that used to consume it was removed;
+/// see [`crate::idle`]) — and marking idle keeps parity for any future reader.
+pub fn on_codex_turn_exit(session_id: &str) {
+    if session_id.is_empty() {
+        return;
+    }
+    if let Err(e) = crate::idle::mark_idle(session_id) {
+        crate::log_debug(&format!("codex turn exit: mark_idle {session_id}: {e}"));
+    }
+    match crate::handoff::consume_and_spawn(session_id) {
+        Ok(Some(to)) => crate::log_debug(&format!(
+            "codex turn exit: handoff relayed {session_id} -> {to}"
+        )),
+        Ok(None) => {}
+        Err(e) => crate::log_debug(&format!(
+            "codex turn exit: handoff relay failed for {session_id}: {e}"
+        )),
+    }
+    // Re-arm any loop timer stranded by a reboot/kill — cheap, idempotent,
+    // duplicate-safe via the loop generation. Piggy-backs on the turn boundary
+    // exactly like the Claude Stop hook does.
+    let rearmed = crate::agent_loop::reconcile();
+    if !rearmed.is_empty() {
+        crate::log_debug(&format!(
+            "codex turn exit: re-armed {} stranded loop timer(s)",
+            rearmed.len()
+        ));
+    }
+}
+
 /// Pin `HOME` + augment `PATH` exactly like the Claude spawn, so a
 /// launchd-minimal `PATH` doesn't strand the child's tools. Shared by the
 /// new-session spawn and the resume launcher. See
@@ -513,6 +563,10 @@ pub fn spawn_new_codex_session(
         // read this dead session as alive.
         if let Some(tid) = spawned_thread.take() {
             clear_spawn_pid(&tid);
+            // Turn ended (process exited) — mirror the Claude Stop hook so a
+            // `fleet handoff` this session registered actually relays. Codex has
+            // no hook of its own; this reaper is the only turn-boundary signal.
+            on_codex_turn_exit(&tid);
         }
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -717,6 +771,9 @@ pub fn resume_codex_session(
     // Reader/reaper thread: drain stdout to EOF (so the pipe never fills and
     // blocks the child), reap the child, log its exit, and invoke `on_exit`.
     let stderr_log_owned = stderr_log.clone();
+    // Owned copy for the reaper: the turn-exit hook needs the thread id after the
+    // borrowed `session_id` is out of scope.
+    let sid_owned = session_id.to_string();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
@@ -727,6 +784,11 @@ pub fn resume_codex_session(
         }
         let result = child.wait();
         let success = matches!(&result, Ok(status) if status.success());
+        // Turn ended — mirror the Claude Stop hook (mark idle + fire any pending
+        // `fleet handoff` relay). Codex has no hook of its own; this reaper is the
+        // only turn-boundary signal. Runs before `on_exit` so a relayed successor
+        // is spawned before the auto-resume scheduler frees this slot.
+        on_codex_turn_exit(&sid_owned);
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -1256,6 +1318,100 @@ mod tests {
             "codex must invoke the fleet server's fleet__ask tool; stdout:\n{stdout}"
         );
         let _ = fleet; // fleet path is baked into decision_args above
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    /// Gap-2 unit: the codex turn-exit hook must write the idle sentinel even
+    /// with no pending handoff (parity with the Claude Stop hook), and consuming
+    /// an absent handoff must be a clean no-op (no spawn, no error). Cheap — no
+    /// real codex; the no-pending path never reaches the spawner.
+    #[test]
+    fn on_codex_turn_exit_marks_idle_and_no_pending_is_noop() {
+        let _home = TmpHome::new("turn-exit-idle");
+        on_codex_turn_exit("sid-turnexit");
+        let idle_path = crate::session::get_fleet_dir()
+            .unwrap()
+            .join("idle")
+            .join("sid-turnexit.json");
+        assert!(
+            idle_path.exists(),
+            "codex turn exit must write the idle sentinel (Stop-hook parity)"
+        );
+        // Empty id is a guarded no-op — no file, no panic.
+        on_codex_turn_exit("");
+        assert!(!crate::session::get_fleet_dir().unwrap().join("idle").join(".json").exists());
+    }
+
+    /// Gap-2 acceptance (live, end-to-end): a `fleet handoff` registered by a
+    /// codex session must actually relay when its turn ends. Exercises the REAL
+    /// resume reaper (not a direct helper call): spawn a codex session, register
+    /// a pending handoff for its thread id (as `fleet handoff` would), resume it,
+    /// and confirm that when the resumed turn ends the reaper's
+    /// `on_codex_turn_exit` consumed the handoff and spawned a codex successor
+    /// (a chain link now exists from the predecessor). Before this fix, codex had
+    /// no Stop hook so the pending handoff was written but never consumed.
+    /// Ignored — invokes the real codex binary + model across three turns.
+    ///   `cargo test -p claw-fleet-core codex_launch::tests::live_codex_handoff_fires -- --ignored`
+    #[test]
+    #[ignore = "spawns + resumes real codex across turns; run manually"]
+    fn live_codex_handoff_fires_from_resume_reaper() {
+        let ws = std::env::temp_dir().join(format!("fleet-codex-hofire-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let resp =
+            spawn_new_codex_session(ws.to_str().unwrap(), "reply with exactly: FIRST", None, None)
+                .expect("initial spawn");
+        let tid = resp.session_id.expect("thread id captured");
+
+        // Register a pending codex handoff, exactly as `fleet handoff` does.
+        crate::handoff::register(
+            &tid,
+            ws.to_str().unwrap(),
+            None,
+            "relay successor: reply with exactly SUCCESSOR",
+            None,
+            None,
+            None,
+            None,
+            "codex",
+        )
+        .expect("register pending handoff");
+
+        // Resume; the reaper on THIS turn's exit must fire on_codex_turn_exit,
+        // which consumes the handoff and spawns the successor synchronously
+        // before on_exit sets `done`.
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done_cb = done.clone();
+        resume_codex_session(
+            &tid,
+            ws.to_str().unwrap(),
+            "reply with exactly: RESUMED",
+            None,
+            None,
+            Box::new(move |_| done_cb.store(true, std::sync::atomic::Ordering::SeqCst)),
+        )
+        .expect("resume spawn");
+
+        let mut waited = Duration::ZERO;
+        while waited < Duration::from_secs(150) && !done.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(500));
+            waited += Duration::from_millis(500);
+        }
+        assert!(done.load(std::sync::atomic::Ordering::SeqCst), "resume never completed");
+
+        // The reaper spawned the successor before on_exit fired, so the chain
+        // link from the predecessor must now exist.
+        let chain = crate::handoff::chain_containing(&tid)
+            .expect("handoff must have relayed from the codex turn exit");
+        assert!(
+            chain.links.iter().any(|l| l.from_session_id == tid),
+            "chain must contain a relay from the predecessor {tid}: {chain:?}"
+        );
+        // Best-effort cleanup of the spawned successor process.
+        if let Some(link) = chain.links.iter().find(|l| l.from_session_id == tid) {
+            if let Some(pid) = resolve_spawn_pid(&link.to_session_id) {
+                let _ = crate::session::kill_pid_impl(pid);
+            }
+        }
         let _ = std::fs::remove_dir_all(&ws);
     }
 
