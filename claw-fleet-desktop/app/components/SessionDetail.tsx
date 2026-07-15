@@ -914,6 +914,7 @@ export function SessionDetail({
                     fullyLoaded={fullyLoaded}
                     isLoadingEarlier={isLoading && messages.length > 0}
                     paths={pathLinks}
+                    jsonlPath={session?.jsonlPath}
                   />
                 </AgentNavProvider>
                 {liveThinking?.streaming && liveThinking.thinking && (

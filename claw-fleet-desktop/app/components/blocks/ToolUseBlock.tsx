@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
@@ -11,6 +11,7 @@ import { DiffView } from "./DiffView";
 import { ExpandableText } from "./ExpandableText";
 import { ImageThumb } from "./ImageThumb";
 import { ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
+import { useToolResultFetch, type FullToolResult } from "./toolResultFetch";
 import styles from "./ToolUseBlock.module.css";
 
 // Read-only tools that get grouped into a single summary row
@@ -175,8 +176,40 @@ function DiffSection({ block, meta }: { block: ToolUseBlockType; meta?: unknown 
 
 const DIFF_TOOLS = new Set(["Edit", "MultiEdit", "Write"]);
 
-export function ToolUseBlock({ block, result, isPartial, meta }: Props) {
+export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaProp }: Props) {
   const [open, setOpen] = useState(false);
+
+  // On expand, recover the full output if this card's tail payload was
+  // truncated for transport (see the Rust `message_trim`). headerStats reads
+  // only small fields the backend leaves intact, so the collapsed row never
+  // needs this — the fetch is deferred until the reader actually opens the card.
+  const toolFetch = useToolResultFetch();
+  const wasTruncated = !!block.id && (toolFetch?.truncatedIds.has(block.id) ?? false);
+  const [full, setFull] = useState<FullToolResult | null>(null);
+  const [loadingFull, setLoadingFull] = useState(false);
+  useEffect(() => {
+    if (!open || !wasTruncated || full || loadingFull || !toolFetch || !block.id) return;
+    let cancelled = false;
+    setLoadingFull(true);
+    toolFetch
+      .fetchFull(block.id)
+      .then((r) => {
+        if (!cancelled) setFull(r);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingFull(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, wasTruncated, full, loadingFull, toolFetch, block.id]);
+
+  // Swap the recovered full body in for the truncated preview once it lands.
+  const meta = full ? full.toolUseResult : metaProp;
+  const result =
+    full && resultProp ? { ...resultProp, content: full.content as ToolResultBlock["content"] } : resultProp;
+
   const summary = formatInput(block.input);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
@@ -205,6 +238,9 @@ export function ToolUseBlock({ block, result, isPartial, meta }: Props) {
 
       {open && (
         <div className={styles.body}>
+          {loadingFull && !full && (
+            <div className={styles.pending}>Loading full output…</div>
+          )}
           {/* A failed Edit/Write applied nothing — drawing its intended diff
               would claim a change that never landed. Show the error instead. */}
           {isDiffTool && !result?.is_error ? (

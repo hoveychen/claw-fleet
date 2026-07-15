@@ -248,6 +248,11 @@ export interface RawMessage {
    * mismatch so callers degrade to the generic renderer.
    */
   toolUseResult?: unknown;
+  /** Set by the backend (`message_trim`) when this message's oversized tool
+   *  output was truncated for transport. The tool card fetches the full body
+   *  on expand via the `get_tool_result_full` command, keyed by its
+   *  `tool_use_id`. Absent on messages that shipped whole. */
+  _fleetTruncated?: boolean;
 }
 
 // ── Decision panel types (frontend UI state, extensible) ────────────────────
