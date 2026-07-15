@@ -45,6 +45,49 @@ const JWT_SKEW: Duration = Duration::from_secs(300);
 /// JSON body); anything else is a business error (e.g. `82500006` bad OpenID).
 const SUCCESS_CODE: &str = "80000000";
 
+/// Push Kit business codes that mean the recipient OpenID will never receive
+/// again, so the caller should drop the subscription:
+///   * `82500006` — invalid OpenID (from this module's original comment).
+///   * `80300007` — `atomicUnableSendUnsubscribedMsg`, i.e. the user revoked
+///     the service-notification subscription (from the setup wiki).
+///
+/// CAVEAT: neither code has been confirmed on a real device to be *permanent*
+/// (the success path `80000000` and the OAuth-param errors were verified, these
+/// two were only read off docs/comments). They are treated as the ONLY
+/// prune-worthy codes; every other failure — transport, auth, unknown business
+/// code — is transient and keeps the subscription, so a temporary Push Kit
+/// hiccup never evicts a live sub. If an on-device test later shows one of
+/// these is actually retryable (or surfaces another permanent code), adjust
+/// this list. Under-pruning here is harmless (a stale entry that keeps getting
+/// skipped); over-pruning silently drops a working subscriber, so we err toward
+/// keeping.
+const DEAD_OPENID_CODES: &[&str] = &["82500006", "80300007"];
+
+fn is_dead_openid_code(code: &str) -> bool {
+    DEAD_OPENID_CODES.contains(&code)
+}
+
+/// Why a [`HarmonyPush::send`] failed, so the caller can decide whether to
+/// prune the OpenID. The inner `String` is a human-readable detail for logs.
+#[derive(Debug)]
+pub enum SendError {
+    /// Push Kit reported the OpenID as permanently invalid / unsubscribed —
+    /// the caller should remove this subscription. See [`DEAD_OPENID_CODES`].
+    DeadOpenId(String),
+    /// Transport / auth / unknown-code failure — keep the subscription, retry
+    /// on the next notify.
+    Transient(String),
+}
+
+impl std::fmt::Display for SendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SendError::DeadOpenId(d) => write!(f, "dead openId: {d}"),
+            SendError::Transient(d) => write!(f, "{d}"),
+        }
+    }
+}
+
 struct CachedJwt {
     token: String,
     minted_at: Instant,
@@ -162,11 +205,11 @@ impl HarmonyPush {
         Ok(token)
     }
 
-    /// Send one service notification to a Huawei-account OpenID. Returns `Err`
-    /// on transport / auth / API failure (caller logs; dead-OpenID pruning by
-    /// Push Kit failure code is deferred to a later pass).
-    pub async fn send(&self, open_id: &str, payload: &PushPayload<'_>) -> Result<(), String> {
-        let jwt = self.jwt()?;
+    /// Send one service notification to a Huawei-account OpenID. On failure
+    /// returns a [`SendError`] classifying whether the OpenID is dead (caller
+    /// should prune) or the failure is transient (caller keeps + retries).
+    pub async fn send(&self, open_id: &str, payload: &PushPayload<'_>) -> Result<(), SendError> {
+        let jwt = self.jwt().map_err(SendError::Transient)?;
         let url = format!("{SVC_API_BASE}/{}/service_notification/send", self.project_id);
         let body = build_service_notification(
             &gen_msg_id(),
@@ -182,12 +225,12 @@ impl HarmonyPush {
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("service_notification request failed: {e}"))?;
+            .map_err(|e| SendError::Transient(format!("service_notification request failed: {e}")))?;
         let status = resp.status();
         let text = resp
             .text()
             .await
-            .map_err(|e| format!("service_notification response body: {e}"))?;
+            .map_err(|e| SendError::Transient(format!("service_notification response body: {e}")))?;
         // Push Kit returns HTTP 200 with a business `code` on both success and
         // failure, so the code — not the HTTP status — is authoritative.
         let code = serde_json::from_str::<Value>(&text)
@@ -195,8 +238,15 @@ impl HarmonyPush {
             .and_then(|v| v.get("code").and_then(Value::as_str).map(str::to_string));
         match code.as_deref() {
             Some(SUCCESS_CODE) => Ok(()),
-            Some(c) => Err(format!("service_notification code {c}: {text} (http {status})")),
-            None => Err(format!("service_notification unexpected response (http {status}): {text}")),
+            Some(c) if is_dead_openid_code(c) => {
+                Err(SendError::DeadOpenId(format!("code {c}: {text} (http {status})")))
+            }
+            Some(c) => Err(SendError::Transient(format!(
+                "service_notification code {c}: {text} (http {status})"
+            ))),
+            None => Err(SendError::Transient(format!(
+                "service_notification unexpected response (http {status}): {text}"
+            ))),
         }
     }
 }
@@ -393,5 +443,18 @@ cHMuOFehtqcSyMaY3z552xNj
             "not a pem",
         );
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn only_allowlisted_codes_are_dead() {
+        // The two allowlisted permanent codes prune.
+        assert!(is_dead_openid_code("82500006"));
+        assert!(is_dead_openid_code("80300007"));
+        // Everything else — success, unknown business codes, OAuth errors — is
+        // transient and must NOT prune (guards against over-pruning live subs).
+        assert!(!is_dead_openid_code(SUCCESS_CODE));
+        assert!(!is_dead_openid_code("80300010"));
+        assert!(!is_dead_openid_code("1101"));
+        assert!(!is_dead_openid_code(""));
     }
 }

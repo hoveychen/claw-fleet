@@ -21,7 +21,7 @@ use web_push::{
 };
 
 use crate::frames::PushPayload;
-use crate::harmony_push::HarmonyPush;
+use crate::harmony_push::{HarmonyPush, SendError};
 
 pub struct Push {
     /// Raw 32-byte private scalar, base64url no-pad (what VapidSignatureBuilder eats).
@@ -205,19 +205,28 @@ impl Push {
         let web_body = serde_json::to_vec(payload).ok();
         let client = HyperWebPushClient::new();
         let mut dead: Vec<String> = Vec::new();
+        // Harmony OpenIDs Push Kit reported as permanently invalid / unsubscribed
+        // (see `harmony_push::DEAD_OPENID_CODES`). Kept separate from web `dead`
+        // because harmony subs are matched by openId, not endpoint.
+        let mut dead_harmony: Vec<String> = Vec::new();
         for sub in &subs {
             if Self::is_harmony(sub) {
                 // 元服务 account service-notification path. No-op when the
                 // channel is disabled (creds absent → harmony is None).
-                // Dead-OpenID pruning needs Push Kit's specific failure codes,
-                // only observable with real creds — deferred; this just logs.
                 let (Some(hp), Some(open_id)) =
                     (harmony, sub.get("openId").and_then(Value::as_str))
                 else {
                     continue;
                 };
-                if let Err(e) = hp.send(open_id, payload).await {
-                    log::warn!("harmony push failed on channel {channel}: {e}");
+                match hp.send(open_id, payload).await {
+                    Ok(()) => {}
+                    Err(SendError::DeadOpenId(detail)) => {
+                        log::info!("harmony openId dead on channel {channel}, pruning: {detail}");
+                        dead_harmony.push(open_id.to_string());
+                    }
+                    Err(SendError::Transient(detail)) => {
+                        log::warn!("harmony push failed on channel {channel}: {detail}");
+                    }
                 }
                 continue;
             }
@@ -236,24 +245,39 @@ impl Push {
                 }
             }
         }
-        if !dead.is_empty() {
+        if !dead.is_empty() || !dead_harmony.is_empty() {
             let _g = self.file_lock.lock().unwrap();
-            let mut subs = self.load_subs(channel);
-            subs.retain(|s| {
-                // Never drop harmony subs here — they have no endpoint and the
-                // `unwrap_or(false)` below would otherwise evict them all the
-                // moment any web endpoint dies.
+            let subs = Self::retain_live(self.load_subs(channel), &dead, &dead_harmony);
+            self.save_subs(channel, &subs);
+            log::info!(
+                "pruned dead push subscription(s) on channel {channel}: web={} harmony={}",
+                dead.len(),
+                dead_harmony.len()
+            );
+        }
+    }
+
+    /// Keep only the still-live subscriptions after a notify round: drop web
+    /// subs whose endpoint is in `dead_web`, and harmony subs whose openId is
+    /// in `dead_harmony`. A web endpoint dying never touches harmony subs (they
+    /// have no endpoint); a harmony sub with no openId is kept (can't match a
+    /// dead id), a web sub with no endpoint is dropped (malformed).
+    fn retain_live(subs: Vec<Value>, dead_web: &[String], dead_harmony: &[String]) -> Vec<Value> {
+        subs.into_iter()
+            .filter(|s| {
                 if Self::is_harmony(s) {
-                    return true;
+                    return s
+                        .get("openId")
+                        .and_then(Value::as_str)
+                        .map(|o| !dead_harmony.iter().any(|d| d == o))
+                        .unwrap_or(true);
                 }
                 s.get("endpoint")
                     .and_then(Value::as_str)
-                    .map(|e| !dead.iter().any(|d| d == e))
+                    .map(|e| !dead_web.iter().any(|d| d == e))
                     .unwrap_or(false)
-            });
-            self.save_subs(channel, &subs);
-            log::info!("pruned {} dead push subscription(s) on channel {channel}", dead.len());
-        }
+            })
+            .collect()
     }
 
     async fn send_one(
@@ -410,5 +434,39 @@ mod tests {
         let push = mk_push(dir.path());
         assert!(push.unsubscribe("ch", &json!({})).is_err());
         assert!(push.unsubscribe("ch", &json!({ "platform": "harmony" })).is_err());
+    }
+
+    fn open_ids(subs: &[Value]) -> Vec<String> {
+        subs.iter()
+            .filter_map(|s| s.get("openId").and_then(Value::as_str).map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn retain_live_prunes_only_dead_harmony_open_ids() {
+        let subs = vec![mk_harmony("OID-A"), mk_harmony("OID-B"), mk_sub("https://push/a")];
+        let kept = Push::retain_live(subs, &[], &["OID-A".to_string()]);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(open_ids(&kept), vec!["OID-B"]); // OID-B kept
+        assert!(kept
+            .iter()
+            .any(|s| s.get("endpoint").and_then(Value::as_str) == Some("https://push/a")));
+    }
+
+    #[test]
+    fn retain_live_dead_web_never_evicts_harmony() {
+        // Regression guard: a dying web endpoint must not drop harmony subs.
+        let subs = vec![mk_harmony("OID-A"), mk_sub("https://push/dead")];
+        let kept = Push::retain_live(subs, &["https://push/dead".to_string()], &[]);
+        assert_eq!(open_ids(&kept), vec!["OID-A"]);
+        assert_eq!(kept.len(), 1, "harmony sub survives web endpoint death");
+    }
+
+    #[test]
+    fn retain_live_keeps_harmony_without_open_id() {
+        // A malformed harmony sub (no openId) can't match a dead id → kept.
+        let subs = vec![json!({ "platform": "harmony" })];
+        let kept = Push::retain_live(subs, &[], &["OID-A".to_string()]);
+        assert_eq!(kept.len(), 1);
     }
 }
