@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
   Circle,
@@ -17,6 +17,7 @@ import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isSessionUnread } from "../types";
+import { useDraft } from "../draft";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import styles from "./TasksView.module.css";
@@ -135,10 +136,13 @@ export function TasksView({
   onOpenSession,
   onMarkRead,
 }: Props) {
-  const [search, setSearch] = useState("");
-  const [workspace, setWorkspace] = useState<string>("");
-  const [activeOnly, setActiveOnly] = useState(false);
-  const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
+  // 筛选状态落到 localStorage（复用 Composer 草稿那套 useDraft），这样切标签页
+  // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/仅活跃/分段都保持不变，
+  // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
+  const [search, setSearch] = useDraft<string>("tasks:search", "");
+  const [workspace, setWorkspace] = useDraft<string>("tasks:workspace", "");
+  const [activeOnly, setActiveOnly] = useDraft<boolean>("tasks:activeOnly", false);
+  const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
   const [busyOp, setBusyOp] = useState<string | null>(null);
   // Optimistic mark overrides, dropped once the server snapshot catches up.
   const [markOverride, setMarkOverride] = useState<Record<string, SessionMark | null>>({});
@@ -176,6 +180,18 @@ export function TasksView({
     }
     return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [all, chatPath]);
+
+  // A persisted workspace path can outlive its sessions (all done + pruned, or a
+  // repo we haven't touched this launch). Left as-is it would silently filter the
+  // list to empty while the <select> falls back to showing "全部目录" — looks like
+  // a bug. Once the first snapshot has landed, drop an orphaned real path back to
+  // "all". The chat pseudo-values degrade to "all" on their own, so leave them.
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+    if (!workspace || workspace === CHAT_ONLY || workspace === CHAT_HIDDEN) return;
+    if (workspaces.some(([path]) => path === workspace)) return;
+    setWorkspace("");
+  }, [sessionsLoaded, workspace, workspaces, setWorkspace]);
 
   const activeCount = useMemo(() => all.filter((s) => LIVE.includes(s.status)).length, [all]);
 
