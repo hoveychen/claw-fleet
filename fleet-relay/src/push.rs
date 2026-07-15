@@ -9,7 +9,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -30,8 +30,11 @@ pub struct Push {
     pub public_b64: String,
     subject: String,
     subs_dir: PathBuf,
-    /// Serializes read-modify-write cycles on the subscription files.
-    file_lock: Mutex<()>,
+    /// Serializes read-modify-write cycles on the subscription files. `Arc` so
+    /// notify's blocking file work can hold it inside a `spawn_blocking` closure
+    /// (which must be `'static`) while the sync subscribe/unsubscribe paths hold
+    /// it directly — all four contend on the same lock.
+    file_lock: Arc<Mutex<()>>,
     /// Reused across notifies — the hyper client keeps a connection pool, so
     /// building it once (instead of per-notify) lets keep-alive connections to
     /// the push services be reused.
@@ -59,7 +62,7 @@ impl Push {
             public_b64,
             subject,
             subs_dir,
-            file_lock: Mutex::new(()),
+            file_lock: Arc::new(Mutex::new(())),
             web_client: HyperWebPushClient::new(),
         })
     }
@@ -76,20 +79,31 @@ impl Push {
     }
 
     fn load_subs(&self, channel: &str) -> Vec<Value> {
-        let Ok(raw) = fs::read_to_string(self.subs_path(channel)) else {
+        Self::load_subs_at(&self.subs_path(channel))
+    }
+
+    fn save_subs(&self, channel: &str, subs: &[Value]) {
+        Self::save_subs_at(&self.subs_path(channel), subs);
+    }
+
+    /// Path-only file read, so it can run inside a `spawn_blocking` closure that
+    /// can't borrow `&self`. Missing/corrupt file → empty list.
+    fn load_subs_at(path: &Path) -> Vec<Value> {
+        let Ok(raw) = fs::read_to_string(path) else {
             return Vec::new();
         };
         serde_json::from_str(&raw).unwrap_or_default()
     }
 
-    fn save_subs(&self, channel: &str, subs: &[Value]) {
-        let path = self.subs_path(channel);
+    /// Path-only file write (companion to [`load_subs_at`]). Empty list removes
+    /// the file, matching the instance method's semantics.
+    fn save_subs_at(path: &Path, subs: &[Value]) {
         if subs.is_empty() {
-            let _ = fs::remove_file(&path);
+            let _ = fs::remove_file(path);
             return;
         }
         if let Ok(raw) = serde_json::to_string(subs) {
-            let _ = fs::write(&path, raw);
+            let _ = fs::write(path, raw);
         }
     }
 
@@ -198,9 +212,17 @@ impl Push {
         payload: &PushPayload<'_>,
         harmony: Option<&HarmonyPush>,
     ) {
+        // Read the subscription file off the async worker threads: file I/O is
+        // blocking, and notify runs on every decision card.
         let subs = {
-            let _g = self.file_lock.lock().unwrap();
-            self.load_subs(channel)
+            let lock = self.file_lock.clone();
+            let path = self.subs_path(channel);
+            tokio::task::spawn_blocking(move || {
+                let _g = lock.lock().unwrap();
+                Self::load_subs_at(&path)
+            })
+            .await
+            .unwrap_or_default()
         };
         if subs.is_empty() {
             return;
@@ -267,13 +289,21 @@ impl Push {
             }
         }
         if !dead.is_empty() || !dead_harmony.is_empty() {
-            let _g = self.file_lock.lock().unwrap();
-            let subs = Self::retain_live(self.load_subs(channel), &dead, &dead_harmony);
-            self.save_subs(channel, &subs);
+            let web_n = dead.len();
+            let harmony_n = dead_harmony.len();
+            // Re-read → filter → write as one locked blocking unit off the async
+            // workers. Re-reading under the lock (rather than reusing the `subs`
+            // snapshot) preserves any subscribe that landed during fan-out.
+            let lock = self.file_lock.clone();
+            let path = self.subs_path(channel);
+            let _ = tokio::task::spawn_blocking(move || {
+                let _g = lock.lock().unwrap();
+                let subs = Self::retain_live(Self::load_subs_at(&path), &dead, &dead_harmony);
+                Self::save_subs_at(&path, &subs);
+            })
+            .await;
             log::info!(
-                "pruned dead push subscription(s) on channel {channel}: web={} harmony={}",
-                dead.len(),
-                dead_harmony.len()
+                "pruned dead push subscription(s) on channel {channel}: web={web_n} harmony={harmony_n}"
             );
         }
     }
