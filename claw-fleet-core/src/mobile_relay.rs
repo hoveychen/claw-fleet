@@ -909,6 +909,31 @@ pub fn publish_sessions(sessions: &Value) {
 
 // ── Inbound: answers and requests from mobile clients ────────────────────────
 
+/// Business frame acknowledging that a write `req` reached the desktop, sent
+/// before the final `reply` (方案 A early ack). Carries the same `req_id` so the
+/// client can correlate it.
+fn ack_frame(req_id: &Value) -> Value {
+    json!({ "event": "ack", "req_id": req_id })
+}
+
+/// Whether a `req` method warrants an early submit-ack. Write methods (which
+/// have side effects and whose "did it land?" the client acts on) do; read
+/// methods (idempotent, just retried) don't. Kept in sync with the write-method
+/// arm of `serve_request`.
+fn is_ackable_method(method: &str) -> bool {
+    matches!(
+        method,
+        "spawn_session"
+            | "resume_session"
+            | "enqueue_message"
+            | "interrupt"
+            | "stop"
+            | "stop_workspace"
+            | "session_mark"
+            | "upload_attachment"
+    )
+}
+
 /// Handle one business payload sent by a mobile client. Returns an optional
 /// reply payload to send back. Implemented in this module so the write-back
 /// path stays unit-testable without sockets.
@@ -920,7 +945,22 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
             }
             None
         }
-        Some("req") => Some(handle_request(payload)),
+        Some("req") => {
+            // Early submit-ack: for write methods, tell the client "received, now
+            // processing" the instant the req lands, before the (possibly slower)
+            // work + final reply. Lets the client confirm its submit reached the
+            // desktop without waiting out the whole request timeout. Reads don't
+            // ack — they just retry, and the extra frame isn't worth it on hot
+            // polling paths. The ack rides the same best-effort relay path as the
+            // reply, so it's a latency/feedback win, not a delivery guarantee (the
+            // resend + dedup guard in serve_spawn_session covers loss).
+            let method = payload.get("method").and_then(Value::as_str).unwrap_or("");
+            if is_ackable_method(method) {
+                let req_id = payload.get("req_id").cloned().unwrap_or(Value::Null);
+                send_out(encode_payload(&ack_frame(&req_id)));
+            }
+            Some(handle_request(payload))
+        }
         // Presence announcements — kept in a local registry surfaced via
         // `status().devices`; no reply needed.
         Some("client_hello") => {
@@ -2016,6 +2056,34 @@ mod tests {
         // not find a cached pid (it would return the wrong session otherwise).
         record_if_dedupable(Some("dedup-phone-preassigned"), Some("dedup-codex-real"), 222);
         assert_eq!(spawned_session_pid("dedup-phone-preassigned"), None);
+    }
+
+    // ── 方案 A early submit-ack ──────────────────────────────────────────────
+
+    #[test]
+    fn ackable_covers_writes_not_reads() {
+        for m in [
+            "spawn_session",
+            "resume_session",
+            "enqueue_message",
+            "interrupt",
+            "stop",
+            "stop_workspace",
+            "session_mark",
+            "upload_attachment",
+        ] {
+            assert!(is_ackable_method(m), "{m} should be ackable");
+        }
+        for m in ["pending_snapshot", "tail", "tail_delta", "wiki_list", ""] {
+            assert!(!is_ackable_method(m), "{m} should not be ackable");
+        }
+    }
+
+    #[test]
+    fn ack_frame_carries_event_and_req_id() {
+        let f = ack_frame(&json!("abc-7"));
+        assert_eq!(f["event"], "ack");
+        assert_eq!(f["req_id"], "abc-7");
     }
 
     #[test]
