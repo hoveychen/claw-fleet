@@ -153,6 +153,8 @@
     "five_hour": "会话 (5小时)",
     "seven_day": "每周 (7天)",
     "seven_day_sonnet": "每周 Sonnet",
+    "codex_session": "会话",
+    "codex_weekly": "每周",
     "occupancy_title": "占用率变化 · 最近 24 小时",
     "occupancy_subtitle": "5h / 7d 池占用率，每 10 分钟采样一次",
     "heavy_threshold": "重负载阈值",
