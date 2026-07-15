@@ -396,6 +396,41 @@ pub fn fleet_decision_card_args(session_env: &[(String, String)]) -> Vec<String>
     args
 }
 
+/// `-c notify=[…]` override that wires a Fleet-spawned codex session's turn-end
+/// to `fleet session codex-notify` — the codex analogue of Claude's `Stop` hook.
+///
+/// Codex fires the configured `notify` program once per turn (verified live for
+/// both `codex exec` and `codex exec resume`, codex-cli 0.144.4), appending the
+/// `agent-turn-complete` JSON payload as the final arg. Routing it to
+/// `fleet session codex-notify` lets a pending `fleet handoff` relay at turn end
+/// even after the Fleet desktop app quits — the reaper-thread approach could not,
+/// since that thread dies with the spawning process. This is why the reaper
+/// turn-exit call was removed in favour of this.
+///
+/// `notify` is a **single slot**: this `-c` override replaces any `notify` in the
+/// user's `~/.codex/config.toml` for this invocation. `-c` does not modify the
+/// file, so `fleet session codex-notify` re-reads the user's original `notify`
+/// from `config.toml` at runtime and forwards the payload to it (see
+/// `cmd_codex_notify`) — the user's own notify still runs. Returns empty when no
+/// `fleet` binary resolves (the session still runs, just without the turn-end
+/// relay).
+pub fn fleet_notify_args() -> Vec<String> {
+    let Some(fleet) = crate::fleet_cli::resolve_fleet_binary() else {
+        crate::log_debug("fleet_notify_args: no fleet binary resolved; skipping codex notify relay");
+        return Vec::new();
+    };
+    let fleet = fleet.to_string_lossy().into_owned();
+    vec![
+        "-c".to_string(),
+        format!(
+            "notify=[{},{},{}]",
+            toml_basic_string(&fleet),
+            toml_basic_string("session"),
+            toml_basic_string("codex-notify"),
+        ),
+    ]
+}
+
 /// Build the `codex exec` argv for a headless spawn.
 ///
 /// `workspace_path` is passed to Codex via `-C` (Codex's own working-dir flag)
@@ -508,7 +543,12 @@ pub fn spawn_new_codex_session(
         ),
         ("CLAUDE_PROJECT_DIR".to_string(), workspace_path.clone()),
     ]);
-    let args = build_codex_exec_args(&workspace_path, prompt, model, effort, &decision_args);
+    // Turn-end relay: route codex's `notify` to `fleet session codex-notify` (the
+    // codex analogue of Claude's Stop hook), so a pending `fleet handoff` fires
+    // when this session's turn ends — even after the Fleet app quits.
+    let mut pre_prompt = decision_args;
+    pre_prompt.extend(fleet_notify_args());
+    let args = build_codex_exec_args(&workspace_path, prompt, model, effort, &pre_prompt);
 
     crate::log_debug(&format!(
         "new_codex_session: {} exec … (cwd={}, model={:?}, effort={:?}, token={})",
@@ -589,10 +629,11 @@ pub fn spawn_new_codex_session(
         // read this dead session as alive.
         if let Some(tid) = spawned_thread.take() {
             clear_spawn_pid(&tid);
-            // Turn ended (process exited) — mirror the Claude Stop hook so a
-            // `fleet handoff` this session registered actually relays. Codex has
-            // no hook of its own; this reaper is the only turn-boundary signal.
-            on_codex_turn_exit(&tid);
+            // Note: the turn-end relay (mark idle + consume handoff) is NOT fired
+            // here. It runs via codex's own `notify` hook → `fleet session
+            // codex-notify` → on_codex_turn_exit (injected by fleet_notify_args),
+            // which fires in codex's process and survives the Fleet app quitting —
+            // unlike this reaper thread, which dies with the spawning process.
         }
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -733,7 +774,11 @@ pub fn resume_codex_session(
         ("FLEET_SESSION_ID".to_string(), session_id.to_string()),
         ("CLAUDE_PROJECT_DIR".to_string(), workspace_path.clone()),
     ]);
-    let args = build_codex_resume_args(session_id, prompt, model, effort, &decision_args);
+    // Turn-end relay (see spawn): route codex `notify` to `fleet session
+    // codex-notify` so a pending handoff fires when this resumed turn ends.
+    let mut pre_prompt = decision_args;
+    pre_prompt.extend(fleet_notify_args());
+    let args = build_codex_resume_args(session_id, prompt, model, effort, &pre_prompt);
 
     // A resume may carry its own `--model` / `--effort`; record them so the
     // launch note describes what the session is running *now* (same as the
@@ -797,9 +842,6 @@ pub fn resume_codex_session(
     // Reader/reaper thread: drain stdout to EOF (so the pipe never fills and
     // blocks the child), reap the child, log its exit, and invoke `on_exit`.
     let stderr_log_owned = stderr_log.clone();
-    // Owned copy for the reaper: the turn-exit hook needs the thread id after the
-    // borrowed `session_id` is out of scope.
-    let sid_owned = session_id.to_string();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
@@ -810,11 +852,8 @@ pub fn resume_codex_session(
         }
         let result = child.wait();
         let success = matches!(&result, Ok(status) if status.success());
-        // Turn ended — mirror the Claude Stop hook (mark idle + fire any pending
-        // `fleet handoff` relay). Codex has no hook of its own; this reaper is the
-        // only turn-boundary signal. Runs before `on_exit` so a relayed successor
-        // is spawned before the auto-resume scheduler frees this slot.
-        on_codex_turn_exit(&sid_owned);
+        // Note: the turn-end relay runs via codex's `notify` hook (see spawn
+        // reaper), not here — so it fires even after the Fleet app quits.
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -1401,77 +1440,31 @@ mod tests {
         assert_eq!(parse_agent_turn_complete_thread_id(""), None);
     }
 
-    /// Gap-2 acceptance (live, end-to-end): a `fleet handoff` registered by a
-    /// codex session must actually relay when its turn ends. Exercises the REAL
-    /// resume reaper (not a direct helper call): spawn a codex session, register
-    /// a pending handoff for its thread id (as `fleet handoff` would), resume it,
-    /// and confirm that when the resumed turn ends the reaper's
-    /// `on_codex_turn_exit` consumed the handoff and spawned a codex successor
-    /// (a chain link now exists from the predecessor). Before this fix, codex had
-    /// no Stop hook so the pending handoff was written but never consumed.
-    /// Ignored — invokes the real codex binary + model across three turns.
-    ///   `cargo test -p claw-fleet-core codex_launch::tests::live_codex_handoff_fires -- --ignored`
+    /// The turn-end relay is now driven by codex's `notify` hook, not the reaper:
+    /// `fleet_notify_args` must inject a `-c notify=[…]` override pointing codex at
+    /// `fleet session codex-notify`. (The full live e2e — codex fires notify →
+    /// fleet consumes the handoff → codex successor — is a shell test run against
+    /// the freshly-built fleet binary; a cargo #[ignore] test can't guarantee
+    /// `resolve_fleet_binary` returns THIS build.)
     #[test]
-    #[ignore = "spawns + resumes real codex across turns; run manually"]
-    fn live_codex_handoff_fires_from_resume_reaper() {
-        let ws = std::env::temp_dir().join(format!("fleet-codex-hofire-{}", std::process::id()));
-        std::fs::create_dir_all(&ws).unwrap();
-        let resp =
-            spawn_new_codex_session(ws.to_str().unwrap(), "reply with exactly: FIRST", None, None)
-                .expect("initial spawn");
-        let tid = resp.session_id.expect("thread id captured");
-
-        // Register a pending codex handoff, exactly as `fleet handoff` does.
-        crate::handoff::register(
-            &tid,
-            ws.to_str().unwrap(),
-            None,
-            "relay successor: reply with exactly SUCCESSOR",
-            None,
-            None,
-            None,
-            None,
-            "codex",
-        )
-        .expect("register pending handoff");
-
-        // Resume; the reaper on THIS turn's exit must fire on_codex_turn_exit,
-        // which consumes the handoff and spawns the successor synchronously
-        // before on_exit sets `done`.
-        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let done_cb = done.clone();
-        resume_codex_session(
-            &tid,
-            ws.to_str().unwrap(),
-            "reply with exactly: RESUMED",
-            None,
-            None,
-            Box::new(move |_| done_cb.store(true, std::sync::atomic::Ordering::SeqCst)),
-        )
-        .expect("resume spawn");
-
-        let mut waited = Duration::ZERO;
-        while waited < Duration::from_secs(150) && !done.load(std::sync::atomic::Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(500));
-            waited += Duration::from_millis(500);
+    fn fleet_notify_args_inject_codex_notify_override() {
+        let args = fleet_notify_args();
+        // Degrades to empty only when no fleet binary resolves; in the test tree
+        // one is resolvable, so assert the shape. If empty (no binary), skip.
+        if args.is_empty() {
+            return;
         }
-        assert!(done.load(std::sync::atomic::Ordering::SeqCst), "resume never completed");
-
-        // The reaper spawned the successor before on_exit fired, so the chain
-        // link from the predecessor must now exist.
-        let chain = crate::handoff::chain_containing(&tid)
-            .expect("handoff must have relayed from the codex turn exit");
+        assert_eq!(args[0], "-c");
         assert!(
-            chain.links.iter().any(|l| l.from_session_id == tid),
-            "chain must contain a relay from the predecessor {tid}: {chain:?}"
+            args[1].starts_with("notify=[") && args[1].ends_with(']'),
+            "must be a TOML notify array: {}",
+            args[1]
         );
-        // Best-effort cleanup of the spawned successor process.
-        if let Some(link) = chain.links.iter().find(|l| l.from_session_id == tid) {
-            if let Some(pid) = resolve_spawn_pid(&link.to_session_id) {
-                let _ = crate::session::kill_pid_impl(pid);
-            }
-        }
-        let _ = std::fs::remove_dir_all(&ws);
+        assert!(
+            args[1].contains("\"session\"") && args[1].contains("\"codex-notify\""),
+            "notify must route to `fleet session codex-notify`: {}",
+            args[1]
+        );
     }
 
     #[test]
