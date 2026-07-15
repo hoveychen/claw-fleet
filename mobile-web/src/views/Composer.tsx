@@ -32,6 +32,31 @@ const EFFORT_CHOICES: Array<[string, string]> = [
   ["max", "max"],
 ];
 
+// Codex model ids (`codex exec -m <model>`), disjoint from Claude's — mirrors
+// the desktop's CODEX_MODEL_CHOICES. "" default follows Codex's configured model.
+const CODEX_MODEL_CHOICES: Array<[string, string]> = [
+  ["", "默认模型"],
+  ["gpt-5.6-sol", "GPT-5.6 Sol"],
+  ["gpt-5.6-terra", "GPT-5.6 Terra"],
+  ["gpt-5.6-luna", "GPT-5.6 Luna"],
+  ["gpt-5.5", "GPT-5.5"],
+];
+
+// Codex reasoning effort — no "xhigh"/"max", adds "minimal" (mirrors desktop).
+const CODEX_EFFORT_CHOICES: Array<[string, string]> = [
+  ["", "默认努力度"],
+  ["minimal", "minimal"],
+  ["low", "low"],
+  ["medium", "medium"],
+  ["high", "high"],
+];
+
+// The agent tools Fleet can launch a new session with (mirrors AGENT_TOOL_CHOICES).
+const AGENT_TOOL_CHOICES: Array<[string, string]> = [
+  ["claude", "Claude"],
+  ["codex", "Codex"],
+];
+
 const PERMISSION_LABEL: Record<string, string> = {
   acceptEdits: "自动接受编辑",
   plan: "计划模式",
@@ -193,18 +218,24 @@ function AttachmentRow({
 }
 
 function OptionSelects({
+  isCodex = false,
   model,
   effort,
   permissionMode,
   permissionDefaultLabel,
   onChange,
 }: {
+  /** Codex has disjoint model/effort ids and no `--permission-mode` analogue,
+   *  so the permission select is hidden and the codex choice lists are used. */
+  isCodex?: boolean;
   model: string;
   effort: string;
   permissionMode: string;
   permissionDefaultLabel: string;
   onChange: (patch: { model?: string; effort?: string; permissionMode?: string }) => void;
 }) {
+  const modelChoices = isCodex ? CODEX_MODEL_CHOICES : MODEL_CHOICES;
+  const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : EFFORT_CHOICES;
   return (
     <div className={styles.optionRow}>
       <select
@@ -212,7 +243,7 @@ function OptionSelects({
         value={model}
         onChange={(e) => onChange({ model: e.target.value })}
       >
-        {MODEL_CHOICES.map(([v, label]) => (
+        {modelChoices.map(([v, label]) => (
           <option key={v} value={v}>
             {t(label)}
           </option>
@@ -223,24 +254,26 @@ function OptionSelects({
         value={effort}
         onChange={(e) => onChange({ effort: e.target.value })}
       >
-        {EFFORT_CHOICES.map(([v, label]) => (
+        {effortChoices.map(([v, label]) => (
           <option key={v} value={v}>
             {t(label)}
           </option>
         ))}
       </select>
-      <select
-        className={styles.optionSelect}
-        value={permissionMode}
-        onChange={(e) => onChange({ permissionMode: e.target.value })}
-      >
-        <option value="">{t(permissionDefaultLabel)}</option>
-        {Object.entries(PERMISSION_LABEL).map(([v, label]) => (
-          <option key={v} value={v}>
-            {t(label)}
-          </option>
-        ))}
-      </select>
+      {!isCodex && (
+        <select
+          className={styles.optionSelect}
+          value={permissionMode}
+          onChange={(e) => onChange({ permissionMode: e.target.value })}
+        >
+          <option value="">{t(permissionDefaultLabel)}</option>
+          {Object.entries(PERMISSION_LABEL).map(([v, label]) => (
+            <option key={v} value={v}>
+              {t(label)}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }
@@ -263,10 +296,13 @@ const NEW_SESSION_DEFAULT = {
   workspace: "",
   customWorkspace: "",
   prompt: "",
+  // Which agent tool to launch: "claude" (default) or "codex". Routed by the
+  // relay's spawn_session → agent_source::spawn_session.
+  tool: "claude",
   model: "",
   effort: "",
   // acceptEdits by default: headless -p sessions in default mode can't approve
-  // file edits (same default as the desktop launcher).
+  // file edits (same default as the desktop launcher). Ignored for Codex.
   permissionMode: "acceptEdits",
 };
 
@@ -291,6 +327,13 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
   );
 
   const { customWorkspace, prompt, model, effort, permissionMode } = draft;
+  // Older persisted drafts predate the tool field → default to Claude.
+  const tool = draft.tool || "claude";
+  const isCodex = tool === "codex";
+  // Claude and Codex model/effort ids are disjoint, so switching tool clears
+  // them — a leftover Claude model would otherwise reach `codex exec -m` (and
+  // vice versa). Mirrors the desktop NewSessionForm.
+  const setTool = (v: string) => patch({ tool: v, model: "", effort: "" });
   // 持久化的 workspace 可能已失效（那个 workspace 不在最近列表里了），
   // 落不到有效选项时退回列表首项，避免 <select> 显示空白。
   const workspacePaths = new Set(recents.map((r) => r[0]));
@@ -313,9 +356,11 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
       workspacePath: effectiveWorkspace,
       prompt: withContextFiles(prompt.trim(), attachments),
       sessionId,
+      tool,
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
-      ...(permissionMode ? { permissionMode } : {}),
+      // Codex has no --permission-mode analogue; only send it for Claude.
+      ...(!isCodex && permissionMode ? { permissionMode } : {}),
     };
     setBusy(true);
     // 一旦确认(ack / reply / 快照)就乐观收尾一次;settled 防重复。
@@ -435,7 +480,21 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           onPick={(f) => void addFiles(f)}
           onRemove={remove}
         />
+        <div className={styles.optionRow}>
+          <select
+            className={styles.optionSelect}
+            value={tool}
+            onChange={(e) => setTool(e.target.value)}
+          >
+            {AGENT_TOOL_CHOICES.map(([v, label]) => (
+              <option key={v} value={v}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </div>
         <OptionSelects
+          isCodex={isCodex}
           model={model}
           effort={effort}
           permissionMode={permissionMode}
@@ -469,6 +528,7 @@ interface ResumeProps {
 
 export function ResumeComposer({ session, client, mode = "resume" }: ResumeProps) {
   const enqueueing = mode === "enqueue";
+  const isCodex = session.agentSource === "codex";
   const pendingMessages = session.pendingMessages ?? [];
   // 每个会话各自的续写草稿，按 sessionId 分 key——切到别的会话再回来，
   // 各自的半截输入互不覆盖；发送成功后清空。
@@ -503,9 +563,13 @@ export function ResumeComposer({ session, client, mode = "resume" }: ResumeProps
           workspacePath: session.workspacePath,
           // Empty prompt = "continue" (relay side supplies the fallback).
           prompt: text || undefined,
+          // The relay routes the resume by source (blank → claude); a Codex
+          // thread resumed as claude would fail, so always send it.
+          agentSource: session.agentSource ?? "",
           ...(model ? { model } : {}),
           ...(effort ? { effort } : {}),
-          ...(permissionMode ? { permissionMode } : {}),
+          // Codex has no --permission-mode analogue; only send it for Claude.
+          ...(!isCodex && permissionMode ? { permissionMode } : {}),
         });
       }
       clearPrompt();
@@ -551,6 +615,7 @@ export function ResumeComposer({ session, client, mode = "resume" }: ResumeProps
       <div className={styles.resumeActions}>
         {!enqueueing && (
           <OptionSelects
+            isCodex={isCodex}
             model={model}
             effort={effort}
             permissionMode={permissionMode}
