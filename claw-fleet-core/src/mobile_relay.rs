@@ -1637,22 +1637,25 @@ fn serve_repo_list(_params: &Value) -> Result<Value, String> {
 fn serve_repo_detail(params: &Value) -> Result<Value, String> {
     let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
     let known = known_workspaces();
-    serde_json::to_value(crate::git_ops::repo_detail(root, &known))
-        .map_err(|e| e.to_string())
+    // Unwrap the core `Result` before serialising — `to_value` on the `Result`
+    // itself emits serde's `{"Ok": {..}}` / `{"Err": ".."}` enum tagging, which
+    // buries the payload one level down and crashes the mobile clients.
+    let detail = crate::git_ops::repo_detail(root, &known)?;
+    serde_json::to_value(detail).map_err(|e| e.to_string())
 }
 
 fn serve_repo_push(params: &Value) -> Result<Value, String> {
     let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
     let known = known_workspaces();
-    serde_json::to_value(crate::git_ops::repo_push(root, &known))
-        .map_err(|e| e.to_string())
+    let res = crate::git_ops::repo_push(root, &known)?;
+    serde_json::to_value(res).map_err(|e| e.to_string())
 }
 
 fn serve_repo_pull(params: &Value) -> Result<Value, String> {
     let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
     let known = known_workspaces();
-    serde_json::to_value(crate::git_ops::repo_pull(root, &known))
-        .map_err(|e| e.to_string())
+    let res = crate::git_ops::repo_pull(root, &known)?;
+    serde_json::to_value(res).map_err(|e| e.to_string())
 }
 
 // ── Account & usage (mobile 「账号与用量」 page) ─────────────────────────────────
@@ -3745,5 +3748,30 @@ mod tests {
         CLIENTS.store(0, Ordering::SeqCst);
         SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
         *SESSIONS_LAST_SENT.lock().unwrap() = None;
+    }
+
+    /// Regression: the repo handlers must NOT double-wrap their core `Result`.
+    /// `serde_json::to_value(repo_detail(..))` serialises the `Result` itself as
+    /// serde's externally-tagged enum (`{"Ok": {..}}` / `{"Err": ".."}`), so a
+    /// core error was buried inside a *successful* `{"Err": ".."}` frame and a
+    /// success arrived as `{"Ok": {..}}` — the client's `detail.worktrees` was
+    /// then `undefined` and both mobile clients crashed on the detail page.
+    /// A fake root is never a known workspace, so `repo_detail` errors; the
+    /// handler must surface that as a protocol `Err`, not a wrapped `Ok`.
+    #[test]
+    fn repo_handlers_propagate_core_error_not_wrapped_ok() {
+        let params = json!({ "root": "/nonexistent/fleet-repo-xyz" });
+        assert!(
+            serve_repo_detail(&params).is_err(),
+            "repo_detail handler must propagate the core Err, not a wrapped Ok",
+        );
+        assert!(
+            serve_repo_push(&params).is_err(),
+            "repo_push handler must propagate the core Err, not a wrapped Ok",
+        );
+        assert!(
+            serve_repo_pull(&params).is_err(),
+            "repo_pull handler must propagate the core Err, not a wrapped Ok",
+        );
     }
 }
