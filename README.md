@@ -21,6 +21,24 @@ Supports **Claude Code** and **Codex**.
 
 ---
 
+## Installation
+
+Download the latest pre-built binary for your platform from the [Releases page](https://github.com/hoveychen/claw-fleet/releases/latest):
+
+| | Platform | Architecture | Download |
+|---|---|---|---|
+| <img src="docs/icon-apple.svg" width="24"> | macOS | Universal (Intel + Apple Silicon) | [claw-fleet-macos.pkg](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-macos.pkg) |
+| <img src="docs/icon-windows.svg" width="24"> | Windows | x64 / ARM64 | [claw-fleet-windows-x64-setup.exe](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-windows-x64-setup.exe) |
+| <img src="docs/icon-linux.svg" width="24"> | Linux | x86\_64 | [claw-fleet-linux-x64.deb](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.deb) · [claw-fleet-linux-x64.AppImage](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.AppImage) |
+
+The mobile app needs no install — enable **Mobile** in the desktop app and scan the QR code.
+
+### Prerequisites
+
+Claw Fleet reads session data written by **Claude Code** (`claude` CLI). You need Claude Code installed and at least one session run before anything shows up. The Codex source can be enabled in Settings.
+
+---
+
 ## What is Claw Fleet?
 
 When you run AI coding agents across multiple projects — or lean on multi-agent delegation — three problems show up fast:
@@ -70,45 +88,6 @@ The [66-second field guide](https://hoveychen.github.io/claw-fleet/#demo) in one
 | <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/codex.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/codex-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/codex-dark.svg" width="24" height="24"></picture> | **Codex** | Monitoring supported |
 
 > Decision routing, plan approval, and orchestration features are built on Claude Code's hooks & MCP; monitoring works for all sources. Claw Fleet auto-detects which tools are installed.
-
----
-
-## Screenshots
-
-<table>
-<tr>
-<td width="50%"><strong>Gallery View</strong> — multi-agent dashboard</td>
-<td width="50%"><strong>Session Detail</strong> — multi-subagent hierarchy</td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/01_gallery.png" alt="Gallery View" /></td>
-<td><img src="docs/screenshots/02_session_detail.png" alt="Session Detail" /></td>
-</tr>
-<tr>
-<td><strong>Security Audit</strong> — tool-use risk scanning</td>
-<td><strong>Captain Claw</strong> — your AI fleet assistant</td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/03_audit.png" alt="Audit View" /></td>
-<td><img src="docs/screenshots/04_mascot.png" alt="Mascot Assistant" /></td>
-</tr>
-<tr>
-<td><strong>Memory</strong> — cross-session knowledge</td>
-<td><strong>Notifications</strong> — waiting & audit alerts</td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/05_memory.png" alt="Memory Panel" /></td>
-<td><img src="docs/screenshots/06_notifications.png" alt="Notifications" /></td>
-</tr>
-<tr>
-<td><strong>Insights Timeline</strong> — AI summaries & lessons feed</td>
-<td><strong>Daily Report</strong> — metrics, charts & AI summary</td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/07_report.png" alt="Insights Timeline" /></td>
-<td><img src="docs/screenshots/08_daily_report.png" alt="Daily Report" /></td>
-</tr>
-</table>
 
 ---
 
@@ -185,24 +164,6 @@ A **floating decision window** pops cards up even when the main window is minimi
 **A CLI for everything.** `fleet agents`, `stop`, `interrupt`, `speed`, `account`, `search`, `audit`, `report`, `memory`, `wiki`, `plan`, `handoff`, `loop`, `serve` — most with `--json`. Stay in the terminal if that's your thing.
 
 **Zero config.** Download. Open. It reads local session files directly — no server, no API key, no signup. macOS, Windows, Linux.
-
----
-
-## Installation
-
-Download the latest pre-built binary for your platform from the [Releases page](https://github.com/hoveychen/claw-fleet/releases/latest):
-
-| | Platform | Architecture | Download |
-|---|---|---|---|
-| <img src="docs/icon-apple.svg" width="24"> | macOS | Universal (Intel + Apple Silicon) | [claw-fleet-macos.pkg](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-macos.pkg) |
-| <img src="docs/icon-windows.svg" width="24"> | Windows | x64 / ARM64 | [claw-fleet-windows-x64-setup.exe](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-windows-x64-setup.exe) |
-| <img src="docs/icon-linux.svg" width="24"> | Linux | x86\_64 | [claw-fleet-linux-x64.deb](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.deb) · [claw-fleet-linux-x64.AppImage](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.AppImage) |
-
-The mobile app needs no install — enable **Mobile** in the desktop app and scan the QR code.
-
-### Prerequisites
-
-Claw Fleet reads session data written by **Claude Code** (`claude` CLI). You need Claude Code installed and at least one session run before anything shows up. The Codex source can be enabled in Settings.
 
 ---
 
