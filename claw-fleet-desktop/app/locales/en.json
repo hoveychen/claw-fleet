@@ -153,6 +153,8 @@
     "five_hour": "Session (5hr)",
     "seven_day": "Weekly (7 day)",
     "seven_day_sonnet": "Weekly Sonnet",
+    "codex_session": "Session",
+    "codex_weekly": "Weekly",
     "occupancy_title": "Occupancy trend · last 24h",
     "occupancy_subtitle": "5h / 7d pool occupancy, sampled every 10 min",
     "heavy_threshold": "Heavy threshold",

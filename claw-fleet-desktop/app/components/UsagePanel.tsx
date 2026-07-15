@@ -92,14 +92,24 @@ function UsageBar({ label, stats }: { label: string; stats: UsageStats | null })
 
 // ── Codex rate-limit window bar ──────────────────────────────────────────────
 
-function formatWindowLabel(mins: number | null | undefined): string {
-  if (!mins) return "";
-  if (mins >= 1440) return `${Math.round(mins / 1440)}d`;
-  if (mins >= 60) return `${Math.round(mins / 60)}h`;
-  return `${mins}m`;
+// Codex reports each rate-limit window's real length via `windowDurationMins`
+// (unlike Claude's fixed 5h + 7d pools). So the label must be *derived* from
+// that duration, not from the primary/secondary slot — a Team plan, for
+// example, returns a single 7-day window in the `primary` slot, and hardcoding
+// "会话 (5小时)" there produced the self-contradicting "会话 (5小时) (7d)".
+function codexWindowLabel(mins: number | null | undefined, t: TFunc): string {
+  if (mins == null || !Number.isFinite(mins)) return t("account.usage");
+  const isWeekly = mins >= 1440;
+  const duration = isWeekly
+    ? t("account.resets_days", { n: Math.round(mins / 1440) })
+    : mins >= 60
+      ? t("account.resets_hours", { n: Math.round(mins / 60) })
+      : t("account.resets_mins", { n: Math.round(mins) });
+  const kind = isWeekly ? t("account.codex_weekly") : t("account.codex_session");
+  return `${kind} (${duration})`;
 }
 
-function CodexWindowBar({ label, window }: { label: string; window: CodexRateLimitWindow }) {
+function CodexWindowBar({ window }: { window: CodexRateLimitWindow }) {
   const { t } = useTranslation();
   const pct = window.usedPercent;
   const resetIso = window.resetsAt
@@ -110,8 +120,7 @@ function CodexWindowBar({ label, window }: { label: string; window: CodexRateLim
     <div className={styles.usage_item}>
       <div className={styles.usage_header}>
         <span className={styles.usage_label}>
-          {label}
-          {window.windowDurationMins ? ` (${formatWindowLabel(window.windowDurationMins)})` : ""}
+          {codexWindowLabel(window.windowDurationMins, t)}
         </span>
         <span className={styles.usage_pct}>{pct}%</span>
       </div>
@@ -272,12 +281,8 @@ function CodexUsageSection() {
       )}
       {hasBars && (
         <div className={styles.bars}>
-          {data.primary && (
-            <CodexWindowBar label={t("account.five_hour")} window={data.primary} />
-          )}
-          {data.secondary && (
-            <CodexWindowBar label={t("account.seven_day")} window={data.secondary} />
-          )}
+          {data.primary && <CodexWindowBar window={data.primary} />}
+          {data.secondary && <CodexWindowBar window={data.secondary} />}
         </div>
       )}
       {data && !hasBars && <p className={styles.dim}>No usage data</p>}
