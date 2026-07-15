@@ -9,7 +9,7 @@
 //!
 //! Business frames live inside `msg.payload` and are Fleet-specific:
 //!   agent → client: `decision_created{kind,request}` / `decision_resolved{kind,id}`
-//!                   / `sessions{sessions}` / `reply{req_id,ok,data}`
+//!                   / `sessions{sessions}` / `ack{req_id}` / `reply{req_id,ok,data}`
 //!   client → agent: `answer{kind,id,...}` / `req{req_id,method,params}`
 //!                   / `client_hello{clientId,label,platform,pushSubscribed,supportsGzip,supportsBinary}` (presence)
 //!                   / `client_bye{clientId}`
@@ -257,6 +257,48 @@ pub fn status() -> MobileRelayStatus {
 const CLIENT_STALE_MS: u64 = 40_000;
 
 static CLIENTS_REGISTRY: Mutex<Option<HashMap<String, MobileClientInfo>>> = Mutex::new(None);
+
+/// Session ids we've already spawned this process, mapped to their pid. Guards
+/// the idempotent-resend case: the phone resends `spawn_session` with the same
+/// preassigned `session_id` when the reply frame was lost (relay delivery is
+/// best-effort, see fleet-relay `registry::forward`). Without this a resend would
+/// launch a second `claude --session-id S`. Keyed on the phone-preassigned id;
+/// only recorded when the tool actually honored it (see `record_if_dedupable`).
+static SPAWNED_SESSIONS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+
+/// Prior pid for an already-spawned preassigned session id, or `None` if this id
+/// has not been spawned in this process.
+fn spawned_session_pid(id: &str) -> Option<u32> {
+    SPAWNED_SESSIONS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(id).copied())
+}
+
+/// Record a spawn so a later resend of the same preassigned id is deduped.
+/// Only records when the tool honored the phone-preassigned id
+/// (`resp_session_id == preassigned`): claude threads `--session-id` through, so
+/// the two match and the resend is recoverable; codex mints its own thread id and
+/// ignores the preassigned one, so there is no stable key to dedup on and we must
+/// not record (a resend of a codex spawn is not recoverable by preassigned id —
+/// same contract `serve_spawn_session` documents).
+fn record_if_dedupable(preassigned: Option<&str>, resp_session_id: Option<&str>, pid: u32) {
+    let Some(id) = preassigned.map(str::trim).filter(|s| !s.is_empty()) else {
+        return;
+    };
+    // Only record when the tool honored the preassigned id: claude threads
+    // `--session-id` so resp == preassigned; codex mints its own id (resp != id)
+    // and is not dedupable by preassigned key.
+    if resp_session_id != Some(id) {
+        return;
+    }
+    SPAWNED_SESSIONS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(id.to_string(), pid);
+}
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -867,6 +909,31 @@ pub fn publish_sessions(sessions: &Value) {
 
 // ── Inbound: answers and requests from mobile clients ────────────────────────
 
+/// Business frame acknowledging that a write `req` reached the desktop, sent
+/// before the final `reply` (方案 A early ack). Carries the same `req_id` so the
+/// client can correlate it.
+fn ack_frame(req_id: &Value) -> Value {
+    json!({ "event": "ack", "req_id": req_id })
+}
+
+/// Whether a `req` method warrants an early submit-ack. Write methods (which
+/// have side effects and whose "did it land?" the client acts on) do; read
+/// methods (idempotent, just retried) don't. Kept in sync with the write-method
+/// arm of `serve_request`.
+fn is_ackable_method(method: &str) -> bool {
+    matches!(
+        method,
+        "spawn_session"
+            | "resume_session"
+            | "enqueue_message"
+            | "interrupt"
+            | "stop"
+            | "stop_workspace"
+            | "session_mark"
+            | "upload_attachment"
+    )
+}
+
 /// Handle one business payload sent by a mobile client. Returns an optional
 /// reply payload to send back. Implemented in this module so the write-back
 /// path stays unit-testable without sockets.
@@ -878,7 +945,22 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
             }
             None
         }
-        Some("req") => Some(handle_request(payload)),
+        Some("req") => {
+            // Early submit-ack: for write methods, tell the client "received, now
+            // processing" the instant the req lands, before the (possibly slower)
+            // work + final reply. Lets the client confirm its submit reached the
+            // desktop without waiting out the whole request timeout. Reads don't
+            // ack — they just retry, and the extra frame isn't worth it on hot
+            // polling paths. The ack rides the same best-effort relay path as the
+            // reply, so it's a latency/feedback win, not a delivery guarantee (the
+            // resend + dedup guard in serve_spawn_session covers loss).
+            let method = payload.get("method").and_then(Value::as_str).unwrap_or("");
+            if is_ackable_method(method) {
+                let req_id = payload.get("req_id").cloned().unwrap_or(Value::Null);
+                send_out(encode_payload(&ack_frame(&req_id)));
+            }
+            Some(handle_request(payload))
+        }
         // Presence announcements — kept in a local registry surfaced via
         // `status().devices`; no reply needed.
         Some("client_hello") => {
@@ -1481,6 +1563,24 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
     // ignores the preassigned one, so a dropped reply for a codex spawn is not
     // recoverable by preassigned id — the phone must read the real id off the
     // reply frame.
+    // Idempotent-resend guard: the phone resends this same req (same preassigned
+    // session_id) when the reply frame was lost in transit. If we already spawned
+    // this id, return the prior success instead of launching a duplicate process.
+    let preassigned: Option<String> = req
+        .session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(id) = preassigned.as_deref() {
+        if let Some(pid) = spawned_session_pid(id) {
+            return serde_json::to_value(crate::session_launch::SpawnSessionResponse {
+                pid,
+                session_id: Some(id.to_string()),
+            })
+            .map_err(|e| e.to_string());
+        }
+    }
     let spec = crate::agent_source::SpawnSpec {
         workspace_path: req.workspace_path.clone(),
         prompt: req.prompt.clone(),
@@ -1492,6 +1592,7 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
     };
     let resp =
         crate::agent_source::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;
+    record_if_dedupable(preassigned.as_deref(), resp.session_id.as_deref(), resp.pid);
     serde_json::to_value(resp).map_err(|e| e.to_string())
 }
 
@@ -1935,6 +2036,63 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
 mod tests {
     use super::*;
     use crate::session::fleet_home_lock;
+
+    // ── spawn_session idempotent-resend dedup (方案 C 桌面去重) ──────────────
+
+    #[test]
+    fn dedup_unknown_id_is_none() {
+        assert_eq!(spawned_session_pid("dedup-never-spawned-xyz"), None);
+    }
+
+    #[test]
+    fn dedup_records_claude_but_not_codex() {
+        // claude honors the phone-preassigned id (resp id == preassigned) → a
+        // resend of the same id must find the prior pid and be deduped.
+        record_if_dedupable(Some("dedup-claude-id"), Some("dedup-claude-id"), 111);
+        assert_eq!(spawned_session_pid("dedup-claude-id"), Some(111));
+
+        // codex mints its own thread id and ignores the preassigned one (resp id
+        // != preassigned) → NOT dedupable, so a resend of the preassigned id must
+        // not find a cached pid (it would return the wrong session otherwise).
+        record_if_dedupable(Some("dedup-phone-preassigned"), Some("dedup-codex-real"), 222);
+        assert_eq!(spawned_session_pid("dedup-phone-preassigned"), None);
+    }
+
+    // ── 方案 A early submit-ack ──────────────────────────────────────────────
+
+    #[test]
+    fn ackable_covers_writes_not_reads() {
+        for m in [
+            "spawn_session",
+            "resume_session",
+            "enqueue_message",
+            "interrupt",
+            "stop",
+            "stop_workspace",
+            "session_mark",
+            "upload_attachment",
+        ] {
+            assert!(is_ackable_method(m), "{m} should be ackable");
+        }
+        for m in ["pending_snapshot", "tail", "tail_delta", "wiki_list", ""] {
+            assert!(!is_ackable_method(m), "{m} should not be ackable");
+        }
+    }
+
+    #[test]
+    fn ack_frame_carries_event_and_req_id() {
+        let f = ack_frame(&json!("abc-7"));
+        assert_eq!(f["event"], "ack");
+        assert_eq!(f["req_id"], "abc-7");
+    }
+
+    #[test]
+    fn dedup_ignores_blank_preassigned() {
+        record_if_dedupable(Some("   "), Some("whatever"), 333);
+        record_if_dedupable(None, Some("whatever"), 333);
+        // Nothing recorded under a blank/None key — spawned_session_pid("") stays None.
+        assert_eq!(spawned_session_pid(""), None);
+    }
 
     fn with_temp_home<F: FnOnce()>(f: F) {
         let _guard = fleet_home_lock();

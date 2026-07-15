@@ -306,39 +306,57 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
   const submit = async () => {
     if (!client || !canSubmit) return;
     // 手机端预分配 session_id:桌面会用它作 `claude --session-id`,于是即便
-    // reply 帧丢失,也能凭它在后续快照里认出这个会话。
+    // reply 帧丢失,也能凭它在后续快照里认出这个会话;且桌面按此 id 幂等去重,
+    // 超时重发同一 req 不会双开(方案 C)。
     const sessionId = crypto.randomUUID();
+    const params = {
+      workspacePath: effectiveWorkspace,
+      prompt: withContextFiles(prompt.trim(), attachments),
+      sessionId,
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
+    };
     setBusy(true);
-    try {
-      await client.request("spawn_session", {
-        workspacePath: effectiveWorkspace,
-        prompt: withContextFiles(prompt.trim(), attachments),
-        sessionId,
-        ...(model ? { model } : {}),
-        ...(effort ? { effort } : {}),
-        ...(permissionMode ? { permissionMode } : {}),
-      });
+    // 一旦确认(ack / reply / 快照)就乐观收尾一次;settled 防重复。
+    let settled = false;
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
       clearDraft();
       reset();
       onClose();
+    };
+    // 方案 A:收到桌面早 ack 即乐观关闭——提交已抵达桌面,不必干等 reply。
+    const send = () => client.request("spawn_session", params, undefined, succeed);
+    try {
+      await send();
+      succeed(); // reply 到达同样成功,与 onAck 幂等
     } catch (e) {
-      // 桌面端明确拒绝了(路径不存在、prompt 为空……):它收到了、判断了、说不行,
-      // 会话不可能出现在任何快照里。直接报错——过去这里不加区分地跑完 20 秒
-      // 宽限期,把一个即时的输入错误演成「点了没反应,二十秒后才弹」。
+      // 桌面端明确拒绝(路径不存在、prompt 为空……):它收到了、判断了、说不行,
+      // 会话不可能出现在任何快照里,直接报错、不重发、不进宽限。
       if (isDesktopRejection(e)) {
         window.alert(e.message);
         return; // finally 会清 busy
       }
-      // relay 尽力而为投递:切网/息屏/重连会让 reply 帧丢失,而桌面其实已把
-      // 会话 spawn 出来。进宽限期盯快照——出现同 id 的会话即视为成功,消除
-      // 「超时报错但会话已在跑」的假失败;真没出现才报错。
-      const confirmed = await waitForSessionId(sessionId, () => sessionsRef.current);
-      if (confirmed) {
-        clearDraft();
-        reset();
-        onClose();
-      } else {
-        window.alert(e instanceof Error ? e.message : t("创建会话失败"));
+      if (settled) return; // 已凭 ack 关闭,超时的 reject 忽略即可
+      // 方案 C:超时且没收到 ack——提交可能压根没抵达桌面(relay 尽力而为,
+      // 无队列/不补投)。重发一次同一 req;桌面按 sessionId 幂等去重,不会双开。
+      try {
+        await send();
+        succeed();
+        return;
+      } catch (e2) {
+        if (isDesktopRejection(e2)) {
+          window.alert(e2.message);
+          return;
+        }
+        if (settled) return;
+        // 最后兜底:桌面可能已 spawn 但 ack/reply 都丢了。进宽限期盯快照,
+        // 出现同 id 即视为成功;真没出现才报错。
+        const confirmed = await waitForSessionId(sessionId, () => sessionsRef.current);
+        if (confirmed) succeed();
+        else window.alert(e2 instanceof Error ? e2.message : t("创建会话失败"));
       }
     } finally {
       setBusy(false);
