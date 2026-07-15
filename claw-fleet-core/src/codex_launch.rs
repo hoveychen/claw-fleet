@@ -274,6 +274,37 @@ pub fn clear_spawn_pid(thread_id: &str) {
 /// ```
 /// Note the keys are hyphenated (`thread-id`, not `thread_id`). The thread id
 /// is codex's session id — the key Fleet relays a handoff on.
+/// The user's own `notify` command from codex's `config.toml`, so the Fleet
+/// notify injection can chain-forward to it (Fleet's `-c notify` override
+/// replaces the config value for the invocation but never edits the file, so the
+/// user's command is still readable here).
+///
+/// Reads `$CODEX_HOME/config.toml` (falling back to `~/.codex/config.toml`),
+/// expecting `notify = ["prog", "arg", …]`. Returns `None` when the file/key is
+/// absent, malformed, empty, or — to prevent a self-invocation loop — when the
+/// command is itself Fleet's `codex-notify` relay.
+pub fn read_user_codex_notify() -> Option<Vec<String>> {
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| crate::session::real_home_dir().map(|h| h.join(".codex")))?;
+    let cfg = std::fs::read_to_string(codex_home.join("config.toml")).ok()?;
+    let value: toml::Value = cfg.parse().ok()?;
+    let arr = value.get("notify")?.as_array()?;
+    let cmd: Vec<String> = arr
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    if cmd.is_empty() {
+        return None;
+    }
+    // Guard against forwarding to ourselves (user config already points at the
+    // fleet relay) — that would loop.
+    if cmd.iter().any(|a| a == "codex-notify") {
+        return None;
+    }
+    Some(cmd)
+}
+
 pub fn parse_agent_turn_complete_thread_id(payload: &str) -> Option<String> {
     let v: Value = serde_json::from_str(payload.trim()).ok()?;
     if v.get("type").and_then(|t| t.as_str()) != Some("agent-turn-complete") {
@@ -1405,6 +1436,48 @@ mod tests {
         // Empty id is a guarded no-op — no file, no panic.
         on_codex_turn_exit("");
         assert!(!crate::session::get_fleet_dir().unwrap().join("idle").join(".json").exists());
+    }
+
+    #[test]
+    fn reads_user_notify_from_codex_config_and_guards_self_and_absent() {
+        // Serialize env mutation on the shared home lock (TmpHome holds it too).
+        let _lock = crate::session::fleet_home_lock();
+        let dir = std::env::temp_dir().join(format!(
+            "fleet-codexcfg-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let prev = std::env::var_os("CODEX_HOME");
+        unsafe { std::env::set_var("CODEX_HOME", &dir) };
+
+        // User has a notify → returned verbatim.
+        std::fs::write(dir.join("config.toml"), "notify = [\"my-notifier\", \"--flag\"]\n").unwrap();
+        assert_eq!(
+            read_user_codex_notify(),
+            Some(vec!["my-notifier".to_string(), "--flag".to_string()])
+        );
+        // Self-reference (points at the fleet relay) → None, so we never loop.
+        std::fs::write(
+            dir.join("config.toml"),
+            "notify = [\"fleet\", \"session\", \"codex-notify\"]\n",
+        )
+        .unwrap();
+        assert_eq!(read_user_codex_notify(), None);
+        // No notify key → None.
+        std::fs::write(dir.join("config.toml"), "model = \"gpt-5.6-sol\"\n").unwrap();
+        assert_eq!(read_user_codex_notify(), None);
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("CODEX_HOME", v),
+                None => std::env::remove_var("CODEX_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -89,13 +89,40 @@ pub(crate) fn cmd_session_resume() {
 pub(crate) fn cmd_codex_notify(payload: &[String]) {
     // Codex appends the JSON as one argv; scan defensively in case fixed args
     // precede it. The first arg that parses as a turn-complete event wins.
-    let Some(thread_id) = payload
+    let Some(payload_json) = payload
         .iter()
-        .find_map(|arg| claw_fleet_core::codex_launch::parse_agent_turn_complete_thread_id(arg))
+        .find(|arg| {
+            claw_fleet_core::codex_launch::parse_agent_turn_complete_thread_id(arg).is_some()
+        })
+        .cloned()
     else {
+        // Not a turn-complete payload — still chain-forward so the user's notify
+        // sees every event codex would have delivered, then stop.
+        forward_user_notify(payload);
         return;
     };
+    let thread_id =
+        claw_fleet_core::codex_launch::parse_agent_turn_complete_thread_id(&payload_json).unwrap();
     claw_fleet_core::codex_launch::on_codex_turn_exit(&thread_id);
+    // Chain-forward: Fleet's `-c notify` override replaced the user's own notify
+    // for this invocation, so re-invoke the user's command (from config.toml)
+    // with the same payload — their notify still runs.
+    forward_user_notify(payload);
+}
+
+/// Re-invoke the user's original codex `notify` command (if any) with the same
+/// argv codex passed us, so Fleet's notify injection doesn't swallow it.
+/// Fire-and-forget; failures are ignored (a broken user notify must not break
+/// the relay).
+fn forward_user_notify(payload: &[String]) {
+    let Some(cmd) = claw_fleet_core::codex_launch::read_user_codex_notify() else {
+        return;
+    };
+    let (prog, fixed) = cmd.split_first().unwrap(); // read_user_codex_notify never returns empty
+    let _ = std::process::Command::new(prog)
+        .args(fixed)
+        .args(payload)
+        .spawn();
 }
 
 /// The current session's id, for attributing `fleet plan` / `fleet session`

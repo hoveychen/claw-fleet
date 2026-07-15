@@ -7,6 +7,10 @@ publish = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Read the user's `notify` out of codex's config.toml so the injected Fleet
+# notify can chain-forward to it (see codex_launch::read_user_codex_notify).
+# Already in the lockfile transitively; promoted to a direct dep here.
+toml = "0.8"
 dirs = "5"
 libc = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
