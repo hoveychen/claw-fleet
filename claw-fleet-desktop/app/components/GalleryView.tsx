@@ -17,8 +17,9 @@ import sessionStyles from "./SessionCard.module.css";
 // active count instead of vanishing into the "show all" tail. Its card keeps a
 // distinct look via RateLimitControls (countdown + resume), and SessionCard's
 // own isActive (live-process pulse / stop button) deliberately excludes it.
+// "serverErrored" is the same shape: unfinished work being auto-retried.
 const ACTIVE_STATUSES: SessionStatus[] = [
-  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating", "rateLimited",
+  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating", "rateLimited", "serverErrored",
 ];
 
 function isActive(s: SessionInfo) {

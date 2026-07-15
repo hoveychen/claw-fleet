@@ -52,6 +52,7 @@
     "delegating": "Delegating",
     "idle": "Idle",
     "rateLimited": "Rate Limited",
+    "serverErrored": "Server Error",
     "stuck": "Stuck"
   },
   "rateLimit": {
@@ -59,6 +60,10 @@
     "resetsNow": "reset due",
     "estimated": "~",
     "resumeNow": "Resume now (claude --resume -p continue)"
+  },
+  "serverError": {
+    "retrying": "Retrying",
+    "resumeNow": "Retry now (claude --resume -p continue)"
   },
   "theme": {
     "light": "Light",

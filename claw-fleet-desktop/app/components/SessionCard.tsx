@@ -97,6 +97,53 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
   );
 }
 
+// ── Server-error controls (auto-retry indicator + manual retry) ─────────────
+
+export function ServerErrorControls({ session }: { session: SessionInfo }) {
+  const { t } = useTranslation();
+  const [resuming, setResuming] = useState(false);
+  if (session.status !== "serverErrored") return null;
+  const handleResume = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (resuming) return;
+    setResuming(true);
+    try {
+      await invoke("resume_rate_limited_session", {
+        sessionId: session.id,
+        workspacePath: session.workspacePath,
+        agentSource: session.agentSource,
+      });
+    } catch (err) {
+      console.error("resume failed", err);
+    } finally {
+      setResuming(false);
+    }
+  };
+  // Same resumability gate as the auto-retry scheduler
+  // (`auto_resume.rs::should_retry_server_error`): not a subagent, not attached
+  // to an interactive IDE, and a source that supports headless resume.
+  const RESUMABLE_SOURCES = ["claude-code", "codex"];
+  const canResume =
+    !session.isSubagent &&
+    !session.ideName &&
+    RESUMABLE_SOURCES.includes(session.agentSource);
+  return (
+    <>
+      <span className={styles.rate_limit_countdown}>{t("serverError.retrying")}</span>
+      {canResume && (
+        <button
+          className={styles.resume_btn}
+          onClick={handleResume}
+          disabled={resuming}
+          title={t("serverError.resumeNow")}
+        >
+          {resuming ? "…" : <Play size={12} strokeWidth={1.75} />}
+        </button>
+      )}
+    </>
+  );
+}
+
 // ── Subagent type icon ────────────────────────────────────────────────────────
 
 export function SubagentTypeIcon({ type }: { type: string | null }) {
@@ -421,6 +468,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           )}
           <span className={styles.gm_spacer} />
           <RateLimitControls session={session} />
+          <ServerErrorControls session={session} />
           {isActive && session.pid !== null && canControl(session) && (
             <span className={styles.stop_slot}>
               <StopControl session={session} />
@@ -433,6 +481,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             {!hideHeader && <span className={styles.workspace}>{session.workspaceName}</span>}
             {!hideHeader && <StatusBadge status={session.status} />}
             {!hideHeader && <RateLimitControls session={session} />}
+            {!hideHeader && <ServerErrorControls session={session} />}
             {isActive && session.pid !== null && canControl(session) && (
               <span className={styles.stop_slot}>
                 <StopControl session={session} />
