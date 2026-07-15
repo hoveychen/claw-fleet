@@ -24,6 +24,7 @@ interface HookSetupPlan {
   prdContextInstalled: boolean;
   prdDisciplineInstalled: boolean;
   wikiGuidanceInstalled: boolean;
+  modelGuidanceInstalled: boolean;
 }
 
 interface SourceInfo {
@@ -233,6 +234,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
           console.error("auto-apply wiki guidance:", e),
         );
       }
+      // Model guidance: opt-in, disk is the source of truth.
+      setModelGuidanceEnabled(plan.modelGuidanceInstalled);
+      setItem("model-guidance-enabled", plan.modelGuidanceInstalled ? "true" : "false");
+      if (plan.modelGuidanceInstalled) {
+        invoke("apply_model_guidance").catch((e: unknown) =>
+          console.error("auto-apply model guidance:", e),
+        );
+      }
     }).catch(() => {});
   }, []);
 
@@ -365,6 +374,26 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("wiki guidance toggle failed:", e);
+    }
+  }, []);
+
+  // ── Model guidance state (default off) ─────────────────────────────────
+  const [modelGuidanceEnabled, setModelGuidanceEnabled] = useState(
+    () => getItem("model-guidance-enabled") === "true",
+  );
+
+  const handleToggleModelGuidance = useCallback(async (enabled: boolean) => {
+    setModelGuidanceEnabled(enabled);
+    setItem("model-guidance-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_model_guidance");
+      } else {
+        await invoke("remove_model_guidance");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("model guidance toggle failed:", e);
     }
   }, []);
 
@@ -1682,6 +1711,22 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       type="checkbox"
                       checked={wikiGuidanceEnabled}
                       onChange={(e) => handleToggleWikiGuidance(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.model_guidance_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.model_guidance_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={modelGuidanceEnabled}
+                      onChange={(e) => handleToggleModelGuidance(e.target.checked)}
                     />
                     <span className={styles.toggle_slider} />
                   </label>

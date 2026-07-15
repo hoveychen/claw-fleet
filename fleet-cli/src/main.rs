@@ -202,6 +202,13 @@ enum Commands {
         #[command(subcommand)]
         action: PrdDisciplineCommands,
     },
+    /// Manage the model-selection cheat-sheet in ~/.claude/CLAUDE.md that tells
+    /// agents how to pick a Claude/Codex model for subagents, workflow agents,
+    /// and new sessions.
+    ModelGuidance {
+        #[command(subcommand)]
+        action: ModelGuidanceCommands,
+    },
     /// Manage agent loops: a prompt Fleet re-runs on an interval by spawning a
     /// fresh session each time. Unlike Claude Code's own CronCreate /
     /// ScheduleWakeup / `/loop` — in-process timers that silently die with a
@@ -483,6 +490,21 @@ pub(crate) enum PrdDisciplineCommands {
     },
 }
 
+#[derive(Subcommand)]
+pub(crate) enum ModelGuidanceCommands {
+    /// Write ~/.claude/fleet-model-guidance.md and inject its @import into
+    /// ~/.claude/CLAUDE.md (idempotent)
+    Apply {
+        /// Guidance locale: `en` or `zh`
+        #[arg(long, default_value = "en")]
+        locale: String,
+    },
+    /// Strip the sentinel block and delete the guidance file (idempotent)
+    Remove,
+    /// Print whether the guidance block is installed (exit 1 if not)
+    Status,
+}
+
 fn main() {
     claw_fleet_core::console::init_utf8();
 
@@ -567,6 +589,36 @@ fn main() {
         Commands::PrdDiscipline { action } => match action {
             PrdDisciplineCommands::Apply { title, locale } => {
                 commands::prd::cmd_prd_discipline_apply(&title, &locale)
+            }
+        },
+        Commands::ModelGuidance { action } => match action {
+            ModelGuidanceCommands::Apply { locale } => {
+                match claw_fleet_core::model_guidance::apply_model_guidance(&locale) {
+                    Ok(()) => println!(
+                        "Model guidance installed (~/.claude/fleet-model-guidance.md + CLAUDE.md import)."
+                    ),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            ModelGuidanceCommands::Remove => {
+                match claw_fleet_core::model_guidance::remove_model_guidance() {
+                    Ok(()) => println!("Model guidance removed."),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            ModelGuidanceCommands::Status => {
+                if claw_fleet_core::model_guidance::is_model_guidance_installed() {
+                    println!("installed");
+                } else {
+                    println!("not installed");
+                    std::process::exit(1);
+                }
             }
         },
     }

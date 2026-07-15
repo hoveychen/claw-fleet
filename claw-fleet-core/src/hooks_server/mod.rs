@@ -782,6 +782,11 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::REMOVE_WIKI_GUIDANCE => route_remove_wiki_guidance(ctx, request, &query, json_header, path),
 
+            // ── Model guidance endpoints ─────────────────────────────────────
+            crate::routes::APPLY_MODEL_GUIDANCE => route_apply_model_guidance(ctx, request, &query, json_header, path),
+
+            crate::routes::REMOVE_MODEL_GUIDANCE => route_remove_model_guidance(ctx, request, &query, json_header, path),
+
             crate::routes::INTERACTION_DIAGNOSTICS => route_interaction_diagnostics(ctx, request, &query, json_header, path),
 
             crate::routes::TEST_DECISION_END_TO_END => route_test_decision_end_to_end(ctx, request, &query, json_header, path),

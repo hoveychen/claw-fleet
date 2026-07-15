@@ -36,6 +36,17 @@ pub(crate) fn remove_wiki_guidance(state: tauri::State<AppState>) -> Result<(), 
 }
 
 #[tauri::command]
+pub(crate) fn apply_model_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+    let locale = state.locale.lock().unwrap().clone();
+    state.backend.read().unwrap().apply_model_guidance(&locale)
+}
+
+#[tauri::command]
+pub(crate) fn remove_model_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().remove_model_guidance()
+}
+
+#[tauri::command]
 pub(crate) fn get_interaction_diagnostics(
     state: tauri::State<AppState>,
 ) -> Vec<claw_fleet_core::interaction_mode_diagnostics::DiagnosticCheck> {
