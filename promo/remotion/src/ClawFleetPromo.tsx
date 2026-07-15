@@ -16,11 +16,14 @@ import { Tip9 } from "./scenes/Tip9Wiki";
 //     Series.Sequence, so it plays from that scene's first frame automatically —
 //     no manual timecodes, and it follows the scene if durations ever change.
 //   • One original sea-shanty BGM bed (audio-build/compose_bgm.py) rides the whole
-//     composition at a subordinate volume so the narration always sits on top.
+//     composition. It is already side-chain ducked in audio-build/render_bgm.sh —
+//     the music dips ~10 dB while the captain speaks and lifts back up in the gaps —
+//     so here it only needs a static level to sit under the voiceover.
 
-// Volume of the music bed relative to the voiceover. VO clips average ~-20 dB;
-// 0.22 puts the bed ~13 dB under the voice — present but never fighting the words.
-const BGM_VOLUME = 0.22;
+// Level of the pre-ducked music bed. VO clips average ~-20 dB. 0.55 lands the
+// music at ~-20 dB in the gaps (full and present) and ~-32 dB under speech
+// (well beneath the voice), because the duck is already baked into the file.
+const BGM_VOLUME = 0.55;
 
 // Each scene paired with its narration clip in public/audio/.
 const VO: Record<string, string> = {
