@@ -292,6 +292,28 @@ interface NewSessionProps {
 const NEW_SESSION_DRAFT_KEY = "new-session";
 const NEW_SESSION_ATTACH_KEY = "new-session:attachments";
 
+/** 最近用过的 workspace（`[path, name]`），去重后**按最近活动时间倒序**——最近用过的
+ *  排最前，剔除纯聊天路径（它单独钉在选项首位）。提交成功会清空草稿，下次打开
+ *  sheet 退回列表首项，于是「刚用过的那个 workspace」自然成为默认——这就是桌面端
+ *  NewSessionForm.distinctWorkspaces 的等价行为，实现「记住最后一次使用的路径」。*/
+export function recentWorkspaces(
+  sessions: SessionInfo[],
+  chatPath: string | null,
+): [string, string][] {
+  const byPath = new Map<string, { name: string; lastMs: number }>();
+  for (const s of sessions) {
+    if (!s.workspacePath || s.workspacePath === chatPath) continue;
+    const prev = byPath.get(s.workspacePath);
+    // 同一路径下保留最近活动的那条会话的名字与时间戳。
+    if (!prev || s.lastActivityMs > prev.lastMs) {
+      byPath.set(s.workspacePath, { name: s.workspaceName, lastMs: s.lastActivityMs });
+    }
+  }
+  return [...byPath.entries()]
+    .sort((a, b) => b[1].lastMs - a[1].lastMs)
+    .map(([path, { name }]) => [path, name]);
+}
+
 const NEW_SESSION_DEFAULT = {
   workspace: "",
   customWorkspace: "",
@@ -310,10 +332,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
   // 纯聊天 workspace：不绑定项目，没有「最近会话」可被发现，必须显式钉在选项首位。
   const chatPath = useChatWorkspace(client);
 
-  const recents = [...new Map(sessions.map((s) => [s.workspacePath, s.workspaceName])).entries()]
-    // 聊过之后它也会出现在 recents 里——剔除，避免同一项列两次。
-    .filter(([path]) => path !== chatPath)
-    .sort((a, b) => a[1].localeCompare(b[1]));
+  const recents = recentWorkspaces(sessions, chatPath);
   // 供超时后的宽限期确认读取最新快照(prop 每次快照推送都会更新)。
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
