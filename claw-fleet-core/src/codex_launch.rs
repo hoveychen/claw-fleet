@@ -131,6 +131,41 @@ pub fn resolve_launch_token(token: &str) -> Option<String> {
     (!id.is_empty()).then_some(id)
 }
 
+/// Pure precedence between the two env-carried session ids: `FLEET_SESSION_ID`
+/// (Fleet-stamped) wins over `CLAUDE_CODE_SESSION_ID` (Claude Code's own), and
+/// an empty value never counts. Split out so it can be tested without touching
+/// the real environment. See [`resolve_fleet_session_id_from_env`].
+fn fleet_or_claude_session_id(fleet: Option<String>, claude: Option<String>) -> Option<String> {
+    fleet
+        .filter(|s| !s.is_empty())
+        .or_else(|| claude.filter(|s| !s.is_empty()))
+}
+
+/// Resolve the current process's Fleet session id from the environment, across
+/// agent sources. This is the single precedence shared by the `fleet mcp`
+/// server ([`crate::mcp_server`]) and the `fleet` CLI (`read_fleet_session_id`),
+/// so a decision card or a `fleet plan` call attributes to the right session
+/// whether it came from Claude or Codex:
+///   1. `FLEET_SESSION_ID`        — Fleet-stamped (Codex resume + explicit)
+///   2. `CLAUDE_CODE_SESSION_ID`  — Claude Code exposes this to MCP/hooks
+///   3. `FLEET_CODEX_LAUNCH_TOKEN` → thread id via [`resolve_launch_token`]
+///      (a new Codex spawn, whose thread id isn't minted until after launch, so
+///      Fleet injects a token up front and writes the token→id note later)
+///
+/// Returns `None` when none resolve to a non-empty id.
+pub fn resolve_fleet_session_id_from_env() -> Option<String> {
+    if let Some(id) = fleet_or_claude_session_id(
+        std::env::var("FLEET_SESSION_ID").ok(),
+        std::env::var("CLAUDE_CODE_SESSION_ID").ok(),
+    ) {
+        return Some(id);
+    }
+    std::env::var(FLEET_CODEX_LAUNCH_TOKEN_ENV)
+        .ok()
+        .filter(|t| !t.is_empty())
+        .and_then(|t| resolve_launch_token(&t))
+}
+
 // ── Spawn-pid notes (new-session liveness) ───────────────────────────────────
 //
 // A freshly spawned `codex exec` does NOT carry its thread id in argv — Codex
@@ -779,6 +814,27 @@ mod tests {
             resolve_launch_token("tok-1").as_deref(),
             Some("019f-thread-abc")
         );
+    }
+
+    #[test]
+    fn fleet_session_id_precedence_fleet_over_claude() {
+        // FLEET_SESSION_ID wins over CLAUDE_CODE_SESSION_ID; empty never counts;
+        // Claude is the fallback. Mirrors the CLI's read_fleet_session_id order
+        // so a card/plan call attributes identically across both crates.
+        assert_eq!(
+            fleet_or_claude_session_id(Some("fleet".into()), Some("claude".into())),
+            Some("fleet".into())
+        );
+        assert_eq!(
+            fleet_or_claude_session_id(Some(String::new()), Some("claude".into())),
+            Some("claude".into()),
+            "empty FLEET_SESSION_ID falls back to Claude"
+        );
+        assert_eq!(
+            fleet_or_claude_session_id(None, Some("claude".into())),
+            Some("claude".into())
+        );
+        assert_eq!(fleet_or_claude_session_id(None, None), None);
     }
 
     #[test]

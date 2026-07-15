@@ -89,48 +89,9 @@ pub(crate) fn cmd_session_resume() {
 /// rollout id (i.e. `SessionInfo.id`), so the side-channel key always matches
 /// what the card looks up.
 pub(crate) fn read_fleet_session_id() -> Option<String> {
-    resolve_session_id(
-        std::env::var("FLEET_SESSION_ID").ok(),
-        std::env::var("CLAUDE_CODE_SESSION_ID").ok(),
-    )
-    .or_else(|| {
-        std::env::var("FLEET_CODEX_LAUNCH_TOKEN")
-            .ok()
-            .filter(|t| !t.is_empty())
-            .and_then(|t| claw_fleet_core::codex_launch::resolve_launch_token(&t))
-    })
-}
-
-/// Pure resolution: first non-empty of (`FLEET_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`).
-fn resolve_session_id(fleet: Option<String>, claude: Option<String>) -> Option<String> {
-    fleet
-        .filter(|s| !s.is_empty())
-        .or_else(|| claude.filter(|s| !s.is_empty()))
-}
-
-#[cfg(test)]
-mod session_id_tests {
-    use super::resolve_session_id;
-
-    #[test]
-    fn falls_back_to_claude_code_session_id() {
-        // Non-Fleet-managed session: FLEET_SESSION_ID absent, but Claude Code
-        // always sets CLAUDE_CODE_SESSION_ID — attribution must still resolve.
-        assert_eq!(
-            resolve_session_id(None, Some("claude-sid".into())),
-            Some("claude-sid".into())
-        );
-        // Empty FLEET_SESSION_ID also falls back.
-        assert_eq!(
-            resolve_session_id(Some("".into()), Some("claude-sid".into())),
-            Some("claude-sid".into())
-        );
-        // FLEET_SESSION_ID wins when present.
-        assert_eq!(
-            resolve_session_id(Some("fleet-sid".into()), Some("claude-sid".into())),
-            Some("fleet-sid".into())
-        );
-        // Neither → None.
-        assert_eq!(resolve_session_id(None, None), None);
-    }
+    // Single source of truth for the FLEET_SESSION_ID → CLAUDE_CODE_SESSION_ID →
+    // FLEET_CODEX_LAUNCH_TOKEN precedence, shared with the `fleet mcp` decision
+    // server so a `fleet plan` call and a decision card attribute to the same
+    // session id across both Claude and Codex.
+    claw_fleet_core::codex_launch::resolve_fleet_session_id_from_env()
 }
