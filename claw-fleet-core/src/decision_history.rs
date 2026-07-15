@@ -885,33 +885,46 @@ fn parse_user_prompt_line(line: &str, session_id: &str) -> Option<UserPromptReco
     if msg.get("role")?.as_str()? != "user" {
         return None;
     }
-    let content = msg.get("content")?.as_array()?;
+    let content = msg.get("content")?;
     let mut texts: Vec<String> = Vec::new();
     let mut has_image = false;
-    for block in content {
-        let kind = block.get("type").and_then(|x| x.as_str()).unwrap_or("");
-        match kind {
-            "text" => {
-                let text = block.get("text").and_then(|x| x.as_str()).unwrap_or("");
-                let stripped = text.trim_start();
-                if stripped.is_empty() {
-                    continue;
-                }
-                if INJECTED_TEXT_PREFIXES
-                    .iter()
-                    .any(|p| stripped.starts_with(p))
-                {
-                    continue;
-                }
-                texts.push(text.to_string());
-            }
-            "image" => {
-                has_image = true;
-            }
-            // tool_result and others: not user-typed, drop.
-            _ => {}
+    // Keep one text block unless it's purely IDE-injected context.
+    let mut push_text = |text: &str| {
+        let stripped = text.trim_start();
+        if stripped.is_empty() {
+            return;
         }
+        if INJECTED_TEXT_PREFIXES
+            .iter()
+            .any(|p| stripped.starts_with(p))
+        {
+            return;
+        }
+        texts.push(text.to_string());
+    };
+    // The session's first typed prompt is stored as a bare string; later user
+    // turns (tool_results, pasted images) use the block-array form.
+    if let Some(text) = content.as_str() {
+        push_text(text);
+    } else if let Some(blocks) = content.as_array() {
+        for block in blocks {
+            let kind = block.get("type").and_then(|x| x.as_str()).unwrap_or("");
+            match kind {
+                "text" => {
+                    let text = block.get("text").and_then(|x| x.as_str()).unwrap_or("");
+                    push_text(text);
+                }
+                "image" => {
+                    has_image = true;
+                }
+                // tool_result and others: not user-typed, drop.
+                _ => {}
+            }
+        }
+    } else {
+        return None;
     }
+    drop(push_text);
     if texts.is_empty() && !has_image {
         return None;
     }
@@ -1152,6 +1165,26 @@ mod tests {
         let line = r#"{"type":"user","uuid":"u7","timestamp":"t","message":{"role":"user","content":[{"type":"text","text":"<ide_opened_file>...injected..."},{"type":"text","text":"actual user words"}]}}"#;
         let rec = parse_user_prompt_line(line, "ssn").unwrap();
         assert_eq!(rec.text, "actual user words");
+    }
+
+    #[test]
+    fn parse_user_prompt_keeps_string_content() {
+        // The session's very first typed prompt is stored by Claude Code with
+        // `message.content` as a bare string, not a block array. That opening
+        // question must still surface in the decision timeline.
+        let line = r#"{"type":"user","uuid":"u8","timestamp":"2026-07-15T00:00:00Z","message":{"role":"user","content":"现在应用对与codex，能支持决策卡么？"}}"#;
+        let rec = parse_user_prompt_line(line, "ssn").unwrap();
+        assert_eq!(rec.id, "u8");
+        assert_eq!(rec.text, "现在应用对与codex，能支持决策卡么？");
+        assert!(!rec.has_image);
+    }
+
+    #[test]
+    fn parse_user_prompt_string_content_drops_ide_injection() {
+        // A string-form prompt that is purely IDE-injected context is still
+        // filtered out, matching the block-array behaviour.
+        let line = r#"{"type":"user","uuid":"u9","timestamp":"t","message":{"role":"user","content":"<ide_selection>foo.rs</ide_selection>"}}"#;
+        assert!(parse_user_prompt_line(line, "ssn").is_none());
     }
 
     #[test]
