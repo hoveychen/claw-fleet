@@ -23,7 +23,7 @@ import { useRelaySearch } from "../useRelaySearch";
 import styles from "./TasksView.module.css";
 
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
-const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimited"];
+const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimited", "serverErrored"];
 
 /** Dot tone for the row status accent — mirrors the desktop launchpad's
  *  `rowBarColor`: a colour only for live/waiting rows, `null` (no dot) for
@@ -32,7 +32,7 @@ function statusTone(status: SessionStatus): string | null {
   if (WORKING.includes(status)) return "working";
   if (status === "waitingInput") return "waiting";
   if (status === "active") return "active";
-  if (status === "rateLimited") return "error";
+  if (status === "rateLimited" || status === "serverErrored") return "error";
   return null;
 }
 

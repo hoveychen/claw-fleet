@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { SessionInfo } from "../types";
-import { RateLimitControls, StatusIcon, SubagentTypeIcon } from "./SessionCard";
+import { RateLimitControls, ServerErrorControls, StatusIcon, SubagentTypeIcon } from "./SessionCard";
 import styles from "./LiteSessionCard.module.css";
 
 export function LiteSessionCard({
@@ -65,6 +65,11 @@ export function LiteSessionCard({
       {session.status === "rateLimited" && session.rateLimit && (
         <div className={styles.rate_limit}>
           <RateLimitControls session={session} />
+        </div>
+      )}
+      {session.status === "serverErrored" && (
+        <div className={styles.rate_limit}>
+          <ServerErrorControls session={session} />
         </div>
       )}
     </div>
