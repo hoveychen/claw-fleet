@@ -672,6 +672,10 @@
       "title": "New: PRD Discipline Mode",
       "description": "Keep Claude Code focused across long multi-step plans (P1–P10). Adds a commit-discipline rule (no proactive commits mid-PRD) and persists your macro plan to TASKS.md at the workspace root, with a UserPromptSubmit hook that re-injects the active region every turn — so context compression no longer makes Claude forget remaining tasks."
     },
+    "model_guidance": {
+      "title": "New: model-selection cheat-sheet",
+      "description": "This toggle injects a capability/cost/effort cheat-sheet for the Claude (Fable/Opus/Sonnet/Haiku) and Codex (Sol/Terra/Luna) model families into ~/.claude/CLAUDE.md, so agents pick a model deliberately for subagents, workflow agents, and new sessions. Claude Code only."
+    },
     "wiki_guidance": {
       "title": "New: Wiki knowledge base",
       "description": "Agents' HTML reports, demos and markdown docs get archived into a shared wiki (~/.fleet/wiki) via `fleet wiki publish` and browsed in the Wiki board with version history. This toggle injects a short guidance block into ~/.claude/CLAUDE.md so agents publish finished artifacts there automatically."
@@ -1367,6 +1371,8 @@
     "prd_mode": "PRD Discipline Mode",
     "prd_mode_desc": "Keep the Agent focused on long tasks: it won't keep interrupting you to confirm commits, and it saves the task list so it doesn't forget remaining steps after a long conversation. Claude Code only.",
     "prd_mode_enabled": "Enable PRD discipline mode",
+    "model_guidance_desc": "Inject a Claude + Codex model capability/cost/effort cheat-sheet into ~/.claude/CLAUDE.md so agents pick a model deliberately for subagents, workflow agents, and new sessions. Claude Code only.",
+    "model_guidance_enabled": "Enable model-selection guidance",
     "wiki_guidance_desc": "Tell agents to archive finished HTML reports, demos and markdown docs into the Fleet wiki (`fleet wiki publish`) so they show up in the Wiki board instead of getting lost in workdirs. Claude Code only.",
     "wiki_guidance_enabled": "Enable wiki publish guidance",
     "sources": "Agents to monitor",
