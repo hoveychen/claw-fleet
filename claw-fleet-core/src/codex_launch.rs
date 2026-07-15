@@ -260,6 +260,32 @@ pub fn clear_spawn_pid(thread_id: &str) {
 /// sentinel is never cleared. That is harmless today — nothing reads the idle
 /// sentinel for card state (the supervisor that used to consume it was removed;
 /// see [`crate::idle`]) — and marking idle keeps parity for any future reader.
+/// Extract the codex thread id from a `notify` payload iff it is the
+/// `agent-turn-complete` event. Returns `None` for any other event type or
+/// malformed input.
+///
+/// Codex invokes the program configured in `notify = [...]` once per turn,
+/// appending a single JSON argument. Verified against codex-cli 0.144.4
+/// (headless `codex exec` AND `codex exec resume`, 2026-07-16):
+/// ```json
+/// {"type":"agent-turn-complete","thread-id":"019f…","turn-id":"019f…",
+///  "cwd":"…","client":"codex_exec","input-messages":[…],
+///  "last-assistant-message":"…"}
+/// ```
+/// Note the keys are hyphenated (`thread-id`, not `thread_id`). The thread id
+/// is codex's session id — the key Fleet relays a handoff on.
+pub fn parse_agent_turn_complete_thread_id(payload: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(payload.trim()).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("agent-turn-complete") {
+        return None;
+    }
+    v.get("thread-id")
+        .and_then(|t| t.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 pub fn on_codex_turn_exit(session_id: &str) {
     if session_id.is_empty() {
         return;
@@ -1340,6 +1366,39 @@ mod tests {
         // Empty id is a guarded no-op — no file, no panic.
         on_codex_turn_exit("");
         assert!(!crate::session::get_fleet_dir().unwrap().join("idle").join(".json").exists());
+    }
+
+    #[test]
+    fn parses_thread_id_from_agent_turn_complete_notify_payload() {
+        // The exact shape codex passes to the notify program (verified live).
+        let payload = r#"{"type":"agent-turn-complete","thread-id":"019f669f-2269-7122-93ab-51e783755798","turn-id":"019f669f-22c0","cwd":"/ws","client":"codex_exec","input-messages":["hi"],"last-assistant-message":"ONE"}"#;
+        assert_eq!(
+            parse_agent_turn_complete_thread_id(payload).as_deref(),
+            Some("019f669f-2269-7122-93ab-51e783755798")
+        );
+    }
+
+    #[test]
+    fn ignores_non_turn_complete_notify_payloads() {
+        // Wrong event type → None (codex may add other notify events later).
+        assert_eq!(
+            parse_agent_turn_complete_thread_id(r#"{"type":"other","thread-id":"x"}"#),
+            None
+        );
+        // Missing / empty thread-id → None.
+        assert_eq!(
+            parse_agent_turn_complete_thread_id(r#"{"type":"agent-turn-complete"}"#),
+            None
+        );
+        assert_eq!(
+            parse_agent_turn_complete_thread_id(
+                r#"{"type":"agent-turn-complete","thread-id":""}"#
+            ),
+            None
+        );
+        // Garbage / non-JSON → None, no panic.
+        assert_eq!(parse_agent_turn_complete_thread_id("not json"), None);
+        assert_eq!(parse_agent_turn_complete_thread_id(""), None);
     }
 
     /// Gap-2 acceptance (live, end-to-end): a `fleet handoff` registered by a

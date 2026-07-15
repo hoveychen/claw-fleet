@@ -303,6 +303,16 @@ pub(crate) enum SessionCommands {
     /// Wired to Claude Code's `UserPromptSubmit` hook.
     #[command(hide = true)]
     Resume,
+    /// [internal] Codex `notify` callback (the codex analogue of Claude's `Stop`
+    /// hook). Injected as `-c notify=[fleet,session,codex-notify]` on Fleet-spawned
+    /// codex sessions; codex appends the `agent-turn-complete` JSON payload as the
+    /// final arg. Parses the thread id and fires the turn-exit relay.
+    #[command(hide = true)]
+    CodexNotify {
+        /// Codex appends the JSON payload (and possibly fixed args) here.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        payload: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -588,6 +598,9 @@ fn main() {
         Commands::Session { action } => match action {
             SessionCommands::Idle => commands::session::cmd_session_idle(),
             SessionCommands::Resume => commands::session::cmd_session_resume(),
+            SessionCommands::CodexNotify { payload } => {
+                commands::session::cmd_codex_notify(&payload)
+            }
         },
         Commands::Plan { action } => commands::plan::cmd_plan(action),
         Commands::Handoff {
