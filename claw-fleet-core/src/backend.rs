@@ -721,6 +721,10 @@ pub trait Backend: Send + Sync {
     // ── Wiki guidance (global CLAUDE.md block) ──────────────────────────────
     fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String>;
     fn remove_wiki_guidance(&self) -> Result<(), String>;
+
+    // ── Model guidance (global CLAUDE.md block) ─────────────────────────────
+    fn apply_model_guidance(&self, locale: &str) -> Result<(), String>;
+    fn remove_model_guidance(&self) -> Result<(), String>;
     /// QA diagnostics: report on the four backend-observable checkpoints in
     /// the AskUserQuestion → Decision Card pipeline. The frontend appends a
     /// fifth row (Tauri listener self-test) it owns.

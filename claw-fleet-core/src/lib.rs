@@ -48,6 +48,7 @@ pub mod memory;
 pub mod mobile_relay;
 pub mod relay_crypto;
 pub mod model_cost;
+pub mod model_guidance;
 pub mod launch_spec;
 pub mod parked;
 pub mod pending_message;

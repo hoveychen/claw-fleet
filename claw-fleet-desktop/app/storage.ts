@@ -70,6 +70,7 @@ const ALL_KEYS = [
   "interaction-mode-enabled",
   "prd-mode-enabled",
   "wiki-guidance-enabled",
+  "model-guidance-enabled",
   "plan-approval-enabled",
   "onboarding-seen-features",
   "usage-auto-refresh",
@@ -97,6 +98,7 @@ export const ONBOARDING_FEATURES = [
   "global_ask",
   "prd_discipline",
   "wiki_guidance",
+  "model_guidance",
 ] as const;
 
 export type OnboardingFeatureId = (typeof ONBOARDING_FEATURES)[number];

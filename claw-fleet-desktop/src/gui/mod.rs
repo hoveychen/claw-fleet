@@ -1790,6 +1790,8 @@ pub fn run() {
             remove_interaction_mode,
             apply_wiki_guidance,
             remove_wiki_guidance,
+            apply_model_guidance,
+            remove_model_guidance,
             get_interaction_diagnostics,
             test_decision_frontend_only,
             test_decision_end_to_end,

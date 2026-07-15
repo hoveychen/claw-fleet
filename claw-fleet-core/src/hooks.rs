@@ -63,6 +63,10 @@ pub struct HookSetupPlan {
     /// payloads from older `fleet serve` probes deserializable.
     #[serde(default)]
     pub wiki_guidance_installed: bool,
+    /// Whether the model-guidance CLAUDE.md block is installed. `default` keeps
+    /// payloads from older `fleet serve` probes deserializable.
+    #[serde(default)]
+    pub model_guidance_installed: bool,
     /// Whether the idle hooks (Stop + UserPromptSubmit → kanban Pending) are installed.
     pub idle_hooks_installed: bool,
 }
@@ -138,6 +142,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
     let prd_context_installed = has_prd_context_hook(&hooks_obj);
     let prd_discipline_installed = crate::prd_discipline::is_prd_discipline_installed();
     let wiki_guidance_installed = crate::wiki_guidance::is_wiki_guidance_installed();
+    let model_guidance_installed = crate::model_guidance::is_model_guidance_installed();
     let idle_hooks_installed = has_idle_hooks(&hooks_obj);
 
     HookSetupPlan {
@@ -151,6 +156,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         prd_context_installed,
         prd_discipline_installed,
         wiki_guidance_installed,
+        model_guidance_installed,
         idle_hooks_installed,
     }
 }

@@ -671,6 +671,10 @@
       "title": "新功能：PRD 自律模式",
       "description": "让 Claude 在长 PRD（P1-P10）中保持专注：注入一条 commit 纪律（PRD 进行中不主动发起 commit），并把宏观计划持久化到工作区根目录的 TASKS.md。每次用户发送消息前，UserPromptSubmit 钩子会自动把 TASKS.md 中标记为「活动区」的部分重新注入上下文 —— 即便上下文被压缩，也不会忘记尚未完成的任务。仅对 Claude Code 生效。"
     },
+    "model_guidance": {
+      "title": "新功能：模型选择速查",
+      "description": "打开此开关会向 ~/.claude/CLAUDE.md 注入一份 Claude(Fable/Opus/Sonnet/Haiku)与 Codex(Sol/Terra/Luna)两家模型的能力、成本、effort 对比速查表，让 Agent 给 subagent、workflow agent 或新会话选模型时有据可依。仅对 Claude Code 生效。"
+    },
     "wiki_guidance": {
       "title": "新功能：Wiki 知识库",
       "description": "Agent 产出的 HTML 报告、demo、markdown 文档可以用 `fleet wiki publish` 归档进统一知识库（~/.fleet/wiki），在「知识库」板块浏览并保留版本历史。打开此开关会向 ~/.claude/CLAUDE.md 注入一段指引，让 Agent 完成成品后自动归档。"
@@ -1366,6 +1370,8 @@
     "prd_mode": "PRD 自律模式",
     "prd_mode_desc": "让 Agent 在长任务里保持专注：不中途反复打断你确认提交，并把任务清单持久化保存，避免聊久了忘记剩余步骤。仅对 Claude Code 生效。",
     "prd_mode_enabled": "启用 PRD 自律模式",
+    "model_guidance_desc": "向 ~/.claude/CLAUDE.md 注入一份 Claude 与 Codex 两家模型的能力/成本/effort 速查表，让 Agent 给 subagent、workflow agent、新会话选模型时有据可依。仅对 Claude Code 生效。",
+    "model_guidance_enabled": "启用模型选择速查指引",
     "wiki_guidance_desc": "让 Agent 把完成的 HTML 报告、demo、markdown 文档用 `fleet wiki publish` 归档进知识库，在「知识库」板块统一浏览，不再散落在工作目录里。仅对 Claude Code 生效。",
     "wiki_guidance_enabled": "启用知识库归档指引",
     "sources": "要监控的 Agent",

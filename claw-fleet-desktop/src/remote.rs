@@ -337,6 +337,7 @@ impl crate::backend::Backend for RemoteBackend {
             remove_plan_approval_hook = REMOVE_PLAN_APPROVAL_HOOK;
             remove_interaction_mode = REMOVE_INTERACTION_MODE;
             remove_wiki_guidance = REMOVE_WIKI_GUIDANCE;
+            remove_model_guidance = REMOVE_MODEL_GUIDANCE;
             remove_prd_mode = REMOVE_PRD_MODE;
         }
     }
@@ -983,6 +984,7 @@ impl crate::backend::Backend for RemoteBackend {
             prd_context_installed: false,
             prd_discipline_installed: false,
             wiki_guidance_installed: false,
+            model_guidance_installed: false,
             idle_hooks_installed: false,
         })
     }
@@ -1166,6 +1168,12 @@ impl crate::backend::Backend for RemoteBackend {
         #[derive(serde::Serialize)]
         struct Req<'a> { locale: &'a str }
         self.probe.post_json_ok(claw_fleet_core::routes::APPLY_WIKI_GUIDANCE, &Req { locale })
+    }
+
+    fn apply_model_guidance(&self, locale: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { locale: &'a str }
+        self.probe.post_json_ok(claw_fleet_core::routes::APPLY_MODEL_GUIDANCE, &Req { locale })
     }
 
 
