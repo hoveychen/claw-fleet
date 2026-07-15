@@ -183,7 +183,7 @@ function AttachmentRow({
     <div className={styles.attachRow}>
       {attachments.map((a) => (
         <span key={a.path} className={styles.attachChip}>
-          {a.name}
+          <span className={styles.attachName}>{a.name}</span>
           <button className={styles.attachRemove} onClick={() => onRemove(a.path)}>
             <X size={12} />
           </button>
