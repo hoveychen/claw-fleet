@@ -78,6 +78,26 @@ pub(crate) fn cmd_session_resume() {
     claw_fleet_core::handoff::cancel_pending(&sid);
 }
 
+/// `fleet session codex-notify <payload…>` — the codex analogue of Claude's
+/// `Stop` hook, invoked via the `-c notify=[fleet,session,codex-notify]` that
+/// Fleet injects on the codex sessions it spawns/resumes. Codex appends the
+/// `agent-turn-complete` JSON payload as the final arg (plus, harmlessly, any
+/// fixed args); we scan for the JSON, and if it is a turn-complete event we fire
+/// the same turn-exit relay the Claude `Stop` hook does — mark idle, consume any
+/// pending `fleet handoff`, re-arm stranded loops. Silent no-op for any other
+/// payload (never blocks or fails codex over a relay problem).
+pub(crate) fn cmd_codex_notify(payload: &[String]) {
+    // Codex appends the JSON as one argv; scan defensively in case fixed args
+    // precede it. The first arg that parses as a turn-complete event wins.
+    let Some(thread_id) = payload
+        .iter()
+        .find_map(|arg| claw_fleet_core::codex_launch::parse_agent_turn_complete_thread_id(arg))
+    else {
+        return;
+    };
+    claw_fleet_core::codex_launch::on_codex_turn_exit(&thread_id);
+}
+
 /// The current session's id, for attributing `fleet plan` / `fleet session`
 /// actions. Prefers `FLEET_SESSION_ID` (set by the Fleet supervisor and by the
 /// Codex resume launcher) and falls back to `CLAUDE_CODE_SESSION_ID` (set by
