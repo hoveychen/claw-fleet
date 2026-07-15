@@ -838,6 +838,52 @@ mod tests {
     }
 
     #[test]
+    fn resolve_session_id_from_env_uses_codex_launch_token() {
+        // The codex new-spawn attribution seam: with no FLEET_SESSION_ID /
+        // CLAUDE_CODE_SESSION_ID but a FLEET_CODEX_LAUNCH_TOKEN whose note Fleet
+        // wrote, the shared resolver must return the recorded thread id — this is
+        // how a `fleet__ask` card from a fresh codex session gets attributed.
+        // Guards all three env vars under the fleet-home lock TmpHome holds.
+        let _home = TmpHome::new("resolve-token");
+        let prev_fleet = std::env::var_os("FLEET_SESSION_ID");
+        let prev_claude = std::env::var_os("CLAUDE_CODE_SESSION_ID");
+        let prev_token = std::env::var_os(FLEET_CODEX_LAUNCH_TOKEN_ENV);
+        unsafe {
+            std::env::remove_var("FLEET_SESSION_ID");
+            std::env::remove_var("CLAUDE_CODE_SESSION_ID");
+            std::env::set_var(FLEET_CODEX_LAUNCH_TOKEN_ENV, "tok-resolve");
+        }
+        record_launch_token("tok-resolve", "019f-thread-xyz");
+        assert_eq!(
+            resolve_fleet_session_id_from_env().as_deref(),
+            Some("019f-thread-xyz"),
+            "codex launch token must resolve to the recorded thread id"
+        );
+        // FLEET_SESSION_ID, when present, must win over the token path.
+        unsafe { std::env::set_var("FLEET_SESSION_ID", "explicit-sid") };
+        assert_eq!(
+            resolve_fleet_session_id_from_env().as_deref(),
+            Some("explicit-sid"),
+            "explicit FLEET_SESSION_ID outranks the launch token"
+        );
+        // Restore prior env so sibling tests are unaffected.
+        unsafe {
+            match prev_fleet {
+                Some(v) => std::env::set_var("FLEET_SESSION_ID", v),
+                None => std::env::remove_var("FLEET_SESSION_ID"),
+            }
+            match prev_claude {
+                Some(v) => std::env::set_var("CLAUDE_CODE_SESSION_ID", v),
+                None => std::env::remove_var("CLAUDE_CODE_SESSION_ID"),
+            }
+            match prev_token {
+                Some(v) => std::env::set_var(FLEET_CODEX_LAUNCH_TOKEN_ENV, v),
+                None => std::env::remove_var(FLEET_CODEX_LAUNCH_TOKEN_ENV),
+            }
+        }
+    }
+
+    #[test]
     fn launch_token_rejects_path_traversal() {
         let _home = TmpHome::new("token-traversal");
         // A token that could escape the store dir must resolve to nothing and
@@ -1156,6 +1202,60 @@ mod tests {
         }
         assert!(done.load(std::sync::atomic::Ordering::SeqCst), "resume on_exit never fired");
         assert!(ok.load(std::sync::atomic::Ordering::SeqCst), "resume exited non-zero");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    /// Live end-to-end (P3 acceptance): a Fleet-spawned codex session must reach
+    /// Fleet's Decision Panel via `fleet__ask`. Spawns real `codex exec` with the
+    /// exact wiring [`fleet_decision_card_args`] emits (bypass + `-c
+    /// mcp_servers.fleet.*` pointing at the built `fleet` binary) and asserts
+    /// codex invokes the `fleet` MCP server's `fleet__ask` tool.
+    ///
+    /// Ignored: needs a real codex binary + model AND a Fleet decision consumer.
+    /// Run against a *test* consumer (or with no consumer, asserting the
+    /// "consumer not running" tool_error) so it does not queue a card into a live
+    /// Fleet desktop. Verified manually 2026-07-15: with the real `fleet mcp`
+    /// server the tool call reaches `handle_fleet_ask_call` and the card is
+    /// attributed to the codex session id (launch token → thread id).
+    ///   `cargo test -p claw-fleet-core codex_launch::tests::live_decision_card -- --ignored`
+    #[test]
+    #[ignore = "spawns real codex + needs a decision consumer; run manually"]
+    fn live_decision_card_reaches_fleet_ask() {
+        let fleet = crate::fleet_cli::resolve_fleet_binary()
+            .expect("a fleet binary must be resolvable for the MCP bridge");
+        let codex = crate::codex_source::find_codex_binary().expect("codex binary");
+        let ws = std::env::temp_dir().join(format!("fleet-codex-card-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+
+        let decision_args = fleet_decision_card_args(&[(
+            "CLAUDE_PROJECT_DIR".to_string(),
+            ws.to_string_lossy().into_owned(),
+        )]);
+        assert!(
+            decision_args.iter().any(|a| a == "--dangerously-bypass-approvals-and-sandbox"),
+            "bypass flag present"
+        );
+        let prompt = "Call the fleet__ask MCP tool from the \"fleet\" server with a single \
+                      yes/no question, then reply with what it returned.";
+        let args = build_codex_exec_args(
+            &ws.to_string_lossy(),
+            prompt,
+            None,
+            None,
+            &decision_args,
+        );
+        let out = crate::process_util::command(&codex)
+            .args(&args)
+            .current_dir(&ws)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("codex exec runs");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("\"server\":\"fleet\"") && stdout.contains("fleet__ask"),
+            "codex must invoke the fleet server's fleet__ask tool; stdout:\n{stdout}"
+        );
+        let _ = fleet; // fleet path is baked into decision_args above
         let _ = std::fs::remove_dir_all(&ws);
     }
 
