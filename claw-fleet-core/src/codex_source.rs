@@ -588,6 +588,67 @@ fn compute_token_stats(lines: &[Value]) -> (f64, u64) {
     (speed, total_output)
 }
 
+/// Compute USD cost and cumulative input tokens for a Codex session from its
+/// rollout lines, reading the last `token_count` event's cumulative
+/// `total_token_usage` (input / cached_input / output).
+///
+/// Codex's `output_tokens` already includes `reasoning_output_tokens` — verified
+/// against real rollouts where `input_tokens + output_tokens == total_tokens` —
+/// so reasoning is NOT added separately. `cached_input_tokens` is a subset of
+/// `input_tokens`, so full-price input is `input - cached` and the cached portion
+/// is billed at the model's cache-read (90%-off) rate.
+///
+/// Returns `(cost_usd, total_input_tokens)`, or `(0.0, 0)` when no `token_count`
+/// with a `total_token_usage` block is present. `model` selects the price tier
+/// via `model_cost::get_model_costs`; an absent model falls back to `"gpt"`,
+/// which routes to the GPT Sol tier.
+fn codex_cost_and_input(lines: &[Value], model: Option<&str>) -> (f64, u64) {
+    for line in lines.iter().rev() {
+        if line.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let payload = match line.get("payload") {
+            Some(p) => p,
+            None => continue,
+        };
+        if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
+            continue;
+        }
+        let usage = match payload.get("info").and_then(|i| i.get("total_token_usage")) {
+            Some(u) => u,
+            None => continue,
+        };
+        let input = usage
+            .get("input_tokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        // cached is a subset of input; clamp defensively so `input - cached`
+        // never underflows if a rollout ever reports cached > input.
+        let cached = usage
+            .get("cached_input_tokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0)
+            .min(input);
+        let output = usage
+            .get("output_tokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        if input == 0 && output == 0 {
+            continue;
+        }
+        let turn = crate::model_cost::TurnUsage {
+            input_tokens: input - cached,
+            output_tokens: output,
+            cache_read_tokens: cached,
+            cache_creation_tokens: 0,
+            web_search_requests: 0,
+        };
+        let cost = crate::model_cost::turn_cost_usd(model.unwrap_or("gpt"), &turn);
+        return (cost, input);
+    }
+    (0.0, 0)
+}
+
 /// Extract context utilization from the latest token_count event.
 fn extract_context_percent(lines: &[Value], model: Option<&str>) -> Option<f64> {
     for line in lines.iter().rev() {
@@ -870,7 +931,7 @@ fn build_session_from_sqlite(
     let mut last_activity_ms = (thread.updated_at as u64) * 1000;
 
     // For recently active sessions, read the rollout file for precise status.
-    let (status, token_speed, total_output_tokens, last_message_preview, model, thinking_level, context_percent, rate_limit) =
+    let (status, token_speed, total_output_tokens, last_message_preview, model, thinking_level, context_percent, rate_limit, codex_cost, total_input_tokens) =
         if age_secs < 600.0 && rollout_path.exists() {
             // Update last_activity_ms from file mtime for sub-second precision.
             if let Ok(meta) = fs::metadata(&rollout_path) {
@@ -928,7 +989,8 @@ fn build_session_from_sqlite(
                         };
                         let tok = if tok > 0 { tok } else { thread.tokens_used as u64 };
                         let ctx = extract_context_percent(&all_parsed, mdl.as_deref());
-                        (st, spd, tok, preview, mdl, tl, ctx, rl)
+                        let (cost, input) = codex_cost_and_input(&all_parsed, mdl.as_deref());
+                        (st, spd, tok, preview, mdl, tl, ctx, rl, cost, input)
                     } else {
                         (
                             determine_status_from_age(file_age.as_secs_f64()),
@@ -939,6 +1001,8 @@ fn build_session_from_sqlite(
                             None,
                             None,
                             None,
+                            0.0,
+                            0,
                         )
                     }
                 } else {
@@ -951,6 +1015,8 @@ fn build_session_from_sqlite(
                         None,
                         None,
                         None,
+                        0.0,
+                        0,
                     )
                 }
             } else {
@@ -963,6 +1029,8 @@ fn build_session_from_sqlite(
                     None,
                     None,
                     None,
+                    0.0,
+                    0,
                 )
             }
         } else {
@@ -983,6 +1051,8 @@ fn build_session_from_sqlite(
                 None,
                 None,
                 None,
+                0.0,
+                0,
             )
         };
 
@@ -1038,9 +1108,9 @@ fn build_session_from_sqlite(
         token_speed,
         agent_token_speed: token_speed,
         total_output_tokens,
-        total_input_tokens: 0,
-        total_cost_usd: 0.0,
-        agent_total_cost_usd: 0.0,
+        total_input_tokens,
+        total_cost_usd: codex_cost,
+        agent_total_cost_usd: codex_cost,
         cost_speed_usd_per_min: 0.0,
         last_message_preview,
         last_activity_ms,
@@ -1075,12 +1145,71 @@ fn build_session_from_sqlite(
 #[cfg(test)]
 mod tests {
     use super::{
-        codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
+        codex_cost_and_input, codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit, compute_token_stats,
         extract_context_percent, last_rollout_rate_limits, read_rollout_originator,
         CodexRateLimitWindow, CodexUsageItem,
     };
     use serde_json::json;
+
+    #[test]
+    fn codex_cost_and_input_prices_last_token_count() {
+        // Real gpt-5.6-sol usage shape: cached is a subset of input, output
+        // already includes reasoning. An earlier token_count is present to
+        // prove we read the LAST (cumulative) one, not the first.
+        let lines = vec![
+            json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": { "total_token_usage": {
+                        "input_tokens": 1000, "cached_input_tokens": 0, "output_tokens": 10
+                    }}
+                }
+            }),
+            json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": { "total_token_usage": {
+                        "input_tokens": 136970,
+                        "cached_input_tokens": 123392,
+                        "output_tokens": 565,
+                        "reasoning_output_tokens": 60,
+                        "total_tokens": 137535
+                    }}
+                }
+            }),
+        ];
+        let (cost, input) = codex_cost_and_input(&lines, Some("gpt-5.6-sol"));
+        assert_eq!(input, 136970, "reports cumulative input");
+        // (136970-123392)/1M*$5 + 123392/1M*$0.50 + 565/1M*$30
+        let expected = 13578.0 / 1e6 * 5.0 + 123392.0 / 1e6 * 0.50 + 565.0 / 1e6 * 30.0;
+        assert!(
+            (cost - expected).abs() < 1e-9,
+            "cost {cost} != expected {expected}"
+        );
+    }
+
+    #[test]
+    fn codex_cost_and_input_absent_model_uses_gpt_sol() {
+        // No model -> "gpt" -> Sol tier. 1M full-price input = $5.
+        let lines = vec![json!({
+            "type": "event_msg",
+            "payload": { "type": "token_count", "info": { "total_token_usage": {
+                "input_tokens": 1_000_000, "cached_input_tokens": 0, "output_tokens": 0
+            }}}
+        })];
+        let (cost, input) = codex_cost_and_input(&lines, None);
+        assert_eq!(input, 1_000_000);
+        assert!((cost - 5.0).abs() < 1e-9, "gpt sol input = $5/M, got {cost}");
+    }
+
+    #[test]
+    fn codex_cost_and_input_no_token_count_is_zero() {
+        let lines = vec![json!({ "type": "response_item", "payload": {} })];
+        assert_eq!(codex_cost_and_input(&lines, Some("gpt-5.6-sol")), (0.0, 0));
+    }
 
     /// The scanner's Fleet-ownership signal: the rollout's first `session_meta`
     /// line carries `originator`, and Fleet stamps `"fleet"` there via
@@ -1635,6 +1764,7 @@ fn parse_codex_session(
     let last_message_preview = extract_last_text(last_n);
     let model = extract_model(&all_parsed);
     let context_percent = extract_context_percent(&all_parsed, model.as_deref());
+    let (codex_cost, total_input_tokens) = codex_cost_and_input(&all_parsed, model.as_deref());
 
     // Detect thinking/reasoning.
     let has_reasoning = last_n.iter().any(|v| {
@@ -1702,9 +1832,9 @@ fn parse_codex_session(
         token_speed,
         agent_token_speed: token_speed,
         total_output_tokens,
-        total_input_tokens: 0,
-        total_cost_usd: 0.0,
-        agent_total_cost_usd: 0.0,
+        total_input_tokens,
+        total_cost_usd: codex_cost,
+        agent_total_cost_usd: codex_cost,
         cost_speed_usd_per_min: 0.0,
         last_message_preview,
         last_activity_ms,
