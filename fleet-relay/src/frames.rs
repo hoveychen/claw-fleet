@@ -40,6 +40,11 @@ pub enum InFrame {
     },
     /// Client only: register a browser PushSubscription for this channel.
     PushSubscribe { subscription: Value },
+    /// Client only: remove a previously registered subscription for this
+    /// channel. The payload identifies the sub the same way `PushSubscribe`
+    /// does — a harmony sub by `platform:"harmony"` + `openId`, a web sub by
+    /// `endpoint`. Removing an absent subscription is a no-op.
+    PushUnsubscribe { subscription: Value },
 }
 
 /// Frames the relay emits to a connection.
