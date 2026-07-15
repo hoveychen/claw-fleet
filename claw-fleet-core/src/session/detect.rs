@@ -301,6 +301,44 @@ pub(crate) fn detect_rate_limit(last_lines: &[Value]) -> Option<RateLimitState> 
     None
 }
 
+/// Detect a terminal transient-server-error entry in the last assistant
+/// messages — the "API Error: Server error mid-response / Response stalled
+/// mid-stream. The response above may be incomplete." family.
+///
+/// Claude Code persists these as synthetic assistant messages with
+/// `isApiErrorMessage: true` and `error: "server_error"` — the same shape as
+/// [`detect_rate_limit`] but a different `error` enum. Unlike a rate limit
+/// (which must wait for `resets_at`) a server error is *transient*: resuming
+/// the session re-runs the interrupted turn immediately.
+///
+/// Returns `true` only when the last real (non-API-error) user/assistant line
+/// IS such a `server_error` entry — i.e. no subsequent real turn has started.
+/// Every *other* API error (`authentication_failed`, `invalid_request`,
+/// `oauth_org_not_allowed`, `model_not_found`, …) is permanent and must NOT be
+/// auto-retried, so this returns `false` for them: only `server_error` is
+/// whitelisted.
+pub(crate) fn detect_server_error(last_lines: &[Value]) -> bool {
+    for v in last_lines.iter().rev() {
+        let t = v.get("type").and_then(|t| t.as_str());
+        if t != Some("assistant") && t != Some("user") {
+            continue;
+        }
+        let is_api_err = v
+            .get("isApiErrorMessage")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false);
+        if !is_api_err {
+            // First real turn going backwards is fresh activity — any earlier
+            // server_error is stale (the session already resumed past it).
+            return false;
+        }
+        // Only the transient server_error family is retryable; every other API
+        // error is permanent and must not re-fire spawns forever.
+        return v.get("error").and_then(|e| e.as_str()) == Some("server_error");
+    }
+    false
+}
+
 /// True iff the last meaningful (user/assistant) record is a synthetic
 /// "[Request interrupted by user]" / "...for tool use" user message, which
 /// claude-code writes when Esc is pressed mid-turn.
