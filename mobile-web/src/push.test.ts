@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { classifyPush, type PushEnv } from "./push-classify";
+import { isPushOptedOut, setPushOptedOut } from "./push";
 
 // HarmonyOS NEXT (鸿蒙5) 内置浏览器 / ArkWeb Web 组件的真实 UA 形态：
 // Chromium 114 定制内核，含 `OpenHarmony` 系统标识 + `ArkWeb/` 内核标识。
@@ -56,5 +57,26 @@ describe("classifyPush", () => {
 
   it("无 Service Worker 的桌面浏览器 → unsupported", () => {
     expect(classifyPush(base({ hasServiceWorker: false }))).toBe("unsupported");
+  });
+});
+
+describe("push opt-out persistence", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("默认(未设置)不算 opted out", () => {
+    expect(isPushOptedOut()).toBe(false);
+  });
+
+  it("停用后 isPushOptedOut() 为真且持久化", () => {
+    setPushOptedOut(true);
+    expect(isPushOptedOut()).toBe(true);
+    expect(localStorage.getItem("fleet:push-opt-out")).toBe("1");
+  });
+
+  it("重新开启清除 opt-out", () => {
+    setPushOptedOut(true);
+    setPushOptedOut(false);
+    expect(isPushOptedOut()).toBe(false);
+    expect(localStorage.getItem("fleet:push-opt-out")).toBe("0");
   });
 });

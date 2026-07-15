@@ -114,6 +114,7 @@ const DICT: Record<string, string> = {
     "This browser doesn't support web notifications — use desktop Fleet to receive decision-card alerts.",
   "开启通知，第一时间收到新决策卡。": "Enable notifications to get new decision cards instantly.",
   开启: "Enable",
+  停用: "Off",
   再按一次返回退出: "Press back again to exit",
   决策: "Decisions",
   任务: "Tasks",
