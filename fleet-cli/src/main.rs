@@ -193,6 +193,17 @@ enum Commands {
         /// Next P label for --plan, e.g. `P4` (optional).
         #[arg(long)]
         next: Option<String>,
+        /// Pin the successor's model, e.g. `claude-opus-4-8[1m]`. Overrides the
+        /// auto-inherited model — otherwise recovered from Fleet's launch-spec or,
+        /// for sessions Fleet did not launch, the transcript's most recent turn,
+        /// which is unreliable when that turn ran on a rate-limit fallback. The
+        /// bracketed suffix (`[1m]`) is passed through verbatim.
+        #[arg(long)]
+        model: Option<String>,
+        /// Pin the successor's reasoning effort (e.g. low|medium|high|max).
+        /// Overrides the value otherwise inherited from CLAUDE_EFFORT.
+        #[arg(long)]
+        effort: Option<String>,
         #[command(subcommand)]
         action: Option<HandoffCommands>,
     },
@@ -583,8 +594,17 @@ fn main() {
             note,
             plan,
             next,
+            model,
+            effort,
             action,
-        } => commands::handoff::cmd_handoff(note.as_deref(), plan.as_deref(), next.as_deref(), action),
+        } => commands::handoff::cmd_handoff(
+            note.as_deref(),
+            plan.as_deref(),
+            next.as_deref(),
+            model.as_deref(),
+            effort.as_deref(),
+            action,
+        ),
         Commands::Loop { action } => commands::loop_cmd::cmd_loop(action),
         Commands::PrdDiscipline { action } => match action {
             PrdDisciplineCommands::Apply { title, locale } => {
