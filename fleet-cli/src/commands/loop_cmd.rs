@@ -91,6 +91,14 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 .as_deref()
                 .and_then(claw_fleet_core::session::resolve_session_model_spec);
             let effort = std::env::var("CLAUDE_EFFORT").ok().filter(|e| !e.trim().is_empty());
+            // Fleet stamps `FLEET_AGENT_SOURCE` on the sessions it launches
+            // (codex sets it to "codex"; claude sessions have no stamp). Absent →
+            // None, which `fire_once` resolves to the claude source — so a loop
+            // created from a codex session wakes up as codex, matching handoff.
+            let agent_source = std::env::var("FLEET_AGENT_SOURCE")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
 
             match agent_loop::create(
                 &ws,
@@ -99,6 +107,7 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 max,
                 model.as_deref(),
                 effort.as_deref(),
+                agent_source.as_deref(),
                 sid.as_deref(),
             ) {
                 Ok(rec) => {
