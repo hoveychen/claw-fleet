@@ -168,6 +168,57 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
   });
 });
 
+describe("RelayClient 早 ack(方案 A)", () => {
+  const clients: RelayClient[] = [];
+
+  beforeEach(() => {
+    FakeWs.instances = [];
+    (globalThis as unknown as { window: unknown }).window = windowShim();
+    (globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWs;
+  });
+
+  afterEach(() => {
+    for (const c of clients.splice(0)) c.close();
+  });
+
+  it("收到 ack 触发 onAck，但 promise 仍待 reply 才 resolve", async () => {
+    const { client, ws } = await connected(clients);
+    let acked = false;
+    const p = client.request<{ ok: boolean }>("spawn_session", {}, undefined, () => {
+      acked = true;
+    });
+    let settled: unknown = "PENDING";
+    p.then((v) => (settled = v)).catch(() => (settled = "REJECTED"));
+    await tick();
+    const reqId = await sentReqId(ws);
+
+    // 早 ack 到达：onAck 触发，但 promise 不 resolve（仍等最终 reply）。
+    ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
+    await tick();
+    expect(acked).toBe(true);
+    expect(settled).toBe("PENDING");
+
+    // 最终 reply 到达才 resolve。
+    ws.deliver(await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: { ok: true } }));
+    await expect(p).resolves.toEqual({ ok: true });
+  });
+
+  it("重复 ack 只触发一次 onAck", async () => {
+    const { client, ws } = await connected(clients);
+    let count = 0;
+    const p = client.request("spawn_session", {}, undefined, () => {
+      count++;
+    });
+    p.catch(() => {});
+    await tick();
+    const reqId = await sentReqId(ws);
+    ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
+    ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
+    await tick();
+    expect(count).toBe(1);
+  });
+});
+
 // 一个请求可能因为两种完全不同的原因失败，调用方的正确反应也完全相反：
 //   - 桌面端明确回了 ok:false（"Workspace directory not found: ..."）——桌面收到了、
 //     判断了、拒绝了。重试/等待都没有意义，该立刻把错误摊给用户。
