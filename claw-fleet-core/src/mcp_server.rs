@@ -158,18 +158,22 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 }
 
-/// The Claude Code session id of the agent that invoked this MCP tool.
+/// The session id of the agent that invoked this MCP tool, across agent sources.
 ///
-/// Claude Code exposes it to MCP stdio servers via the `CLAUDE_CODE_SESSION_ID`
-/// environment variable (verified empirically: the value equals the transcript
-/// UUID, e.g. `~/.claude/projects/<proj>/<uuid>.jsonl`, which is exactly what
-/// `session::parse_session_info` keys `SessionInfo.id` on). Returning a real id
-/// lets the Fleet desktop decision panel resolve which session a `fleet__ask` /
-/// `fleet__render_a2ui` card belongs to, so its inline SessionDetail side column
-/// can open — mirroring the v1 hook-driven elicitation path, where the session
-/// id arrives over the hook's stdin payload instead of the environment.
+/// For **Claude Code** the id arrives via `CLAUDE_CODE_SESSION_ID` (verified
+/// empirically: the value equals the transcript UUID, e.g.
+/// `~/.claude/projects/<proj>/<uuid>.jsonl`, which is exactly what
+/// `session::parse_session_info` keys `SessionInfo.id` on). For **Codex** — which
+/// exposes no session-id env of its own — Fleet stamps the MCP server's env at
+/// spawn: a resume carries `FLEET_SESSION_ID` (the thread id, known up front), a
+/// new spawn carries `FLEET_CODEX_LAUNCH_TOKEN` (resolved to the thread id once
+/// `thread.started` lands). All three collapse into the one precedence in
+/// [`crate::codex_launch::resolve_fleet_session_id_from_env`], shared with the
+/// `fleet` CLI. Returning a real id lets the desktop decision panel resolve which
+/// session a `fleet__ask` / `fleet__render_a2ui` card belongs to so its inline
+/// SessionDetail side column can open.
 fn current_session_id() -> String {
-    std::env::var("CLAUDE_CODE_SESSION_ID").unwrap_or_default()
+    crate::codex_launch::resolve_fleet_session_id_from_env().unwrap_or_default()
 }
 
 fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
