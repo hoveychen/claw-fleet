@@ -91,6 +91,58 @@ pub const COST_HAIKU_45: ModelCosts = ModelCosts {
     web_search: 0.01,
 };
 
+// --- OpenAI GPT / Codex tiers ---------------------------------------------
+// Used by Codex CLI sessions (see `codex_source.rs`). Codex rollouts report
+// the model as e.g. `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`,
+// `gpt-5.3-codex`. Prices per 1M tokens from
+// https://developers.openai.com/api/docs/pricing (verified 2026-07-15).
+// `cache_read` is input * 0.10 (90% cache discount); `cache_write` is
+// input * 1.25 (explicit cache-write surcharge) — Codex rollouts don't
+// report cache-write tokens so `cache_write` is currently unused for Codex.
+// `web_search` is 0 (not applicable to the Codex token accounting we parse).
+//
+// NOTE: OpenAI's ">272K input tokens per request => 2x input / 1.5x output"
+// surcharge is deliberately NOT modeled here. Codex rollouts only give
+// cumulative per-session token totals, not per-request counts, so applying a
+// per-request multiplier to the cumulative sum would over-count. See
+// `codex_source::codex_cost_and_input`.
+
+// gpt-5.6-sol (and bare gpt-5.6): $5 / $30 per Mtok.
+pub const COST_GPT_SOL: ModelCosts = ModelCosts {
+    input: 5.0,
+    output: 30.0,
+    cache_write: 6.25,
+    cache_read: 0.50,
+    web_search: 0.0,
+};
+
+// gpt-5.6-terra: $2.50 / $15 per Mtok.
+pub const COST_GPT_TERRA: ModelCosts = ModelCosts {
+    input: 2.50,
+    output: 15.0,
+    cache_write: 3.125,
+    cache_read: 0.25,
+    web_search: 0.0,
+};
+
+// gpt-5.6-luna: $1 / $6 per Mtok.
+pub const COST_GPT_LUNA: ModelCosts = ModelCosts {
+    input: 1.0,
+    output: 6.0,
+    cache_write: 1.25,
+    cache_read: 0.10,
+    web_search: 0.0,
+};
+
+// gpt-5.3-codex (and other `*-codex` variants): $1.75 / $14 per Mtok.
+pub const COST_GPT_CODEX: ModelCosts = ModelCosts {
+    input: 1.75,
+    output: 14.0,
+    cache_write: 2.1875,
+    cache_read: 0.175,
+    web_search: 0.0,
+};
+
 const DEFAULT_UNKNOWN_COST: ModelCosts = COST_TIER_5_25;
 
 /// Look up pricing for a Claude model name.
@@ -103,6 +155,25 @@ const DEFAULT_UNKNOWN_COST: ModelCosts = COST_TIER_5_25;
 /// Claude Code's behavior.
 pub fn get_model_costs(model: &str) -> ModelCosts {
     let m = model.to_ascii_lowercase();
+
+    // OpenAI GPT / Codex models (Codex CLI sessions). Checked first because
+    // no Claude model name contains "gpt", "terra", "luna", or "codex", so
+    // these branches never shadow a Claude lookup. Order within the block:
+    // most specific tier suffix first, then bare `gpt-*` -> Sol (the
+    // conservative, most-expensive gpt-5.6 tier) so an unrecognised gpt
+    // model never silently prices below what it likely costs.
+    if m.contains("gpt") || m.contains("codex") {
+        if m.contains("terra") {
+            return COST_GPT_TERRA;
+        }
+        if m.contains("luna") {
+            return COST_GPT_LUNA;
+        }
+        if m.contains("codex") {
+            return COST_GPT_CODEX;
+        }
+        return COST_GPT_SOL;
+    }
 
     // Fable 5 and Mythos 5 share the $10/$50 tier. Substring match tolerates
     // `claude-fable-5`, the `fable` alias, `claude-mythos-preview`,
@@ -291,6 +362,37 @@ mod tests {
         assert!((cost_40 - 90.0).abs() < 1e-9, "opus-4.0 priced wrong: {cost_40}");
         let cost_41 = turn_cost_usd("claude-opus-4-1-20250805", &usage);
         assert!((cost_41 - 90.0).abs() < 1e-9, "opus-4.1 priced wrong: {cost_41}");
+    }
+
+    #[test]
+    fn gpt_codex_tiers() {
+        // 1M input + 1M output per tier.
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            ..Default::default()
+        };
+        // Sol: $5 + $30 = $35. Bare gpt-5.6 also routes to Sol.
+        for model in ["gpt-5.6-sol", "gpt-5.6", "GPT-5.6-Sol"] {
+            let cost = turn_cost_usd(model, &usage);
+            assert!((cost - 35.0).abs() < 1e-9, "{model} -> {cost}, want 35.0");
+        }
+        // Terra: $2.50 + $15 = $17.50.
+        assert!((turn_cost_usd("gpt-5.6-terra", &usage) - 17.50).abs() < 1e-9);
+        // Luna: $1 + $6 = $7.
+        assert!((turn_cost_usd("gpt-5.6-luna", &usage) - 7.0).abs() < 1e-9);
+        // Codex tier: $1.75 + $14 = $15.75.
+        assert!((turn_cost_usd("gpt-5.3-codex", &usage) - 15.75).abs() < 1e-9);
+    }
+
+    #[test]
+    fn gpt_cached_input_discount() {
+        // Sol with 1M cache-read tokens = 1M * $0.50/M = $0.50 (90% off $5).
+        let usage = TurnUsage {
+            cache_read_tokens: 1_000_000,
+            ..Default::default()
+        };
+        assert!((turn_cost_usd("gpt-5.6-sol", &usage) - 0.50).abs() < 1e-9);
     }
 
     #[test]
