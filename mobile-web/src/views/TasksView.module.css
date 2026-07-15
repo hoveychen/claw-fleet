@@ -253,6 +253,13 @@
   flex-shrink: 0;
 }
 
+/* Provider mark (Claude / Codex) — dim so it reads as a badge, not a focal point. */
+.sourceIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}
+
 .statusDot[data-tone="working"] {
   background: var(--color-accent);
   animation: pulse 1.4s ease-in-out infinite;
