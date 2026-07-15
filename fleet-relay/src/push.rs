@@ -135,6 +135,46 @@ impl Push {
         Ok(())
     }
 
+    /// Remove a subscription from the channel — the mirror of [`subscribe`].
+    /// A harmony subscription (`platform:"harmony"`) is matched by `openId`; a
+    /// web subscription by `endpoint`. Removing a subscription that isn't
+    /// present is a no-op (`Ok`). When the last subscription goes, the channel
+    /// file is deleted (via `save_subs`).
+    pub fn unsubscribe(&self, channel: &str, subscription: &Value) -> Result<(), String> {
+        if subscription.get("platform").and_then(Value::as_str) == Some("harmony") {
+            let open_id = subscription
+                .get("openId")
+                .and_then(Value::as_str)
+                .ok_or("harmony unsubscribe has no openId")?
+                .to_string();
+            let _g = self.file_lock.lock().unwrap();
+            let mut subs = self.load_subs(channel);
+            let before = subs.len();
+            subs.retain(|s| {
+                !(s.get("platform").and_then(Value::as_str) == Some("harmony")
+                    && s.get("openId").and_then(Value::as_str) == Some(open_id.as_str()))
+            });
+            if subs.len() != before {
+                self.save_subs(channel, &subs);
+            }
+            return Ok(());
+        }
+
+        let endpoint = subscription
+            .get("endpoint")
+            .and_then(Value::as_str)
+            .ok_or("unsubscribe has no endpoint")?
+            .to_string();
+        let _g = self.file_lock.lock().unwrap();
+        let mut subs = self.load_subs(channel);
+        let before = subs.len();
+        subs.retain(|s| s.get("endpoint").and_then(Value::as_str) != Some(endpoint.as_str()));
+        if subs.len() != before {
+            self.save_subs(channel, &subs);
+        }
+        Ok(())
+    }
+
     /// True if the subscription is a HarmonyOS Push Kit registration.
     fn is_harmony(sub: &Value) -> bool {
         sub.get("platform").and_then(Value::as_str) == Some("harmony")
@@ -307,5 +347,68 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let push = mk_push(dir.path());
         assert!(push.subscribe("ch", json!({ "platform": "harmony" })).is_err());
+    }
+
+    #[test]
+    fn unsubscribe_removes_web_by_endpoint_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        push.subscribe("ch", mk_sub("https://push/a")).unwrap();
+        push.subscribe("ch", mk_sub("https://push/b")).unwrap();
+        push.unsubscribe("ch", &mk_sub("https://push/a")).unwrap();
+        assert_eq!(push.subscription_count("ch"), 1);
+
+        // survives a fresh instance re-reading from disk
+        let push2 =
+            Push::new(Push::generate_private_key(), "mailto:t@example.com".into(), dir.path())
+                .unwrap();
+        assert_eq!(push2.subscription_count("ch"), 1);
+    }
+
+    #[test]
+    fn unsubscribe_removes_harmony_by_open_id_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        push.subscribe("ch", mk_harmony("OID-A")).unwrap();
+        push.subscribe("ch", mk_harmony("OID-B")).unwrap();
+        push.subscribe("ch", mk_sub("https://push/a")).unwrap();
+        push.unsubscribe("ch", &mk_harmony("OID-A")).unwrap();
+        assert_eq!(push.subscription_count("ch"), 2); // OID-B + web survive
+        // the surviving harmony sub is OID-B, and the web sub is untouched
+        let subs = push.load_subs("ch");
+        assert!(subs
+            .iter()
+            .any(|s| s.get("openId").and_then(Value::as_str) == Some("OID-B")));
+        assert!(subs
+            .iter()
+            .any(|s| s.get("endpoint").and_then(Value::as_str) == Some("https://push/a")));
+    }
+
+    #[test]
+    fn unsubscribe_absent_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        push.subscribe("ch", mk_sub("https://push/a")).unwrap();
+        push.unsubscribe("ch", &mk_sub("https://push/gone")).unwrap();
+        push.unsubscribe("ch", &mk_harmony("OID-gone")).unwrap();
+        assert_eq!(push.subscription_count("ch"), 1);
+    }
+
+    #[test]
+    fn unsubscribe_last_sub_deletes_channel_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        push.subscribe("ch", mk_sub("https://push/a")).unwrap();
+        push.unsubscribe("ch", &mk_sub("https://push/a")).unwrap();
+        assert_eq!(push.subscription_count("ch"), 0);
+        assert!(!push.subs_path("ch").exists(), "empty channel file is removed");
+    }
+
+    #[test]
+    fn unsubscribe_rejects_malformed() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        assert!(push.unsubscribe("ch", &json!({})).is_err());
+        assert!(push.unsubscribe("ch", &json!({ "platform": "harmony" })).is_err());
     }
 }
