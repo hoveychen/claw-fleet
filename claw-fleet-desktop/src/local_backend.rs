@@ -265,6 +265,14 @@ impl LocalBackend {
         let auto_resume_failures: Arc<Mutex<HashMap<String, u32>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
+        // Per-session server-error retry count, incremented each time a retry is
+        // FIRED (not on exit) and reset once the session leaves ServerErrored.
+        // Caps retries per error episode at `max_server_error_retries` so a
+        // turn that keeps erroring — or a server that stays down — stops
+        // re-firing forever, independent of the resume process's exit code.
+        let auto_resume_server_errors: Arc<Mutex<HashMap<String, u32>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
         // Cancellation flag for long-running threads. Flipped to false by `Drop`
         // so old threads exit when the backend is replaced.
         let running = Arc::new(AtomicBool::new(true));
@@ -372,6 +380,7 @@ impl LocalBackend {
         let ar2 = auto_resume_last_fire.clone();
         let arif2 = auto_resume_in_flight.clone();
         let arfail2 = auto_resume_failures.clone();
+        let arse2 = auto_resume_server_errors.clone();
 
         // Pre-compute each filesystem source's watch dirs for fast path matching.
         let source_watch_dirs: Vec<(usize, Vec<std::path::PathBuf>)> = sources
@@ -475,7 +484,7 @@ impl LocalBackend {
                         &locale2,
                         &llm_config2,
                     );
-                    maybe_fire_auto_resume(&sess2, &ar2, &arif2, &arfail2);
+                    maybe_fire_auto_resume(&sess2, &ar2, &arif2, &arfail2, &arse2);
                     maybe_drain_pending_messages(&sess2);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
@@ -508,6 +517,7 @@ impl LocalBackend {
             let ar3 = auto_resume_last_fire.clone();
             let arif3 = auto_resume_in_flight.clone();
             let arfail3 = auto_resume_failures.clone();
+            let arse3 = auto_resume_server_errors.clone();
 
             // Indices of polling sources — only these need rescanning on each tick.
             let poll_source_indices: HashSet<usize> = sources
@@ -587,7 +597,7 @@ impl LocalBackend {
                         &locale3,
                         &llm_config3,
                     );
-                    maybe_fire_auto_resume(&sess3, &ar3, &arif3, &arfail3);
+                    maybe_fire_auto_resume(&sess3, &ar3, &arif3, &arfail3, &arse3);
                     maybe_drain_pending_messages(&sess3);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
@@ -604,13 +614,14 @@ impl LocalBackend {
             let ar_ar = auto_resume_last_fire.clone();
             let arif_ar = auto_resume_in_flight.clone();
             let arfail_ar = auto_resume_failures.clone();
+            let arse_ar = auto_resume_server_errors.clone();
             let running_ar = running.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(30));
                 if !running_ar.load(Ordering::SeqCst) {
                     break;
                 }
-                maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar, &arfail_ar);
+                maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar, &arfail_ar, &arse_ar);
                 maybe_drain_pending_messages(&sess_ar);
             });
         }
@@ -1482,6 +1493,7 @@ fn maybe_fire_auto_resume(
     last_fire: &Arc<Mutex<HashMap<String, Instant>>>,
     in_flight: &Arc<AtomicUsize>,
     failures: &Arc<Mutex<HashMap<String, u32>>>,
+    server_errors: &Arc<Mutex<HashMap<String, u32>>>,
 ) {
     let config = claw_fleet_core::auto_resume::AutoResumeConfig::load();
     if !config.enabled {
@@ -1592,6 +1604,96 @@ fn maybe_fire_auto_resume(
                 );
             }
             log_debug(&format!("auto_resume: failed for {}: {}", session_id, e));
+        }
+    }
+
+    // ── Transient server_error retries ──────────────────────────────────────
+    // A ServerErrored session resumes immediately (no resets_at wait). Recompute
+    // free slots — the rate-limit fires above may have consumed some — then retry
+    // eligible Fleet-headless sessions, capped per error episode so a turn that
+    // keeps erroring (or a server that stays down) can't re-fire forever.
+    if !config.retry_server_errors {
+        return;
+    }
+    let se_slots = AUTO_RESUME_MAX_CONCURRENT.saturating_sub(in_flight.load(Ordering::SeqCst));
+    if se_slots == 0 {
+        return;
+    }
+    let se_candidates: Vec<(String, String, String)> = {
+        let sess = sessions.lock().unwrap();
+        let mut fire_map = last_fire.lock().unwrap();
+        let mut se_map = server_errors.lock().unwrap();
+        // Reset the retry budget for any session no longer ServerErrored — a
+        // successful retry (or the user resuming) ends the episode, so the next
+        // error starts fresh. Also keeps the map bounded.
+        let errored: std::collections::HashSet<String> = sess
+            .iter()
+            .filter(|s| s.status == claw_fleet_core::session::SessionStatus::ServerErrored)
+            .map(|s| s.id.clone())
+            .collect();
+        se_map.retain(|id, _| errored.contains(id));
+        let max_retries = config.max_server_error_retries;
+        let picked = claw_fleet_core::auto_resume::select_server_error_retries(
+            &sess,
+            &config,
+            // Skip a session that's debounced, already has a resume/turn running,
+            // or has exhausted its per-episode retry budget.
+            |id| {
+                fire_map.get(id).is_some_and(|t| t.elapsed() < debounce)
+                    || se_map.get(id).is_some_and(|&n| n >= max_retries)
+                    || sess.iter().any(|s| s.id == id && s.proc_alive)
+            },
+            se_slots,
+        );
+        for (id, _) in &picked {
+            fire_map.insert(id.clone(), Instant::now());
+            *se_map.entry(id.clone()).or_insert(0) += 1;
+        }
+        picked
+            .into_iter()
+            .map(|(id, ws)| {
+                let source = sess
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| s.agent_source.clone())
+                    .unwrap_or_else(|| "claude-code".to_string());
+                (id, ws, source)
+            })
+            .collect()
+    };
+
+    for (session_id, workspace_path, agent_source) in se_candidates {
+        log_debug(&format!(
+            "server_error_retry: firing for session {} ({}) in {} (in_flight={})",
+            session_id,
+            agent_source,
+            workspace_path,
+            in_flight.load(Ordering::SeqCst)
+        ));
+        in_flight.fetch_add(1, Ordering::SeqCst);
+        let in_flight_done = in_flight.clone();
+        let spawn_result = claw_fleet_core::agent_source::resume_session(
+            &agent_source,
+            &claw_fleet_core::agent_source::ResumeSpec {
+                session_id: session_id.clone(),
+                workspace_path: workspace_path.clone(),
+                prompt: "continue".to_string(),
+                model: None,
+                effort: None,
+                permission_mode: None,
+            },
+            // The per-episode se_map cap (not the failures backoff) bounds these,
+            // so the reaper only needs to release the concurrency slot.
+            Box::new(move |_success| {
+                in_flight_done.fetch_sub(1, Ordering::SeqCst);
+            }),
+        );
+        if let Err(e) = spawn_result {
+            in_flight.fetch_sub(1, Ordering::SeqCst);
+            log_debug(&format!(
+                "server_error_retry: failed for {}: {}",
+                session_id, e
+            ));
         }
     }
 }
