@@ -224,6 +224,67 @@ fn apply_codex_launch_env(cmd: &mut std::process::Command) {
     cmd.env("FLEET_AGENT_SOURCE", FLEET_AGENT_SOURCE_CODEX);
 }
 
+/// Quote a value as a TOML basic string for a Codex `-c key=<value>` override.
+///
+/// Codex parses the `value` of a `-c` override as TOML, falling back to a raw
+/// literal only when the parse fails. An unquoted path usually survives as a
+/// literal, but a value containing spaces / brackets / quotes would be
+/// mis-parsed — so we always emit a properly-escaped TOML basic string, which
+/// parses deterministically regardless of the content.
+fn toml_basic_string(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Args that bridge a Fleet-spawned Codex session to Fleet's Decision Panel
+/// (`fleet__ask` / `fleet__render_a2ui` cards), appended before the `--` prompt
+/// separator by the exec/resume arg builders.
+///
+/// Two pieces, both verified against codex-cli 0.144.4:
+///
+/// 1. **`--dangerously-bypass-approvals-and-sandbox`.** In headless `codex exec`
+///    (stdin = /dev/null, no interactive approval channel), Codex *auto-cancels*
+///    every MCP `tools/call` — the call surfaces as
+///    `error: "user cancelled MCP tool call"` and never reaches the server. Only
+///    with this bypass does the tool call go through, block awaiting the user's
+///    Decision-Panel answer, and relay it back. The bypass ALSO disables Codex's
+///    shell-command sandbox (Codex flags it EXTREMELY DANGEROUS); that trade-off
+///    is accepted deliberately for Fleet-launched headless sessions, which have
+///    no interactive approver anyway.
+///
+/// 2. **`-c mcp_servers.fleet.*` overrides.** Register the `fleet mcp` stdio
+///    server per-invocation (no global `~/.codex/config.toml` mutation — the
+///    Claude analogue mutates `~/.claude.json`, but Codex accepts inline `-c`
+///    overrides so we keep the user's config untouched). `session_env` is passed
+///    as the MCP server's own `env` so `fleet mcp` can attribute the card to
+///    this session and resolve its workspace: a new spawn passes
+///    `FLEET_CODEX_LAUNCH_TOKEN` (the thread id isn't minted yet) + the
+///    workspace as `CLAUDE_PROJECT_DIR`; a resume passes `FLEET_SESSION_ID`
+///    directly (see [`crate::mcp_server`] for the resolution).
+///
+/// Returns empty when no `fleet` binary can be resolved to point Codex at — the
+/// session still runs, just without the Decision-Panel bridge.
+pub fn fleet_decision_card_args(session_env: &[(String, String)]) -> Vec<String> {
+    let Some(fleet) = crate::fleet_cli::resolve_fleet_binary() else {
+        crate::log_debug(
+            "fleet_decision_card_args: no fleet binary resolved; skipping Decision-Panel bridge",
+        );
+        return Vec::new();
+    };
+    let fleet = fleet.to_string_lossy().into_owned();
+    let mut args = vec![
+        "--dangerously-bypass-approvals-and-sandbox".to_string(),
+        "-c".to_string(),
+        format!("mcp_servers.fleet.command={}", toml_basic_string(&fleet)),
+        "-c".to_string(),
+        format!("mcp_servers.fleet.args=[{}]", toml_basic_string("mcp")),
+    ];
+    for (k, v) in session_env {
+        args.push("-c".to_string());
+        args.push(format!("mcp_servers.fleet.env.{}={}", k, toml_basic_string(v)));
+    }
+    args
+}
+
 /// Build the `codex exec` argv for a headless spawn.
 ///
 /// `workspace_path` is passed to Codex via `-C` (Codex's own working-dir flag)
@@ -235,11 +296,16 @@ fn apply_codex_launch_env(cmd: &mut std::process::Command) {
 /// Effort maps to Codex's `-c model_reasoning_effort=<value>` config override
 /// (Codex has no `--effort` flag). Validation of the value against Codex's
 /// accepted set is left to Codex; blank model/effort are dropped.
+///
+/// `pre_prompt_args` (e.g. [`fleet_decision_card_args`]) are inserted verbatim
+/// **before** the `--` separator, so they are parsed as flags and never as part
+/// of the prompt. Pass an empty slice for none.
 pub fn build_codex_exec_args(
     workspace_path: &str,
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    pre_prompt_args: &[String],
 ) -> Vec<String> {
     let mut args = vec![
         "exec".to_string(),
@@ -256,7 +322,9 @@ pub fn build_codex_exec_args(
         args.push("-c".to_string());
         args.push(format!("model_reasoning_effort={e}"));
     }
-    // Everything after `--` is the prompt, verbatim.
+    // Flags (bypass + MCP overrides) must precede `--`; everything after `--`
+    // is the prompt, verbatim.
+    args.extend(pre_prompt_args.iter().cloned());
     args.push("--".to_string());
     args.push(prompt.to_string());
     args
@@ -315,11 +383,21 @@ pub fn spawn_new_codex_session(
             .map_err(|e| format!("create stderr log dir {}: {e}", parent.display()))?;
     }
 
-    let args = build_codex_exec_args(&workspace_path, prompt, model, effort);
-
     // Token the child reads back (via `FLEET_CODEX_LAUNCH_TOKEN`) to learn its
     // own thread id once `thread.started` lands and we write the note below.
     let launch_token = uuid::Uuid::new_v4().to_string();
+
+    // Bridge this session to Fleet's Decision Panel: the thread id isn't minted
+    // yet, so the `fleet mcp` server is handed the launch token (resolved back to
+    // the thread id by `mcp_server`) plus the workspace as `CLAUDE_PROJECT_DIR`.
+    let decision_args = fleet_decision_card_args(&[
+        (
+            FLEET_CODEX_LAUNCH_TOKEN_ENV.to_string(),
+            launch_token.clone(),
+        ),
+        ("CLAUDE_PROJECT_DIR".to_string(), workspace_path.clone()),
+    ]);
+    let args = build_codex_exec_args(&workspace_path, prompt, model, effort, &decision_args);
 
     crate::log_debug(&format!(
         "new_codex_session: {} exec … (cwd={}, model={:?}, effort={:?}, token={})",
@@ -461,11 +539,15 @@ pub fn spawn_new_codex_session(
 /// builder there is **no `-C`** — `codex exec resume` has no working-dir flag;
 /// it scopes by the child's cwd, and the explicit thread id takes precedence
 /// over cwd filtering anyway. Blank model/effort are dropped.
+///
+/// `pre_prompt_args` (e.g. [`fleet_decision_card_args`]) are inserted before the
+/// `--` separator, same as the spawn builder. Pass an empty slice for none.
 pub fn build_codex_resume_args(
     session_id: &str,
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    pre_prompt_args: &[String],
 ) -> Vec<String> {
     let mut args = vec![
         "exec".to_string(),
@@ -482,6 +564,7 @@ pub fn build_codex_resume_args(
         args.push("-c".to_string());
         args.push(format!("model_reasoning_effort={e}"));
     }
+    args.extend(pre_prompt_args.iter().cloned());
     args.push("--".to_string());
     args.push(prompt.to_string());
     args
@@ -528,7 +611,14 @@ pub fn resume_codex_session(
             .map_err(|e| format!("create stderr log dir {}: {e}", parent.display()))?;
     }
 
-    let args = build_codex_resume_args(session_id, prompt, model, effort);
+    // Bridge to Fleet's Decision Panel: a resume already knows its thread id, so
+    // hand `fleet mcp` the session id directly (no launch-token indirection) plus
+    // the workspace as `CLAUDE_PROJECT_DIR`.
+    let decision_args = fleet_decision_card_args(&[
+        ("FLEET_SESSION_ID".to_string(), session_id.to_string()),
+        ("CLAUDE_PROJECT_DIR".to_string(), workspace_path.clone()),
+    ]);
+    let args = build_codex_resume_args(session_id, prompt, model, effort, &decision_args);
 
     // A resume may carry its own `--model` / `--effort`; record them so the
     // launch note describes what the session is running *now* (same as the
@@ -703,7 +793,7 @@ mod tests {
 
     #[test]
     fn arg_builder_minimal_has_exec_json_cwd_and_prompt_after_dashdash() {
-        let args = build_codex_exec_args("/ws", "do the thing", None, None);
+        let args = build_codex_exec_args("/ws", "do the thing", None, None, &[]);
         assert_eq!(args[0], "exec");
         assert!(args.contains(&"--json".to_string()));
         // -C <ws>
@@ -718,8 +808,55 @@ mod tests {
     }
 
     #[test]
+    fn toml_basic_string_escapes_backslash_and_quote() {
+        assert_eq!(toml_basic_string("plain"), "\"plain\"");
+        assert_eq!(toml_basic_string("/abs/fleet"), "\"/abs/fleet\"");
+        // A backslash and a double-quote must both be escaped so Codex's TOML
+        // parser reads the value back verbatim (Windows paths, odd names).
+        assert_eq!(toml_basic_string(r#"a\b"#), r#""a\\b""#);
+        assert_eq!(toml_basic_string(r#"a"b"#), r#""a\"b""#);
+    }
+
+    #[test]
+    fn exec_builder_inserts_pre_prompt_args_before_dashdash() {
+        // The bypass flag + `-c mcp_servers.*` overrides MUST land before `--`,
+        // or Codex would swallow them into the prompt. This is the correctness
+        // property fleet_decision_card_args depends on.
+        let pre = vec![
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            "-c".to_string(),
+            "mcp_servers.fleet.command=\"/bin/fleet\"".to_string(),
+        ];
+        let args = build_codex_exec_args("/ws", "the prompt", None, None, &pre);
+        let dd = args.iter().position(|a| a == "--").expect("has --");
+        let bypass = args
+            .iter()
+            .position(|a| a == "--dangerously-bypass-approvals-and-sandbox")
+            .expect("has bypass flag");
+        assert!(bypass < dd, "bypass flag must precede --");
+        assert!(
+            args.iter().position(|a| a.starts_with("mcp_servers.fleet.command")).unwrap() < dd,
+            "mcp override must precede --"
+        );
+        assert_eq!(args.last().unwrap(), "the prompt", "prompt stays last");
+    }
+
+    #[test]
+    fn resume_builder_inserts_pre_prompt_args_before_dashdash() {
+        let pre = vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
+        let args = build_codex_resume_args("tid", "cont", None, None, &pre);
+        let dd = args.iter().position(|a| a == "--").expect("has --");
+        let bypass = args
+            .iter()
+            .position(|a| a == "--dangerously-bypass-approvals-and-sandbox")
+            .expect("has bypass flag");
+        assert!(bypass < dd, "bypass flag must precede --");
+        assert_eq!(args.last().unwrap(), "cont", "prompt stays last");
+    }
+
+    #[test]
     fn arg_builder_maps_model_and_effort() {
-        let args = build_codex_exec_args("/ws", "hi", Some("gpt-5.6-sol"), Some("high"));
+        let args = build_codex_exec_args("/ws", "hi", Some("gpt-5.6-sol"), Some("high"), &[]);
         let mi = args.iter().position(|a| a == "-m").expect("has -m");
         assert_eq!(args[mi + 1], "gpt-5.6-sol");
         // effort → `-c model_reasoning_effort=high`
@@ -732,7 +869,7 @@ mod tests {
 
     #[test]
     fn arg_builder_drops_blank_model_and_effort() {
-        let args = build_codex_exec_args("/ws", "hi", Some("  "), Some(""));
+        let args = build_codex_exec_args("/ws", "hi", Some("  "), Some(""), &[]);
         assert!(!args.contains(&"-m".to_string()));
         assert!(!args.iter().any(|a| a.starts_with("model_reasoning_effort=")));
     }
@@ -885,7 +1022,7 @@ mod tests {
 
     #[test]
     fn resume_arg_builder_minimal_has_exec_resume_id_and_prompt_after_dashdash() {
-        let args = build_codex_resume_args("019f-abc", "keep going", None, None);
+        let args = build_codex_resume_args("019f-abc", "keep going", None, None, &[]);
         assert_eq!(args[0], "exec");
         assert_eq!(args[1], "resume");
         assert_eq!(args[2], "019f-abc", "thread id is resume's first positional");
@@ -902,7 +1039,7 @@ mod tests {
 
     #[test]
     fn resume_arg_builder_maps_model_and_effort() {
-        let args = build_codex_resume_args("tid", "hi", Some("gpt-5.6-sol"), Some("high"));
+        let args = build_codex_resume_args("tid", "hi", Some("gpt-5.6-sol"), Some("high"), &[]);
         let mi = args.iter().position(|a| a == "-m").expect("has -m");
         assert_eq!(args[mi + 1], "gpt-5.6-sol");
         let ci = args
@@ -914,7 +1051,7 @@ mod tests {
 
     #[test]
     fn resume_arg_builder_drops_blank_model_and_effort() {
-        let args = build_codex_resume_args("tid", "hi", Some(" "), Some(""));
+        let args = build_codex_resume_args("tid", "hi", Some(" "), Some(""), &[]);
         assert!(!args.contains(&"-m".to_string()));
         assert!(!args.iter().any(|a| a.starts_with("model_reasoning_effort=")));
     }
