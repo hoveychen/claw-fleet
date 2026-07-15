@@ -128,7 +128,14 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
                     log::warn!("push subscribe rejected on {}…: {e}", &channel[..12]);
                 }
             }
-            InFrame::Notify { .. } | InFrame::PushSubscribe { .. } => {
+            InFrame::PushUnsubscribe { subscription } if role == Role::Client => {
+                if let Err(e) = state.push.unsubscribe(&channel, &subscription) {
+                    log::warn!("push unsubscribe rejected on {}…: {e}", &channel[..12]);
+                }
+            }
+            InFrame::Notify { .. }
+            | InFrame::PushSubscribe { .. }
+            | InFrame::PushUnsubscribe { .. } => {
                 log::debug!("{role:?} sent a frame reserved for the opposite role; dropped");
             }
         }
