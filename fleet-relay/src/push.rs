@@ -32,6 +32,10 @@ pub struct Push {
     subs_dir: PathBuf,
     /// Serializes read-modify-write cycles on the subscription files.
     file_lock: Mutex<()>,
+    /// Reused across notifies — the hyper client keeps a connection pool, so
+    /// building it once (instead of per-notify) lets keep-alive connections to
+    /// the push services be reused.
+    web_client: HyperWebPushClient,
 }
 
 impl Push {
@@ -56,6 +60,7 @@ impl Push {
             subject,
             subs_dir,
             file_lock: Mutex::new(()),
+            web_client: HyperWebPushClient::new(),
         })
     }
 
@@ -202,47 +207,63 @@ impl Push {
         }
         // Web Push body is JSON; harmony uses the typed payload directly. A
         // failed encode only disables the web leg, not the harmony one.
+        // `as_deref()` yields an `Option<&[u8]>` (Copy), so every per-sub future
+        // can capture it by value while `web_body` stays owned on this stack.
         let web_body = serde_json::to_vec(payload).ok();
-        let client = HyperWebPushClient::new();
-        let mut dead: Vec<String> = Vec::new();
-        // Harmony OpenIDs Push Kit reported as permanently invalid / unsubscribed
-        // (see `harmony_push::DEAD_OPENID_CODES`). Kept separate from web `dead`
-        // because harmony subs are matched by openId, not endpoint.
-        let mut dead_harmony: Vec<String> = Vec::new();
-        for sub in &subs {
+        let web_body = web_body.as_deref();
+
+        // Fan out concurrently: one future per subscription, all polled together
+        // in THIS task (join_all, no spawn) so they can borrow `&self` / payload
+        // / harmony. Wall-clock becomes the slowest single send, not their sum.
+        let outcomes = futures_util::future::join_all(subs.iter().map(|sub| async move {
             if Self::is_harmony(sub) {
                 // 元服务 account service-notification path. No-op when the
                 // channel is disabled (creds absent → harmony is None).
                 let (Some(hp), Some(open_id)) =
                     (harmony, sub.get("openId").and_then(Value::as_str))
                 else {
-                    continue;
+                    return SendOutcome::Ok;
                 };
-                match hp.send(open_id, payload).await {
-                    Ok(()) => {}
+                return match hp.send(open_id, payload).await {
+                    Ok(()) => SendOutcome::Ok,
                     Err(SendError::DeadOpenId(detail)) => {
                         log::info!("harmony openId dead on channel {channel}, pruning: {detail}");
-                        dead_harmony.push(open_id.to_string());
+                        SendOutcome::DeadHarmony(open_id.to_string())
                     }
                     Err(SendError::Transient(detail)) => {
                         log::warn!("harmony push failed on channel {channel}: {detail}");
+                        SendOutcome::Ok
                     }
-                }
-                continue;
+                };
             }
-            let Some(body) = web_body.as_deref() else { continue };
+            let Some(body) = web_body else { return SendOutcome::Ok };
             let info: SubscriptionInfo = match serde_json::from_value(sub.clone()) {
                 Ok(i) => i,
-                Err(_) => continue,
+                Err(_) => return SendOutcome::Ok,
             };
-            match self.send_one(&client, &info, body).await {
-                Ok(()) => {}
+            match self.send_one(&info, body).await {
+                Ok(()) => SendOutcome::Ok,
                 Err(WebPushError::EndpointNotValid(_) | WebPushError::EndpointNotFound(_)) => {
-                    dead.push(info.endpoint.clone());
+                    SendOutcome::DeadWeb(info.endpoint.clone())
                 }
                 Err(e) => {
                     log::warn!("web push to {} failed: {e}", info.endpoint);
+                    SendOutcome::Ok
                 }
+            }
+        }))
+        .await;
+
+        let mut dead: Vec<String> = Vec::new();
+        // Harmony OpenIDs Push Kit reported as permanently invalid / unsubscribed
+        // (see `harmony_push::DEAD_OPENID_CODES`). Kept separate from web `dead`
+        // because harmony subs are matched by openId, not endpoint.
+        let mut dead_harmony: Vec<String> = Vec::new();
+        for outcome in outcomes {
+            match outcome {
+                SendOutcome::Ok => {}
+                SendOutcome::DeadWeb(endpoint) => dead.push(endpoint),
+                SendOutcome::DeadHarmony(open_id) => dead_harmony.push(open_id),
             }
         }
         if !dead.is_empty() || !dead_harmony.is_empty() {
@@ -282,7 +303,6 @@ impl Push {
 
     async fn send_one(
         &self,
-        client: &HyperWebPushClient,
         info: &SubscriptionInfo,
         body: &[u8],
     ) -> Result<(), WebPushError> {
@@ -291,8 +311,17 @@ impl Push {
         let mut msg = WebPushMessageBuilder::new(info);
         msg.set_payload(ContentEncoding::Aes128Gcm, body);
         msg.set_vapid_signature(sig.build()?);
-        client.send(msg.build()?).await
+        self.web_client.send(msg.build()?).await
     }
+}
+
+/// Per-subscription result of a notify fan-out, collected after all sends
+/// complete concurrently. A dead entry drives pruning (web by endpoint, harmony
+/// by openId); `Ok` covers both success and kept-transient failures.
+enum SendOutcome {
+    Ok,
+    DeadWeb(String),
+    DeadHarmony(String),
 }
 
 #[cfg(test)]
