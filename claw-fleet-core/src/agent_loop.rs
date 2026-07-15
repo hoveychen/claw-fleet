@@ -77,6 +77,14 @@ pub struct LoopRecord {
     /// Session that registered the loop, for provenance.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub created_by_session: Option<String>,
+    /// Agent source each iteration is spawned on — the api name Fleet routes by
+    /// (`"claude"` / `"codex"`), inherited from the session that created the loop
+    /// so a codex loop wakes up as codex, not silently as claude. `None` = the
+    /// historical default (claude), for records written before codex loops
+    /// existed. See [`fire_once`], which routes through
+    /// [`crate::agent_source::spawn_session`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub agent_source: Option<String>,
     /// Most recent iteration Fleet spawned.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub last_session_id: Option<String>,
@@ -172,6 +180,7 @@ pub fn create(
     max_iterations: Option<u32>,
     model: Option<&str>,
     effort: Option<&str>,
+    agent_source: Option<&str>,
     created_by_session: Option<&str>,
 ) -> Result<LoopRecord, String> {
     let dir = loops_dir().ok_or("cannot determine home dir")?;
@@ -183,6 +192,7 @@ pub fn create(
         max_iterations,
         model,
         effort,
+        agent_source,
         created_by_session,
         &uuid::Uuid::new_v4().to_string()[..8],
         now_ms(),
@@ -198,6 +208,7 @@ fn create_in(
     max_iterations: Option<u32>,
     model: Option<&str>,
     effort: Option<&str>,
+    agent_source: Option<&str>,
     created_by_session: Option<&str>,
     id: &str,
     now: u64,
@@ -228,6 +239,7 @@ fn create_in(
         generation: 0,
         created: now,
         created_by_session: created_by_session.map(str::to_string),
+        agent_source: agent_source.filter(|s| !blank(s)).map(str::to_string),
         last_session_id: None,
     };
     write_record(dir, &rec)?;
@@ -431,10 +443,15 @@ fn humanize_secs(secs: u64) -> String {
     }
 }
 
-/// Signature of the session spawner, matching
-/// [`crate::session_launch::spawn_new_session_with_entrypoint`] — injected so the
-/// fire path is testable without launching a real `claude`.
+/// Signature of the session spawner — injected so the fire path is testable
+/// without launching a real agent. The first argument is the loop's
+/// `agent_source` (api name: `"claude"` / `"codex"`); the real spawner routes on
+/// it via [`crate::agent_source::spawn_session`], mirroring the handoff relay's
+/// `spawn_successor_by_source`, so a codex loop spawns codex iterations. The
+/// remaining arguments match
+/// [`crate::session_launch::spawn_new_session_with_entrypoint`].
 type SpawnFn<'a> = dyn Fn(
+        &str,
         &str,
         &str,
         Option<&str>,
@@ -454,8 +471,24 @@ type SpawnFn<'a> = dyn Fn(
 /// wedges or doubles. The claimed record's advanced schedule stands either way.
 pub fn fire_once(id: &str, generation: u64) -> Result<LoopRecord, ClaimError> {
     let dir = loops_dir().ok_or(ClaimError::Gone)?;
-    fire_once_in(&dir, id, generation, now_ms(), &move |ws, prompt, model, effort, perm, ep| {
-        crate::session_launch::spawn_new_session_with_entrypoint(ws, prompt, model, effort, perm, ep)
+    fire_once_in(&dir, id, generation, now_ms(), &move |source, ws, prompt, model, effort, perm, ep| {
+        // Route by the loop's agent source so a codex loop wakes up as codex,
+        // not silently as claude. Blank/"claude" resolves to the Claude source
+        // inside `spawn_session`. The entrypoint stamp (LOOP_ENTRYPOINT) is
+        // honoured by the Claude source; the codex source ignores it and carries
+        // its Fleet-owned marker via the launch env (see `codex_launch`).
+        crate::agent_source::spawn_session(
+            source,
+            &crate::agent_source::SpawnSpec {
+                workspace_path: ws.to_string(),
+                prompt: prompt.to_string(),
+                model: model.map(str::to_string),
+                effort: effort.map(str::to_string),
+                permission_mode: perm.map(str::to_string),
+                session_id: None,
+                entrypoint: ep.to_string(),
+            },
+        )
     })
 }
 
@@ -469,6 +502,8 @@ fn fire_once_in(
     let claimed = claim_fire_in(dir, id, generation, now)?;
     let prompt = compose_iteration_prompt(&claimed);
     match spawn(
+        // `None` agent_source → "claude" (legacy records / claude loops).
+        claimed.agent_source.as_deref().unwrap_or("claude"),
         &claimed.workspace_path,
         &prompt,
         claimed.model.as_deref(),
@@ -643,7 +678,7 @@ mod tests {
     }
 
     fn make(d: &Path, id: &str, now: u64) -> LoopRecord {
-        create_in(d, "/ws", "check the deploy", 300, None, None, None, Some("s1"), id, now)
+        create_in(d, "/ws", "check the deploy", 300, None, None, None, None, Some("s1"), id, now)
             .unwrap()
     }
 
@@ -684,11 +719,11 @@ mod tests {
     #[test]
     fn create_rejects_empty_prompt_and_zero_iterations() {
         let d = dir();
-        assert!(create_in(d.path(), "/ws", "  ", 300, None, None, None, None, "x", 1)
+        assert!(create_in(d.path(), "/ws", "  ", 300, None, None, None, None, None, "x", 1)
             .unwrap_err()
             .contains("prompt is required"));
         assert!(
-            create_in(d.path(), "/ws", "p", 300, Some(0), None, None, None, "x", 1)
+            create_in(d.path(), "/ws", "p", 300, Some(0), None, None, None, None, "x", 1)
                 .unwrap_err()
                 .contains("at least 1")
         );
@@ -781,7 +816,7 @@ mod tests {
     #[test]
     fn a_bounded_loop_retires_itself_on_the_final_iteration() {
         let d = dir();
-        create_in(d.path(), "/ws", "twice", 60, Some(2), None, None, None, "l1", 0).unwrap();
+        create_in(d.path(), "/ws", "twice", 60, Some(2), None, None, None, None, "l1", 0).unwrap();
         let first = claim_fire_in(d.path(), "l1", 0, 60_000).unwrap();
         assert_eq!(first.iterations_done, 1);
         assert!(get_in(d.path(), "l1").is_some(), "one iteration left");
@@ -801,7 +836,7 @@ mod tests {
     fn max_iterations_is_clamped_to_the_hard_ceiling() {
         let d = dir();
         let rec =
-            create_in(d.path(), "/ws", "p", 60, Some(99_999), None, None, None, "l1", 0).unwrap();
+            create_in(d.path(), "/ws", "p", 60, Some(99_999), None, None, None, None, "l1", 0).unwrap();
         assert_eq!(rec.max_iterations, Some(MAX_ITERATIONS));
     }
 
@@ -817,7 +852,7 @@ mod tests {
     fn due_loops_selects_only_live_and_due() {
         let d = dir();
         make(d.path(), "soon", 0); // due at 300_000
-        create_in(d.path(), "/ws", "p", 3600, None, None, None, None, "later", 0).unwrap();
+        create_in(d.path(), "/ws", "p", 3600, None, None, None, None, None, "later", 0).unwrap();
         let due = due_loops_in(d.path(), 400_000);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, "soon");
@@ -829,6 +864,7 @@ mod tests {
     /// launched with the right workspace / prompt / model.
     #[derive(Default, Clone)]
     struct SpawnCall {
+        agent_source: String,
         workspace: String,
         prompt: String,
         model: Option<String>,
@@ -838,10 +874,11 @@ mod tests {
     fn ok_spawner<'a>(
         calls: &'a RefCell<Vec<SpawnCall>>,
         sid: &'a str,
-    ) -> impl Fn(&str, &str, Option<&str>, Option<&str>, Option<&str>, &str)
+    ) -> impl Fn(&str, &str, &str, Option<&str>, Option<&str>, Option<&str>, &str)
         -> Result<crate::session_launch::SpawnSessionResponse, String> + 'a {
-        move |ws, prompt, model, _effort, _perm, ep| {
+        move |source, ws, prompt, model, _effort, _perm, ep| {
             calls.borrow_mut().push(SpawnCall {
+                agent_source: source.to_string(),
                 workspace: ws.to_string(),
                 prompt: prompt.to_string(),
                 model: model.map(str::to_string),
@@ -859,7 +896,7 @@ mod tests {
         let d = dir();
         create_in(
             d.path(), "/ws", "check the deploy", 300, None,
-            Some("claude-fable-5"), Some("high"), None, "l1", 0,
+            Some("claude-fable-5"), Some("high"), None, None, "l1", 0,
         )
         .unwrap();
 
@@ -904,7 +941,7 @@ mod tests {
     fn a_spawn_failure_still_advances_the_schedule() {
         let d = dir();
         make(d.path(), "l1", 0);
-        let failing = |_ws: &str, _p: &str, _m: Option<&str>, _e: Option<&str>, _pm: Option<&str>, _ep: &str|
+        let failing = |_src: &str, _ws: &str, _p: &str, _m: Option<&str>, _e: Option<&str>, _pm: Option<&str>, _ep: &str|
             -> Result<crate::session_launch::SpawnSessionResponse, String> { Err("boom".into()) };
         let claimed = fire_once_in(d.path(), "l1", 0, 300_000, &failing).unwrap();
         assert_eq!(claimed.iterations_done, 1);
@@ -931,7 +968,7 @@ mod tests {
     fn reconcile_rearms_only_stranded_loops() {
         let d = dir();
         // "healthy": due in the future — a timer is presumably driving it
-        create_in(d.path(), "/ws", "p", 300, None, None, None, None, "healthy", 1_000_000).unwrap();
+        create_in(d.path(), "/ws", "p", 300, None, None, None, None, None, "healthy", 1_000_000).unwrap();
         // "napping": due, but only just — inside the grace window, timer likely mid-nap
         let mut napping = make(d.path(), "napping", 0);
         napping.next_fire_at = 1_000_000 - 10_000; // 10s overdue < grace
@@ -953,7 +990,7 @@ mod tests {
         let d = dir();
         // exhausted: max 1 iteration, already done — overdue but must not re-arm
         let mut done =
-            create_in(d.path(), "/ws", "p", 60, Some(1), None, None, None, "done", 0).unwrap();
+            create_in(d.path(), "/ws", "p", 60, Some(1), None, None, None, None, "done", 0).unwrap();
         done.iterations_done = 1;
         done.next_fire_at = 0; // very overdue
         write_record(d.path(), &done).unwrap();
@@ -985,6 +1022,7 @@ mod tests {
             Some("claude-fable-5"),
             Some("high"),
             None,
+            None,
             "l1",
             0,
         )
@@ -992,9 +1030,38 @@ mod tests {
         assert_eq!(rec.model.as_deref(), Some("claude-fable-5"));
         assert_eq!(rec.effort.as_deref(), Some("high"));
         // blank strings are not a model
-        let rec = create_in(d.path(), "/ws", "p", 300, None, Some("  "), Some(""), None, "l2", 0)
+        let rec = create_in(d.path(), "/ws", "p", 300, None, Some("  "), Some(""), None, None, "l2", 0)
             .unwrap();
         assert_eq!(rec.model, None);
         assert_eq!(rec.effort, None);
+    }
+
+    /// Gap-1 acceptance: a loop created from a codex session must fire its
+    /// iterations on the *codex* source, not silently on claude. The injected
+    /// spawner records the api name it was routed to; a codex-tagged record must
+    /// route "codex".
+    #[test]
+    fn codex_loop_fires_iterations_on_codex_source() {
+        let d = dir();
+        create_in(d.path(), "/ws", "p", 60, None, None, None, Some("codex"), None, "cx", 0)
+            .unwrap();
+        let calls = RefCell::new(Vec::new());
+        fire_once_in(d.path(), "cx", 0, 300_000, &ok_spawner(&calls, "cx-sid")).unwrap();
+        let calls = calls.into_inner();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].agent_source, "codex", "codex loop must route to codex spawner");
+    }
+
+    /// Companion: a loop with no agent_source (legacy record / claude session)
+    /// defaults to the claude source, preserving pre-codex behaviour.
+    #[test]
+    fn loop_without_source_defaults_to_claude() {
+        let d = dir();
+        create_in(d.path(), "/ws", "p", 60, None, None, None, None, None, "cl", 0).unwrap();
+        assert_eq!(get_in(d.path(), "cl").unwrap().agent_source, None, "no source stored");
+        let calls = RefCell::new(Vec::new());
+        fire_once_in(d.path(), "cl", 0, 300_000, &ok_spawner(&calls, "cl-sid")).unwrap();
+        let calls = calls.into_inner();
+        assert_eq!(calls[0].agent_source, "claude", "absent source falls back to claude");
     }
 }
