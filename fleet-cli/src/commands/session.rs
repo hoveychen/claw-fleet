@@ -78,6 +78,53 @@ pub(crate) fn cmd_session_resume() {
     claw_fleet_core::handoff::cancel_pending(&sid);
 }
 
+/// `fleet session codex-notify <payload…>` — the codex analogue of Claude's
+/// `Stop` hook, invoked via the `-c notify=[fleet,session,codex-notify]` that
+/// Fleet injects on the codex sessions it spawns/resumes. Codex appends the
+/// `agent-turn-complete` JSON payload as the final arg (plus, harmlessly, any
+/// fixed args); we scan for the JSON, and if it is a turn-complete event we fire
+/// the same turn-exit relay the Claude `Stop` hook does — mark idle, consume any
+/// pending `fleet handoff`, re-arm stranded loops. Silent no-op for any other
+/// payload (never blocks or fails codex over a relay problem).
+pub(crate) fn cmd_codex_notify(payload: &[String]) {
+    // Codex appends the JSON as one argv; scan defensively in case fixed args
+    // precede it. The first arg that parses as a turn-complete event wins.
+    let Some(payload_json) = payload
+        .iter()
+        .find(|arg| {
+            claw_fleet_core::codex_launch::parse_agent_turn_complete_thread_id(arg).is_some()
+        })
+        .cloned()
+    else {
+        // Not a turn-complete payload — still chain-forward so the user's notify
+        // sees every event codex would have delivered, then stop.
+        forward_user_notify(payload);
+        return;
+    };
+    let thread_id =
+        claw_fleet_core::codex_launch::parse_agent_turn_complete_thread_id(&payload_json).unwrap();
+    claw_fleet_core::codex_launch::on_codex_turn_exit(&thread_id);
+    // Chain-forward: Fleet's `-c notify` override replaced the user's own notify
+    // for this invocation, so re-invoke the user's command (from config.toml)
+    // with the same payload — their notify still runs.
+    forward_user_notify(payload);
+}
+
+/// Re-invoke the user's original codex `notify` command (if any) with the same
+/// argv codex passed us, so Fleet's notify injection doesn't swallow it.
+/// Fire-and-forget; failures are ignored (a broken user notify must not break
+/// the relay).
+fn forward_user_notify(payload: &[String]) {
+    let Some(cmd) = claw_fleet_core::codex_launch::read_user_codex_notify() else {
+        return;
+    };
+    let (prog, fixed) = cmd.split_first().unwrap(); // read_user_codex_notify never returns empty
+    let _ = std::process::Command::new(prog)
+        .args(fixed)
+        .args(payload)
+        .spawn();
+}
+
 /// The current session's id, for attributing `fleet plan` / `fleet session`
 /// actions. Prefers `FLEET_SESSION_ID` (set by the Fleet supervisor and by the
 /// Codex resume launcher) and falls back to `CLAUDE_CODE_SESSION_ID` (set by
