@@ -62,6 +62,9 @@ export class MockRelayClient extends RelayClient {
   override pushSubscribe(): boolean {
     return true;
   }
+  override pushUnsubscribe(): boolean {
+    return true;
+  }
 
   /** Answering a card just drops it from the list, like a real resolve event. */
   override answer(kind: DecisionKind, id: string): boolean {
