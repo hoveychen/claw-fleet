@@ -1055,8 +1055,9 @@ fn build_session_from_sqlite(
 #[cfg(test)]
 mod tests {
     use super::{
-        codex_rate_limit_state_from_usage, compute_token_stats, extract_context_percent,
-        read_rollout_originator, CodexRateLimitWindow, CodexUsageItem,
+        codex_rate_limit_state_from_rollout, codex_rate_limit_state_from_usage,
+        compute_token_stats, extract_context_percent, read_rollout_originator,
+        CodexRateLimitWindow, CodexUsageItem,
     };
     use serde_json::json;
 
@@ -1233,6 +1234,73 @@ mod tests {
         assert_eq!(
             (st.resets_at - st.error_timestamp),
             chrono::Duration::minutes(300)
+        );
+    }
+
+    // ── rollout token_count.rate_limits (per-session) parsing ────────────────
+    //
+    // Shapes below are the REAL rollout `rate_limits` object (snake_case,
+    // `window_minutes`, `used_percent` as float) verified against on-disk
+    // codex-cli rollouts — distinct from the app-server camelCase snapshot.
+
+    #[test]
+    fn rollout_rate_limit_none_when_reached_type_null() {
+        // Healthy turn: rate_limit_reached_type is present but null.
+        let rl = json!({
+            "limit_id": "codex", "plan_type": "team",
+            "primary": {"used_percent": 3.0, "window_minutes": 10080, "resets_at": 1_784_636_185_i64},
+            "secondary": null,
+            "rate_limit_reached_type": null
+        });
+        assert!(codex_rate_limit_state_from_rollout(&rl, chrono::Utc::now()).is_none());
+    }
+
+    #[test]
+    fn rollout_rate_limit_none_when_field_absent_legacy() {
+        // Pre-0.14x rollout: no rate_limit_reached_type field at all.
+        let rl = json!({
+            "limit_id": "codex",
+            "primary": {"used_percent": 26.0, "window_minutes": 300, "resets_at": 1_774_617_675_i64},
+            "secondary": {"used_percent": 8.0, "window_minutes": 10080, "resets_at": 1_775_204_475_i64}
+        });
+        assert!(codex_rate_limit_state_from_rollout(&rl, chrono::Utc::now()).is_none());
+    }
+
+    #[test]
+    fn rollout_rate_limit_secondary_reached_builds_state() {
+        // A genuinely rate-limited turn: secondary (5h) window reached.
+        let rl = json!({
+            "limit_id": "codex", "plan_type": "team",
+            "primary": {"used_percent": 50.0, "window_minutes": 10080, "resets_at": 2_000_000_000_i64},
+            "secondary": {"used_percent": 100.0, "window_minutes": 300, "resets_at": 1_900_000_000_i64},
+            "rate_limit_reached_type": "secondary"
+        });
+        let st = codex_rate_limit_state_from_rollout(&rl, chrono::Utc::now())
+            .expect("reached secondary → Some");
+        // resets_at from the SECONDARY window (the reached one), epoch seconds.
+        assert_eq!(st.resets_at.timestamp(), 1_900_000_000);
+        // window length 300 min drives error_timestamp = resets_at - 300min.
+        assert_eq!(
+            (st.resets_at - st.error_timestamp),
+            chrono::Duration::minutes(300)
+        );
+        assert_eq!(st.limit_type, crate::rate_limit_parser::RateLimitType::Unknown);
+    }
+
+    #[test]
+    fn rollout_rate_limit_primary_reached_uses_window_minutes() {
+        // Weekly (primary, 10080-min) reached — proves the rollout's
+        // `window_minutes` key (not the app-server `windowDurationMins`) is read.
+        let rl = json!({
+            "primary": {"used_percent": 100.0, "window_minutes": 10080, "resets_at": 1_784_636_186_i64},
+            "rate_limit_reached_type": "primary"
+        });
+        let st = codex_rate_limit_state_from_rollout(&rl, chrono::Utc::now()).unwrap();
+        assert_eq!(st.resets_at.timestamp(), 1_784_636_186);
+        assert_eq!(
+            (st.resets_at - st.error_timestamp),
+            chrono::Duration::minutes(10080),
+            "window_minutes must map to the window duration"
         );
     }
 
@@ -2231,6 +2299,51 @@ pub fn codex_rate_limit_state_from_usage(
         parsed: true,
         error_timestamp: resets_at - window_dur,
     })
+}
+
+/// Build a [`crate::session::RateLimitState`] from a Codex session's **own
+/// rollout** `token_count.rate_limits` object — the per-session view of the
+/// shared account limit that Codex embeds in every `token_count` event.
+///
+/// The rollout shape differs from the app-server `account/rateLimits/read`
+/// snapshot [`codex_rate_limit_state_from_usage`] consumes: it is snake_case and
+/// names the window length `window_minutes` (the app-server spells it
+/// `windowDurationMins`). We normalise it into a [`CodexUsageItem`] and delegate,
+/// so the reset judgment (window pick, `resets_at`, `error_timestamp`,
+/// `max_wait` semantics) lives in exactly one place.
+///
+/// Keyed off `rate_limit_reached_type` exactly like the app-server path
+/// (verified against real rollouts: healthy turns carry
+/// `rate_limit_reached_type: null`, older pre-0.14x rollouts omit the field
+/// entirely). Both non-limited cases yield `None`; a genuinely rate-limited turn
+/// carries `"primary"`/`"secondary"` and yields `Some`.
+pub fn codex_rate_limit_state_from_rollout(
+    rate_limits: &Value,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<crate::session::RateLimitState> {
+    // Absent or null reached-type → not limited (or a legacy rollout without
+    // the field). `.as_str()` on JSON null returns None, covering both.
+    let reached = rate_limits.get("rate_limit_reached_type")?.as_str()?.to_string();
+    let window_from = |key: &str| -> Option<CodexRateLimitWindow> {
+        let w = rate_limits.get(key)?;
+        if w.is_null() {
+            return None;
+        }
+        Some(CodexRateLimitWindow {
+            used_percent: w.get("used_percent").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32,
+            // Rollout names it `window_minutes`; the app-server struct field is
+            // `window_duration_mins` (camelCase `windowDurationMins`).
+            window_duration_mins: w.get("window_minutes").and_then(|v| v.as_i64()),
+            resets_at: w.get("resets_at").and_then(|v| v.as_i64()),
+        })
+    };
+    let usage = CodexUsageItem {
+        primary: window_from("primary"),
+        secondary: window_from("secondary"),
+        rate_limit_reached_type: Some(reached),
+        ..Default::default()
+    };
+    codex_rate_limit_state_from_usage(&usage, now)
 }
 
 /// Locate a runnable Codex binary.
