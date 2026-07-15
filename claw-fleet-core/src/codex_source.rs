@@ -1075,8 +1075,9 @@ fn build_session_from_sqlite(
 #[cfg(test)]
 mod tests {
     use super::{
-        codex_rate_limit_state_from_rollout, codex_rate_limit_state_from_usage,
-        compute_token_stats, extract_context_percent, read_rollout_originator,
+        codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
+        codex_rate_limit_state_from_usage, codex_rollout_rate_limit, compute_token_stats,
+        extract_context_percent, last_rollout_rate_limits, read_rollout_originator,
         CodexRateLimitWindow, CodexUsageItem,
     };
     use serde_json::json;
@@ -1305,6 +1306,75 @@ mod tests {
             chrono::Duration::minutes(300)
         );
         assert_eq!(st.limit_type, crate::rate_limit_parser::RateLimitType::Unknown);
+    }
+
+    // ── scan-integration gating: codex_rollout_rate_limit ───────────────────
+    //
+    // Synthetic rollout event streams (the same event_msg shape the scanner
+    // parses) exercise the three gates together: Fleet-owned + cut-off + reached.
+
+    fn tc_reached(reached: Option<&str>) -> serde_json::Value {
+        // A token_count event whose rate_limits reports (or not) a reached window.
+        let rl = if let Some(r) = reached {
+            json!({
+                "secondary": {"used_percent": 100.0, "window_minutes": 300, "resets_at": 1_900_000_000_i64},
+                "rate_limit_reached_type": r
+            })
+        } else {
+            json!({
+                "secondary": {"used_percent": 20.0, "window_minutes": 300, "resets_at": 1_900_000_000_i64},
+                "rate_limit_reached_type": null
+            })
+        };
+        json!({"type":"event_msg","payload":{"type":"token_count","rate_limits": rl}})
+    }
+    fn ev(pt: &str) -> serde_json::Value {
+        json!({"type":"event_msg","payload":{"type": pt}})
+    }
+
+    #[test]
+    fn last_turn_incomplete_detects_cutoff_vs_clean() {
+        // turn_started with no completion → cut off.
+        assert!(codex_last_turn_incomplete(&[ev("turn_started"), tc_reached(Some("secondary"))]));
+        // ...but a clean turn_complete after → not cut off.
+        assert!(!codex_last_turn_incomplete(&[ev("turn_started"), ev("turn_complete")]));
+        // turn_aborted → cut off.
+        assert!(codex_last_turn_incomplete(&[ev("turn_aborted")]));
+    }
+
+    #[test]
+    fn rollout_rate_limit_fires_for_fleet_owned_cutoff_reached() {
+        // Fleet-owned + last turn cut off + secondary window reached → Some.
+        let parsed = vec![ev("turn_started"), tc_reached(Some("secondary"))];
+        let st = codex_rollout_rate_limit(&parsed, Some("fleet"), chrono::Utc::now())
+            .expect("fleet-owned cut-off reached → Some");
+        assert_eq!(st.resets_at.timestamp(), 1_900_000_000);
+    }
+
+    #[test]
+    fn rollout_rate_limit_skips_non_fleet_session() {
+        // Same signals but a non-Fleet session (interactive user) → never
+        // auto-resumed, so no RateLimited state.
+        let parsed = vec![ev("turn_started"), tc_reached(Some("secondary"))];
+        assert!(codex_rollout_rate_limit(&parsed, Some("vscode"), chrono::Utc::now()).is_none());
+        assert!(codex_rollout_rate_limit(&parsed, None, chrono::Utc::now()).is_none());
+    }
+
+    #[test]
+    fn rollout_rate_limit_skips_cleanly_completed_session() {
+        // Fleet-owned + reached, but the turn COMPLETED cleanly afterwards → the
+        // session finished, not cut off → not a resume candidate.
+        let parsed = vec![tc_reached(Some("secondary")), ev("turn_complete")];
+        assert!(codex_rollout_rate_limit(&parsed, Some("fleet"), chrono::Utc::now()).is_none());
+    }
+
+    #[test]
+    fn rollout_rate_limit_skips_when_not_reached() {
+        // Fleet-owned + cut off, but no window reached → nothing to resume for.
+        let parsed = vec![ev("turn_started"), tc_reached(None)];
+        assert!(codex_rollout_rate_limit(&parsed, Some("fleet"), chrono::Utc::now()).is_none());
+        // last_rollout_rate_limits still finds the (non-reached) snapshot.
+        assert!(last_rollout_rate_limits(&parsed).is_some());
     }
 
     #[test]
