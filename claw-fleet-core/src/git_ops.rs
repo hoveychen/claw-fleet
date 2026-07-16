@@ -273,8 +273,11 @@ pub struct WorktreeHealth {
     /// Commits on this worktree's branch not reachable from the main checkout's
     /// HEAD — i.e. work not yet merged back.
     pub unmerged: usize,
-    /// Uncommitted entries in this worktree.
+    /// Uncommitted entries in this worktree. Always `dirty_files.len()`.
     pub dirty_count: usize,
+    /// The uncommitted entries themselves, so the "脏 N" badge can expand into
+    /// a file list on the mobile repo surface.
+    pub dirty_files: Vec<DirtyFile>,
     pub last_commit_summary: Option<String>,
     /// Author date of the tip commit, unix seconds.
     pub last_commit_time: Option<i64>,
@@ -303,7 +306,11 @@ pub struct RepoDetail {
     pub upstream: Option<String>,
     pub unpushed: Option<usize>,
     pub behind: Option<usize>,
+    /// Uncommitted entries in the main checkout. Always `dirty_files.len()`.
     pub dirty_count: usize,
+    /// The uncommitted entries themselves, so the main-checkout "脏 N" badge can
+    /// expand into a file list on the mobile repo surface.
+    pub dirty_files: Vec<DirtyFile>,
     pub worktrees: Vec<WorktreeHealth>,
     pub commits: Vec<CommitInfo>,
 }
@@ -355,6 +362,7 @@ pub fn repo_detail(root: &str, known_workspaces: &[String]) -> Result<RepoDetail
     let repo = git2::Repository::open(&root).map_err(|e| format!("open repo: {e}"))?;
     let (branch, upstream, unpushed, behind) = head_tracking(&repo);
     let main_head = repo.head().ok().and_then(|h| h.target());
+    let files = dirty_files(&repo);
     Ok(RepoDetail {
         label: repo_label(&root),
         root: root.to_string_lossy().to_string(),
@@ -362,7 +370,8 @@ pub fn repo_detail(root: &str, known_workspaces: &[String]) -> Result<RepoDetail
         upstream,
         unpushed,
         behind,
-        dirty_count: dirty_count(&repo),
+        dirty_count: files.len(),
+        dirty_files: files,
         worktrees: worktree_healths(&repo, main_head),
         commits: recent_commits(&repo, 30),
     })
@@ -467,11 +476,13 @@ fn worktree_healths(
             Some(c) => (c.summary().map(str::to_string), Some(c.time().seconds())),
             None => (None, None),
         };
+        let wt_files = dirty_files(&wt_repo);
         out.push(WorktreeHealth {
             path: path.to_string_lossy().to_string(),
             branch,
             unmerged,
-            dirty_count: dirty_count(&wt_repo),
+            dirty_count: wt_files.len(),
+            dirty_files: wt_files,
             last_commit_summary,
             last_commit_time,
         });
@@ -741,6 +752,49 @@ mod tests {
         assert_eq!(detail.worktrees[0].dirty_count, 0);
         assert!(detail.worktrees[0].last_commit_summary.is_some());
         assert!(!detail.commits.is_empty(), "recent commits populated");
+    }
+
+    #[test]
+    fn repo_detail_reports_dirty_files_for_main_and_worktree() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        init_repo(&ws);
+        // A worktree on a fresh branch.
+        let wt = tmp.path().join("wt-feature");
+        git(&ws, &["worktree", "add", "-b", "prd/feature", wt.to_str().unwrap()]);
+
+        // Main checkout: one untracked file.
+        fs::write(ws.join("scratch.txt"), "s\n").unwrap();
+        // Worktree: a modified tracked file + an untracked file.
+        fs::write(wt.join("a.txt"), "one\ntwo\n").unwrap();
+        fs::write(wt.join("new.txt"), "n\n").unwrap();
+
+        let known = vec![
+            ws.to_string_lossy().to_string(),
+            wt.to_string_lossy().to_string(),
+        ];
+        let detail = repo_detail(&ws.to_string_lossy(), &known).unwrap();
+
+        // Main checkout dirty list.
+        assert_eq!(detail.dirty_count, 1);
+        assert_eq!(detail.dirty_files.len(), detail.dirty_count);
+        assert_eq!(detail.dirty_files[0].path, "scratch.txt");
+        assert_eq!(detail.dirty_files[0].status, "?");
+
+        // Worktree dirty list, sorted by path (a.txt modified, new.txt untracked).
+        assert_eq!(detail.worktrees.len(), 1);
+        let wtf: Vec<(&str, &str)> = detail.worktrees[0]
+            .dirty_files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status.as_str()))
+            .collect();
+        assert_eq!(
+            wtf,
+            vec![("a.txt", "M"), ("new.txt", "?")],
+            "worktree dirty_files: {:?}",
+            detail.worktrees[0].dirty_files
+        );
+        assert_eq!(detail.worktrees[0].dirty_count, 2);
     }
 
     #[test]

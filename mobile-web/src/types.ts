@@ -264,6 +264,14 @@ export interface WikiExportPayload {
 
 // ── Repository "仓库" surface (git_ops::RepoSummary/RepoDetail/…) ─────────────
 
+/** One uncommitted working-tree entry (git_ops::DirtyFile). */
+export interface DirtyFile {
+  path: string;
+  /** One-char status: M modified, A staged-add, D deleted, R renamed, T
+   *  typechange, ? untracked, U conflict. */
+  status: string;
+}
+
 /** One repository row from `repo_list`. */
 export interface RepoSummary {
   /** Canonical main-checkout path; pass back as `root` to the other methods. */
@@ -289,6 +297,8 @@ export interface WorktreeHealth {
   /** Commits on this branch not merged back into the main checkout. */
   unmerged: number;
   dirtyCount: number;
+  /** Uncommitted entries (path + status code); expandable from the "脏 N" badge. */
+  dirtyFiles: DirtyFile[];
   lastCommitSummary: string | null;
   /** Tip-commit author date, unix seconds. */
   lastCommitTime: number | null;
@@ -312,6 +322,8 @@ export interface RepoDetail {
   unpushed: number | null;
   behind: number | null;
   dirtyCount: number;
+  /** Uncommitted entries in the main checkout (path + status code). */
+  dirtyFiles: DirtyFile[];
   worktrees: WorktreeHealth[];
   commits: CommitInfo[];
 }
