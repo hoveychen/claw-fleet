@@ -1640,3 +1640,8 @@ export function runningProcCounts(procs: ProcRecord[]): Map<string, number> {
   }
   return counts;
 }
+
+/** Total running procs across all workspaces — drives the 仓库 nav badge. */
+export function runningProcTotal(procs: ProcRecord[]): number {
+  return procs.reduce((n, p) => (p.status === "exited" ? n : n + 1), 0);
+}
