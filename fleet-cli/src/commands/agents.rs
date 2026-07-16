@@ -35,10 +35,10 @@ pub(crate) fn cmd_agents(show_all: bool, as_json: bool) {
     let r = c_reset();
 
     println!(
-        "{b}{:<10}{r}  {b}{:<20}{r}  {b}{:<10}{r}  {b}{:>8}{r}  {b}{:>7}{r}  {b}{:>5}{r}  {b}{:<7}{r}  {b}{}{r}",
+        "{b}{:<10}{r}  {b}{:<20}{r}  {b}{:<10}{r}  {b}{:>8}{r}  {b}{:>7}{r}  {b}{:>5}{r}  {b}{:<8}{r}  {b}{}{r}",
         "ID", "WORKSPACE", "STATUS", "SPEED", "TOKENS", "CTX%", "HARNESS", "MODEL"
     );
-    println!("{}", "─".repeat(88));
+    println!("{}", "─".repeat(89));
 
     for s in &filtered {
         let id_display = if s.is_subagent {
@@ -60,7 +60,7 @@ pub(crate) fn cmd_agents(show_all: bool, as_json: bool) {
             .unwrap_or_else(|| "-".to_string());
 
         println!(
-            "{:<10}  {:<20}  {sc}{:<10}{r}  {:>8}  {:>7}  {:>5}  {:<7}  {}",
+            "{:<10}  {:<20}  {sc}{:<10}{r}  {:>8}  {:>7}  {:>5}  {:<8}  {}",
             id_display,
             ws,
             status_str,
