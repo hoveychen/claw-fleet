@@ -850,6 +850,15 @@ pub trait Backend: Send + Sync {
     /// (epoch ms) for the 24h occupancy-trend chart. Sorted ascending by ts.
     fn usage_history(&self, from_ms: i64, to_ms: i64) -> Vec<UsageHistoryPoint>;
 
+    /// Return persisted codex primary/secondary occupancy snapshots in
+    /// [from_ms, to_ms] (epoch ms) for the codex 24h occupancy-trend chart.
+    /// Sorted ascending by ts. The codex parallel of [`Self::usage_history`].
+    fn codex_usage_history(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Vec<crate::codex_usage_history::CodexUsageHistoryPoint>;
+
     // ── User-direction attachments ──────────────────────────────────────────
     /// Make a local file available to the agent process as an absolute path.
     /// UI layers splice the returned path into the prompt (`Context files:`) or
