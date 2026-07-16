@@ -2,21 +2,21 @@ use super::*;
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub(crate) fn list_sessions(state: tauri::State<AppState>) -> Vec<SessionInfo> {
+#[tauri::command(async)]
+pub(crate) fn list_sessions(state: tauri::State<'_, AppState>) -> Vec<SessionInfo> {
     state.backend.read().unwrap().list_sessions()
 }
 
-#[tauri::command]
-pub(crate) fn today_usage(state: tauri::State<AppState>) -> claw_fleet_core::today_usage::TodayUsage {
+#[tauri::command(async)]
+pub(crate) fn today_usage(state: tauri::State<'_, AppState>) -> claw_fleet_core::today_usage::TodayUsage {
     state.backend.read().unwrap().today_usage()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn search_sessions(
     query: String,
     limit: Option<usize>,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Vec<search_index::SearchHit> {
     let limit = limit.unwrap_or(50);
     if query.trim().is_empty() {
@@ -25,10 +25,10 @@ pub(crate) fn search_sessions(
     state.backend.read().unwrap().search_sessions(&query, limit)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_messages(
     jsonl_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Value>, String> {
     state.backend.read().unwrap().get_messages(&jsonl_path)
 }
@@ -67,18 +67,18 @@ pub(crate) fn get_tool_result_full(
         .get_tool_result_full(&jsonl_path, &tool_use_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_skill_history(
     jsonl_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
     state.backend.read().unwrap().get_skill_history(&jsonl_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_workflow_trees(
     jsonl_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::workflow::WorkflowTree>, String> {
     state
         .backend
@@ -87,11 +87,11 @@ pub(crate) fn get_workflow_trees(
         .get_workflow_trees(&jsonl_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_task_token_breakdown(
     jsonl_path: String,
     project_root: Option<String>,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::token_analysis::TaskTokenBreakdown, String> {
     state
         .backend
@@ -100,10 +100,10 @@ pub(crate) fn get_task_token_breakdown(
         .get_task_token_breakdown(&jsonl_path, project_root.as_deref())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_codex_token_breakdown(
     jsonl_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::codex_source::CodexTokenBreakdown, String> {
     state
         .backend
@@ -112,10 +112,10 @@ pub(crate) fn get_codex_token_breakdown(
         .get_codex_token_breakdown(&jsonl_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_session_todos(
     jsonl_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::session_todos::TodoItem>, String> {
     let messages = state.backend.read().unwrap().get_messages(&jsonl_path)?;
     Ok(claw_fleet_core::session_todos::extract_latest_todos(&messages))

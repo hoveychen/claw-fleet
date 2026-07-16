@@ -102,7 +102,7 @@ pub(crate) fn chat_workspace(state: tauri::State<'_, AppState>) -> Result<String
 /// dialog can only ever browse the machine the desktop runs on — under a remote
 /// connection that is the wrong host, which is why the launcher used to just hide
 /// its Browse button in that mode.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn browse_dir(
     state: tauri::State<'_, AppState>,
     path: Option<String>,
@@ -110,7 +110,7 @@ pub(crate) fn browse_dir(
     state.backend.read().unwrap().browse_dir(path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_auto_resume_config(
     state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::auto_resume::AutoResumeConfig {

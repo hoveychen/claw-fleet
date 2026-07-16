@@ -46,9 +46,9 @@ pub(crate) fn remove_model_guidance(state: tauri::State<AppState>) -> Result<(),
     state.backend.read().unwrap().remove_model_guidance()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_interaction_diagnostics(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::interaction_mode_diagnostics::DiagnosticCheck> {
     state.backend.read().unwrap().interaction_diagnostics()
 }

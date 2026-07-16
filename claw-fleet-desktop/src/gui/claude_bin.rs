@@ -2,13 +2,13 @@ use super::*;
 
 // ── Claude binary discovery & override ──────────────────────────────────────
 
-#[tauri::command]
-pub(crate) fn list_claude_binaries(state: tauri::State<AppState>) -> Vec<claude_binary::ClaudeBinary> {
+#[tauri::command(async)]
+pub(crate) fn list_claude_binaries(state: tauri::State<'_, AppState>) -> Vec<claude_binary::ClaudeBinary> {
     state.backend.read().unwrap().list_claude_binaries()
 }
 
-#[tauri::command]
-pub(crate) fn get_claude_binary_override(state: tauri::State<AppState>) -> Option<String> {
+#[tauri::command(async)]
+pub(crate) fn get_claude_binary_override(state: tauri::State<'_, AppState>) -> Option<String> {
     state.backend.read().unwrap().get_claude_binary_override()
 }
 

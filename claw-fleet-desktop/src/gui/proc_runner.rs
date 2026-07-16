@@ -2,7 +2,7 @@ use super::*;
 
 // ── Workspace command runner (文件 page) ─────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_workspace_procs(
     state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
@@ -33,7 +33,7 @@ pub(crate) fn kill_workspace_proc(
     state.backend.read().unwrap().kill_proc(id, force)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn read_workspace_proc_output(
     id: String,
     offset: Option<u64>,

@@ -3,20 +3,20 @@ use crate::skills;
 
 // ── Skills ────────────────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub(crate) fn list_skills(state: tauri::State<AppState>) -> Vec<skills::SkillItem> {
+#[tauri::command(async)]
+pub(crate) fn list_skills(state: tauri::State<'_, AppState>) -> Vec<skills::SkillItem> {
     state.backend.read().unwrap().list_skills()
 }
 
-#[tauri::command]
-pub(crate) fn get_skill_content(path: String, state: tauri::State<AppState>) -> Result<String, String> {
+#[tauri::command(async)]
+pub(crate) fn get_skill_content(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
     state.backend.read().unwrap().get_skill_content(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_skill_files(
     skill_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<skills::SkillFileEntry>, String> {
     state.backend.read().unwrap().list_skill_files(&skill_path)
 }

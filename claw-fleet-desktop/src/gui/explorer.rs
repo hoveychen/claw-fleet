@@ -2,21 +2,21 @@ use super::*;
 
 // ── File explorer ─────────────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_explorer_roots(
     workspace: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerRoot>, String> {
     state.backend.read().unwrap().list_explorer_roots(&workspace)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_explorer_dir(
     workspace: String,
     root: String,
     rel_path: String,
     show_ignored: bool,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
     state
         .backend
@@ -25,12 +25,12 @@ pub(crate) fn list_explorer_dir(
         .list_explorer_dir(&workspace, &root, &rel_path, show_ignored)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn read_explorer_file(
     workspace: String,
     root: String,
     rel_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
     state
         .backend

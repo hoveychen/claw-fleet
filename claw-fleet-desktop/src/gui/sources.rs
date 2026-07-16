@@ -3,8 +3,8 @@ use super::*;
 // ── Agent sources config ─────────────────────────────────────────────────────
 
 /// Return the current sources config merged with availability info.
-#[tauri::command]
-pub(crate) fn get_sources_config(state: tauri::State<AppState>) -> Vec<agent_source::SourceInfo> {
+#[tauri::command(async)]
+pub(crate) fn get_sources_config(state: tauri::State<'_, AppState>) -> Vec<agent_source::SourceInfo> {
     state.backend.read().unwrap().get_sources_config()
 }
 

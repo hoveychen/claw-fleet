@@ -27,9 +27,9 @@ pub(crate) fn respond_to_guard(
         .respond_to_guard(&id, allow, always_allow, reason)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_guard_allow_rules(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::audit::GuardAllowRule> {
     state.backend.read().unwrap().list_guard_allow_rules()
 }
