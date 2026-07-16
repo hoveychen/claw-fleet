@@ -700,10 +700,11 @@ fn streaming_substatus(last_lines: &[Value]) -> SessionStatus {
 /// non-in-flight boundary. Approval requests are handled before this is
 /// consulted (they mean the turn paused for the user), so they are not listed.
 ///
-/// Residual: the scan sees only the window it is handed (the last ~100 lines).
-/// A single turn that emitted more than that many rollout lines before going
-/// silent scrolls its `task_started` out of view, so this returns `false` and
-/// the turn falls to the age fallback — the next rollout write recovers it.
+/// Callers must hand this the FULL parsed rollout, not a tail window: a single
+/// turn can emit hundreds of lines, scrolling `task_started` out of any fixed
+/// window and misreading an in-flight turn as not-in-flight (the "codex 假死"
+/// report). The backward scan stops at the first boundary event, so the full
+/// slice costs nothing extra in practice.
 fn turn_in_flight(last_lines: &[Value]) -> bool {
     for v in last_lines.iter().rev() {
         if v.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
@@ -1355,7 +1356,11 @@ fn build_session_from_sqlite(
                         let last_n_start = all_parsed.len().saturating_sub(100);
                         let last_n = &all_parsed[last_n_start..];
 
-                        let st = determine_status(last_n, file_age.as_secs_f64());
+                        // Full parse, not `last_n`: the turn-boundary scan inside
+                        // must see a `task_started` that a long turn (>100 rollout
+                        // lines) has scrolled past the tail window, or an in-flight
+                        // session misreads as Idle once the file goes silent >30s.
+                        let st = determine_status(&all_parsed, file_age.as_secs_f64());
                         // Rate-limit from this session's own rollout (Fleet-owned +
                         // cut-off + reached window). Overrides status so auto-resume
                         // can continue it after reset.
@@ -1596,7 +1601,7 @@ mod tests {
         codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
         codex_token_breakdown_from_lines, compute_token_stats, determine_status,
-        exec_note_from_script,
+        exec_note_from_script, parse_codex_session,
         extract_context_percent, extract_first_user_prompt, last_rollout_rate_limits,
         latest_total_token_usage, normalize_messages, strip_leading_system_reminder,
         strip_trailing_context_files, read_rollout_originator, CodexProcess,
@@ -1762,6 +1767,53 @@ mod tests {
             determine_status(&done, 45.0),
             S::WaitingInput,
             "a task_complete after task_started means the turn is over — WaitingInput"
+        );
+    }
+
+    #[test]
+    fn parse_codex_session_reads_in_flight_when_task_started_scrolls_past_window() {
+        // Regression (2026-07-16 "codex 假死"): a single long turn that has
+        // emitted more than the status window's worth of rollout lines scrolls
+        // its `task_started` out of the fixed 100-line tail the status scan was
+        // handed. With the rollout then silent >30s (codex writes nothing during
+        // a long tool call), the age fallback misread the working session as
+        // Idle — the desktop dropped it out of ACTIVE_STATUSES and stopped
+        // live-tailing. The turn-boundary scan must see the WHOLE rollout.
+        use std::io::Write as _;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-07-16T13:00:00.000Z","type":"session_meta","payload":{{"id":"t-longturn","cwd":"/ws","originator":"fleet","source":"exec"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-07-16T13:00:01.000Z","type":"event_msg","payload":{{"type":"task_started"}}}}"#
+        )
+        .unwrap();
+        // 150 in-turn lines push task_started well past a 100-line tail window.
+        for _ in 0..150 {
+            writeln!(
+                f,
+                r#"{{"timestamp":"2026-07-16T13:05:00.000Z","type":"response_item","payload":{{"type":"reasoning"}}}}"#
+            )
+            .unwrap();
+        }
+        f.flush().unwrap();
+        // Silent for 120s: past the fresh-file branch (<8s) and the Active
+        // age fallback (<30s), exactly like a long tool call mid-turn.
+        f.as_file()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120))
+            .unwrap();
+
+        let info = parse_codex_session(f.path(), &[]).expect("rollout must parse");
+        // No live process → clamp_dead_session_status downgrades the in-flight
+        // display status to WaitingInput. The buggy tail-window path never sees
+        // task_started and lands on Idle instead.
+        assert_eq!(
+            info.status,
+            S::WaitingInput,
+            "an in-flight turn whose task_started scrolled past the tail window must not read as Idle"
         );
     }
 
@@ -3344,7 +3396,9 @@ fn parse_codex_session(
 
     let source_info = parse_source(&source_str);
 
-    let status = determine_status(last_n, age.as_secs_f64());
+    // Full parse, not `last_n` — see the SQLite path: a >100-line turn scrolls
+    // `task_started` past the tail window and misreads as Idle when silent.
+    let status = determine_status(&all_parsed, age.as_secs_f64());
     let (token_speed, total_output_tokens, reasoning_output_tokens) = compute_token_stats(&all_parsed);
     let last_message_preview = extract_last_text(last_n);
     let model = extract_model(&all_parsed);
