@@ -49,6 +49,12 @@ const WIKI_BEGIN: &str = "<!-- fleet:codex-wiki:begin -->";
 const WIKI_END: &str = "<!-- fleet:codex-wiki:end -->";
 const MODEL_BEGIN: &str = "<!-- fleet:codex-model:begin -->";
 const MODEL_END: &str = "<!-- fleet:codex-model:end -->";
+// Daily-report lessons the user added to global guidance. Unlike the concept
+// blocks above (static text gated by a toggle) this block's body is the current
+// contents of the managed `~/.claude/fleet-lessons.md`, budget-capped for the
+// 32 KiB AGENTS.md ceiling. Codex has no `@import`, so lessons are inlined here.
+const LESSONS_BEGIN: &str = "<!-- fleet:codex-lessons:begin -->";
+const LESSONS_END: &str = "<!-- fleet:codex-lessons:end -->";
 
 // Legacy monolithic block (PRD + interaction packed together). Pre-dates the
 // per-concept split; [`reconcile_codex_agents_md`] strips it on first run so old
@@ -63,6 +69,7 @@ const FLEET_MARKERS: &[(&str, &str)] = &[
     (INTERACTION_BEGIN, INTERACTION_END),
     (WIKI_BEGIN, WIKI_END),
     (MODEL_BEGIN, MODEL_END),
+    (LESSONS_BEGIN, LESSONS_END),
     (LEGACY_BEGIN, LEGACY_END),
 ];
 
@@ -597,6 +604,62 @@ Opus 4.8 or Sonnet 5 at xhigh.\n\
         .to_string()
 }
 
+/// Collapse all whitespace runs (incl. newlines) to single spaces so a
+/// multi-paragraph lesson renders as one compact AGENTS.md bullet.
+fn flatten_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Render the daily-report lessons block body for AGENTS.md, or `None` when
+/// there are no lessons. Budget-capped for the 32 KiB AGENTS.md ceiling:
+/// lessons are included in file order until `MAX_BYTES`, then the omitted count
+/// is noted so the truncation is visible rather than silent.
+fn render_codex_lessons_block(
+    lessons: &[crate::lessons_store::ManagedLesson],
+    locale: &str,
+) -> Option<String> {
+    if lessons.is_empty() {
+        return None;
+    }
+    // Conservative slice of the shared 32 KiB budget — the PRD + interaction
+    // blocks alone already dominate it when all concepts are on.
+    const MAX_BYTES: usize = 6 * 1024;
+    let zh = locale == "zh";
+    let header = if zh {
+        "# Fleet 用户经验 (managed by Claw Fleet — 勿手改)\n\n用户从每日报告加入的可迁移经验，逐条遵守："
+    } else {
+        "# Fleet user lessons (managed by Claw Fleet — do not edit)\n\nTransferable lessons the user added from the daily report — follow each:"
+    };
+    let mut out = String::from(header);
+    let mut included = 0usize;
+    for l in lessons {
+        let content = flatten_ws(&l.content);
+        let reason = flatten_ws(&l.reason);
+        let line = if reason.is_empty() {
+            format!("\n\n- {content}")
+        } else if zh {
+            format!("\n\n- {content}（原因：{reason}）")
+        } else {
+            format!("\n\n- {content} (why: {reason})")
+        };
+        if out.len() + line.len() > MAX_BYTES {
+            break;
+        }
+        out.push_str(&line);
+        included += 1;
+    }
+    let omitted = lessons.len() - included;
+    if omitted > 0 {
+        let note = if zh {
+            format!("\n\n（另有 {omitted} 条因 AGENTS.md 篇幅上限省略；在桌面端 Memory 面板可查看全部）")
+        } else {
+            format!("\n\n({omitted} more omitted for the AGENTS.md size cap; see all in the desktop Memory panel)")
+        };
+        out.push_str(&note);
+    }
+    Some(out)
+}
+
 /// Wrap a block body in its sentinel markers with a trailing newline.
 fn wrap(begin: &str, end: &str, body: &str) -> String {
     format!("{begin}\n{body}\n{end}\n")
@@ -611,6 +674,9 @@ pub struct CodexGuidanceSet {
     pub interaction: bool,
     pub wiki: bool,
     pub model: bool,
+    /// Include the daily-report lessons block (body read from the managed
+    /// `~/.claude/fleet-lessons.md` at compose time, budget-capped).
+    pub lessons: bool,
 }
 
 /// The single writer for `~/.codex/AGENTS.md`. Composes exactly the enabled
@@ -650,6 +716,12 @@ pub fn reconcile_codex_agents_md(
     if set.model {
         push(MODEL_BEGIN, MODEL_END, render_codex_model_block(locale));
     }
+    if set.lessons {
+        let lessons = crate::lessons_store::list_lessons();
+        if let Some(body) = render_codex_lessons_block(&lessons, locale) {
+            push(LESSONS_BEGIN, LESSONS_END, body);
+        }
+    }
 
     let new_content = compose(&user_content, &blocks);
 
@@ -675,11 +747,16 @@ pub fn reconcile_codex_agents_md(
 /// calls this after any concept toggle and on startup. Idempotent and
 /// order-independent — the Claude write always lands first, then this reads it.
 pub fn reconcile_codex_from_claude_state(user_title: &str, locale: &str) -> Result<(), String> {
+    // Only mirror lessons onto codex when codex is actually in use — don't
+    // conjure a ~/.codex/AGENTS.md for a Claude-only user who happened to add a
+    // lesson. Codex has no @import, so an existing codex home is the signal.
+    let codex_present = codex_home().map(|d| d.exists()).unwrap_or(false);
     let set = CodexGuidanceSet {
         prd: crate::prd_discipline::is_prd_discipline_installed(),
         interaction: crate::interaction_mode::is_interaction_mode_installed(),
         wiki: crate::wiki_guidance::is_wiki_guidance_installed(),
         model: crate::model_guidance::is_model_guidance_installed(),
+        lessons: codex_present && !crate::lessons_store::list_lessons().is_empty(),
     };
     reconcile_codex_agents_md(set, user_title, locale)
 }
@@ -971,7 +1048,56 @@ mod tests {
             interaction,
             wiki,
             model,
+            lessons: false,
         }
+    }
+
+    fn ml(content: &str, reason: &str) -> crate::lessons_store::ManagedLesson {
+        crate::lessons_store::ManagedLesson {
+            id: format!("{}", content.len()),
+            content: content.to_string(),
+            reason: reason.to_string(),
+            workspace_name: "ws".to_string(),
+            session_id: "sid".to_string(),
+        }
+    }
+
+    #[test]
+    fn lessons_block_none_when_empty() {
+        assert!(render_codex_lessons_block(&[], "en").is_none());
+    }
+
+    #[test]
+    fn lessons_block_renders_each_and_flattens() {
+        let lessons = vec![
+            ml("Line one.\n\nLine two.", "Because reasons."),
+            ml("Second lesson.", ""),
+        ];
+        let body = render_codex_lessons_block(&lessons, "en").unwrap();
+        // Multi-paragraph content collapsed to one bullet.
+        assert!(body.contains("- Line one. Line two. (why: Because reasons.)"));
+        // Reason-less lesson has no trailing "(why:...)".
+        assert!(body.contains("- Second lesson."));
+        assert!(!body.contains("Second lesson. (why:"));
+        assert!(body.contains("managed by Claw Fleet"));
+    }
+
+    #[test]
+    fn lessons_block_budget_caps_and_notes_omissions() {
+        // Each lesson ~2 KB of content; with a 6 KiB cap only a few fit and the
+        // rest are reported as omitted (never silently dropped).
+        let big = "x".repeat(2000);
+        let lessons: Vec<_> = (0..10).map(|_| ml(&big, "")).collect();
+        let body = render_codex_lessons_block(&lessons, "en").unwrap();
+        assert!(body.len() <= 6 * 1024 + 200, "block honors the byte cap");
+        assert!(body.contains("more omitted"), "omitted count is surfaced");
+    }
+
+    #[test]
+    fn lessons_block_zh_locale() {
+        let body = render_codex_lessons_block(&[ml("内容", "原因文本")], "zh").unwrap();
+        assert!(body.contains("用户经验"));
+        assert!(body.contains("- 内容（原因：原因文本）"));
     }
 
     #[test]
