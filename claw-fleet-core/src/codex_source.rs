@@ -1210,9 +1210,71 @@ mod tests {
         codex_cost_and_input, codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit, compute_token_stats,
         extract_context_percent, extract_first_user_text, last_rollout_rate_limits,
-        read_rollout_originator, CodexRateLimitWindow, CodexUsageItem,
+        normalize_messages, read_rollout_originator, CodexRateLimitWindow, CodexUsageItem,
     };
     use serde_json::json;
+
+    #[test]
+    fn normalize_messages_dedups_agent_message_against_response_item() {
+        // A single Codex turn persists the SAME assistant text twice:
+        //   - event_msg/agent_message  (UI event-timeline mirror)
+        //   - response_item/message    (canonical model-history item — what
+        //     Codex's own resume path replays)
+        // The transcript must render the reply exactly once.
+        let lines = vec![
+            json!({"type":"event_msg","payload":{"type":"user_message","message":"hi"},"timestamp":"t0"}),
+            json!({"type":"response_item","payload":{"type":"reasoning","summary":[{"text":"thinking..."}]},"timestamp":"t1"}),
+            json!({"type":"event_msg","payload":{"type":"agent_message","message":"hello world"},"timestamp":"t2"}),
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello world"}]},"timestamp":"t3"}),
+        ];
+
+        let out = normalize_messages(lines);
+
+        let assistant_texts: Vec<String> = out
+            .iter()
+            .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+            .filter_map(|m| {
+                let content = m.get("message")?.get("content")?.as_array()?;
+                content.iter().find_map(|b| {
+                    if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        b.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+
+        assert_eq!(
+            assistant_texts,
+            vec!["hello world".to_string()],
+            "assistant reply should render exactly once, got: {assistant_texts:?}"
+        );
+    }
+
+    #[test]
+    fn normalize_messages_keeps_agent_message_without_response_item() {
+        // Interrupted / not-yet-persisted turn: only the agent_message event
+        // exists, no matching response_item. The reply must NOT be dropped.
+        let lines = vec![
+            json!({"type":"event_msg","payload":{"type":"agent_message","message":"partial reply"},"timestamp":"t0"}),
+        ];
+
+        let out = normalize_messages(lines);
+
+        let assistant_texts: Vec<String> = out
+            .iter()
+            .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+            .filter_map(|m| {
+                let content = m.get("message")?.get("content")?.as_array()?;
+                content.iter().find_map(|b| {
+                    b.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                })
+            })
+            .collect();
+
+        assert_eq!(assistant_texts, vec!["partial reply".to_string()]);
+    }
 
     #[test]
     fn extract_first_user_text_finds_earliest_user_turn() {
@@ -2005,6 +2067,57 @@ fn parse_codex_session(
 /// Codex format: `{"timestamp":"...","type":"<variant>","payload":{...}}`
 /// Fleet format: `{"type":"user|assistant","message":{...},"timestamp":"..."}`
 fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
+    // Codex persists every finalized assistant turn TWICE in the rollout:
+    //   - as an `event_msg/agent_message` (the UI event-timeline mirror), and
+    //   - as a `response_item/message` with role=assistant (the canonical
+    //     model-history item — the only copy Codex's own `reconstruct_history_
+    //     from_rollout` replays; the event copy is ignored there).
+    // Rendering both yields two identical replies, so we suppress the
+    // `agent_message` event whenever its text also exists as a response_item
+    // assistant message. The event is kept only when no matching response_item
+    // is present (e.g. an interrupted or not-yet-persisted turn), so an
+    // in-flight reply is never dropped.
+    let response_item_assistant_texts: std::collections::HashSet<String> = lines
+        .iter()
+        .filter_map(|line| {
+            if line.get("type").and_then(|t| t.as_str()) != Some("response_item") {
+                return None;
+            }
+            let payload = line.get("payload")?;
+            if payload.get("type").and_then(|t| t.as_str()) != Some("message") {
+                return None;
+            }
+            let role = payload
+                .get("role")
+                .and_then(|r| r.as_str())
+                .unwrap_or("assistant");
+            if role == "user" || role == "developer" {
+                return None;
+            }
+            let text: String = payload
+                .get("content")
+                .and_then(|c| c.as_array())
+                .map(|blocks| {
+                    blocks
+                        .iter()
+                        .filter_map(|b| match b.get("type").and_then(|t| t.as_str()) {
+                            Some("output_text") | Some("input_text") => {
+                                b.get("text").and_then(|t| t.as_str())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("")
+                })
+                .unwrap_or_default();
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
+        })
+        .collect();
+
     let mut messages: Vec<Value> = Vec::new();
 
     for line in lines {
@@ -2060,7 +2173,12 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                             .unwrap_or("")
                             .to_string();
 
-                        if !text.is_empty() {
+                        // Skip the event-mirror copy when the canonical
+                        // response_item carries the same text (see the dedup
+                        // note at the top of this fn).
+                        if !text.is_empty()
+                            && !response_item_assistant_texts.contains(&text)
+                        {
                             messages.push(json!({
                                 "type": "assistant",
                                 "message": {
