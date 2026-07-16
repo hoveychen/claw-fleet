@@ -1515,8 +1515,7 @@
     "scenario_daily_report_summary": "日报摘要",
     "scenario_daily_report_lessons": "日报经验提取",
     "scenario_session_analyze": "会话状态分析",
-    "scenario_mascot_quips": "吉祥物台词",
-    "scenario_codex_title": "Codex 会话标题"
+    "scenario_mascot_quips": "吉祥物台词"
   },
   "connect_dialog": {
     "title": "Claw Fleet",
