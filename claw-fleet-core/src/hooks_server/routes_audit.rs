@@ -263,13 +263,10 @@ pub(crate) fn route_audit_rules_suggest(
                             &req.concern, &req.lang, &existing_tags,
                         );
                         let llm_cfg = llm_config.lock().unwrap().clone();
-                        let provider = crate::llm_provider::resolve_provider(&llm_cfg.provider);
-                        match provider {
-                            Some(p) => {
-                                match crate::llm_usage::complete_accounted(
-                                    p.as_ref(),
+                        match crate::llm_provider::complete_routed(
+                                    &llm_cfg,
+                                    crate::llm_provider::ModelSlot::Standard,
                                     &prompt,
-                                    &llm_cfg.standard_model,
                                     std::time::Duration::from_secs(120),
                                     crate::llm_usage::SCENARIO_AUDIT_RULES,
                                 ) {
@@ -305,16 +302,6 @@ pub(crate) fn route_audit_rules_suggest(
                                                 .with_header(json_header),
                                         );
                                     }
-                                }
-                            }
-                            None => {
-                                let body = r#"{"error":"No LLM provider available"}"#;
-                                let _ = request.respond(
-                                    tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
-                                        .with_header(json_header),
-                                );
-                            }
                         }
                     }
                     Err(e) => {

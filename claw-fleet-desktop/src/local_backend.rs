@@ -2508,18 +2508,11 @@ impl Backend for LocalBackend {
             return Err("LLM provider is disabled".to_string());
         }
 
-        let provider = llm_provider::resolve_provider(&llm_cfg.provider)
-            .ok_or("LLM provider not available")?;
-
-        if !provider.is_available() {
-            return Err(format!("{} CLI not found", provider.display_name()));
-        }
-
         let timeout = std::time::Duration::from_secs(30);
-        crate::llm_usage::complete_accounted(
-            provider.as_ref(),
+        llm_provider::complete_routed(
+            &llm_cfg,
+            llm_provider::ModelSlot::Fast,
             &prompt,
-            &llm_cfg.fast_model,
             timeout,
             crate::llm_usage::SCENARIO_GUARD_COMMAND,
         )
@@ -2949,13 +2942,10 @@ impl Backend for LocalBackend {
         let prompt = crate::audit::build_suggest_rules_prompt(concern, lang, &existing_tags);
 
         let cfg = self.llm_config.lock().unwrap().clone();
-        let provider = crate::llm_provider::resolve_provider(&cfg.provider)
-            .ok_or_else(|| "No LLM provider available".to_string())?;
-
-        let response = crate::llm_usage::complete_accounted(
-            provider.as_ref(),
+        let response = crate::llm_provider::complete_routed(
+            &cfg,
+            crate::llm_provider::ModelSlot::Standard,
             &prompt,
-            &cfg.standard_model,
             std::time::Duration::from_secs(120),
             crate::llm_usage::SCENARIO_AUDIT_RULES,
         )
@@ -3300,12 +3290,9 @@ fn detect_waiting_transitions(
                 let analysis_text = extract_last_assistant_text(&jsonl_path, 1000)
                     .unwrap_or(last_text);
 
-                let provider = crate::llm_provider::resolve_provider(&cfg.provider);
-                let result = provider.as_ref().and_then(|p| {
-                    crate::claude_analyze::analyze_session_outcome(
-                        p.as_ref(), &cfg.fast_model, &analysis_text, &lang, &session_id, &title,
-                    )
-                });
+                let result = crate::claude_analyze::analyze_session_outcome_routed(
+                    &cfg, &analysis_text, &lang, &session_id, &title,
+                );
                 an.lock().unwrap().remove(&session_id);
 
                 // Always store outcome tags for the mascot.

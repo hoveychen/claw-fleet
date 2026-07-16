@@ -6,7 +6,7 @@
 
 use std::process::Stdio;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -398,6 +398,7 @@ impl LlmProvider for CodexCliProvider {
         // `*-codex-mini` slugs 400 with "not supported when using Codex with a
         // ChatGPT account" (verified live).
         vec![
+            LlmModel { id: "gpt-5.6-sol".into(), display_name: "GPT-5.6-Sol".into() },
             LlmModel { id: "gpt-5.6-terra".into(), display_name: "GPT-5.6-Terra".into() },
             LlmModel { id: "gpt-5.6-luna".into(), display_name: "GPT-5.6-Luna".into() },
         ]
@@ -503,7 +504,7 @@ pub fn all_provider_infos() -> Vec<LlmProviderInfo> {
     infos
 }
 
-// ── Daily-report routing ────────────────────────────────────────────────────
+// ── Quota-aware provider routing ────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuotaState { Healthy, Limited, Unknown }
@@ -513,7 +514,38 @@ pub struct LlmRoute {
     pub model: String,
 }
 
-fn rank_daily_report_providers(preference: &str, states: &[(String, QuotaState)]) -> Vec<String> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelSlot { Fast, Standard }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModelTier { Fast, Standard, Premium }
+
+fn model_tier(model: &str, fallback: ModelSlot) -> ModelTier {
+    let model = model.to_ascii_lowercase();
+    if model.contains("haiku") || model.contains("luna") {
+        ModelTier::Fast
+    } else if model.contains("opus") || model.contains("fable") || model.contains("sol") {
+        ModelTier::Premium
+    } else if model.contains("sonnet") || model.contains("terra") {
+        ModelTier::Standard
+    } else {
+        match fallback { ModelSlot::Fast => ModelTier::Fast, ModelSlot::Standard => ModelTier::Standard }
+    }
+}
+
+fn equivalent_model(target_provider: &str, selected_model: &str, slot: ModelSlot) -> String {
+    match (target_provider, model_tier(selected_model, slot)) {
+        ("claude", ModelTier::Fast) => "haiku",
+        ("claude", ModelTier::Standard) => "sonnet",
+        ("claude", ModelTier::Premium) => "opus",
+        ("codex", ModelTier::Fast) => "gpt-5.6-luna",
+        ("codex", ModelTier::Standard) => "gpt-5.6-terra",
+        ("codex", ModelTier::Premium) => "gpt-5.6-sol",
+        _ => selected_model,
+    }.to_string()
+}
+
+fn rank_providers(preference: &str, states: &[(String, QuotaState)]) -> Vec<String> {
     let mut usable: Vec<&(String, QuotaState)> = states.iter()
         .filter(|(_, state)| *state != QuotaState::Limited)
         .collect();
@@ -550,9 +582,28 @@ fn codex_quota_state() -> QuotaState {
     }
 }
 
-/// Resolve daily-report providers using monitoring toggles as the allow-list.
-/// Preference wins while healthy; known-limited providers are omitted.
-pub fn daily_report_routes(config: &LlmConfig) -> Vec<LlmRoute> {
+static QUOTA_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, (Instant, QuotaState)>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn provider_quota_state(name: &str) -> QuotaState {
+    const TTL: Duration = Duration::from_secs(60);
+    if let Some((checked_at, state)) = QUOTA_CACHE.lock().unwrap().get(name).copied() {
+        if checked_at.elapsed() < TTL { return state }
+    }
+    let state = match name {
+        "claude" => claude_quota_state(),
+        "codex" => codex_quota_state(),
+        _ => QuotaState::Unknown,
+    };
+    QUOTA_CACHE.lock().unwrap().insert(name.to_string(), (Instant::now(), state));
+    state
+}
+
+/// Resolve monitored providers in preference order, omitting accounts known to
+/// be rate-limited and translating the selected model onto the equivalent tier
+/// of the fallback provider.
+pub fn provider_routes(config: &LlmConfig, slot: ModelSlot, preference: &str) -> Vec<LlmRoute> {
     if config.provider == "none" { return Vec::new() }
     let sources = crate::agent_source::SourcesConfig::load();
     let mut providers = Vec::<(String, Box<dyn LlmProvider>)>::new();
@@ -561,21 +612,63 @@ pub fn daily_report_routes(config: &LlmConfig) -> Vec<LlmRoute> {
         let Some(provider) = resolve_provider(name) else { continue };
         if provider.is_available() { providers.push((name.to_string(), provider)); }
     }
+    // Probe the preferred account first. If it is usable, the fallback's
+    // quota does not affect this call and remains lazy (actual CLI failure
+    // still falls through). Only probe the fallback eagerly when preference
+    // is known-limited, avoiding a Codex app-server round trip on every first
+    // Claude-preferred Guard/session-analysis call.
+    let primary = providers.iter()
+        .find(|(name, _)| name == preference)
+        .or_else(|| providers.first())
+        .map(|(name, _)| name.clone());
+    let primary_state = primary.as_deref().map(provider_quota_state).unwrap_or(QuotaState::Unknown);
     let states: Vec<(String, QuotaState)> = providers.iter().map(|(name, _)| {
-        let state = match name.as_str() {
-            "claude" => claude_quota_state(),
-            "codex" => codex_quota_state(),
-            _ => QuotaState::Unknown,
+        let state = if Some(name.as_str()) == primary.as_deref() {
+            primary_state
+        } else if primary_state == QuotaState::Limited {
+            provider_quota_state(name)
+        } else {
+            QuotaState::Unknown
         };
         (name.clone(), state)
     }).collect();
-    let order = rank_daily_report_providers(config.effective_daily_report_preference(), &states);
+    let order = rank_providers(preference, &states);
+    let selected_model = match slot {
+        ModelSlot::Fast => &config.fast_model,
+        ModelSlot::Standard => &config.standard_model,
+    };
     order.into_iter().filter_map(|name| {
         let index = providers.iter().position(|(candidate, _)| candidate == &name)?;
         let (_, provider) = providers.swap_remove(index);
-        let model = config.standard_model_for(provider.as_ref());
+        let model = if name == config.provider {
+            selected_model.to_string()
+        } else {
+            equivalent_model(&name, selected_model, slot)
+        };
         Some(LlmRoute { provider, model })
     }).collect()
+}
+
+pub fn daily_report_routes(config: &LlmConfig) -> Vec<LlmRoute> {
+    provider_routes(config, ModelSlot::Standard, config.effective_daily_report_preference())
+}
+
+pub fn complete_routed(
+    config: &LlmConfig,
+    slot: ModelSlot,
+    prompt: &str,
+    timeout: Duration,
+    scenario: &str,
+) -> Option<String> {
+    for route in provider_routes(config, slot, &config.provider) {
+        log_debug(&format!("[llm:route] scenario={scenario} provider={} model={}", route.provider.name(), route.model));
+        if let Some(text) = crate::llm_usage::complete_accounted(
+            route.provider.as_ref(), prompt, &route.model, timeout, scenario,
+        ) {
+            return Some(text);
+        }
+    }
+    None
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -592,9 +685,19 @@ mod tests {
     #[test]
     fn daily_report_routing_prefers_choice_and_skips_limited() {
         let healthy = vec![("claude".into(), QuotaState::Healthy), ("codex".into(), QuotaState::Healthy)];
-        assert_eq!(rank_daily_report_providers("codex", &healthy), ["codex", "claude"]);
+        assert_eq!(rank_providers("codex", &healthy), ["codex", "claude"]);
         let limited = vec![("claude".into(), QuotaState::Limited), ("codex".into(), QuotaState::Healthy)];
-        assert_eq!(rank_daily_report_providers("claude", &limited), ["codex"]);
+        assert_eq!(rank_providers("claude", &limited), ["codex"]);
+    }
+
+    #[test]
+    fn equivalent_models_preserve_capability_tier() {
+        assert_eq!(equivalent_model("codex", "haiku", ModelSlot::Fast), "gpt-5.6-luna");
+        assert_eq!(equivalent_model("codex", "sonnet", ModelSlot::Standard), "gpt-5.6-terra");
+        assert_eq!(equivalent_model("codex", "opus", ModelSlot::Standard), "gpt-5.6-sol");
+        assert_eq!(equivalent_model("claude", "gpt-5.6-luna", ModelSlot::Fast), "haiku");
+        assert_eq!(equivalent_model("claude", "gpt-5.6-terra", ModelSlot::Standard), "sonnet");
+        assert_eq!(equivalent_model("claude", "gpt-5.6-sol", ModelSlot::Standard), "opus");
     }
 
     #[test]

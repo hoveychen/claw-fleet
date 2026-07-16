@@ -1437,15 +1437,10 @@ fn serve_guard_analyze(params: &Value) -> Result<Value, String> {
     if cfg.provider == "none" {
         return Err("LLM provider is disabled".into());
     }
-    let provider = crate::llm_provider::resolve_provider(&cfg.provider)
-        .ok_or("LLM provider not available")?;
-    if !provider.is_available() {
-        return Err(format!("{} CLI not found", provider.display_name()));
-    }
-    let analysis = crate::llm_usage::complete_accounted(
-        provider.as_ref(),
+    let analysis = crate::llm_provider::complete_routed(
+        &cfg,
+        crate::llm_provider::ModelSlot::Fast,
         &prompt,
-        &cfg.fast_model,
         Duration::from_secs(30),
         crate::llm_usage::SCENARIO_GUARD_COMMAND,
     )
