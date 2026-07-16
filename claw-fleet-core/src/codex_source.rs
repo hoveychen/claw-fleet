@@ -1608,6 +1608,34 @@ mod tests {
     }
 
     #[test]
+    fn agents_md_instructions_heading_user_msg_is_tagged_is_meta() {
+        // Newer codex CLI builds no longer wrap the AGENTS.md guidance in
+        // `<user_instructions>`. Instead the role=user blob opens with a markdown
+        // heading `# AGENTS.md instructions`, wraps the doc in
+        // `<INSTRUCTIONS>…</INSTRUCTIONS>`, and appends `<environment_context>` to
+        // the same message. It is still runtime-injected context, so it must fold.
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "# AGENTS.md instructions\n\n<INSTRUCTIONS>\nFollow the house style.\n</INSTRUCTIONS>\n<environment_context>\n  <cwd>/tmp</cwd>\n</environment_context>"
+                }]
+            }
+        })];
+
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0]["isMeta"],
+            json!(true),
+            "codex's `# AGENTS.md instructions` blob must be tagged isMeta so the frontend folds it"
+        );
+    }
+
+    #[test]
     fn runtime_marker_user_msgs_are_tagged_is_meta() {
         // Codex also injects two low-frequency runtime markers as role=user
         // messages: `<turn_aborted>` (interrupt notice; its developer-role
@@ -3002,12 +3030,25 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                                 trimmed.starts_with(&format!("<{tag}>"))
                                     && text.contains(&format!("</{tag}>"))
                             };
+                            // Newer codex CLI builds no longer wrap the AGENTS.md
+                            // guidance in `<user_instructions>`; they emit a
+                            // role=user blob that opens with a markdown heading
+                            // `# AGENTS.md instructions`, wraps the doc body in
+                            // `<INSTRUCTIONS>…</INSTRUCTIONS>`, and appends the
+                            // `<environment_context>` preamble to the same message.
+                            // That leading heading means none of the `wrapped_in`
+                            // tag checks fire, so match the heading directly (a
+                            // real user turn won't start with codex's own heading).
+                            let is_agents_md_instructions =
+                                trimmed.starts_with("# AGENTS.md instructions")
+                                    && text.contains("<INSTRUCTIONS>");
                             let is_injected_user_context = role == "user"
                                 && (wrapped_in("recommended_plugins")
                                     || wrapped_in("environment_context")
                                     || wrapped_in("user_instructions")
                                     || wrapped_in("turn_aborted")
-                                    || wrapped_in("subagent_notification"));
+                                    || wrapped_in("subagent_notification")
+                                    || is_agents_md_instructions);
 
                             if role == "developer" || is_injected_user_context {
                                 msg["isMeta"] = json!(true);
