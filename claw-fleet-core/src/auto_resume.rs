@@ -521,7 +521,7 @@ mod tests {
             rate_limit: rl,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, last_read_ms: None,            compact_count: 0,
+            task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,

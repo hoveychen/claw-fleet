@@ -109,6 +109,7 @@ pub const SEARCH: &str = "/search";
 pub const SESSION_DECISIONS: &str = "/session_decisions";
 pub const SESSION_MARK: &str = "/session_mark";
 pub const SESSION_READ: &str = "/session_read";
+pub const SESSION_TITLE: &str = "/session_title";
 pub const SESSIONS: &str = "/sessions";
 pub const SET_SOURCE_ENABLED: &str = "/set_source_enabled";
 pub const SETUP_STATUS: &str = "/setup-status";
