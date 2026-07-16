@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
-import type { RepoDetail, RepoSummary, WorktreeHealth } from "../types";
+import type { DirtyFile, RepoDetail, RepoSummary, WorktreeHealth } from "../types";
 import { fetchRepoDetail, pullRepo, pushRepo } from "../repo";
 import styles from "./RepoDetailView.module.css";
 
@@ -22,6 +22,8 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "push" | "pull">(null);
   const [opResult, setOpResult] = useState<{ ok: boolean; output: string } | null>(null);
+  // Whether the main checkout's "脏 N" badge is expanded into its file list.
+  const [showMainFiles, setShowMainFiles] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -101,9 +103,15 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
                       tone="info"
                     />
                     {detail.dirtyCount > 0 && (
-                      <span className={styles.chip} data-tone="info">
-                        {t("脏 {0}", detail.dirtyCount)}
-                      </span>
+                      <button
+                        type="button"
+                        className={`${styles.chip} ${styles.chipToggle}`}
+                        data-tone="info"
+                        aria-expanded={showMainFiles}
+                        onClick={() => setShowMainFiles((v) => !v)}
+                      >
+                        {t("脏 {0}", detail.dirtyCount)} {showMainFiles ? "▾" : "▸"}
+                      </button>
                     )}
                     {(detail.unpushed ?? 0) === 0 &&
                       (detail.behind ?? 0) === 0 &&
@@ -115,6 +123,9 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
                   </span>
                 </div>
               </div>
+              {showMainFiles && detail.dirtyCount > 0 && (
+                <DirtyFileList files={detail.dirtyFiles} />
+              )}
               <div className={styles.opRow}>
                 <button
                   className={styles.opButton}
@@ -209,6 +220,7 @@ function StatChip({
 
 function WorktreeRow({ wt }: { wt: WorktreeHealth }) {
   const pending = wt.unmerged > 0 || wt.dirtyCount > 0;
+  const [showFiles, setShowFiles] = useState(false);
   return (
     <div className={styles.worktree}>
       <span className={styles.wtDot} data-pending={pending} />
@@ -221,9 +233,15 @@ function WorktreeRow({ wt }: { wt: WorktreeHealth }) {
             </span>
           )}
           {wt.dirtyCount > 0 && (
-            <span className={styles.chip} data-tone="info">
-              {t("脏 {0}", wt.dirtyCount)}
-            </span>
+            <button
+              type="button"
+              className={`${styles.chip} ${styles.chipToggle}`}
+              data-tone="info"
+              aria-expanded={showFiles}
+              onClick={() => setShowFiles((v) => !v)}
+            >
+              {t("脏 {0}", wt.dirtyCount)} {showFiles ? "▾" : "▸"}
+            </button>
           )}
           {!pending && (
             <span className={styles.chip} data-tone="ok">
@@ -234,8 +252,26 @@ function WorktreeRow({ wt }: { wt: WorktreeHealth }) {
             <span className={styles.wtTime}>{fmtTime(wt.lastCommitTime)}</span>
           )}
         </span>
+        {showFiles && wt.dirtyCount > 0 && <DirtyFileList files={wt.dirtyFiles} />}
       </span>
     </div>
+  );
+}
+
+/** Read-only list of uncommitted files (path + one-char status code). Mobile
+ *  has no file tree, so — unlike the desktop 文件 tab — entries are display-only. */
+function DirtyFileList({ files }: { files: DirtyFile[] }) {
+  return (
+    <ul className={styles.dirtyFiles}>
+      {files.map((f) => (
+        <li key={f.path} className={styles.dirtyFile}>
+          <span className={styles.dirtyStatus} data-status={f.status}>
+            {f.status}
+          </span>
+          <span className={styles.dirtyPath}>{f.path}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
