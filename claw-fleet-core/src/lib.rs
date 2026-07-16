@@ -113,8 +113,7 @@ use std::fs;
 use session::SessionInfo;
 
 pub fn log_debug(msg: &str) {
-    if let Some(home) = session::real_home_dir() {
-        let log_path = home.join(".fleet").join("claw-fleet-debug.log");
+    if let Some(log_path) = debug_log_path() {
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
         let line = format!("[{timestamp}] {msg}\n");
         let _ = std::fs::OpenOptions::new()
@@ -122,6 +121,46 @@ pub fn log_debug(msg: &str) {
             .append(true)
             .open(&log_path)
             .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+    }
+}
+
+/// Where [`log_debug`] writes. Production: `~/.fleet/claw-fleet-debug.log`.
+/// Test builds redirect to a temp-dir file: unit tests exercise the real
+/// modules, whose fixture ids (`sess-idle`, `loop l1`, `watch w1`, …) would
+/// otherwise interleave with production entries in the real log and drown out
+/// the events a live diagnosis greps for (bit us on 2026-07-16 tracing codex
+/// turn aborts).
+fn debug_log_path() -> Option<std::path::PathBuf> {
+    if cfg!(test) {
+        return Some(std::env::temp_dir().join("claw-fleet-debug-test.log"));
+    }
+    session::real_home_dir().map(|h| h.join(".fleet").join("claw-fleet-debug.log"))
+}
+
+#[cfg(test)]
+mod log_debug_tests {
+    /// `cargo test` must never append fixture noise to the real
+    /// `~/.fleet/claw-fleet-debug.log`. Probe is time-unique so reruns don't
+    /// trip over lines an older (pre-fix) run leaked into the real file.
+    #[test]
+    fn test_build_log_debug_stays_out_of_the_real_fleet_log() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let probe = format!("log-isolation-probe-{nanos}");
+        super::log_debug(&probe);
+
+        if let Some(home) = crate::session::real_home_dir() {
+            let real = home.join(".fleet").join("claw-fleet-debug.log");
+            if let Ok(content) = std::fs::read_to_string(&real) {
+                assert!(
+                    !content.contains(&probe),
+                    "test-build log_debug leaked into {}",
+                    real.display()
+                );
+            }
+        }
     }
 }
 
