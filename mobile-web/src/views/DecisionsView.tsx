@@ -688,7 +688,7 @@ function assistantProse(msg: RawMessage): string {
 
 /** Agent narration since the user's last input (typed prompt or an answer to
  *  an ask-family tool; plain Bash/Read tool_results do NOT end the span). */
-function slicePrecedingMessages(messages: RawMessage[]): { key: string; text: string }[] {
+export function slicePrecedingMessages(messages: RawMessage[]): { key: string; text: string }[] {
   const toolNameById = new Map<string, string>();
   for (const m of messages) {
     for (const b of blocksOf(m)) {
@@ -703,6 +703,10 @@ function slicePrecedingMessages(messages: RawMessage[]): { key: string; text: st
     if (blocks.some((b) => b.type === "text" && b.text?.trim())) return true;
     return blocks.some((b) => {
       if (b.type !== "tool_result" || !b.tool_use_id) return false;
+      // A failed ask call (is_error) was never actually answered — it errored
+      // out before the user could respond, so it is NOT user input and must not
+      // end the narration span.
+      if (b.is_error) return false;
       const name = toolNameById.get(b.tool_use_id);
       return !!name && isAskToolName(name);
     });
