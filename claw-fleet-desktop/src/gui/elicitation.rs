@@ -121,20 +121,18 @@ pub(crate) fn remove_prd_mode(state: tauri::State<AppState>) -> Result<(), Strin
     state.backend.read().unwrap().remove_prd_mode()
 }
 
+/// Mirror the Claude concept toggles onto codex's AGENTS.md. Called by the
+/// desktop after any concept toggle (interaction / PRD / wiki / model) and on
+/// startup, so codex's per-concept blocks always match the Claude sentinels.
 #[tauri::command]
-pub(crate) fn apply_codex_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+pub(crate) fn reconcile_codex_guidance(state: tauri::State<AppState>) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
     state
         .backend
         .read()
         .unwrap()
-        .apply_codex_guidance(&title, &locale)
-}
-
-#[tauri::command]
-pub(crate) fn remove_codex_guidance(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().remove_codex_guidance()
+        .reconcile_codex_guidance(&title, &locale)
 }
 
 #[tauri::command]

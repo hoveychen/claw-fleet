@@ -677,25 +677,26 @@ pub fn parse_thread_started(line: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Channel B (prompt-prepend) of codex guidance: if the codex-guidance toggle
-/// is on (its `~/.codex/AGENTS.md` sentinel is present) AND the workspace has
-/// active TASKS.md plans, prepend the same `<system-reminder>` block Claude gets
-/// via the `fleet prd-context` UserPromptSubmit hook to the codex prompt.
+/// Channel B (prompt-prepend) of codex guidance: if the codex **PRD** block is
+/// installed (its `~/.codex/AGENTS.md` sentinel is present) AND the workspace
+/// has active TASKS.md plans, prepend the same `<system-reminder>` block Claude
+/// gets via the `fleet prd-context` UserPromptSubmit hook to the codex prompt.
 ///
 /// Because Fleet drives every codex turn with a fresh `codex exec` /
 /// `codex exec resume … -- <prompt>`, prepending here on each spawn and resume
 /// gives the per-turn re-injection Claude's hook provides — this is the B2 path
 /// chosen in P1 (B1 codex hooks are an experimental, already-renamed feature).
 ///
-/// Gated on the single codex-guidance toggle so static (AGENTS.md) and dynamic
-/// (this) injection move together. No toggle / no active plan → returns the
+/// Gated on the codex PRD concept specifically (active-plans is a TASKS.md / PRD
+/// concern): static (AGENTS.md PRD block) and dynamic (this) injection move
+/// together with the PRD toggle. No PRD block / no active plan → returns the
 /// prompt unchanged (AC3 graceful degradation).
 fn maybe_prepend_active_plans(
     workspace_path: &str,
     session_id: Option<&str>,
     prompt: &str,
 ) -> String {
-    if !crate::codex_guidance::is_codex_guidance_installed() {
+    if !crate::codex_guidance::is_codex_prd_installed() {
         return prompt.to_string();
     }
     match crate::prd_tasks::render_active_plans_reminder(Path::new(workspace_path), session_id) {
