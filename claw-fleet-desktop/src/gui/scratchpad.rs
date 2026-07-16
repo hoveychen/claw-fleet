@@ -2,12 +2,12 @@ use super::*;
 
 // ── Session scratchpad ──────────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_scratchpad_dir(
     workspace: String,
     session_id: String,
     rel_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
     state
         .backend
@@ -16,12 +16,12 @@ pub(crate) fn list_scratchpad_dir(
         .list_scratchpad_dir(&workspace, &session_id, &rel_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn read_scratchpad_file(
     workspace: String,
     session_id: String,
     rel_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
     state
         .backend

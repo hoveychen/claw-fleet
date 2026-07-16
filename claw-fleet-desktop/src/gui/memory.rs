@@ -3,8 +3,8 @@ use crate::memory;
 
 // ── Memory commands ──────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub(crate) fn list_memories(state: tauri::State<AppState>) -> Vec<memory::WorkspaceMemory> {
+#[tauri::command(async)]
+pub(crate) fn list_memories(state: tauri::State<'_, AppState>) -> Vec<memory::WorkspaceMemory> {
     state.backend.read().unwrap().list_memories()
 }
 
@@ -19,21 +19,21 @@ pub(crate) fn read_live_thinking(
     state.backend.read().unwrap().read_live_thinking(&session_id)
 }
 
-#[tauri::command]
-pub(crate) fn get_memory_content(path: String, state: tauri::State<AppState>) -> Result<String, String> {
+#[tauri::command(async)]
+pub(crate) fn get_memory_content(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
     state.backend.read().unwrap().get_memory_content(&path)
 }
 
-#[tauri::command]
-pub(crate) fn get_memory_history(path: String, state: tauri::State<AppState>) -> Vec<memory::MemoryHistoryEntry> {
+#[tauri::command(async)]
+pub(crate) fn get_memory_history(path: String, state: tauri::State<'_, AppState>) -> Vec<memory::MemoryHistoryEntry> {
     state.backend.read().unwrap().get_memory_history(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_task_plans(
     workspace_path: String,
     session_id: Option<String>,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
     state
         .backend

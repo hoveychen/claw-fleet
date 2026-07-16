@@ -3,8 +3,8 @@ use crate::plugins;
 
 // ── Plugins ──────────────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub(crate) fn list_plugins(state: tauri::State<AppState>) -> Vec<plugins::PluginItem> {
+#[tauri::command(async)]
+pub(crate) fn list_plugins(state: tauri::State<'_, AppState>) -> Vec<plugins::PluginItem> {
     state.backend.read().unwrap().list_plugins()
 }
 
@@ -31,9 +31,9 @@ pub(crate) fn uninstall_plugin(state: tauri::State<AppState>, plugin_id: String)
     state.backend.read().unwrap().uninstall_plugin(&plugin_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_marketplaces(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::claude_cli::CliMarketplace> {
     state.backend.read().unwrap().list_marketplaces()
 }

@@ -4,13 +4,13 @@ use serde::Serialize;
 
 // ── Security audit ──────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub(crate) fn get_audit_events(state: tauri::State<AppState>) -> audit::AuditSummary {
+#[tauri::command(async)]
+pub(crate) fn get_audit_events(state: tauri::State<'_, AppState>) -> audit::AuditSummary {
     state.backend.read().unwrap().get_audit_events()
 }
 
-#[tauri::command]
-pub(crate) fn get_audit_rules(state: tauri::State<AppState>) -> Vec<audit::AuditRuleInfo> {
+#[tauri::command(async)]
+pub(crate) fn get_audit_rules(state: tauri::State<'_, AppState>) -> Vec<audit::AuditRuleInfo> {
     state.backend.read().unwrap().get_audit_rules()
 }
 
@@ -29,24 +29,24 @@ pub(crate) fn delete_custom_audit_rule(state: tauri::State<AppState>, id: String
     state.backend.read().unwrap().delete_custom_audit_rule(&id)
 }
 
-#[tauri::command]
-pub(crate) fn suggest_audit_rules(state: tauri::State<AppState>, concern: String, lang: String) -> Result<Vec<audit::SuggestedRule>, String> {
+#[tauri::command(async)]
+pub(crate) fn suggest_audit_rules(state: tauri::State<'_, AppState>, concern: String, lang: String) -> Result<Vec<audit::SuggestedRule>, String> {
     state.backend.read().unwrap().suggest_audit_rules(&concern, &lang)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_daily_report(
     date: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Option<daily_report::DailyReport>, String> {
     state.backend.read().unwrap().get_daily_report(&date)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_daily_report_stats(
     from: String,
     to: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Vec<daily_report::DailyReportStats> {
     state.backend.read().unwrap().list_daily_report_stats(&from, &to)
 }
