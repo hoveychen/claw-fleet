@@ -88,6 +88,17 @@ const IN_FLIGHT_STATUSES = new Set<SessionStatus>([
 ]);
 
 /**
+ * Whether the session detail view should keep live-tailing this session's
+ * transcript (the "自动跟随" poller and live-thinking poll). A live process can
+ * produce new transcript writes regardless of what the scan-computed status
+ * says — codex long turns have misread as Idle mid-turn (the "codex 假死"
+ * report) — so `procAlive` keeps the poller armed on its own.
+ */
+export function shouldFollowSession(s: SessionInfo): boolean {
+  return s.procAlive || LIVE_STATUSES.has(s.status);
+}
+
+/**
  * Whether the detail view may offer the resume composer: a Fleet-launched main
  * session whose process is no longer running, so `claude --resume` spawns a
  * fresh turn rather than racing a live one.
