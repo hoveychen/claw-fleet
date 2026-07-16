@@ -2,11 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Brain } from "lucide-react";
+import { Brain, GraduationCap, Trash2 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { useAutoFlip } from "./useAutoFlip";
 import { PageShell } from "./PageShell";
+import { useReportStore } from "../store";
+import type { ManagedLesson } from "../types";
 import styles from "./MemoryView.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -65,6 +67,7 @@ interface MemoryHistoryEntry {
 type Selection =
   | { kind: "file"; workspace: WorkspaceMemory; file: MemoryFile }
   | { kind: "claudeMd"; workspace: WorkspaceMemory }
+  | { kind: "lessons" }
   | null;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -116,6 +119,13 @@ export function MemoryView() {
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
   const [expandedUnindexed, setExpandedUnindexed] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Selection>(null);
+
+  // Lessons the user added to global guidance from the daily-report card
+  // (~/.claude/fleet-lessons.md), shown as a pinned entry with per-row removal.
+  const { managedLessons, loadManagedLessons, removeManagedLesson } = useReportStore();
+  useEffect(() => {
+    loadManagedLessons();
+  }, [loadManagedLessons]);
 
   const load = useCallback(async () => {
     try {
@@ -220,6 +230,7 @@ export function MemoryView() {
   // Keep selection valid after refresh / filter changes.
   useEffect(() => {
     if (!selection) return;
+    if (selection.kind === "lessons") return; // not tied to a workspace
     if (selection.kind === "file") {
       const stillThere = filtered
         .find((ws) => ws.projectKey === selection.workspace.projectKey)
@@ -302,12 +313,44 @@ export function MemoryView() {
       secondary={
         <div className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("memory.loading")}</p>}
-          {loaded && filtered.length === 0 && (
+          {loaded && filtered.length === 0 && managedLessons.length === 0 && (
             <EmptyState
               icon={<Brain size={28} strokeWidth={1.5} />}
               title={t("empty_state.memory_title")}
               subtitle={t("empty_state.memory_subtitle")}
             />
+          )}
+          {managedLessons.length > 0 && (
+            <div className={styles.workspace_group}>
+              <div className={styles.workspace_header}>
+                <span className={styles.workspace_name}>
+                  {t("memory.lessons_group")}
+                </span>
+                <span className={styles.workspace_count}>
+                  {managedLessons.length}
+                </span>
+              </div>
+              <div className={styles.card_list}>
+                <button
+                  className={`${styles.card} ${
+                    selection?.kind === "lessons" ? styles.card_active : ""
+                  }`}
+                  onClick={() => setSelection({ kind: "lessons" })}
+                >
+                  <span className={`${styles.type_badge} ${styles.type_index}`}>
+                    <GraduationCap size={13} strokeWidth={2} />
+                  </span>
+                  <div className={styles.card_body}>
+                    <div className={styles.card_title}>
+                      {t("memory.lessons_entry_title")}
+                    </div>
+                    <div className={styles.card_hook}>
+                      {t("memory.lessons_entry_hook")}
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
           )}
           {filtered.map((ws) => {
             const indexed = ws.files.filter(
@@ -405,6 +448,11 @@ export function MemoryView() {
             ? t("memory.panel_title")
             : t("memory.no_memories")}
         </div>
+      ) : selection.kind === "lessons" ? (
+        <ManagedLessonsDetail
+          lessons={managedLessons}
+          onRemove={removeManagedLesson}
+        />
       ) : selection.kind === "claudeMd" ? (
         <ClaudeMdDetail
           workspaceName={selection.workspace.workspaceName}
@@ -652,6 +700,75 @@ function ClaudeMdDetail({
         {content !== null && (
           <div className={styles.content_markdown}>
             <TextBlock text={content} />
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ── Managed lessons detail pane ──────────────────────────────────────────────
+
+function ManagedLessonsDetail({
+  lessons,
+  onRemove,
+}: {
+  lessons: ManagedLesson[];
+  onRemove: (id: string) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [removing, setRemoving] = useState<Set<string>>(new Set());
+
+  const handleRemove = async (id: string) => {
+    setRemoving((prev) => new Set(prev).add(id));
+    try {
+      await onRemove(id);
+    } finally {
+      setRemoving((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  return (
+    <>
+      <div className={styles.detail_header}>
+        <div className={styles.detail_title}>
+          <span className={styles.detail_name}>{t("memory.lessons_entry_title")}</span>
+        </div>
+      </div>
+      <div className={styles.detail_body}>
+        {lessons.length === 0 ? (
+          <p className={styles.no_history}>{t("memory.lessons_empty")}</p>
+        ) : (
+          <div className={styles.history_list}>
+            {lessons.map((l) => (
+              <div key={l.id} className={styles.history_entry}>
+                <div className={styles.content_markdown}>
+                  <TextBlock text={l.content} />
+                </div>
+                {l.reason && (
+                  <div className={styles.card_hook}>
+                    <TextBlock text={l.reason} />
+                  </div>
+                )}
+                <div className={styles.card_meta}>
+                  <span>{l.workspaceName}</span>
+                  <span className={styles.card_meta_dot}>·</span>
+                  <span>{l.sessionId}</span>
+                </div>
+                <button
+                  className={styles.promote_btn}
+                  disabled={removing.has(l.id)}
+                  onClick={() => handleRemove(l.id)}
+                >
+                  <Trash2 size={13} strokeWidth={2} />
+                  {removing.has(l.id) ? t("memory.lessons_removing") : t("memory.lessons_remove")}
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>

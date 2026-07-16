@@ -398,7 +398,13 @@
     "unindexed_section": "Unindexed",
     "all_workspaces": "All workspaces",
     "source_claude": "Claude",
-    "source_codex": "Codex"
+    "source_codex": "Codex",
+    "lessons_group": "Daily-report lessons",
+    "lessons_entry_title": "Added lessons",
+    "lessons_entry_hook": "Lessons you added to global guidance",
+    "lessons_empty": "No lessons added yet.",
+    "lessons_remove": "Remove",
+    "lessons_removing": "Removing…"
   },
   "wiki": {
     "panel_title": "Wiki",
