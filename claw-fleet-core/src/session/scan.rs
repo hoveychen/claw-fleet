@@ -763,6 +763,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         token_speed: 0.0,
         agent_token_speed: 0.0,
         total_output_tokens: 0,
+        reasoning_output_tokens: 0,
         total_input_tokens: 0,
         total_cost_usd: 0.0,
         agent_total_cost_usd: 0.0,
@@ -897,4 +898,3 @@ mod rollup_tests {
         assert_eq!(sessions[0].running_subagent_count, 0);
     }
 }
-

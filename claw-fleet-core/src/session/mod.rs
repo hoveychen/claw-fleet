@@ -96,6 +96,12 @@ pub struct SessionInfo {
     /// reconciles with the global aggregate.
     pub agent_token_speed: f64,
     pub total_output_tokens: u64,
+    /// Cumulative Codex reasoning output tokens. These are already included in
+    /// `total_output_tokens`; kept separately so clients can show the reasoning
+    /// share without double-counting cost or total usage. Zero for non-Codex
+    /// sources and rollouts that predate this metric.
+    #[serde(default)]
+    pub reasoning_output_tokens: u64,
     /// Last finalized turn's total input tokens (`input_tokens +
     /// cache_creation_input_tokens + cache_read_input_tokens`) — i.e. the current
     /// context-window size, reset by each compaction. Matches the per-session
@@ -611,6 +617,7 @@ mod tests {
             token_speed: 10.0,
             agent_token_speed: 10.0,
             total_output_tokens: 500,
+            reasoning_output_tokens: 0,
             total_input_tokens: 0,
             total_cost_usd: 0.0,
             agent_total_cost_usd: 0.0,
@@ -3132,4 +3139,3 @@ mod tests {
         );
     }
 }
-
