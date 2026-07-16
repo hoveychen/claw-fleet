@@ -46,6 +46,13 @@
   flex-shrink: 0;
 }
 
+.time {
+  color: var(--color-text-dim);
+  font-size: 11px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .body {
   padding: 4px 8px;
   background: var(--color-bg-secondary);
