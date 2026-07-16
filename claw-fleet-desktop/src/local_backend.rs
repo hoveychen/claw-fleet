@@ -2538,6 +2538,14 @@ impl Backend for LocalBackend {
         r1.and(r2)
     }
 
+    fn apply_codex_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
+        crate::codex_guidance::apply_codex_guidance(user_title, locale)
+    }
+
+    fn remove_codex_guidance(&self) -> Result<(), String> {
+        crate::codex_guidance::remove_codex_guidance()
+    }
+
     fn respond_to_elicitation(
         &self,
         id: &str,

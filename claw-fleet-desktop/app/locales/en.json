@@ -1377,6 +1377,8 @@
     "model_guidance_enabled": "Enable model-selection guidance",
     "wiki_guidance_desc": "Tell agents to archive finished HTML reports, demos and markdown docs into the Fleet wiki (`fleet wiki publish`) so they show up in the Wiki board instead of getting lost in workdirs. Claude Code only.",
     "wiki_guidance_enabled": "Enable wiki publish guidance",
+    "codex_guidance_desc": "Inject Fleet's PRD discipline (commit / worktree / rhythm / handoff) and fleet__ask decision-card discipline into the global ~/.codex/AGENTS.md so Fleet-launched Codex sessions follow the same workflow. Codex only; wrapped in a sentinel block that leaves your existing AGENTS.md untouched.",
+    "codex_guidance_enabled": "Enable Codex session guidance",
     "sources": "Agents to monitor",
     "sources_desc": "Choose which AI coding tools Fleet should keep an eye on.",
     "sources_restart": "Restart to apply changes",

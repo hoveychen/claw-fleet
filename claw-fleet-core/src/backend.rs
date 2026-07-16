@@ -776,6 +776,20 @@ pub trait Backend: Send + Sync {
     fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_prd_mode(&self) -> Result<(), String>;
 
+    // ── Codex guidance (global ~/.codex/AGENTS.md block) ────────────────────
+    /// Enable Fleet guidance for Codex sessions: write the sentinel-wrapped
+    /// PRD-discipline + `fleet__ask` interaction block into the backend's
+    /// `~/.codex/AGENTS.md`. Codex re-reads AGENTS.md on every run, so one
+    /// install covers all subsequent codex sessions. Default-bodied so backends
+    /// that don't support it (or haven't wired it yet) fail loudly rather than
+    /// silently no-op; LocalBackend and RemoteBackend override it.
+    fn apply_codex_guidance(&self, _user_title: &str, _locale: &str) -> Result<(), String> {
+        Err("codex guidance not supported by this backend".into())
+    }
+    fn remove_codex_guidance(&self) -> Result<(), String> {
+        Err("codex guidance not supported by this backend".into())
+    }
+
     // ── Agent sources config ─────────────────────────────────────────────────
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo>;
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String>;
