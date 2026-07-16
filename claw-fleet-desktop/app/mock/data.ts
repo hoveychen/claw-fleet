@@ -22,6 +22,7 @@ const MOCK_SESSIONS_SEED: Array<
   Omit<
     SessionInfo,
     | "totalInputTokens"
+    | "reasoningOutputTokens"
     | "pendingToolBatch"
     | "compactCount"
     | "compactPreTokens"
@@ -30,7 +31,7 @@ const MOCK_SESSIONS_SEED: Array<
     | "pendingMessages"
     | "agentLastActivityMs"
     | "runningSubagentCount"
-  >
+  > & { reasoningOutputTokens?: number }
 > = [
   // ── 1. Active main session: "claw-fleet" (this project) — thinking ──
   {
@@ -290,6 +291,7 @@ const MOCK_SESSIONS_SEED: Array<
     tokenSpeed: 18.4,
     agentTokenSpeed: 18.4,
     totalOutputTokens: 34560,
+    reasoningOutputTokens: 12480,
     totalCostUsd: 0,
     agentTotalCostUsd: 0,
     costSpeedUsdPerMin: 0,
@@ -457,6 +459,7 @@ const MOCK_SESSIONS_SEED: Array<
 // every seed literal above.
 export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
   totalInputTokens: 0,
+  reasoningOutputTokens: 0,
   pendingToolBatch: false,
   compactCount: 0,
   compactPreTokens: 0,
@@ -490,6 +493,7 @@ function mkSession(
     tokenSpeed: 0,
     agentTokenSpeed: o.tokenSpeed ?? 0,
     totalOutputTokens: 20_000,
+    reasoningOutputTokens: 0,
     totalInputTokens: o.totalInputTokens ?? 0,
     totalCostUsd: 0,
     agentTotalCostUsd: 0,
