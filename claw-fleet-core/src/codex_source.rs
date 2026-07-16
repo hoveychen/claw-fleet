@@ -345,6 +345,44 @@ fn strip_leading_system_reminder(text: &str) -> &str {
     }
 }
 
+/// Strip the composer's trailing attachment block from a prompt.
+///
+/// The desktop and mobile composers append attachments as a trailing block:
+///
+///   <prose>\n\nContext files:\n- /abs/one.png\n- /abs/two.pdf
+///
+/// codex has no semantic title, so it stores this whole first prompt — block
+/// included — verbatim as its SQLite `title`, which Fleet then shows as the card
+/// title. Peel the block back off so the title reads the authored prose, not a
+/// wall of absolute paths. This mirrors the frontend `CONTEXT_FILES_RE`
+/// (`userAttachments.ts`), which already does the same at the transcript layer.
+///
+/// Anchored to the exact shape we emit: a `\n\nContext files:\n` marker followed
+/// by one-or-more `- <non-empty>` lines running to end of string. A prompt that
+/// merely mentions "Context files:" mid-sentence, or whose block is followed by
+/// more prose, is returned untouched.
+fn strip_trailing_context_files(text: &str) -> &str {
+    const MARKER: &str = "\n\nContext files:\n";
+    let Some(idx) = text.rfind(MARKER) else {
+        return text;
+    };
+    let tail = &text[idx + MARKER.len()..];
+    // Tolerate a single trailing newline (JS `$` matches before a final `\n`).
+    let tail = tail.strip_suffix('\n').unwrap_or(tail);
+    if tail.is_empty() {
+        return text;
+    }
+    // Every line in the block must be `- ` followed by at least one character.
+    let all_paths = tail
+        .split('\n')
+        .all(|line| line.starts_with("- ") && line.len() > 2);
+    if all_paths {
+        &text[..idx]
+    } else {
+        text
+    }
+}
+
 /// True when a codex message is runtime-injected boilerplate rather than an
 /// authored user prompt: any `developer`-role message, or a `user`-role message
 /// that is one of codex's own preamble blocks — `<recommended_plugins>`,
@@ -424,7 +462,7 @@ fn extract_first_user_prompt(lines: &[Value]) -> Option<String> {
         if role != "user" || text.is_empty() || is_injected_codex_context(role, &text) {
             continue;
         }
-        let stripped = strip_leading_system_reminder(&text);
+        let stripped = strip_trailing_context_files(strip_leading_system_reminder(&text));
         if !stripped.is_empty() {
             return Some(stripped.to_string());
         }
@@ -1391,7 +1429,7 @@ fn build_session_from_sqlite(
             // `<system-reminder>` block. Strip it so the header/card title shows
             // the real prompt, not the plan dump (see
             // `strip_leading_system_reminder`).
-            let cleaned = strip_leading_system_reminder(&thread.title);
+            let cleaned = strip_trailing_context_files(strip_leading_system_reminder(&thread.title));
             if !cleaned.is_empty() {
                 return Some(cleaned.to_string());
             }
@@ -1490,8 +1528,8 @@ mod tests {
         codex_token_breakdown_from_lines, compute_token_stats, exec_note_from_script,
         extract_context_percent, extract_first_user_prompt, last_rollout_rate_limits,
         latest_total_token_usage, normalize_messages, strip_leading_system_reminder,
-        read_rollout_originator, CodexProcess, CodexRateLimitWindow, CodexUsageItem,
-        SqliteThread,
+        strip_trailing_context_files, read_rollout_originator, CodexProcess,
+        CodexRateLimitWindow, CodexUsageItem, SqliteThread,
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
@@ -1533,6 +1571,59 @@ mod tests {
             Some("当前fleet应用中，是不是审计和日报两个功能会使用到LLM？"),
             "must skip developer/recommended_plugins/AGENTS.md records and strip the leading \
              <system-reminder> block, returning only the authored prompt"
+        );
+    }
+
+    #[test]
+    fn extract_first_user_prompt_strips_trailing_context_files() {
+        // The desktop/mobile composers append attachments to the prompt as a
+        // trailing `\n\nContext files:\n- <abs path>` block (see
+        // userAttachments.ts `CONTEXT_FILES_RE`). codex stores that verbatim as
+        // its SQLite `title`, so without stripping it the card title reads a wall
+        // of absolute attachment paths instead of just the authored prose.
+        let prompt = "为什么这个codex会话会显示决策卡没有回复？\n\n\
+             然后这个会话thinking后就没有然后了？\n\n\
+             Context files:\n\
+             - /Users/hoveychen/.fleet/user-attachments/4f2f718f/paste-1.png\n\
+             - /Users/hoveychen/.fleet/user-attachments/4f2f718f/doc.pdf";
+        let lines = vec![json!({"type":"response_item","payload":{
+            "type":"message","role":"user",
+            "content":[{"type":"input_text","text": prompt}]
+        }})];
+
+        let got = extract_first_user_prompt(&lines);
+        assert_eq!(
+            got.as_deref(),
+            Some(
+                "为什么这个codex会话会显示决策卡没有回复？\n\n\
+                 然后这个会话thinking后就没有然后了？"
+            ),
+            "the trailing `Context files:` attachment block must be stripped from \
+             the title, leaving only the authored prose"
+        );
+    }
+
+    #[test]
+    fn strip_trailing_context_files_leaves_prose_mentions_alone() {
+        // A user who merely types the words mid-sentence, or a block followed by
+        // more prose, must be left untouched — only the exact composer shape
+        // (double-newline + `Context files:` + `- ` lines running to EOS) is cut.
+        assert_eq!(
+            strip_trailing_context_files("讨论一下 Context files: 这个功能怎么做"),
+            "讨论一下 Context files: 这个功能怎么做"
+        );
+        assert_eq!(
+            strip_trailing_context_files("hi\n\nContext files:\n- /a/one.png\nand I kept typing"),
+            "hi\n\nContext files:\n- /a/one.png\nand I kept typing"
+        );
+        assert_eq!(
+            strip_trailing_context_files("look\n\nContext files:\n- /a/one.png\n- /b/two.pdf"),
+            "look"
+        );
+        // Tolerate a single trailing newline.
+        assert_eq!(
+            strip_trailing_context_files("look\n\nContext files:\n- /a/one.png\n"),
+            "look"
         );
     }
 
