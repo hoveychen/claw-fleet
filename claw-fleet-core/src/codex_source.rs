@@ -707,19 +707,23 @@ fn extract_context_percent(lines: &[Value], model: Option<&str>) -> Option<f64> 
             continue;
         }
         let info = payload.get("info")?;
+        // `last_token_usage` is the current context-window occupancy for the
+        // most recent turn. `total_token_usage` is CUMULATIVE across every turn
+        // (Codex resends the whole prompt each turn, so its input grows without
+        // bound) and would pin any multi-turn session to ctx 100%. Prefer last,
+        // falling back to total only when a rollout lacks the per-turn field.
         let usage = info
-            .get("total_token_usage")
-            .or_else(|| info.get("last_token_usage"));
+            .get("last_token_usage")
+            .or_else(|| info.get("total_token_usage"));
 
-        let input_tokens = usage
+        // For OpenAI/Codex models `input_tokens` already includes the cached
+        // portion (`cached_input_tokens` is a subset detail, not a separate
+        // bucket the way Anthropic reports cache_read), so it alone is the
+        // window occupancy — adding cached would double-count.
+        let total_input = usage
             .and_then(|u| u.get("input_tokens"))
             .and_then(|t| t.as_u64())
             .unwrap_or(0);
-        let cached_input_tokens = usage
-            .and_then(|u| u.get("cached_input_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let total_input = input_tokens + cached_input_tokens;
 
         if total_input == 0 {
             continue;
@@ -1277,6 +1281,71 @@ mod tests {
     }
 
     #[test]
+    fn normalize_messages_dedups_user_message_against_response_item() {
+        // Current Codex rollouts persist a real prompt in both forms. The
+        // response_item is canonical and the event_msg is only its timeline
+        // mirror, so Fleet must render one user bubble rather than two.
+        let lines = vec![
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "same prompt"}]
+                },
+                "timestamp": "t0"
+            }),
+            json!({
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": "same prompt"},
+                "timestamp": "t1"
+            }),
+        ];
+
+        let out = normalize_messages(lines);
+        let user_texts: Vec<&str> = out
+            .iter()
+            .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("user"))
+            .filter_map(|m| {
+                m.get("message")?
+                    .get("content")?
+                    .as_array()?
+                    .first()?
+                    .get("text")?
+                    .as_str()
+            })
+            .collect();
+
+        assert_eq!(user_texts, vec!["same prompt"]);
+    }
+
+    #[test]
+    fn normalize_messages_keeps_unmatched_repeated_user_event() {
+        // A count (not a global text set) ensures an event-only partial turn is
+        // retained even when it repeats a prompt from a completed older turn.
+        let lines = vec![
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "again"}]
+                }
+            }),
+            json!({"type":"event_msg","payload":{"type":"user_message","message":"again"}}),
+            json!({"type":"event_msg","payload":{"type":"user_message","message":"again"}}),
+        ];
+
+        let out = normalize_messages(lines);
+        assert_eq!(
+            out.iter()
+                .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("user"))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
     fn extract_first_user_text_finds_earliest_user_turn() {
         // event_msg user_message form, preceded by a non-user line.
         let lines = vec![
@@ -1358,6 +1427,28 @@ mod tests {
             out[1].get("isMeta").is_none(),
             "real user messages must NOT be tagged isMeta"
         );
+    }
+
+    #[test]
+    fn recommended_plugins_user_context_is_tagged_is_meta() {
+        // Codex injects this runtime block with role=user (unlike its other
+        // role=developer boilerplate), but it still must render as a collapsed
+        // system-context row rather than as a user-authored chat bubble.
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "<recommended_plugins>\n- GitHub\n</recommended_plugins><environment_context>...</environment_context>"
+                }]
+            }
+        })];
+
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["isMeta"], json!(true));
     }
 
     #[test]
@@ -1805,14 +1896,17 @@ mod tests {
 
     #[test]
     fn extract_context_percent_prefers_precise_window_from_token_count() {
+        // No `last_token_usage` here, so it falls back to `total_token_usage`.
+        // `input_tokens` already includes the 1000 cached tokens, so occupancy
+        // is 1500/3000, NOT (1500+1000)/3000 — cached must not be added.
         let lines = vec![json!({
             "type": "event_msg",
             "payload": {
                 "type": "token_count",
                 "info": {
                     "total_token_usage": {
-                        "input_tokens": 1000,
-                        "cached_input_tokens": 500
+                        "input_tokens": 1500,
+                        "cached_input_tokens": 1000
                     },
                     "model_context_window": 3000
                 }
@@ -1821,6 +1915,44 @@ mod tests {
 
         let pct = extract_context_percent(&lines, Some("gpt-5.4"));
         assert_eq!(pct, Some(0.5));
+    }
+
+    #[test]
+    fn context_percent_uses_last_turn_not_cumulative_total() {
+        // Real on-disk shape from a long gpt-5.6-sol session. Codex's
+        // `total_token_usage` is CUMULATIVE across every turn (each turn resends
+        // the whole prompt, so its input sums without bound — here 1.5M against
+        // a 258K window), while `last_token_usage` is the current window
+        // occupancy (92K). Using the cumulative total pinned the card to
+        // ctx 100%. Also: for OpenAI/Codex models `input_tokens` already
+        // includes the cached subset, so summing them double-counts.
+        let lines = vec![json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "model_context_window": 258_400,
+                    "total_token_usage": {
+                        "input_tokens": 1_549_616,
+                        "cached_input_tokens": 1_454_080,
+                        "output_tokens": 6192
+                    },
+                    "last_token_usage": {
+                        "input_tokens": 92_304,
+                        "cached_input_tokens": 90_880,
+                        "output_tokens": 393
+                    }
+                }
+            }
+        })];
+
+        let pct = extract_context_percent(&lines, Some("gpt-5.6-sol")).unwrap();
+        // 92_304 / 258_400 ≈ 0.357 — must not be clamped to 1.0, and must not
+        // add cached on top (that would give 183_184 / 258_400 ≈ 0.709).
+        assert!(
+            (pct - 92_304.0 / 258_400.0).abs() < 1e-9,
+            "expected last-turn occupancy, got {pct}"
+        );
     }
 }
 
@@ -2167,6 +2299,45 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
         })
         .collect();
 
+    // Codex also persists each genuine user turn twice: first as the
+    // canonical response_item/message(role=user), then as an
+    // event_msg/user_message mirror. Keep a count rather than a set so a later
+    // interrupted turn that happens to repeat an earlier prompt is not lost.
+    let mut response_item_user_texts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for line in &lines {
+        if line.get("type").and_then(|t| t.as_str()) != Some("response_item") {
+            continue;
+        }
+        let Some(payload) = line.get("payload") else {
+            continue;
+        };
+        if payload.get("type").and_then(|t| t.as_str()) != Some("message")
+            || payload.get("role").and_then(|r| r.as_str()) != Some("user")
+        {
+            continue;
+        }
+        let text = payload
+            .get("content")
+            .and_then(|c| c.as_array())
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|b| match b.get("type").and_then(|t| t.as_str()) {
+                        Some("input_text") | Some("output_text") => {
+                            b.get("text").and_then(|t| t.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .unwrap_or_default();
+        if !text.is_empty() {
+            *response_item_user_texts.entry(text).or_default() += 1;
+        }
+    }
+
     let mut messages: Vec<Value> = Vec::new();
 
     for line in lines {
@@ -2205,6 +2376,17 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                             })
                             .unwrap_or("")
                             .to_string();
+
+                        // The response_item is the canonical history record.
+                        // Suppress only one matching event mirror per canonical
+                        // copy; unmatched events remain visible for partial or
+                        // legacy rollouts.
+                        if let Some(remaining) = response_item_user_texts.get_mut(&text) {
+                            if *remaining > 0 {
+                                *remaining -= 1;
+                                continue;
+                            }
+                        }
 
                         messages.push(json!({
                             "type": "user",
@@ -2358,7 +2540,16 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                             // records — and the frontend folds it into a
                             // collapsed, expandable card instead of a full
                             // bubble (see MessageList / SessionDetailView).
-                            if role == "developer" {
+                            let text = content
+                                .iter()
+                                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                                .collect::<Vec<_>>()
+                                .join("");
+                            let is_injected_user_context = role == "user"
+                                && text.trim_start().starts_with("<recommended_plugins>")
+                                && text.contains("</recommended_plugins>");
+
+                            if role == "developer" || is_injected_user_context {
                                 msg["isMeta"] = json!(true);
                             }
 
