@@ -35,6 +35,7 @@ import { UserContent } from "./blocks/UserContent";
 import { CopyButton } from "./CopyButton";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import { SkillLoadBlock } from "./blocks/SkillLoadBlock";
+import { MetaContextBlock } from "./blocks/MetaContextBlock";
 import { parseSkillInjection } from "../skillInjection";
 import styles from "./MessageList.module.css";
 
@@ -278,7 +279,8 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
   // SKILL.md to the agent as a synthetic `isMeta` user turn. It is not something
   // the user typed, so fold it into a collapsed card instead of a giant bubble.
   if (isUser && msg.isMeta) {
-    const skill = parseSkillInjection(messageToText(msg));
+    const text = messageToText(msg);
+    const skill = parseSkillInjection(text);
     if (skill) {
       return (
         <div className={styles.compact_row} data-msg-idx={msgIdx}>
@@ -286,6 +288,15 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
         </div>
       );
     }
+    // Any other injected `isMeta` context (codex's sandbox/permissions
+    // preamble, the `/root` collaboration prompt, `<multi_agent_mode>`) is
+    // runtime boilerplate, not a user turn — fold it into a collapsed card too
+    // rather than falling through to a full-width user bubble.
+    return (
+      <div className={styles.compact_row} data-msg-idx={msgIdx}>
+        <MetaContextBlock body={text} />
+      </div>
+    );
   }
 
   const isPartial =
