@@ -3079,6 +3079,14 @@ impl Backend for LocalBackend {
         crate::account::load_usage_history(from_ms, to_ms)
     }
 
+    fn codex_usage_history(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Vec<crate::codex_usage_history::CodexUsageHistoryPoint> {
+        crate::codex_usage_history::load_codex_usage_history(from_ms, to_ms)
+    }
+
     fn upload_attachment(
         &self,
         source_path: &std::path::Path,

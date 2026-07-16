@@ -10,8 +10,9 @@ import {
 } from "../usageStore";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { UsageHistoryModal } from "./UsageHistoryModal";
+import { CodexUsageHistoryModal } from "./CodexUsageHistoryModal";
 
-type TFunc = (key: string, opts?: Record<string, unknown>) => string;
+export type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
 function formatResetIn(resets_at: string, t: TFunc): string {
   const diff = new Date(resets_at).getTime() - Date.now();
@@ -97,7 +98,7 @@ function UsageBar({ label, stats }: { label: string; stats: UsageStats | null })
 // that duration, not from the primary/secondary slot — a Team plan, for
 // example, returns a single 7-day window in the `primary` slot, and hardcoding
 // "会话 (5小时)" there produced the self-contradicting "会话 (5小时) (7d)".
-function codexWindowLabel(mins: number | null | undefined, t: TFunc): string {
+export function codexWindowLabel(mins: number | null | undefined, t: TFunc): string {
   if (mins == null || !Number.isFinite(mins)) return t("account.usage");
   const isWeekly = mins >= 1440;
   const duration = isWeekly
@@ -261,6 +262,8 @@ function CodexUsageSection() {
     return () => clearInterval(timer);
   }, []);
 
+  const [historyOpen, setHistoryOpen] = useState(false);
+
   const refresh = () => { load("codex"); };
   const onAutoRefreshChange = (v: boolean) => setAutoRefresh("codex", v);
 
@@ -286,6 +289,16 @@ function CodexUsageSection() {
         </div>
       )}
       {data && !hasBars && <p className={styles.dim}>No usage data</p>}
+      {hasBars && (
+        <button
+          className={styles.history_btn}
+          onClick={() => setHistoryOpen(true)}
+          title={t("account.occupancy_subtitle_codex")}
+        >
+          {t("account.occupancy_history")}
+        </button>
+      )}
+      {historyOpen && <CodexUsageHistoryModal onClose={() => setHistoryOpen(false)} />}
       <SectionFooter
         lastUpdated={lastUpdated}
         loading={loading}

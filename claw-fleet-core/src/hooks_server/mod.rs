@@ -211,6 +211,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     // for local users who run `fleet serve`. Idempotent (once-per-process) and
     // self-healing — offline / not-logged-in errors are swallowed and retried.
     crate::account::start_background_sampler(std::time::Duration::from_secs(600));
+    // Codex parallel sampler — self-gates on codex being installed each tick.
+    crate::codex_source::start_codex_background_sampler(std::time::Duration::from_secs(600));
 
     // Bring up the mobile relay channel if it's configured — on a probe-only
     // machine (no desktop app) this serve process is the agent-side publisher
@@ -874,6 +876,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             crate::routes::FLEET_LLM_USAGE_DAILY => route_fleet_llm_usage_daily(ctx, request, &query, json_header, path),
 
             crate::routes::USAGE_HISTORY => route_usage_history(ctx, request, &query, json_header, path),
+            crate::routes::CODEX_USAGE_HISTORY => route_codex_usage_history(ctx, request, &query, json_header, path),
 
             // ── Session outcome analysis (delegated from remote clients) ──
             crate::routes::ANALYZE => route_analyze(ctx, request, &query, json_header, path),

@@ -157,6 +157,7 @@
     "codex_weekly": "Weekly",
     "occupancy_title": "Occupancy trend · last 24h",
     "occupancy_subtitle": "5h / 7d pool occupancy, sampled every 10 min",
+    "occupancy_subtitle_codex": "Codex session / weekly window occupancy, sampled every 10 min",
     "heavy_threshold": "Heavy threshold",
     "heavy_hint": "Agent sessions whose cumulative cost crosses this amount get a marker at their start time",
     "heavy_marker": "Heavy sessions ×{{n}}",
