@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, ListChecks } from "lucide-react";
-import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
+import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
@@ -83,6 +83,9 @@ export function SessionList() {
       ).length,
     [sessions, readOverrides],
   );
+  // Total running workspace commands across all repos — surfaced as a badge on
+  // the 仓库 (files) nav item, mirroring the green per-repo badge in FilesView.
+  const runningProcCount = useProcStore((s) => runningProcTotal(s.procs));
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
   const {
@@ -122,9 +125,15 @@ export function SessionList() {
     // so far; and any future events will be caught by the listeners above.
     unlistenPromise.then(() => refresh());
     unlistenScanReady.then(() => refresh());
+    // Keep the running-command total fresh for the 仓库 nav badge even when the
+    // files view isn't open (FilesView also polls, but only while mounted).
+    const fetchProcs = useProcStore.getState().fetchProcs;
+    fetchProcs();
+    const procTimer = setInterval(fetchProcs, 2000);
     return () => {
       unlistenPromise.then((u) => u());
       unlistenScanReady.then((u) => u());
+      clearInterval(procTimer);
     };
   }, []);
 
@@ -305,6 +314,9 @@ export function SessionList() {
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5V4Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_files", "仓库")}</span>
+            {runningProcCount > 0 && (
+              <span className={styles.nav_badge_running}>{runningProcCount}</span>
+            )}
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
