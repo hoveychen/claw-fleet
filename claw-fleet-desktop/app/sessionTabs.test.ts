@@ -3,9 +3,12 @@ import {
   closeOtherTabs,
   closeTab,
   closeTabsToRight,
+  DRAFT_TAB_ID,
+  isDraftTab,
   openTab,
   parsePersistedTabs,
   pruneMissingTabs,
+  replaceTab,
   reorderTabs,
   type TabState,
 } from "./sessionTabs";
@@ -136,6 +139,44 @@ describe("pruneMissingTabs", () => {
   it("returns the same object when nothing is missing", () => {
     const before = state(["a", "b"], "a");
     expect(pruneMissingTabs(before, alive(["a", "b"]))).toBe(before);
+  });
+});
+
+describe("isDraftTab", () => {
+  it("recognises the synthetic draft id and nothing else", () => {
+    expect(isDraftTab(DRAFT_TAB_ID)).toBe(true);
+    expect(isDraftTab("some-uuid")).toBe(false);
+  });
+});
+
+describe("replaceTab", () => {
+  it("morphs the draft tab into the real session in place, keeping focus", () => {
+    expect(
+      replaceTab(state(["a", DRAFT_TAB_ID, "b"], DRAFT_TAB_ID), DRAFT_TAB_ID, "s1"),
+    ).toEqual(state(["a", "s1", "b"], "s1"));
+  });
+
+  it("keeps a background draft's slot without stealing focus", () => {
+    expect(
+      replaceTab(state([DRAFT_TAB_ID, "b"], "b"), DRAFT_TAB_ID, "s1"),
+    ).toEqual(state(["s1", "b"], "b"));
+  });
+
+  it("falls back to opening the session when the old tab is gone", () => {
+    expect(replaceTab(state(["a", "b"], "a"), DRAFT_TAB_ID, "s1")).toEqual(
+      state(["a", "b", "s1"], "s1"),
+    );
+  });
+
+  it("drops the old slot and focuses the existing tab when newId is already open", () => {
+    expect(
+      replaceTab(state([DRAFT_TAB_ID, "s1"], DRAFT_TAB_ID), DRAFT_TAB_ID, "s1"),
+    ).toEqual(state(["s1"], "s1"));
+  });
+
+  it("is a no-op when old and new ids are identical", () => {
+    const before = state(["a", "b"], "a");
+    expect(replaceTab(before, "a", "a")).toBe(before);
   });
 });
 
