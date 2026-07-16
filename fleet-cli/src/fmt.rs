@@ -122,6 +122,13 @@ pub(crate) fn short_model(model: &str) -> String {
     s.to_string()
 }
 
+pub(crate) fn short_harness(source: &str) -> &str {
+    match source {
+        "claude-code" => "claude",
+        other => other,
+    }
+}
+
 pub(crate) fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
