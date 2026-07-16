@@ -32,14 +32,16 @@ import {
   type NewSessionCreated,
 } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
-import { SessionTabs } from "./SessionTabs";
+import { SessionTabs, type TabItem } from "./SessionTabs";
 import {
   closeOtherTabs as closeOtherTabsState,
   closeTab as closeTabState,
   closeTabsToRight as closeTabsToRightState,
+  DRAFT_TAB_ID,
   openTab as openTabState,
   parsePersistedTabs,
   pruneMissingTabs,
+  replaceTab as replaceTabState,
   reorderTabs as reorderTabIds,
   TABS_STORAGE_KEY,
   type TabState,
@@ -409,12 +411,13 @@ export function HistoryView() {
   // Per-tab search highlight (the FTS query that matched that session), keyed
   // by session id — each tab was opened by its own click and carries its own.
   const [queryById, setQueryById] = useState<Record<string, string | null>>({});
-  // Detail-column modes are mutually exclusive, in precedence order:
-  //   pending  → "starting…" spinner while we wait for the scanner
-  //   composing→ the inline new-session form
-  //   tabs     → the open sessions' SessionDetail panes
-  //   (none)   → the empty-state hint
-  const [composing, setComposing] = useState(false);
+  // The "+新会话" flow lives entirely inside a synthetic draft tab (DRAFT_TAB_ID)
+  // rather than as a column-level overlay. That tab renders the compose form;
+  // once the form spawns a session, `pending` flips its pane to a "starting…"
+  // spinner, and the morph effect below swaps DRAFT_TAB_ID for the real session
+  // id in place — the draft tab becomes the session's SessionDetail without
+  // leaving its slot. `pending`/`startTimedOut` are therefore about the draft
+  // tab's pane content, not a separate mode covering the whole column.
   const [pending, setPending] = useState<PendingSpawn | null>(null);
   const [startTimedOut, setStartTimedOut] = useState(false);
 
@@ -527,18 +530,22 @@ export function HistoryView() {
     () => new Map(sessions.map((s) => [s.id, s])),
     [sessions],
   );
-  const tabs = useMemo(
+  // The strip's entries. The draft tab (DRAFT_TAB_ID) has no backing session and
+  // renders the compose form / starting spinner; every other id resolves to its
+  // live session, and an id that resolves to nothing (a vanished session) drops
+  // out just as before.
+  const tabItems = useMemo<TabItem[]>(
     () =>
       tabIds
-        .map((id) => sessionById.get(id))
-        .filter((s): s is SessionInfo => s != null),
-    [tabIds, sessionById],
+        .map((id): TabItem | null => {
+          if (id === DRAFT_TAB_ID)
+            return { id, session: null, label: t("new_session.button") };
+          const s = sessionById.get(id);
+          return s ? { id, session: s } : null;
+        })
+        .filter((x): x is TabItem => x != null),
+    [tabIds, sessionById, t],
   );
-
-  // Compose / pending own the whole column while they're up. The tab panes stay
-  // mounted underneath (hidden + paused) so cancelling out of the composer puts
-  // the user back on the tab they left, exactly where they left it.
-  const overlaid = pending != null || composing;
 
   // Persist the strip so it comes back on the next launch. The per-tab search
   // highlight is deliberately NOT persisted — a term you searched for last week
@@ -556,20 +563,21 @@ export function HistoryView() {
   useEffect(() => {
     if (!scanReady || prunedRef.current) return;
     prunedRef.current = true;
-    const next = pruneMissingTabs({ tabIds, activeId }, (id) => sessionById.has(id));
+    // The draft tab never resolves against the scan — exempt it from pruning, or
+    // the first scan would close a new-session form the user is typing into.
+    const next = pruneMissingTabs(
+      { tabIds, activeId },
+      (id) => id === DRAFT_TAB_ID || sessionById.has(id),
+    );
     if (next.tabIds.length === tabIds.length) return;
     setTabIds(next.tabIds);
     setActiveId(next.activeId);
   }, [scanReady, sessionById, tabIds, activeId]);
 
-  // Clicking a tab also dismisses whatever overlay was covering the column, so
-  // the strip doubles as the way back out of the composer.
-  const activateTab = useCallback((id: string) => {
-    setComposing(false);
-    setPending(null);
-    setStartTimedOut(false);
-    setActiveId(id);
-  }, []);
+  // Switching tabs just moves focus. A spawn in flight keeps correlating in the
+  // background (its draft tab morphs in place whether or not it's on screen), so
+  // activating another tab must NOT cancel `pending`.
+  const activateTab = useCallback((id: string) => setActiveId(id), []);
 
   // The close/reorder rules (chiefly: where focus lands after a close) live in
   // `sessionTabs.ts` as pure reducers so they can be unit-tested.
@@ -590,9 +598,6 @@ export function HistoryView() {
 
   const openTab = useCallback(
     (s: SessionInfo, highlight: string | null) => {
-      setComposing(false);
-      setPending(null);
-      setStartTimedOut(false);
       applyTabs((st) => openTabState(st, s.id));
       setQueryById((prev) => ({ ...prev, [s.id]: highlight }));
     },
@@ -629,36 +634,50 @@ export function HistoryView() {
     setTabIds((prev) => reorderTabIds(prev, fromId, toId));
   }, []);
 
-  // "+新会话" → swap the detail column to the inline compose form. Open tabs are
-  // left untouched (and merely hidden) — composing is a detour, not a close.
-  const handleNewSession = () => {
+  // Back out of the draft tab: close it and abandon any in-flight spawn
+  // correlation so a late scan match doesn't pop the tab back open.
+  const cancelDraft = useCallback(() => {
     setPending(null);
     setStartTimedOut(false);
-    setComposing(true);
+    applyTabs((s) => closeTabState(s, DRAFT_TAB_ID));
+  }, [applyTabs]);
+
+  // "+新会话" → open (or refocus) the single draft tab. Other tabs are left
+  // untouched; the draft is just another tab, so this is `openTab`, not an
+  // overlay. Clicking it again while a draft is already open simply refocuses it.
+  const handleNewSession = () => {
+    applyTabs((st) => openTabState(st, DRAFT_TAB_ID));
   };
 
-  // Form spawned the process: leave compose mode and start polling for the
-  // session so we can swap the column over to its live SessionDetail in place.
-  // Snapshot the ad-hoc session ids that exist *now* so the poller can tell the
-  // new session apart from the workspace's existing ones (pid can't — see
-  // matchSpawnedSession).
+  // Form spawned the process: flip the draft tab's pane to the "starting…"
+  // spinner and start polling for the session. Snapshot the ad-hoc session ids
+  // that exist *now* so the poller can tell the new session apart from the
+  // workspace's existing ones (pid can't — see matchSpawnedSession).
   const handleCreated = (info: NewSessionCreated) => {
-    setComposing(false);
     setStartTimedOut(false);
     setPending({ ...info, knownIds: new Set(adhocSessions.map((s) => s.id)) });
   };
 
-  // Poll the scanned list for the freshly-spawned session (by id novelty, not
-  // pid) and swap the detail column over to it once it appears. `adhocSessions`
-  // is filtered to Fleet-owned entrypoints, so this stays scoped to launches.
+  // Poll the scanned list for the freshly-spawned session (by id, not pid) and
+  // morph the draft tab into it in place once it appears. If the user closed the
+  // draft tab mid-spawn, abandon the correlation rather than reopening a tab
+  // behind their back. `adhocSessions` is Fleet-owned only, so this stays scoped
+  // to launches.
   useEffect(() => {
     if (!pending) return;
+    if (!tabIds.includes(DRAFT_TAB_ID)) {
+      setPending(null);
+      setStartTimedOut(false);
+      return;
+    }
     const match = matchSpawnedSession(adhocSessions, pending);
     if (match) {
-      // A freshly spawned session gets its own tab, same as any other open.
-      openTab(match, null);
+      applyTabs((st) => replaceTabState(st, DRAFT_TAB_ID, match.id));
+      setQueryById((prev) => ({ ...prev, [match.id]: null }));
+      setPending(null);
+      setStartTimedOut(false);
     }
-  }, [adhocSessions, pending, openTab]);
+  }, [adhocSessions, pending, tabIds, applyTabs]);
 
   // Surface an escape hatch if the spawn takes unusually long to show up.
   useEffect(() => {
@@ -680,21 +699,22 @@ export function HistoryView() {
   // from marking themselves read: a session you have parked in a tab but are
   // not looking at is, correctly, still unread.
   const activeSession = useMemo(
-    () => tabs.find((s) => s.id === activeId) ?? null,
-    [tabs, activeId],
+    () => tabItems.find((tab) => tab.id === activeId)?.session ?? null,
+    [tabItems, activeId],
   );
   // Read at fire time so the timer isn't re-armed by every scan that refreshes
   // the session object, which would keep pushing the 2s dwell out.
   const activeSessionRef = useRef(activeSession);
   activeSessionRef.current = activeSession;
   useEffect(() => {
-    if (!activeId || overlaid) return;
+    // The draft tab has no session to mark read; only real session tabs dwell.
+    if (!activeId || activeId === DRAFT_TAB_ID) return;
     const id = setTimeout(() => {
       const target = activeSessionRef.current;
       if (target) markRead(target);
     }, 2000);
     return () => clearTimeout(id);
-  }, [activeId, overlaid, markRead]);
+  }, [activeId, markRead]);
 
   return (
     <PageShell
@@ -723,7 +743,7 @@ export function HistoryView() {
           </button>
           <button
             type="button"
-            className={`${styles.new_btn} ${composing ? styles.new_btn_active : ""}`}
+            className={`${styles.new_btn} ${activeId === DRAFT_TAB_ID ? styles.new_btn_active : ""}`}
             onClick={handleNewSession}
             title={t("new_session.title")}
           >
@@ -834,16 +854,13 @@ export function HistoryView() {
       }
     >
       {/* This column wrapper is load-bearing: `.detail_body` below is a flex ROW
-          whose children (the open tabs' panes, the composer, the spawn spinner)
-          compete for the same space. Dropping this level would put the tab strip
-          side by side with them instead of above them. */}
+          whose children (the open tabs' panes) compete for the same space.
+          Dropping this level would put the tab strip side by side with them
+          instead of above them. */}
       <div className={styles.detail}>
-        {/* No tab reads as active while the composer or the spawn spinner owns
-            the column — the highlighted tab would be pointing at content that
-            isn't on screen. */}
         <SessionTabs
-          tabs={tabs}
-          activeId={overlaid ? null : activeId}
+          tabs={tabItems}
+          activeId={activeId}
           onActivate={activateTab}
           onClose={closeTab}
           onCloseOthers={closeOtherTabs}
@@ -856,57 +873,62 @@ export function HistoryView() {
           {/* Every open tab stays mounted; only the active one is displayed.
               Unmounting the others would throw away the messages, scroll
               position and view-tab that make a tab worth keeping open. The
-              hidden ones are `paused`, so they cost no polling. */}
-          {tabs.map((tab) => {
-            const visible = !overlaid && tab.id === activeId;
+              hidden ones are `paused`, so they cost no polling. The draft tab
+              renders the compose form, or the spawn spinner once it has fired. */}
+          {tabItems.map((tab) => {
+            const visible = tab.id === activeId;
             return (
               <div
                 key={tab.id}
                 className={styles.pane}
                 style={{ display: visible ? "flex" : "none" }}
               >
-                <SessionDetail
-                  inline
-                  sessionInfo={tab}
-                  searchQuery={queryById[tab.id] ?? null}
-                  paused={!visible}
-                />
+                {tab.id === DRAFT_TAB_ID ? (
+                  pending ? (
+                    <div className={styles.detail_starting}>
+                      {startTimedOut ? (
+                        <>
+                          <span className={styles.starting_text}>
+                            {t("new_session.start_timeout", "启动较慢，可再等等，或从左侧列表里查看")}
+                          </span>
+                          <button
+                            type="button"
+                            className={styles.starting_dismiss}
+                            onClick={cancelDraft}
+                          >
+                            {t("cancel")}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className={styles.starting_spinner} />
+                          <span className={styles.starting_text}>
+                            {t("new_session.starting", "正在启动会话…")}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <NewSessionForm onCreated={handleCreated} onCancel={cancelDraft} />
+                  )
+                ) : (
+                  <SessionDetail
+                    inline
+                    sessionInfo={tab.session!}
+                    searchQuery={queryById[tab.id] ?? null}
+                    paused={!visible}
+                  />
+                )}
               </div>
             );
           })}
 
-          {pending ? (
-            <div className={styles.detail_starting}>
-              {startTimedOut ? (
-                <>
-                  <span className={styles.starting_text}>
-                    {t("new_session.start_timeout", "启动较慢，可再等等，或从左侧列表里查看")}
-                  </span>
-                  <button
-                    type="button"
-                    className={styles.starting_dismiss}
-                    onClick={() => setPending(null)}
-                  >
-                    {t("cancel")}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span className={styles.starting_spinner} />
-                  <span className={styles.starting_text}>
-                    {t("new_session.starting", "正在启动会话…")}
-                  </span>
-                </>
-              )}
-            </div>
-          ) : composing ? (
-            <NewSessionForm onCreated={handleCreated} onCancel={() => setComposing(false)} />
-          ) : tabs.length === 0 ? (
+          {tabItems.length === 0 && (
             <div className={styles.detail_empty}>
               <History size={28} strokeWidth={1.2} />
               <span>{t("history.select_hint", "从左侧选择一个会话查看详情")}</span>
             </div>
-          ) : null}
+          )}
         </div>
       </div>
     </PageShell>
