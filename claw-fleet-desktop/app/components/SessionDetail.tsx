@@ -10,7 +10,7 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { canResumeSession, canEnqueueSession } from "../types";
+import { canResumeSession, canEnqueueSession, shouldFollowSession, LIVE_STATUSES } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
@@ -33,10 +33,6 @@ import { isWorkflowAgent } from "../workflowAgent";
 import { bgTaskIcon, bgTaskDataType } from "../bgTaskKinds";
 import styles from "./SessionDetail.module.css";
 
-const ACTIVE_STATUSES = new Set([
-  "thinking", "executing", "streaming", "processing",
-  "waitingInput", "active", "delegating",
-]);
 
 /** Max subagent tabs in the segmented strip. Active ones win the slots first,
  *  then the most-recently-active finished ones; the wrap scrolls past this. A
@@ -244,7 +240,7 @@ export function SessionDetail({
   // extension renders, just teed to a file). Stops polling once the session
   // leaves an active status; clears when the stream is no longer streaming.
   const liveSessionId = liveSession?.id;
-  const liveActive = !!liveSession && ACTIVE_STATUSES.has(liveSession.status);
+  const liveActive = !!liveSession && shouldFollowSession(liveSession);
   useEffect(() => {
     if (!liveSessionId || !liveActive) {
       setLiveThinking(null);
@@ -569,9 +565,9 @@ export function SessionDetail({
     // finished ones, and cap the strip — a parent that fanned out dozens/hundreds
     // of subagents would otherwise overflow the tab bar. The wrap scrolls
     // horizontally (see .agent_seg_wrap) so the capped set stays reachable.
-    const active = subagents.filter((s) => ACTIVE_STATUSES.has(s.status));
+    const active = subagents.filter((s) => LIVE_STATUSES.has(s.status));
     const finished = subagents
-      .filter((s) => !ACTIVE_STATUSES.has(s.status))
+      .filter((s) => !LIVE_STATUSES.has(s.status))
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
     let ordered = [...active, ...finished].slice(0, SUBAGENT_TAB_CAP);
 

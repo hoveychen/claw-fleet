@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canResumeSession,
+  shouldFollowSession,
   HANDOFF_ENTRYPOINT,
   NEW_SESSION_ENTRYPOINT,
   type SessionInfo,
@@ -99,5 +100,30 @@ describe("canResumeSession", () => {
     expect(
       canResumeSession(session({ agentSource: "codex", entrypoint: "codex_exec" })),
     ).toBe(false);
+  });
+});
+
+describe("shouldFollowSession", () => {
+  it("follows in-flight and waiting statuses", () => {
+    expect(shouldFollowSession(session({ status: "thinking" }))).toBe(true);
+    expect(shouldFollowSession(session({ status: "executing" }))).toBe(true);
+    expect(shouldFollowSession(session({ status: "waitingInput" }))).toBe(true);
+  });
+
+  it("does not follow a genuinely finished session", () => {
+    expect(shouldFollowSession(session({ status: "idle", procAlive: false }))).toBe(
+      false,
+    );
+  });
+
+  it("keeps following while the process is alive, whatever the status says", () => {
+    // Regression (2026-07-16 "codex 假死"): a long codex turn misread as Idle
+    // disarmed the detail poller — "自动跟随中" stopped pulling new messages
+    // while the codex process was still working. A live process can produce new
+    // transcript writes regardless of the scan-computed status, so status alone
+    // must never stop the follow poller.
+    expect(shouldFollowSession(session({ status: "idle", procAlive: true }))).toBe(
+      true,
+    );
   });
 });
