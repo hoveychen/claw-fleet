@@ -101,6 +101,13 @@ pub fn context_window_for_model(model: &str, observed_max_input_tokens: u64) -> 
     }
 
     // ── OpenAI ──────────────────────────────────────────────────────────
+    // GPT-5 family (incl. Codex slugs gpt-5.6-sol/luna/terra, gpt-5.5, gpt-5.4,
+    // gpt-5.1-codex-*): advertised 400K context. This is only a fallback —
+    // Codex reports the precise per-session effective window via
+    // token_count.model_context_window, which extract_context_percent prefers.
+    if m.starts_with("gpt-5") {
+        return Some(400_000);
+    }
     // o3 / o4-mini: 200 000
     if m.starts_with("o3") || m.starts_with("o4") {
         return Some(200_000);
