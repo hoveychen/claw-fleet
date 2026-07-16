@@ -45,6 +45,10 @@ const PRD_BEGIN: &str = "<!-- fleet:codex-prd:begin -->";
 const PRD_END: &str = "<!-- fleet:codex-prd:end -->";
 const INTERACTION_BEGIN: &str = "<!-- fleet:codex-interaction:begin -->";
 const INTERACTION_END: &str = "<!-- fleet:codex-interaction:end -->";
+const WIKI_BEGIN: &str = "<!-- fleet:codex-wiki:begin -->";
+const WIKI_END: &str = "<!-- fleet:codex-wiki:end -->";
+const MODEL_BEGIN: &str = "<!-- fleet:codex-model:begin -->";
+const MODEL_END: &str = "<!-- fleet:codex-model:end -->";
 
 // Legacy monolithic block (PRD + interaction packed together). Pre-dates the
 // per-concept split; [`reconcile_codex_agents_md`] strips it on first run so old
@@ -57,6 +61,8 @@ const LEGACY_END: &str = "<!-- fleet:codex-guidance:end -->";
 const FLEET_MARKERS: &[(&str, &str)] = &[
     (PRD_BEGIN, PRD_END),
     (INTERACTION_BEGIN, INTERACTION_END),
+    (WIKI_BEGIN, WIKI_END),
+    (MODEL_BEGIN, MODEL_END),
     (LEGACY_BEGIN, LEGACY_END),
 ];
 
@@ -371,19 +377,221 @@ toolset this turn (rare), respond with plain text as normal.",
     )
 }
 
+/// Compact codex **wiki knowledge base** block body (no sentinel markers).
+/// Mirrors [`crate::wiki_guidance`]; the `fleet wiki` CLI is agent-agnostic, so
+/// this is close to the Claude text with the Claude-only Artifact cousin softened
+/// (codex has no Artifact tool).
+pub fn render_codex_wiki_block(locale: &str) -> String {
+    if locale == "zh" {
+        return "# Fleet Wiki 知识库 for Codex (managed by Claw Fleet — do not edit this block)\n\
+\n\
+当你产出**值得留存**的 HTML 报告、可交互 demo 或 markdown 文档(调研报告、\
+架构说明、性能分析、数据可视化等)时,完成后用 Fleet 的 wiki 知识库归档,\
+不要只把文件留在工作目录里:\n\
+\n\
+```\nfleet wiki publish <path> [--slug <slug>] [--title \"<标题>\"]\n```\n\
+\n\
+- `<path>` 可以是单个 `.html` / `.md` 文件,或含 `index.html` 的目录(目录会\
+连同相对引用的 js/css/图片一起入库)。\n\
+- 同一份文档迭代**复用同一个 slug** 重新 publish——生成新版本、旧版保留可回看;\
+别为同一份内容起新 slug。\n\
+- slug 用小写字母/数字/连字符;`/` 是**虚拟目录**分隔符(如 `--slug arch/overview` \
+归到 `arch` 目录),同一主题共用前缀。已发布的可 `fleet wiki mv <旧> <新>` 改键搬家,\
+版本历史一起带走。\n\
+- 只归档最终成品,草稿/中间产物/一次性调试页不 publish。\n\
+- markdown 里用 `[[slug]]` 或 `[[slug|显示文字]]` 交叉引用,渲染后可点击;\
+引用前先 `fleet wiki list --all` 确认目标 slug 已发布。\n\
+\n\
+## 读取知识库\n\
+\n\
+需要某篇正文时(尤其用户在 prompt 里 `[[slug]]` 引用了它)用 `cat` 直接读,\
+**别**去 `~/.fleet/wiki/` 手动拼版本目录:\n\
+\n\
+```\n\
+fleet wiki cat <slug>                         # 当前版本正文\n\
+fleet wiki cat <slug> --version <version-id>  # 历史版本\n\
+fleet wiki cat <slug> --file assets/app.js    # 目录型文档里的其他文件\n\
+```\n\
+\n\
+- `fleet wiki list`——只列当前 workspace 已发布,开工前回顾已有调研成果;`--all` 跨全部。\n\
+- `fleet wiki search <关键词>`——搜标题/slug/正文并给片段(默认限当前 workspace)。\n\
+- `fleet wiki show <slug>`——看版本历史和 entry 文件名。\n\
+\n\
+## 什么时候不该用 wiki\n\
+\n\
+- **一次性看一眼**(过目一张图/一段 diff)→ 用 `fleet__ask` 的 `html` 或 \
+`fleet__render_a2ui` 渲染成决策卡,不要 publish。\n\
+- **要把链接发给别人**→ 若你的运行环境有外部分享工具(如托管在外部服务上的\
+制品)才用;私有项目产物别外传。\n\
+- **要沉淀、之后还要读回来**→ wiki。只有 wiki 的文档能被后续 session `fleet wiki cat` \
+读回、`[[slug]]` 交叉引用、按 workspace 筛选与全文搜索,也只有 wiki 收得下带 \
+`assets/` 的多文件目录。\n\
+\n\
+判据不是「哪个能渲染」——而是「这份产物之后还会不会被读第二次」。会 → wiki。\n"
+            .to_string();
+    }
+    "# Fleet Wiki knowledge base for Codex (managed by Claw Fleet — do not edit this block)\n\
+\n\
+When you produce a **durable** HTML report, interactive demo, or markdown \
+document (research reports, architecture notes, performance analyses, data \
+visualizations…), archive it into the Fleet wiki when done instead of leaving \
+it in the workdir:\n\
+\n\
+```\nfleet wiki publish <path> [--slug <slug>] [--title \"<title>\"]\n```\n\
+\n\
+- `<path>` is a single `.html` / `.md` file, or a directory with an \
+`index.html` entry (its relatively-referenced js/css/images are archived too).\n\
+- Iterating on the same doc → **re-publish with the same slug** (new version, \
+old ones stay browsable); don't mint a new slug for the same content.\n\
+- Slugs are lowercase letters/digits/hyphens; `/` is a **virtual directory** \
+separator (`--slug arch/overview` files under an `arch` folder) — share a \
+prefix across docs on one topic. Move a published doc with \
+`fleet wiki mv <old> <new>`, version history included.\n\
+- Publish finished artifacts only — no drafts, intermediates, or debug pages.\n\
+- Cross-link other docs with `[[slug]]` / `[[slug|display text]]` (clickable \
+when rendered); check the target exists first with `fleet wiki list --all`.\n\
+\n\
+## Reading a wiki doc\n\
+\n\
+When you need a doc's content — especially when the user referenced it as \
+`[[slug]]` — read it with `cat`; do **not** hand-assemble version paths under \
+`~/.fleet/wiki/`:\n\
+\n\
+```\n\
+fleet wiki cat <slug>                         # current version's content\n\
+fleet wiki cat <slug> --version <version-id>  # a historical version\n\
+fleet wiki cat <slug> --file assets/app.js    # another file in a dir doc\n\
+```\n\
+\n\
+- `fleet wiki list` shows docs published from the current workspace (review \
+what this project already investigated before starting); `--all` spans every \
+workspace.\n\
+- `fleet wiki search <term>` finds docs by title / slug / body; \
+`fleet wiki show <slug>` shows version history and the entry filename.\n\
+\n\
+## When NOT to use the wiki\n\
+\n\
+- **A one-time glance** (show a chart or a diff, then discard) → render it \
+into a decision card with `fleet__ask`'s `html` or `fleet__render_a2ui`. Don't \
+publish it.\n\
+- **A link to send someone else** → use an external share tool only if your \
+harness has one; keep private project output off external services.\n\
+- **Something read again later** → the wiki. Only wiki docs can be read back \
+by a later session with `fleet wiki cat`, cross-linked with `[[slug]]`, \
+filtered by workspace, and full-text searched — and only the wiki accepts a \
+multi-file directory with an `assets/` folder.\n\
+\n\
+The test is not \"which one can render this\" — it's \"will this output be read \
+a second time?\" If yes → wiki.\n"
+        .to_string()
+}
+
+/// Compact codex **model-selection** block body (no sentinel markers). Mirrors
+/// [`crate::model_guidance`]; agent-agnostic, so it keeps both model families.
+pub fn render_codex_model_block(locale: &str) -> String {
+    if locale == "zh" {
+        return "# Fleet 模型选择速查 for Codex (managed by Claw Fleet — do not edit this block)\n\
+\n\
+给 subagent、workflow agent 或新会话选模型时用。**默认继承父/会话模型**——几乎\
+总是对的;只有明确判断某一档更合适才 override。入口:`Agent` 工具的 `model`、\
+`Workflow` `agent()` 的 `opts.model`/`opts.effort`、`fleet` spawn 的 `--model`、\
+`cws dispatch` 的 `--model`/`--effort`。\n\
+\n\
+## Codex 家族(codex 工具链,gpt-5.6 系;按 ChatGPT 套餐配额计费,无按 token 定价)\n\
+\n\
+| 模型 | ID | 定位 |\n\
+|---|---|---|\n\
+| Sol | `gpt-5.6-sol` | 前沿最强 agentic 编码(Fleet 默认);低 effort 也能打——先低后调高 |\n\
+| Terra | `gpt-5.6-terra` | 均衡型日常 agentic 编码 |\n\
+| Luna | `gpt-5.6-luna` | 快且省的 agentic 编码 |\n\
+| GPT-5.5 | `gpt-5.5` | 复杂编码 / 研究前沿,默认 effort 更高 |\n\
+\n\
+Codex effort 档:`minimal` / `low` / `medium` / `high`(**没有** Claude 的 xhigh/max)。\n\
+\n\
+## Claude 家族(claude 工具链)\n\
+\n\
+| 模型 | ID | 上下文 | 输入/输出 $/1M | 何时选 |\n\
+|---|---|---|---|---|\n\
+| Fable 5 | `claude-fable-5` | 1M | $10 / $50 | 最强推理+超长程;只用在最难任务 |\n\
+| Opus 4.8 | `claude-opus-4-8` | 1M | $5 / $25 | 默认主力,自主 agentic / 知识工作 |\n\
+| Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15(有优惠)| 近 Opus 编码、成本更低;并行 subagent 首选 |\n\
+| Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | 最快最便宜;分类/抽取/机械活 |\n\
+\n\
+Claude effort:`low`/`medium`/`high`/`xhigh`/`max`;`xhigh` 是编码/agentic 最佳档。\n\
+\n\
+## 怎么挑\n\
+\n\
+- 机械、可并行、量大的 subagent → 便宜快档(Luna / Terra;Haiku / Sonnet)+ 低 effort。\n\
+- 硬推理、最终综合、把关校验 → 最强档(Sol;Opus / Fable)+ high/xhigh。\n\
+- 编码 / agentic 主循环 → Codex 侧 Sol 从 medium 起步;Claude 侧 Opus 4.8 / Sonnet 5 配 xhigh。\n\
+- 拿不准就别 override,继承父/会话模型。\n"
+            .to_string();
+    }
+    "# Fleet model-selection cheat-sheet for Codex (managed by Claw Fleet — do not edit this block)\n\
+\n\
+Use this when picking a model for a subagent, a workflow agent, or a new \
+session. **Default to inheriting the parent/session model** — almost always \
+right; only override with a clear reason. Selection points: the `Agent` tool's \
+`model`, `Workflow` `agent()`'s `opts.model`/`opts.effort`, `fleet` spawn's \
+`--model`, `cws dispatch`'s `--model`/`--effort`.\n\
+\n\
+## Codex family (codex toolchain, gpt-5.6 series; billed against a ChatGPT-plan quota, no per-token price)\n\
+\n\
+| Model | ID | Positioning |\n\
+|---|---|---|\n\
+| Sol | `gpt-5.6-sol` | Frontier, most capable agentic coding (Fleet default); strong even at low effort — start low, turn up |\n\
+| Terra | `gpt-5.6-terra` | Balanced everyday agentic coding |\n\
+| Luna | `gpt-5.6-luna` | Fast and affordable agentic coding |\n\
+| GPT-5.5 | `gpt-5.5` | Frontier for complex coding / research; higher default effort |\n\
+\n\
+Codex effort levels: `minimal` / `low` / `medium` / `high` (**no** xhigh or max, unlike Claude).\n\
+\n\
+## Claude family (claude toolchain)\n\
+\n\
+| Model | ID | Context | In/Out $/1M | When to pick |\n\
+|---|---|---|---|---|\n\
+| Fable 5 | `claude-fable-5` | 1M | $10 / $50 | Strongest reasoning + longest-horizon; reserve for the hardest tasks |\n\
+| Opus 4.8 | `claude-opus-4-8` | 1M | $5 / $25 | Default workhorse: autonomous agentic / knowledge work |\n\
+| Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 (intro pricing) | Near-Opus coding at lower cost; value pick for parallel subagents |\n\
+| Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | Fastest / cheapest; classification, extraction, mechanical work |\n\
+\n\
+Claude effort: `low`/`medium`/`high`/`xhigh`/`max`; `xhigh` is best for coding / agentic work.\n\
+\n\
+## How to pick\n\
+\n\
+- Mechanical, parallel, high-volume subagents → the cheap/fast tier \
+(Luna / Terra; Haiku / Sonnet) at low effort.\n\
+- Hard reasoning, final synthesis, adversarial verification → the strongest \
+tier (Sol; Opus / Fable) at high/xhigh.\n\
+- Coding / agentic main loop → on Codex, Sol starting at medium; on Claude, \
+Opus 4.8 or Sonnet 5 at xhigh.\n\
+- When in doubt, don't override — inherit the parent/session model.\n"
+        .to_string()
+}
+
 /// Wrap a block body in its sentinel markers with a trailing newline.
 fn wrap(begin: &str, end: &str, body: &str) -> String {
     format!("{begin}\n{body}\n{end}\n")
 }
 
+/// Which per-concept codex guidance blocks should be present in AGENTS.md.
+/// Passed to [`reconcile_codex_agents_md`]; each field maps to one Claude-side
+/// concept toggle.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CodexGuidanceSet {
+    pub prd: bool,
+    pub interaction: bool,
+    pub wiki: bool,
+    pub model: bool,
+}
+
 /// The single writer for `~/.codex/AGENTS.md`. Composes exactly the enabled
-/// concept blocks (stable order: PRD, interaction), strips every Fleet-managed
-/// block that should be absent (including the legacy monolithic block), and
-/// preserves user-authored content outside the markers. Idempotent and
-/// order-independent. Deletes the file if the result would be empty.
+/// concept blocks (stable order: PRD, interaction, wiki, model), strips every
+/// Fleet-managed block that should be absent (including the legacy monolithic
+/// block), and preserves user-authored content outside the markers. Idempotent
+/// and order-independent. Deletes the file if the result would be empty.
 pub fn reconcile_codex_agents_md(
-    prd_on: bool,
-    interaction_on: bool,
+    set: CodexGuidanceSet,
     user_title: &str,
     locale: &str,
 ) -> Result<(), String> {
@@ -392,22 +600,27 @@ pub fn reconcile_codex_agents_md(
     let user_content = strip_all_fleet_blocks(&existing);
 
     let mut blocks = String::new();
-    if prd_on {
-        blocks.push_str(&wrap(
-            PRD_BEGIN,
-            PRD_END,
-            &render_codex_prd_block(user_title, locale),
-        ));
-    }
-    if interaction_on {
+    let mut push = |begin: &str, end: &str, body: String| {
         if !blocks.is_empty() {
             blocks.push('\n');
         }
-        blocks.push_str(&wrap(
+        blocks.push_str(&wrap(begin, end, &body));
+    };
+    if set.prd {
+        push(PRD_BEGIN, PRD_END, render_codex_prd_block(user_title, locale));
+    }
+    if set.interaction {
+        push(
             INTERACTION_BEGIN,
             INTERACTION_END,
-            &render_codex_interaction_block(user_title, locale),
-        ));
+            render_codex_interaction_block(user_title, locale),
+        );
+    }
+    if set.wiki {
+        push(WIKI_BEGIN, WIKI_END, render_codex_wiki_block(locale));
+    }
+    if set.model {
+        push(MODEL_BEGIN, MODEL_END, render_codex_model_block(locale));
     }
 
     let new_content = compose(&user_content, &blocks);
@@ -428,15 +641,24 @@ pub fn reconcile_codex_agents_md(
 }
 
 /// Backward-compat shim: the legacy single "codex guidance" toggle applied both
-/// PRD and interaction. Routed through the new reconcile writer so old callers
-/// keep working while the per-concept toggles are wired up (P3–P5).
+/// PRD and interaction (never wiki/model). Routed through the new reconcile
+/// writer so old callers keep working while the per-concept toggles are wired up
+/// (P3–P5).
 pub fn apply_codex_guidance(user_title: &str, locale: &str) -> Result<(), String> {
-    reconcile_codex_agents_md(true, true, user_title, locale)
+    reconcile_codex_agents_md(
+        CodexGuidanceSet {
+            prd: true,
+            interaction: true,
+            ..Default::default()
+        },
+        user_title,
+        locale,
+    )
 }
 
 /// Backward-compat shim: remove all Fleet-managed blocks (per-concept + legacy).
 pub fn remove_codex_guidance() -> Result<(), String> {
-    reconcile_codex_agents_md(false, false, "", "en")
+    reconcile_codex_agents_md(CodexGuidanceSet::default(), "", "en")
 }
 
 /// Whether the codex PRD-discipline block is present in `~/.codex/AGENTS.md`.
@@ -449,10 +671,24 @@ pub fn is_codex_interaction_installed() -> bool {
     agents_md_contains(INTERACTION_BEGIN)
 }
 
+/// Whether the codex wiki block is present in `~/.codex/AGENTS.md`.
+pub fn is_codex_wiki_installed() -> bool {
+    agents_md_contains(WIKI_BEGIN)
+}
+
+/// Whether the codex model block is present in `~/.codex/AGENTS.md`.
+pub fn is_codex_model_installed() -> bool {
+    agents_md_contains(MODEL_BEGIN)
+}
+
 /// Whether any Fleet-managed codex block (per-concept or legacy) is present.
 /// Used by the desktop's setup-plan snapshot until the per-concept flags land.
 pub fn is_codex_guidance_installed() -> bool {
-    is_codex_prd_installed() || is_codex_interaction_installed() || agents_md_contains(LEGACY_BEGIN)
+    is_codex_prd_installed()
+        || is_codex_interaction_installed()
+        || is_codex_wiki_installed()
+        || is_codex_model_installed()
+        || agents_md_contains(LEGACY_BEGIN)
 }
 
 fn agents_md_contains(needle: &str) -> bool {
@@ -591,17 +827,35 @@ mod tests {
     }
 
     #[test]
-    fn each_block_fits_under_agents_md_budget() {
-        // AGENTS.md has a 32 KiB limit; both blocks together plus markers must
-        // stay comfortably under it.
+    fn all_four_blocks_fit_under_agents_md_budget() {
+        // AGENTS.md has a 32 KiB (project_doc_max_bytes) limit; all four blocks
+        // plus markers must stay comfortably under it.
         let prd = render_codex_prd_block("老板", "zh");
         let ix = render_codex_interaction_block("老板", "zh");
+        let wiki = render_codex_wiki_block("zh");
+        let model = render_codex_model_block("zh");
+        let total = prd.len() + ix.len() + wiki.len() + model.len();
         assert!(
-            prd.len() + ix.len() < 30_000,
-            "prd ({}) + interaction ({}) must stay well under 32 KiB",
+            total < 30_000,
+            "prd+interaction+wiki+model = {total} must stay well under 32 KiB \
+(prd {}, ix {}, wiki {}, model {})",
             prd.len(),
-            ix.len()
+            ix.len(),
+            wiki.len(),
+            model.len()
         );
+    }
+
+    #[test]
+    fn wiki_and_model_blocks_carry_their_essence() {
+        let wiki = render_codex_wiki_block("en");
+        assert!(wiki.contains("fleet wiki publish"), "wiki must teach publish");
+        assert!(wiki.contains("[[slug]]"), "wiki must teach cross-links");
+        assert!(!wiki.contains("git worktree"), "wiki block must not drag in PRD content");
+        let model = render_codex_model_block("en");
+        assert!(model.contains("gpt-5.6-sol") && model.contains("claude-opus-4-8"),
+            "model block must cover both families");
+        assert!(model.contains("inherit"), "model block must teach the inherit default");
     }
 
     #[test]
@@ -675,28 +929,43 @@ mod tests {
         out
     }
 
+    fn set(prd: bool, interaction: bool, wiki: bool, model: bool) -> CodexGuidanceSet {
+        CodexGuidanceSet {
+            prd,
+            interaction,
+            wiki,
+            model,
+        }
+    }
+
     #[test]
     fn reconcile_composes_only_enabled_blocks() {
         with_temp_codex_home(|base| {
             let agents = base.join("AGENTS.md");
 
             // interaction only
-            reconcile_codex_agents_md(false, true, "Boss", "en").unwrap();
+            reconcile_codex_agents_md(set(false, true, false, false), "Boss", "en").unwrap();
             let c = fs::read_to_string(&agents).unwrap();
             assert!(c.contains(INTERACTION_BEGIN) && !c.contains(PRD_BEGIN));
 
-            // both
-            reconcile_codex_agents_md(true, true, "Boss", "en").unwrap();
+            // all four
+            reconcile_codex_agents_md(set(true, true, true, true), "Boss", "en").unwrap();
             let c = fs::read_to_string(&agents).unwrap();
-            assert!(c.contains(PRD_BEGIN) && c.contains(INTERACTION_BEGIN));
+            assert!(
+                c.contains(PRD_BEGIN)
+                    && c.contains(INTERACTION_BEGIN)
+                    && c.contains(WIKI_BEGIN)
+                    && c.contains(MODEL_BEGIN)
+            );
 
-            // prd only — interaction block must be gone
-            reconcile_codex_agents_md(true, false, "Boss", "en").unwrap();
+            // prd + model only — interaction and wiki blocks must be gone
+            reconcile_codex_agents_md(set(true, false, false, true), "Boss", "en").unwrap();
             let c = fs::read_to_string(&agents).unwrap();
-            assert!(c.contains(PRD_BEGIN) && !c.contains(INTERACTION_BEGIN));
+            assert!(c.contains(PRD_BEGIN) && c.contains(MODEL_BEGIN));
+            assert!(!c.contains(INTERACTION_BEGIN) && !c.contains(WIKI_BEGIN));
 
             // none — file removed
-            reconcile_codex_agents_md(false, false, "Boss", "en").unwrap();
+            reconcile_codex_agents_md(set(false, false, false, false), "Boss", "en").unwrap();
             assert!(!agents.exists(), "empty reconcile removes the file");
         });
     }
@@ -705,9 +974,9 @@ mod tests {
     fn reconcile_is_idempotent() {
         with_temp_codex_home(|base| {
             let agents = base.join("AGENTS.md");
-            reconcile_codex_agents_md(true, true, "Boss", "en").unwrap();
+            reconcile_codex_agents_md(set(true, true, true, true), "Boss", "en").unwrap();
             let once = fs::read_to_string(&agents).unwrap();
-            reconcile_codex_agents_md(true, true, "Boss", "en").unwrap();
+            reconcile_codex_agents_md(set(true, true, true, true), "Boss", "en").unwrap();
             let twice = fs::read_to_string(&agents).unwrap();
             assert_eq!(once, twice, "composing twice must not accumulate content");
             assert!(!once.contains("\n\n\n"), "no triple newline");
@@ -724,7 +993,7 @@ mod tests {
             );
             fs::write(&agents, seed).unwrap();
 
-            reconcile_codex_agents_md(true, true, "Boss", "en").unwrap();
+            reconcile_codex_agents_md(set(true, true, false, false), "Boss", "en").unwrap();
             let c = fs::read_to_string(&agents).unwrap();
             assert!(c.contains("keep me."), "user content preserved");
             assert!(!c.contains(LEGACY_BEGIN), "legacy monolithic block migrated away");
@@ -740,10 +1009,12 @@ mod tests {
     fn is_installed_flags_track_disk() {
         with_temp_codex_home(|_base| {
             assert!(!is_codex_prd_installed() && !is_codex_interaction_installed());
-            reconcile_codex_agents_md(true, false, "Boss", "en").unwrap();
-            assert!(is_codex_prd_installed() && !is_codex_interaction_installed());
+            assert!(!is_codex_wiki_installed() && !is_codex_model_installed());
+            reconcile_codex_agents_md(set(true, false, false, true), "Boss", "en").unwrap();
+            assert!(is_codex_prd_installed() && is_codex_model_installed());
+            assert!(!is_codex_interaction_installed() && !is_codex_wiki_installed());
             assert!(is_codex_guidance_installed());
-            reconcile_codex_agents_md(false, false, "Boss", "en").unwrap();
+            reconcile_codex_agents_md(set(false, false, false, false), "Boss", "en").unwrap();
             assert!(!is_codex_guidance_installed());
         });
     }
