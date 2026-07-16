@@ -219,10 +219,24 @@ function AgentBody({ meta }: { meta: unknown }) {
           <button className={styles.toggle} onClick={() => setShowPrompt((v) => !v)}>
             {showPrompt ? "▾" : "▸"} prompt
           </button>
-          {showPrompt && <ExpandableText text={agent.prompt} />}
+          {showPrompt && (
+            <div className={styles.agent_prompt_body}>
+              <TextBlock text={agent.prompt} />
+            </div>
+          )}
         </>
       )}
-      {agent.content && <Stream label="result" text={agent.content} />}
+      {/* The subagent's prompt (above) and final result are both model/agent-
+          authored prose that routinely carries markdown — render them through
+          TextBlock like AgentInput and TaskNotification do, not as raw <pre>. */}
+      {agent.content && (
+        <div className={styles.agent_prompt}>
+          <span className={styles.stream_label}>result</span>
+          <div className={styles.agent_prompt_body}>
+            <TextBlock text={agent.content} />
+          </div>
+        </div>
+      )}
     </>
   );
 }
