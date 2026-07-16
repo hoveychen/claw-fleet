@@ -203,6 +203,14 @@ pub struct MobileClientInfo {
     /// status for backward compatibility; no code path reads it for transport.
     #[serde(default)]
     pub supports_binary: bool,
+    /// Whether this client understands the `sessions_delta` frame (keyed
+    /// upsert/remove instead of a whole-list re-push). Gates whether
+    /// `publish_sessions` emits deltas: like `supports_gzip`, a single client
+    /// that can't apply deltas forces full snapshots for the whole channel
+    /// (the relay broadcasts one frame to all). Absent in a hello → `false`,
+    /// so an older client keeps receiving full snapshots unchanged.
+    #[serde(default)]
+    pub supports_delta: bool,
 }
 
 /// Cheap connectivity probe so callers can skip serialization work while the
@@ -323,6 +331,8 @@ fn upsert_client(payload: &Value) {
         payload.get("supportsGzip").and_then(Value::as_bool).unwrap_or(false);
     let supports_binary =
         payload.get("supportsBinary").and_then(Value::as_bool).unwrap_or(false);
+    let supports_delta =
+        payload.get("supportsDelta").and_then(Value::as_bool).unwrap_or(false);
     let mut guard = CLIENTS_REGISTRY.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
     let entry = map.entry(client_id.to_string()).or_insert_with(|| MobileClientInfo {
@@ -334,12 +344,14 @@ fn upsert_client(payload: &Value) {
         last_seen_ms: now,
         supports_gzip,
         supports_binary,
+        supports_delta,
     });
     entry.label = label;
     entry.platform = platform;
     entry.push_subscribed = push_subscribed;
     entry.supports_gzip = supports_gzip;
     entry.supports_binary = supports_binary;
+    entry.supports_delta = supports_delta;
     entry.last_seen_ms = now;
 }
 
@@ -840,6 +852,61 @@ pub fn slim_tail_messages(msgs: Vec<Value>) -> Vec<Value> {
 /// just connected still gets the current state on the next scan tick.
 static SESSIONS_LAST_HASH: AtomicU64 = AtomicU64::new(0);
 
+/// Per-session baseline: `id → hash of that session's slim JSON` for the last
+/// full state every current client holds. `None` means "no baseline" — the next
+/// push must be a full `sessions` snapshot (a fresh/reconnected client has no
+/// state to diff against). Reset to `None` alongside [`SESSIONS_LAST_HASH`] at
+/// every presence change. When present *and* every client supports deltas,
+/// `publish_sessions` emits a `sessions_delta{upsert,remove}` computed against
+/// this map instead of re-sending the whole list.
+static SESSIONS_BASELINE: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+
+/// Clear both the whole-list dedup hash and the per-session delta baseline, so
+/// the next `publish_sessions` re-sends a full snapshot and rebuilds the
+/// baseline. Called at every presence change (new socket / client joined).
+fn reset_sessions_dedup() {
+    SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
+    *SESSIONS_BASELINE.lock().unwrap() = None;
+}
+
+/// Per-`id` hash of each slim session object — the baseline a later delta diffs
+/// against. Sessions without a string `id` are skipped (they can't be keyed).
+fn per_id_hashes(slim: &Value) -> HashMap<String, u64> {
+    let mut m = HashMap::new();
+    if let Some(arr) = slim.as_array() {
+        for s in arr {
+            if let Some(id) = s.get("id").and_then(Value::as_str) {
+                m.insert(id.to_string(), snapshot_hash(s));
+            }
+        }
+    }
+    m
+}
+
+/// Diff the current slim snapshot against the baseline, keyed by session `id`.
+/// Returns `(upsert, remove)`: `upsert` holds the full slim object for every
+/// session that is new or whose content hash changed; `remove` holds the ids
+/// present in the baseline but absent from the current snapshot (dropped, or
+/// fell out of the top-[`SNAPSHOT_MAX_SESSIONS`] cap — both render as a removal
+/// on the phone). Order within `upsert` follows the snapshot (already sorted by
+/// `lastActivityMs` desc); the client re-sorts its merged map regardless.
+fn diff_snapshot(prev: &HashMap<String, u64>, slim: &Value) -> (Vec<Value>, Vec<String>) {
+    let mut upsert = Vec::new();
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    if let Some(arr) = slim.as_array() {
+        for s in arr {
+            let Some(id) = s.get("id").and_then(Value::as_str) else { continue };
+            seen.insert(id);
+            if prev.get(id) != Some(&snapshot_hash(s)) {
+                upsert.push(s.clone());
+            }
+        }
+    }
+    let remove: Vec<String> =
+        prev.keys().filter(|id| !seen.contains(id.as_str())).cloned().collect();
+    (upsert, remove)
+}
+
 fn snapshot_hash(v: &Value) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -862,6 +929,16 @@ fn all_clients_support_gzip() -> bool {
     !devices.is_empty() && devices.iter().all(|d| d.supports_gzip)
 }
 
+/// Whether every live client can apply a `sessions_delta` frame (reported as
+/// `supportsDelta` in `client_hello`). A single client that can't — or an empty
+/// registry — forces full snapshots for the whole channel, since the relay
+/// broadcasts one frame to all clients and a delta is meaningless to a client
+/// that never received the matching baseline.
+fn all_clients_support_delta() -> bool {
+    let devices = live_devices();
+    !devices.is_empty() && devices.iter().all(|d| d.supports_delta)
+}
+
 /// gzip a byte slice to raw bytes (compressed *before* encryption).
 /// Returns `None` if compression itself fails (then the caller seals raw bytes).
 fn gzip_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
@@ -882,10 +959,18 @@ fn gunzip_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
 
 /// Push a sessions snapshot. Skipped when no client is online (Web Push is
 /// pointless for passive data), throttled to one per 2s, slimmed to the
-/// mobile field set, and deduplicated against the last pushed content. A large
-/// snapshot is compressed by `encode_payload` (~110KB→29KB on this repo's own
-/// data) — the hash dedup above runs on the uncompressed content, so
-/// compression is a pure transport concern.
+/// mobile field set, and deduplicated against the last pushed content.
+///
+/// When every live client advertises `supportsDelta` *and* a per-session
+/// baseline exists, only the sessions that changed (`upsert`) and the ids that
+/// vanished (`remove`) ship, as a `sessions_delta` frame — a busy fleet whose
+/// token counts tick every message no longer re-pushes the whole ≤500-row list
+/// each time. Otherwise (any legacy client present, or no baseline yet after a
+/// (re)connect) a full `sessions` snapshot ships and (re)seeds the baseline.
+///
+/// Either frame is compressed by `encode_payload` (~110KB→29KB for a full
+/// snapshot on this repo's own data); the hash/diff dedup here runs on the
+/// uncompressed content, so compression stays a pure transport concern.
 pub fn publish_sessions(sessions: &Value) {
     if !CONNECTED.load(Ordering::SeqCst) || CLIENTS.load(Ordering::SeqCst) == 0 {
         return;
@@ -902,9 +987,28 @@ pub fn publish_sessions(sessions: &Value) {
     let slim = slim_sessions_snapshot(sessions);
     let hash = snapshot_hash(&slim);
     if SESSIONS_LAST_HASH.swap(hash, Ordering::SeqCst) == hash {
-        return; // nothing changed since the last push
+        return; // whole list unchanged since the last push
     }
-    send_out(encode_payload(&json!({ "event": "sessions", "sessions": slim })));
+
+    // Decide full vs delta under the baseline lock so a concurrent presence
+    // reset can't interleave between the diff and the baseline update.
+    let mut baseline = SESSIONS_BASELINE.lock().unwrap();
+    let can_delta = all_clients_support_delta() && baseline.is_some();
+    let frame = if can_delta {
+        let (upsert, remove) = diff_snapshot(baseline.as_ref().unwrap(), &slim);
+        *baseline = Some(per_id_hashes(&slim));
+        // The whole-list hash changed, so per-id diff normally finds something;
+        // guard the degenerate case (e.g. hash collision) by sending nothing.
+        if upsert.is_empty() && remove.is_empty() {
+            return;
+        }
+        json!({ "event": "sessions_delta", "upsert": upsert, "remove": remove })
+    } else {
+        *baseline = Some(per_id_hashes(&slim));
+        json!({ "event": "sessions", "sessions": slim })
+    };
+    drop(baseline);
+    send_out(encode_payload(&frame));
 }
 
 // ── Inbound: answers and requests from mobile clients ────────────────────────
@@ -1962,7 +2066,7 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                         // Fresh socket — drop any stale device registry; clients
                         // re-announce themselves on their next heartbeat.
                         clear_clients();
-                        SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
+                        reset_sessions_dedup();
                         crate::log_debug("[mobile-relay] connected");
                         // Reconnected with clients already on the channel: push
                         // the current state now instead of waiting for the next
@@ -1982,7 +2086,7 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                             // on a blank task list until some session file next
                             // changed (see push_snapshot_on_connect).
                             if n as usize > prev {
-                                SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
+                                reset_sessions_dedup();
                                 push_snapshot_on_connect();
                             }
                             // Everyone's gone: forget the device list immediately
@@ -3957,6 +4061,131 @@ mod tests {
         CLIENTS.store(0, Ordering::SeqCst);
         SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
         *SESSIONS_LAST_SENT.lock().unwrap() = None;
+    }
+
+    /// The pure per-id diff — new/changed sessions become `upsert`, vanished
+    /// ids become `remove`, unchanged ones are omitted. No globals, safe alone.
+    #[test]
+    fn diff_snapshot_keys_upsert_and_remove_by_id() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        let ep = NEW_SESSION_ENTRYPOINT;
+        let base_list = slim_sessions_snapshot(&json!([
+            {"id": "s1", "lastActivityMs": 3, "entrypoint": ep},
+            {"id": "s2", "lastActivityMs": 2, "entrypoint": ep},
+            {"id": "s3", "lastActivityMs": 1, "entrypoint": ep},
+        ]));
+        let baseline = per_id_hashes(&base_list);
+
+        // s1 unchanged, s2 changed (activity bump), s4 new, s3 gone.
+        let next = slim_sessions_snapshot(&json!([
+            {"id": "s1", "lastActivityMs": 3, "entrypoint": ep},
+            {"id": "s2", "lastActivityMs": 9, "entrypoint": ep},
+            {"id": "s4", "lastActivityMs": 4, "entrypoint": ep},
+        ]));
+        let (upsert, mut remove) = diff_snapshot(&baseline, &next);
+
+        let mut up_ids: Vec<&str> =
+            upsert.iter().filter_map(|s| s["id"].as_str()).collect();
+        up_ids.sort_unstable();
+        assert_eq!(up_ids, vec!["s2", "s4"], "only changed + new ship as upsert");
+        remove.sort();
+        assert_eq!(remove, vec!["s3".to_string()], "vanished id ships as remove");
+
+        // Identical snapshot → nothing to send.
+        let (u2, r2) = diff_snapshot(&per_id_hashes(&next), &next);
+        assert!(u2.is_empty() && r2.is_empty(), "no change → empty delta");
+    }
+
+    /// The delta capability gate mirrors the gzip gate: every live client must
+    /// opt in, and an empty registry never deltas. Shares the global registry,
+    /// so it runs under the home lock and cleans up.
+    #[test]
+    fn all_clients_support_delta_gate() {
+        let _guard = fleet_home_lock();
+        clear_clients();
+        assert!(!all_clients_support_delta(), "empty registry → never delta");
+        handle_client_payload(&hello_delta("d1", true));
+        assert!(all_clients_support_delta(), "sole delta-capable client → delta");
+        // A legacy client (no flag → default false) vetoes deltas channel-wide.
+        handle_client_payload(&hello("legacy", "old PWA", false));
+        assert!(!all_clients_support_delta(), "one legacy client forces full snapshots");
+        clear_clients();
+    }
+
+    /// End-to-end through the sealed channel: the first push after a baseline
+    /// reset is a full `sessions` snapshot; a following change ships as a
+    /// `sessions_delta` carrying only the changed/added rows and removed ids;
+    /// and a legacy client on the channel forces a full snapshot again.
+    #[test]
+    fn publish_sessions_emits_full_then_delta() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        let ep = NEW_SESSION_ENTRYPOINT;
+        let _guard = fleet_home_lock();
+        *ENC_KEY.lock().unwrap() = Some([7u8; 32]);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
+        *OUT_TX.lock().unwrap() = Some(tx);
+        CONNECTED.store(true, Ordering::SeqCst);
+        CLIENTS.store(1, Ordering::SeqCst);
+        clear_clients();
+        reset_sessions_dedup();
+        *SESSIONS_LAST_SENT.lock().unwrap() = None;
+        handle_client_payload(&hello_delta("d1", true));
+
+        // First push after a reset → full snapshot (no baseline to diff against).
+        publish_sessions(&json!([
+            {"id": "s1", "isSubagent": false, "lastActivityMs": 3, "entrypoint": ep},
+            {"id": "s2", "isSubagent": false, "lastActivityMs": 2, "entrypoint": ep},
+            {"id": "s3", "isSubagent": false, "lastActivityMs": 1, "entrypoint": ep},
+        ]));
+        let Outbound::Text(t1) = rx.try_recv().expect("first push emits a frame");
+        let full = decode_out(&t1);
+        assert_eq!(full["event"], "sessions", "first push is a full snapshot");
+        assert_eq!(full["sessions"].as_array().unwrap().len(), 3);
+
+        // Second push, one changed + one new + one gone → a delta with just those.
+        *SESSIONS_LAST_SENT.lock().unwrap() = None; // bypass the 2s throttle in-test
+        publish_sessions(&json!([
+            {"id": "s1", "isSubagent": false, "lastActivityMs": 3, "entrypoint": ep},
+            {"id": "s2", "isSubagent": false, "lastActivityMs": 9, "entrypoint": ep},
+            {"id": "s4", "isSubagent": false, "lastActivityMs": 4, "entrypoint": ep},
+        ]));
+        let Outbound::Text(t2) = rx.try_recv().expect("second push emits a frame");
+        let delta = decode_out(&t2);
+        assert_eq!(delta["event"], "sessions_delta", "second push is a delta");
+        let mut up_ids: Vec<&str> =
+            delta["upsert"].as_array().unwrap().iter().filter_map(|s| s["id"].as_str()).collect();
+        up_ids.sort_unstable();
+        assert_eq!(up_ids, vec!["s2", "s4"]);
+        assert_eq!(delta["remove"].as_array().unwrap(), &vec![json!("s3")]);
+
+        // A legacy client joins → the gate closes, next push is full again.
+        handle_client_payload(&hello("legacy", "old PWA", false));
+        *SESSIONS_LAST_SENT.lock().unwrap() = None;
+        publish_sessions(&json!([
+            {"id": "s2", "isSubagent": false, "lastActivityMs": 10, "entrypoint": ep},
+        ]));
+        let Outbound::Text(t3) = rx.try_recv().expect("third push emits a frame");
+        assert_eq!(decode_out(&t3)["event"], "sessions", "legacy client forces full");
+
+        // Reset shared globals for sibling tests.
+        clear_clients();
+        reset_sessions_dedup();
+        *OUT_TX.lock().unwrap() = None;
+        *ENC_KEY.lock().unwrap() = None;
+        CONNECTED.store(false, Ordering::SeqCst);
+        CLIENTS.store(0, Ordering::SeqCst);
+        *SESSIONS_LAST_SENT.lock().unwrap() = None;
+    }
+
+    fn hello_delta(client_id: &str, supports_delta: bool) -> Value {
+        json!({
+            "event": "client_hello",
+            "clientId": client_id,
+            "label": "x",
+            "platform": "harmony",
+            "pushSubscribed": false,
+            "supportsDelta": supports_delta,
+        })
     }
 
     /// Regression: the repo handlers must NOT double-wrap their core `Result`.
