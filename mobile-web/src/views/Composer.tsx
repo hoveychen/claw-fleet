@@ -2,7 +2,7 @@
 // through the relay's `upload_attachment` (bytes → desktop's user-attachments
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
 import { useDraft } from "../draft";
 import { t } from "../i18n";
@@ -10,6 +10,7 @@ import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type RelayClient } from 
 import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
+import { useSourcesConfig } from "../useSourcesConfig";
 import { HistoryLayer } from "../useNavStack";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
@@ -353,6 +354,32 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
   // them — a leftover Claude model would otherwise reach `codex exec -m` (and
   // vice versa). Mirrors the desktop NewSessionForm.
   const setTool = (v: string) => patch({ tool: v, model: "", effort: "" });
+
+  // Only offer the agent tools whose source is actually being monitored (source
+  // enabled AND CLI installed on the desktop host). Mirrors the desktop
+  // NewSessionForm — Codex must not appear when its source is off; selecting it
+  // would only fail at spawn. `null` = config not loaded yet → Claude-only so we
+  // never flash Codex then hide it.
+  const sources = useSourcesConfig(client);
+  const toolChoices = useMemo(() => {
+    const active = new Set(
+      (sources ?? [])
+        .filter((s) => s.enabled && s.available)
+        .map((s) => (s.name === "claude-code" ? "claude" : s.name)),
+    );
+    const filtered = AGENT_TOOL_CHOICES.filter(([v]) => active.has(v));
+    return filtered.length ? filtered : [AGENT_TOOL_CHOICES[0]];
+  }, [sources]);
+  // A stale draft (or a since-disabled source) may leave `tool` pointing at a
+  // tool that's no longer offered — snap it back to the first available one.
+  useEffect(() => {
+    if (sources === null) return;
+    if (!toolChoices.some(([v]) => v === tool)) {
+      setTool(toolChoices[0][0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sources, toolChoices, tool]);
+
   // 持久化的 workspace 可能已失效（那个 workspace 不在最近列表里了），
   // 落不到有效选项时退回列表首项，避免 <select> 显示空白。
   const workspacePaths = new Set(recents.map((r) => r[0]));
@@ -499,19 +526,21 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           onPick={(f) => void addFiles(f)}
           onRemove={remove}
         />
-        <div className={styles.optionRow}>
-          <select
-            className={styles.optionSelect}
-            value={tool}
-            onChange={(e) => setTool(e.target.value)}
-          >
-            {AGENT_TOOL_CHOICES.map(([v, label]) => (
-              <option key={v} value={v}>
-                {t(label)}
-              </option>
-            ))}
-          </select>
-        </div>
+        {toolChoices.length > 1 && (
+          <div className={styles.optionRow}>
+            <select
+              className={styles.optionSelect}
+              value={tool}
+              onChange={(e) => setTool(e.target.value)}
+            >
+              {toolChoices.map(([v, label]) => (
+                <option key={v} value={v}>
+                  {t(label)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <OptionSelects
           isCodex={isCodex}
           model={model}

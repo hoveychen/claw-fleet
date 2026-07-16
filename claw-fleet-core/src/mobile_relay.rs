@@ -1139,6 +1139,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "wiki_search" => serve_wiki_search(params),
         "wiki_export" => serve_wiki_export(params),
         "chat_workspace" => serve_chat_workspace(params),
+        "sources_config" => serve_sources_config(params),
         "browse_dir" => serve_browse_dir(params),
         // ── Write methods ────────────────────────────────────────────────
         "spawn_session" => serve_spawn_session(params),
@@ -1536,6 +1537,14 @@ fn serve_wiki_export(params: &Value) -> Result<Value, String> {
 fn serve_chat_workspace(_params: &Value) -> Result<Value, String> {
     let path = crate::chat_workspace::ensure_chat_workspace()?;
     Ok(json!({ "path": path }))
+}
+
+// The monitored agent sources ({name, enabled, available}), so the mobile
+// launcher can restrict the tool selector to the sources actually being watched
+// — mirrors the desktop's `get_sources_config` Tauri command.
+fn serve_sources_config(_params: &Value) -> Result<Value, String> {
+    let sources = crate::agent_source::get_sources_config_local();
+    serde_json::to_value(sources).map_err(|e| e.to_string())
 }
 
 // Directory picker for the new-session composer. Deliberately NOT gated
@@ -2076,6 +2085,23 @@ mod tests {
         }
         for m in ["pending_snapshot", "tail", "tail_delta", "wiki_list", ""] {
             assert!(!is_ackable_method(m), "{m} should not be ackable");
+        }
+    }
+
+    #[test]
+    fn sources_config_returns_source_list() {
+        // The mobile launcher restricts its tool selector to these entries, so
+        // the method must return an array of {name, enabled, available}.
+        let v = serve_request("sources_config", &serde_json::json!({})).unwrap();
+        let arr = v.as_array().expect("sources_config returns an array");
+        assert!(
+            arr.iter().any(|s| s["name"] == serde_json::json!("codex")),
+            "codex source must be present in the config: {v}"
+        );
+        for s in arr {
+            assert!(s["name"].is_string(), "each entry has a name: {s}");
+            assert!(s["enabled"].is_boolean(), "each entry has enabled: {s}");
+            assert!(s["available"].is_boolean(), "each entry has available: {s}");
         }
     }
 
