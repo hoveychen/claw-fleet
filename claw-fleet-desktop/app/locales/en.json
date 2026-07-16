@@ -1492,7 +1492,8 @@
     "scenario_daily_report_summary": "Daily report summary",
     "scenario_daily_report_lessons": "Daily report lessons",
     "scenario_session_analyze": "Session outcome analysis",
-    "scenario_mascot_quips": "Mascot quips"
+    "scenario_mascot_quips": "Mascot quips",
+    "scenario_codex_title": "Codex session titles"
   },
   "connect_dialog": {
     "title": "Claw Fleet",
