@@ -156,6 +156,64 @@
   color: var(--color-text-dim);
 }
 
+/* A chip that toggles its file list — reset the native button chrome so it
+ * still reads as a chip. */
+.chipToggle {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* ── expanded uncommitted-file list (read-only on mobile) ── */
+.dirtyFiles {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border-radius: 8px;
+}
+
+.dirtyFile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  padding: 2px 6px;
+}
+
+.dirtyStatus {
+  flex: 0 0 auto;
+  width: 12px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--color-text-dim);
+}
+.dirtyStatus[data-status="A"] {
+  color: var(--color-success);
+}
+.dirtyStatus[data-status="D"],
+.dirtyStatus[data-status="U"] {
+  color: var(--color-error);
+}
+.dirtyStatus[data-status="M"],
+.dirtyStatus[data-status="T"] {
+  color: var(--color-warning);
+}
+.dirtyStatus[data-status="R"] {
+  color: var(--color-accent);
+}
+
+.dirtyPath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── push / pull ── */
 .opRow {
   display: flex;
