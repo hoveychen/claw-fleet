@@ -25,11 +25,15 @@ use crate::session::SessionInfo;
 pub struct TodayUsage {
     /// YYYY-MM-DD in the user's local timezone.
     pub date: String,
-    /// Input tokens today (incl. cache creation + cache read), on the same口径
-    /// as the daily report: per agent session, its last-turn context-window size
-    /// (`SessionInfo.total_input_tokens`); plus Fleet's own LLM calls' input +
-    /// cache tokens. Summed alongside `output_tokens` so the badge total
-    /// (`input + output`) matches the daily report's `input + output`.
+    /// Cumulative input tokens today (input + cache creation + cache read, cache
+    /// re-reads included) — the "tokens sent to the API" total, on the same口径
+    /// as cost. Per agent session it's the cumulative `SessionInfo.total_input_tokens`
+    /// (for both Claude and Codex sources, which now agree); plus Fleet's own LLM
+    /// calls' input + cache tokens. Summed alongside `output_tokens`. NOTE: this
+    /// is cache-read-dominated and can reach billions/day — it is NOT the daily
+    /// report's old last-turn snapshot (the report now sums cumulatively too, so
+    /// both surfaces agree on口径, though the sidebar also counts Codex + Fleet
+    /// which the Claude-only report does not).
     pub input_tokens: u64,
     /// Output tokens today: agent sessions created today + Fleet's own LLM calls.
     pub output_tokens: u64,

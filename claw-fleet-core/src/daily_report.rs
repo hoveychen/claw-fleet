@@ -146,9 +146,11 @@ pub struct ConversationPair {
 // ── Raw metrics from a single session's JSONL ────────────────────────────────
 
 pub struct SessionMetricsRaw {
-    /// Last assistant turn's "context window size" estimate
-    /// (input + cache_creation + cache_read at the final turn). Kept for
-    /// backward compatibility with the existing "input tokens" display.
+    /// Cumulative input tokens across all unique assistant turns
+    /// (`Σ input + cache_creation + cache_read`, cache re-reads included) — the
+    /// "tokens sent to the API" total, on the same口径 as `cost_usd` and as the
+    /// live scan's `SessionInfo.total_input_tokens`. NOT the last-turn
+    /// context-window snapshot.
     pub input_tokens: u64,
     /// Summed output tokens across all unique assistant turns.
     pub output_tokens: u64,
@@ -437,7 +439,7 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
     use crate::model_cost::{turn_cost_usd, TurnUsage};
 
     let mut total_output: u64 = 0;
-    let mut last_input: u64 = 0;
+    let mut sum_input: u64 = 0;
     let mut sum_cache_create: u64 = 0;
     let mut sum_cache_read: u64 = 0;
     let mut sum_web_search: u64 = 0;
@@ -502,11 +504,10 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
         sum_cache_read += cache_read;
         sum_web_search += web_search;
 
-        // Back-compat "input_tokens" field = last turn's full context window.
-        let total_input = input + cache_create + cache_read;
-        if total_input > 0 {
-            last_input = total_input;
-        }
+        // Cumulative input across turns (cache re-reads included), matching
+        // `cost_usd` and the live scan's `SessionInfo.total_input_tokens` — not
+        // the last-turn context-window snapshot.
+        sum_input += input + cache_create + cache_read;
 
         // Per-turn cost uses this turn's own model (falls back to the
         // most recently seen model if this line omits it).
@@ -539,7 +540,7 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
     }
 
     SessionMetricsRaw {
-        input_tokens: last_input,
+        input_tokens: sum_input,
         output_tokens: total_output,
         cache_creation_tokens: sum_cache_create,
         cache_read_tokens: sum_cache_read,
@@ -1937,8 +1938,8 @@ mod tests {
         let content = lines.join("\n");
         let m = extract_session_metrics(&content);
 
-        // input_tokens: last message's 200 + 20 = 220
-        assert_eq!(m.input_tokens, 220);
+        // input_tokens: cumulative across turns = (100) + (200 + 20) = 320
+        assert_eq!(m.input_tokens, 320);
         // output_tokens: 30 + 60 = 90
         assert_eq!(m.output_tokens, 90);
         assert_eq!(m.tool_calls.get("Bash"), Some(&2));
