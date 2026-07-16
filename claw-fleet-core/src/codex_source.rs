@@ -2989,12 +2989,30 @@ fn codex_proc_alive(processes: &[CodexProcess], thread_id: &str) -> bool {
     false
 }
 
+/// The exact Fleet-owned Codex process for `thread_id`, if it is still live.
+///
+/// Resumed turns carry the thread id in argv. Fresh turns use Fleet's
+/// thread-id → pid note because Codex mints the id only after spawning. The
+/// note is accepted only while that pid is still in the scanned Codex process
+/// set, so pid reuse cannot target an unrelated process.
+pub fn codex_session_pid(thread_id: &str) -> Option<u32> {
+    let processes = scan_codex_processes();
+    if let Some(process) = processes
+        .iter()
+        .find(|p| p.thread_id.as_deref() == Some(thread_id))
+    {
+        return Some(process.pid);
+    }
+    let recorded = crate::codex_launch::resolve_spawn_pid(thread_id)?;
+    processes.iter().any(|p| p.pid == recorded).then_some(recorded)
+}
+
 /// A fresh liveness check for one Codex thread: scans the live Codex process set
 /// and applies [`codex_proc_alive`]. Used as the drain gate's belt-and-braces —
 /// the `SessionInfo.proc_alive` snapshot the gate is handed can lag a turn that
 /// started since the scan, so this re-checks against the current process table.
 pub fn codex_session_alive(thread_id: &str) -> bool {
-    codex_proc_alive(&scan_codex_processes(), thread_id)
+    codex_session_pid(thread_id).is_some()
 }
 
 fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Option<u32>, bool) {
