@@ -1292,6 +1292,8 @@
     "work_cat_work": "Working",
     "work_steps": "{{count}} steps",
     "work_thinking": "thinking",
+    "reasoning_summary_unavailable": "Reasoning used, but this model returned no summary.",
+    "redacted_thinking": "Reasoning redacted",
     "today": "Today",
     "yesterday": "Yesterday",
     "copy": "Copy message",
