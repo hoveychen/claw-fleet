@@ -845,10 +845,16 @@ fn parse_source(source: &str) -> SourceInfo {
         "xcode" => Some("Xcode".to_string()),
         _ => None,
     };
-    let is_subagent = matches!(
-        source.to_lowercase().as_str(),
-        "sub_agent" | "subagent" | "exec"
-    );
+    // NOTE: plain "exec" is NOT a subagent — it is the headless mode Fleet
+    // launches every top-level codex session with (`codex exec`), so ~all
+    // Fleet-owned codex sessions carry source="exec". Real codex subagents
+    // record a JSON source (`{"subagent":{"thread_spawn":...}}`) and are caught
+    // by the JSON branch above. Classifying "exec" as a subagent set
+    // is_subagent=true, which the desktop's `adhocSessions`
+    // (`!isSubagent && isFleetOwnedEntrypoint`) then filtered out — the New
+    // Session launcher hung forever on "正在启动会话…" because matchSpawnedSession
+    // could never find the spawned codex session.
+    let is_subagent = matches!(source.to_lowercase().as_str(), "sub_agent" | "subagent");
 
     SourceInfo {
         ide_name,
@@ -1151,6 +1157,30 @@ mod tests {
         CodexRateLimitWindow, CodexUsageItem,
     };
     use serde_json::json;
+
+    #[test]
+    fn parse_source_exec_is_top_level_not_subagent() {
+        // Fleet launches every codex session via `codex exec`, so the SQLite
+        // `threads.source` column is the plain string "exec". That is a
+        // TOP-LEVEL session, not a subagent — real codex subagents record a
+        // JSON source (`{"subagent":{"thread_spawn":...}}`), handled by the JSON
+        // branch below. Misclassifying plain "exec" as a subagent set
+        // is_subagent=true, which the desktop's `adhocSessions` filter
+        // (`!isSubagent && isFleetOwnedEntrypoint`) then excluded — so a
+        // Fleet-spawned codex "新会话" never surfaced and the launcher hung
+        // forever on "正在启动会话…".
+        assert!(!super::parse_source("exec").is_subagent, "plain exec is top-level");
+        assert!(!super::parse_source("EXEC").is_subagent, "case-insensitive");
+        // Interactive TUI ("cli") and IDE sources are top-level too.
+        assert!(!super::parse_source("cli").is_subagent);
+        assert!(!super::parse_source("vscode").is_subagent);
+        // Real subagents (JSON source) MUST still classify as subagents.
+        let sub = super::parse_source(
+            r#"{"subagent":{"thread_spawn":{"parent_thread_id":"019d","agent_nickname":"Goodall","agent_role":"explorer"}}}"#,
+        );
+        assert!(sub.is_subagent, "JSON subagent source stays a subagent");
+        assert_eq!(sub.parent_thread_id.as_deref(), Some("019d"));
+    }
 
     #[test]
     fn codex_cost_and_input_prices_last_token_count() {
