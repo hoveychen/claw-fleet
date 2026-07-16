@@ -63,6 +63,19 @@ pub(crate) fn cmd_session_idle() {
     if !rearmed.is_empty() {
         println!("loop: re-armed {} stranded timer(s): {}", rearmed.len(), rearmed.join(", "));
     }
+
+    // Watch reconcile: same contract as the loop reconcile above, for condition
+    // watches whose detached timer died. Re-arms only watches whose heartbeat has
+    // gone stale, so a watch keeps polling (and can still fire its resume) even
+    // after a reboot, the next time any session yields.
+    let watch_rearmed = claw_fleet_core::watch::reconcile();
+    if !watch_rearmed.is_empty() {
+        println!(
+            "watch: re-armed {} stranded timer(s): {}",
+            watch_rearmed.len(),
+            watch_rearmed.join(", ")
+        );
+    }
 }
 
 /// `fleet session resume` — UserPromptSubmit-hook entrypoint. Clears the idle
