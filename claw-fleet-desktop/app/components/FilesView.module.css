@@ -203,6 +203,90 @@
   color: var(--color-error);
 }
 
+/* The dirty chip is a toggle button; strip the native button chrome so it
+ * still reads as a chip, just clickable. */
+.scm_chip_btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.scm_chip_btn:hover {
+  filter: brightness(1.15);
+}
+
+/* Expanded uncommitted-file list — full width so it wraps onto its own row
+ * under the chips/actions (mirrors .scm_msg). */
+.scm_files {
+  width: 100%;
+  margin: 4px 8px 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.scm_file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  text-align: left;
+  cursor: pointer;
+}
+
+.scm_file:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.scm_file_status {
+  flex: 0 0 auto;
+  width: 12px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* Status colours: added=green, deleted=red, modified/typechange=warning,
+ * renamed=accent, untracked=muted, conflicted=error. */
+.scm_file_status[data-status="A"] {
+  color: var(--color-success);
+}
+.scm_file_status[data-status="D"],
+.scm_file_status[data-status="U"] {
+  color: var(--color-error);
+}
+.scm_file_status[data-status="M"],
+.scm_file_status[data-status="T"] {
+  color: var(--color-warning);
+}
+.scm_file_status[data-status="R"] {
+  color: var(--color-accent);
+}
+.scm_file_status[data-status="?"] {
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+}
+
+.scm_file_path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Workspace command runner (ProcPanel) ─────────────────────────────────── */
 
 /* The 命令 tab fills the detail pane; the launcher stays pinned at the top and
