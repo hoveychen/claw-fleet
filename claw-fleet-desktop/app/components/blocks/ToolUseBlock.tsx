@@ -266,7 +266,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
             // the custom body can't render — but its description + prompt are
             // right here in the input. Show them readably instead of raw JSON.
             <div className={styles.input_section}>
-              <AgentInput block={block} />
+              <AgentInput block={block} paths={paths} />
             </div>
           ) : (
             <div className={styles.input_section}>
