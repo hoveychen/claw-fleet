@@ -190,7 +190,6 @@ export function GalleryView() {
   const { open, close, session: openSession } = useDetailStore();
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const handleSelect = (s: SessionInfo) => open(s);
   const gridCls = `${styles.rows_grid}${openSession ? ` ${styles.compact}` : ""}`;
 
   // Close detail drawer when clicking on empty gallery space
@@ -202,6 +201,14 @@ export function GalleryView() {
 
   const activeSessions = sessions.filter(isActive);
   const { searching, ftsMatchPaths } = useSessionSearch(filter);
+
+  // Same contract as SessionList's card click: an FTS hit opens with the query,
+  // so the detail highlights matches, scrolls to the first one, and auto-expands
+  // the fold it lives in. Opening without it silently dropped all of that.
+  const handleSelect = (s: SessionInfo) => {
+    const isFtsHit = filter.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
+    open(s, isFtsHit ? filter.trim() : undefined);
+  };
 
   // Filter source: active only or all sessions
   const filterSource = showAll ? sessions : activeSessions;
