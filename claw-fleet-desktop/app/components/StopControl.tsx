@@ -56,6 +56,29 @@ export function canControl(s: SessionInfo): boolean {
   return !s.isSubagent;
 }
 
+/**
+ * Perform the escalating stop action for a session — the same behaviour the
+ * StopControl button carries, factored out so the row's context menu can drive
+ * it too (the confirmation dialogs and the interrupt-vs-kill choice must stay
+ * identical in both places). No-op when there is nothing live to signal.
+ */
+export async function performStop(
+  session: SessionInfo,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): Promise<void> {
+  const mode = stopMode(session);
+  if (mode === "spent") return;
+  if (mode === "interrupt") {
+    await invoke("interrupt_session", { pid: session.pid });
+  } else if (session.pidPrecise) {
+    const ok = await ask(t("stop_confirm", { name: session.workspaceName }), { kind: "warning" });
+    if (ok) await invoke("kill_session", { pid: session.pid });
+  } else {
+    const ok = await ask(t("stop_imprecise_confirm", { workspace: session.workspaceName }), { kind: "warning" });
+    if (ok) await invoke("kill_workspace_sessions", { workspacePath: session.workspacePath });
+  }
+}
+
 export function StopControl({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
@@ -66,15 +89,7 @@ export function StopControl({ session }: { session: SessionInfo }) {
     if (busy || mode === "spent") return;
     setBusy(true);
     try {
-      if (mode === "interrupt") {
-        await invoke("interrupt_session", { pid: session.pid });
-      } else if (session.pidPrecise) {
-        const ok = await ask(t("stop_confirm", { name: session.workspaceName }), { kind: "warning" });
-        if (ok) await invoke("kill_session", { pid: session.pid });
-      } else {
-        const ok = await ask(t("stop_imprecise_confirm", { workspace: session.workspaceName }), { kind: "warning" });
-        if (ok) await invoke("kill_workspace_sessions", { workspacePath: session.workspacePath });
-      }
+      await performStop(session, t);
     } finally {
       setBusy(false);
     }
