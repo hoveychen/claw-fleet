@@ -15,6 +15,7 @@ pub mod cmd_ast;
 pub mod codex_guidance;
 pub mod codex_launch;
 pub mod codex_source;
+pub mod codex_title;
 pub mod console;
 pub mod consumer_heartbeat;
 pub mod daily_report;
