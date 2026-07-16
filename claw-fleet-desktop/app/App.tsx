@@ -49,6 +49,8 @@ function App() {
   const [mainMinimized, setMainMinimized] = useState(false);
   const decisions = useDecisionStore((s) => s.decisions);
   const floatingDecisionPanel = useUIStore((s) => s.floatingDecisionPanel);
+  const viewMode = useUIStore((s) => s.viewMode);
+  const isSessionView = viewMode === "list" || viewMode === "gallery";
   const prevShouldShow = useRef(false);
 
   useEffect(() => {
@@ -309,7 +311,7 @@ function App() {
       {showWizard && <Wizard onDone={dismissWizard} />}
       <div className="app_main">
         <SessionList />
-        <SessionDetail />
+        {isSessionView && <SessionDetail />}
       </div>
       {!floatingDecisionPanel && <DecisionPanel />}
       <WaitingAlerts />
