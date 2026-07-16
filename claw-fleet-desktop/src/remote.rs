@@ -339,6 +339,7 @@ impl crate::backend::Backend for RemoteBackend {
             remove_wiki_guidance = REMOVE_WIKI_GUIDANCE;
             remove_model_guidance = REMOVE_MODEL_GUIDANCE;
             remove_prd_mode = REMOVE_PRD_MODE;
+            remove_codex_guidance = REMOVE_CODEX_GUIDANCE;
         }
     }
 
@@ -998,6 +999,7 @@ impl crate::backend::Backend for RemoteBackend {
             prd_discipline_installed: false,
             wiki_guidance_installed: false,
             model_guidance_installed: false,
+            codex_guidance_installed: false,
             idle_hooks_installed: false,
         })
     }
@@ -1214,6 +1216,12 @@ impl crate::backend::Backend for RemoteBackend {
         #[derive(serde::Serialize)]
         struct Req<'a> { user_title: &'a str, locale: &'a str }
         self.probe.post_json_ok(claw_fleet_core::routes::APPLY_PRD_MODE, &Req { user_title, locale })
+    }
+
+    fn apply_codex_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { user_title: &'a str, locale: &'a str }
+        self.probe.post_json_ok(claw_fleet_core::routes::APPLY_CODEX_GUIDANCE, &Req { user_title, locale })
     }
 
 

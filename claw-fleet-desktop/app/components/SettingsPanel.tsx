@@ -25,6 +25,7 @@ interface HookSetupPlan {
   prdDisciplineInstalled: boolean;
   wikiGuidanceInstalled: boolean;
   modelGuidanceInstalled: boolean;
+  codexGuidanceInstalled: boolean;
 }
 
 interface SourceInfo {
@@ -242,6 +243,15 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
           console.error("auto-apply model guidance:", e),
         );
       }
+      // Codex guidance: opt-in, disk (~/.codex/AGENTS.md sentinel) is the
+      // source of truth. Re-apply on startup to pick up title/locale changes.
+      setCodexGuidanceEnabled(plan.codexGuidanceInstalled);
+      setItem("codex-guidance-enabled", plan.codexGuidanceInstalled ? "true" : "false");
+      if (plan.codexGuidanceInstalled) {
+        invoke("apply_codex_guidance").catch((e: unknown) =>
+          console.error("auto-apply codex guidance:", e),
+        );
+      }
     }).catch(() => {});
   }, []);
 
@@ -394,6 +404,26 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("model guidance toggle failed:", e);
+    }
+  }, []);
+
+  // ── Codex guidance state (default off) ─────────────────────────────────
+  const [codexGuidanceEnabled, setCodexGuidanceEnabled] = useState(
+    () => getItem("codex-guidance-enabled") === "true",
+  );
+
+  const handleToggleCodexGuidance = useCallback(async (enabled: boolean) => {
+    setCodexGuidanceEnabled(enabled);
+    setItem("codex-guidance-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_codex_guidance");
+      } else {
+        await invoke("remove_codex_guidance");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("codex guidance toggle failed:", e);
     }
   }, []);
 
@@ -1727,6 +1757,22 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       type="checkbox"
                       checked={modelGuidanceEnabled}
                       onChange={(e) => handleToggleModelGuidance(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.codex_guidance_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.codex_guidance_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={codexGuidanceEnabled}
+                      onChange={(e) => handleToggleCodexGuidance(e.target.checked)}
                     />
                     <span className={styles.toggle_slider} />
                   </label>
