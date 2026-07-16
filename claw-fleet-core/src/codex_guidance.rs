@@ -1,35 +1,64 @@
-//! Codex guidance injection — writes a sentinel-wrapped block into the global
-//! `~/.codex/AGENTS.md` (or `$CODEX_HOME/AGENTS.md`) so Fleet-driven Codex
-//! sessions see the same discipline Claude sessions get.
+//! Codex guidance injection — composes Fleet's per-concept guidance blocks into
+//! the global `~/.codex/AGENTS.md` (or `$CODEX_HOME/AGENTS.md`) so Fleet-driven
+//! Codex sessions see the same discipline Claude sessions get.
 //!
-//! Two concerns are packed into one block:
-//!   1. **PRD discipline** (commit / worktree / rhythm / handoff) — the codex
-//!      analogue of [`crate::prd_discipline`].
-//!   2. **Interaction mode** (`fleet__ask` decision cards) — the codex analogue
-//!      of [`crate::interaction_mode`]. Codex reaches `fleet__ask` via the MCP
-//!      server Fleet injects at spawn/resume (`fleet_decision_card_args`), so the
-//!      tool is live from turn 1 — no `ToolSearch` deferred-loading dance.
+//! # Per-concept blocks (unified reconcile)
 //!
-//! Why a purpose-built renderer instead of reusing
-//! [`crate::prd_discipline::render_guidance`]?  AGENTS.md has a 32 KiB limit
-//! (`project_doc_max_bytes`).  The Claude PRD-discipline text alone renders to
-//! ~29 KB and the interaction-mode text to ~20 KB; concatenated they blow past
-//! 32 KiB.  This module renders a compact codex-tuned combination (~18 KB) that
-//! drops the Claude-only mechanics (AskUserQuestion/ToolSearch deferral,
-//! `@import` sentinels, hook internals) while keeping every rule a codex session
-//! can actually act on.
+//! Claude receives each guidance *concept* through its own independently
+//! toggled file (`fleet-interaction-mode.md`, `fleet-prd-discipline.md`,
+//! `fleet-wiki-guidance.md`, `fleet-model-guidance.md`) `@import`ed into
+//! `~/.claude/CLAUDE.md`.  Codex has no `@import` mechanism — it reads AGENTS.md
+//! directly — so the concepts live **inline** as separate sentinel-wrapped
+//! blocks in one file:
+//!   - `fleet:codex-prd`         — PRD discipline (commit / worktree / rhythm /
+//!                                 handoff / watch), analogue of
+//!                                 [`crate::prd_discipline`].
+//!   - `fleet:codex-interaction` — `fleet__ask` decision cards, analogue of
+//!                                 [`crate::interaction_mode`].
+//!   - `fleet:codex-wiki`        — `fleet wiki` knowledge base, analogue of
+//!                                 [`crate::wiki_guidance`]  (added in P2).
+//!   - `fleet:codex-model`       — model-selection cheat-sheet, analogue of
+//!                                 [`crate::model_guidance`] (added in P2).
 //!
-//! Unlike `prd_discipline` (which writes a separate file and `@import`s it into
-//! CLAUDE.md), codex reads AGENTS.md directly with no import mechanism, so the
-//! guidance text lives **inline** inside the sentinel block.  Only the block
-//! between the markers is Fleet's; any user-authored AGENTS.md content outside
-//! the markers is preserved verbatim.
+//! [`reconcile_codex_agents_md`] is the single writer: given which concepts are
+//! enabled it composes exactly those blocks (in a stable order), strips any
+//! Fleet-managed block that should be absent, migrates away the **legacy**
+//! monolithic `fleet:codex-guidance` block, and preserves any user-authored
+//! AGENTS.md content outside the markers verbatim.  It is idempotent and
+//! order-independent, so the desktop can call it on toggle-change, on startup,
+//! and before every spawn without accumulating content.
+//!
+//! Why purpose-built compact renderers instead of reusing the Claude ones?
+//! AGENTS.md has a 32 KiB limit (`project_doc_max_bytes`).  The Claude
+//! PRD-discipline text alone renders to ~29 KB and the interaction-mode text to
+//! ~20 KB; concatenated they blow past 32 KiB.  Each `render_codex_*_block`
+//! renders a compact codex-tuned variant that drops the Claude-only mechanics
+//! (AskUserQuestion/ToolSearch deferral, `@import` sentinels, hook internals)
+//! while keeping every rule a codex session can actually act on.
 
 use std::fs;
 use std::path::PathBuf;
 
-const BEGIN_MARKER: &str = "<!-- fleet:codex-guidance:begin -->";
-const END_MARKER: &str = "<!-- fleet:codex-guidance:end -->";
+// Per-concept sentinels. Each block is independently composable by
+// [`reconcile_codex_agents_md`].
+const PRD_BEGIN: &str = "<!-- fleet:codex-prd:begin -->";
+const PRD_END: &str = "<!-- fleet:codex-prd:end -->";
+const INTERACTION_BEGIN: &str = "<!-- fleet:codex-interaction:begin -->";
+const INTERACTION_END: &str = "<!-- fleet:codex-interaction:end -->";
+
+// Legacy monolithic block (PRD + interaction packed together). Pre-dates the
+// per-concept split; [`reconcile_codex_agents_md`] strips it on first run so old
+// installs migrate to the new structure automatically.
+const LEGACY_BEGIN: &str = "<!-- fleet:codex-guidance:begin -->";
+const LEGACY_END: &str = "<!-- fleet:codex-guidance:end -->";
+
+/// All Fleet-managed marker pairs, used to strip the file down to user content
+/// before recomposing. Extend this when adding a new per-concept block.
+const FLEET_MARKERS: &[(&str, &str)] = &[
+    (PRD_BEGIN, PRD_END),
+    (INTERACTION_BEGIN, INTERACTION_END),
+    (LEGACY_BEGIN, LEGACY_END),
+];
 
 /// Resolve the codex home dir (`$CODEX_HOME` or `~/.codex`), mirroring
 /// [`crate::codex_source`] and [`crate::codex_launch`].
@@ -44,35 +73,49 @@ fn agents_md_path() -> Option<PathBuf> {
     codex_home().map(|d| d.join("AGENTS.md"))
 }
 
-/// Build the compact codex AGENTS.md guidance (PRD discipline + `fleet__ask`
-/// interaction mode). Kept well under the 32 KiB AGENTS.md limit.
-pub fn render_codex_guidance(user_title: &str, locale: &str) -> String {
-    let title = if user_title.is_empty() {
+/// Localized "write the paired artifacts in language X" lines, split per concept
+/// so each standalone block carries only the sentence relevant to it.
+fn language_lines(locale: &str) -> (&'static str, &'static str) {
+    match locale {
+        "zh" => (
+            "本规则配套的 TASKS.md 用中文书写。",
+            "决策卡的 question 与 option 文案用中文书写。",
+        ),
+        "ja" => (
+            "本ルールに対応する TASKS.md は日本語で書いてください。",
+            "意思決定カードの question と option は日本語で書いてください。",
+        ),
+        "ko" => (
+            "이 규칙과 짝을 이루는 TASKS.md는 한국어로 작성하세요.",
+            "결정 카드의 question과 option은 한국어로 작성하세요.",
+        ),
+        _ => (
+            "Write the paired TASKS.md in English.",
+            "Write decision-card question and option text in English.",
+        ),
+    }
+}
+
+fn title_or_default(user_title: &str) -> String {
+    if user_title.is_empty() {
         "Boss".to_string()
     } else {
         user_title.to_string()
-    };
+    }
+}
 
-    let language_line = match locale {
-        "zh" => "本规则配套的 TASKS.md、决策卡文案都用中文书写。",
-        "ja" => "本ルールに対応する TASKS.md・意思決定カードは日本語で書いてください。",
-        "ko" => "이 규칙과 짝을 이루는 TASKS.md·결정 카드는 한국어로 작성하세요.",
-        _ => "Write the paired TASKS.md and decision cards in English.",
-    };
+/// Compact codex **PRD discipline** block body (no sentinel markers). Mirrors
+/// [`crate::prd_discipline`] with the Claude-only mechanics dropped.
+pub fn render_codex_prd_block(user_title: &str, locale: &str) -> String {
+    let title = title_or_default(user_title);
+    let (prd_lang, _) = language_lines(locale);
 
     format!(
-        "# Fleet Guidance for Codex (managed by Claw Fleet — do not edit this block)\n\
+        "# Fleet PRD Discipline for Codex (managed by Claw Fleet — do not edit this block)\n\
 \n\
-These rules govern Codex sessions that Claw Fleet launched. They mirror the \
-discipline Fleet gives its Claude sessions. Two parts: **PRD discipline** \
-(how to run multi-step plans and touch production code) and **Interaction \
-mode** (how to end a turn — via a `fleet__ask` decision card). {language_line}\n\
-\n\
-Address the user as \"{title}\" throughout.\n\
-\n\
----\n\
-\n\
-# Part 1 — PRD Discipline\n\
+These rules govern how Codex sessions that Claw Fleet launched run multi-step \
+plans and touch production code — the same discipline Fleet gives its Claude \
+sessions. {prd_lang} Address the user as \"{title}\" throughout.\n\
 \n\
 A **multi-step plan** = any task you split into 2+ sequential subtasks \
 (P1, P2, ..., Pn). The rules below hold from the moment you start such a plan \
@@ -234,17 +277,27 @@ fleet watch create --until \"<shell cmd that exits 0 when done>\" --capture \"<s
 - A detached timer polls the condition; the moment it succeeds Fleet resumes \
 THIS session and hands the captured output to your next turn. `fleet watch \
 stop <id>` cancels. It inherits this session's model / effort / source, so a \
-codex session resumes as codex.\n\
-\n\
----\n\
-\n\
-# Part 2 — Interaction Mode (`fleet__ask` decision cards)\n\
+codex session resumes as codex.",
+        title = title,
+        prd_lang = prd_lang,
+    )
+}
+
+/// Compact codex **interaction mode** block body (no sentinel markers). Mirrors
+/// [`crate::interaction_mode`] but targets `fleet__ask` (codex has no
+/// `AskUserQuestion` / ToolSearch deferral).
+pub fn render_codex_interaction_block(user_title: &str, locale: &str) -> String {
+    let title = title_or_default(user_title);
+    let (_, ix_lang) = language_lines(locale);
+
+    format!(
+        "# Fleet Interaction Mode for Codex (managed by Claw Fleet — do not edit this block)\n\
 \n\
 {title} wants every wait-for-input moment delivered as a **decision card**, \
 not plain text. When you would otherwise end a turn by yielding control back \
 to {title} with a plain-text message, call **`fleet__ask`** instead. \
 Mid-turn status lines (a one-sentence note before a tool call) stay as text; \
-it's the **final surface** of a turn that must be a card.\n\
+it's the **final surface** of a turn that must be a card. {ix_lang}\n\
 \n\
 `fleet__ask` is available from turn 1 (Fleet injects its MCP server at \
 spawn/resume). It takes `{{ \"questions\": Question[] }}` — 1 to 4 questions, \
@@ -312,93 +365,157 @@ the conversation (\"任务结束\", \"收工\", \"done\"), end with a one-line \
 plain-text acknowledgement instead of another card. This is the only case \
 where a terminal turn is plain text.\n\
 - **When this whole part does NOT apply:** if `fleet__ask` is not in your \
-toolset this turn (rare), respond with plain text as normal.\n\
-",
+toolset this turn (rare), respond with plain text as normal.",
         title = title,
-        language_line = language_line,
+        ix_lang = ix_lang,
     )
 }
 
-/// Apply codex guidance: write the sentinel-wrapped block into
-/// `~/.codex/AGENTS.md`, preserving any user content outside the block.
-/// Idempotent.
-pub fn apply_codex_guidance(user_title: &str, locale: &str) -> Result<(), String> {
-    let dir = codex_home().ok_or("cannot determine codex home")?;
-    fs::create_dir_all(&dir).map_err(|e| format!("create codex home: {e}"))?;
+/// Wrap a block body in its sentinel markers with a trailing newline.
+fn wrap(begin: &str, end: &str, body: &str) -> String {
+    format!("{begin}\n{body}\n{end}\n")
+}
 
+/// The single writer for `~/.codex/AGENTS.md`. Composes exactly the enabled
+/// concept blocks (stable order: PRD, interaction), strips every Fleet-managed
+/// block that should be absent (including the legacy monolithic block), and
+/// preserves user-authored content outside the markers. Idempotent and
+/// order-independent. Deletes the file if the result would be empty.
+pub fn reconcile_codex_agents_md(
+    prd_on: bool,
+    interaction_on: bool,
+    user_title: &str,
+    locale: &str,
+) -> Result<(), String> {
     let agents_md = agents_md_path().ok_or("cannot determine codex home")?;
     let existing = fs::read_to_string(&agents_md).unwrap_or_default();
-    let guidance = render_codex_guidance(user_title, locale);
-    let block = format!("{BEGIN_MARKER}\n{guidance}\n{END_MARKER}\n");
-    let new_content = compose_agents_md(&existing, &block);
+    let user_content = strip_all_fleet_blocks(&existing);
+
+    let mut blocks = String::new();
+    if prd_on {
+        blocks.push_str(&wrap(
+            PRD_BEGIN,
+            PRD_END,
+            &render_codex_prd_block(user_title, locale),
+        ));
+    }
+    if interaction_on {
+        if !blocks.is_empty() {
+            blocks.push('\n');
+        }
+        blocks.push_str(&wrap(
+            INTERACTION_BEGIN,
+            INTERACTION_END,
+            &render_codex_interaction_block(user_title, locale),
+        ));
+    }
+
+    let new_content = compose(&user_content, &blocks);
+
+    if new_content.trim().is_empty() {
+        // Nothing left (no user content, no blocks) — remove rather than leave a
+        // stray empty AGENTS.md that shadows nested project docs.
+        if agents_md.exists() {
+            fs::remove_file(&agents_md).map_err(|e| format!("remove AGENTS.md: {e}"))?;
+        }
+        return Ok(());
+    }
+
+    let dir = codex_home().ok_or("cannot determine codex home")?;
+    fs::create_dir_all(&dir).map_err(|e| format!("create codex home: {e}"))?;
     fs::write(&agents_md, new_content).map_err(|e| format!("write AGENTS.md: {e}"))?;
     Ok(())
 }
 
-/// Remove codex guidance: strip the sentinel block, leaving the rest of
-/// AGENTS.md intact. Deletes the file only if it becomes empty. Idempotent.
-pub fn remove_codex_guidance() -> Result<(), String> {
-    let Some(agents_md) = agents_md_path() else {
-        return Ok(());
-    };
-    let Ok(existing) = fs::read_to_string(&agents_md) else {
-        return Ok(());
-    };
-    let stripped = strip_sentinel_block(&existing);
-    if stripped == existing {
-        return Ok(());
-    }
-    if stripped.trim().is_empty() {
-        // The whole file was Fleet's block — remove it rather than leave a
-        // stray empty AGENTS.md that shadows nested project docs.
-        fs::remove_file(&agents_md).map_err(|e| format!("remove AGENTS.md: {e}"))?;
-    } else {
-        fs::write(&agents_md, stripped).map_err(|e| format!("write AGENTS.md: {e}"))?;
-    }
-    Ok(())
+/// Backward-compat shim: the legacy single "codex guidance" toggle applied both
+/// PRD and interaction. Routed through the new reconcile writer so old callers
+/// keep working while the per-concept toggles are wired up (P3–P5).
+pub fn apply_codex_guidance(user_title: &str, locale: &str) -> Result<(), String> {
+    reconcile_codex_agents_md(true, true, user_title, locale)
 }
 
-/// Whether the sentinel block is present in `~/.codex/AGENTS.md`.
+/// Backward-compat shim: remove all Fleet-managed blocks (per-concept + legacy).
+pub fn remove_codex_guidance() -> Result<(), String> {
+    reconcile_codex_agents_md(false, false, "", "en")
+}
+
+/// Whether the codex PRD-discipline block is present in `~/.codex/AGENTS.md`.
+pub fn is_codex_prd_installed() -> bool {
+    agents_md_contains(PRD_BEGIN)
+}
+
+/// Whether the codex interaction-mode block is present in `~/.codex/AGENTS.md`.
+pub fn is_codex_interaction_installed() -> bool {
+    agents_md_contains(INTERACTION_BEGIN)
+}
+
+/// Whether any Fleet-managed codex block (per-concept or legacy) is present.
+/// Used by the desktop's setup-plan snapshot until the per-concept flags land.
 pub fn is_codex_guidance_installed() -> bool {
+    is_codex_prd_installed() || is_codex_interaction_installed() || agents_md_contains(LEGACY_BEGIN)
+}
+
+fn agents_md_contains(needle: &str) -> bool {
     let Some(agents_md) = agents_md_path() else {
         return false;
     };
     let Ok(content) = fs::read_to_string(&agents_md) else {
         return false;
     };
-    content.contains(BEGIN_MARKER) && content.contains(END_MARKER)
+    content.contains(needle)
 }
 
-/// Re-attach the sentinel block to AGENTS.md content: strip any prior block,
-/// then append `block` separated by one blank line from user content.
-fn compose_agents_md(existing: &str, block: &str) -> String {
-    let stripped = strip_sentinel_block(existing);
-    if stripped.trim().is_empty() {
-        block.to_string()
-    } else {
-        format!("{base}\n\n{block}", base = stripped.trim_end_matches('\n'))
+/// Append `blocks` to `user_content` separated by one blank line. Either side
+/// may be empty.
+fn compose(user_content: &str, blocks: &str) -> String {
+    let base = user_content.trim_end_matches('\n');
+    let blocks = blocks.trim_end_matches('\n');
+    if base.trim().is_empty() {
+        return if blocks.is_empty() {
+            String::new()
+        } else {
+            format!("{blocks}\n")
+        };
     }
+    if blocks.is_empty() {
+        return format!("{base}\n");
+    }
+    format!("{base}\n\n{blocks}\n")
 }
 
-fn strip_sentinel_block(content: &str) -> String {
+/// Strip every Fleet-managed marker pair from `content`, leaving only
+/// user-authored text. Collapses 3+ trailing blank lines left behind.
+fn strip_all_fleet_blocks(content: &str) -> String {
+    let mut out = content.to_string();
+    for (begin, end) in FLEET_MARKERS {
+        out = strip_block(&out, begin, end);
+    }
+    // Stripping a block from the middle leaves the blank lines that surrounded
+    // it stacked together; collapse any run of 3+ newlines to a single blank
+    // line so recomposition starts from clean spacing.
+    while out.contains("\n\n\n") {
+        out = out.replace("\n\n\n", "\n\n");
+    }
+    out
+}
+
+/// Strip a single `begin..end` marker pair (inclusive) from `content`.
+fn strip_block(content: &str, begin: &str, end: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let mut in_block = false;
     for line in content.split_inclusive('\n') {
         let trimmed = line.trim_end_matches(['\n', '\r']);
-        if trimmed == BEGIN_MARKER {
+        if trimmed == begin {
             in_block = true;
             continue;
         }
-        if trimmed == END_MARKER {
+        if trimmed == end {
             in_block = false;
             continue;
         }
         if !in_block {
             out.push_str(line);
         }
-    }
-    while out.ends_with("\n\n\n") {
-        out.pop();
     }
     out
 }
@@ -408,62 +525,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_fits_under_agents_md_limit() {
-        // AGENTS.md has a 32 KiB (project_doc_max_bytes) limit; the sentinel
-        // markers add a little, so budget the rendered body well under it.
-        let g = render_codex_guidance("老板", "zh");
-        assert!(
-            g.len() < 30_000,
-            "codex guidance must stay well under the 32 KiB AGENTS.md limit, got {} bytes",
-            g.len()
-        );
-    }
-
-    #[test]
-    fn render_carries_both_parts() {
-        let g = render_codex_guidance("Boss", "en");
-        assert!(
-            g.contains("Part 1 — PRD Discipline"),
-            "must include PRD discipline part"
-        );
-        assert!(
-            g.contains("Part 2 — Interaction Mode"),
-            "must include the fleet__ask interaction part (Boss's 2026-07-16 decision)"
-        );
-    }
-
-    #[test]
-    fn render_carries_worktree_workflow() {
-        let g = render_codex_guidance("Boss", "en");
+    fn prd_block_carries_worktree_and_rhythm() {
+        let g = render_codex_prd_block("Boss", "en");
         assert!(
             g.contains("git worktree add -b prd/"),
             "must show worktree creation"
         );
-        assert!(
-            g.contains("git merge --no-ff"),
-            "must mandate --no-ff merge back"
-        );
+        assert!(g.contains("git merge --no-ff"), "must mandate --no-ff merge back");
         assert!(
             g.contains("--squash") && g.contains("forbidden"),
             "must forbid --squash so codex doesn't substitute it"
         );
         assert!(g.contains("git worktree remove"), "must show cleanup step");
-    }
-
-    #[test]
-    fn render_carries_commit_and_rhythm_rules() {
-        let g = render_codex_guidance("Boss", "en");
         assert!(g.contains("Rule 1") && g.contains("Commit discipline"));
         assert!(g.contains("Rule 4") && g.contains("Execution rhythm"));
         assert!(
             g.contains("should I continue"),
             "Rule 4 must name the forbidden progress-report checkpoint pattern"
         );
+        assert!(g.contains("fleet handoff"), "must teach the Rule 5 handoff relay");
+        assert!(g.contains("fleet watch create"), "must teach the Rule 6 watch");
+        assert!(
+            g.contains("fleet plan check") && g.contains("fleet plan create"),
+            "must teach the fleet plan subcommands"
+        );
     }
 
     #[test]
-    fn render_carries_fleet_ask_and_divider() {
-        let g = render_codex_guidance("Boss", "en");
+    fn interaction_block_carries_fleet_ask_and_divider() {
+        let g = render_codex_interaction_block("Boss", "en");
         assert!(
             g.contains("fleet__ask"),
             "interaction part must reference the fleet__ask tool"
@@ -476,78 +566,185 @@ mod tests {
             g.contains("Session-end exemption"),
             "must keep the session-end plain-text exemption so codex doesn't loop cards forever"
         );
-    }
-
-    #[test]
-    fn render_teaches_handoff_and_fleet_plan() {
-        let g = render_codex_guidance("Boss", "en");
+        // The interaction block must NOT drag in worktree/PRD mechanics — those
+        // live in the PRD block now.
         assert!(
-            g.contains("fleet handoff"),
-            "must teach the Rule 5 handoff relay"
-        );
-        assert!(
-            g.contains("fleet plan check") && g.contains("fleet plan create"),
-            "must teach the fleet plan subcommands"
+            !g.contains("git worktree add"),
+            "interaction block must not contain PRD/worktree content"
         );
     }
 
     #[test]
-    fn render_uses_title_and_locale() {
-        let g = render_codex_guidance("师父", "zh");
-        assert!(g.contains("师父"), "must interpolate the user title");
+    fn blocks_use_title_and_locale() {
+        let prd = render_codex_prd_block("师父", "zh");
+        assert!(prd.contains("师父"), "PRD block must interpolate the user title");
         assert!(
-            g.contains("中文书写"),
-            "zh locale must select the Chinese language line"
+            prd.contains("中文书写"),
+            "zh locale must select the Chinese TASKS.md line"
         );
-        let g2 = render_codex_guidance("", "en");
-        assert!(g2.contains("Boss"), "empty title falls back to Boss");
+        let ix = render_codex_interaction_block("", "en");
+        assert!(ix.contains("Boss"), "empty title falls back to Boss");
         assert!(
-            g2.contains("in English"),
-            "en locale selects the English language line"
+            ix.contains("decision-card question and option text in English"),
+            "en locale selects the English interaction language line"
         );
     }
 
     #[test]
-    fn render_distinct_marker_from_other_modes() {
-        // AGENTS.md / CLAUDE.md sentinels must not collide across modes.
-        assert_ne!(BEGIN_MARKER, "<!-- fleet:prd-discipline:begin -->");
-        assert_ne!(BEGIN_MARKER, "<!-- fleet:interaction-mode:begin -->");
-    }
-
-    #[test]
-    fn compose_preserves_user_content_and_is_idempotent() {
-        let block = format!("{BEGIN_MARKER}\ncodex rules here\n{END_MARKER}\n");
-        let existing = "# My project\n\nUser-authored AGENTS.md instructions.\n";
-        let once = compose_agents_md(existing, &block);
+    fn each_block_fits_under_agents_md_budget() {
+        // AGENTS.md has a 32 KiB limit; both blocks together plus markers must
+        // stay comfortably under it.
+        let prd = render_codex_prd_block("老板", "zh");
+        let ix = render_codex_interaction_block("老板", "zh");
         assert!(
-            once.contains("User-authored AGENTS.md instructions."),
-            "must keep user content"
+            prd.len() + ix.len() < 30_000,
+            "prd ({}) + interaction ({}) must stay well under 32 KiB",
+            prd.len(),
+            ix.len()
         );
-        assert!(once.contains("codex rules here"), "must add Fleet block");
-        let twice = compose_agents_md(&once, &block);
-        assert_eq!(
-            once, twice,
-            "composing twice must not accumulate content or blank lines"
-        );
-        assert!(!once.contains("\n\n\n"), "no triple newline: {once:?}");
     }
 
     #[test]
-    fn strip_removes_block_preserves_rest() {
+    fn compose_appends_blocks_to_user_content() {
+        let out = compose("# My AGENTS\n\nuser stuff.\n", "BLOCK\n");
+        assert!(out.contains("user stuff."), "keeps user content");
+        assert!(out.contains("BLOCK"), "adds the block");
+        assert!(out.starts_with("# My AGENTS"), "user content first");
+        assert!(!out.contains("\n\n\n"), "no triple newline: {out:?}");
+    }
+
+    #[test]
+    fn compose_handles_empty_sides() {
+        assert_eq!(compose("", ""), "");
+        assert_eq!(compose("", "BLOCK\n"), "BLOCK\n");
+        assert_eq!(compose("user\n", ""), "user\n");
+    }
+
+    #[test]
+    fn strip_block_removes_one_pair_preserves_rest() {
+        let input = format!("above\n\n{PRD_BEGIN}\nprd body\n{PRD_END}\n\nbelow\n");
+        let out = strip_block(&input, PRD_BEGIN, PRD_END);
+        assert!(!out.contains(PRD_BEGIN) && !out.contains("prd body"));
+        assert!(out.contains("above") && out.contains("below"));
+    }
+
+    #[test]
+    fn strip_all_removes_legacy_and_per_concept_blocks() {
         let input = format!(
-            "user content above\n\n{BEGIN_MARKER}\ncodex rules\n{END_MARKER}\n\nuser content below\n"
+            "user top\n\n{LEGACY_BEGIN}\nold monolithic\n{LEGACY_END}\n\n\
+{PRD_BEGIN}\nprd\n{PRD_END}\n\n{INTERACTION_BEGIN}\nix\n{INTERACTION_END}\n\nuser bottom\n"
         );
-        let out = strip_sentinel_block(&input);
-        assert!(!out.contains(BEGIN_MARKER));
-        assert!(!out.contains(END_MARKER));
-        assert!(!out.contains("codex rules"));
-        assert!(out.contains("user content above"));
-        assert!(out.contains("user content below"));
+        let out = strip_all_fleet_blocks(&input);
+        assert!(!out.contains(LEGACY_BEGIN) && !out.contains("old monolithic"));
+        assert!(!out.contains(PRD_BEGIN) && !out.contains("prd"));
+        assert!(!out.contains(INTERACTION_BEGIN) && !out.contains("ix"));
+        assert!(out.contains("user top") && out.contains("user bottom"));
+        assert!(!out.contains("\n\n\n"), "collapses blank runs: {out:?}");
     }
 
     #[test]
-    fn strip_noop_when_absent() {
-        let input = "plain AGENTS.md\nno markers here\n";
-        assert_eq!(strip_sentinel_block(input), input);
+    fn markers_are_distinct_across_modes() {
+        assert_ne!(PRD_BEGIN, INTERACTION_BEGIN);
+        assert_ne!(PRD_BEGIN, LEGACY_BEGIN);
+        assert_ne!(INTERACTION_BEGIN, LEGACY_BEGIN);
+        assert_ne!(PRD_BEGIN, "<!-- fleet:prd-discipline:begin -->");
+        assert_ne!(INTERACTION_BEGIN, "<!-- fleet:interaction-mode:begin -->");
+    }
+
+    // --- reconcile_codex_agents_md: exercised against a temp CODEX_HOME ---
+    //
+    // These tests set $CODEX_HOME to an isolated temp dir. They run serially
+    // (guarded by a mutex) because they mutate a process-global env var.
+
+    use std::sync::Mutex;
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_temp_codex_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let base = std::env::temp_dir().join(format!("fleet-codex-guidance-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let prev = std::env::var_os("CODEX_HOME");
+        std::env::set_var("CODEX_HOME", &base);
+        let out = f(&base);
+        match prev {
+            Some(v) => std::env::set_var("CODEX_HOME", v),
+            None => std::env::remove_var("CODEX_HOME"),
+        }
+        let _ = fs::remove_dir_all(&base);
+        out
+    }
+
+    #[test]
+    fn reconcile_composes_only_enabled_blocks() {
+        with_temp_codex_home(|base| {
+            let agents = base.join("AGENTS.md");
+
+            // interaction only
+            reconcile_codex_agents_md(false, true, "Boss", "en").unwrap();
+            let c = fs::read_to_string(&agents).unwrap();
+            assert!(c.contains(INTERACTION_BEGIN) && !c.contains(PRD_BEGIN));
+
+            // both
+            reconcile_codex_agents_md(true, true, "Boss", "en").unwrap();
+            let c = fs::read_to_string(&agents).unwrap();
+            assert!(c.contains(PRD_BEGIN) && c.contains(INTERACTION_BEGIN));
+
+            // prd only — interaction block must be gone
+            reconcile_codex_agents_md(true, false, "Boss", "en").unwrap();
+            let c = fs::read_to_string(&agents).unwrap();
+            assert!(c.contains(PRD_BEGIN) && !c.contains(INTERACTION_BEGIN));
+
+            // none — file removed
+            reconcile_codex_agents_md(false, false, "Boss", "en").unwrap();
+            assert!(!agents.exists(), "empty reconcile removes the file");
+        });
+    }
+
+    #[test]
+    fn reconcile_is_idempotent() {
+        with_temp_codex_home(|base| {
+            let agents = base.join("AGENTS.md");
+            reconcile_codex_agents_md(true, true, "Boss", "en").unwrap();
+            let once = fs::read_to_string(&agents).unwrap();
+            reconcile_codex_agents_md(true, true, "Boss", "en").unwrap();
+            let twice = fs::read_to_string(&agents).unwrap();
+            assert_eq!(once, twice, "composing twice must not accumulate content");
+            assert!(!once.contains("\n\n\n"), "no triple newline");
+        });
+    }
+
+    #[test]
+    fn reconcile_preserves_user_content_and_migrates_legacy() {
+        with_temp_codex_home(|base| {
+            let agents = base.join("AGENTS.md");
+            // Seed a legacy monolithic block plus user content.
+            let seed = format!(
+                "# My project AGENTS\n\nkeep me.\n\n{LEGACY_BEGIN}\nold packed guidance\n{LEGACY_END}\n"
+            );
+            fs::write(&agents, seed).unwrap();
+
+            reconcile_codex_agents_md(true, true, "Boss", "en").unwrap();
+            let c = fs::read_to_string(&agents).unwrap();
+            assert!(c.contains("keep me."), "user content preserved");
+            assert!(!c.contains(LEGACY_BEGIN), "legacy monolithic block migrated away");
+            assert!(!c.contains("old packed guidance"));
+            assert!(
+                c.contains(PRD_BEGIN) && c.contains(INTERACTION_BEGIN),
+                "new blocks written"
+            );
+        });
+    }
+
+    #[test]
+    fn is_installed_flags_track_disk() {
+        with_temp_codex_home(|_base| {
+            assert!(!is_codex_prd_installed() && !is_codex_interaction_installed());
+            reconcile_codex_agents_md(true, false, "Boss", "en").unwrap();
+            assert!(is_codex_prd_installed() && !is_codex_interaction_installed());
+            assert!(is_codex_guidance_installed());
+            reconcile_codex_agents_md(false, false, "Boss", "en").unwrap();
+            assert!(!is_codex_guidance_installed());
+        });
     }
 }
