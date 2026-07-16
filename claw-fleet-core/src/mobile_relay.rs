@@ -1931,6 +1931,10 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
     sink.send(Message::Text(auth.into()))
         .await
         .map_err(|e| format!("auth send: {e}"))?;
+    // Between here and the `authed` frame the socket is up but unroutable, and
+    // pongs keep refreshing `last_inbound` — a relay that accepts the socket
+    // but never auths would otherwise stall silently with no log line at all.
+    crate::log_debug("[mobile-relay] socket open, auth sent");
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
     *OUT_TX.lock().unwrap() = Some(tx);
@@ -1995,6 +1999,17 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                         // path under the hard cutover.
                         if let Some(payload) = frame.get("payload").and_then(decode_inbound_payload)
                         {
+                            // Requests are handled one at a time (this arm awaits
+                            // before the next frame is read), so queue wait is
+                            // inferable from adjacent [relay-timing] lines: the
+                            // previous line's end is the next request's start.
+                            let method = payload
+                                .get("method")
+                                .and_then(Value::as_str)
+                                .or_else(|| payload.get("event").and_then(Value::as_str))
+                                .unwrap_or("?")
+                                .to_string();
+                            let started = std::time::Instant::now();
                             // Blocking file IO (write_response / pending scans)
                             // must not run on the ws runtime thread.
                             let reply = tokio::task::spawn_blocking(move || {
@@ -2003,9 +2018,24 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                             .await
                             .ok()
                             .flatten();
+                            let handle_ms = started.elapsed().as_millis();
                             if let Some(reply) = reply {
-                                send_out(encode_payload(&reply));
+                                let out = encode_payload(&reply);
+                                let Outbound::Text(ref wire) = out;
+                                crate::log_debug(&format!(
+                                    "[relay-timing] method={method} handle_ms={handle_ms} wire_bytes={}",
+                                    wire.len()
+                                ));
+                                send_out(out);
+                            } else if handle_ms >= 50 {
+                                crate::log_debug(&format!(
+                                    "[relay-timing] method={method} handle_ms={handle_ms} no-reply"
+                                ));
                             }
+                        } else {
+                            // A dropped envelope is invisible to the phone (it just
+                            // times out) — make version/key mismatches greppable.
+                            crate::log_debug("[relay-timing] undecodable msg payload dropped");
                         }
                     }
                     Some("error") => {
