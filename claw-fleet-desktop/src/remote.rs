@@ -1356,6 +1356,16 @@ impl crate::backend::Backend for RemoteBackend {
             .unwrap_or_default()
     }
 
+    fn codex_usage_history(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Vec<crate::codex_usage_history::CodexUsageHistoryPoint> {
+        self.probe
+            .get(&format!("{}?from_ms={from_ms}&to_ms={to_ms}", claw_fleet_core::routes::CODEX_USAGE_HISTORY))
+            .unwrap_or_default()
+    }
+
     fn upload_attachment(
         &self,
         source_path: &std::path::Path,

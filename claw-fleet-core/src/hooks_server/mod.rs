@@ -876,6 +876,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             crate::routes::FLEET_LLM_USAGE_DAILY => route_fleet_llm_usage_daily(ctx, request, &query, json_header, path),
 
             crate::routes::USAGE_HISTORY => route_usage_history(ctx, request, &query, json_header, path),
+            crate::routes::CODEX_USAGE_HISTORY => route_codex_usage_history(ctx, request, &query, json_header, path),
 
             // ── Session outcome analysis (delegated from remote clients) ──
             crate::routes::ANALYZE => route_analyze(ctx, request, &query, json_header, path),

@@ -118,6 +118,26 @@ pub(crate) fn route_usage_history(
                 );
             }
 
+pub(crate) fn route_codex_usage_history(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let from_ms = query
+        .get("from_ms")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let to_ms = query
+        .get("to_ms")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(i64::MAX);
+    let points = crate::codex_usage_history::load_codex_usage_history(from_ms, to_ms);
+    let body = serde_json::to_string(&points).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_analyze(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,

@@ -131,6 +131,7 @@ pub const TODAY_USAGE: &str = "/today_usage";
 pub const TOKEN_BREAKDOWN: &str = "/token_breakdown";
 pub const CODEX_TOKEN_BREAKDOWN: &str = "/codex_token_breakdown";
 pub const USAGE_HISTORY: &str = "/usage_history";
+pub const CODEX_USAGE_HISTORY: &str = "/codex_usage_history";
 pub const USAGE_SUMMARIES: &str = "/usage_summaries";
 pub const USER_ATTACHMENT: &str = "/user_attachment";
 pub const WIKI_DELETE: &str = "/wiki_delete";
