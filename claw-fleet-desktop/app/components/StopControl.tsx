@@ -79,7 +79,18 @@ export async function performStop(
   }
 }
 
-export function StopControl({ session }: { session: SessionInfo }) {
+export function StopControl({
+  session,
+  variant = "bare",
+}: {
+  session: SessionInfo;
+  /**
+   * `"bare"` (default): the small ghost glyph used in session lists/cards.
+   * `"solid"`: a filled round button sized to sit in the composer's send slot,
+   * so a running-session Stop reads as the primary action there.
+   */
+  variant?: "bare" | "solid";
+}) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const mode = stopMode(session);
@@ -111,6 +122,7 @@ export function StopControl({ session }: { session: SessionInfo }) {
       type="button"
       className={[
         styles.btn,
+        variant === "solid" ? styles.btn_solid : "",
         styles[`btn_${mode}`],
         busy ? styles.btn_busy : "",
         mode === "stop" && !session.pidPrecise ? styles.btn_warn : "",
