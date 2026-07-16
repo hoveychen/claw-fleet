@@ -1302,6 +1302,8 @@
     "work_cat_work": "Working",
     "work_steps": "{{count}} steps",
     "work_thinking": "thinking",
+    "tool_wait": "Waiting for output",
+    "tool_wait_timed": "Waiting for output · up to {{secs}}s",
     "reasoning_summary_unavailable": "Reasoning used, but this model returned no summary.",
     "redacted_thinking": "Reasoning redacted",
     "today": "Today",

@@ -83,6 +83,21 @@ function formatInput(input: Record<string, unknown>, name?: string, wsRoot?: str
   return JSON.stringify(input, null, 2);
 }
 
+/**
+ * codex's `wait` tool blocks on a background exec cell for more output. Its raw
+ * input — `{cell_id, max_tokens, yield_time_ms}` — used to fall through to
+ * JSON.stringify and render as `{ "cell_id": "54", ... }`. Only the timeout is
+ * meaningful to a reader; the cell id and token cap are plumbing. Return the
+ * yield timeout as a compact seconds string (30000 → "30", 1500 → "1.5"), or
+ * null when the field is absent so the caller can drop the "up to Ns" suffix.
+ */
+export function waitTimeoutSecs(input: Record<string, unknown>): string | null {
+  const ms = input.yield_time_ms;
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return null;
+  const s = ms / 1000;
+  return Number.isInteger(s) ? String(s) : s.toFixed(1);
+}
+
 /** True when an Agent call has a description or prompt worth rendering as
  *  text; if neither is present we keep the raw-JSON fallback. */
 function hasAgentInput(block: ToolUseBlockType): boolean {
@@ -217,6 +232,7 @@ function DiffSection({ block, meta }: { block: ToolUseBlockType; meta?: unknown 
 const DIFF_TOOLS = new Set(["Edit", "MultiEdit", "Write"]);
 
 export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaProp, paths }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   // On expand, recover the full output if this card's tail payload was
@@ -232,7 +248,14 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   const result =
     full && resultProp ? { ...resultProp, content: full.content as ToolResultBlock["content"] } : resultProp;
 
-  const summary = formatInput(block.input, block.name, paths?.workspaceRoot);
+  // codex's `wait` gets a friendly one-liner instead of its raw args object.
+  const summary =
+    block.name === "wait"
+      ? (() => {
+          const secs = waitTimeoutSecs(block.input);
+          return secs ? t("detail.tool_wait_timed", { secs }) : t("detail.tool_wait");
+        })()
+      : formatInput(block.input, block.name, paths?.workspaceRoot);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
   const custom = hasCustomBody(block.name, meta, result);
