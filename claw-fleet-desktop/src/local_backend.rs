@@ -1390,6 +1390,39 @@ fn emit_tail_lines(path: &std::path::Path, app: &AppHandle, watch: &crate::Watch
     }
 }
 
+/// Compute what a filesystem watch should track for `path`, returning the
+/// on-disk path string to store in [`WatchState`] plus the current file size
+/// (the tail offset to start from).
+///
+/// Returns `Ok(None)` for non-filesystem (polling) sources — the caller stores
+/// the raw path with offset 0. Returns `Ok(Some((real_path, size)))` for
+/// filesystem sources.
+fn watch_start_target(
+    sources: &[Box<dyn AgentSource>],
+    path: &str,
+) -> Result<Option<(String, u64)>, String> {
+    let source = find_source_for_path(sources, path);
+    let is_file_based = source
+        .map(|s| matches!(s.watch_strategy(), WatchStrategy::Filesystem))
+        .unwrap_or(false);
+
+    if !is_file_based {
+        return Ok(None);
+    }
+
+    // `path` may be a source-specific URI (e.g. Codex's `codex://…`); resolve
+    // it to the real rollout file before `stat`ing it. Without this, filesystem
+    // sources whose sessions are addressed by URI would error here — and the
+    // stored watch path must also be the real path so `emit_tail_lines`'
+    // fs-event match (real absolute path vs stored path) succeeds.
+    let real_path = source
+        .and_then(|s| s.resolve_file_path(path))
+        .unwrap_or_else(|| std::path::PathBuf::from(path));
+
+    let size = std::fs::metadata(&real_path).map(|m| m.len()).map_err(|e| e.to_string())?;
+    Ok(Some((real_path.to_string_lossy().into_owned(), size)))
+}
+
 use crate::agent_source::find_source_for_path;
 
 // ── Public kill helpers (used by ClaudeCodeSource) ──────────────────────────
@@ -2100,21 +2133,17 @@ impl Backend for LocalBackend {
     }
 
     fn start_watch(&self, path: String) -> Result<u64, String> {
-        // For non-filesystem sources (polling-based), no file to tail.
-        let is_file_based = find_source_for_path(&self.sources, &path)
-            .map(|s| matches!(s.watch_strategy(), WatchStrategy::Filesystem))
-            .unwrap_or(false);
-
-        if !is_file_based {
-            self.watch.set(path, 0);
-            return Ok(0);
+        match watch_start_target(&self.sources, &path)? {
+            // Non-filesystem (polling) source — nothing to tail on disk.
+            None => {
+                self.watch.set(path, 0);
+                Ok(0)
+            }
+            Some((real_path, size)) => {
+                self.watch.set(real_path, size);
+                Ok(size)
+            }
         }
-
-        let size = std::fs::metadata(&path)
-            .map(|m| m.len())
-            .map_err(|e| e.to_string())?;
-        self.watch.set(path, size);
-        Ok(size)
     }
 
     fn stop_watch(&self) {
@@ -3493,6 +3522,7 @@ mod tests {
     use super::*;
     use crate::backend::{SourceUsageSummary, UsageBar};
     use serde_json::json;
+    use std::path::PathBuf;
 
     fn mk_session(id: &str, source: &str) -> crate::session::SessionInfo {
         use crate::session::{SessionInfo, SessionStatus};
@@ -3529,6 +3559,7 @@ mod tests {
             pid_precise: false,
             proc_alive: false,
             pending_tool_batch: false,
+            pending_messages: Vec::new(),
             last_skill: None,
             context_percent: None,
             agent_source: source.into(),
@@ -3608,6 +3639,11 @@ mod tests {
         usage: Result<serde_json::Value, String>,
         summary: Option<SourceUsageSummary>,
         sessions: Vec<crate::session::SessionInfo>,
+        /// When true, report `WatchStrategy::Filesystem` (like Codex/Claude).
+        watch_fs: bool,
+        /// When set, `resolve_file_path` maps any URI to this real path
+        /// (mimics Codex's `codex://…` → rollout-file resolution).
+        resolve_target: Option<PathBuf>,
     }
 
     impl MockSource {
@@ -3619,6 +3655,8 @@ mod tests {
                 usage: Err("n/a".into()),
                 summary: None,
                 sessions: vec![],
+                watch_fs: false,
+                resolve_target: None,
             }
         }
     }
@@ -3630,10 +3668,61 @@ mod tests {
         fn is_available(&self) -> bool { self.available }
         fn scan_sessions(&self) -> Vec<crate::session::SessionInfo> { self.sessions.clone() }
         fn get_messages(&self, _: &str) -> Result<Vec<serde_json::Value>, String> { Ok(vec![]) }
-        fn watch_strategy(&self) -> WatchStrategy { WatchStrategy::Poll(Duration::from_secs(5)) }
+        fn watch_strategy(&self) -> WatchStrategy {
+            if self.watch_fs {
+                WatchStrategy::Filesystem
+            } else {
+                WatchStrategy::Poll(Duration::from_secs(5))
+            }
+        }
+        fn resolve_file_path(&self, path: &str) -> Option<PathBuf> {
+            match &self.resolve_target {
+                Some(p) => Some(p.clone()),
+                None => Some(PathBuf::from(path)),
+            }
+        }
         fn fetch_account(&self) -> Result<serde_json::Value, String> { self.account.clone() }
         fn fetch_usage(&self) -> Result<serde_json::Value, String> { self.usage.clone() }
         fn usage_summary(&self) -> Option<SourceUsageSummary> { self.summary.clone() }
+    }
+
+    /// Codex sessions store a `codex://…` URI as `jsonl_path` and report
+    /// `WatchStrategy::Filesystem`. `start_watch` must resolve that URI to the
+    /// real rollout file before `stat`ing it — otherwise `std::fs::metadata`
+    /// fails on the URI, `start_watching_session` rejects, and the desktop
+    /// detail view's `store.open()` hangs forever on "加载中…" (isLoading never
+    /// cleared). The stored watch path must also be the real path so the fs
+    /// watcher's tail matches against real filesystem-event paths.
+    #[test]
+    fn watch_start_target_resolves_uri_before_stat() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("rollout-abc.jsonl");
+        std::fs::write(&real, b"{}\n{}\n").unwrap(); // 6 bytes
+
+        let sources: Vec<Box<dyn AgentSource>> = vec![Box::new(MockSource {
+            watch_fs: true,
+            resolve_target: Some(real.clone()),
+            ..MockSource::new("codex", "codex", "codex://")
+        })];
+
+        let out = watch_start_target(&sources, "codex://2026/07/16/rollout-abc.jsonl")
+            .expect("codex-like filesystem source must resolve, not error on the URI");
+        let (real_path, size) =
+            out.expect("filesystem source should yield a tail target, not None");
+        assert_eq!(real_path, real.to_string_lossy(), "must store the resolved real path");
+        assert_eq!(size, 6, "size must be read from the resolved file");
+    }
+
+    /// Polling sources have no on-disk file to tail; `start_watch` stores the
+    /// raw path with offset 0 and does not stat anything.
+    #[test]
+    fn watch_start_target_none_for_polling_source() {
+        let sources: Vec<Box<dyn AgentSource>> = vec![Box::new(MockSource {
+            watch_fs: false,
+            ..MockSource::new("poll", "poll", "poll://")
+        })];
+        let out = watch_start_target(&sources, "poll://whatever").unwrap();
+        assert!(out.is_none(), "polling source must not produce a filesystem tail target");
     }
 
     #[test]
