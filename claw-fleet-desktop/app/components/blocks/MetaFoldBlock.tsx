@@ -73,5 +73,7 @@ function deriveHeader(
     return { title, tag: t("detail.codex_meta_multiagent", "multi_agent_mode") };
   if (head.startsWith("<environment_context>"))
     return { title, tag: t("detail.codex_meta_environment", "环境上下文") };
+  if (head.startsWith("<user_instructions>"))
+    return { title, tag: t("detail.codex_meta_instructions", "用户指令") };
   return { title, tag: t("detail.codex_meta_generic", "注入指令") };
 }

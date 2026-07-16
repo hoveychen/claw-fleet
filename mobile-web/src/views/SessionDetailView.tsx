@@ -192,6 +192,7 @@ function deriveMetaLabel(body: string): string {
   if (head.includes("primary agent in a team")) return t("多智能体协作");
   if (head.startsWith("<multi_agent_mode>")) return "multi_agent_mode";
   if (head.startsWith("<environment_context>")) return t("环境上下文");
+  if (head.startsWith("<user_instructions>")) return t("用户指令");
   return t("注入指令");
 }
 
