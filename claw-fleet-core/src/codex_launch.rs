@@ -867,6 +867,10 @@ pub fn spawn_new_codex_session(
         // `thread.started` line.
         .stdout(std::process::Stdio::from(stdout_sink))
         .stderr(std::process::Stdio::from(stderr_file));
+    // Own process group: a terminal Ctrl-C / group signal at the spawner must
+    // not abort the codex turn (the stdout file sink covers the app *exiting*;
+    // this covers the signal — see process_util docs).
+    crate::process_util::detach_process_group(&mut cmd);
     apply_codex_launch_env(&mut cmd);
     cmd.env(FLEET_CODEX_LAUNCH_TOKEN_ENV, &launch_token);
 
@@ -1114,6 +1118,8 @@ pub fn resume_codex_session(
         // transcript is read from the on-disk rollout, not this stream.
         .stdout(std::process::Stdio::from(stdout_sink))
         .stderr(std::process::Stdio::from(stderr_file));
+    // Own process group — same rationale as the spawn path above.
+    crate::process_util::detach_process_group(&mut cmd);
     apply_codex_launch_env(&mut cmd);
     // Resume knows the thread id up front (it *is* the one being resumed), so
     // stamp it directly — no launch-token indirection needed. The child's
