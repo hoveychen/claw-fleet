@@ -163,6 +163,13 @@ pub struct SessionStats {
     pub token_speed: f64,
     /// Cumulative output tokens across all finalized assistant turns.
     pub total_output_tokens: u64,
+    /// Cumulative input tokens across all finalized assistant turns —
+    /// `Σ(input_tokens + cache_creation_input_tokens + cache_read_input_tokens)`.
+    /// This is the "tokens actually sent to the API" total (cache re-reads
+    /// included), on the same口径 as `total_cost_usd`, NOT the last-turn
+    /// context-window snapshot. The snapshot lives separately in
+    /// `SessionAcc::context_usage` and still drives `context_percent`.
+    pub total_input_tokens: u64,
     /// Cumulative USD cost across all finalized assistant turns.
     pub total_cost_usd: f64,
     /// USD/min over the last 5-minute window.
@@ -205,6 +212,7 @@ pub struct SessionStats {
 #[derive(Clone, Debug, Default)]
 pub struct StatsAcc {
     total_output: u64,
+    total_input: u64,
     total_cost: f64,
     /// (timestamp_secs, output_tokens, turn_cost_usd) — feeds the speed window.
     timed: Vec<(f64, u64, f64)>,
@@ -316,6 +324,10 @@ impl StatsAcc {
                 .unwrap_or(0);
 
             self.total_output += output_tokens;
+            // Cumulative input across finalized turns, cache re-reads included, so
+            // the total tracks `total_cost` (which also folds every turn) rather
+            // than the last-turn context-window snapshot.
+            self.total_input += input_tokens + cache_creation_tokens + cache_read_tokens;
 
             // Per-turn cost uses this turn's own model; fall back to most-recently-
             // seen model when a turn omits it (model can change mid-session).
@@ -390,6 +402,7 @@ impl StatsAcc {
         SessionStats {
             token_speed,
             total_output_tokens: self.total_output,
+            total_input_tokens: self.total_input,
             total_cost_usd: self.total_cost,
             cost_speed_usd_per_min,
             compact_count: self.compact_count,
@@ -427,5 +440,54 @@ pub(crate) fn compute_session_stats(lines: &[&str]) -> SessionStats {
     let mut acc = StatsAcc::new();
     acc.push_lines(lines);
     acc.finish()
+}
+
+#[cfg(test)]
+mod input_accumulation_tests {
+    use super::*;
+
+    fn turn(id: &str, input: u64, cache_create: u64, cache_read: u64, output: u64) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2026-07-16T10:00:00Z",
+            "message": {
+                "id": id,
+                "model": "claude-sonnet-4-5",
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": input,
+                    "cache_creation_input_tokens": cache_create,
+                    "cache_read_input_tokens": cache_read,
+                    "output_tokens": output
+                }
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn total_input_accumulates_input_plus_cache_across_turns() {
+        // Two finalized turns; each turn's input = input + cache_create + cache_read.
+        // Turn 1: 100 + 2000 + 0     = 2100
+        // Turn 2: 150 + 0    + 5000  = 5150   (cache re-read of turn 1's context)
+        // Cumulative must be 7250 — NOT the last-turn snapshot (5150).
+        let lines = vec![
+            turn("m1", 100, 2000, 0, 30),
+            turn("m2", 150, 0, 5000, 40),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let stats = compute_session_stats(&refs);
+        assert_eq!(stats.total_input_tokens, 7250, "cumulative input incl cache");
+        assert_eq!(stats.total_output_tokens, 70);
+    }
+
+    #[test]
+    fn duplicate_msg_id_not_double_counted() {
+        // Re-logging the same finalized message must not double its input.
+        let lines = vec![turn("dup", 100, 0, 900, 10), turn("dup", 100, 0, 900, 10)];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let stats = compute_session_stats(&refs);
+        assert_eq!(stats.total_input_tokens, 1000, "dedup by msg id");
+    }
 }
 

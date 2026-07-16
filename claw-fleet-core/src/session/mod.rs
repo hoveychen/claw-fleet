@@ -102,12 +102,14 @@ pub struct SessionInfo {
     /// sources and rollouts that predate this metric.
     #[serde(default)]
     pub reasoning_output_tokens: u64,
-    /// Last finalized turn's total input tokens (`input_tokens +
-    /// cache_creation_input_tokens + cache_read_input_tokens`) — i.e. the current
-    /// context-window size, reset by each compaction. Matches the per-session
-    /// `total_input_tokens` the daily report derives (`daily_report.rs`), so
-    /// "today's cumulative" can sum input on the same口径. `0` when no usage seen
-    /// yet or for sources (e.g. Codex) that don't track it.
+    /// Cumulative input tokens across all finalized turns (`Σ input_tokens +
+    /// cache_creation_input_tokens + cache_read_input_tokens`, cache re-reads
+    /// included) — the "tokens sent to the API" total, on the same口径 as
+    /// `total_cost_usd`. This is NOT the last-turn context-window snapshot (that
+    /// is exposed via `context_percent`); for Codex it's the cumulative
+    /// `total_token_usage.input_tokens`. Matches the per-session input the daily
+    /// report sums (`daily_report.rs`), so "today's cumulative" sums both sources
+    /// on one口径. `0` when no usage seen yet.
     #[serde(default)]
     pub total_input_tokens: u64,
     /// Cumulative USD cost for this session alone (main or subagent).
