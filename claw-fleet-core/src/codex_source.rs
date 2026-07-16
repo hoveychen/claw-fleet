@@ -1153,10 +1153,59 @@ mod tests {
     use super::{
         codex_cost_and_input, codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit, compute_token_stats,
-        extract_context_percent, last_rollout_rate_limits, read_rollout_originator,
-        CodexRateLimitWindow, CodexUsageItem,
+        extract_context_percent, last_rollout_rate_limits, normalize_messages,
+        read_rollout_originator, CodexRateLimitWindow, CodexUsageItem,
     };
     use serde_json::json;
+
+    #[test]
+    fn developer_role_message_is_tagged_is_meta() {
+        // Codex injects its sandbox/permissions preamble, the `/root`
+        // multi-agent collaboration prompt, and `<multi_agent_mode>` guidance
+        // as `role:"developer"` response_items. These are codex-native
+        // boilerplate, not user turns, so normalize_messages must flag them
+        // `isMeta` (mirroring Claude's harness-injected records) — the frontend
+        // folds `isMeta` messages into a collapsed card instead of a bubble.
+        let lines = vec![
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "You are `/root`, the primary agent in a team of agents."
+                    }]
+                }
+            }),
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "real user prompt" }]
+                }
+            }),
+        ];
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 2, "both messages emitted");
+
+        // Developer message: type user (right-aligned lane) but flagged isMeta.
+        assert_eq!(out[0]["type"], json!("user"));
+        assert_eq!(out[0]["message"]["role"], json!("developer"));
+        assert_eq!(
+            out[0]["isMeta"],
+            json!(true),
+            "developer-role message must be tagged isMeta so the frontend folds it"
+        );
+
+        // A genuine user turn stays un-flagged.
+        assert_eq!(out[1]["type"], json!("user"));
+        assert!(
+            out[1].get("isMeta").is_none(),
+            "real user messages must NOT be tagged isMeta"
+        );
+    }
 
     #[test]
     fn parse_source_exec_is_top_level_not_subagent() {
@@ -2078,6 +2127,19 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
 
                             if end_turn {
                                 msg["message"]["stop_reason"] = json!("end_turn");
+                            }
+
+                            // Codex injects boilerplate system context as
+                            // `role:"developer"` messages (sandbox/permissions
+                            // preamble, the `/root` multi-agent collaboration
+                            // prompt, `<multi_agent_mode>` guidance). None of it
+                            // is user-authored, so tag it `isMeta` — the same
+                            // flag Claude Code stamps on harness-injected user
+                            // records — and the frontend folds it into a
+                            // collapsed, expandable card instead of a full
+                            // bubble (see MessageList / SessionDetailView).
+                            if role == "developer" {
+                                msg["isMeta"] = json!(true);
                             }
 
                             // Attach ID if present.
