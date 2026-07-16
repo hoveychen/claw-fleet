@@ -5,22 +5,22 @@ use super::*;
 /// Graceful stop: abort the in-flight tool call, keep the transcript resumable.
 /// Only ever called with a `pidPrecise` session — SIGINT aimed at the wrong
 /// sibling would abort someone else's turn.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn interrupt_session(pid: u32, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().interrupt_pid(pid)
+    state.backend.write().unwrap().interrupt_pid(pid)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn kill_session(pid: u32, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().kill_pid(pid)
+    state.backend.write().unwrap().kill_pid(pid)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn kill_workspace_sessions(workspace_path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().kill_workspace(workspace_path)
+    state.backend.write().unwrap().kill_workspace(workspace_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn resume_rate_limited_session(
     session_id: String,
     workspace_path: String,
@@ -31,7 +31,7 @@ pub(crate) fn resume_rate_limited_session(
     agent_source: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.backend.read().unwrap().resume_session(
+    state.backend.write().unwrap().resume_session(
         session_id,
         workspace_path,
         prompt,
@@ -45,7 +45,7 @@ pub(crate) fn resume_rate_limited_session(
 /// Queue a follow-up message for a session that is still mid-turn. The message
 /// is delivered via `claude --resume` the moment the current turn ends (see
 /// [`claw_fleet_core::pending_message`]).
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn enqueue_session_message(
     session_id: String,
     workspace_path: String,
@@ -54,7 +54,7 @@ pub(crate) fn enqueue_session_message(
 ) -> Result<(), String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .enqueue_message(session_id, workspace_path, text)
 }
@@ -90,9 +90,9 @@ pub(crate) async fn spawn_new_claude_session(
 /// Absolute path of the pure-chat workspace, created on demand. The launcher
 /// pins it as a fixed entry — it has no prior sessions to be discovered from,
 /// and under a remote connection it resolves against the probe host's home.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn chat_workspace(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state.backend.read().unwrap().chat_workspace()
+    state.backend.write().unwrap().chat_workspace()
 }
 
 /// One level of directories under `path` on the *backend host* (`None` = its
@@ -102,7 +102,7 @@ pub(crate) fn chat_workspace(state: tauri::State<'_, AppState>) -> Result<String
 /// dialog can only ever browse the machine the desktop runs on — under a remote
 /// connection that is the wrong host, which is why the launcher used to just hide
 /// its Browse button in that mode.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn browse_dir(
     state: tauri::State<'_, AppState>,
     path: Option<String>,
@@ -110,25 +110,25 @@ pub(crate) fn browse_dir(
     state.backend.read().unwrap().browse_dir(path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_auto_resume_config(
     state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::auto_resume::AutoResumeConfig {
     state.backend.read().unwrap().get_auto_resume_config()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn set_auto_resume_config(
     config: claw_fleet_core::auto_resume::AutoResumeConfig,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.backend.read().unwrap().set_auto_resume_config(config)
+    state.backend.write().unwrap().set_auto_resume_config(config)
 }
 
 /// Set (or clear, when `mark` is null) the human's manual review mark for a
 /// session. Delegates via the backend so LocalBackend writes the local
 /// side-channel file and RemoteBackend POSTs it to the probe.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn set_session_mark(
     session_id: String,
     workspace_path: String,
@@ -137,7 +137,7 @@ pub(crate) fn set_session_mark(
 ) -> Result<(), String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .set_session_mark(session_id, workspace_path, mark)
 }
@@ -162,12 +162,12 @@ pub(crate) fn set_session_title(
 /// Mark a batch of sessions read as of now (a single row-read is a batch of one,
 /// "一键清除未读" a batch of many). Unread is derived from `last_read_ms` vs
 /// `last_activity_ms`, so this only stamps the read time.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn mark_sessions_read(
     items: Vec<claw_fleet_core::session_read::SessionReadItem>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.backend.read().unwrap().mark_sessions_read(items)
+    state.backend.write().unwrap().mark_sessions_read(items)
 }
 
 // ── Keep-awake (caffeinate -i equivalent) ────────────────────────────────────

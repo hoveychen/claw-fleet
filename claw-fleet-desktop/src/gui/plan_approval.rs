@@ -2,26 +2,26 @@ use super::*;
 
 // ── Plan approval (ExitPlanMode interception) ───────────────────────────────
 
-#[tauri::command]
-pub(crate) fn apply_plan_approval_hook(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().apply_plan_approval_hook()
+#[tauri::command(async)]
+pub(crate) fn apply_plan_approval_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().apply_plan_approval_hook()
 }
 
-#[tauri::command]
-pub(crate) fn remove_plan_approval_hook(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().remove_plan_approval_hook()
+#[tauri::command(async)]
+pub(crate) fn remove_plan_approval_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().remove_plan_approval_hook()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_pending_plan_approvals(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Vec<claw_fleet_core::plan_approval::PlanApprovalRequest> {
     state.backend.read().unwrap().list_pending_plan_approvals()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn respond_to_plan_approval(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     id: String,
     decision: String,
     edited_plan: Option<String>,
@@ -29,7 +29,7 @@ pub(crate) fn respond_to_plan_approval(
 ) -> Result<(), String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .respond_to_plan_approval(&id, &decision, edited_plan, feedback)
 }
@@ -55,53 +55,53 @@ pub(crate) fn list_session_decisions(
 /// response so the frontend can seed its store on launch. Covers the
 /// cold-restart gap where the one-shot watcher emit was lost because no Tauri
 /// listener was attached yet.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn list_pending_decisions(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::backend::PendingDecisions {
     state.backend.read().unwrap().list_pending_decisions()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_mobile_relay_config(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
     state.backend.read().unwrap().get_mobile_relay_config()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn set_mobile_relay_config(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     cfg: claw_fleet_core::mobile_relay::MobileRelayConfig,
 ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
-    state.backend.read().unwrap().set_mobile_relay_config(cfg)
+    state.backend.write().unwrap().set_mobile_relay_config(cfg)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn rotate_mobile_relay_secret(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
-    state.backend.read().unwrap().rotate_mobile_relay_secret()
+    state.backend.write().unwrap().rotate_mobile_relay_secret()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn mobile_relay_status(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::mobile_relay::MobileRelayStatus, String> {
     state.backend.read().unwrap().mobile_relay_status()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn mobile_relay_qr_svg(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     lang: Option<String>,
 ) -> Result<String, String> {
     state.backend.read().unwrap().mobile_relay_qr_svg(lang.as_deref())
 }
 
 /// Read the last non-tool-use assistant message from a session, for guard context.
-#[tauri::command]
-pub(crate) fn get_guard_context(state: tauri::State<AppState>, session_id: String) -> String {
+#[tauri::command(async)]
+pub(crate) fn get_guard_context(state: tauri::State<'_, AppState>, session_id: String) -> String {
     // Find the session by ID and read its messages.
     let backend = state.backend.read().unwrap();
     let sessions = backend.list_sessions();
