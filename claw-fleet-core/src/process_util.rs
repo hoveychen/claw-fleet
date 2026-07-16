@@ -32,6 +32,26 @@ pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
+/// Put the child in its own process group (Unix), no-op on Windows.
+///
+/// For long-lived agent children only (claude / codex sessions). A child left
+/// in the spawner's group receives every group-wide signal aimed at the Fleet
+/// process — a terminal Ctrl-C at a dev build SIGINTs all in-flight agents,
+/// aborting their turns (`turn_aborted reason='interrupted'` on Codex). Do NOT
+/// apply this to short-lived tool invocations (`which`, `git`, …): those
+/// *should* die with the caller.
+///
+/// Fleet's own stop paths are unaffected: `interrupt_pid_impl` /
+/// `kill_pid_tree` signal explicit pids collected by ppid walk, not the group.
+pub fn detach_process_group(cmd: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
