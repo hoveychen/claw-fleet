@@ -1452,6 +1452,81 @@ mod tests {
     }
 
     #[test]
+    fn normalize_messages_renders_custom_tool_call_and_output() {
+        // Current Codex rollouts record tool calls as `custom_tool_call` /
+        // `custom_tool_call_output` (name="exec", input is a script string,
+        // output is an array of text blocks) rather than the older
+        // `function_call` / `local_shell_call` shape. The parser must surface
+        // both — otherwise the whole tool timeline (including `apply_patch`
+        // file edits carried inside these exec calls) vanishes and a session
+        // that actually changed files looks like it did nothing.
+        let lines = vec![
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call",
+                    "id": "ctc_abc",
+                    "status": "completed",
+                    "call_id": "call_XYZ",
+                    "name": "exec",
+                    "input": "const patch = \"*** Begin Patch\\n*** Update File: foo.rs\\n\"; apply_patch(patch)"
+                },
+                "timestamp": "t0"
+            }),
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_XYZ",
+                    "output": [
+                        {"type": "input_text", "text": "Success. Updated the following files:"},
+                        {"type": "input_text", "text": "M foo.rs"}
+                    ]
+                },
+                "timestamp": "t1"
+            }),
+        ];
+
+        let out = normalize_messages(lines);
+
+        // A tool_use block keyed by the call_id, carrying the input.
+        let tool_use = out
+            .iter()
+            .find(|m| {
+                m.get("message")
+                    .and_then(|msg| msg.get("content"))
+                    .and_then(|c| c.as_array())
+                    .and_then(|blocks| blocks.first())
+                    .and_then(|b| b.get("type"))
+                    .and_then(|t| t.as_str())
+                    == Some("tool_use")
+            })
+            .expect("custom_tool_call should render a tool_use block");
+        let block = &tool_use["message"]["content"][0];
+        assert_eq!(block["id"], json!("call_XYZ"));
+        assert_eq!(block["name"], json!("exec"));
+        assert!(
+            block["input"]["command"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("*** Begin Patch"),
+            "tool_use input must carry the exec script (incl. apply_patch)"
+        );
+
+        // A matching tool_result carrying the joined output text.
+        let result = out
+            .iter()
+            .find(|m| m.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+            .expect("custom_tool_call_output should render a tool_result block");
+        assert_eq!(result["tool_use_id"], json!("call_XYZ"));
+        let content = result["content"].as_str().unwrap_or_default();
+        assert!(
+            content.contains("Success") && content.contains("M foo.rs"),
+            "tool_result must carry the joined output text, got: {content}"
+        );
+    }
+
+    #[test]
     fn parse_source_exec_is_top_level_not_subagent() {
         // Fleet launches every codex session via `codex exec`, so the SQLite
         // `threads.source` column is the plain string "exec". That is a
@@ -2682,6 +2757,79 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                                     .or_else(|| o.as_str())
                             })
                             .unwrap_or("");
+
+                        messages.push(json!({
+                            "type": "tool_result",
+                            "tool_use_id": call_id,
+                            "content": output,
+                            "timestamp": timestamp
+                        }));
+                    }
+                    "custom_tool_call" => {
+                        // Current Codex rollouts record tool invocations here
+                        // (name="exec", `input` is a script string) instead of
+                        // the older `function_call` / `local_shell_call` shape.
+                        // `apply_patch` file edits ride *inside* these exec
+                        // calls, so dropping the arm hid every change from the
+                        // conversation — the session looked like it did nothing.
+                        let name = payload
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("tool");
+                        let call_id = payload
+                            .get("call_id")
+                            .and_then(|c| c.as_str())
+                            .or_else(|| payload.get("id").and_then(|i| i.as_str()))
+                            .unwrap_or("tool");
+                        // `input` is a raw script string; surface it under
+                        // `command` so the generic tool card renders it as a
+                        // one-liner. Fall back to structured JSON if a future
+                        // custom tool ever sends an object.
+                        let input = match payload.get("input") {
+                            Some(Value::String(s)) => json!({ "command": s }),
+                            Some(other) => other.clone(),
+                            None => json!({}),
+                        };
+
+                        messages.push(json!({
+                            "type": "assistant",
+                            "message": {
+                                "role": "assistant",
+                                "content": [{
+                                    "type": "tool_use",
+                                    "id": call_id,
+                                    "name": name,
+                                    "input": input
+                                }]
+                            },
+                            "timestamp": timestamp
+                        }));
+                    }
+                    "custom_tool_call_output" => {
+                        let call_id = payload
+                            .get("call_id")
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("tool");
+                        // `output` is usually an array of {type,text} blocks;
+                        // older/simple rollouts use a bare string or {text}.
+                        let output = match payload.get("output") {
+                            Some(Value::String(s)) => s.clone(),
+                            Some(Value::Array(blocks)) => blocks
+                                .iter()
+                                .filter_map(|b| {
+                                    b.get("text")
+                                        .and_then(|t| t.as_str())
+                                        .or_else(|| b.as_str())
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                            Some(obj) => obj
+                                .get("text")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                            None => String::new(),
+                        };
 
                         messages.push(json!({
                             "type": "tool_result",
