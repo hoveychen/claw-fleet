@@ -34,6 +34,8 @@ import {
 import { UserContent } from "./blocks/UserContent";
 import { CopyButton } from "./CopyButton";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
+import { SkillLoadBlock } from "./blocks/SkillLoadBlock";
+import { parseSkillInjection } from "../skillInjection";
 import styles from "./MessageList.module.css";
 
 // ── Search highlight ─────────────────────────────────────────────────────────
@@ -270,6 +272,20 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
         <CompactSummaryBlock summary={summaryText} />
       </div>
     );
+  }
+
+  // Skill-body injection: when a `Skill` tool loads, the harness feeds the whole
+  // SKILL.md to the agent as a synthetic `isMeta` user turn. It is not something
+  // the user typed, so fold it into a collapsed card instead of a giant bubble.
+  if (isUser && msg.isMeta) {
+    const skill = parseSkillInjection(messageToText(msg));
+    if (skill) {
+      return (
+        <div className={styles.compact_row} data-msg-idx={msgIdx}>
+          <SkillLoadBlock slug={skill.slug} body={skill.body} />
+        </div>
+      );
+    }
   }
 
   const isPartial =

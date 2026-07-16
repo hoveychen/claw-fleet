@@ -177,6 +177,10 @@ export interface RawMessage {
   timestamp?: string;
   isSidechain?: boolean;
   isCompactSummary?: boolean;
+  /** Harness-injected user record (skill body, hook output). Skill bodies also
+   *  carry `sourceToolUseID`; see `skillInjection.ts`. */
+  isMeta?: boolean;
+  sourceToolUseID?: string;
   message?: {
     role?: string;
     content?: string | ContentBlock[];

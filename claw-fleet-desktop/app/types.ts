@@ -219,6 +219,11 @@ export interface RawMessage {
   timestamp?: string;
   isSidechain?: boolean;
   isCompactSummary?: boolean;
+  /** Claude Code tags harness-injected user records (skill bodies, hook output,
+   *  system reminders) with this. A skill-body injection also carries
+   *  `sourceToolUseID`; see `skillInjection.ts`. */
+  isMeta?: boolean;
+  sourceToolUseID?: string;
   isVisibleInTranscriptOnly?: boolean;
   agentId?: string;
   sessionId?: string;
