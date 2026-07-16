@@ -104,6 +104,13 @@ export interface ChatComposerProps {
   className?: string;
   /** Submit button label (defaults to a paper-plane glyph). */
   submitLabel?: ReactNode;
+  /**
+   * Control shown in the send slot *instead of* the send button while the input
+   * is empty. Used by the enqueue composer to surface a Stop button when the
+   * turn is running and there's nothing queued to send; the moment the user
+   * types, the send (queue) button takes back over.
+   */
+  emptyTrailingControl?: ReactNode;
   /** Drop the outer rounded box so a host wrapper can supply its own framing. */
   bare?: boolean;
   /**
@@ -133,6 +140,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     disabled,
     className,
     submitLabel,
+    emptyTrailingControl,
     bare,
     contextSlot,
     toolbarSlot,
@@ -398,6 +406,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     </button>
   ) : null;
 
+  // While the input is empty, an enqueue composer surfaces its Stop control in
+  // the send slot instead of a dead (disabled) send arrow; typing anything
+  // hands the slot back to the send button so a follow-up can still be queued.
+  const trailingControl =
+    emptyTrailingControl && !value.trim() ? emptyTrailingControl : sendControl;
+
   return (
     <div className={`${styles.composer} ${bare ? styles.bare : ""} ${className ?? ""}`}>
       {mentions.menu}
@@ -462,14 +476,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             {attachControl}
             {toolbarSlot}
             <span className={styles.action_spacer} />
-            {sendControl}
+            {trailingControl}
           </div>
         </>
       ) : (
         <div className={styles.row}>
           {attachControl}
           {textareaEl}
-          {sendControl}
+          {trailingControl}
         </div>
       )}
       {previewing && (

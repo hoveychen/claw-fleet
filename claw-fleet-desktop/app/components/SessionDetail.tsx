@@ -966,6 +966,7 @@ export function SessionDetail({
                     sessionId={liveSession.id}
                     workspacePath={liveSession.workspacePath}
                     agentSource={liveSession.agentSource}
+                    session={liveSession}
                     onResumed={() => {}}
                     mode={canEnqueue ? "enqueue" : "resume"}
                     pendingMessages={liveSession.pendingMessages ?? []}
