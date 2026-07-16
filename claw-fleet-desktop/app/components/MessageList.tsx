@@ -14,6 +14,9 @@ import {
   isRenderableRow,
   messageSearchText,
   messageToText,
+  shortModelName,
+  turnUsageByRow,
+  type TurnUsage,
 } from "../messageRows";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import { ContentBlocks } from "./blocks/ContentBlocks";
@@ -107,9 +110,13 @@ interface MsgProps {
   /** The hit the search navigation is currently parked on. */
   isActiveMatch?: boolean;
   paths?: PathLinkContext;
+  /** The turn's aggregated usage when this row is its final assistant record;
+   *  null on mid-turn rows, which render no usage line at all (that line
+   *  repeating under every record was the loudest noise in tool-heavy turns). */
+  turnUsage?: TurnUsage | null;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch, paths }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch, paths, turnUsage }: MsgProps) {
   // Same predicate the list uses to build its window and day separators, so the
   // two can never disagree about which records occupy a row.
   if (!isRenderableRow(msg) || !msg.message) return null;
@@ -210,20 +217,16 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
             />
           </div>
         )}
-        {isAssistant && (msg.message.usage || time) && (
+        {isAssistant && turnUsage && (
           <div className={styles.usage}>
             {dotClass && <span className={`${styles.dot} ${dotClass}`} />}
-            {msg.message.usage && (
-              <>
-                ↑{msg.message.usage.input_tokens} ↓{msg.message.usage.output_tokens}
-                {msg.message.model && (
-                  <span className={styles.model}> · {msg.message.model}</span>
-                )}
-              </>
+            ↑{turnUsage.inputTokens} ↓{turnUsage.outputTokens}
+            {msg.message.model && (
+              <span className={styles.model}> · {shortModelName(msg.message.model)}</span>
             )}
             {time && (
               <span className={styles.msg_time} title={time.full}>
-                {msg.message.usage ? " · " : ""}
+                {" · "}
                 {time.short}
               </span>
             )}
@@ -413,6 +416,9 @@ export function MessageList({
   // "100 message" window used to show ~67 rows) and stops a day separator from
   // landing above an invisible message.
   const displayMsgs = useMemo(() => messages.filter(isRenderableRow), [messages]);
+
+  // One `↑ ↓ · model · time` line per turn, on its final assistant row.
+  const turnUsage = useMemo(() => turnUsageByRow(displayMsgs), [displayMsgs]);
 
   // Parse search terms once for matching and highlighting
   const searchTerms = useMemo(() => {
@@ -709,6 +715,7 @@ export function MessageList({
               msgIdx={globalStart}
               isActiveMatch={globalStart === searchMatchIndex}
               paths={paths}
+              turnUsage={turnUsage.get(globalStart) ?? null}
             />
           </Fragment>
         );
