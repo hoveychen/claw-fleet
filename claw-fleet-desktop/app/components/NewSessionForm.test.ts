@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { distinctWorkspaces, isTempWorkspacePath, repoRootPath } from "./NewSessionForm";
+import {
+  defaultWorkspace,
+  distinctWorkspaces,
+  isTempWorkspacePath,
+  repoRootPath,
+  type WorkspaceOption,
+} from "./NewSessionForm";
 
 describe("isTempWorkspacePath", () => {
   it("flags scratchpad paths under /private/tmp", () => {
@@ -90,12 +96,31 @@ describe("distinctWorkspaces", () => {
     expect(out[0].name).toBe("maliang");
   });
 
-  it("keeps distinct repos separate and sorts most-recent first", () => {
+  it("keeps distinct repos separate and returns them alphabetically by name", () => {
+    // Newer activity no longer wins the top slot — the dropdown is alphabetical
+    // and the default rides on the remembered last-used repo instead.
     const out = distinctWorkspaces([
-      { workspacePath: "/w/a", workspaceName: "a", lastActivityMs: 10 },
-      { workspacePath: "/w/b", workspaceName: "b", lastActivityMs: 20 },
+      { workspacePath: "/w/zebra", workspaceName: "zebra", lastActivityMs: 20 },
+      { workspacePath: "/w/apple", workspaceName: "apple", lastActivityMs: 10 },
     ]);
-    expect(out.map((w) => w.name)).toEqual(["b", "a"]);
+    expect(out.map((w) => w.name)).toEqual(["apple", "zebra"]);
+  });
+
+  it("keeps the `limit` most-recent repos before sorting the survivors alphabetically", () => {
+    // Recency decides WHICH repos survive the cap; alphabetical decides the
+    // display order of the survivors. A stale repo whose name sorts first must
+    // not push out a fresher one.
+    const out = distinctWorkspaces(
+      [
+        { workspacePath: "/w/zebra", workspaceName: "zebra", lastActivityMs: 300 },
+        { workspacePath: "/w/mango", workspaceName: "mango", lastActivityMs: 200 },
+        { workspacePath: "/w/apple", workspaceName: "apple", lastActivityMs: 100 },
+      ],
+      2,
+    );
+    // apple is oldest → dropped by the limit=2 recency cut; the two survivors
+    // (zebra, mango) are shown alphabetically.
+    expect(out.map((w) => w.name)).toEqual(["mango", "zebra"]);
   });
 
   it("skips sessions without a workspacePath", () => {
@@ -138,5 +163,33 @@ describe("distinctWorkspaces", () => {
       { workspacePath: "/Users/hoveychen/workspace/claude-fleet", workspaceName: "claude-fleet", lastActivityMs: 50 },
     ]);
     expect(out.map((w) => w.path)).toEqual(["/Users/hoveychen/workspace/claude-fleet"]);
+  });
+});
+
+describe("defaultWorkspace", () => {
+  const recents: WorkspaceOption[] = [
+    { path: "/w/apple", name: "apple", lastMs: 10 },
+    { path: "/w/mango", name: "mango", lastMs: 30 },
+    { path: "/w/zebra", name: "zebra", lastMs: 20 },
+  ];
+
+  it("defaults to the remembered last-used repo when it is still an option", () => {
+    expect(defaultWorkspace(recents, null, "/w/zebra")).toBe("/w/zebra");
+  });
+
+  it("falls back to the first (alphabetical) entry when the remembered repo is gone", () => {
+    expect(defaultWorkspace(recents, null, "/w/deleted")).toBe("/w/apple");
+  });
+
+  it("falls back to the first entry when nothing was remembered", () => {
+    expect(defaultWorkspace(recents, null, null)).toBe("/w/apple");
+  });
+
+  it("treats the pinned chat path as a valid remembered target", () => {
+    expect(defaultWorkspace(recents, "/chat", "/chat")).toBe("/chat");
+  });
+
+  it("returns undefined when there are no options at all", () => {
+    expect(defaultWorkspace([], null, "/w/gone")).toBeUndefined();
   });
 });

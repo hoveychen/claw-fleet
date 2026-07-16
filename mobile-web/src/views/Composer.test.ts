@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { recentWorkspaces } from "./Composer";
+import { defaultWorkspace, recentWorkspaces } from "./Composer";
 import type { SessionInfo } from "../types";
 
 /**
- * 新会话 sheet 提交成功后清空草稿，下次打开退回 recents[0]。桌面端靠「recents 按
- * 最近活动倒序」让刚用过的 workspace 成为默认，从而记住最后一次使用的路径；移动端
- * 曾按名字字母序排，导致默认永远是字母最靠前的那个而非刚用过的那个。
+ * 下拉列表**按名称字母序**排列（方便扫读）；默认选中不再依赖排序，而是来自独立持久化的
+ * 「上次成功创建会话用的 repo」（defaultWorkspace）。这解决了旧字母序方案的痛点——那时
+ * 默认永远是字母最靠前的那个而非刚用过的那个，如今字母序仅决定展示顺序。
  */
 function session(
   workspacePath: string,
@@ -21,21 +21,19 @@ function session(
 }
 
 describe("recentWorkspaces", () => {
-  it("按最近活动倒序排列——刚用过的 workspace 排在首位（记住最后一次使用的路径）", () => {
-    // Zebra 名字字母最靠后，但活动时间最新；字母序会把它排到最后。
+  it("按名称字母序排列——不再受最近活动时间影响", () => {
+    // Zebra 活动时间最新，但字母序把它排到最后；顺序只看名字。
     const sessions = [
+      session("/home/zebra", "Zebra", 300),
       session("/home/alpha", "Alpha", 100),
       session("/home/mid", "Mid", 200),
-      session("/home/zebra", "Zebra", 300),
     ];
     const recents = recentWorkspaces(sessions, null);
     expect(recents.map(([path]) => path)).toEqual([
-      "/home/zebra",
-      "/home/mid",
       "/home/alpha",
+      "/home/mid",
+      "/home/zebra",
     ]);
-    // recents[0] 是刚用过（最近活动）的那个——新会话默认落到它上。
-    expect(recents[0][0]).toBe("/home/zebra");
   });
 
   it("同一路径多条会话时，取最近活动的时间戳与名字去重", () => {
@@ -58,5 +56,37 @@ describe("recentWorkspaces", () => {
     ];
     const recents = recentWorkspaces(sessions, "/home/chat");
     expect(recents.map(([path]) => path)).toEqual(["/home/repo"]);
+  });
+});
+
+describe("defaultWorkspace", () => {
+  const recents: [string, string][] = [
+    ["/home/alpha", "Alpha"],
+    ["/home/mango", "Mango"],
+    ["/home/zebra", "Zebra"],
+  ];
+
+  it("沿用用户本次已选且有效的 workspace", () => {
+    expect(defaultWorkspace("/home/zebra", recents, null, "/home/alpha")).toBe("/home/zebra");
+  });
+
+  it("沿用 __custom__（自定义路径）选择", () => {
+    expect(defaultWorkspace("__custom__", recents, null, "/home/alpha")).toBe("__custom__");
+  });
+
+  it("草稿为空时默认选中上次用过的 repo", () => {
+    expect(defaultWorkspace("", recents, null, "/home/mango")).toBe("/home/mango");
+  });
+
+  it("上次用过的 repo 已失效时退回列表首项（字母序）", () => {
+    expect(defaultWorkspace("", recents, null, "/home/deleted")).toBe("/home/alpha");
+  });
+
+  it("无记忆、无候选时退回纯聊天路径", () => {
+    expect(defaultWorkspace("", [], "/home/chat", "")).toBe("/home/chat");
+  });
+
+  it("纯聊天路径可作为上次用过的目标被记住", () => {
+    expect(defaultWorkspace("", recents, "/home/chat", "/home/chat")).toBe("/home/chat");
   });
 });

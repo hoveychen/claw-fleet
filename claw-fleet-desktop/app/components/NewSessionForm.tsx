@@ -93,10 +93,14 @@ interface WorkspaceSessionLike {
   lastActivityMs: number;
 }
 
-/** Distinct workspaces from known sessions, most-recently-active first. In-repo
- *  worktree checkouts are collapsed onto their repo root so a repo with both a
- *  main checkout and a live worktree appears once, pointing at the durable root
- *  (see {@link repoRootPath}).
+/** Distinct workspaces from known sessions. The `limit` most-recently-active are
+ *  kept (so a repo used yesterday isn't dropped just because its name sorts late),
+ *  then the survivors are returned in alphabetical order by name for a stable,
+ *  scannable dropdown. The default selection no longer rides on this order — it
+ *  comes from the remembered last-used workspace (see {@link defaultWorkspace}).
+ *  In-repo worktree checkouts are collapsed onto their repo root so a repo with
+ *  both a main checkout and a live worktree appears once, pointing at the durable
+ *  root (see {@link repoRootPath}).
  *
  *  `chatPath` — when the chat workspace already has sessions it would otherwise
  *  show up here as an ordinary recent entry, duplicating the pinned one. Passing
@@ -121,7 +125,46 @@ export function distinctWorkspaces(
       });
     }
   }
-  return [...byPath.values()].sort((a, b) => b.lastMs - a.lastMs).slice(0, limit);
+  return [...byPath.values()]
+    .sort((a, b) => b.lastMs - a.lastMs)
+    .slice(0, limit)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** localStorage key for the repo the user last successfully launched a session
+ *  in. Unlike the in-memory composer draft (cleared on submit), this survives so
+ *  reopening the new-session form defaults to that repo. */
+const LAST_WORKSPACE_KEY = "fleet:last-new-session-workspace";
+
+function loadLastWorkspace(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_WORKSPACE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveLastWorkspace(path: string): void {
+  try {
+    window.localStorage.setItem(LAST_WORKSPACE_KEY, path);
+  } catch {
+    // best-effort — private mode / quota. Defaulting just falls back to the top
+    // of the alphabetical list next time.
+  }
+}
+
+/** The workspace to select by default in a fresh new-session form: the remembered
+ *  last-used one when it's still a valid option, else the first entry (now
+ *  alphabetical). Returns undefined when there are no options yet. */
+export function defaultWorkspace(
+  recents: WorkspaceOption[],
+  chatPath: string | null | undefined,
+  lastWorkspace: string | null,
+): string | undefined {
+  const valid = new Set(recents.map((w) => w.path));
+  if (chatPath) valid.add(chatPath);
+  if (lastWorkspace && valid.has(lastWorkspace)) return lastWorkspace;
+  return recents[0]?.path;
 }
 
 /** Plain "start a new claude session" form — no project, no task, no queue.
@@ -197,14 +240,16 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
 
   const isChat = !!chatPath && workspace === chatPath;
 
-  // Seed the workspace to the most-recent one once, on mount. The form is
-  // remounted each time the user re-enters "new session" mode, so a plain
-  // mount effect stands in for the old modal's open-reset. recentWorkspaces is
-  // read once here on purpose — re-running on every 5s session poll would
-  // clobber the user's in-progress selection.
+  // Seed the workspace once, on mount, to the repo the user last launched in
+  // (when still available) — else the first option. The form is remounted each
+  // time the user re-enters "new session" mode, so a plain mount effect stands in
+  // for the old modal's open-reset. recentWorkspaces is read once here on purpose
+  // — re-running on every 5s session poll would clobber the user's in-progress
+  // selection.
   useEffect(() => {
-    if (!draft.workspace && recentWorkspaces[0]?.path) {
-      patch({ workspace: recentWorkspaces[0].path });
+    if (!draft.workspace) {
+      const seed = defaultWorkspace(recentWorkspaces, chatPath, loadLastWorkspace());
+      if (seed) patch({ workspace: seed });
     }
     const id = setTimeout(() => composerRef.current?.focus(), 50);
     return () => clearTimeout(id);
@@ -283,6 +328,9 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
           tool,
         },
       );
+      // Remember the launched repo so the next new-session form defaults to it
+      // (survives the draft clear() below, which resets the in-memory workspace).
+      saveLastWorkspace(ws);
       clear();
       onCreated({ pid: resp.pid, sessionId: resp.sessionId, workspacePath: ws });
     } catch (e) {
