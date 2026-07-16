@@ -153,42 +153,26 @@ function TaskNotificationCard({ data }: { data: ParsedTaskNotification }) {
   );
 }
 
-/** The SKILL.md body Claude Code injects on a skill load, folded into a
- *  collapsed card — the harness feeding the agent, not a user turn. */
-function SkillLoadCard({ slug, body }: { slug: string; body: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className={styles.skillCard}>
-      <button className={styles.skillHeader} onClick={() => setOpen((o) => !o)}>
-        <Puzzle size={14} className={styles.skillIcon} />
-        <span className={styles.skillLabel}>{t("已加载 SKILL")}</span>
-        <span className={styles.skillSlug}>{slug}</span>
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-      </button>
-      {open && (
-        <div className={styles.skillBody}>
-          <LazyMarkdown text={body} bare />
-        </div>
-      )}
-    </div>
-  );
-}
-
 /**
- * Codex injects boilerplate system context (sandbox/permissions preamble, the
- * `/root` multi-agent collaboration prompt, `<multi_agent_mode>` guidance) as
- * `role:"developer"` messages, tagged `isMeta` in codex_source.rs. Fold them
- * into the same collapsed card as skill injections rather than a raw bubble.
+ * One collapsed fold for every synthetic `isMeta` user turn — the SKILL.md body
+ * a `Skill` load injects, or codex's developer-role boilerplate (sandbox/
+ * permissions preamble, the `/root` multi-agent collaboration prompt,
+ * `<multi_agent_mode>` guidance, tagged `isMeta` in codex_source.rs). Neither is
+ * user-authored; both fold into the same card, which self-labels from the body
+ * so a skill load still reads as a skill and everything else as system context.
  */
-function MetaContextCard({ body }: { body: string }) {
+function MetaFoldCard({ body }: { body: string }) {
   const [open, setOpen] = useState(false);
-  const label = deriveMetaLabel(body);
+  const skill = parseSkillInjection(body);
+  const Icon = skill ? Puzzle : Cog;
+  const label = skill ? t("已加载 SKILL") : t("系统上下文");
+  const tag = skill ? skill.slug : deriveMetaLabel(body);
   return (
     <div className={styles.skillCard}>
       <button className={styles.skillHeader} onClick={() => setOpen((o) => !o)}>
-        <Cog size={14} className={styles.skillIcon} />
-        <span className={styles.skillLabel}>{t("系统上下文")}</span>
-        <span className={styles.skillSlug}>{label}</span>
+        <Icon size={14} className={styles.skillIcon} />
+        <span className={styles.skillLabel}>{label}</span>
+        <span className={styles.skillSlug}>{tag}</span>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
       {open && (
@@ -307,24 +291,14 @@ const MessageRow = memo(function MessageRow({
   if (msg.type === "user") {
     const text = userText(msg);
     if (!text) return null;
-    // A skill-body injection is the harness feeding SKILL.md to the agent, not
-    // a user turn — fold it into a collapsed card.
+    // Every synthetic `isMeta` user turn — a SKILL.md body a `Skill` load
+    // injects, or codex's developer-role boilerplate — is harness/runtime
+    // content, not a user turn. Fold them all into one card that self-labels
+    // from its body rather than a raw user bubble.
     if (msg.isMeta) {
-      const skill = parseSkillInjection(text);
-      if (skill) {
-        return (
-          <div className={styles.assistantRow}>
-            <SkillLoadCard slug={skill.slug} body={skill.body} />
-            <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
-          </div>
-        );
-      }
-      // Any other injected meta (codex sandbox/permissions preamble, the
-      // `/root` collaboration prompt, `<multi_agent_mode>`) folds into the same
-      // collapsed card rather than a raw user bubble.
       return (
         <div className={styles.assistantRow}>
-          <MetaContextCard body={text} />
+          <MetaFoldCard body={text} />
           <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
         </div>
       );
