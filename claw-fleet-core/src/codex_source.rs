@@ -314,6 +314,37 @@ fn extract_model(lines: &[Value]) -> Option<String> {
     None
 }
 
+/// Strip a leading Fleet-injected `<system-reminder>…</system-reminder>` block
+/// from a codex user message's text.
+///
+/// Unlike Claude — where the TASKS.md active-plans reminder rides in as a
+/// separate `UserPromptSubmit`-hook additionalContext record and never touches
+/// `message.content` — codex headless `exec` has no additional-context channel,
+/// so `codex_launch::maybe_prepend_active_plans` prepends the reminder into the
+/// prompt string itself (`format!("{reminder}\n\n{prompt}")`). That leaks the
+/// whole plan dump into the transcript bubble, and — because codex's SQLite
+/// `title`/`first_user_message` are just the raw first prompt — into the session
+/// title and card preview too. Stripping it at the display layer keeps the
+/// per-turn re-injection (which is intentional) while showing only the real
+/// prompt.
+///
+/// Only strips when the text opens with the tag AND a matching close tag exists,
+/// so a genuine prompt that merely mentions `<system-reminder>` mid-sentence, or
+/// a malformed unterminated block, is returned untouched. When the message is
+/// nothing but the reminder, returns `""` so callers can fold it as meta.
+fn strip_leading_system_reminder(text: &str) -> &str {
+    const OPEN: &str = "<system-reminder>";
+    const CLOSE: &str = "</system-reminder>";
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with(OPEN) {
+        return text;
+    }
+    match trimmed.find(CLOSE) {
+        Some(idx) => trimmed[idx + CLOSE.len()..].trim_start(),
+        None => text,
+    }
+}
+
 /// Extract the last text content for preview from the session.
 fn extract_last_text(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
@@ -1204,10 +1235,20 @@ fn build_session_from_sqlite(
             }
         } else {
             // Older session — use SQLite metadata only, skip rollout file.
-            let preview = if !thread.first_user_message.is_empty() {
-                Some(thread.first_user_message.chars().take(200).collect())
+            // codex stores the raw first prompt as `first_user_message`/`title`,
+            // which for Fleet-launched sessions opens with the prepended
+            // `<system-reminder>` block — strip it so the card preview shows the
+            // real prompt (see `strip_leading_system_reminder`).
+            let cleaned_first = strip_leading_system_reminder(&thread.first_user_message);
+            let preview = if !cleaned_first.is_empty() {
+                Some(cleaned_first.chars().take(200).collect())
             } else if !thread.title.is_empty() {
-                Some(thread.title.clone())
+                Some(
+                    strip_leading_system_reminder(&thread.title)
+                        .chars()
+                        .take(200)
+                        .collect(),
+                )
             } else {
                 None
             };
@@ -1247,8 +1288,14 @@ fn build_session_from_sqlite(
         .agent_nickname
         .or_else(|| thread.agent_nickname.clone())
         .or_else(|| {
-            if !thread.title.is_empty() {
-                Some(thread.title.clone())
+            // codex has no semantic title — `thread.title` is the raw first
+            // prompt, which for Fleet-launched sessions opens with the prepended
+            // `<system-reminder>` block. Strip it so the header/card title shows
+            // the real prompt, not the plan dump (see
+            // `strip_leading_system_reminder`).
+            let cleaned = strip_leading_system_reminder(&thread.title);
+            if !cleaned.is_empty() {
+                Some(cleaned.to_string())
             } else {
                 None
             }
@@ -1323,7 +1370,7 @@ mod tests {
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
         codex_token_breakdown_from_lines, compute_token_stats, exec_note_from_script,
         extract_context_percent, last_rollout_rate_limits, latest_total_token_usage,
-        normalize_messages,
+        normalize_messages, strip_leading_system_reminder,
         read_rollout_originator, CodexProcess, CodexRateLimitWindow, CodexUsageItem,
         SqliteThread,
     };
@@ -1564,6 +1611,89 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn normalize_messages_strips_leading_fleet_system_reminder() {
+        // Fleet prepends the TASKS.md active-plans `<system-reminder>` block into
+        // the codex prompt itself (codex has no Claude-style UserPromptSubmit hook
+        // channel — see `codex_launch::maybe_prepend_active_plans`). The transcript
+        // bubble must show only the real prompt, not the injected plan dump.
+        let reminder =
+            "<system-reminder>\nThe workspace `TASKS.md` holds 2 active plans.\n</system-reminder>";
+        let prompt = "帮我看看这个 bug";
+        let full = format!("{reminder}\n\n{prompt}");
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": full }]
+            },
+            "timestamp": "t0"
+        })];
+
+        let out = normalize_messages(lines);
+        let users: Vec<_> = out
+            .iter()
+            .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("user"))
+            .collect();
+        assert_eq!(users.len(), 1);
+        let text = users[0]["message"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            text, prompt,
+            "leading Fleet <system-reminder> block must be stripped from the bubble"
+        );
+        assert!(
+            users[0].get("isMeta").is_none(),
+            "a real prompt after the reminder must remain a normal user bubble, not folded"
+        );
+    }
+
+    #[test]
+    fn normalize_messages_keeps_user_msg_merely_mentioning_reminder() {
+        // A genuine prompt that only *mentions* the tag mid-text (not opening with
+        // it) must be left completely untouched.
+        let text = "why does codex show the <system-reminder> block in my session?";
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": text }]
+            }
+        })];
+        let out = normalize_messages(lines);
+        assert_eq!(
+            out[0]["message"]["content"][0]["text"].as_str().unwrap(),
+            text
+        );
+    }
+
+    #[test]
+    fn strip_leading_system_reminder_cases() {
+        // Opens with the block → stripped down to the trailing real prompt.
+        assert_eq!(
+            strip_leading_system_reminder("<system-reminder>\nplans\n</system-reminder>\n\nhi"),
+            "hi"
+        );
+        // Only the block, no real prompt → empty (caller folds it as meta).
+        assert_eq!(
+            strip_leading_system_reminder("<system-reminder>\nplans\n</system-reminder>"),
+            ""
+        );
+        // Does not open with the tag → untouched.
+        assert_eq!(
+            strip_leading_system_reminder("hello <system-reminder> x </system-reminder>"),
+            "hello <system-reminder> x </system-reminder>"
+        );
+        // Opens with tag but never closes → untouched (malformed, don't guess).
+        assert_eq!(
+            strip_leading_system_reminder("<system-reminder>\nunterminated"),
+            "<system-reminder>\nunterminated"
+        );
+    }
 
     #[test]
     fn developer_role_message_is_tagged_is_meta() {
@@ -2958,14 +3088,23 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                             }
                         }
 
-                        messages.push(json!({
+                        // Strip Fleet's prepended active-plans reminder from the
+                        // bubble (see `strip_leading_system_reminder`); a
+                        // reminder-only turn folds into the meta lane.
+                        let stripped = strip_leading_system_reminder(&text);
+                        let mut msg = json!({
                             "type": "user",
                             "message": {
                                 "role": "user",
-                                "content": [{"type": "text", "text": text}]
+                                "content": [{"type": "text", "text": stripped}]
                             },
                             "timestamp": timestamp
-                        }));
+                        });
+                        if stripped.len() != text.len() && stripped.is_empty() {
+                            msg["message"]["content"][0]["text"] = json!(text);
+                            msg["isMeta"] = json!(true);
+                        }
+                        messages.push(msg);
                     }
                     "agent_message" => {
                         let text = payload
@@ -3212,6 +3351,25 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
 
                             if role == "developer" || is_injected_user_context {
                                 msg["isMeta"] = json!(true);
+                            }
+
+                            // Fleet prepends the TASKS.md active-plans
+                            // `<system-reminder>` block into the codex prompt
+                            // itself (no Claude-style hook channel; see
+                            // `strip_leading_system_reminder`). Strip that leading
+                            // block from the displayed bubble so the transcript
+                            // shows only the real prompt. A message that is *only*
+                            // the reminder collapses into the meta fold.
+                            if role == "user" {
+                                let stripped = strip_leading_system_reminder(&text);
+                                if stripped.len() != text.len() {
+                                    if stripped.is_empty() {
+                                        msg["isMeta"] = json!(true);
+                                    } else {
+                                        msg["message"]["content"] =
+                                            json!([{ "type": "text", "text": stripped }]);
+                                    }
+                                }
                             }
 
                             // Attach ID if present.
