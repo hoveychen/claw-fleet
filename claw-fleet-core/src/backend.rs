@@ -337,6 +337,15 @@ pub trait Backend: Send + Sync {
         workspace_path: String,
         mark: Option<crate::session_mark::SessionMark>,
     ) -> Result<(), String>;
+    /// Persist the human's manual title override for a session. A non-empty
+    /// `title` sets/overwrites it; `None` or an empty/whitespace title clears it
+    /// (back to the auto-derived title).
+    fn set_session_title(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        title: Option<String>,
+    ) -> Result<(), String>;
     /// Mark a batch of sessions read as of now. "Unread" is derived
     /// (`last_activity_ms > last_read_ms`), so this only stamps the read time;
     /// a single mark is a batch of one, "mark all read" a batch of many.

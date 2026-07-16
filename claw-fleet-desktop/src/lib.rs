@@ -207,6 +207,14 @@ impl Backend for NullBackend {
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn set_session_title(
+        &self,
+        _: String,
+        _: String,
+        _: Option<String>,
+    ) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn mark_sessions_read(
         &self,
         _: Vec<claw_fleet_core::session_read::SessionReadItem>,
