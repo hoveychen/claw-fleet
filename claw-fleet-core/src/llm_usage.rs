@@ -36,6 +36,7 @@ pub const SCENARIO_DAILY_REPORT_SUMMARY: &str = "daily_report_summary";
 pub const SCENARIO_DAILY_REPORT_LESSONS: &str = "daily_report_lessons";
 pub const SCENARIO_SESSION_ANALYZE: &str = "session_analyze";
 pub const SCENARIO_MASCOT_QUIPS: &str = "mascot_quips";
+pub const SCENARIO_CODEX_TITLE: &str = "codex_title";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
