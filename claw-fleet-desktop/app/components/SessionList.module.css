@@ -300,6 +300,21 @@
   flex-shrink: 0;
 }
 
+/* Green variant for the 仓库 nav badge — matches FilesView's per-repo running
+   badge (.ws_badge) so "running command" reads the same across both surfaces. */
+.nav_badge_running {
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--color-success);
+  color: var(--color-bg-card);
+  border-radius: var(--radius-md);
+  padding: 1px 6px;
+  min-width: 18px;
+  text-align: center;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
 .nav_dot {
   width: 7px;
   height: 7px;
