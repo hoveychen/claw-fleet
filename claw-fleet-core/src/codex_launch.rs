@@ -38,7 +38,7 @@
 //! captured, the remaining stdout is drained-and-discarded solely to keep the
 //! pipe from filling (which would block the child).
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -235,6 +235,89 @@ pub fn clear_spawn_pid(thread_id: &str) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => crate::log_debug(&format!("codex_launch: clear spawn-pid {thread_id}: {e}")),
+    }
+}
+
+/// Directory holding the transient stdout sinks for Fleet-spawned Codex turns
+/// (`codex-live/<key>.jsonl`). Lives under the Fleet dir alongside the spawn-pid
+/// notes.
+fn codex_live_dir() -> Option<std::path::PathBuf> {
+    crate::session::get_fleet_dir().map(|d| d.join("codex-live"))
+}
+
+/// Create (truncating) a per-launch stdout sink file for a Codex child and
+/// return `(write_handle, path)`. `key` is a filesystem-safe id known *before*
+/// spawn — the launch token for a new spawn, the thread id for a resume.
+///
+/// Why a file and not a pipe: a pipe's read end is owned by the Fleet app, so
+/// when the app quits/restarts the read end closes and Codex dies on its next
+/// stdout write with `Broken pipe`, aborting the turn mid-flight (observed in the
+/// wild: an app update-restart killed a live turn 17s in). A file fd never breaks
+/// that way, so the child survives — the same reason Claude sessions, whose
+/// stdout goes to a file/null, outlive an app restart. The transcript is read
+/// from the on-disk rollout, not this sink; the sink exists only to keep the
+/// child from blocking and to let the spawn path tail back the `thread.started`
+/// line. The reaper thread removes it when the turn ends.
+fn open_codex_stdout_sink(key: &str) -> Result<(std::fs::File, std::path::PathBuf), String> {
+    // Same path-safety rejection as the spawn-pid notes.
+    if key.is_empty() || key.contains('/') || key.contains('\\') || key.contains("..") {
+        return Err(format!("unsafe codex stdout sink key: {key:?}"));
+    }
+    let dir = codex_live_dir().ok_or_else(|| "no fleet dir".to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create codex-live dir: {e}"))?;
+    let path = dir.join(format!("{key}.jsonl"));
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)
+        .map_err(|e| format!("open codex stdout sink {}: {e}", path.display()))?;
+    Ok((file, path))
+}
+
+/// Extract the Codex thread id from the FIRST complete line of a stdout sink, or
+/// `None` if no complete line has landed yet or it isn't a `thread.started`.
+///
+/// Reads only the first 8 KiB: `thread.started` is always Codex's first stdout
+/// line, so that is always enough, and it bounds the read on a long turn that
+/// (pathologically) never prints one.
+fn read_first_thread_started(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut buf = [0u8; 8192];
+    let n = f.read(&mut buf).ok()?;
+    let s = String::from_utf8_lossy(&buf[..n]);
+    let nl = s.find('\n')?;
+    parse_thread_started(&s[..nl])
+}
+
+/// Tail `path` (a Codex stdout sink being written by `child`) for the first
+/// `thread.started` line, returning its thread id. Gives up when `deadline`
+/// passes or the child exits before emitting it, sleeping `poll` between reads.
+///
+/// Unlike a pipe, a file read returns EOF the instant it catches up to the
+/// writer, so we poll: try the first line, and if it isn't there yet, sleep and
+/// retry — checking child liveness so a child that dies before printing the line
+/// doesn't hang us until the deadline.
+fn tail_thread_started(
+    path: &std::path::Path,
+    child: &mut std::process::Child,
+    deadline: std::time::Instant,
+    poll: Duration,
+) -> Option<String> {
+    loop {
+        if let Some(tid) = read_first_thread_started(path) {
+            return Some(tid);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            // Child gone: one last look for a line it may have flushed on the way
+            // out, then give up.
+            return read_first_thread_started(path);
+        }
+        std::thread::sleep(poll);
     }
 }
 
@@ -638,13 +721,20 @@ pub fn spawn_new_codex_session(
         .open(&stderr_log)
         .map_err(|e| format!("reopen stderr log {}: {e}", stderr_log.display()))?;
 
+    // Redirect stdout to a file sink instead of a pipe the app holds, so the
+    // child outlives a Fleet app restart (see `open_codex_stdout_sink`). Keyed by
+    // the launch token — the thread id isn't minted yet.
+    let (stdout_sink, sink_path) = open_codex_stdout_sink(&launch_token)?;
+
     let mut cmd = crate::process_util::command(&codex);
     cmd.args(&args)
         .current_dir(&workspace_path)
         // MUST be null: `codex exec` otherwise blocks reading stdin forever.
         .stdin(std::process::Stdio::null())
-        // Piped so we can read the `thread.started` line; drained afterward.
-        .stdout(std::process::Stdio::piped())
+        // File, not pipe: a pipe's read end dies with the app and takes the turn
+        // down with `Broken pipe`; a file fd survives. Tailed below for the
+        // `thread.started` line.
+        .stdout(std::process::Stdio::from(stdout_sink))
         .stderr(std::process::Stdio::from(stderr_file));
     apply_codex_launch_env(&mut cmd);
     cmd.env(FLEET_CODEX_LAUNCH_TOKEN_ENV, &launch_token);
@@ -654,37 +744,30 @@ pub fn spawn_new_codex_session(
         .map_err(|e| format!("spawn codex failed: {e}"))?;
     let pid = child.id();
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "codex child stdout unavailable".to_string())?;
-
-    // Reader/reaper thread: read stdout, send the thread id over the channel as
-    // soon as `thread.started` arrives, then keep draining to EOF (so the pipe
-    // never fills and blocks the child) and reap the child.
+    // Tail/reaper thread: tail the stdout sink for the `thread.started` line to
+    // learn the thread id (Codex mints it post-spawn), record the spawn pid, then
+    // reap the child and clean up. The tail reads a FILE, not a pipe, so nothing
+    // here keeps the child tethered to the app — the app can quit and the child
+    // (and this turn) keep running; only this reaper dies with it.
     let (tx, rx) = mpsc::channel::<String>();
     let stderr_log_owned = stderr_log.clone();
+    let sink_path_owned = sink_path.clone();
     std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        let mut tx = Some(tx);
+        let deadline = std::time::Instant::now() + THREAD_STARTED_TIMEOUT;
         // Thread id captured from `thread.started`, kept so we can drop its
         // spawn-pid note once the child exits below.
         let mut spawned_thread: Option<String> = None;
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            if let Some(sender) = tx.as_ref() {
-                if let Some(thread_id) = parse_thread_started(&line) {
-                    // Note the spawn pid so new-session liveness can recognise
-                    // this still-running session before its id lands in any argv.
-                    record_spawn_pid(&thread_id, pid);
-                    spawned_thread = Some(thread_id.clone());
-                    let _ = sender.send(thread_id);
-                    tx = None; // fire once
-                }
-            }
-            // Any remaining lines are drained-and-discarded on purpose.
+        if let Some(thread_id) =
+            tail_thread_started(&sink_path_owned, &mut child, deadline, Duration::from_millis(50))
+        {
+            // Note the spawn pid so new-session liveness can recognise this
+            // still-running session before its id lands in any argv.
+            record_spawn_pid(&thread_id, pid);
+            spawned_thread = Some(thread_id.clone());
+            let _ = tx.send(thread_id);
         }
-        // stdout closed → reap the child and log its exit.
+        drop(tx);
+        // Reap the child and log its exit.
         let result = child.wait();
         // Session is gone: drop the spawn-pid note so a later pid reuse can never
         // read this dead session as alive.
@@ -696,6 +779,9 @@ pub fn spawn_new_codex_session(
             // which fires in codex's process and survives the Fleet app quitting —
             // unlike this reaper thread, which dies with the spawning process.
         }
+        // Transient stdout sink: drop it now the turn is over. (Leaks only if the
+        // app dies first — harmless and tiny, and the child surviving is the point.)
+        let _ = std::fs::remove_file(&sink_path_owned);
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -878,14 +964,18 @@ pub fn resume_codex_session(
         .open(&stderr_log)
         .map_err(|e| format!("reopen stderr log {}: {e}", stderr_log.display()))?;
 
+    // File sink, not a pipe: a resumed turn must survive a Fleet app restart too.
+    // Keyed by the thread id (known up front on resume).
+    let (stdout_sink, sink_path) = open_codex_stdout_sink(session_id)?;
+
     let mut cmd = crate::process_util::command(&codex);
     cmd.args(&args)
         .current_dir(&workspace_path)
         // MUST be null: `codex exec` otherwise blocks reading stdin forever.
         .stdin(std::process::Stdio::null())
-        // Piped so the reader thread can drain it; the transcript is read from
-        // the on-disk rollout, not this stream.
-        .stdout(std::process::Stdio::piped())
+        // File, not pipe (see spawn): keeps the child off the app's lifetime. The
+        // transcript is read from the on-disk rollout, not this stream.
+        .stdout(std::process::Stdio::from(stdout_sink))
         .stderr(std::process::Stdio::from(stderr_file));
     apply_codex_launch_env(&mut cmd);
     // Resume knows the thread id up front (it *is* the one being resumed), so
@@ -898,24 +988,16 @@ pub fn resume_codex_session(
         .map_err(|e| format!("spawn codex resume failed: {e}"))?;
     let pid = child.id();
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "codex resume child stdout unavailable".to_string())?;
-
-    // Reader/reaper thread: drain stdout to EOF (so the pipe never fills and
-    // blocks the child), reap the child, log its exit, and invoke `on_exit`.
+    // Reaper thread: reap the child, log its exit, and invoke `on_exit`. stdout
+    // goes to the file sink (not a pipe), so — unlike before — nothing needs to
+    // drain it and the child is not tethered to the app's lifetime.
     let stderr_log_owned = stderr_log.clone();
+    let sink_path_owned = sink_path.clone();
     std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if line.is_err() {
-                break;
-            }
-            // Drained-and-discarded on purpose (see module doc).
-        }
         let result = child.wait();
         let success = matches!(&result, Ok(status) if status.success());
+        // Transient stdout sink: drop it now the turn is over.
+        let _ = std::fs::remove_file(&sink_path_owned);
         // Note: the turn-end relay runs via codex's `notify` hook (see spawn
         // reaper), not here — so it fires even after the Fleet app quits.
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -1583,5 +1665,108 @@ mod tests {
         assert_eq!(parse_thread_started("not json"), None);
         // thread.started without a usable id → None
         assert_eq!(parse_thread_started(r#"{"type":"thread.started","thread_id":""}"#), None);
+    }
+
+    /// Unique temp file path for a stdout-sink test.
+    fn tmp_sink(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "fleet-codexsink-{}-{}-{}.jsonl",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn read_first_thread_started_needs_a_complete_first_line() {
+        let path = tmp_sink("partial");
+        // No file yet → None.
+        assert_eq!(read_first_thread_started(&path), None);
+        // Partial line (no trailing newline) → None: the writer is mid-flush.
+        std::fs::write(&path, r#"{"type":"thread.started","thread_id":"019abc"#).unwrap();
+        assert_eq!(read_first_thread_started(&path), None);
+        // Completed line → the id.
+        std::fs::write(&path, "{\"type\":\"thread.started\",\"thread_id\":\"019abc\"}\n").unwrap();
+        assert_eq!(read_first_thread_started(&path).as_deref(), Some("019abc"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_first_thread_started_only_looks_at_the_first_line() {
+        let path = tmp_sink("firstline");
+        // thread.started is always Codex's first line; a non-matching first line
+        // means None even if a later line would match.
+        std::fs::write(
+            &path,
+            "{\"type\":\"turn.started\"}\n{\"type\":\"thread.started\",\"thread_id\":\"late\"}\n",
+        )
+        .unwrap();
+        assert_eq!(read_first_thread_started(&path), None);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tail_thread_started_picks_up_a_delayed_line() {
+        // A child that writes its `thread.started` line to the sink after a short
+        // delay; the tailer must poll the file and return the id.
+        let path = tmp_sink("tail");
+        let f = std::fs::File::create(&path).unwrap();
+        let mut child = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "sleep 0.2; printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"t-123\"}'; sleep 0.2",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(f))
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let got = tail_thread_started(&path, &mut child, deadline, Duration::from_millis(20));
+        assert_eq!(got.as_deref(), Some("t-123"));
+        let _ = child.wait();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The root-cause regression: a child whose stdout is a PIPE dies when the
+    /// read end goes away (the app restart that aborted a Codex turn 17s in),
+    /// whereas a child whose stdout is a FILE survives and exits cleanly. Fleet's
+    /// fix is exactly this pipe→file swap for Codex stdout.
+    #[test]
+    fn file_backed_stdout_survives_reader_loss_but_pipe_does_not() {
+        // Pipe variant: drop the read end, then the child's delayed write hits a
+        // broken pipe (SIGPIPE → death, so it does NOT exit successfully).
+        let mut pipe_child = std::process::Command::new("sh")
+            .args(["-c", "sleep 0.3; echo late"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(pipe_child.stdout.take()); // the app/reader going away
+        let pipe_status = pipe_child.wait().unwrap();
+
+        // File variant: the delayed write lands in the file; the child exits 0.
+        let path = tmp_sink("survive");
+        let f = std::fs::File::create(&path).unwrap();
+        let mut file_child = std::process::Command::new("sh")
+            .args(["-c", "sleep 0.3; echo late"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(f))
+            .spawn()
+            .unwrap();
+        let file_status = file_child.wait().unwrap();
+
+        assert!(
+            file_status.success(),
+            "file-backed child must survive the reader leaving and exit 0"
+        );
+        assert!(std::fs::read_to_string(&path).unwrap().contains("late"));
+        assert!(
+            !pipe_status.success(),
+            "pipe-backed child is killed by the broken-pipe write — the bug the fix removes"
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }
