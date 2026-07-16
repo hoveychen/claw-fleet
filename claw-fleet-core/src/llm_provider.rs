@@ -612,9 +612,26 @@ pub fn provider_routes(config: &LlmConfig, slot: ModelSlot, preference: &str) ->
         let Some(provider) = resolve_provider(name) else { continue };
         if provider.is_available() { providers.push((name.to_string(), provider)); }
     }
-    let states: Vec<(String, QuotaState)> = providers.iter()
-        .map(|(name, _)| (name.clone(), provider_quota_state(name)))
-        .collect();
+    // Probe the preferred account first. If it is usable, the fallback's
+    // quota does not affect this call and remains lazy (actual CLI failure
+    // still falls through). Only probe the fallback eagerly when preference
+    // is known-limited, avoiding a Codex app-server round trip on every first
+    // Claude-preferred Guard/session-analysis call.
+    let primary = providers.iter()
+        .find(|(name, _)| name == preference)
+        .or_else(|| providers.first())
+        .map(|(name, _)| name.clone());
+    let primary_state = primary.as_deref().map(provider_quota_state).unwrap_or(QuotaState::Unknown);
+    let states: Vec<(String, QuotaState)> = providers.iter().map(|(name, _)| {
+        let state = if Some(name.as_str()) == primary.as_deref() {
+            primary_state
+        } else if primary_state == QuotaState::Limited {
+            provider_quota_state(name)
+        } else {
+            QuotaState::Unknown
+        };
+        (name.clone(), state)
+    }).collect();
     let order = rank_providers(preference, &states);
     let selected_model = match slot {
         ModelSlot::Fast => &config.fast_model,
