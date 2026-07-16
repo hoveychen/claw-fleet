@@ -285,9 +285,9 @@ fn parse_frontmatter(content: &str, name_source: &Path) -> (String, String) {
 
     for line in frontmatter.lines() {
         if let Some(val) = line.strip_prefix("name:") {
-            name = Some(val.trim().to_string());
+            name = Some(parse_frontmatter_scalar(val));
         } else if let Some(val) = line.strip_prefix("description:") {
-            description = Some(val.trim().to_string());
+            description = Some(parse_frontmatter_scalar(val));
         }
     }
 
@@ -295,6 +295,19 @@ fn parse_frontmatter(content: &str, name_source: &Path) -> (String, String) {
         name.unwrap_or(fallback_name),
         description.unwrap_or_default(),
     )
+}
+
+fn parse_frontmatter_scalar(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+        {
+            return value[1..value.len() - 1].to_string();
+        }
+    }
+    value.to_string()
 }
 
 // ── List files inside a skill ────────────────────────────────────────────────
@@ -507,6 +520,15 @@ mod tests {
         let (name, desc) = parse_frontmatter(content, path);
         assert_eq!(name, "custom");
         assert_eq!(desc, "");
+    }
+
+    #[test]
+    fn parse_frontmatter_strips_matching_quotes() {
+        let content = "---\nname: \"imagegen\"\ndescription: 'Generate images'\n---\nBody";
+        let path = Path::new("/tmp/imagegen/SKILL.md");
+        let (name, desc) = parse_frontmatter(content, path);
+        assert_eq!(name, "imagegen");
+        assert_eq!(desc, "Generate images");
     }
 
     struct FleetHomeOverride {
