@@ -656,27 +656,6 @@ pub fn reconcile_codex_from_claude_state(user_title: &str, locale: &str) -> Resu
     reconcile_codex_agents_md(set, user_title, locale)
 }
 
-/// Backward-compat shim: the legacy single "codex guidance" toggle applied both
-/// PRD and interaction (never wiki/model). Routed through the new reconcile
-/// writer so old callers keep working while the per-concept toggles are wired up
-/// (P3–P5).
-pub fn apply_codex_guidance(user_title: &str, locale: &str) -> Result<(), String> {
-    reconcile_codex_agents_md(
-        CodexGuidanceSet {
-            prd: true,
-            interaction: true,
-            ..Default::default()
-        },
-        user_title,
-        locale,
-    )
-}
-
-/// Backward-compat shim: remove all Fleet-managed blocks (per-concept + legacy).
-pub fn remove_codex_guidance() -> Result<(), String> {
-    reconcile_codex_agents_md(CodexGuidanceSet::default(), "", "en")
-}
-
 /// Whether the codex PRD-discipline block is present in `~/.codex/AGENTS.md`.
 pub fn is_codex_prd_installed() -> bool {
     agents_md_contains(PRD_BEGIN)

@@ -1802,8 +1802,6 @@ pub fn run() {
             test_fleet_ask_via_claude_cli,
             apply_prd_mode,
             remove_prd_mode,
-            apply_codex_guidance,
-            remove_codex_guidance,
             reconcile_codex_guidance,
             respond_to_elicitation,
             respond_to_fleet_ask,
