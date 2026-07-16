@@ -184,6 +184,10 @@ export function SessionDetail({
     if (!session) return null;
     return sessions.find((s) => s.id === session.id) ?? session;
   }, [session, sessions]);
+  const reasoningPercent =
+    liveSession && liveSession.totalOutputTokens > 0
+      ? (liveSession.reasoningOutputTokens / liveSession.totalOutputTokens) * 100
+      : 0;
 
   // Build tabs: [mainSession, ...activeSubagents]
   // Show tabs only when viewing a main agent that has active subagents,
@@ -628,6 +632,20 @@ export function SessionDetail({
               <span className={styles.meta_chip} title={t("tokens_out")}>
                 {liveSession.totalOutputTokens.toLocaleString()} tok
               </span>
+              {liveSession.reasoningOutputTokens > 0 && (
+                <span
+                  className={styles.meta_chip}
+                  title={t("reasoning_tokens_tip", {
+                    tokens: liveSession.reasoningOutputTokens.toLocaleString(),
+                    percent: reasoningPercent.toFixed(1),
+                  })}
+                >
+                  {t("reasoning_tokens_chip", {
+                    tokens: liveSession.reasoningOutputTokens.toLocaleString(),
+                    percent: reasoningPercent.toFixed(1),
+                  })}
+                </span>
+              )}
               {(liveSession.compactCount ?? 0) > 0 && (
                 <span
                   className={styles.meta_chip}
