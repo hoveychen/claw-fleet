@@ -785,17 +785,15 @@ pub trait Backend: Send + Sync {
     fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_prd_mode(&self) -> Result<(), String>;
 
-    // ── Codex guidance (global ~/.codex/AGENTS.md block) ────────────────────
-    /// Enable Fleet guidance for Codex sessions: write the sentinel-wrapped
-    /// PRD-discipline + `fleet__ask` interaction block into the backend's
-    /// `~/.codex/AGENTS.md`. Codex re-reads AGENTS.md on every run, so one
-    /// install covers all subsequent codex sessions. Default-bodied so backends
-    /// that don't support it (or haven't wired it yet) fail loudly rather than
-    /// silently no-op; LocalBackend and RemoteBackend override it.
-    fn apply_codex_guidance(&self, _user_title: &str, _locale: &str) -> Result<(), String> {
-        Err("codex guidance not supported by this backend".into())
-    }
-    fn remove_codex_guidance(&self) -> Result<(), String> {
+    // ── Codex guidance (global ~/.codex/AGENTS.md blocks) ───────────────────
+    /// Mirror the Claude-side concept toggles (interaction / PRD / wiki / model)
+    /// onto codex's `~/.codex/AGENTS.md`. One concept toggle drives both
+    /// carriers: the desktop calls this after any concept toggle and on startup,
+    /// so codex's per-concept blocks always match the Claude sentinels. Reads
+    /// the enabled set from the Claude carriers, so it is idempotent and
+    /// order-independent. Default-bodied so unsupported backends fail loudly;
+    /// LocalBackend and RemoteBackend override it.
+    fn reconcile_codex_guidance(&self, _user_title: &str, _locale: &str) -> Result<(), String> {
         Err("codex guidance not supported by this backend".into())
     }
 

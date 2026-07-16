@@ -340,13 +340,17 @@ pub(crate) fn route_remove_prd_mode(
                 }
             }
 
-pub(crate) fn route_apply_codex_guidance(
+/// Mirror the Claude concept toggles onto codex's AGENTS.md on the serve host.
+/// Body carries `{user_title, locale}`; the enabled set is read from the host's
+/// own Claude carriers.
+pub(crate) fn route_reconcile_codex_guidance(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,
     query: &std::collections::HashMap<String, String>,
     json_header: tiny_http::Header,
     path: &str,
 ) {
+    let _ = (ctx, query, path);
     let mut body_bytes = Vec::new();
     let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
     #[derive(serde::Deserialize)]
@@ -356,8 +360,10 @@ pub(crate) fn route_apply_codex_guidance(
     }
     match serde_json::from_slice::<Req>(&body_bytes) {
         Ok(req_body) => {
-            match crate::codex_guidance::apply_codex_guidance(&req_body.user_title, &req_body.locale)
-            {
+            match crate::codex_guidance::reconcile_codex_from_claude_state(
+                &req_body.user_title,
+                &req_body.locale,
+            ) {
                 Ok(()) => {
                     let _ = request.respond(
                         tiny_http::Response::from_string(r#"{"ok":true}"#)
@@ -379,30 +385,6 @@ pub(crate) fn route_apply_codex_guidance(
             let _ = request.respond(
                 tiny_http::Response::from_string(body)
                     .with_status_code(400)
-                    .with_header(json_header),
-            );
-        }
-    }
-}
-
-pub(crate) fn route_remove_codex_guidance(
-    ctx: &ServeCtx,
-    request: tiny_http::Request,
-    query: &std::collections::HashMap<String, String>,
-    json_header: tiny_http::Header,
-    path: &str,
-) {
-    match crate::codex_guidance::remove_codex_guidance() {
-        Ok(()) => {
-            let _ = request.respond(
-                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
-            );
-        }
-        Err(e) => {
-            let body = serde_json::json!({"error": e}).to_string();
-            let _ = request.respond(
-                tiny_http::Response::from_string(body)
-                    .with_status_code(500)
                     .with_header(json_header),
             );
         }
