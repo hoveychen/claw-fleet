@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
@@ -14,8 +14,7 @@ export function LessonsCard({
   lessons: Lesson[] | null;
 }) {
   const { t } = useTranslation();
-  const { generatingLessons, generateLessons, appendLessonToClaudeMd } = useReportStore();
-  const [added, setAdded] = useState<Set<number>>(new Set());
+  const { generatingLessons, generateLessons, appendLessonToClaudeMd, managedLessons, loadManagedLessons } = useReportStore();
   const triggeredRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -25,9 +24,19 @@ export function LessonsCard({
     }
   }, [date, lessons, generatingLessons, generateLessons]);
 
-  const handleAdd = async (lesson: Lesson, idx: number) => {
+  // Real "already added" state: a lesson is added if the managed store holds a
+  // block with the same session + content. Survives refresh, unlike local state.
+  useEffect(() => {
+    loadManagedLessons();
+  }, [loadManagedLessons]);
+
+  const isAdded = (lesson: Lesson) =>
+    managedLessons.some(
+      (m) => m.sessionId === lesson.sessionId && m.content === lesson.content,
+    );
+
+  const handleAdd = async (lesson: Lesson) => {
     await appendLessonToClaudeMd(lesson);
-    setAdded((prev) => new Set(prev).add(idx));
   };
 
   return (
@@ -43,7 +52,9 @@ export function LessonsCard({
         </div>
       ) : (
         <div className={styles.lessons_list}>
-          {lessons.map((lesson, idx) => (
+          {lessons.map((lesson, idx) => {
+            const added = isAdded(lesson);
+            return (
             <div key={idx} className={styles.lesson_card}>
               <div className={styles.lesson_content}>
                 <div className={styles.lesson_text}><ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{lesson.content}</ReactMarkdown></div>
@@ -54,13 +65,14 @@ export function LessonsCard({
               </div>
               <button
                 className={styles.lesson_add_btn}
-                onClick={() => handleAdd(lesson, idx)}
-                disabled={added.has(idx)}
+                onClick={() => handleAdd(lesson)}
+                disabled={added}
               >
-                {added.has(idx) ? t("report.lesson_added") : t("report.add_to_claude_md")}
+                {added ? t("report.lesson_added") : t("report.add_to_claude_md")}
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

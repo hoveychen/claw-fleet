@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -631,6 +631,10 @@ interface ReportState {
   generatingSummary: boolean;
   generatingLessons: boolean;
 
+  // Lessons already recorded in the managed ~/.claude/fleet-lessons.md. Used to
+  // show "added" state in the report card and to drive the Memory-panel list.
+  managedLessons: ManagedLesson[];
+
   // "New report" red dot on the 每日报告 nav item. `latestReportDate` is the most
   // recent date that has report data; `lastSeenReportDate` is the newest date the
   // user has actually opened the report view at (persisted). A dot shows while the
@@ -655,6 +659,10 @@ interface ReportState {
   generateSummary: (date: string) => Promise<void>;
   generateLessons: (date: string) => Promise<void>;
   appendLessonToClaudeMd: (lesson: Lesson) => Promise<void>;
+  /** Refresh the managed-lessons list from ~/.claude/fleet-lessons.md. */
+  loadManagedLessons: () => Promise<void>;
+  /** Remove a managed lesson by id and refresh the list. */
+  removeManagedLesson: (id: string) => Promise<void>;
   loadTimelinePage: () => Promise<void>;
   resetTimeline: () => void;
 }
@@ -683,6 +691,8 @@ export const useReportStore = create<ReportState>((set, get) => ({
   loading: false,
   generatingSummary: false,
   generatingLessons: false,
+
+  managedLessons: [],
 
   latestReportDate: "",
   lastSeenReportDate: getItem("daily-report-last-seen") ?? "",
@@ -792,6 +802,21 @@ export const useReportStore = create<ReportState>((set, get) => ({
 
   appendLessonToClaudeMd: async (lesson: Lesson) => {
     await invoke<void>("append_lesson_to_claude_md", { lesson });
+    await get().loadManagedLessons();
+  },
+
+  loadManagedLessons: async () => {
+    try {
+      const lessons = await invoke<ManagedLesson[]>("list_managed_lessons");
+      set({ managedLessons: lessons });
+    } catch {
+      // leave existing list on failure
+    }
+  },
+
+  removeManagedLesson: async (id: string) => {
+    await invoke<void>("remove_managed_lesson", { id });
+    await get().loadManagedLessons();
   },
 
   resetTimeline: () => set({ timelineReports: [], timelineCursor: 0, timelineHasMore: true }),
