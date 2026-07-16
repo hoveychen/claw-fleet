@@ -1778,6 +1778,8 @@
       "ahead": "{{n}} to push",
       "behind": "{{n}} behind",
       "dirty": "{{n}} uncommitted",
+      "dirty_toggle": "Toggle uncommitted file list",
+      "reveal_file": "Reveal and open in the file tree",
       "push": "Push",
       "pull": "Pull",
       "pushing": "Pushing…",

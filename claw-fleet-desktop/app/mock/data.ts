@@ -2161,6 +2161,11 @@ export const MOCK_GIT_STATUS = {
   ahead: 2,
   behind: 0,
   dirtyCount: 3,
+  dirtyFiles: [
+    { path: "src/components/FilesView.tsx", status: "M" },
+    { path: "src/git_ops.rs", status: "M" },
+    { path: "notes/scratch.md", status: "?" },
+  ],
 };
 
 export const MOCK_SKILLS = [

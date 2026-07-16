@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowDown,
   ArrowUp,
   Check,
+  ChevronDown,
+  ChevronRight,
   FileDiff,
   FolderOpen,
   FolderPlus,
@@ -47,6 +49,11 @@ interface ExplorerRoot {
 }
 
 // mirror claw-fleet-core/src/git_ops.rs
+interface DirtyFile {
+  path: string;
+  status: string;
+}
+
 interface GitStatus {
   isGit: boolean;
   branch: string | null;
@@ -54,6 +61,7 @@ interface GitStatus {
   ahead: number | null;
   behind: number | null;
   dirtyCount: number;
+  dirtyFiles: DirtyFile[];
 }
 
 interface GitOpResult {
@@ -371,6 +379,18 @@ function WorkspaceExplorer({
     setReveal({ relPath: rel, nonce: nav.nonce });
   }, [nav, roots, activeRoot, clearFileNav]);
 
+  // Reveal a file the user clicked in the source-control panel. Its path is
+  // already relative to the active root (git reports work-dir-relative paths,
+  // and the root IS the repo work dir), so no root-picking is needed. Clicks
+  // get their own strictly-decreasing (negative) nonce space so they never
+  // collide with the non-negative `fileNav` nonces the effect above uses.
+  const clickNonce = useRef(0);
+  const revealFile = useCallback((relPath: string) => {
+    setTab("files");
+    clickNonce.current -= 1;
+    setReveal({ relPath, nonce: clickNonce.current });
+  }, []);
+
   return (
     <>
       <div className={styles.detail_header}>
@@ -444,7 +464,12 @@ function WorkspaceExplorer({
           )}
 
           {activeRoot && (
-            <GitStatusBar key={activeRoot.path} workspace={workspace} root={activeRoot.path} />
+            <GitStatusBar
+              key={activeRoot.path}
+              workspace={workspace}
+              root={activeRoot.path}
+              onRevealFile={revealFile}
+            />
           )}
 
           <div className={skillStyles.detail_split}>
@@ -481,12 +506,22 @@ function WorkspaceExplorer({
 
 // ── Source-control status bar for the active root ────────────────────────────
 
-function GitStatusBar({ workspace, root }: { workspace: string; root: string }) {
+function GitStatusBar({
+  workspace,
+  root,
+  onRevealFile,
+}: {
+  workspace: string;
+  root: string;
+  onRevealFile: (relPath: string) => void;
+}) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [busy, setBusy] = useState<null | "push" | "pull">(null);
   const [confirm, setConfirm] = useState<null | "push" | "pull">(null);
   const [opMsg, setOpMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // Whether the "N 个未提交" chip is expanded into its file list.
+  const [showFiles, setShowFiles] = useState(false);
 
   const refresh = useCallback(() => {
     invoke<GitStatus>("git_status", { workspace, root })
@@ -563,10 +598,21 @@ function GitStatusBar({ workspace, root }: { workspace: string; root: string }) 
           </span>
         )}
         {dirty > 0 && (
-          <span className={`${fileStyles.scm_chip} ${fileStyles.scm_chip_dirty}`}>
+          <button
+            type="button"
+            className={`${fileStyles.scm_chip} ${fileStyles.scm_chip_dirty} ${fileStyles.scm_chip_btn}`}
+            onClick={() => setShowFiles((v) => !v)}
+            aria-expanded={showFiles}
+            title={t("files.scm.dirty_toggle")}
+          >
             <FileDiff size={12} strokeWidth={2} />
             {t("files.scm.dirty", { n: dirty })}
-          </span>
+            {showFiles ? (
+              <ChevronDown size={12} strokeWidth={2} />
+            ) : (
+              <ChevronRight size={12} strokeWidth={2} />
+            )}
+          </button>
         )}
       </div>
 
@@ -604,6 +650,29 @@ function GitStatusBar({ workspace, root }: { workspace: string; root: string }) 
           {busy === "push" ? t("files.scm.pushing") : t("files.scm.push")}
         </button>
       </div>
+
+      {showFiles && dirty > 0 && (
+        <ul className={fileStyles.scm_files}>
+          {status.dirtyFiles.map((f) => (
+            <li key={f.path}>
+              <button
+                type="button"
+                className={fileStyles.scm_file}
+                onClick={() => onRevealFile(f.path)}
+                title={t("files.scm.reveal_file")}
+              >
+                <span
+                  className={fileStyles.scm_file_status}
+                  data-status={f.status}
+                >
+                  {f.status}
+                </span>
+                <span className={fileStyles.scm_file_path}>{f.path}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {opMsg && (
         <div
