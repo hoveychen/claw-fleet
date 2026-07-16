@@ -139,6 +139,19 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "respond_to_elicitation":
       return null;
 
+    case "set_session_title": {
+      // Mirror the desktop restamp: set/clear titleOverride, re-emit so the row
+      // re-renders with the new (or reverted) title.
+      const sessionId = args.sessionId as string;
+      const rawTitle = args.title as string | null | undefined;
+      const title = rawTitle?.trim() || null;
+      currentSessions = currentSessions.map((s) =>
+        s.id === sessionId ? { ...s, titleOverride: title } : s,
+      );
+      emit("sessions-updated", currentSessions);
+      return null;
+    }
+
     case "list_skills":
       return MOCK_SKILLS;
     // The pure-chat workspace. Returning it (rather than falling through to

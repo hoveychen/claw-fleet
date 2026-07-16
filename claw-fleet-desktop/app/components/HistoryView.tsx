@@ -21,6 +21,7 @@ import {
   FolderGit2,
   History,
   PanelRightOpen,
+  Pencil,
   Plus,
   Square,
   Waypoints,
@@ -65,6 +66,7 @@ import { StopControl, canControl, stopMode, performStop } from "./StopControl";
 import { MarkControl } from "./MarkControl";
 import { AgentSourceIcon } from "./SessionCard";
 import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./ContextMenu";
+import { RenameSessionDialog } from "./RenameSessionDialog";
 import styles from "./HistoryView.module.css";
 
 /** A session spawned but not yet discovered by the scanner. We poll the session
@@ -323,7 +325,7 @@ const SessionRow = memo(function SessionRow({
                 <AgentSourceIcon source={s.agentSource} />
               </span>
             )}
-            {s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
+            {s.titleOverride ?? s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
           </span>
           <span className={styles.row_meta}>
             <span className={styles.row_project} title={s.workspacePath}>
@@ -554,6 +556,7 @@ export function HistoryView() {
       .filter((s) => {
         if (!q) return true;
         const clientMatch =
+          (s.titleOverride?.toLowerCase().includes(q) ?? false) ||
           (s.aiTitle?.toLowerCase().includes(q) ?? false) ||
           (s.slug?.toLowerCase().includes(q) ?? false) ||
           (s.lastMessagePreview?.toLowerCase().includes(q) ?? false) ||
@@ -737,6 +740,10 @@ export function HistoryView() {
     setMenuSession(null);
   }, []);
 
+  // Manual title override ("重命名"). Held here so the dialog outlives the
+  // context menu that opened it (the menu closes on select).
+  const [renameTarget, setRenameTarget] = useState<SessionInfo | null>(null);
+
   // A failed clipboard write (Tauri ACL) must not read as success. The menu is
   // gone by the time the promise settles, so failures are swallowed rather than
   // faked — the same fire-and-forget the header menu uses for reveal.
@@ -783,6 +790,12 @@ export function HistoryView() {
             mark: isDone ? null : "done",
           }).catch(() => {});
         },
+      });
+      items.push({
+        id: "rename",
+        label: t("history.menu_rename", "重命名"),
+        icon: <Pencil size={13} />,
+        onSelect: () => setRenameTarget(s),
       });
       items.push({
         id: "copy-id",
@@ -1069,6 +1082,27 @@ export function HistoryView() {
               anchor={menuAnchor}
               items={rowMenuItems(menuSession)}
               onClose={closeRowMenu}
+            />
+          )}
+          {renameTarget && (
+            <RenameSessionDialog
+              currentTitle={
+                renameTarget.titleOverride ??
+                renameTarget.aiTitle ??
+                renameTarget.slug ??
+                ""
+              }
+              hasOverride={renameTarget.titleOverride != null}
+              onCancel={() => setRenameTarget(null)}
+              onSave={(title) => {
+                const target = renameTarget;
+                setRenameTarget(null);
+                invoke("set_session_title", {
+                  sessionId: target.id,
+                  workspacePath: target.workspacePath,
+                  title: title === "" ? null : title,
+                }).catch(() => {});
+              }}
             />
           )}
         </div>

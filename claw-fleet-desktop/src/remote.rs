@@ -511,6 +511,20 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::SESSION_MARK, &req)
     }
 
+    fn set_session_title(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        title: Option<String>,
+    ) -> Result<(), String> {
+        let req = claw_fleet_core::session_title::SetSessionTitleRequest {
+            session_id,
+            workspace_path,
+            title,
+        };
+        self.probe.post_json_ok(claw_fleet_core::routes::SESSION_TITLE, &req)
+    }
+
     fn mark_sessions_read(
         &self,
         items: Vec<claw_fleet_core::session_read::SessionReadItem>,
