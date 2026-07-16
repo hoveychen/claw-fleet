@@ -1340,6 +1340,19 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::DAILY_REPORT_APPEND_LESSON, lesson)
     }
 
+    fn list_managed_lessons(
+        &self,
+    ) -> Result<Vec<claw_fleet_core::lessons_store::ManagedLesson>, String> {
+        self.probe.get(claw_fleet_core::routes::MANAGED_LESSONS)
+    }
+
+    fn remove_managed_lesson(&self, id: &str) -> Result<(), String> {
+        self.probe.post_json_ok(
+            claw_fleet_core::routes::MANAGED_LESSON_REMOVE,
+            &serde_json::json!({ "id": id }),
+        )
+    }
+
 
 
     fn set_llm_config(&self, config: crate::llm_provider::LlmConfig) -> Result<(), String> {

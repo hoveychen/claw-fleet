@@ -90,8 +90,39 @@ pub(crate) async fn append_lesson_to_claude_md(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let backend = state.backend.clone();
+    let title = state.user_title.lock().unwrap().clone();
+    let locale = state.locale.lock().unwrap().clone();
     tokio::task::spawn_blocking(move || {
-        backend.read().unwrap().append_lesson_to_claude_md(&lesson)
+        backend.read().unwrap().append_lesson_to_claude_md(&lesson)?;
+        // Mirror onto codex AGENTS.md too (no-op when codex isn't in use).
+        let _ = backend.read().unwrap().reconcile_codex_guidance(&title, &locale);
+        Ok(())
+    }).await.map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn list_managed_lessons(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::lessons_store::ManagedLesson>, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || {
+        backend.read().unwrap().list_managed_lessons()
+    }).await.map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn remove_managed_lesson(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let backend = state.backend.clone();
+    let title = state.user_title.lock().unwrap().clone();
+    let locale = state.locale.lock().unwrap().clone();
+    tokio::task::spawn_blocking(move || {
+        backend.read().unwrap().remove_managed_lesson(&id)?;
+        // Re-sync codex AGENTS.md so the removed lesson drops there too.
+        let _ = backend.read().unwrap().reconcile_codex_guidance(&title, &locale);
+        Ok(())
     }).await.map_err(|e| format!("join: {e}"))?
 }
 

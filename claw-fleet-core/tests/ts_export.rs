@@ -171,6 +171,7 @@ fn build_bundle() -> String {
         claw_fleet_core::daily_report::SessionSummary,
         claw_fleet_core::daily_report::DailyReportStats,
         claw_fleet_core::daily_report::Lesson,
+        claw_fleet_core::lessons_store::ManagedLesson,
         claw_fleet_core::proc_runner::ProcStatus,
         claw_fleet_core::proc_runner::ProcRecord,
         claw_fleet_core::proc_runner::ProcOutputChunk,
