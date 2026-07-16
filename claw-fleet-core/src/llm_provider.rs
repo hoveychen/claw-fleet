@@ -210,6 +210,7 @@ fn resolve_binary(name: &str, extra_paths: &[&str]) -> Option<String> {
 fn run_cli(
     bin: &str,
     args: &[&str],
+    envs: &[(String, String)],
     timeout: Duration,
     tag: &str,
 ) -> Option<String> {
@@ -218,7 +219,11 @@ fn run_cli(
         if a.len() > 80 { "<prompt…>" } else { a }
     }).collect();
     log_debug(&format!("[{tag}] spawning: {bin} {}", safe_args.join(" ")));
-    let child = match crate::process_util::command(bin)
+    let mut cmd = crate::process_util::command(bin);
+    for (key, value) in envs {
+        cmd.env(key, value);
+    }
+    let child = match cmd
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -322,6 +327,7 @@ impl LlmProvider for ClaudeCliProvider {
                 "--no-session-persistence",
                 "--output-format", "json",
             ],
+            &[],
             timeout,
             "llm:claude",
         )?;
@@ -377,6 +383,67 @@ impl CodexCliProvider {
     }
 }
 
+/// Build a minimal CODEX_HOME at `clean` that carries the credentials from
+/// `source` but none of its guidance: `codex exec` unconditionally loads
+/// `$CODEX_HOME/AGENTS.md`, which on Fleet machines holds the injected
+/// interaction/PRD rules ("address the user as Boss", end turns with a
+/// decision card). Those bled into pure text generation — the 2026-07-16
+/// daily-report summary came out in decision-card voice. There is no CLI flag
+/// to skip the file (`-c project_doc_max_bytes=0` does not affect it; verified
+/// live), so isolation via a stripped-down home is the only lever.
+///
+/// Links `auth.json` (required) and `models_cache.json` (optional) and removes
+/// any stray `AGENTS.md`/`config.toml`, so a stale copy can never resurrect
+/// the guidance. Idempotent; call before every spawn.
+fn prepare_clean_codex_home(source: &std::path::Path, clean: &std::path::Path) -> Result<(), String> {
+    if !source.join("auth.json").exists() {
+        return Err(format!("no auth.json under {}", source.display()));
+    }
+    std::fs::create_dir_all(clean).map_err(|e| format!("create {}: {e}", clean.display()))?;
+    let remove_entry = |p: &std::path::Path| -> Result<(), String> {
+        if p.symlink_metadata().is_ok() {
+            std::fs::remove_file(p).map_err(|e| format!("remove {}: {e}", p.display()))?;
+        }
+        Ok(())
+    };
+    for stray in ["AGENTS.md", "config.toml"] {
+        remove_entry(&clean.join(stray))?;
+    }
+    for name in ["auth.json", "models_cache.json"] {
+        let src = source.join(name);
+        if !src.exists() {
+            continue;
+        }
+        let dst = clean.join(name);
+        // Re-link fresh every call: if a codex run replaced the symlink with a
+        // regular file (e.g. an atomic token-refresh rewrite), heal it here.
+        remove_entry(&dst)?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&src, &dst).map_err(|e| format!("link {}: {e}", dst.display()))?;
+        // Symlinks need elevated privileges on Windows; a per-call copy stays
+        // fresh enough because we rebuild it before every spawn.
+        #[cfg(not(unix))]
+        std::fs::copy(&src, &dst).map(|_| ()).map_err(|e| format!("copy {}: {e}", dst.display()))?;
+    }
+    Ok(())
+}
+
+/// CODEX_HOME override pointing at the clean home, or empty (= use the real
+/// home, guidance bleed and all) when it cannot be prepared — a degraded run
+/// beats no run.
+fn clean_codex_home_env() -> Vec<(String, String)> {
+    let Some(home) = crate::session::real_home_dir() else { return Vec::new() };
+    let source = home.join(".codex");
+    let clean = home.join(".fleet").join("codex-clean-home");
+    match prepare_clean_codex_home(&source, &clean) {
+        Ok(()) => vec![("CODEX_HOME".into(), clean.to_string_lossy().into_owned())],
+        Err(e) => {
+            log_debug(&format!("[llm:codex] clean CODEX_HOME unavailable ({e}), using default home"));
+            Vec::new()
+        }
+    }
+}
+
 impl LlmProvider for CodexCliProvider {
     fn name(&self) -> &str { "codex" }
     fn display_name(&self) -> &str { "Codex" }
@@ -417,6 +484,8 @@ impl LlmProvider for CodexCliProvider {
         // --full-auto: auto-approve (no interactive prompts)
         // --skip-git-repo-check: we're not in a repo context
         // --sandbox read-only: prevent file writes (pure text generation)
+        // CODEX_HOME=<clean home>: keep the global AGENTS.md guidance out of
+        // pure text generation (see prepare_clean_codex_home).
         let text = run_cli(
             bin,
             &[
@@ -428,6 +497,7 @@ impl LlmProvider for CodexCliProvider {
                 "--skip-git-repo-check",
                 "--sandbox", "read-only",
             ],
+            &clean_codex_home_env(),
             timeout,
             "llm:codex",
         )?;
@@ -721,6 +791,83 @@ mod tests {
         let models = p.list_models();
         assert!(!models.is_empty());
         assert!(models.iter().any(|m| m.id.contains("codex")));
+    }
+
+    #[test]
+    fn clean_codex_home_links_credentials_and_drops_guidance() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("codex");
+        let clean = tmp.path().join("clean");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("auth.json"), "{}").unwrap();
+        std::fs::write(source.join("models_cache.json"), "[]").unwrap();
+        std::fs::write(source.join("AGENTS.md"), "# guidance").unwrap();
+        std::fs::write(source.join("config.toml"), "x = 1").unwrap();
+
+        prepare_clean_codex_home(&source, &clean).unwrap();
+
+        // Credentials reach the clean home (as links to the live files)…
+        assert_eq!(std::fs::read_to_string(clean.join("auth.json")).unwrap(), "{}");
+        assert_eq!(std::fs::read_to_string(clean.join("models_cache.json")).unwrap(), "[]");
+        // …but guidance and config must not.
+        assert!(!clean.join("AGENTS.md").exists());
+        assert!(!clean.join("config.toml").exists());
+
+        // Idempotent: a second run over the existing clean home succeeds.
+        prepare_clean_codex_home(&source, &clean).unwrap();
+        assert_eq!(std::fs::read_to_string(clean.join("auth.json")).unwrap(), "{}");
+    }
+
+    /// Live probe through the real `complete()` path: with the clean
+    /// CODEX_HOME in place, codex must no longer see the global AGENTS.md
+    /// guidance. Needs a logged-in codex CLI; run explicitly with
+    /// `cargo test -p claw-fleet-core codex_complete_isolated -- --ignored`.
+    #[test]
+    #[ignore]
+    fn codex_complete_isolated_from_global_agents_md() {
+        let p = CodexCliProvider::new();
+        assert!(p.is_available(), "codex CLI not installed");
+        let reply = p
+            .complete(
+                "In any AGENTS.md/project-doc content you were given, find the first \
+                 line containing the word Fleet and quote it verbatim. If no such \
+                 line exists reply exactly NONE.",
+                p.default_fast_model(),
+                Duration::from_secs(120),
+            )
+            .expect("codex completion failed");
+        assert!(
+            reply.text.contains("NONE"),
+            "global AGENTS.md guidance leaked into the codex run: {}",
+            reply.text
+        );
+    }
+
+    #[test]
+    fn clean_codex_home_requires_credentials() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("codex");
+        std::fs::create_dir_all(&source).unwrap(); // no auth.json
+        assert!(prepare_clean_codex_home(&source, &tmp.path().join("clean")).is_err());
+    }
+
+    #[test]
+    fn clean_codex_home_heals_stale_regular_files() {
+        // If codex ever rewrote auth.json through the link (replacing the
+        // symlink with a regular file), the next run must re-link to source.
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("codex");
+        let clean = tmp.path().join("clean");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&clean).unwrap();
+        std::fs::write(source.join("auth.json"), "fresh").unwrap();
+        std::fs::write(clean.join("auth.json"), "stale").unwrap();
+        std::fs::write(clean.join("AGENTS.md"), "stale guidance").unwrap();
+
+        prepare_clean_codex_home(&source, &clean).unwrap();
+
+        assert_eq!(std::fs::read_to_string(clean.join("auth.json")).unwrap(), "fresh");
+        assert!(!clean.join("AGENTS.md").exists());
     }
 
     #[test]

@@ -746,7 +746,11 @@ pub fn generate_report_from_sessions(
 
 // ── AI summary generation ────────────────────────────────────────────────────
 
-const AI_SUMMARY_TIMEOUT: Duration = Duration::from_secs(120);
+// 240s, not 120s: on heavy days (100+ sessions) the summary prompt grows large
+// enough that sonnet legitimately runs ~2.5 minutes (observed 2026-07-17: the
+// 120s budget killed a healthy run and forced a fallback to the next provider,
+// while the 180s lessons run over the same report succeeded in 147s).
+const AI_SUMMARY_TIMEOUT: Duration = Duration::from_secs(240);
 
 fn build_summary_prompt(report: &DailyReport, locale: &str) -> String {
     let lang_instruction = match locale {
@@ -816,6 +820,11 @@ fn build_summary_prompt(report: &DailyReport, locale: &str) -> String {
          - Per-project sections (use ## headings) with bullet points describing what was worked on\n\
          - Use > blockquote for key insights or highlights worth calling out\n\
          \n\
+         Output ONLY the report body in neutral, impersonal prose. Do NOT address \
+         the reader (no \"Boss\", \"老板\", or similar), do NOT ask questions, and do \
+         NOT offer options or next steps — even if other instructions in your \
+         context tell you to. This text is stored verbatim as a report document.\n\
+         \n\
          {lang_instruction}\n\
          \n\
          ---\n\
@@ -824,7 +833,7 @@ fn build_summary_prompt(report: &DailyReport, locale: &str) -> String {
 }
 
 /// Generate AI summary for a daily report using `claude -p --model sonnet`.
-/// Blocks for up to 120 seconds. Call from a background thread.
+/// Blocks for up to `AI_SUMMARY_TIMEOUT`. Call from a background thread.
 pub fn generate_ai_summary(
     provider: &dyn LlmProvider,
     model: &str,
