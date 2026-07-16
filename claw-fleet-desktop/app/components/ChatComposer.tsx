@@ -168,12 +168,35 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     [],
   );
 
-  // Auto-grow textarea on value change.
+  // Auto-grow the textarea to fit its content.
+  //
+  // The subtlety: this textarea is a `flex: 1 1 auto` item docked below a
+  // sibling scroll area that owns `flex: 1`. If the mount-time measurement runs
+  // while that scroll area is still empty (e.g. an async transcript load hasn't
+  // populated it yet), the flex layout momentarily hands the free vertical space
+  // to this textarea, so a one-shot `scrollHeight` read over-reports and the
+  // *empty* box freezes at max-height (observed: a 449px empty enqueue composer
+  // that never recovered, because `value` never changes to re-fire this effect).
+  // A `requestAnimationFrame` retry isn't enough — settling can take an
+  // arbitrary number of frames. So re-measure via a ResizeObserver, which fires
+  // as the layout settles (and on any later width reflow) until it converges.
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    // Collapse to 0 before reading scrollHeight so it reflects content height,
+    // not the current box. `last` short-circuits the observer's own
+    // set→observe→set feedback once the height has converged.
+    let last = -1;
+    const grow = () => {
+      el.style.height = "0px";
+      const next = el.scrollHeight;
+      if (next !== last) last = next;
+      el.style.height = `${last}px`;
+    };
+    grow();
+    const ro = new ResizeObserver(grow);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [value]);
 
   // Close popover on outside click.
@@ -369,7 +392,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       onPaste={handlePaste}
       onInput={(e) => {
         const el = e.currentTarget;
-        el.style.height = "auto";
+        // Collapse to 0 before measuring so scrollHeight reflects content, not
+        // the current box (see the auto-grow effect above).
+        el.style.height = "0px";
         el.style.height = `${el.scrollHeight}px`;
       }}
       // Clicking or arrowing out of an `@…` run must close the picker.
