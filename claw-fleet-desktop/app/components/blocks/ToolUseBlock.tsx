@@ -7,6 +7,7 @@ import type {
   ToolUseBlock as ToolUseBlockType,
 } from "../../types";
 import { asFileEditResult } from "../../toolResults";
+import type { PathLinkContext } from "../../markdown/pathLinks";
 import { DiffView } from "./DiffView";
 import { ExpandableText } from "./ExpandableText";
 import { ImageThumb } from "./ImageThumb";
@@ -32,6 +33,9 @@ interface Props {
   isPartial?: boolean; // no result yet
   /** Claude Code's structured `toolUseResult` for this call, when recorded. */
   meta?: unknown;
+  /** Workspace context; the collapsed row strips its root from path summaries.
+   *  The expanded body keeps absolute paths — precision belongs there. */
+  paths?: PathLinkContext;
 }
 
 interface MultiEditEdit {
@@ -40,7 +44,14 @@ interface MultiEditEdit {
   replace_all?: boolean;
 }
 
-function formatInput(input: Record<string, unknown>, name?: string): string {
+/** `/Users/x/ws/app/foo.ts` → `app/foo.ts` when the workspace root is known. */
+function relToWorkspace(p: string, root?: string): string {
+  if (!root) return p;
+  const prefix = root.endsWith("/") ? root : `${root}/`;
+  return p.startsWith(prefix) ? p.slice(prefix.length) : p;
+}
+
+function formatInput(input: Record<string, unknown>, name?: string, wsRoot?: string): string {
   // Bash and Agent both carry a model-written `description` on every call — for
   // Bash a one-line summary ("Find files referencing meta block names"), for
   // Agent a 3-5 word task name. It reads far better in the collapsed row than
@@ -54,9 +65,9 @@ function formatInput(input: Record<string, unknown>, name?: string): string {
   }
   // Show a compact one-liner for common tools
   if ("command" in input) return String(input.command);
-  if ("file_path" in input) return String(input.file_path);
+  if ("file_path" in input) return relToWorkspace(String(input.file_path), wsRoot);
   if ("pattern" in input) return String(input.pattern);
-  if ("path" in input) return String(input.path);
+  if ("path" in input) return relToWorkspace(String(input.path), wsRoot);
   if ("query" in input) return String(input.query);
   if ("url" in input) return String(input.url);
   return JSON.stringify(input, null, 2);
@@ -187,7 +198,7 @@ function DiffSection({ block, meta }: { block: ToolUseBlockType; meta?: unknown 
 
 const DIFF_TOOLS = new Set(["Edit", "MultiEdit", "Write"]);
 
-export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaProp }: Props) {
+export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaProp, paths }: Props) {
   const [open, setOpen] = useState(false);
 
   // On expand, recover the full output if this card's tail payload was
@@ -203,7 +214,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   const result =
     full && resultProp ? { ...resultProp, content: full.content as ToolResultBlock["content"] } : resultProp;
 
-  const summary = formatInput(block.input, block.name);
+  const summary = formatInput(block.input, block.name, paths?.workspaceRoot);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
   const custom = hasCustomBody(block.name, meta, result);
@@ -266,9 +277,10 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
 
 interface GroupedProps {
   blocks: Array<{ block: ToolUseBlockType; result?: ToolResultBlock; meta?: unknown }>;
+  paths?: PathLinkContext;
 }
 
-export function GroupedToolUseBlocks({ blocks }: GroupedProps) {
+export function GroupedToolUseBlocks({ blocks, paths }: GroupedProps) {
   const [open, setOpen] = useState(false);
   // The label used to read "Explored N files" for every group, including runs
   // of WebSearch or TodoWrite, which touch no files at all.
@@ -283,7 +295,7 @@ export function GroupedToolUseBlocks({ blocks }: GroupedProps) {
       {open && (
         <div className={styles.group_body}>
           {blocks.map(({ block, result, meta }, i) => (
-            <ToolUseBlock key={block.id ?? i} block={block} result={result} meta={meta} />
+            <ToolUseBlock key={block.id ?? i} block={block} result={result} meta={meta} paths={paths} />
           ))}
         </div>
       )}
