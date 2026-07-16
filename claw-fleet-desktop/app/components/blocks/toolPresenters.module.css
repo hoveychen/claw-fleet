@@ -97,6 +97,15 @@
   border: 1px solid var(--color-border);
 }
 
+/* The subagent's task name, shown alongside its type chip on the input view. */
+.agent_task {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text);
+  font-weight: 500;
+  word-break: break-word;
+}
+
 .stat_key { color: var(--color-text-dim); }
 .stat_val {
   color: var(--color-text);

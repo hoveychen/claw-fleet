@@ -225,6 +225,35 @@ function AgentBody({ meta }: { meta: unknown }) {
   );
 }
 
+/**
+ * The Agent card's *input*, rendered readably instead of as raw JSON.
+ *
+ * A subagent call carries a short `description` (the 3-5 word task name) and a
+ * long `prompt` (the full brief). Before this, whenever no `toolUseResult` was
+ * recorded — i.e. while the subagent is still running, or for non-Claude
+ * sources — the card fell through to the generic `JSON.stringify(input)` branch,
+ * so the prompt showed as one blob with literal `\n` escapes. Rendering the
+ * prompt through ExpandableText (a `<pre>`) restores real line breaks and gives
+ * it a preview + copy button, matching how the completed card shows it.
+ */
+export function AgentInput({ block }: { block: ToolUseBlockType }) {
+  const desc = typeof block.input.description === "string" ? block.input.description.trim() : "";
+  const prompt = typeof block.input.prompt === "string" ? block.input.prompt : "";
+  const subagentType =
+    typeof block.input.subagent_type === "string" ? block.input.subagent_type.trim() : "";
+  return (
+    <>
+      {(desc || subagentType) && (
+        <div className={styles.agent_meta}>
+          {subagentType && <span className={styles.chip}>{subagentType}</span>}
+          {desc && <span className={styles.agent_task}>{desc}</span>}
+        </div>
+      )}
+      {prompt && <Stream label="prompt" text={prompt} />}
+    </>
+  );
+}
+
 const TODO_MARK: Record<string, string> = {
   completed: "☑",
   in_progress: "▶",
