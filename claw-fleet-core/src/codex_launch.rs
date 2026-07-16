@@ -522,6 +522,33 @@ pub fn parse_thread_started(line: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Channel B (prompt-prepend) of codex guidance: if the codex-guidance toggle
+/// is on (its `~/.codex/AGENTS.md` sentinel is present) AND the workspace has
+/// active TASKS.md plans, prepend the same `<system-reminder>` block Claude gets
+/// via the `fleet prd-context` UserPromptSubmit hook to the codex prompt.
+///
+/// Because Fleet drives every codex turn with a fresh `codex exec` /
+/// `codex exec resume … -- <prompt>`, prepending here on each spawn and resume
+/// gives the per-turn re-injection Claude's hook provides — this is the B2 path
+/// chosen in P1 (B1 codex hooks are an experimental, already-renamed feature).
+///
+/// Gated on the single codex-guidance toggle so static (AGENTS.md) and dynamic
+/// (this) injection move together. No toggle / no active plan → returns the
+/// prompt unchanged (AC3 graceful degradation).
+fn maybe_prepend_active_plans(
+    workspace_path: &str,
+    session_id: Option<&str>,
+    prompt: &str,
+) -> String {
+    if !crate::codex_guidance::is_codex_guidance_installed() {
+        return prompt.to_string();
+    }
+    match crate::prd_tasks::render_active_plans_reminder(Path::new(workspace_path), session_id) {
+        Some(reminder) => format!("{reminder}\n\n{prompt}"),
+        None => prompt.to_string(),
+    }
+}
+
 /// Start a brand-new headless Codex session: spawns
 /// `codex exec --json -C <ws> [-m <model>] [-c model_reasoning_effort=<e>] --
 /// "<prompt>"` detached in `workspace_path`, captures the Codex-minted thread
@@ -579,7 +606,10 @@ pub fn spawn_new_codex_session(
     // when this session's turn ends — even after the Fleet app quits.
     let mut pre_prompt = decision_args;
     pre_prompt.extend(fleet_notify_args());
-    let args = build_codex_exec_args(&workspace_path, prompt, model, effort, &pre_prompt);
+    // Channel B: prepend the workspace's active TASKS.md plans (new session has
+    // no thread id yet, so no backtrack backstop — pass None).
+    let prompt = maybe_prepend_active_plans(&workspace_path, None, prompt);
+    let args = build_codex_exec_args(&workspace_path, &prompt, model, effort, &pre_prompt);
 
     crate::log_debug(&format!(
         "new_codex_session: {} exec … (cwd={}, model={:?}, effort={:?}, token={})",
@@ -809,7 +839,10 @@ pub fn resume_codex_session(
     // codex-notify` so a pending handoff fires when this resumed turn ends.
     let mut pre_prompt = decision_args;
     pre_prompt.extend(fleet_notify_args());
-    let args = build_codex_resume_args(session_id, prompt, model, effort, &pre_prompt);
+    // Channel B: prepend the workspace's active TASKS.md plans; this resume knows
+    // its thread id, so the backtrack backstop can fire for a completed child.
+    let prompt = maybe_prepend_active_plans(&workspace_path, Some(session_id), prompt);
+    let args = build_codex_resume_args(session_id, &prompt, model, effort, &pre_prompt);
 
     // A resume may carry its own `--model` / `--effort`; record them so the
     // launch note describes what the session is running *now* (same as the
