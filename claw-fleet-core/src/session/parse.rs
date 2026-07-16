@@ -764,6 +764,7 @@ pub fn parse_session_info(
         background_tasks: Vec::new(),
         handoff: None,
         user_mark: None,
+        title_override: None,
         last_read_ms: None,
         compact_count: stats.compact_count,
         compact_pre_tokens: stats.compact_pre_tokens,

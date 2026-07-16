@@ -205,6 +205,14 @@ pub struct SessionInfo {
     /// parse — the mark changes while the session's jsonl doesn't.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub user_mark: Option<crate::session_mark::SessionMark>,
+    /// Human-pinned title override for the task list. `None` = display the
+    /// auto-derived title (`ai_title ?? slug ?? preview`); `Some` = show this
+    /// verbatim instead. Orthogonal to `ai_title` (which stays the pristine
+    /// auto-derived value so "reset to auto" can restore it). Stamped by
+    /// `session_title::enrich_sessions` at scan time, not during the cached deep
+    /// parse — the override changes while the session's jsonl doesn't.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub title_override: Option<String>,
     /// Epoch-ms of the last time the human read this session, or `None` if never
     /// read. Orthogonal to both `status` and `user_mark`: a session is "unread"
     /// when `last_activity_ms > last_read_ms` (or this is `None`). Stamped by
@@ -626,7 +634,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
-            task_plan: None, handoff: None, user_mark: None, last_read_ms: None,
+            task_plan: None, handoff: None, user_mark: None, title_override: None, last_read_ms: None,
             compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,

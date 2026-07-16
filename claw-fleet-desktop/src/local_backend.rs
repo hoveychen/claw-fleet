@@ -147,6 +147,7 @@ impl LocalBackend {
         let snapshot = {
             let mut list = self.sessions.lock().unwrap();
             claw_fleet_core::session_mark::enrich_sessions(&mut list);
+            claw_fleet_core::session_title::enrich_sessions(&mut list);
             claw_fleet_core::session_read::enrich_sessions(&mut list);
             claw_fleet_core::pending_message::enrich_sessions(&mut list);
             list.clone()
@@ -3514,6 +3515,7 @@ mod tests {
             task_plan: None,
             handoff: None,
             user_mark: None,
+            title_override: None,
             last_read_ms: None,
             compact_count: 0,
             compact_pre_tokens: 0,
