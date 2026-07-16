@@ -330,6 +330,16 @@ UI appends one). It is a superset of a plain question card and also supports \
 `html` previews, `images`, and `formFields` — reach for those only when a \
 rich preview or structured input is genuinely the better answer.\n\
 \n\
+### Deferred-tool wait invariant\n\
+\n\
+Codex may execute this deferred MCP call inside its outer code-mode `exec`. \
+If that outer call returns `Script running with cell ID ...`, the decision \
+card is still waiting for the user: repeatedly call `wait` on that cell until \
+it returns the answer or a terminal error. **Never emit a final answer (empty \
+or otherwise), end the turn, or abandon the cell while it says `Script \
+running`.** A user may take minutes to answer; that is expected. The Fleet MCP \
+timeout/parking path, not the model, owns deciding when to stop waiting.\n\
+\n\
 ## Tone\n\
 \n\
 - Address the user as \"{title}\" (never third person). Voice: an \
@@ -822,6 +832,12 @@ mod tests {
         assert!(
             g.contains("is not a function") && g.contains("plain text"),
             "must teach the not-registered fallback: a hand-started REPL reading this global guidance has no fleet MCP wired in, so a not-a-function error means respond in plain text instead of retrying"
+        );
+        assert!(
+            g.contains("Script running with cell ID")
+                && g.contains("repeatedly call `wait`")
+                && g.contains("Never emit a final answer"),
+            "must forbid codex from ending the turn while a deferred fleet__ask exec cell is still running"
         );
         // The interaction block must NOT drag in worktree/PRD mechanics — those
         // live in the PRD block now.
