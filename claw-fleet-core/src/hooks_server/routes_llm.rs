@@ -53,13 +53,17 @@ pub(crate) fn route_llm_config_1(
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<LlmConfig>(&body_bytes) {
                     Ok(new_cfg) => {
-                        // Mirror into the process-wide slot so the mobile
-                        // relay's `guard_analyze` follows the same provider.
-                        crate::llm_provider::set_shared_config(new_cfg.clone());
-                        *llm_config.lock().unwrap() = new_cfg;
-                        let _ = request.respond(
-                            tiny_http::Response::from_string("{}").with_header(json_header),
-                        );
+                        match new_cfg.save() {
+                            Ok(()) => {
+                                crate::llm_provider::set_shared_config(new_cfg.clone());
+                                *llm_config.lock().unwrap() = new_cfg;
+                                let _ = request.respond(tiny_http::Response::from_string("{}").with_header(json_header));
+                            }
+                            Err(e) => {
+                                let body = format!(r#"{{"error":"save config: {}"}}"#, e.to_string().replace('"', "'"));
+                                let _ = request.respond(tiny_http::Response::from_string(body).with_status_code(500).with_header(json_header));
+                            }
+                        }
                     }
                     Err(e) => {
                         let body = format!(r#"{{"error":"invalid config: {}"}}"#, e.to_string().replace('"', "'"));

@@ -54,7 +54,7 @@ use crate::agent_source::{self, build_sources, find_source_for_path};
 use crate::audit;
 use crate::claude_analyze;
 use crate::daily_report::{
-    append_lesson_to_claude_md, generate_ai_summary, generate_lessons,
+    append_lesson_to_claude_md, generate_ai_summary_routed, generate_lessons_routed,
     generate_report_from_sessions, scan_sessions_for_date, Lesson, ReportStore,
 };
 use crate::elicitation;
@@ -146,8 +146,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         ReportStore::open().expect("report store open"),
     ));
 
-    // LLM provider config — defaults to Claude, updated via /llm/config endpoint.
-    let llm_config: Arc<Mutex<LlmConfig>> = Arc::new(Mutex::new(LlmConfig::default()));
+    // LLM provider config — shared with the desktop app on this host.
+    let llm_config: Arc<Mutex<LlmConfig>> = Arc::new(Mutex::new(LlmConfig::load()));
 
     // Load the persistent audit history.
     let audit_history = Arc::new(Mutex::new(
