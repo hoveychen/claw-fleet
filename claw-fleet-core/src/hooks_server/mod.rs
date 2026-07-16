@@ -760,6 +760,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // ── Session mark (manual done/pending review state) ──────────────
             crate::routes::SESSION_MARK => route_session_mark(ctx, request, &query, json_header, path),
 
+            // ── Session title (manual per-session title override) ─────────────
+            crate::routes::SESSION_TITLE => route_session_title(ctx, request, &query, json_header, path),
+
             // ── Session read (batch mark-read; unread is derived) ─────────────
             crate::routes::SESSION_READ => route_session_read(ctx, request, &query, json_header, path),
 

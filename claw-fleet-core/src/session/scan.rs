@@ -789,6 +789,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         task_plan: None,
         handoff: None,
         user_mark: None,
+        title_override: None,
         last_read_ms: None,
         compact_count: 0,
         compact_pre_tokens: 0,
@@ -806,6 +807,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
 pub fn enrich_all(sessions: &mut [SessionInfo]) {
     crate::handoff::enrich_sessions(sessions);
     crate::session_mark::enrich_sessions(sessions);
+    crate::session_title::enrich_sessions(sessions);
     crate::session_read::enrich_sessions(sessions);
     crate::pending_message::enrich_sessions(sessions);
 }
