@@ -1273,6 +1273,7 @@
     "codex_meta_permissions": "权限 / 沙箱",
     "codex_meta_collab": "多智能体协作",
     "codex_meta_multiagent": "multi_agent_mode",
+    "codex_meta_environment": "环境上下文",
     "codex_meta_generic": "注入指令",
     "today": "今天",
     "yesterday": "昨天",

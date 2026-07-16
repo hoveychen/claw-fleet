@@ -71,5 +71,7 @@ function deriveHeader(
     return { title, tag: t("detail.codex_meta_collab", "多智能体协作") };
   if (head.startsWith("<multi_agent_mode>"))
     return { title, tag: t("detail.codex_meta_multiagent", "multi_agent_mode") };
+  if (head.startsWith("<environment_context>"))
+    return { title, tag: t("detail.codex_meta_environment", "环境上下文") };
   return { title, tag: t("detail.codex_meta_generic", "注入指令") };
 }
