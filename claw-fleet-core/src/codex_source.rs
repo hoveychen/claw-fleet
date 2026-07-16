@@ -553,72 +553,7 @@ fn determine_status(last_lines: &[Value], file_age_secs: f64) -> SessionStatus {
             }
         }
 
-        // Check for shell call or patch apply in progress.
-        let has_tool_in_progress = last_lines.iter().rev().take(10).any(|v| {
-            let lt = v.get("type").and_then(|t| t.as_str());
-            let payload = v.get("payload");
-            let item_type = payload
-                .and_then(|p| p.get("type"))
-                .and_then(|t| t.as_str());
-            let status = payload
-                .and_then(|p| p.get("status"))
-                .and_then(|s| s.as_str());
-
-            lt == Some("response_item")
-                && matches!(
-                    item_type,
-                    Some("local_shell_call")
-                        | Some("function_call")
-                        | Some("web_search_call")
-                        | Some("image_generation_call")
-                )
-                && status == Some("in_progress")
-        });
-        if has_tool_in_progress {
-            return SessionStatus::Executing;
-        }
-
-        // Check for exec_command_begin without a matching exec_command_end.
-        let has_command_running = {
-            let mut running = false;
-            for v in last_lines.iter().rev().take(20) {
-                if v.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
-                    continue;
-                }
-                let msg_type = v
-                    .get("payload")
-                    .and_then(|p| p.get("type"))
-                    .and_then(|t| t.as_str());
-                match msg_type {
-                    Some("exec_command_begin") | Some("patch_apply_begin") => {
-                        running = true;
-                        break;
-                    }
-                    Some("exec_command_end") | Some("patch_apply_end") => {
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            running
-        };
-        if has_command_running {
-            return SessionStatus::Executing;
-        }
-
-        // Check for reasoning.
-        let has_reasoning = last_lines.iter().rev().take(10).any(|v| {
-            v.get("type").and_then(|t| t.as_str()) == Some("response_item")
-                && v.get("payload")
-                    .and_then(|p| p.get("type"))
-                    .and_then(|t| t.as_str())
-                    == Some("reasoning")
-        });
-        if has_reasoning {
-            return SessionStatus::Thinking;
-        }
-
-        return SessionStatus::Streaming;
+        return streaming_substatus(last_lines);
     }
 
     // Check the most recent event.
@@ -646,11 +581,146 @@ fn determine_status(last_lines: &[Value], file_age_secs: f64) -> SessionStatus {
         }
     }
 
+    // Mid-turn silence. Codex writes NOTHING to its rollout for the whole
+    // duration of a long tool call — real rollouts show 30–60s inter-line gaps
+    // during function_call / MCP execution — so `file_age_secs` here says
+    // nothing about whether work is still happening. And codex marks turn
+    // boundaries with `task_started` / `task_complete`, never the
+    // `turn_started` / `turn_complete` the block above keys on, so a genuinely
+    // in-flight turn matched no `last_turn_event` and fell straight to the `Idle`
+    // fallback below. The desktop then drops the session out of ACTIVE_STATUSES,
+    // stops live-tailing the transcript, and the session looks frozen while codex
+    // is still working (the "codex 会话卡住不更新" report). Recognise an in-flight
+    // turn from the rollout content (a start with no following completion) and
+    // report the working sub-status regardless of file age. A codex process that
+    // actually died mid-turn is caught by `clamp_dead_session_status`, which
+    // downgrades these in-flight statuses to WaitingInput when the process is
+    // gone — so an abandoned turn never sticks as "working".
+    if turn_in_flight(last_lines) {
+        return streaming_substatus(last_lines);
+    }
+
     if file_age_secs < 30.0 {
         SessionStatus::Active
     } else {
         SessionStatus::Idle
     }
+}
+
+/// The working sub-status for a rollout that is actively producing output:
+/// a tool/command in progress → `Executing`, reasoning → `Thinking`, otherwise
+/// `Streaming`. Shared by the fresh-file path and the silent-mid-turn path in
+/// [`determine_status`] so both classify an in-flight turn identically.
+///
+/// Note the `status == "in_progress"` tool check and the
+/// `exec_command_begin`/`patch_apply_begin` command check are effectively dead
+/// for modern codex — verified against real rollouts, codex writes
+/// `function_call` with NO status field and emits no `exec_command_*` events —
+/// so codex tool work resolves to `Thinking` (when a reasoning item is nearby)
+/// or `Streaming`. Both are ACTIVE_STATUSES on the desktop, which is all the
+/// in-flight fix requires; the checks are retained for any codex build / other
+/// source that does emit them.
+fn streaming_substatus(last_lines: &[Value]) -> SessionStatus {
+    // Check for shell call or patch apply in progress.
+    let has_tool_in_progress = last_lines.iter().rev().take(10).any(|v| {
+        let lt = v.get("type").and_then(|t| t.as_str());
+        let payload = v.get("payload");
+        let item_type = payload
+            .and_then(|p| p.get("type"))
+            .and_then(|t| t.as_str());
+        let status = payload
+            .and_then(|p| p.get("status"))
+            .and_then(|s| s.as_str());
+
+        lt == Some("response_item")
+            && matches!(
+                item_type,
+                Some("local_shell_call")
+                    | Some("function_call")
+                    | Some("web_search_call")
+                    | Some("image_generation_call")
+            )
+            && status == Some("in_progress")
+    });
+    if has_tool_in_progress {
+        return SessionStatus::Executing;
+    }
+
+    // Check for exec_command_begin without a matching exec_command_end.
+    let has_command_running = {
+        let mut running = false;
+        for v in last_lines.iter().rev().take(20) {
+            if v.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+                continue;
+            }
+            let msg_type = v
+                .get("payload")
+                .and_then(|p| p.get("type"))
+                .and_then(|t| t.as_str());
+            match msg_type {
+                Some("exec_command_begin") | Some("patch_apply_begin") => {
+                    running = true;
+                    break;
+                }
+                Some("exec_command_end") | Some("patch_apply_end") => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+        running
+    };
+    if has_command_running {
+        return SessionStatus::Executing;
+    }
+
+    // Check for reasoning.
+    let has_reasoning = last_lines.iter().rev().take(10).any(|v| {
+        v.get("type").and_then(|t| t.as_str()) == Some("response_item")
+            && v.get("payload")
+                .and_then(|p| p.get("type"))
+                .and_then(|t| t.as_str())
+                == Some("reasoning")
+    });
+    if has_reasoning {
+        return SessionStatus::Thinking;
+    }
+
+    SessionStatus::Streaming
+}
+
+/// Whether a codex turn is in flight: scanning the tail backward, the most
+/// recent turn-boundary event is a *start* (`task_started` / `turn_started`)
+/// rather than a *completion* (`task_complete` / `turn_complete`) or a stop
+/// (`turn_aborted` / `error`).
+///
+/// Distinct from [`codex_last_turn_incomplete`] (used by the rate-limit resume
+/// gate), which treats `turn_aborted` / `error` as "incomplete" too: for status
+/// display an aborted/errored turn is NOT working, so those stop the scan as a
+/// non-in-flight boundary. Approval requests are handled before this is
+/// consulted (they mean the turn paused for the user), so they are not listed.
+///
+/// Residual: the scan sees only the window it is handed (the last ~100 lines).
+/// A single turn that emitted more than that many rollout lines before going
+/// silent scrolls its `task_started` out of view, so this returns `false` and
+/// the turn falls to the age fallback — the next rollout write recovers it.
+fn turn_in_flight(last_lines: &[Value]) -> bool {
+    for v in last_lines.iter().rev() {
+        if v.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+            continue;
+        }
+        match v
+            .get("payload")
+            .and_then(|p| p.get("type"))
+            .and_then(|t| t.as_str())
+        {
+            Some("task_started") | Some("turn_started") => return true,
+            Some("task_complete") | Some("turn_complete") | Some("turn_aborted")
+            | Some("error") => return false,
+            _ => {}
+        }
+    }
+    false
 }
 
 /// A Codex session with no live process cannot be mid-turn: clamp any in-flight
@@ -1525,7 +1595,8 @@ mod tests {
         build_session_from_sqlite, clamp_dead_session_status, codex_cost_and_input,
         codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
-        codex_token_breakdown_from_lines, compute_token_stats, exec_note_from_script,
+        codex_token_breakdown_from_lines, compute_token_stats, determine_status,
+        exec_note_from_script,
         extract_context_percent, extract_first_user_prompt, last_rollout_rate_limits,
         latest_total_token_usage, normalize_messages, strip_leading_system_reminder,
         strip_trailing_context_files, read_rollout_originator, CodexProcess,
@@ -1640,6 +1711,58 @@ mod tests {
         assert_eq!(clamp_dead_session_status(S::Executing, false), S::WaitingInput);
         assert_eq!(clamp_dead_session_status(S::Delegating, false), S::WaitingInput);
         assert_eq!(clamp_dead_session_status(S::Processing, false), S::WaitingInput);
+    }
+
+    #[test]
+    fn determine_status_inflight_survives_silent_tool_call() {
+        // Regression: codex writes NOTHING to its rollout for the whole duration
+        // of a long tool call — real rollouts show 30–60s inter-line gaps during
+        // function_call / MCP execution — and it marks turn boundaries with
+        // `task_started`/`task_complete`, never the `turn_started`/`turn_complete`
+        // the age-fallback keyed on. So a mid-turn rollout idle >30s fell straight
+        // to `Idle`; the desktop then dropped it out of ACTIVE_STATUSES, stopped
+        // live-tailing the transcript, and the session looked frozen while codex
+        // was still working. An in-flight turn (a `task_started` with no following
+        // `task_complete`) must read as a working status regardless of file age.
+
+        // reasoning is the most recent activity, file silent 45s → Thinking.
+        let reasoning = vec![
+            json!({"type":"event_msg","payload":{"type":"task_started"}}),
+            json!({"type":"response_item","payload":{"type":"reasoning"}}),
+        ];
+        assert_eq!(
+            determine_status(&reasoning, 45.0),
+            S::Thinking,
+            "a reasoning item under an open task_started must read as Thinking, not Idle"
+        );
+
+        // a function_call was just issued (codex writes it with NO status field —
+        // verified against real rollouts, so the `status == in_progress` check
+        // never matches) and its tool has run silently for 60s → a working
+        // (non-Idle) status, never Idle.
+        let tool = vec![
+            json!({"type":"event_msg","payload":{"type":"task_started"}}),
+            json!({"type":"response_item","payload":{"type":"function_call"}}),
+        ];
+        let st = determine_status(&tool, 60.0);
+        assert_ne!(st, S::Idle, "a silent in-flight tool call must not read as Idle");
+        assert!(
+            matches!(st, S::Streaming | S::Executing | S::Thinking | S::Active),
+            "expected a working status for a silent in-flight tool call, got {st:?}"
+        );
+
+        // a completed turn (task_complete is the terminal boundary) is NOT in
+        // flight — it must stay WaitingInput, never a working status.
+        let done = vec![
+            json!({"type":"event_msg","payload":{"type":"task_started"}}),
+            json!({"type":"response_item","payload":{"type":"reasoning"}}),
+            json!({"type":"event_msg","payload":{"type":"task_complete"}}),
+        ];
+        assert_eq!(
+            determine_status(&done, 45.0),
+            S::WaitingInput,
+            "a task_complete after task_started means the turn is over — WaitingInput"
+        );
     }
 
     #[test]
