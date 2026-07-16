@@ -47,9 +47,10 @@ export function TodayUsageBadge({
   }, []);
 
   const cost = usage?.costUsd ?? 0;
-  // Total tokens = input + output, matching the daily report's口径 (the report
-  // sums `totalInputTokens + totalOutputTokens`). Older behaviour showed output
-  // only, which read far smaller than the same day's report.
+  // Total tokens = input + output, cumulative across every turn (cache re-reads
+  // included), on the same口径 as cost — so a heavy day reads large. Counts all
+  // sources (Claude + Codex + Fleet's own LLM calls); the daily report card also
+  // sums cumulatively now, but is Claude-only, so the two need not match exactly.
   const inputTokens = usage?.inputTokens ?? 0;
   const outputTokens = usage?.outputTokens ?? 0;
   const tokens = inputTokens + outputTokens;

@@ -686,9 +686,12 @@ pub fn parse_session_info(
     let pending_tool_batch = has_pending_noninteractive_tool_batch(&last_n);
     let stats = acc.stats();
     let ctx_usage = acc.context_usage();
-    // Last-turn total input (input + cache_creation + cache_read) — the current
-    // context-window size, same value the daily report sums per session.
-    let total_input_tokens = ctx_usage.as_ref().map(|(used, _, _)| *used).unwrap_or(0);
+    // Cumulative input across all finalized turns (input + cache_creation +
+    // cache_read, cache re-reads included) — the "tokens sent to the API" total,
+    // on the same口径 as `total_cost_usd` and as Codex's cumulative
+    // `total_token_usage`. NOT the last-turn context-window snapshot: that is
+    // `ctx_usage.used`, which still drives `context_percent` just below.
+    let total_input_tokens = stats.total_input_tokens;
     let context_percent = ctx_usage
         .and_then(|(used, model, max)| compute_context_percent(used, Some(&model), max));
     let last_message_preview = extract_last_text(&last_n);
