@@ -128,6 +128,15 @@ export type TaskTokenBreakdown = { main: SessionTokenBreakdown, subagents: Array
 baselineLoaded: boolean, 
 bundleSizeTokens: number, };
 
+export type CodexTokenBreakdown = { 
+inputTokens: number, 
+cachedInputTokens: number, 
+outputTokens: number, 
+totalTokens: number, 
+costUsd: number, 
+contextPercent: number | null, 
+model: string | null, };
+
 export type SessionTodo = { content: string, activeForm: string, 
 status: string, };
 

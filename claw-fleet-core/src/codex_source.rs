@@ -742,6 +742,113 @@ fn extract_context_percent(lines: &[Value], model: Option<&str>) -> Option<f64> 
     None
 }
 
+/// Codex-native token breakdown for a single rollout, shown in the desktop
+/// "Token" tab. Unlike Claude's `TaskTokenBreakdown` (which attributes input to
+/// system-prompt / tools / CLAUDE.md / memory / MCP buckets — concepts a Codex
+/// rollout has none of), this reports the raw `total_token_usage` split that
+/// Codex actually records: full-price input, cached input, and output.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct CodexTokenBreakdown {
+    /// Full-price input tokens (the cached portion is excluded here).
+    pub input_tokens: u64,
+    /// Cached input tokens, billed at the model's cache-read rate. A subset of
+    /// the rollout's raw `input_tokens`, so `input_tokens + cached_input_tokens`
+    /// equals that raw cumulative input.
+    pub cached_input_tokens: u64,
+    /// Output tokens. Codex's `output_tokens` already includes reasoning tokens.
+    pub output_tokens: u64,
+    /// `input_tokens + cached_input_tokens + output_tokens` — the three rows sum
+    /// to this so the panel's total is internally consistent.
+    pub total_tokens: u64,
+    /// Estimated USD cost using the model's price tier (same math as the header).
+    pub cost_usd: f64,
+    /// Context-window utilization (0.0..=1.0) from the latest `token_count`, when
+    /// a `model_context_window` is present; `None` otherwise.
+    pub context_percent: Option<f64>,
+    /// Model id used for pricing, when resolvable from the rollout.
+    pub model: Option<String>,
+}
+
+/// Pull the latest cumulative `total_token_usage` from a parsed rollout,
+/// returning `(raw_input_incl_cached, cached, output)`. Mirrors the reverse scan
+/// in [`codex_cost_and_input`] so the breakdown and the cost agree on which
+/// `token_count` event is canonical.
+fn latest_total_token_usage(lines: &[Value]) -> Option<(u64, u64, u64)> {
+    for line in lines.iter().rev() {
+        if line.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let payload = line.get("payload")?;
+        if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
+            continue;
+        }
+        let usage = match payload.get("info").and_then(|i| i.get("total_token_usage")) {
+            Some(u) => u,
+            None => continue,
+        };
+        let input = usage
+            .get("input_tokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let cached = usage
+            .get("cached_input_tokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0)
+            .min(input);
+        let output = usage
+            .get("output_tokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        if input == 0 && output == 0 {
+            continue;
+        }
+        return Some((input, cached, output));
+    }
+    None
+}
+
+/// Build the Codex-native [`CodexTokenBreakdown`] for a `codex://` rollout URI.
+/// Returns `Ok` with zeroed token counts (cost 0, no context%) when the rollout
+/// exists but has no `token_count` event yet — the panel then simply shows a
+/// zero row rather than an error. Errors only on an unreadable/absent file.
+pub fn codex_token_breakdown(uri: &str) -> Result<CodexTokenBreakdown, String> {
+    let file_path = resolve_uri(uri).ok_or_else(|| format!("Invalid Codex URI: {uri}"))?;
+    let content = read_session_content(&file_path)?;
+    let lines: Vec<Value> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+
+    let model = extract_model(&lines);
+    Ok(codex_token_breakdown_from_lines(&lines, model))
+}
+
+/// Pure assembly of a [`CodexTokenBreakdown`] from parsed rollout lines. Split
+/// out from [`codex_token_breakdown`] so the token math is unit-testable without
+/// touching the filesystem.
+fn codex_token_breakdown_from_lines(lines: &[Value], model: Option<String>) -> CodexTokenBreakdown {
+    let model_ref = model.as_deref();
+    let (raw_input, cached, output) = latest_total_token_usage(lines).unwrap_or((0, 0, 0));
+    // `raw_input` is cumulative and already includes `cached`; split it into the
+    // full-price portion for display so the three rows sum to `total_tokens`.
+    let full_price_input = raw_input.saturating_sub(cached);
+    let (cost_usd, _) = codex_cost_and_input(lines, model_ref);
+    let context_percent = extract_context_percent(lines, model_ref);
+
+    CodexTokenBreakdown {
+        input_tokens: full_price_input,
+        cached_input_tokens: cached,
+        output_tokens: output,
+        total_tokens: raw_input + output,
+        cost_usd,
+        context_percent,
+        model,
+    }
+}
+
 /// Scan codex processes to find PIDs, including thread IDs from command-line args.
 fn scan_codex_processes() -> Vec<CodexProcess> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
@@ -1212,8 +1319,9 @@ fn build_session_from_sqlite(
 mod tests {
     use super::{
         codex_cost_and_input, codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
-        codex_rate_limit_state_from_usage, codex_rollout_rate_limit, compute_token_stats,
-        extract_context_percent, extract_first_user_text, last_rollout_rate_limits,
+        codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
+        codex_token_breakdown_from_lines, compute_token_stats, extract_context_percent,
+        extract_first_user_text, last_rollout_rate_limits, latest_total_token_usage,
         normalize_messages, read_rollout_originator, CodexRateLimitWindow, CodexUsageItem,
     };
     use serde_json::json;
@@ -1681,6 +1789,60 @@ mod tests {
     fn codex_cost_and_input_no_token_count_is_zero() {
         let lines = vec![json!({ "type": "response_item", "payload": {} })];
         assert_eq!(codex_cost_and_input(&lines, Some("gpt-5.6-sol")), (0.0, 0));
+    }
+
+    #[test]
+    fn latest_total_token_usage_reads_last_cumulative_and_clamps_cached() {
+        // Two token_count events prove we read the LAST (cumulative) one, and
+        // cached is clamped to input so `input - cached` can never underflow.
+        let lines = vec![
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{
+                "total_token_usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":10}}}}),
+            json!({"type":"event_msg","payload":{"type":"token_count","info":{
+                "total_token_usage":{"input_tokens":136970,"cached_input_tokens":999999,"output_tokens":565}}}}),
+        ];
+        // cached (999999) is clamped down to input (136970).
+        assert_eq!(latest_total_token_usage(&lines), Some((136970, 136970, 565)));
+    }
+
+    #[test]
+    fn latest_total_token_usage_none_without_token_count() {
+        let lines = vec![json!({"type":"response_item","payload":{}})];
+        assert_eq!(latest_total_token_usage(&lines), None);
+    }
+
+    #[test]
+    fn codex_token_breakdown_splits_full_price_and_sums_to_total() {
+        // raw input (incl. cached) = 136970, cached = 123392, output = 565.
+        // Panel must show full-price input = 136970 - 123392 = 13578, and the
+        // three rows (13578 + 123392 + 565) must sum to total_tokens 137535.
+        let lines = vec![json!({"type":"event_msg","payload":{"type":"token_count","info":{
+            "total_token_usage":{
+                "input_tokens":136970,"cached_input_tokens":123392,"output_tokens":565
+            }}}})];
+        let b = codex_token_breakdown_from_lines(&lines, Some("gpt-5.6-sol".to_string()));
+        assert_eq!(b.input_tokens, 13578);
+        assert_eq!(b.cached_input_tokens, 123392);
+        assert_eq!(b.output_tokens, 565);
+        assert_eq!(b.total_tokens, 137535);
+        assert_eq!(
+            b.input_tokens + b.cached_input_tokens + b.output_tokens,
+            b.total_tokens
+        );
+        // Same cost math as the header's codex_cost_and_input.
+        let expected = 13578.0 / 1e6 * 5.0 + 123392.0 / 1e6 * 0.50 + 565.0 / 1e6 * 30.0;
+        assert!((b.cost_usd - expected).abs() < 1e-9, "cost {}", b.cost_usd);
+    }
+
+    #[test]
+    fn codex_token_breakdown_zeroed_when_no_token_count() {
+        // A rollout that exists but hasn't emitted a token_count yet yields an
+        // all-zero breakdown (the panel shows a zero row, not an error).
+        let lines = vec![json!({"type":"response_item","payload":{}})];
+        let b = codex_token_breakdown_from_lines(&lines, None);
+        assert_eq!(b.total_tokens, 0);
+        assert_eq!(b.cost_usd, 0.0);
+        assert_eq!(b.context_percent, None);
     }
 
     /// The scanner's Fleet-ownership signal: the rollout's first `session_meta`

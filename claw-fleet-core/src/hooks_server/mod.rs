@@ -704,6 +704,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::TOKEN_BREAKDOWN => route_token_breakdown(ctx, request, &query, json_header, path),
 
+            crate::routes::CODEX_TOKEN_BREAKDOWN => route_codex_token_breakdown(ctx, request, &query, json_header, path),
+
             crate::routes::EXPLORER_ROOTS | crate::routes::EXPLORER_DIR | crate::routes::EXPLORER_FILE | crate::routes::SCRATCHPAD_DIR
             | crate::routes::SCRATCHPAD_FILE => route_explorer_roots(ctx, request, &query, json_header, path),
 

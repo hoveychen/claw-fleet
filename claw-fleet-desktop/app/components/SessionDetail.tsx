@@ -23,6 +23,7 @@ import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
+import { CodexTokenPanel } from "./CodexTokenPanel";
 import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -747,10 +748,14 @@ export function SessionDetail({
           )}
 
           {viewTab === "tokens" && liveSession && (
-            <TokenSpendPanel
-              jsonlPath={liveSession.jsonlPath}
-              workspacePath={liveSession.workspacePath}
-            />
+            liveSession.agentSource === "codex" ? (
+              <CodexTokenPanel jsonlPath={liveSession.jsonlPath} />
+            ) : (
+              <TokenSpendPanel
+                jsonlPath={liveSession.jsonlPath}
+                workspacePath={liveSession.workspacePath}
+              />
+            )
           )}
 
           {viewTab === "tasks" && (
