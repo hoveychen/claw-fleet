@@ -1374,6 +1374,8 @@
     "model_guidance_enabled": "启用模型选择速查指引",
     "wiki_guidance_desc": "让 Agent 把完成的 HTML 报告、demo、markdown 文档用 `fleet wiki publish` 归档进知识库，在「知识库」板块统一浏览，不再散落在工作目录里。仅对 Claude Code 生效。",
     "wiki_guidance_enabled": "启用知识库归档指引",
+    "codex_guidance_desc": "把 Fleet 的 PRD 纪律（提交/worktree/节奏/接力）和 fleet__ask 决策卡纪律注入全局 ~/.codex/AGENTS.md，让 Fleet 启动的 Codex 会话也遵守同一套流程。仅对 Codex 生效，用 sentinel 块包裹、不动你既有的 AGENTS.md 内容。",
+    "codex_guidance_enabled": "启用 Codex 会话指引",
     "sources": "要监控的 Agent",
     "sources_desc": "选择 Fleet 要监控哪些 AI 编程工具。",
     "sources_restart": "重启以应用更改",

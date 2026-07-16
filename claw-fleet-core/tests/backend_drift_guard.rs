@@ -55,7 +55,15 @@ const MOBILE_WEB_SRC: &str = "../mobile-web/src";
 /// Default-bodied methods LocalBackend overrides but RemoteBackend does not.
 /// `apply_mcp_injector`: RemoteBackend never proxies it, so a remote session
 /// silently runs the no-op default. Fix = add the HTTP call in remote.rs.
-const CHECK_A_KNOWN_DRIFT: &[&str] = &["apply_mcp_injector"];
+const CHECK_A_KNOWN_DRIFT: &[&str] = &[
+    "apply_mcp_injector",
+    // codex-guidance-inject P2 wires the LocalBackend override + settings
+    // toggle; the RemoteBackend override + `/apply_codex_guidance` serve
+    // endpoint land in P4 (they're coupled by Check B — a remote impl calling
+    // the endpoint needs the server route). Removed from this list in P4.
+    "apply_codex_guidance",
+    "remove_codex_guidance",
+];
 
 /// Endpoints the remote client calls that `hooks_server` no longer serves.
 /// Empty: the former `/auto_resume_config` drift was fixed by

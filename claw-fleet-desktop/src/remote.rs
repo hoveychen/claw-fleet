@@ -998,6 +998,7 @@ impl crate::backend::Backend for RemoteBackend {
             prd_discipline_installed: false,
             wiki_guidance_installed: false,
             model_guidance_installed: false,
+            codex_guidance_installed: false,
             idle_hooks_installed: false,
         })
     }
