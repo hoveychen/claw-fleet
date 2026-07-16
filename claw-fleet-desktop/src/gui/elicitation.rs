@@ -122,6 +122,22 @@ pub(crate) fn remove_prd_mode(state: tauri::State<AppState>) -> Result<(), Strin
 }
 
 #[tauri::command]
+pub(crate) fn apply_codex_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+    let title = state.user_title.lock().unwrap().clone();
+    let locale = state.locale.lock().unwrap().clone();
+    state
+        .backend
+        .read()
+        .unwrap()
+        .apply_codex_guidance(&title, &locale)
+}
+
+#[tauri::command]
+pub(crate) fn remove_codex_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().remove_codex_guidance()
+}
+
+#[tauri::command]
 pub(crate) fn respond_to_elicitation(
     state: tauri::State<AppState>,
     id: String,
