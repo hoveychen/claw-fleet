@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
@@ -11,7 +11,7 @@ import { DiffView } from "./DiffView";
 import { ExpandableText } from "./ExpandableText";
 import { ImageThumb } from "./ImageThumb";
 import { ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
-import { useToolResultFetch, type FullToolResult } from "./toolResultFetch";
+import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
 import styles from "./ToolUseBlock.module.css";
 
 // Read-only tools that get grouped into a single summary row
@@ -185,25 +185,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // needs this — the fetch is deferred until the reader actually opens the card.
   const toolFetch = useToolResultFetch();
   const wasTruncated = !!block.id && (toolFetch?.truncatedIds.has(block.id) ?? false);
-  const [full, setFull] = useState<FullToolResult | null>(null);
-  const [loadingFull, setLoadingFull] = useState(false);
-  useEffect(() => {
-    if (!open || !wasTruncated || full || loadingFull || !toolFetch || !block.id) return;
-    let cancelled = false;
-    setLoadingFull(true);
-    toolFetch
-      .fetchFull(block.id)
-      .then((r) => {
-        if (!cancelled) setFull(r);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoadingFull(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, wasTruncated, full, loadingFull, toolFetch, block.id]);
+  const { full, loadingFull } = useFullToolResult(open, wasTruncated, toolFetch, block.id);
 
   // Swap the recovered full body in for the truncated preview once it lands.
   const meta = full ? full.toolUseResult : metaProp;
