@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 /** Full tool output recovered on demand from the backend for one tool call. */
 export interface FullToolResult {
@@ -26,4 +26,46 @@ export const ToolResultFetchContext = createContext<ToolResultFetch | null>(null
 
 export function useToolResultFetch(): ToolResultFetch | null {
   return useContext(ToolResultFetchContext);
+}
+
+/**
+ * Recover the full, untrimmed output for a truncated tool card, once and only
+ * when the reader has actually expanded it.
+ *
+ * The fetch is deferred until `open` so a collapsed card never pays for output
+ * the reader may never look at. `loadingFull` drives the "Loading full output…"
+ * placeholder; `full` is the recovered body that swaps in when it lands.
+ *
+ * Note `loadingFull` is deliberately NOT an effect dependency: setting it fires
+ * a re-render, and if the effect re-ran on that change its own cleanup would
+ * cancel the in-flight fetch before it could resolve — leaving the card stuck
+ * on the placeholder forever. The effect keys only on the inputs that should
+ * actually restart a fetch (open / truncated / fetcher / id).
+ */
+export function useFullToolResult(
+  open: boolean,
+  wasTruncated: boolean,
+  toolFetch: ToolResultFetch | null,
+  blockId: string | undefined,
+): { full: FullToolResult | null; loadingFull: boolean } {
+  const [full, setFull] = useState<FullToolResult | null>(null);
+  const [loadingFull, setLoadingFull] = useState(false);
+  useEffect(() => {
+    if (!open || !wasTruncated || full || !toolFetch || !blockId) return;
+    let cancelled = false;
+    setLoadingFull(true);
+    toolFetch
+      .fetchFull(blockId)
+      .then((r) => {
+        if (!cancelled) setFull(r);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingFull(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, wasTruncated, full, toolFetch, blockId]);
+  return { full, loadingFull };
 }
