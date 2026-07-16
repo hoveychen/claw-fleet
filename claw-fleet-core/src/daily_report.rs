@@ -1239,29 +1239,15 @@ pub fn generate_lessons_routed(
     None
 }
 
-/// Append a single lesson to `~/.claude/CLAUDE.md`.
+/// Add a single lesson to the user's global Claude guidance.
+///
+/// Delegates to [`crate::lessons_store`], which records the lesson as a
+/// sentinel-wrapped block in the managed `~/.claude/fleet-lessons.md` file and
+/// ensures a single `@import` of that file is present in `~/.claude/CLAUDE.md`.
+/// This replaces the old behaviour of appending a bare `# Lesson (…)` block
+/// directly into CLAUDE.md body (which could be neither enumerated nor undone).
 pub fn append_lesson_to_claude_md(lesson: &Lesson) -> Result<(), String> {
-    let path = crate::session::real_home_dir()
-        .ok_or_else(|| "cannot determine home dir".to_string())?
-        .join(".claude")
-        .join("CLAUDE.md");
-
-    let entry = format!(
-        "\n\n# Lesson (from {}, session {})\n{}\n\n**Why:** {}\n",
-        lesson.workspace_name, lesson.session_id, lesson.content, lesson.reason
-    );
-
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| format!("open CLAUDE.md: {e}"))?;
-
-    use std::io::Write;
-    file.write_all(entry.as_bytes())
-        .map_err(|e| format!("write CLAUDE.md: {e}"))?;
-
-    Ok(())
+    crate::lessons_store::add_lesson(lesson).map(|_| ())
 }
 
 // ── Session scanning for a specific date ────────────────────────────────────

@@ -46,6 +46,7 @@ pub mod mcp_injector;
 pub mod mcp_ipc;
 pub mod mcp_a2ui_ipc;
 pub mod mcp_server;
+pub mod lessons_store;
 pub mod memory;
 pub mod message_trim;
 pub mod mobile_relay;
