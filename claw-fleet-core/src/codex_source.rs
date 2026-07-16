@@ -1500,6 +1500,35 @@ mod tests {
     }
 
     #[test]
+    fn normalize_messages_joins_all_reasoning_summary_segments() {
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {"type": "reasoning", "summary": [
+                {"type": "summary_text", "text": "First step"},
+                {"type": "summary_text", "text": "  "},
+                {"type": "summary_text", "text": "Second step"}
+            ]},
+            "timestamp": "t1"
+        })];
+        let out = normalize_messages(lines);
+        assert_eq!(out[0]["message"]["content"][0]["type"], json!("thinking"));
+        assert_eq!(out[0]["message"]["content"][0]["thinking"], json!("First step\nSecond step"));
+    }
+
+    #[test]
+    fn normalize_messages_marks_empty_reasoning_summary_unavailable() {
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {"type": "reasoning", "summary": []},
+            "timestamp": "t1"
+        })];
+        let out = normalize_messages(lines);
+        assert_eq!(out[0]["message"]["content"][0], json!({
+            "type": "redacted_thinking", "reason": "summary_unavailable"
+        }));
+    }
+
+    #[test]
     fn normalize_messages_dedups_user_message_against_response_item() {
         // Current Codex rollouts persist a real prompt in both forms. The
         // response_item is canonical and the event_msg is only its timeline
@@ -3223,27 +3252,32 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                         }
                     }
                     "reasoning" => {
-                        // Convert reasoning to a thinking block in an assistant message.
+                        // Keep every non-empty summary segment. Newer models can
+                        // emit several; keeping only the first looked truncated.
                         let summary_text = payload
                             .get("summary")
                             .and_then(|s| s.as_array())
-                            .and_then(|arr| {
+                            .map(|arr| {
                                 arr.iter()
-                                    .filter_map(|item| {
-                                        item.get("text").and_then(|t| t.as_str())
-                                    })
-                                    .next()
+                                    .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                                    .map(str::trim)
+                                    .filter(|text| !text.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
                             })
-                            .unwrap_or("(reasoning)");
+                            .unwrap_or_default();
+
+                        let block = if summary_text.is_empty() {
+                            json!({"type": "redacted_thinking", "reason": "summary_unavailable"})
+                        } else {
+                            json!({"type": "thinking", "thinking": summary_text})
+                        };
 
                         messages.push(json!({
                             "type": "assistant",
                             "message": {
                                 "role": "assistant",
-                                "content": [{
-                                    "type": "thinking",
-                                    "thinking": summary_text
-                                }]
+                                "content": [block]
                             },
                             "timestamp": timestamp
                         }));
