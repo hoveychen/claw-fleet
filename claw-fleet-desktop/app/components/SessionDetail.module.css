@@ -401,6 +401,21 @@
   overflow-x: hidden;
 }
 
+/* Codex calls fleet__ask from inside its code-mode exec tool. The pending
+   request has no top-level transcript row until it is answered, so keep the
+   live card in the conversation flow from the decision store. */
+.inline_fleet_ask {
+  margin: 10px 16px 16px;
+}
+
+.inline_fleet_ask_loading {
+  padding: 12px 16px;
+  color: var(--color-text-dim);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+}
+
 /* The "load earlier" button moved into MessageList, which owns the render
    window it used to duplicate. Its styles live in MessageList.module.css. */
 
