@@ -3080,6 +3080,16 @@ impl Backend for LocalBackend {
         crate::daily_report::append_lesson_to_claude_md(lesson)
     }
 
+    fn list_managed_lessons(
+        &self,
+    ) -> Result<Vec<crate::lessons_store::ManagedLesson>, String> {
+        Ok(crate::lessons_store::list_lessons())
+    }
+
+    fn remove_managed_lesson(&self, id: &str) -> Result<(), String> {
+        crate::lessons_store::remove_lesson(id)
+    }
+
     fn list_llm_providers(&self) -> Vec<crate::llm_provider::LlmProviderInfo> {
         crate::llm_provider::all_provider_infos()
     }

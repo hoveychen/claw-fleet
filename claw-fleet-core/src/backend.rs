@@ -841,6 +841,11 @@ pub trait Backend: Send + Sync {
     fn generate_daily_report_ai_summary(&self, date: &str) -> Result<String, String>;
     fn generate_daily_report_lessons(&self, date: &str) -> Result<Vec<Lesson>, String>;
     fn append_lesson_to_claude_md(&self, lesson: &Lesson) -> Result<(), String>;
+    /// List lessons currently recorded in the managed `~/.claude/fleet-lessons.md`.
+    fn list_managed_lessons(&self)
+        -> Result<Vec<crate::lessons_store::ManagedLesson>, String>;
+    /// Remove a managed lesson by its stable id.
+    fn remove_managed_lesson(&self, id: &str) -> Result<(), String>;
 
     // ── LLM provider ────────────────────────────────────────────────────────
     fn list_llm_providers(&self) -> Vec<LlmProviderInfo>;

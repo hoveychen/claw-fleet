@@ -22,7 +22,7 @@ export type RateLimitState = { resetsAt: string, limitType: RateLimitType, parse
 export type SessionInfo = { id: string, workspacePath: string, workspaceName: string, ideName: string | null, 
 entrypoint: string | null, isSubagent: boolean, parentSessionId: string | null, agentType: string | null, agentDescription: string | null, slug: string | null, aiTitle: string | null, status: SessionStatus, tokenSpeed: number, 
 agentTokenSpeed: number, totalOutputTokens: number, 
-reasoningOutputTokens: number,
+reasoningOutputTokens: number, 
 totalInputTokens: number, 
 totalCostUsd: number, 
 agentTotalCostUsd: number, 
@@ -303,6 +303,9 @@ reason: string,
 workspaceName: string, 
 sessionId: string, };
 
+export type ManagedLesson = { 
+id: string, content: string, reason: string, workspaceName: string, sessionId: string, };
+
 export type ProcStatus = "starting" | "running" | "exited";
 
 export type ProcRecord = { id: string, workspacePath: string, command: string, status: ProcStatus, 
@@ -311,3 +314,4 @@ hostStartTime?: number | null,
 exitCode?: number | null, startedMs: number, finishedMs?: number | null, cols: number, rows: number, };
 
 export type ProcOutputChunk = { dataB64: string, nextOffset: number, record: ProcRecord, };
+

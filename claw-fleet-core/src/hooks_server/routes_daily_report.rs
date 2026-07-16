@@ -227,3 +227,53 @@ pub(crate) fn route_daily_report_append_lesson(
                     }
                 }
             }
+
+pub(crate) fn route_managed_lessons(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let lessons = crate::lessons_store::list_lessons();
+    let body = serde_json::to_string(&lessons).unwrap_or_else(|_| "[]".to_string());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
+pub(crate) fn route_managed_lesson_remove(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    let id = serde_json::from_slice::<serde_json::Value>(&body_bytes)
+        .ok()
+        .and_then(|v| v.get("id").and_then(|s| s.as_str()).map(|s| s.to_string()));
+    match id {
+        Some(id) => match crate::lessons_store::remove_lesson(&id) {
+            Ok(()) => {
+                let _ = request.respond(
+                    tiny_http::Response::from_string("{}").with_header(json_header),
+                );
+            }
+            Err(e) => {
+                let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        None => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(r#"{"error":"missing id"}"#)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}

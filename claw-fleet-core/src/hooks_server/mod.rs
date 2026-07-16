@@ -868,6 +868,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::DAILY_REPORT_APPEND_LESSON => route_daily_report_append_lesson(ctx, request, &query, json_header, path),
 
+            crate::routes::MANAGED_LESSONS => route_managed_lessons(ctx, request, &query, json_header, path),
+
+            crate::routes::MANAGED_LESSON_REMOVE => route_managed_lesson_remove(ctx, request, &query, json_header, path),
+
             // ── LLM provider endpoints ──────────────────────────────────
             crate::routes::LLM_PROVIDERS => route_llm_providers(ctx, request, &query, json_header, path),
 

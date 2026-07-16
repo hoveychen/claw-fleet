@@ -96,6 +96,27 @@ pub(crate) async fn append_lesson_to_claude_md(
 }
 
 #[tauri::command]
+pub(crate) async fn list_managed_lessons(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::lessons_store::ManagedLesson>, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || {
+        backend.read().unwrap().list_managed_lessons()
+    }).await.map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn remove_managed_lesson(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || {
+        backend.read().unwrap().remove_managed_lesson(&id)
+    }).await.map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
 pub(crate) fn check_pattern_update() -> String {
     pattern_update::check_update_now()
 }
