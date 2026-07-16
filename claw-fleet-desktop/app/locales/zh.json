@@ -13,7 +13,7 @@
     "memory_title": "记忆区一片空白，跟我开机时一样",
     "memory_subtitle": "干着干着 Agent 会把重点存这儿，总比指望我这金鱼内存强。",
     "skills_title": "技能槽空得能跑马",
-    "skills_subtitle": "往 ~/.claude/skills 丢点技能，Claude 解锁新姿势，我鼓掌——精神上的，没手。",
+    "skills_subtitle": "给 Claude 或 Codex 加个技能，这里就会亮起来。",
     "plugins_title": "插件？一个都没装",
     "plugins_subtitle": "装几个给 Fleet 加 buff，顺便给我找点事干。",
     "plugins_cta": "逛逛插件市场",
@@ -220,8 +220,14 @@
     "filter_files": "过滤文件…",
     "no_match": "没有匹配的文件。",
     "delete": "删除",
-    "delete_confirm": "确认删除 Skill「{{name}}」？该操作会从 ~/.claude/skills/ 移除整个 Skill，无法撤销。",
-    "delete_failed": "删除失败：{{error}}"
+    "delete_confirm": "确认从来源目录删除 Skill「{{name}}」？此操作无法撤销。",
+    "delete_failed": "删除失败：{{error}}",
+    "source_claude": "Claude",
+    "source_codex": "Codex",
+    "scope_user": "用户级",
+    "scope_repo": "仓库级",
+    "scope_admin": "管理员",
+    "scope_system": "内置"
   },
   "plugins": {
     "panel_title": "插件",
@@ -385,7 +391,9 @@
     "filter_project": "项目",
     "filter_reference": "引用",
     "unindexed_section": "未索引",
-    "all_workspaces": "全部工作区"
+    "all_workspaces": "全部工作区",
+    "source_claude": "Claude",
+    "source_codex": "Codex"
   },
   "wiki": {
     "panel_title": "知识库",

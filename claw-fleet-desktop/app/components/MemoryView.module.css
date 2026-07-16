@@ -130,6 +130,22 @@
   font-variant-numeric: tabular-nums;
 }
 
+.source_badge {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.source_badge + .badge {
+  margin-left: 0;
+}
+
 .badge {
   font-size: 9px;
   padding: 1px 6px;
@@ -276,6 +292,10 @@
 .type_badge.type_unknown {
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
+}
+.type_badge.type_codex {
+  background: rgb(var(--mem-reference) / 0.15);
+  color: rgb(var(--mem-reference));
 }
 
 /* ── Unindexed (orphan files) section ───────────────────────────────────── */

@@ -155,3 +155,12 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+.source_tag {
+  padding: 0 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  color: var(--color-text-dim);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
