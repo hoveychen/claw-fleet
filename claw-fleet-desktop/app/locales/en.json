@@ -501,6 +501,21 @@
       "residual_unexplained": "Unexplained residual"
     }
   },
+  "codex_token": {
+    "loading": "Loading Codex token usage…",
+    "no_data": "No data",
+    "kpi_total": "Total tokens",
+    "kpi_cost": "Cost",
+    "kpi_context": "Context used",
+    "section_breakdown": "Token breakdown",
+    "row_input": "Input (full-price)",
+    "row_cached": "Cached input (cache-read)",
+    "row_output": "Output (incl. reasoning)",
+    "row_total": "Total",
+    "col_source": "Source",
+    "col_tokens": "Tokens",
+    "caveat": "From Codex's cumulative total_token_usage. Cached input is a subset of raw input billed at the cache-read rate; output already includes reasoning tokens. Cost uses the model's public price tier."
+  },
   "inspect": {
     "close": "Close",
     "path": "Path"
