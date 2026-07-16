@@ -106,19 +106,45 @@ export function waitTimeoutSecs(input: Record<string, unknown>): string | null {
   return timeoutMsToSecs(input.yield_time_ms);
 }
 
+/** One file touched by a codex `apply_patch` hunk. */
+interface PatchFile {
+  op: "Add" | "Update" | "Delete";
+  path: string;
+}
+
+/**
+ * Pull the touched files out of a codex `apply_patch` body. The patch is the V4A
+ * text format — file headers read `*** Add File: <path>` / `*** Update File:
+ * <path>` / `*** Delete File: <path>` (a survey of 38 local rollouts showed
+ * every apply_patch starting with `*** Begin Patch`, so the whole body would
+ * otherwise collapse to that useless first line).
+ */
+export function parsePatchFiles(patch: string): PatchFile[] {
+  const files: PatchFile[] = [];
+  const re = /^\*\*\* (Add|Update|Delete) File: (.+)$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(patch)) !== null) {
+    files.push({ op: m[1] as PatchFile["op"], path: m[2].trim() });
+  }
+  return files;
+}
+
 /**
  * Friendly one-liner for codex's function-call tools, which otherwise fall
  * through to a raw `JSON.stringify` of their args (a survey of 156 local
  * rollouts showed `wait`, `write_stdin`, `wait_agent`, `spawn_agent`,
- * `update_plan`, `request_user_input` all rendering as noise). Returns null for
- * anything not handled here so the caller falls back to `formatInput`. The full
- * args JSON still shows in the expanded body — this only rewrites the collapsed
- * summary. `t` is the i18next translator; keys live under `detail.tool_*`.
+ * `update_plan`, `request_user_input` all rendering as noise) — plus the
+ * `apply_patch` custom-tool call, whose patch body otherwise shows only its
+ * `*** Begin Patch` header. Returns null for anything not handled here so the
+ * caller falls back to `formatInput`. The full args JSON still shows in the
+ * expanded body — this only rewrites the collapsed summary. `t` is the i18next
+ * translator; keys live under `detail.tool_*`.
  */
 export function codexToolSummary(
   name: string,
   input: Record<string, unknown>,
   t: (key: string, opts?: Record<string, unknown>) => string,
+  wsRoot?: string,
 ): string | null {
   const withTimeout = (base: string, timedKey: string, value: unknown) => {
     const secs = timeoutMsToSecs(value);
@@ -155,6 +181,24 @@ export function codexToolSummary(
       return t("detail.tool_update_plan");
     case "request_user_input":
       return t("detail.tool_request_input");
+    // A file edit delivered as a V4A patch (the backend puts the patch body
+    // under `command`). Name the file(s) touched instead of dumping the patch.
+    case "apply_patch": {
+      const patch = typeof input.command === "string" ? input.command : "";
+      const files = parsePatchFiles(patch);
+      if (files.length === 0) return null; // let formatInput show the raw body
+      if (files.length === 1) {
+        const { op, path } = files[0];
+        const key =
+          op === "Add"
+            ? "detail.tool_patch_add"
+            : op === "Delete"
+              ? "detail.tool_patch_delete"
+              : "detail.tool_patch_update";
+        return t(key, { path: relToWorkspace(path, wsRoot) });
+      }
+      return t("detail.tool_patch_multi", { count: files.length });
+    }
     default:
       return null;
   }
@@ -313,7 +357,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // codex's function-call tools get a friendly one-liner instead of their raw
   // args object; everything else falls back to the generic formatter.
   const summary =
-    codexToolSummary(block.name, block.input, t) ??
+    codexToolSummary(block.name, block.input, t, paths?.workspaceRoot) ??
     formatInput(block.input, block.name, paths?.workspaceRoot);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
