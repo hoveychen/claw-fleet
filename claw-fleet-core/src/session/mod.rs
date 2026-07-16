@@ -2808,6 +2808,31 @@ mod tests {
     }
 
     #[test]
+    fn context_window_gpt5_family_fallback() {
+        // Codex normally reports the precise per-session window via
+        // token_count.model_context_window, so this fallback rarely fires. But
+        // if that field is ever missing, gpt-5.x must not fall through to None
+        // (which hides the ctx chip). All Codex slugs — plain gpt-5, the 5.6
+        // sol/luna/terra tiers, and 5.5/5.4 — map to the advertised 400K
+        // GPT-5 context window.
+        for model in [
+            "gpt-5",
+            "gpt-5.6-sol",
+            "gpt-5.6-luna",
+            "gpt-5.6-terra",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.1-codex-mini",
+        ] {
+            assert_eq!(
+                context_window_for_model(model, 0),
+                Some(400_000),
+                "{model} should fall back to the 400K gpt-5 window"
+            );
+        }
+    }
+
+    #[test]
     fn process_start_time_returns_value_for_self_and_is_stable() {
         let pid = std::process::id();
         let first = super::process_start_time(pid).expect("self should have a start time");
