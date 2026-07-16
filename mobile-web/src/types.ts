@@ -169,6 +169,9 @@ export interface ContentBlock {
   /** tool_use block id / tool_result back-reference (preceding-narration slicing). */
   id?: string;
   tool_use_id?: string;
+  /** true when a tool_result is an error (e.g. a failed/cancelled ask card that
+   *  the user never actually answered). */
+  is_error?: boolean;
 }
 
 export interface RawMessage {
