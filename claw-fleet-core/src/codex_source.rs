@@ -3845,6 +3845,23 @@ impl AgentSource for CodexSource {
         vec!["zst", "jsonl"]
     }
 
+    fn memory_watch_paths(&self) -> Vec<PathBuf> {
+        let Some(home) = get_codex_dir() else {
+            return vec![];
+        };
+        // Watching CODEX_HOME covers both `memories/` Markdown and SQLite's
+        // WAL/SHM updates without requiring the database files to pre-exist.
+        vec![home]
+    }
+
+    fn list_memories(&self) -> Vec<crate::memory::WorkspaceMemory> {
+        crate::memory::scan_codex_memories()
+    }
+
+    fn get_memory_content(&self, path: &str) -> Result<String, String> {
+        crate::memory::read_memory_file(path)
+    }
+
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
         crate::session::kill_pid_impl(pid)
     }
