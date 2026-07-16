@@ -283,7 +283,11 @@ fleet watch create --until \"<shell cmd that exits 0 when done>\" --capture \"<s
 - A detached timer polls the condition; the moment it succeeds Fleet resumes \
 THIS session and hands the captured output to your next turn. `fleet watch \
 stop <id>` cancels. It inherits this session's model / effort / source, so a \
-codex session resumes as codex.",
+codex session resumes as codex.\n\
+\n\
+## Rule 7 — One-line summary comment atop every `exec`\n\
+\n\
+Every `exec` script you run: make the FIRST line a `// ` comment saying, in one short sentence (老板's language, keep it terse), what this exec does. Fleet surfaces that line as the card's human-readable summary so 老板 sees each step's intent without reading code. Never omit it — even a one-line script gets the comment.",
         title = title,
         prd_lang = prd_lang,
     )
