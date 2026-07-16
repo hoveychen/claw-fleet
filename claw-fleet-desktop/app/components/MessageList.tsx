@@ -35,6 +35,7 @@ import { UserContent } from "./blocks/UserContent";
 import { CopyButton } from "./CopyButton";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import { MetaFoldBlock } from "./blocks/MetaFoldBlock";
+import { groupMetaRuns } from "./metaGrouping";
 import styles from "./MessageList.module.css";
 
 // ── Search highlight ─────────────────────────────────────────────────────────
@@ -282,7 +283,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
   if (isUser && msg.isMeta) {
     return (
       <div className={styles.compact_row} data-msg-idx={msgIdx}>
-        <MetaFoldBlock body={messageToText(msg)} />
+        <MetaFoldBlock segments={[messageToText(msg)]} />
       </div>
     );
   }
@@ -601,6 +602,11 @@ export function MessageList({
   );
   const visibleMsgs = displayMsgs.slice(effectiveStart);
 
+  // Collapse runs of adjacent synthetic `isMeta` user turns into a single fold,
+  // so N back-to-back injected turns don't stack N identical "系统上下文" dividers.
+  // Grouping lives at the list level — a MessageRow only sees one message.
+  const renderUnits = groupMetaRuns(visibleMsgs);
+
   // Keep the reader's place when the transcript grows.
   //
   // A *prepend* (older history arriving) needs nothing: the window counts from
@@ -775,23 +781,42 @@ export function MessageList({
             : `↑ ${t("detail.load_earlier")}`}
         </button>
       )}
-      {visibleMsgs.map((msg, i) => {
+      {renderUnits.map((unit) => {
+        const i = unit.startLocal;
         // A separator opens each new day, and also the top of the window — a
         // reader scrolled into the middle of an old session needs the date too.
-        const today = dayKey(msg.timestamp);
+        // Keyed off the unit's first row; meta groups never straddle a day.
+        const today = dayKey(visibleMsgs[i].timestamp);
         const prev = i > 0 ? dayKey(visibleMsgs[i - 1].timestamp) : null;
         const showDay = today !== null && (i === 0 || today !== prev);
+        const globalStart = effectiveStart + i;
+        if (unit.kind === "meta-group") {
+          // One divider for the whole run. Each folded turn still carries its own
+          // `data-msg-idx` anchor (empty spans) so search-navigation can scroll to
+          // any member — they all resolve to the collapsed card's position.
+          return (
+            <Fragment key={visibleMsgs[i].uuid ?? globalStart}>
+              {showDay && <DaySeparator isoDay={today} />}
+              <div className={styles.compact_row} data-msg-idx={globalStart}>
+                {unit.msgs.slice(1).map((_, k) => (
+                  <span key={k} data-msg-idx={globalStart + 1 + k} aria-hidden />
+                ))}
+                <MetaFoldBlock segments={unit.msgs.map(messageToText)} />
+              </div>
+            </Fragment>
+          );
+        }
         return (
-          <Fragment key={msg.uuid ?? (effectiveStart + i)}>
+          <Fragment key={unit.msg.uuid ?? globalStart}>
             {showDay && <DaySeparator isoDay={today} />}
             <MessageRow
-              msg={msg}
+              msg={unit.msg}
               resultMap={resultMap}
               metaMap={metaMap}
               decisionRecords={records}
               searchTerms={searchTerms}
-              msgIdx={effectiveStart + i}
-              isActiveMatch={effectiveStart + i === searchMatchIndex}
+              msgIdx={globalStart}
+              isActiveMatch={globalStart === searchMatchIndex}
               paths={paths}
             />
           </Fragment>
