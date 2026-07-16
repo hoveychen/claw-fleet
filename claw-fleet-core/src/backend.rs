@@ -584,6 +584,15 @@ pub trait Backend: Send + Sync {
         project_root: Option<&str>,
     ) -> Result<crate::token_analysis::TaskTokenBreakdown, String>;
 
+    /// Codex-native token breakdown for a single `codex://` rollout. Codex
+    /// rollouts have none of the source-attribution buckets
+    /// `get_task_token_breakdown` reports, so the desktop "Token" tab routes
+    /// codex sessions here instead. See `codex_source::codex_token_breakdown`.
+    fn get_codex_token_breakdown(
+        &self,
+        jsonl_path: &str,
+    ) -> Result<crate::codex_source::CodexTokenBreakdown, String>;
+
     // ── Plugins ──────────────────────────────────────────────────────────────
     /// Scan `~/.claude/plugins/` for installed Claude Code plugins.
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem>;
