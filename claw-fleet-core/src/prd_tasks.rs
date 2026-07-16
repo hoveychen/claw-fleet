@@ -1122,6 +1122,101 @@ pub fn resolve_current_task(
     })
 }
 
+// ── Active-plans reminder (shared by `fleet prd-context` + codex prompt-prepend) ─
+
+/// Backstop directive for the child→parent backtrack. Returns `Some(text)` when
+/// `session_id`'s attributed plan is a child that is now fully complete and its
+/// nearest ancestor still has pending work — the same condition `plan check`
+/// acts on, re-checked here every prompt in case focus was left on a completed
+/// child (hand-edited box, handoff successor, etc.). `None` in every other case.
+fn backtrack_backstop(cwd: &Path, session_id: Option<&str>) -> Option<String> {
+    let sid = session_id?;
+    let rec = crate::task_progress::read(sid)?;
+    let focused = rec.plan_id.as_str();
+    let src = find_plan_source(cwd, focused)?;
+    let content = std::fs::read_to_string(&src).ok()?;
+    let body = plan_body(&content, focused)?;
+    if body.lines().any(is_pending_task_line) {
+        return None;
+    }
+    let target = resolve_backtrack_target(cwd, focused)?;
+    let next = target.next_task.as_deref().unwrap_or("第一个未完成的 P");
+    Some(format!(
+        "⤴ 回溯提醒:你当前归属的子 plan `{focused}` 已全部完成,其父 plan `{parent}` \
+         尚有未完成任务。请运行 `fleet plan resume {parent}` 并从 {next} 继续执行,\
+         不要因为子 plan 完成就结束工作。",
+        parent = target.plan_id,
+    ))
+}
+
+/// Build the `<system-reminder>` block that re-injects a workspace's active
+/// TASKS.md plans (merged across the main checkout and sibling worktrees).
+///
+/// This is the single source of truth for the injected text: the `fleet
+/// prd-context` UserPromptSubmit hook (Claude Code) wraps the return value in a
+/// `hookSpecificOutput` JSON envelope, and the codex prompt-prepend path (B2)
+/// prepends it directly to the codex prompt. Returns `None` when there is
+/// nothing to inject (no TASKS.md anywhere, or a clean file with no active plan
+/// and no structural problem) — callers then no-op.
+pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Option<String> {
+    let main_root = discover_main_checkout_root(cwd);
+    let sources = collect_task_sources(cwd, main_root.as_deref());
+    if sources.is_empty() {
+        return None;
+    }
+
+    let (raw, problems) = collect_from_sources(&sources, true);
+    let warning = render_problem_warning(&problems);
+    let deduped = dedup_blocks_keep_latest_mtime(raw);
+    let rendered = render_with_sources(&deduped, main_root.as_deref());
+    let backtrack_note = backtrack_backstop(cwd, session_id);
+
+    if deduped.is_empty() && warning.is_none() {
+        return None;
+    }
+
+    let sources_list = sources
+        .iter()
+        .map(|p| format!("  - {}", p.display()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if deduped.is_empty() {
+        let warn = warning.unwrap_or_default();
+        return Some(format!(
+            "<system-reminder>\n{warn}\n\nSources scanned:\n{sources_list}\n</system-reminder>",
+        ));
+    }
+
+    let n = deduped.len();
+    let plan_word = if n == 1 { "plan" } else { "plans" };
+    let warn_block = match &warning {
+        Some(w) => format!("\n\n{w}"),
+        None => String::new(),
+    };
+    let backtrack_block = match &backtrack_note {
+        Some(b) => format!("\n\n{b}"),
+        None => String::new(),
+    };
+    Some(format!(
+        "<system-reminder>\n\
+The workspace `TASKS.md` (re-injected on every prompt by Fleet PRD \
+Discipline mode) holds {n} active {plan_word} below — merged across the \
+main checkout and any sibling worktrees. This file is the durable macro \
+plan — defer to it over your in-context memory of which P-tasks are done. \
+After each P-task, update the checkbox in the source file shown for that \
+plan. Only modify the block whose `id` matches the plan you are working \
+on; treat every other block as another agent's in-flight work. When the \
+same `id` appears in multiple TASKS.md files, the most recently modified \
+file wins — keep a given `id` in exactly one file.\n\
+\n\
+Sources scanned:\n{sources_list}\n\
+\n\
+{rendered}{warn_block}{backtrack_block}\n\
+</system-reminder>",
+    ))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1389,6 +1484,44 @@ trailing notes outside\n";
         let out = dedup_blocks_keep_latest_mtime(blocks);
         let ids: Vec<&str> = out.iter().filter_map(|b| b.id.as_deref()).collect();
         assert_eq!(ids, vec!["b", "a", "c"]);
+    }
+
+    #[test]
+    fn render_active_plans_reminder_none_when_no_tasks_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No TASKS.md anywhere → nothing to inject.
+        assert!(render_active_plans_reminder(tmp.path(), None).is_none());
+    }
+
+    #[test]
+    fn render_active_plans_reminder_wraps_active_plan() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("TASKS.md"),
+            "# TASKS\n\n\
+<!-- fleet:prd:begin id=\"demo\" v=\"2\" -->\n\n\
+**Plan:** Demo work\n\n\
+- [ ] **P1** — first task\n\n\
+<!-- fleet:prd:end id=\"demo\" -->\n",
+        )
+        .unwrap();
+        let out = render_active_plans_reminder(tmp.path(), None).expect("active plan → Some");
+        // Same envelope the `fleet prd-context` hook emits, so codex sees an
+        // identical block to Claude.
+        assert!(out.starts_with("<system-reminder>"));
+        assert!(out.trim_end().ends_with("</system-reminder>"));
+        assert!(out.contains("1 active plan"));
+        assert!(out.contains("## Plan: demo"));
+        assert!(out.contains("**P1** — first task"));
+        assert!(out.contains("Sources scanned:"));
+    }
+
+    #[test]
+    fn render_active_plans_reminder_none_for_clean_file_without_plan() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A TASKS.md with no sentinel block and no structural problem → no-op.
+        std::fs::write(tmp.path().join("TASKS.md"), "# TASKS\n\njust notes, no plan\n").unwrap();
+        assert!(render_active_plans_reminder(tmp.path(), None).is_none());
     }
 
     #[test]
