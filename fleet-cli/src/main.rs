@@ -230,6 +230,16 @@ enum Commands {
         #[command(subcommand)]
         action: LoopCommands,
     },
+    /// Monitor / background Bash / ScheduleWakeup — background tasks that silently
+    /// die with a headless `claude -p` session — a Fleet watch survives the turn
+    /// boundary: it polls a shell condition in a detached timer and, when the
+    /// condition fires, resumes THIS session (`claude --resume`) so its next turn
+    /// sees the result. Create reads FLEET_SESSION_ID to know which session to
+    /// reanimate and to inherit its workspace/model/effort.
+    Watch {
+        #[command(subcommand)]
+        action: WatchCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -271,6 +281,55 @@ pub(crate) enum LoopCommands {
     #[command(hide = true)]
     Fire {
         /// The loop id.
+        id: String,
+        /// Generation this timer was armed for (staleness guard).
+        generation: u64,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum WatchCommands {
+    /// Wait until <until> succeeds, then resume this session with the result.
+    Create {
+        /// Shell command polled each interval; exit status 0 ⇒ the condition is
+        /// met and the watch fires. E.g. `gh run view 123 --json status -q .status
+        /// | grep -qx completed`.
+        #[arg(long)]
+        until: String,
+        /// Shell command whose stdout is handed to the resumed session as the
+        /// event text. Omit to just say the watch fired. E.g. `gh run view 123
+        /// --json conclusion -q .conclusion`.
+        #[arg(long)]
+        capture: Option<String>,
+        /// Human note describing what is being waited for, shown to the woken
+        /// session so it knows why it came back.
+        #[arg(long)]
+        note: Option<String>,
+        /// Seconds between polls, e.g. `30s`, `2m` (min 5s, default 30s).
+        #[arg(long)]
+        poll: Option<String>,
+        /// Give up after this long and resume with a timeout notice, e.g. `30m`,
+        /// `2h` (default 2h, max 7d).
+        #[arg(long)]
+        timeout: Option<String>,
+    },
+    /// List all registered watches.
+    #[command(alias = "ls")]
+    List {
+        /// Output raw JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop a watch by its id (from `fleet watch list`).
+    Stop {
+        /// The watch id.
+        id: String,
+    },
+    /// Internal: the detached timer body. Polls the condition, fires once, exits.
+    /// Spawned by `create` and the Stop-hook reconcile; not meant to be run by hand.
+    #[command(hide = true)]
+    Fire {
+        /// The watch id.
         id: String,
         /// Generation this timer was armed for (staleness guard).
         generation: u64,
@@ -619,6 +678,7 @@ fn main() {
             action,
         ),
         Commands::Loop { action } => commands::loop_cmd::cmd_loop(action),
+        Commands::Watch { action } => commands::watch::cmd_watch(action),
         Commands::PrdDiscipline { action } => match action {
             PrdDisciplineCommands::Apply { title, locale } => {
                 commands::prd::cmd_prd_discipline_apply(&title, &locale)

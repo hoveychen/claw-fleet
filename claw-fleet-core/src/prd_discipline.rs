@@ -548,8 +548,17 @@ such a turn is the tool call itself: run `fleet handoff --note \"...\"`, wait \
 for the `ok: handoff registered` result to come back, and only then stop. \
 Never let a turn end with the handoff living only as prose, and never reach \
 for ScheduleWakeup / `/loop` / cron to \"continue later\" — those silently \
-no-op inside a Fleet session and spawn nothing. `fleet handoff` is the only \
-relay that actually fires.\n\
+no-op inside a Fleet session and spawn nothing. Two Fleet relays actually fire \
+across the turn boundary: `fleet handoff` for *continuing the work* (hand a \
+briefing to a fresh successor), and `fleet watch` for *waiting on an external \
+condition* — a CI run finishing, a build producing an artifact, a deploy going \
+live. Do NOT sit in a foreground `Monitor` / background `Bash` waiting for such \
+an event: they die the instant the `-p` turn ends and their notification never \
+arrives. Instead run `fleet watch create --until '<shell cmd that exits 0 when \
+done>' --capture '<shell cmd whose stdout you want reported>' --note '<what you \
+are waiting for>'`, then end the turn — Fleet polls in the background and \
+`claude --resume`s THIS session the moment the condition fires, feeding the \
+captured result to your next turn. `fleet watch stop <id>` cancels it.\n\
 \n\
 ## Recommended tooling for the worktree workflow\n\
 \n\

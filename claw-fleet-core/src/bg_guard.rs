@@ -198,11 +198,16 @@ pub fn block_reason(payload: &StopPayload, is_headless: bool) -> Option<String> 
         out.push_str(&format!(
             "你还有 {n} 个后台任务在运行：\n\n{listing}\n\n\
              它们会在约 5 秒后被终止，输出永久丢失，你承诺的「稍后汇报」永远不会发生。\n\n\
-             请三选一：\n\
+             请四选一：\n\
              1. **前台等待**：直接用不带 `run_in_background` 的 Bash 跑等待循环（或 BashOutput 轮询到任务结束），\
              把结果拿到手再收尾——进程活着，任务才活着。\n\
-             2. **交棒**：如果要等很久，用 `fleet handoff --note \"...\"` 注册接力，让后继会话接手这件事。\n\
-             3. **放弃**：如果这些任务已经不重要，用 KillShell 显式终止它们，然后正常结束。\n\n",
+             2. **条件观察（推荐用于等外部事件完成）**：如果这个后台任务只是在等某件事完成\
+             （CI 跑完、build 出产物、deploy 上线、文件出现），别自己前台死等——用 \
+             `fleet watch create --until '<shell 命令，完成时 exit 0>' --capture '<产出要汇报的文本>' --note '在等什么'`。\
+             注册后可以**正常结束这个 turn**：Fleet 在后台轮询到条件满足时，会自动 `claude --resume` 拉起本会话，\
+             把结果喂给你的下一个 turn。`fleet watch stop <id>` 取消。这正是 `Monitor` 在 headless 会话里做不到的事。\n\
+             3. **交棒**：如果不是等某个可判定的条件、而是要继续做一长段活，用 `fleet handoff --note \"...\"` 注册接力，让后继会话接手。\n\
+             4. **放弃**：如果这些任务已经不重要，用 KillShell 显式终止它们，然后正常结束。\n\n",
             n = running.len(),
             listing = listing,
         ));
@@ -223,6 +228,9 @@ pub fn block_reason(payload: &StopPayload, is_headless: bool) -> Option<String> 
              要真正的跨 turn 定时/循环，用 Fleet 的机制：\n\
              - **循环**：`fleet loop create --interval <5m|1h> --prompt \"...\"`——\
              Fleet 会在到点时拉起一个新会话执行该 prompt，进程退出也不影响。`fleet loop stop <id>` 停止。\n\
+             - **条件观察**（如果你注册 wakeup 只是想「过一会回来看 X 好没好」）：\
+             `fleet watch create --until '<完成时 exit 0 的命令>' --capture '<要汇报的文本>'`——\
+             Fleet 轮询到条件满足就 `claude --resume` 拉起本会话，比定时轮询更省。`fleet watch stop <id>` 停止。\n\
              - **一次性接力**：`fleet handoff --note \"...\"`，在本轮结束时立刻交棒给后继会话。\n\n\
              请先用 `CronDelete` 删掉上面这些无效的 cron，再改用上述机制；如果这个循环其实不需要，删掉即可正常结束。\n",
             n = crons.len(),
