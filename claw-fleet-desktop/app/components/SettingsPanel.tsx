@@ -25,7 +25,6 @@ interface HookSetupPlan {
   prdDisciplineInstalled: boolean;
   wikiGuidanceInstalled: boolean;
   modelGuidanceInstalled: boolean;
-  codexGuidanceInstalled: boolean;
 }
 
 interface SourceInfo {
@@ -243,15 +242,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
           console.error("auto-apply model guidance:", e),
         );
       }
-      // Codex guidance: opt-in, disk (~/.codex/AGENTS.md sentinel) is the
-      // source of truth. Re-apply on startup to pick up title/locale changes.
-      setCodexGuidanceEnabled(plan.codexGuidanceInstalled);
-      setItem("codex-guidance-enabled", plan.codexGuidanceInstalled ? "true" : "false");
-      if (plan.codexGuidanceInstalled) {
-        invoke("apply_codex_guidance").catch((e: unknown) =>
-          console.error("auto-apply codex guidance:", e),
-        );
-      }
+      // Codex guidance is derived, not a separate toggle: mirror the Claude
+      // concept toggles (interaction / PRD / wiki / model) onto
+      // ~/.codex/AGENTS.md on startup. reconcile reads the Claude sentinels
+      // (disk source of truth), refreshes title/locale, and migrates away any
+      // legacy monolithic codex-guidance block from before the split.
+      invoke("reconcile_codex_guidance").catch((e: unknown) =>
+        console.error("startup reconcile codex guidance:", e),
+      );
     }).catch(() => {});
   }, []);
 
@@ -332,6 +330,17 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     () => getItem("interaction-mode-enabled") === "true",
   );
 
+  // Mirror the Claude-side concept toggles onto codex's ~/.codex/AGENTS.md.
+  // A single concept toggle drives BOTH carriers: after the Claude apply/remove
+  // lands, this reads the resulting Claude sentinel state and reconciles the
+  // matching codex blocks. Idempotent and order-independent, so it's safe to
+  // call after every concept toggle and on startup.
+  const reconcileCodexGuidance = useCallback(() => {
+    return invoke("reconcile_codex_guidance").catch((e: unknown) =>
+      console.error("reconcile codex guidance:", e),
+    );
+  }, []);
+
   const handleToggleInteractionMode = useCallback(async (enabled: boolean) => {
     setInteractionModeEnabled(enabled);
     setItem("interaction-mode-enabled", enabled ? "true" : "false");
@@ -341,11 +350,12 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       } else {
         await invoke("remove_interaction_mode");
       }
+      await reconcileCodexGuidance();
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("interaction mode toggle failed:", e);
     }
-  }, []);
+  }, [reconcileCodexGuidance]);
 
   // ── PRD discipline mode state (default off) ───────────────────────────
   const [prdModeEnabled, setPrdModeEnabled] = useState(
@@ -361,11 +371,12 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       } else {
         await invoke("remove_prd_mode");
       }
+      await reconcileCodexGuidance();
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("prd mode toggle failed:", e);
     }
-  }, []);
+  }, [reconcileCodexGuidance]);
 
   // ── Wiki guidance state (default off) ──────────────────────────────────
   const [wikiGuidanceEnabled, setWikiGuidanceEnabled] = useState(
@@ -381,11 +392,12 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       } else {
         await invoke("remove_wiki_guidance");
       }
+      await reconcileCodexGuidance();
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("wiki guidance toggle failed:", e);
     }
-  }, []);
+  }, [reconcileCodexGuidance]);
 
   // ── Model guidance state (default off) ─────────────────────────────────
   const [modelGuidanceEnabled, setModelGuidanceEnabled] = useState(
@@ -401,31 +413,12 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       } else {
         await invoke("remove_model_guidance");
       }
+      await reconcileCodexGuidance();
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("model guidance toggle failed:", e);
     }
-  }, []);
-
-  // ── Codex guidance state (default off) ─────────────────────────────────
-  const [codexGuidanceEnabled, setCodexGuidanceEnabled] = useState(
-    () => getItem("codex-guidance-enabled") === "true",
-  );
-
-  const handleToggleCodexGuidance = useCallback(async (enabled: boolean) => {
-    setCodexGuidanceEnabled(enabled);
-    setItem("codex-guidance-enabled", enabled ? "true" : "false");
-    try {
-      if (enabled) {
-        await invoke("apply_codex_guidance");
-      } else {
-        await invoke("remove_codex_guidance");
-      }
-      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
-    } catch (e) {
-      console.error("codex guidance toggle failed:", e);
-    }
-  }, []);
+  }, [reconcileCodexGuidance]);
 
   const handleToggleElicitation = useCallback(async (enabled: boolean) => {
     setElicitationEnabled(enabled);
@@ -435,18 +428,20 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
         await invoke("apply_elicitation_hook");
       } else {
         await invoke("remove_elicitation_hook");
-        // Interaction mode depends on elicitation; disable it together.
+        // Interaction mode depends on elicitation; disable it together — and
+        // mirror the removal onto codex so its interaction block goes too.
         if (getItem("interaction-mode-enabled") === "true") {
           setInteractionModeEnabled(false);
           setItem("interaction-mode-enabled", "false");
           await invoke("remove_interaction_mode").catch(() => {});
+          await reconcileCodexGuidance();
         }
       }
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("elicitation hook toggle failed:", e);
     }
-  }, []);
+  }, [reconcileCodexGuidance]);
 
   // ── Plan approval state (default off) ─────────────────────────────────
   const [planApprovalEnabled, setPlanApprovalEnabled] = useState(
@@ -1763,19 +1758,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                    {t("settings.codex_guidance_desc")}
+                    {t("settings.codex_mirror_note")}
                   </span>
-                </div>
-                <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.codex_guidance_enabled")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={codexGuidanceEnabled}
-                      onChange={(e) => handleToggleCodexGuidance(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
                 </div>
 
               </div>
