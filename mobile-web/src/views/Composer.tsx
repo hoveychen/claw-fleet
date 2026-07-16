@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
-import { useDraft } from "../draft";
+import { useDraft, loadDraft, saveDraft } from "../draft";
 import { t } from "../i18n";
 import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type RelayClient } from "../relay";
 import { waitForSessionId } from "../spawnConfirm";
@@ -293,10 +293,10 @@ interface NewSessionProps {
 const NEW_SESSION_DRAFT_KEY = "new-session";
 const NEW_SESSION_ATTACH_KEY = "new-session:attachments";
 
-/** 最近用过的 workspace（`[path, name]`），去重后**按最近活动时间倒序**——最近用过的
- *  排最前，剔除纯聊天路径（它单独钉在选项首位）。提交成功会清空草稿，下次打开
- *  sheet 退回列表首项，于是「刚用过的那个 workspace」自然成为默认——这就是桌面端
- *  NewSessionForm.distinctWorkspaces 的等价行为，实现「记住最后一次使用的路径」。*/
+/** 最近用过的 workspace（`[path, name]`），去重后**按名称字母序**排列，方便扫读；
+ *  剔除纯聊天路径（它单独钉在选项首位）。默认选中**不**依赖这里的顺序——它来自
+ *  记住的「上次成功创建会话用的 repo」（见 {@link defaultWorkspace}）。与桌面端
+ *  NewSessionForm.distinctWorkspaces 保持一致。*/
 export function recentWorkspaces(
   sessions: SessionInfo[],
   chatPath: string | null,
@@ -311,8 +311,27 @@ export function recentWorkspaces(
     }
   }
   return [...byPath.entries()]
-    .sort((a, b) => b[1].lastMs - a[1].lastMs)
+    .sort((a, b) => a[1].name.localeCompare(b[1].name))
     .map(([path, { name }]) => [path, name]);
+}
+
+/** localStorage key（走 draft.ts 的 `fleet-draft:` 前缀），记住上次成功创建会话用的
+ *  repo。与新会话草稿是独立的键，故提交成功 clearDraft() 时不会被清掉。 */
+const LAST_WORKSPACE_KEY = "last-new-session-workspace";
+
+/** 新会话默认选中的 workspace：用户本次已选且有效（draftWorkspace）时沿用；否则优先
+ *  「上次用过的 repo」（lastWorkspace）——失效则退回列表首项，再退回纯聊天路径。 */
+export function defaultWorkspace(
+  draftWorkspace: string,
+  recents: [string, string][],
+  chatPath: string | null,
+  lastWorkspace: string,
+): string {
+  const valid = new Set(recents.map((r) => r[0]));
+  if (chatPath) valid.add(chatPath);
+  if (draftWorkspace === "__custom__" || valid.has(draftWorkspace)) return draftWorkspace;
+  if (valid.has(lastWorkspace)) return lastWorkspace;
+  return recents[0]?.[0] ?? chatPath ?? "";
 }
 
 const NEW_SESSION_DEFAULT = {
@@ -380,14 +399,14 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources, toolChoices, tool]);
 
-  // 持久化的 workspace 可能已失效（那个 workspace 不在最近列表里了），
-  // 落不到有效选项时退回列表首项，避免 <select> 显示空白。
-  const workspacePaths = new Set(recents.map((r) => r[0]));
-  if (chatPath) workspacePaths.add(chatPath);
-  const workspace =
-    draft.workspace === "__custom__" || workspacePaths.has(draft.workspace)
-      ? draft.workspace
-      : (recents[0]?.[0] ?? chatPath ?? "");
+  // 默认选中「上次成功创建会话用的 repo」（独立持久化，不随草稿清空），失效则退回
+  // 列表首项，避免 <select> 显示空白。用户本次已选且有效时沿用其选择。
+  const workspace = defaultWorkspace(
+    draft.workspace,
+    recents,
+    chatPath,
+    loadDraft(LAST_WORKSPACE_KEY, ""),
+  );
 
   const effectiveWorkspace = workspace === "__custom__" ? customWorkspace.trim() : workspace;
   const canSubmit = Boolean(client && effectiveWorkspace && prompt.trim() && !busy && !uploading);
@@ -414,6 +433,8 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
     const succeed = () => {
       if (settled) return;
       settled = true;
+      // 记住这次用的 repo，下次打开新会话 sheet 默认选中它（独立键，不受 clearDraft 影响）。
+      saveDraft(LAST_WORKSPACE_KEY, effectiveWorkspace);
       clearDraft();
       reset();
       onClose();
