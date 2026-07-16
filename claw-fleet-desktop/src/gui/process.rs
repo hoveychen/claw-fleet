@@ -142,6 +142,23 @@ pub(crate) fn set_session_mark(
         .set_session_mark(session_id, workspace_path, mark)
 }
 
+/// Set (or clear, when `title` is null/empty) the human's manual title override
+/// for a session. Delegates via the backend so LocalBackend writes the local
+/// side-channel file and RemoteBackend POSTs it to the probe.
+#[tauri::command]
+pub(crate) fn set_session_title(
+    session_id: String,
+    workspace_path: String,
+    title: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .set_session_title(session_id, workspace_path, title)
+}
+
 /// Mark a batch of sessions read as of now (a single row-read is a batch of one,
 /// "一键清除未读" a batch of many). Unread is derived from `last_read_ms` vs
 /// `last_activity_ms`, so this only stamps the read time.
