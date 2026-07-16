@@ -100,6 +100,14 @@ pub struct WatchRecord {
     /// Bumped by the reconcile re-arm; stale timers exit without firing. See module docs.
     pub generation: u64,
     pub created: u64,
+    /// Epoch ms of the timer's most recent poll — a heartbeat. A watch has no
+    /// "due time" to be overdue against (its timer polls continuously), so this
+    /// is the liveness signal reconcile uses: a `last_poll_at` older than the
+    /// grace window means the detached timer died and nothing is watching.
+    /// Defaults to `created` (a just-created watch is "freshly polled" so it isn't
+    /// re-armed before its first arm even lands).
+    #[serde(default)]
+    pub last_poll_at: u64,
 }
 
 impl WatchRecord {
@@ -258,6 +266,7 @@ fn create_in(
         agent_source: agent_source.filter(|s| !blank(s)).map(str::to_string),
         generation: 0,
         created: now,
+        last_poll_at: now,
     };
     write_record(dir, &rec)?;
     Ok(rec)
@@ -556,10 +565,69 @@ pub fn run_timer_blocking(id: &str, generation: u64) {
                 return;
             }
             TimerStep::Nap { ms } => {
+                // Heartbeat: record that a live timer just polled, so reconcile
+                // doesn't mistake this watch for stranded. Preserves generation;
+                // a no-op if the record vanished (stopped) between get and touch.
+                if let Some(dir) = watches_dir() {
+                    touch_in(&dir, id, generation, now_ms());
+                }
                 std::thread::sleep(std::time::Duration::from_millis(ms));
             }
         }
     }
+}
+
+/// Stamp `last_poll_at` to mark the timer alive. Only writes when the record is
+/// present and at the expected generation — a stale or stopped timer must not
+/// resurrect a heartbeat.
+fn touch_in(dir: &Path, id: &str, generation: u64, now: u64) {
+    if let Some(mut rec) = get_in(dir, id) {
+        if rec.generation == generation {
+            rec.last_poll_at = now;
+            let _ = write_record(dir, &rec);
+        }
+    }
+}
+
+/// A watch whose timer hasn't polled in this long is treated as stranded — the
+/// detached timer process died (reboot, `kill -9`) and nothing is watching.
+/// Comfortably larger than [`POLL_CAP_MS`] so a timer merely mid-nap is never
+/// mistaken for dead.
+const STRANDED_GRACE_MS: u64 = 3 * POLL_CAP_MS;
+
+/// Re-arm timers for watches left stranded (their detached timer died). Cheap and
+/// idempotent — safe to call from any periodic hook. Bumps `generation` so any
+/// still-alive old timer exits on its next wake and exactly one timer drives.
+/// Returns the ids it re-armed. A stranded watch already past its deadline is
+/// re-armed too; the fresh timer fires its timeout resume on the first tick.
+pub fn reconcile() -> Vec<String> {
+    let Some(dir) = watches_dir() else {
+        return Vec::new();
+    };
+    let fleet = match crate::hooks::resolve_fleet_binary() {
+        Some(f) => f,
+        None => return Vec::new(),
+    };
+    reconcile_in(&dir, now_ms(), &mut |rec| {
+        let _ = arm_timer_with(&fleet, rec);
+    })
+}
+
+fn reconcile_in(dir: &Path, now: u64, arm: &mut dyn FnMut(&WatchRecord)) -> Vec<String> {
+    let mut rearmed = Vec::new();
+    for mut rec in list_in(dir) {
+        if now.saturating_sub(rec.last_poll_at) <= STRANDED_GRACE_MS {
+            continue; // a live timer polled recently
+        }
+        // Stranded: bump the generation (retiring any zombie timer) and re-arm.
+        rec.generation += 1;
+        rec.last_poll_at = now; // the fresh timer will heartbeat from here
+        if write_record(dir, &rec).is_ok() {
+            arm(&rec);
+            rearmed.push(rec.id.clone());
+        }
+    }
+    rearmed
 }
 
 /// Spawn a detached timer process (`fleet watch fire <id> <gen>`) that polls the
@@ -961,5 +1029,73 @@ mod tests {
         .unwrap_err();
         assert_eq!(err, ClaimError::StaleGeneration { expected: 4, found: 5 });
         assert!(get_in(d.path(), "w1").is_some(), "record untouched for the live timer");
+    }
+
+    // ── P3: heartbeat + reconcile ──────────────────────────────────────────────
+
+    #[test]
+    fn touch_updates_heartbeat_only_at_the_right_generation() {
+        let d = dir();
+        make(d.path(), "w1", 1_000); // last_poll_at = 1_000, gen 0
+        touch_in(d.path(), "w1", 0, 50_000);
+        assert_eq!(get_in(d.path(), "w1").unwrap().last_poll_at, 50_000);
+        // wrong generation: no update
+        touch_in(d.path(), "w1", 9, 90_000);
+        assert_eq!(get_in(d.path(), "w1").unwrap().last_poll_at, 50_000);
+        // gone: no panic, no resurrection
+        stop_in(d.path(), "w1");
+        touch_in(d.path(), "w1", 0, 99_000);
+        assert!(get_in(d.path(), "w1").is_none());
+    }
+
+    /// Only a watch whose heartbeat is older than the grace window is re-armed;
+    /// one polled recently (timer alive / mid-nap) is left alone.
+    #[test]
+    fn reconcile_rearms_only_stranded_watches() {
+        let d = dir();
+        // "healthy": polled just now
+        let mut healthy = make(d.path(), "healthy", 0);
+        healthy.last_poll_at = 1_000_000;
+        write_record(d.path(), &healthy).unwrap();
+        // "napping": polled 20s ago — inside the grace window
+        let mut napping = make(d.path(), "napping", 0);
+        napping.last_poll_at = 1_000_000 - 20_000;
+        write_record(d.path(), &napping).unwrap();
+        // "stranded": no poll in well over the grace window — its timer is dead
+        let mut stranded = make(d.path(), "stranded", 0);
+        stranded.last_poll_at = 1_000_000 - STRANDED_GRACE_MS - 5_000;
+        write_record(d.path(), &stranded).unwrap();
+
+        let mut armed = Vec::new();
+        let rearmed = reconcile_in(d.path(), 1_000_000, &mut |r| armed.push(r.id.clone()));
+
+        assert_eq!(rearmed, vec!["stranded"], "only the stranded watch is re-armed");
+        assert_eq!(armed, vec!["stranded"]);
+        // its generation was bumped so the zombie timer exits on stale-gen
+        assert_eq!(get_in(d.path(), "stranded").unwrap().generation, 1);
+        // and the re-arm resets its heartbeat forward
+        assert_eq!(get_in(d.path(), "stranded").unwrap().last_poll_at, 1_000_000);
+        // healthy untouched
+        assert_eq!(get_in(d.path(), "healthy").unwrap().generation, 0);
+    }
+
+    /// A stranded watch already past its deadline is still re-armed; the fresh
+    /// timer's first tick fires the timeout resume rather than leaving it orphaned.
+    #[test]
+    fn reconcile_rearms_a_stranded_expired_watch() {
+        let d = dir();
+        let mut rec = make(d.path(), "w1", 0);
+        // way past deadline, and no heartbeat for ages
+        rec.last_poll_at = 0;
+        write_record(d.path(), &rec).unwrap();
+        let now = rec.deadline_at + STRANDED_GRACE_MS + 1;
+
+        let mut armed = Vec::new();
+        let rearmed = reconcile_in(d.path(), now, &mut |r| armed.push(r.id.clone()));
+        assert_eq!(rearmed, vec!["w1"]);
+        // the re-armed record is still expired, so its timer will Fire{timed_out:true}
+        let back = get_in(d.path(), "w1").unwrap();
+        assert!(back.is_expired(now));
+        assert_eq!(decide(&back, back.generation, now, || false), TimerStep::Fire { timed_out: true });
     }
 }
