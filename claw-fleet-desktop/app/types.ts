@@ -190,6 +190,7 @@ export interface ThinkingBlock {
 
 export interface RedactedThinkingBlock {
   type: "redacted_thinking";
+  reason?: "summary_unavailable";
 }
 
 export interface ImageBlock {

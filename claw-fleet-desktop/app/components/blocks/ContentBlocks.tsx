@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
   DecisionHistoryRecord,
@@ -30,6 +31,7 @@ export interface BlocksProps {
 }
 
 export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, isPartial, searchTerms, paths }: BlocksProps) {
+  const { t } = useTranslation();
   const elements: React.ReactNode[] = [];
   let i = 0;
 
@@ -62,9 +64,10 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
     }
 
     if (block.type === "redacted_thinking") {
+      const unavailable = (block as { reason?: string }).reason === "summary_unavailable";
       elements.push(
         <div key={i} className={styles.redacted}>
-          [Redacted thinking]
+          {unavailable ? t("detail.reasoning_summary_unavailable") : t("detail.redacted_thinking")}
         </div>
       );
       i++;
