@@ -3,8 +3,8 @@
 //! The Codex analogue of [`crate::session_launch::spawn_new_session`]. Where
 //! Claude Code is driven by `claude -p "<prompt>" --session-id <uuid>
 //! --output-format stream-json`, Codex is driven by
-//! `codex exec --json -C <ws> [-m <model>] [-c model_reasoning_effort=<e>] --
-//! "<prompt>"`.
+//! `codex exec --json -C <ws> [-m <model>] [-c model_reasoning_effort=<e>]
+//! -c model_reasoning_summary=auto -- "<prompt>"`.
 //!
 //! Two Codex-specific facts shape this module (both verified against
 //! codex-cli 0.144.4, 2026-07-14):
@@ -273,6 +273,37 @@ fn open_codex_stdout_sink(key: &str) -> Result<(std::fs::File, std::path::PathBu
         .open(&path)
         .map_err(|e| format!("open codex stdout sink {}: {e}", path.display()))?;
     Ok((file, path))
+}
+
+/// Terminal event observed in `codex exec --json` stdout. Exit code 0 alone is
+/// not a completed turn: codex-cli 0.144.5 can exit successfully after emitting
+/// reasoning without an assistant message or `turn.completed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexTurnTerminal {
+    Completed,
+    Failed,
+    Missing,
+}
+
+fn read_codex_turn_terminal(path: &std::path::Path) -> CodexTurnTerminal {
+    use std::io::{BufRead, BufReader};
+    let Ok(file) = std::fs::File::open(path) else {
+        return CodexTurnTerminal::Missing;
+    };
+    let mut terminal = CodexTurnTerminal::Missing;
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
+        match value.get("type").and_then(Value::as_str) {
+            Some("turn.completed") => terminal = CodexTurnTerminal::Completed,
+            Some("turn.failed") => terminal = CodexTurnTerminal::Failed,
+            _ => {}
+        }
+    }
+    terminal
+}
+
+fn codex_turn_succeeded(status: &std::process::ExitStatus, terminal: CodexTurnTerminal) -> bool {
+    status.success() && terminal == CodexTurnTerminal::Completed
 }
 
 /// Extract the Codex thread id from the FIRST complete line of a stdout sink, or
@@ -654,6 +685,10 @@ pub fn build_codex_exec_args(
         args.push("-c".to_string());
         args.push(format!("model_reasoning_effort={e}"));
     }
+    // Presets may default summaries to none. Request the best summary supported
+    // by the active model so Fleet has substantive thinking text to render.
+    args.push("-c".to_string());
+    args.push("model_reasoning_summary=auto".to_string());
     // Flags (bypass + MCP overrides) must precede `--`; everything after `--`
     // is the prompt, verbatim.
     args.extend(pre_prompt_args.iter().cloned());
@@ -844,6 +879,7 @@ pub fn spawn_new_codex_session(
         drop(tx);
         // Reap the child and log its exit.
         let result = child.wait();
+        let terminal = read_codex_turn_terminal(&sink_path_owned);
         // Session is gone: drop the spawn-pid note so a later pid reuse can never
         // read this dead session as alive.
         if let Some(tid) = spawned_thread.take() {
@@ -864,9 +900,10 @@ pub fn spawn_new_codex_session(
         {
             match result {
                 Ok(status) => {
+                    let healthy = codex_turn_succeeded(&status, terminal);
                     let _ = writeln!(
                         f,
-                        "[{}] new_codex_session exit code={:?} success={}",
+                        "[{}] new_codex_session exit code={:?} process_success={} terminal={terminal:?} healthy={healthy}",
                         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
                         status.code(),
                         status.success()
@@ -942,6 +979,8 @@ pub fn build_codex_resume_args(
         args.push("-c".to_string());
         args.push(format!("model_reasoning_effort={e}"));
     }
+    args.push("-c".to_string());
+    args.push("model_reasoning_summary=auto".to_string());
     args.extend(pre_prompt_args.iter().cloned());
     args.push("--".to_string());
     args.push(prompt.to_string());
@@ -1072,7 +1111,8 @@ pub fn resume_codex_session(
     let sink_path_owned = sink_path.clone();
     std::thread::spawn(move || {
         let result = child.wait();
-        let success = matches!(&result, Ok(status) if status.success());
+        let terminal = read_codex_turn_terminal(&sink_path_owned);
+        let success = matches!(&result, Ok(status) if codex_turn_succeeded(status, terminal));
         // Transient stdout sink: drop it now the turn is over.
         let _ = std::fs::remove_file(&sink_path_owned);
         // Note: the turn-end relay runs via codex's `notify` hook (see spawn
@@ -1086,7 +1126,7 @@ pub fn resume_codex_session(
                 Ok(status) => {
                     let _ = writeln!(
                         f,
-                        "[{}] codex_resume exit code={:?} success={}",
+                        "[{}] codex_resume exit code={:?} process_success={} terminal={terminal:?} healthy={success}",
                         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
                         status.code(),
                         status.success()
@@ -1257,6 +1297,7 @@ mod tests {
         assert_eq!(dd, args.len() - 2, "-- immediately precedes the prompt");
         // no model/effort flags when not given
         assert!(!args.contains(&"-m".to_string()));
+        assert!(args.iter().any(|a| a == "model_reasoning_summary=auto"));
     }
 
     #[test]
@@ -1518,6 +1559,31 @@ mod tests {
         // resume has no -C working-dir flag.
         assert!(!args.contains(&"-C".to_string()));
         assert!(!args.contains(&"-m".to_string()));
+        assert!(args.iter().any(|a| a == "model_reasoning_summary=auto"));
+    }
+
+    #[test]
+    fn stdout_terminal_parser_distinguishes_complete_failed_and_missing() {
+        let _home = TmpHome::new("terminal-events");
+        let dir = std::env::temp_dir().join(format!("fleet-codex-terminal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let completed = dir.join("completed.jsonl");
+        std::fs::write(&completed, concat!(
+            "{\"type\":\"thread.started\"}\n",
+            "not-json\n",
+            "{\"type\":\"turn.completed\"}\n"
+        )).unwrap();
+        assert_eq!(read_codex_turn_terminal(&completed), CodexTurnTerminal::Completed);
+
+        let failed = dir.join("failed.jsonl");
+        std::fs::write(&failed, "{\"type\":\"turn.failed\"}\n").unwrap();
+        assert_eq!(read_codex_turn_terminal(&failed), CodexTurnTerminal::Failed);
+
+        let missing = dir.join("missing.jsonl");
+        std::fs::write(&missing, "{\"type\":\"item.completed\",\"item\":{\"type\":\"reasoning\"}}\n").unwrap();
+        assert_eq!(read_codex_turn_terminal(&missing), CodexTurnTerminal::Missing);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
