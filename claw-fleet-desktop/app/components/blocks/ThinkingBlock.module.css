@@ -37,12 +37,15 @@
   padding: 10px 12px;
   margin: 0;
   background: var(--thinking-content-bg);
-  color: var(--color-text-secondary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
   max-height: 400px;
   overflow-y: auto;
+}
+
+/* The thinking text now renders through the shared markdown TextBlock, whose
+ * own .root pins 13px / --color-text. Override its immediate root here so the
+ * reasoning keeps the muted, smaller "thinking" look instead of matching the
+ * main message body. */
+.content > :global(div) {
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }

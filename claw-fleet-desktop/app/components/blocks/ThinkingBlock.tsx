@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { TextBlock } from "./TextBlock";
 import styles from "./ThinkingBlock.module.css";
 
 interface Props {
@@ -24,7 +25,11 @@ export function ThinkingBlock({ thinking, live = false }: Props) {
           </span>
         )}
       </button>
-      {open && <pre className={styles.content}>{thinking}</pre>}
+      {open && (
+        <div className={styles.content}>
+          <TextBlock text={thinking} />
+        </div>
+      )}
     </div>
   );
 }
