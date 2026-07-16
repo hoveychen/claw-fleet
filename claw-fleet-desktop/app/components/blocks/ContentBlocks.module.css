@@ -1,0 +1,6 @@
+.redacted {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  font-style: italic;
+  padding: 2px 0;
+}

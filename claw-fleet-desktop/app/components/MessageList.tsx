@@ -1,13 +1,11 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import type {
-  ContentBlock,
   DecisionHistoryRecord,
   RawMessage,
   ToolResultBlock,
-  ToolUseBlock,
 } from "../types";
-import { buildToolResultMetaMap, isDecisionTool } from "../toolResults";
+import { buildToolResultMetaMap } from "../toolResults";
 import { nextVisibleCount, visibleCountForMatch, windowSlice } from "../messageWindow";
 import {
   dayKey,
@@ -17,14 +15,9 @@ import {
   messageSearchText,
   messageToText,
 } from "../messageRows";
-import { TextBlock } from "./blocks/TextBlock";
 import type { PathLinkContext } from "../markdown/pathLinks";
-import { ThinkingBlock } from "./blocks/ThinkingBlock";
-import {
-  GroupedToolUseBlocks,
-  ToolUseBlock as ToolUseBlockComp,
-} from "./blocks/ToolUseBlock";
-import { DecisionToolCard, hasDecisionQuestions } from "./blocks/DecisionToolCard";
+import { ContentBlocks } from "./blocks/ContentBlocks";
+import { WorkRunBlock } from "./blocks/WorkRunBlock";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ToolResultFetchContext,
@@ -36,6 +29,7 @@ import { CopyButton } from "./CopyButton";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import { MetaFoldBlock } from "./blocks/MetaFoldBlock";
 import { groupMetaRuns } from "./metaGrouping";
+import { groupWorkRuns } from "./workRuns";
 import styles from "./MessageList.module.css";
 
 // ── Search highlight ─────────────────────────────────────────────────────────
@@ -80,137 +74,6 @@ function buildResultMap(
   }
   return map;
 }
-
-// ── Content blocks renderer ───────────────────────────────────────────────────
-
-interface BlocksProps {
-  content: ContentBlock[];
-  resultMap: Map<string, ToolResultBlock>;
-  /** tool_use_id → Claude Code's structured `toolUseResult` for that call. */
-  metaMap: Map<string, unknown>;
-  /** Session decision records; supply asset ids for image-bearing cards. */
-  decisionRecords: DecisionHistoryRecord[];
-  isPartial: boolean;
-  searchTerms?: string[] | null;
-  /** Makes path-shaped inline-code spans clickable. */
-  paths?: PathLinkContext;
-}
-
-const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, isPartial, searchTerms, paths }: BlocksProps) {
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < content.length) {
-    const block = content[i];
-
-    if (block.type === "text") {
-      elements.push(
-        <TextBlock
-          key={i}
-          text={(block as { type: "text"; text: string }).text}
-          isPartial={isPartial && i === content.length - 1}
-          searchTerms={searchTerms}
-          paths={paths}
-        />
-      );
-      i++;
-      continue;
-    }
-
-    if (block.type === "thinking") {
-      elements.push(
-        <ThinkingBlock
-          key={i}
-          thinking={(block as { type: "thinking"; thinking: string }).thinking}
-        />
-      );
-      i++;
-      continue;
-    }
-
-    if (block.type === "redacted_thinking") {
-      elements.push(
-        <div key={i} className={styles.redacted}>
-          [Redacted thinking]
-        </div>
-      );
-      i++;
-      continue;
-    }
-
-    if (block.type === "tool_use") {
-      const toolBlock = block as ToolUseBlock;
-      const result = resultMap.get(toolBlock.id);
-
-      // A decision card is where the conversation turned — never let it degrade
-      // into the generic card's `JSON.stringify(input)` header. An unrenderable
-      // shape (rejected call, future schema) still falls through to that card.
-      if (isDecisionTool(toolBlock.name) && hasDecisionQuestions(toolBlock.input)) {
-        elements.push(
-          <DecisionToolCard
-            key={i}
-            block={toolBlock}
-            result={result}
-            meta={metaMap.get(toolBlock.id)}
-            records={decisionRecords}
-            isPartial={isPartial && !result}
-          />
-        );
-        i++;
-        continue;
-      }
-
-      // Note: the Claude Code Workflow tool renders as an ordinary tool card
-      // here; its progress DAG is surfaced at the session level (the "Workflow"
-      // tab in SessionDetail), not inline in the conversation.
-
-      // Check if the next blocks are also read-only tools → group them
-      const READ_ONLY = new Set([
-        "Read", "Grep", "Glob", "WebSearch", "WebFetch", "TodoWrite", "TodoRead",
-      ]);
-
-      if (READ_ONLY.has(toolBlock.name)) {
-        const group: Array<{ block: ToolUseBlock; result?: ToolResultBlock; meta?: unknown }> =
-          [{ block: toolBlock, result, meta: metaMap.get(toolBlock.id) }];
-
-        let j = i + 1;
-        while (j < content.length && content[j].type === "tool_use") {
-          const next = content[j] as ToolUseBlock;
-          if (!READ_ONLY.has(next.name)) break;
-          group.push({
-            block: next,
-            result: resultMap.get(next.id),
-            meta: metaMap.get(next.id),
-          });
-          j++;
-        }
-
-        if (group.length >= 2) {
-          elements.push(<GroupedToolUseBlocks key={i} blocks={group} />);
-          i = j;
-          continue;
-        }
-      }
-
-      elements.push(
-        <ToolUseBlockComp
-          key={i}
-          block={toolBlock}
-          result={result}
-          isPartial={isPartial && !result}
-          meta={metaMap.get(toolBlock.id)}
-        />
-      );
-      i++;
-      continue;
-    }
-
-    // Unknown block type: skip
-    i++;
-  }
-
-  return <>{elements}</>;
-});
 
 // ── Message timestamp ─────────────────────────────────────────────────────────
 
@@ -604,8 +467,10 @@ export function MessageList({
 
   // Collapse runs of adjacent synthetic `isMeta` user turns into a single fold,
   // so N back-to-back injected turns don't stack N identical "系统上下文" dividers.
-  // Grouping lives at the list level — a MessageRow only sees one message.
-  const renderUnits = groupMetaRuns(visibleMsgs);
+  // A second pass folds runs of tool-call/thinking assistant records into
+  // WorkRunBlock bands. Grouping lives at the list level — a MessageRow only
+  // sees one message.
+  const renderUnits = groupWorkRuns(groupMetaRuns(visibleMsgs));
 
   // Keep the reader's place when the transcript grows.
   //
@@ -729,6 +594,9 @@ export function MessageList({
 
   const lastAssistant = [...displayMsgs].reverse().find((m: RawMessage) => m.type === "assistant");
   const isWaiting = lastAssistant?.message?.stop_reason === "end_turn";
+  // Keeps the trailing work band open while the agent is live in it, so the
+  // reader watches tools stream in; it folds itself once the agent moves on.
+  const isWorkingNow = !!status && WORKING_STATUSES.has(status);
 
   // Only take over the panel when there is genuinely nothing to show. The same
   // `isLoading` flag is raised while fetching *older* history, and blanking the
@@ -781,15 +649,38 @@ export function MessageList({
             : `↑ ${t("detail.load_earlier")}`}
         </button>
       )}
-      {renderUnits.map((unit) => {
+      {renderUnits.map((unit, unitIdx) => {
         const i = unit.startLocal;
         // A separator opens each new day, and also the top of the window — a
         // reader scrolled into the middle of an old session needs the date too.
-        // Keyed off the unit's first row; meta groups never straddle a day.
+        // Keyed off the unit's first row; meta and work groups never straddle a day.
         const today = dayKey(visibleMsgs[i].timestamp);
         const prev = i > 0 ? dayKey(visibleMsgs[i - 1].timestamp) : null;
         const showDay = today !== null && (i === 0 || today !== prev);
         const globalStart = effectiveStart + i;
+        if (unit.kind === "work-group") {
+          // Same anchor scheme as the meta fold: every folded record keeps a
+          // `data-msg-idx` so search navigation can land on the band.
+          return (
+            <Fragment key={visibleMsgs[i].uuid ?? globalStart}>
+              {showDay && <DaySeparator isoDay={today} />}
+              <div className={styles.compact_row} data-msg-idx={globalStart}>
+                {unit.msgs.slice(1).map((_, k) => (
+                  <span key={k} data-msg-idx={globalStart + 1 + k} aria-hidden />
+                ))}
+                <WorkRunBlock
+                  msgs={unit.msgs}
+                  resultMap={resultMap}
+                  metaMap={metaMap}
+                  decisionRecords={records}
+                  searchTerms={searchTerms}
+                  paths={paths}
+                  defaultOpen={isWorkingNow && unitIdx === renderUnits.length - 1}
+                />
+              </div>
+            </Fragment>
+          );
+        }
         if (unit.kind === "meta-group") {
           // One divider for the whole run. Each folded turn still carries its own
           // `data-msg-idx` anchor (empty spans) so search-navigation can scroll to
