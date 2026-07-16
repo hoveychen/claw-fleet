@@ -390,7 +390,14 @@ pub fn remove_lesson(id: &str) -> Result<(), String> {
 }
 
 /// List all lessons currently in the managed file.
+///
+/// Runs the one-time legacy migration first (idempotent, no-op once done) so the
+/// raw `# Lesson (…)` blocks the old appender left in CLAUDE.md body get folded
+/// into the managed file the first time anything lists — the report card and the
+/// Memory panel both list on mount. Safe from recursion: migration calls
+/// [`add_lesson`], which never lists.
 pub fn list_lessons() -> Vec<ManagedLesson> {
+    let _ = migrate_legacy_lessons();
     let Some(path) = lessons_file_path() else {
         return Vec::new();
     };
