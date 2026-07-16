@@ -51,6 +51,43 @@
   animation: stop_control_pulse 0.8s ease-in-out infinite;
 }
 
+/* Solid variant — sized to fill the composer's send slot as the primary
+   running-session action (matches ChatComposer .send_btn's 30px round). Keeps
+   the two-tier semantics visually: the gentle, resumable interrupt reads as
+   accent (like send); the hard kill reads red. */
+.btn_solid {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--color-on-accent);
+}
+
+.btn_solid.btn_interrupt {
+  font-size: 14px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.btn_solid.btn_interrupt:hover {
+  background: var(--color-accent-hover);
+  color: var(--color-on-accent);
+}
+
+.btn_solid.btn_stop {
+  font-size: 12px;
+  background: var(--color-error-solid);
+  color: var(--color-on-accent);
+}
+
+.btn_solid.btn_stop:hover {
+  background: var(--color-error-solid-hover);
+  color: var(--color-on-accent);
+}
+
+.btn_solid:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
 /* Keyframes are scoped to their CSS module, so this must live beside the rule
    that uses it — referencing a `pulse` defined in another module silently
    no-ops. */

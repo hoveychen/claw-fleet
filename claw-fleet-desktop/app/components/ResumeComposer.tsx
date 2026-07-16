@@ -10,8 +10,10 @@ import {
   type ChatComposerStagedAttachment,
 } from "./ChatComposer";
 import { SessionOptionPills } from "./SessionOptionPills";
+import { StopControl, canControl } from "./StopControl";
 import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
+import type { SessionInfo } from "../types";
 import styles from "./ResumeComposer.module.css";
 
 function basename(p: string): string {
@@ -29,6 +31,7 @@ export function ResumeComposer({
   sessionId,
   workspacePath,
   agentSource,
+  session,
   onResumed,
   mode = "resume",
   pendingMessages = [],
@@ -38,6 +41,10 @@ export function ResumeComposer({
   /** Session's source ("claude-code" / "codex"), so the resume routes to the
    *  right launcher. Defaults to claude when omitted. */
   agentSource?: string;
+  /** The live session, so an enqueue composer can surface a Stop button (same
+   *  interrupt/kill escalation as the session list) in the empty send slot
+   *  while the turn is running. */
+  session?: SessionInfo;
   onResumed: () => void;
   /** `"resume"`: the turn ended, submit spawns `claude --resume` now.
    *  `"enqueue"`: the turn is still running, submit queues the message to be
@@ -160,6 +167,11 @@ export function ResumeComposer({
         onSubmit={handleSubmit}
         submitting={submitting}
         submitDisabled={!prompt.trim()}
+        emptyTrailingControl={
+          enqueueing && session && canControl(session) ? (
+            <StopControl session={session} variant="solid" />
+          ) : undefined
+        }
         placeholder={
           enqueueing
             ? t("history.enqueue_placeholder", "会话运行中，发送后排队，本轮结束自动接上…")
