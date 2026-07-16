@@ -315,10 +315,21 @@ pub fn park_and_stop(
 /// [`crate::session::resolve_pid`] would happily hand back *some other* session
 /// in the same workspace — fine for a status badge, catastrophic for a SIGINT.
 pub fn session_pid(session_id: &str) -> Option<u32> {
+    if crate::codex_source::codex_fleet_owned_cwd(session_id).is_some() {
+        return crate::codex_source::codex_session_pid(session_id);
+    }
     crate::session::scan_cli_processes()
         .into_iter()
         .find(|p| p.resume_session_id.as_deref() == Some(session_id))
         .map(|p| p.pid)
+}
+
+/// Whether the Fleet-owned process for this session is still live, across
+/// Claude and Codex. Orphaned decision recovery uses this as its safety gate:
+/// it must never launch a resume while the original producer can still consume
+/// the response itself.
+pub fn session_alive(session_id: &str) -> bool {
+    session_pid(session_id).is_some()
 }
 
 /// SIGINT the session's CLI and wait (briefly) for it to go. Returns `true` when
@@ -363,8 +374,42 @@ fn wait_for_exit(pid: u32, budget: Duration) -> bool {
 /// `claude --resume`.
 pub fn answer(id: &str, response: &Value) -> Result<(), String> {
     answer_with(id, response, |session_id, workspace, prompt, model, effort, perm| {
-        crate::auto_resume::spawn_resume_prompt(session_id, workspace, prompt, model, effort, perm)
+        resume_session(session_id, workspace, prompt, model, effort, perm)
     })
+}
+
+/// Resume a parked session through the launcher that owns its transcript.
+/// Parked cards predate Codex support and historically called the Claude-only
+/// `auto_resume` helper directly, which made a Codex card wake the wrong CLI.
+pub(crate) fn resume_session(
+    session_id: &str,
+    workspace: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
+) -> Result<(), String> {
+    let source = resume_source(session_id);
+    crate::agent_source::resume_session(
+        source,
+        &crate::agent_source::ResumeSpec {
+            session_id: session_id.to_string(),
+            workspace_path: workspace.to_string(),
+            prompt: prompt.to_string(),
+            model: model.map(str::to_string),
+            effort: effort.map(str::to_string),
+            permission_mode: permission_mode.map(str::to_string),
+        },
+        Box::new(|_| {}),
+    )
+}
+
+fn resume_source(session_id: &str) -> &'static str {
+    if crate::codex_source::codex_fleet_owned_cwd(session_id).is_some() {
+        "codex"
+    } else {
+        "claude"
+    }
 }
 
 /// [`answer`] with the resume injected, so tests can observe what the session
@@ -697,6 +742,8 @@ mod tests {
             None,
             "a user-launched codex session stays non-parkable"
         );
+        assert_eq!(resume_source("codex-fleet"), "codex");
+        assert_eq!(resume_source("codex-user"), "claude");
         assert_eq!(parkable_workspace("codex-missing"), None);
     }
 
