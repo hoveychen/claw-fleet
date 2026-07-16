@@ -133,12 +133,11 @@ pub(crate) fn detect_ai_tools() -> Result<Vec<DetectedTool>, String> {
     let home = home_dir()?;
     let detected = SKILL_TARGETS
         .iter()
-        .filter(|(_, dir)| home.join(dir).exists())
-        .map(|(name, dir)| DetectedTool {
+        .filter(|(_, detect_dir, _)| home.join(detect_dir).exists())
+        .map(|(name, _, skills_dir)| DetectedTool {
             name: name.to_string(),
             skill_path: home
-                .join(dir)
-                .join("skills")
+                .join(skills_dir)
                 .join("fleet")
                 .join("SKILL.md")
                 .to_string_lossy()
@@ -185,12 +184,12 @@ pub(crate) fn install_fleet_skill() -> Result<SkillInstallResult, String> {
     let mut installed = vec![];
     let mut errors = vec![];
 
-    for (name, dir) in SKILL_TARGETS {
-        let tool_home = home.join(dir);
+    for (name, detect_dir, skills_dir) in SKILL_TARGETS {
+        let tool_home = home.join(detect_dir);
         if !tool_home.exists() {
             continue;
         }
-        let skill_dir = tool_home.join("skills").join("fleet");
+        let skill_dir = home.join(skills_dir).join("fleet");
         let skill_path = skill_dir.join("SKILL.md");
         match std::fs::create_dir_all(&skill_dir)
             .and_then(|_| std::fs::write(&skill_path, FLEET_SKILL_MD))
@@ -211,4 +210,3 @@ pub(crate) fn install_fleet_skill() -> Result<SkillInstallResult, String> {
 
     Ok(SkillInstallResult { installed, errors })
 }
-
