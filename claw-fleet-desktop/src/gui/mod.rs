@@ -1519,6 +1519,12 @@ pub fn run() {
             claw_fleet_core::account::start_background_sampler(
                 std::time::Duration::from_secs(600),
             );
+            // Codex parallel: same 10-minute cadence, but each tick self-gates
+            // on codex being installed (no wasted `codex app-server` spawns for
+            // Claude-only users). Feeds the codex 占用率历史 chart.
+            claw_fleet_core::codex_source::start_codex_background_sampler(
+                std::time::Duration::from_secs(600),
+            );
 
 
             // Truncate the hook events file if it has grown too large.
@@ -1829,6 +1835,7 @@ pub fn run() {
             set_llm_config,
             list_fleet_llm_usage_daily,
             get_usage_history,
+            get_codex_usage_history,
             get_sources_config,
             set_source_enabled,
             list_claude_binaries,

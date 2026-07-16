@@ -556,6 +556,13 @@ impl Backend for NullBackend {
     fn usage_history(&self, _: i64, _: i64) -> Vec<account::UsageHistoryPoint> {
         vec![]
     }
+    fn codex_usage_history(
+        &self,
+        _: i64,
+        _: i64,
+    ) -> Vec<claw_fleet_core::codex_usage_history::CodexUsageHistoryPoint> {
+        vec![]
+    }
     fn upload_attachment(&self, _: &std::path::Path, _: bool) -> Result<String, String> {
         Err("backend not ready".into())
     }
