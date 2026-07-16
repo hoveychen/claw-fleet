@@ -544,6 +544,43 @@ fn determine_status(last_lines: &[Value], file_age_secs: f64) -> SessionStatus {
     }
 }
 
+/// A Codex session with no live process cannot be mid-turn: clamp any in-flight
+/// *display* status down to `WaitingInput` when `proc_alive` is false.
+///
+/// Why: the desktop's resume/enqueue gate treats a session as "still running"
+/// when `proc_alive || status ∈ {in-flight}` (see `canEnqueueSession` in
+/// `types.ts`), but the pending-message *drain* gate keys purely on `!proc_alive`
+/// (see `pending_message::is_drainable`). Codex frequently ends a turn without
+/// writing a `turn_complete` event, so `determine_status`'s age fallback returns
+/// `Active` for a turn that is already over and whose process has exited. That
+/// left the composer stuck in "queue" mode — showing "会话运行中，排队" — even
+/// though the turn was done and the backend would have happily resumed. Clamping
+/// the in-flight statuses to `WaitingInput` when the process is gone realigns the
+/// UI gate with the drain gate.
+///
+/// The clamped set is exactly the desktop's `IN_FLIGHT_STATUSES`. `RateLimited`,
+/// `ServerErrored`, `Stuck`, `WaitingInput`, and `Idle` are left untouched:
+/// auto-resume owns the first two, `Stuck` can only hold while a process is
+/// alive, and the last two are already terminal display states.
+fn clamp_dead_session_status(
+    status: crate::session::SessionStatus,
+    proc_alive: bool,
+) -> crate::session::SessionStatus {
+    use crate::session::SessionStatus as S;
+    if proc_alive {
+        return status;
+    }
+    match status {
+        S::Thinking
+        | S::Executing
+        | S::Streaming
+        | S::Delegating
+        | S::Processing
+        | S::Active => S::WaitingInput,
+        other => other,
+    }
+}
+
 /// Compute token speed and total output tokens from parsed JSONL lines.
 fn compute_token_stats(lines: &[Value]) -> (f64, u64) {
     let mut total_output: u64 = 0;
@@ -1232,6 +1269,9 @@ fn build_session_from_sqlite(
     // PID resolution: prefer thread-id match, fall back to workspace path match.
     let (pid, pid_precise) = resolve_pid(codex_processes, &thread.id, &thread.cwd);
     let proc_alive = codex_proc_alive(codex_processes, &thread.id);
+    // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
+    // the composer offers resume (not enqueue) once the turn is over.
+    let status = clamp_dead_session_status(status, proc_alive);
 
     // Codex stores only the raw first prompt as `title`; for non-subagent
     // threads Fleet generates a semantic title from the first user message
@@ -1318,13 +1358,56 @@ fn build_session_from_sqlite(
 #[cfg(test)]
 mod tests {
     use super::{
-        codex_cost_and_input, codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
-        codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
-        codex_token_breakdown_from_lines, compute_token_stats, extract_context_percent,
-        extract_first_user_text, last_rollout_rate_limits, latest_total_token_usage,
-        normalize_messages, read_rollout_originator, CodexRateLimitWindow, CodexUsageItem,
+        clamp_dead_session_status, codex_cost_and_input, codex_last_turn_incomplete,
+        codex_rate_limit_state_from_rollout, codex_rate_limit_state_from_usage,
+        codex_rollout_rate_limit, codex_token_breakdown_from_lines, compute_token_stats,
+        extract_context_percent, extract_first_user_text, last_rollout_rate_limits,
+        latest_total_token_usage, normalize_messages, read_rollout_originator,
+        CodexRateLimitWindow, CodexUsageItem,
     };
+    use crate::session::SessionStatus as S;
     use serde_json::json;
+
+    #[test]
+    fn dead_codex_session_is_not_in_flight() {
+        // A Codex turn that ended without a `turn_complete` event leaves
+        // `determine_status` reporting `Active` via its age fallback. With the
+        // process gone, that stale in-flight status must clamp to WaitingInput so
+        // the desktop composer offers *resume* (matching the drain gate), not the
+        // misleading "会话运行中，排队" enqueue mode.
+        assert_eq!(clamp_dead_session_status(S::Active, false), S::WaitingInput);
+        assert_eq!(clamp_dead_session_status(S::Streaming, false), S::WaitingInput);
+        assert_eq!(clamp_dead_session_status(S::Thinking, false), S::WaitingInput);
+        assert_eq!(clamp_dead_session_status(S::Executing, false), S::WaitingInput);
+        assert_eq!(clamp_dead_session_status(S::Delegating, false), S::WaitingInput);
+        assert_eq!(clamp_dead_session_status(S::Processing, false), S::WaitingInput);
+    }
+
+    #[test]
+    fn live_codex_session_status_is_untouched() {
+        // While a process is alive the status is authoritative — never clamp.
+        assert_eq!(clamp_dead_session_status(S::Active, true), S::Active);
+        assert_eq!(clamp_dead_session_status(S::Streaming, true), S::Streaming);
+    }
+
+    #[test]
+    fn dead_codex_session_preserves_non_inflight_status() {
+        // RateLimited/ServerErrored are owned by auto-resume; WaitingInput/Idle
+        // are already terminal. None of these must be rewritten when proc is gone.
+        assert_eq!(
+            clamp_dead_session_status(S::RateLimited, false),
+            S::RateLimited
+        );
+        assert_eq!(
+            clamp_dead_session_status(S::ServerErrored, false),
+            S::ServerErrored
+        );
+        assert_eq!(
+            clamp_dead_session_status(S::WaitingInput, false),
+            S::WaitingInput
+        );
+        assert_eq!(clamp_dead_session_status(S::Idle, false), S::Idle);
+    }
 
     #[test]
     fn normalize_messages_dedups_agent_message_against_response_item() {
@@ -2499,6 +2582,9 @@ fn parse_codex_session(
     } else {
         status
     };
+    // A dead Codex process can't be mid-turn: clamp a stale in-flight status so
+    // the composer offers resume (not enqueue) once the turn is over.
+    let status = clamp_dead_session_status(status, proc_alive);
 
     let uri = build_uri(rollout_path)?;
 
