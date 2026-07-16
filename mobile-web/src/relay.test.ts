@@ -318,6 +318,45 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     expect(got).toEqual(sessions);
   });
 
+  it("sessions_delta 在整表基线上 keyed upsert/remove 并按 lastActivityMs 重排", async () => {
+    let got: Array<{ id: string; lastActivityMs: number; status?: string }> = [];
+    const base = FakeWs.instances.length;
+    const client = new RelayClient(SECRET, {
+      onSessions: (s) => (got = s as typeof got),
+    });
+    clients.push(client);
+    client.connect();
+    const ws = await nextWs(base);
+    ws.onopen?.();
+    ws.deliver({ type: "authed", agent_online: true, clients: 1 });
+
+    // 整表基线（桌面 slim 已按 lastActivityMs desc 排好）。
+    const full = [
+      { id: "s1", lastActivityMs: 3, status: "active" },
+      { id: "s2", lastActivityMs: 2, status: "idle" },
+      { id: "s3", lastActivityMs: 1, status: "idle" },
+    ];
+    ws.deliver(await sealedMsg({ event: "sessions", sessions: full }));
+    await tick();
+    expect(got.map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
+
+    // 增量：s2 活跃度升到 9、s4 新增(4)、s3 删除。
+    ws.deliver(
+      await sealedMsg({
+        event: "sessions_delta",
+        upsert: [
+          { id: "s2", lastActivityMs: 9, status: "active" },
+          { id: "s4", lastActivityMs: 4, status: "active" },
+        ],
+        remove: ["s3"],
+      }),
+    );
+    await tick();
+    // 合并后按 lastActivityMs desc: s2(9) s4(4) s1(3)；s3 已移除。
+    expect(got.map((s) => s.id)).toEqual(["s2", "s4", "s1"]);
+    expect(got.find((s) => s.id === "s2")?.status).toBe("active");
+  });
+
   it("桌面先 gzip 再加密（z:true）的帧被解密后 inflate 再分发", async () => {
     const sessions = [{ id: "g1", workspaceName: "delta", status: "active" }];
     let got: unknown = null;

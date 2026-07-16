@@ -244,6 +244,9 @@ export function App() {
               pushSubscribed: pushState() === "granted",
               supportsGzip: gzipSupported(),
               supportsBinary: binarySupported(),
+              // Delta application is pure JS (see relay.ts sessions_delta) — no
+              // browser API to feature-detect, so always true.
+              supportsDelta: true,
             };
           },
         );

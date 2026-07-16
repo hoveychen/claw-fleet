@@ -24,6 +24,12 @@ export interface DeviceInfo {
    *  transports are gone and nothing gates on this. Still reported so a desktop
    *  that reads the field stays wire-compatible. */
   supportsBinary: boolean;
+  /** Whether this client applies `sessions_delta` frames (keyed upsert/remove)
+   *  instead of needing a whole-list re-push on every change. Pure JS — no
+   *  browser API required — so it's always `true` here; the desktop only emits
+   *  deltas when *every* live client reports `true`, falling back to full
+   *  snapshots otherwise. Absent → the desktop treats the client as legacy. */
+  supportsDelta: boolean;
 }
 
 /** A failed `request()`, tagged with *where* the failure came from.
@@ -114,6 +120,9 @@ export class RelayClient {
   private handlers: RelayHandlers;
   private deviceInfo?: () => DeviceInfo;
   private helloTimer: number | null = null;
+  // Last full sessions snapshot, kept so `sessions_delta` frames can be applied
+  // on top of it (keyed upsert/remove). A full `sessions` frame replaces it.
+  private sessionsSnapshot: SessionInfo[] = [];
   private reqSeq = 0;
   // Per-instance prefix so req_ids never collide across devices sharing a
   // channel: the relay broadcasts every reply to all clients (registry.rs
@@ -315,8 +324,28 @@ export class RelayClient {
         break;
       case "sessions": {
         // Whole-payload compression is handled at the envelope (`z`) in
-        // openInbound, so by here the snapshot is already plain JSON.
-        this.handlers.onSessions?.((payload.sessions ?? []) as SessionInfo[]);
+        // openInbound, so by here the snapshot is already plain JSON. A full
+        // snapshot is the delta baseline: replace local state wholesale.
+        const list = (payload.sessions ?? []) as SessionInfo[];
+        this.sessionsSnapshot = list.slice();
+        this.handlers.onSessions?.(list);
+        break;
+      }
+      case "sessions_delta": {
+        // Incremental update against the last full snapshot: apply removals then
+        // upserts keyed by id, and re-sort by lastActivityMs desc so ordering
+        // matches the desktop's full-snapshot order. onSessions still receives
+        // the whole merged list, so the UI is unaware deltas are in play.
+        const upsert = (payload.upsert ?? []) as SessionInfo[];
+        const remove = new Set((payload.remove ?? []) as string[]);
+        const byId = new Map(this.sessionsSnapshot.map((s) => [s.id, s]));
+        for (const id of remove) byId.delete(id);
+        for (const s of upsert) byId.set(s.id, s);
+        const merged = [...byId.values()].sort(
+          (a, b) => (b.lastActivityMs ?? 0) - (a.lastActivityMs ?? 0),
+        );
+        this.sessionsSnapshot = merged;
+        this.handlers.onSessions?.(merged);
         break;
       }
       case "ack": {
