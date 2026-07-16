@@ -119,7 +119,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
         }
 
         if (group.length >= 2) {
-          elements.push(<GroupedToolUseBlocks key={i} blocks={group} />);
+          elements.push(<GroupedToolUseBlocks key={i} blocks={group} paths={paths} />);
           i = j;
           continue;
         }
@@ -132,6 +132,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
           result={result}
           isPartial={isPartial && !result}
           meta={metaMap.get(toolBlock.id)}
+          paths={paths}
         />
       );
       i++;
