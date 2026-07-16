@@ -1527,6 +1527,80 @@ mod tests {
     }
 
     #[test]
+    fn normalize_messages_summarizes_patch_apply_end() {
+        // Codex emits `patch_apply_end` after applying an apply_patch, carrying
+        // the per-file change map. Surface a concise "which files changed" card
+        // (the full patch already shows in the exec tool card).
+        let lines = vec![json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "patch_apply_end",
+                "call_id": "exec-abc",
+                "success": true,
+                "stdout": "Success. Updated the following files:\nM /repo/foo.rs\n",
+                "changes": {
+                    "/repo/foo.rs": {"type": "update"},
+                    "/repo/new.rs": {"type": "add"}
+                }
+            },
+            "timestamp": "t0"
+        })];
+
+        let out = normalize_messages(lines);
+        let text = out
+            .iter()
+            .filter_map(|m| {
+                m.get("message")?
+                    .get("content")?
+                    .as_array()?
+                    .first()?
+                    .get("text")?
+                    .as_str()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("foo.rs"), "must name the updated file: {text}");
+        assert!(text.contains("new.rs"), "must name the added file: {text}");
+        // Change-type letters: update→M, add→A.
+        assert!(text.contains('M'), "update should show M: {text}");
+        assert!(text.contains('A'), "add should show A: {text}");
+    }
+
+    #[test]
+    fn normalize_messages_flags_failed_patch_apply() {
+        // A failed apply must not read as a successful edit.
+        let lines = vec![json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "patch_apply_end",
+                "call_id": "exec-xyz",
+                "success": false,
+                "stderr": "patch does not apply",
+                "changes": {"/repo/foo.rs": {"type": "update"}}
+            }
+        })];
+
+        let out = normalize_messages(lines);
+        let text = out
+            .iter()
+            .filter_map(|m| {
+                m.get("message")?
+                    .get("content")?
+                    .as_array()?
+                    .first()?
+                    .get("text")?
+                    .as_str()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.to_lowercase().contains("fail"),
+            "failed patch must be flagged as failure: {text}"
+        );
+    }
+
+    #[test]
     fn parse_source_exec_is_top_level_not_subagent() {
         // Fleet launches every codex session via `codex exec`, so the SQLite
         // `threads.source` column is the plain string "exec". That is a
@@ -2533,6 +2607,64 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                             "message": {
                                 "role": "assistant",
                                 "content": [{"type": "text", "text": desc}]
+                            },
+                            "timestamp": timestamp
+                        }));
+                    }
+                    "patch_apply_end" => {
+                        // Codex emits this after applying an apply_patch. The
+                        // full patch already shows in the exec tool card, so
+                        // render a concise "which files changed" summary keyed
+                        // off the per-file change map (path → { type }).
+                        let success = payload
+                            .get("success")
+                            .and_then(|s| s.as_bool())
+                            .unwrap_or(true);
+                        let mut files: Vec<String> = payload
+                            .get("changes")
+                            .and_then(|c| c.as_object())
+                            .map(|map| {
+                                map.iter()
+                                    .map(|(path, meta)| {
+                                        let letter = match meta
+                                            .get("type")
+                                            .and_then(|t| t.as_str())
+                                        {
+                                            Some("add") => "A",
+                                            Some("delete") => "D",
+                                            _ => "M",
+                                        };
+                                        format!("{letter} {path}")
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        files.sort();
+
+                        let text = if success {
+                            if files.is_empty() {
+                                "📝 Applied patch".to_string()
+                            } else {
+                                format!("📝 Applied patch:\n{}", files.join("\n"))
+                            }
+                        } else {
+                            let err = payload
+                                .get("stderr")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("")
+                                .trim();
+                            if err.is_empty() {
+                                "⚠️ Patch failed".to_string()
+                            } else {
+                                format!("⚠️ Patch failed: {err}")
+                            }
+                        };
+
+                        messages.push(json!({
+                            "type": "assistant",
+                            "message": {
+                                "role": "assistant",
+                                "content": [{"type": "text", "text": text}]
                             },
                             "timestamp": timestamp
                         }));
