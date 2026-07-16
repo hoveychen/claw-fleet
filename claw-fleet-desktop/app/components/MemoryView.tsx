@@ -39,6 +39,7 @@ function isMemType(s: string | undefined): s is MemType {
 }
 
 interface WorkspaceMemory {
+  source: "claude-code" | "codex" | string;
   workspaceName: string;
   workspacePath: string;
   projectKey: string;
@@ -111,6 +112,7 @@ export function MemoryView() {
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [filterType, setFilterType] = useState<MemType | "all">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "claude-code" | "codex">("all");
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
   const [expandedUnindexed, setExpandedUnindexed] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Selection>(null);
@@ -173,6 +175,15 @@ export function MemoryView() {
     return [...seen.entries()].map(([key, name]) => ({ key, name }));
   }, [memories, t]);
 
+  const sourceCounts = useMemo(() => ({
+    "claude-code": memories
+      .filter((ws) => ws.source === "claude-code")
+      .reduce((sum, ws) => sum + ws.files.length, 0),
+    codex: memories
+      .filter((ws) => ws.source === "codex")
+      .reduce((sum, ws) => sum + ws.files.length, 0),
+  }), [memories]);
+
   // Filter by query (name/title/hook/description) + by selected type +
   // by selected workspace.
   // MEMORY.md is always kept (it's the index).
@@ -180,6 +191,7 @@ export function MemoryView() {
     const q = query.trim().toLowerCase();
     return memories
       .map((ws) => {
+        if (sourceFilter !== "all" && ws.source !== sourceFilter) return null;
         if (workspaceFilter !== "all" && ws.projectKey !== workspaceFilter) {
           return null;
         }
@@ -203,7 +215,7 @@ export function MemoryView() {
         return { ...ws, files } satisfies WorkspaceMemory;
       })
       .filter((x): x is WorkspaceMemory => x !== null);
-  }, [memories, query, filterType, workspaceFilter]);
+  }, [memories, query, filterType, workspaceFilter, sourceFilter]);
 
   // Keep selection valid after refresh / filter changes.
   useEffect(() => {
@@ -258,6 +270,18 @@ export function MemoryView() {
       subBar={
         <>
           <FilterChip
+            label={t("memory.source_claude")}
+            count={sourceCounts["claude-code"]}
+            active={sourceFilter === "claude-code"}
+            onClick={() => setSourceFilter((v) => v === "claude-code" ? "all" : "claude-code")}
+          />
+          <FilterChip
+            label={t("memory.source_codex")}
+            count={sourceCounts.codex}
+            active={sourceFilter === "codex"}
+            onClick={() => setSourceFilter((v) => v === "codex" ? "all" : "codex")}
+          />
+          <FilterChip
             label={t("memory.filter_all")}
             count={typeCounts.all}
             active={filterType === "all"}
@@ -304,6 +328,9 @@ export function MemoryView() {
                   <span className={styles.workspace_count}>
                     {ws.files.length}
                   </span>
+                  <span className={styles.source_badge}>
+                    {ws.source === "codex" ? "Codex" : "Claude"}
+                  </span>
                   {ws.hasClaudeMd && (
                     <button
                       className={`${styles.badge} ${styles.badge_claude} ${
@@ -323,6 +350,7 @@ export function MemoryView() {
                     <MemoryCard
                       key={f.path}
                       file={f}
+                      source={ws.source}
                       active={
                         selection?.kind === "file" &&
                         selection.file.path === f.path
@@ -353,6 +381,7 @@ export function MemoryView() {
                           <MemoryCard
                             key={f.path}
                             file={f}
+                            source={ws.source}
                             active={
                               selection?.kind === "file" &&
                               selection.file.path === f.path
@@ -471,7 +500,7 @@ function FileDetail({
           <span className={styles.detail_name}>{file.name}</span>
         </div>
         <div className={styles.detail_actions}>
-          {!isIndex && (
+          {!isIndex && workspace.source === "claude-code" && (
             <div className={styles.promote_wrapper}>
               <button
                 className={styles.promote_btn}
@@ -513,13 +542,15 @@ function FileDetail({
         >
           {t("memory.tab_content")}
         </button>
-        <button
-          className={`${styles.tab} ${tab === "history" ? styles.tab_active : ""}`}
-          onClick={() => setTab("history")}
-        >
-          {t("memory.tab_history")}
-          {history && ` (${history.length})`}
-        </button>
+        {workspace.source === "claude-code" && (
+          <button
+            className={`${styles.tab} ${tab === "history" ? styles.tab_active : ""}`}
+            onClick={() => setTab("history")}
+          >
+            {t("memory.tab_history")}
+            {history && ` (${history.length})`}
+          </button>
+        )}
       </div>
 
       <div className={styles.detail_body}>
@@ -660,10 +691,12 @@ function FilterChip({
 
 function MemoryCard({
   file,
+  source,
   active,
   onClick,
 }: {
   file: MemoryFile;
+  source: string;
   active: boolean;
   onClick: () => void;
 }) {
@@ -681,7 +714,9 @@ function MemoryCard({
       }`}
       onClick={onClick}
     >
-      {isIndexFile ? (
+      {source === "codex" ? (
+        <span className={`${styles.type_badge} ${styles.type_codex}`}>CX</span>
+      ) : isIndexFile ? (
         <span className={`${styles.type_badge} ${styles.type_index}`}>IDX</span>
       ) : memType ? (
         <span
