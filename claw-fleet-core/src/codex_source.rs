@@ -345,6 +345,93 @@ fn strip_leading_system_reminder(text: &str) -> &str {
     }
 }
 
+/// True when a codex message is runtime-injected boilerplate rather than an
+/// authored user prompt: any `developer`-role message, or a `user`-role message
+/// that is one of codex's own preamble blocks — `<recommended_plugins>`,
+/// `<environment_context>`, `<user_instructions>`, `<turn_aborted>`,
+/// `<subagent_notification>`, or the `# AGENTS.md instructions` blob newer CLI
+/// builds emit. This is the same fold predicate `normalize_messages` applies to
+/// tag such records `isMeta`; extracted here so title/preview fallbacks skip the
+/// same noise. Each tag match requires the open tag at the start AND its close
+/// tag, so a real prompt merely mentioning one of these is not misclassified.
+fn is_injected_codex_context(role: &str, text: &str) -> bool {
+    if role == "developer" {
+        return true;
+    }
+    if role != "user" {
+        return false;
+    }
+    let trimmed = text.trim_start();
+    let wrapped_in = |tag: &str| {
+        trimmed.starts_with(&format!("<{tag}>")) && text.contains(&format!("</{tag}>"))
+    };
+    let is_agents_md_instructions =
+        trimmed.starts_with("# AGENTS.md instructions") && text.contains("<INSTRUCTIONS>");
+    wrapped_in("recommended_plugins")
+        || wrapped_in("environment_context")
+        || wrapped_in("user_instructions")
+        || wrapped_in("turn_aborted")
+        || wrapped_in("subagent_notification")
+        || is_agents_md_instructions
+}
+
+/// The opening *authored* user prompt from a codex rollout, with codex's
+/// injected boilerplate skipped (see `is_injected_codex_context`) and Fleet's
+/// leading TASKS.md `<system-reminder>` block stripped
+/// (see `strip_leading_system_reminder`).
+///
+/// Used as a title/preview fallback: codex only flushes its SQLite `title` /
+/// `first_user_message` columns at turn boundaries, so during an in-flight first
+/// turn those are empty and the card would read "(无标题)". The rollout file, by
+/// contrast, carries the prompt from the first turn's start — so reading it here
+/// lets the card show the real prompt immediately instead of waiting for the
+/// turn to complete. Returns `None` if no non-injected, non-empty user prompt is
+/// present yet.
+fn extract_first_user_prompt(lines: &[Value]) -> Option<String> {
+    for line in lines {
+        let Some(payload) = line.get("payload") else {
+            continue;
+        };
+        let ptype = payload.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let (role, text) = match ptype {
+            // response_item mirror of the user turn (`role:"user"`, structured
+            // `content[]` of `input_text`/`text` blocks).
+            "message" => {
+                let role = payload.get("role").and_then(|r| r.as_str()).unwrap_or("");
+                let text = payload
+                    .get("content")
+                    .and_then(|c| c.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join("")
+                    })
+                    .unwrap_or_default();
+                (role, text)
+            }
+            // event_msg form (`message` is a plain string).
+            "user_message" => (
+                "user",
+                payload
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+            _ => continue,
+        };
+        if role != "user" || text.is_empty() || is_injected_codex_context(role, &text) {
+            continue;
+        }
+        let stripped = strip_leading_system_reminder(&text);
+        if !stripped.is_empty() {
+            return Some(stripped.to_string());
+        }
+    }
+    None
+}
+
 /// Extract the last text content for preview from the session.
 fn extract_last_text(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
@@ -1293,7 +1380,8 @@ fn build_session_from_sqlite(
     let status = clamp_dead_session_status(status, proc_alive);
 
     // Prefer: source-embedded nickname > SQLite agent_nickname
-    //       > raw codex title (first prompt)
+    //       > raw codex title (first prompt) > rollout's first prompt
+    //       > SQLite first_user_message
     let ai_title = source_info
         .agent_nickname
         .or_else(|| thread.agent_nickname.clone())
@@ -1305,7 +1393,27 @@ fn build_session_from_sqlite(
             // `strip_leading_system_reminder`).
             let cleaned = strip_leading_system_reminder(&thread.title);
             if !cleaned.is_empty() {
-                Some(cleaned.to_string())
+                return Some(cleaned.to_string());
+            }
+            // `thread.title` is empty: codex only flushes it to SQLite at a turn
+            // boundary, so during an in-flight first turn it hasn't landed yet.
+            // The rollout file already carries the opening prompt from the turn's
+            // start — read it so the card shows the real title immediately
+            // instead of "(无标题)".
+            if let Ok(content) = read_session_content(&rollout_path) {
+                let parsed: Vec<Value> = content
+                    .lines()
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect();
+                if let Some(prompt) = extract_first_user_prompt(&parsed) {
+                    return Some(prompt);
+                }
+            }
+            // Last resort: codex's own `first_user_message` column (also the raw
+            // prompt), stripped the same way.
+            let cleaned_first = strip_leading_system_reminder(&thread.first_user_message);
+            if !cleaned_first.is_empty() {
+                Some(cleaned_first.to_string())
             } else {
                 None
             }
@@ -1380,13 +1488,53 @@ mod tests {
         codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
         codex_token_breakdown_from_lines, compute_token_stats, exec_note_from_script,
-        extract_context_percent, last_rollout_rate_limits, latest_total_token_usage,
-        normalize_messages, strip_leading_system_reminder,
+        extract_context_percent, extract_first_user_prompt, last_rollout_rate_limits,
+        latest_total_token_usage, normalize_messages, strip_leading_system_reminder,
         read_rollout_originator, CodexProcess, CodexRateLimitWindow, CodexUsageItem,
         SqliteThread,
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
+
+    #[test]
+    fn extract_first_user_prompt_skips_injected_and_strips_reminder() {
+        // Mirrors a real Fleet-launched codex rollout during its first in-flight
+        // turn: codex prepends `<recommended_plugins>`, the AGENTS.md blob and a
+        // `developer` preamble as role=user/developer records, then Fleet's own
+        // TASKS.md `<system-reminder>` rides in front of the actual prompt.
+        // The title fallback must skip all the boilerplate and return only the
+        // real prompt with the reminder stripped.
+        let reminder_prefixed =
+            "<system-reminder>\nThe workspace `TASKS.md` holds active plans.\n\
+             ## Plan: foo\n- [ ] **P1** — bar\n</system-reminder>\n\n\
+             当前fleet应用中，是不是审计和日报两个功能会使用到LLM？";
+        let lines = vec![
+            json!({"type":"response_item","payload":{
+                "type":"message","role":"developer",
+                "content":[{"type":"input_text","text":"<permissions instructions>\nsandbox\n"}]
+            }}),
+            json!({"type":"response_item","payload":{
+                "type":"message","role":"user",
+                "content":[{"type":"input_text","text":"<recommended_plugins>\n- GitHub\n</recommended_plugins>"}]
+            }}),
+            json!({"type":"response_item","payload":{
+                "type":"message","role":"user",
+                "content":[{"type":"input_text","text":"# AGENTS.md instructions\n\n<INSTRUCTIONS>\nrules\n</INSTRUCTIONS>"}]
+            }}),
+            json!({"type":"response_item","payload":{
+                "type":"message","role":"user",
+                "content":[{"type":"input_text","text": reminder_prefixed}]
+            }}),
+        ];
+
+        let got = extract_first_user_prompt(&lines);
+        assert_eq!(
+            got.as_deref(),
+            Some("当前fleet应用中，是不是审计和日报两个功能会使用到LLM？"),
+            "must skip developer/recommended_plugins/AGENTS.md records and strip the leading \
+             <system-reminder> block, returning only the authored prompt"
+        );
+    }
 
     #[test]
     fn dead_codex_session_is_not_in_flight() {
@@ -2924,11 +3072,17 @@ fn parse_codex_session(
     let (pid, pid_precise) = resolve_pid(codex_processes, &session_id, &workspace_path);
     let proc_alive = codex_proc_alive(codex_processes, &session_id);
 
-    // Prefer source-embedded nickname > rollout meta nickname.
-    // (Codex stores the raw first prompt as its native title; Fleet no longer
-    // generates a semantic one — that path went through a slow `codex exec`
-    // per title and was removed.)
-    let ai_title = source_info.agent_nickname.or(agent_nickname);
+    // Prefer source-embedded nickname > rollout meta nickname > the rollout's
+    // opening authored prompt. Codex has no semantic title; its SQLite `title`
+    // is just the raw first prompt and is only flushed at turn boundaries, so on
+    // this filesystem-fallback path (and during an in-flight first turn) we
+    // derive the title straight from the rollout's first user prompt — with the
+    // leading TASKS.md `<system-reminder>` stripped — instead of leaving the card
+    // "(无标题)".
+    let ai_title = source_info
+        .agent_nickname
+        .or(agent_nickname)
+        .or_else(|| extract_first_user_prompt(&all_parsed));
 
     let agent_type = source_info.agent_role.or_else(|| {
         meta.and_then(|m| m.get("agent_role").and_then(|r| r.as_str()))
@@ -3400,43 +3554,15 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                                 .collect::<Vec<_>>()
                                 .join("");
                             // Codex prepends several runtime-boilerplate blocks
-                            // as `role:"user"` messages (not `developer`): the
-                            // `<recommended_plugins>` list, the standalone
-                            // `<environment_context>` preamble (cwd/shell/date/
-                            // sandbox), the `<user_instructions>` AGENTS.md
-                            // guidance, and two low-frequency runtime markers
-                            // `<turn_aborted>` (interrupt notice) and
-                            // `<subagent_notification>` (subagent status JSON).
-                            // None is user-authored, so fold them like the
-                            // developer boilerplate. Each match requires the open
-                            // tag at the start AND its close tag, so a real user
-                            // message merely mentioning one of these won't fold.
-                            let trimmed = text.trim_start();
-                            let wrapped_in = |tag: &str| {
-                                trimmed.starts_with(&format!("<{tag}>"))
-                                    && text.contains(&format!("</{tag}>"))
-                            };
-                            // Newer codex CLI builds no longer wrap the AGENTS.md
-                            // guidance in `<user_instructions>`; they emit a
-                            // role=user blob that opens with a markdown heading
-                            // `# AGENTS.md instructions`, wraps the doc body in
-                            // `<INSTRUCTIONS>…</INSTRUCTIONS>`, and appends the
-                            // `<environment_context>` preamble to the same message.
-                            // That leading heading means none of the `wrapped_in`
-                            // tag checks fire, so match the heading directly (a
-                            // real user turn won't start with codex's own heading).
-                            let is_agents_md_instructions =
-                                trimmed.starts_with("# AGENTS.md instructions")
-                                    && text.contains("<INSTRUCTIONS>");
-                            let is_injected_user_context = role == "user"
-                                && (wrapped_in("recommended_plugins")
-                                    || wrapped_in("environment_context")
-                                    || wrapped_in("user_instructions")
-                                    || wrapped_in("turn_aborted")
-                                    || wrapped_in("subagent_notification")
-                                    || is_agents_md_instructions);
-
-                            if role == "developer" || is_injected_user_context {
+                            // (`<recommended_plugins>`, `<environment_context>`,
+                            // `<user_instructions>`/`# AGENTS.md instructions`,
+                            // `<turn_aborted>`, `<subagent_notification>`) plus
+                            // the `developer`-role preamble. None is user-authored,
+                            // so fold them into the collapsed meta card — the same
+                            // flag Claude Code stamps on harness-injected records.
+                            // See `is_injected_codex_context` (shared with the
+                            // title/preview fallback so both classify identically).
+                            if is_injected_codex_context(role, &text) {
                                 msg["isMeta"] = json!(true);
                             }
 
