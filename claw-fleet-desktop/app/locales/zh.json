@@ -1253,6 +1253,7 @@
     "result_capped": "内容过长，末尾 {{count}} 个字符未渲染（可复制获取全部）",
     "open_subagent": "打开子会话",
     "slash_command": "斜杠命令",
+    "skill_loaded": "已加载 SKILL",
     "today": "今天",
     "yesterday": "昨天",
     "copy": "复制消息",

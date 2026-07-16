@@ -4,7 +4,7 @@
 // sidecar method while the session is working.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, MessageSquareDashed, Sparkles } from "lucide-react";
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, MessageSquareDashed, Puzzle, Sparkles } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
@@ -34,6 +34,7 @@ import {
   TokenTab,
   WorkflowTab,
 } from "./SessionDetailTabs";
+import { parseSkillInjection } from "../skillInjection";
 import styles from "./SessionDetailView.module.css";
 
 const TAIL_POLL_MS = 2500;
@@ -152,6 +153,27 @@ function TaskNotificationCard({ data }: { data: ParsedTaskNotification }) {
   );
 }
 
+/** The SKILL.md body Claude Code injects on a skill load, folded into a
+ *  collapsed card — the harness feeding the agent, not a user turn. */
+function SkillLoadCard({ slug, body }: { slug: string; body: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={styles.skillCard}>
+      <button className={styles.skillHeader} onClick={() => setOpen((o) => !o)}>
+        <Puzzle size={14} className={styles.skillIcon} />
+        <span className={styles.skillLabel}>{t("已加载 SKILL")}</span>
+        <span className={styles.skillSlug}>{slug}</span>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      </button>
+      {open && (
+        <div className={styles.skillBody}>
+          <LazyMarkdown text={body} bare />
+        </div>
+      )}
+    </div>
+  );
+}
+
 type DetailTab = "messages" | "decisions" | "plans" | "token" | "workflow" | "handoff";
 
 const TABS: Array<[DetailTab, string]> = [
@@ -249,6 +271,19 @@ const MessageRow = memo(function MessageRow({
   if (msg.type === "user") {
     const text = userText(msg);
     if (!text) return null;
+    // A skill-body injection is the harness feeding SKILL.md to the agent, not
+    // a user turn — fold it into a collapsed card.
+    if (msg.isMeta) {
+      const skill = parseSkillInjection(text);
+      if (skill) {
+        return (
+          <div className={styles.assistantRow}>
+            <SkillLoadCard slug={skill.slug} body={skill.body} />
+            <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
+          </div>
+        );
+      }
+    }
     // A subagent-completion notice renders as a card, not a raw-XML bubble.
     const notif = parseTaskNotification(text);
     if (notif) {
