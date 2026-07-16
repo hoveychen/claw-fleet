@@ -1,4 +1,4 @@
-//! Skills scanning — reads Claude Code skill files from `~/.claude/skills/`.
+//! Skills scanning for Claude Code and Codex.
 //!
 //! Supports two layouts:
 //!   • Directory-based: `~/.claude/skills/<name>/SKILL.md`
@@ -19,6 +19,12 @@ use crate::session::get_claude_dir;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillItem {
+    /// Agent family that discovers this skill (`claude-code` or `codex`).
+    #[serde(default = "default_skill_source")]
+    pub source: String,
+    /// Discovery scope (`user`, `repo`, `admin`, or `system`).
+    #[serde(default = "default_skill_scope")]
+    pub scope: String,
     /// Skill name — from frontmatter `name:` or the directory/file stem.
     pub name: String,
     /// Short description — from frontmatter `description:` or empty string.
@@ -27,6 +33,19 @@ pub struct SkillItem {
     pub path: String,
     pub size_bytes: u64,
     pub modified_ms: u64,
+    /// Built-in/admin skills are inspectable but not removable from Fleet.
+    #[serde(default = "default_true")]
+    pub can_delete: bool,
+}
+
+fn default_skill_source() -> String {
+    "claude-code".to_string()
+}
+fn default_skill_scope() -> String {
+    "user".to_string()
+}
+fn default_true() -> bool {
+    true
 }
 
 /// A file or directory inside a skill's root directory. Returned as a flat list;
@@ -47,19 +66,113 @@ pub struct SkillFileEntry {
 // ── Scan ──────────────────────────────────────────────────────────────────────
 
 pub fn scan_all_skills() -> Vec<SkillItem> {
-    let Some(claude_dir) = get_claude_dir() else {
-        return vec![];
-    };
-    let skills_dir = claude_dir.join("skills");
-    if !skills_dir.is_dir() {
-        return vec![];
+    scan_all_skills_for_workspaces(&[])
+}
+
+/// Scan global skills plus `.agents/skills` roots belonging to known
+/// workspaces. Codex intentionally permits duplicate names from different
+/// scopes, so de-duplication is by canonical SKILL.md path only.
+pub fn scan_all_skills_for_workspaces(workspaces: &[String]) -> Vec<SkillItem> {
+    let mut results = Vec::new();
+    let mut seen_roots = std::collections::HashSet::new();
+
+    if let Some(claude_dir) = get_claude_dir() {
+        scan_skill_root(
+            &claude_dir.join("skills"),
+            "claude-code",
+            "user",
+            true,
+            true,
+            &mut seen_roots,
+            &mut results,
+        );
     }
 
-    let Ok(entries) = fs::read_dir(&skills_dir) else {
-        return vec![];
-    };
+    if let Some(home) = crate::session::real_home_dir() {
+        scan_skill_root(
+            &home.join(".agents").join("skills"),
+            "codex",
+            "user",
+            true,
+            false,
+            &mut seen_roots,
+            &mut results,
+        );
+    }
 
-    let mut results = Vec::new();
+    if let Some(codex_home) = codex_home_dir() {
+        scan_skill_root(
+            &codex_home.join("skills"),
+            "codex",
+            "system",
+            false,
+            false,
+            &mut seen_roots,
+            &mut results,
+        );
+    }
+
+    scan_skill_root(
+        Path::new("/etc/codex/skills"),
+        "codex",
+        "admin",
+        false,
+        false,
+        &mut seen_roots,
+        &mut results,
+    );
+
+    for workspace in workspaces {
+        for root in repo_skill_roots(Path::new(workspace)) {
+            scan_skill_root(
+                &root,
+                "codex",
+                "repo",
+                true,
+                false,
+                &mut seen_roots,
+                &mut results,
+            );
+        }
+    }
+
+    results.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then_with(|| a.scope.cmp(&b.scope))
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    results
+}
+
+fn codex_home_dir() -> Option<PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| crate::session::real_home_dir().map(|h| h.join(".codex")))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan_skill_root(
+    root: &Path,
+    source: &str,
+    scope: &str,
+    can_delete: bool,
+    allow_flat: bool,
+    seen_roots: &mut std::collections::HashSet<PathBuf>,
+    results: &mut Vec<SkillItem>,
+) {
+    let Ok(canonical_root) = fs::canonicalize(root) else {
+        return;
+    };
+    if !seen_roots.insert(canonical_root.clone()) {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(&canonical_root) else {
+        return;
+    };
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -68,25 +181,60 @@ pub fn scan_all_skills() -> Vec<SkillItem> {
             // Directory-based skill: <name>/SKILL.md
             let skill_file = path.join("SKILL.md");
             if skill_file.is_file() {
-                if let Some(item) = read_skill_item(&skill_file, &path) {
+                if let Some(item) = read_skill_item(&skill_file, &path, source, scope, can_delete) {
                     results.push(item);
                 }
+            } else if scope == "system" {
+                // Codex bundles its built-ins under `$CODEX_HOME/skills/.system/*`.
+                let Ok(children) = fs::read_dir(&path) else {
+                    continue;
+                };
+                for child in children.flatten() {
+                    let child_path = child.path();
+                    let child_skill = child_path.join("SKILL.md");
+                    if child_skill.is_file() {
+                        if let Some(item) =
+                            read_skill_item(&child_skill, &child_path, source, scope, can_delete)
+                        {
+                            results.push(item);
+                        }
+                    }
+                }
             }
-        } else if path.is_file() {
+        } else if allow_flat && path.is_file() {
             // Flat skill file: <name>.md
             if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                if let Some(item) = read_skill_item(&path, &path) {
+                if let Some(item) = read_skill_item(&path, &path, source, scope, can_delete) {
                     results.push(item);
                 }
             }
         }
     }
-
-    results.sort_by(|a, b| a.name.cmp(&b.name));
-    results
 }
 
-fn read_skill_item(skill_file: &Path, name_source: &Path) -> Option<SkillItem> {
+fn repo_skill_roots(workspace: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let mut current = workspace.to_path_buf();
+    loop {
+        let candidate = current.join(".agents").join("skills");
+        if candidate.is_dir() {
+            roots.push(candidate);
+        }
+        let at_repo_root = current.join(".git").exists();
+        if at_repo_root || !current.pop() {
+            break;
+        }
+    }
+    roots
+}
+
+fn read_skill_item(
+    skill_file: &Path,
+    name_source: &Path,
+    source: &str,
+    scope: &str,
+    can_delete: bool,
+) -> Option<SkillItem> {
     let metadata = fs::metadata(skill_file).ok()?;
     let modified_ms = metadata
         .modified()
@@ -100,11 +248,14 @@ fn read_skill_item(skill_file: &Path, name_source: &Path) -> Option<SkillItem> {
     let (name, description) = parse_frontmatter(&content, name_source);
 
     Some(SkillItem {
+        source: source.to_string(),
+        scope: scope.to_string(),
         name,
         description,
         path: skill_file.to_string_lossy().to_string(),
         size_bytes,
         modified_ms,
+        can_delete,
     })
 }
 
@@ -134,9 +285,9 @@ fn parse_frontmatter(content: &str, name_source: &Path) -> (String, String) {
 
     for line in frontmatter.lines() {
         if let Some(val) = line.strip_prefix("name:") {
-            name = Some(val.trim().to_string());
+            name = Some(parse_frontmatter_scalar(val));
         } else if let Some(val) = line.strip_prefix("description:") {
-            description = Some(val.trim().to_string());
+            description = Some(parse_frontmatter_scalar(val));
         }
     }
 
@@ -144,6 +295,19 @@ fn parse_frontmatter(content: &str, name_source: &Path) -> (String, String) {
         name.unwrap_or(fallback_name),
         description.unwrap_or_default(),
     )
+}
+
+fn parse_frontmatter_scalar(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+        {
+            return value[1..value.len() - 1].to_string();
+        }
+    }
+    value.to_string()
 }
 
 // ── List files inside a skill ────────────────────────────────────────────────
@@ -156,14 +320,9 @@ const MAX_SKILL_TREE_DEPTH: usize = 6;
 /// `SKILL.md` for directory-based skills, or the flat `<name>.md` file for
 /// flat skills. For flat skills this returns a single entry (the file itself).
 pub fn list_skill_files(skill_path: &str) -> Result<Vec<SkillFileEntry>, String> {
-    let claude_dir = get_claude_dir().ok_or_else(|| "cannot determine home dir".to_string())?;
-    let skills_dir = claude_dir.join("skills");
-    let canonical_skills_dir = fs::canonicalize(&skills_dir).map_err(|e| e.to_string())?;
-
     let canonical = fs::canonicalize(skill_path).map_err(|e| e.to_string())?;
-    if !canonical.starts_with(&canonical_skills_dir) {
-        return Err("path is outside allowed skills directory".into());
-    }
+    let (canonical_skills_dir, _) = allowed_skill_root(&canonical)
+        .ok_or_else(|| "path is outside allowed skills directories".to_string())?;
 
     let root: PathBuf = if canonical.is_file() {
         let parent = canonical
@@ -250,13 +409,11 @@ fn walk_skill_dir(root: &Path, dir: &Path, out: &mut Vec<SkillFileEntry>, depth:
 /// The path is canonicalized and must resolve inside `~/.claude/skills/` —
 /// anything outside is rejected.
 pub fn delete_skill(skill_path: &str) -> Result<(), String> {
-    let claude_dir = get_claude_dir().ok_or_else(|| "cannot determine home dir".to_string())?;
-    let skills_dir = claude_dir.join("skills");
-    let canonical_skills_dir = fs::canonicalize(&skills_dir).map_err(|e| e.to_string())?;
-
     let canonical = fs::canonicalize(skill_path).map_err(|e| e.to_string())?;
-    if !canonical.starts_with(&canonical_skills_dir) {
-        return Err("path is outside allowed skills directory".into());
+    let (canonical_skills_dir, can_delete) = allowed_skill_root(&canonical)
+        .ok_or_else(|| "path is outside allowed skills directories".to_string())?;
+    if !can_delete {
+        return Err("built-in and admin skills cannot be deleted".into());
     }
     if canonical == canonical_skills_dir {
         return Err("refusing to delete the skills root".into());
@@ -286,20 +443,51 @@ pub fn delete_skill(skill_path: &str) -> Result<(), String> {
 }
 
 pub fn read_skill_file(path: &str) -> Result<String, String> {
-    // Safety: only allow reading from ~/.claude/skills/
-    let claude_dir = get_claude_dir().ok_or("cannot determine home dir")?;
     let canonical = fs::canonicalize(path).map_err(|e| e.to_string())?;
-    let skills_dir = claude_dir.join("skills");
-
-    let allowed = fs::canonicalize(&skills_dir)
-        .map(|s| canonical.starts_with(s))
-        .unwrap_or(false);
-
-    if !allowed {
-        return Err("path is outside allowed skills directory".into());
+    if allowed_skill_root(&canonical).is_none() {
+        return Err("path is outside allowed skills directories".into());
     }
 
     fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+/// Resolve the discovery root containing `path` and whether Fleet may remove
+/// skills from it. Repo `.agents/skills` roots are recognized structurally so
+/// repositories outside the user's home remain inspectable over local/remote
+/// backends as well.
+fn allowed_skill_root(path: &Path) -> Option<(PathBuf, bool)> {
+    let mut candidates = Vec::new();
+    if let Some(claude_dir) = get_claude_dir() {
+        candidates.push((claude_dir.join("skills"), true));
+    }
+    if let Some(home) = crate::session::real_home_dir() {
+        candidates.push((home.join(".agents").join("skills"), true));
+    }
+    if let Some(codex_home) = codex_home_dir() {
+        candidates.push((codex_home.join("skills"), false));
+    }
+    candidates.push((PathBuf::from("/etc/codex/skills"), false));
+
+    for (root, can_delete) in candidates {
+        if let Ok(root) = fs::canonicalize(root) {
+            if path.starts_with(&root) {
+                return Some((root, can_delete));
+            }
+        }
+    }
+
+    for ancestor in path.ancestors() {
+        if ancestor.file_name().and_then(|n| n.to_str()) == Some("skills")
+            && ancestor
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                == Some(".agents")
+        {
+            return Some((ancestor.to_path_buf(), true));
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -308,7 +496,8 @@ mod tests {
 
     #[test]
     fn parse_frontmatter_extracts_name_and_description() {
-        let content = "---\nname: fleet\ndescription: Monitor agents\nallowed-tools: Bash\n---\n\n# Body";
+        let content =
+            "---\nname: fleet\ndescription: Monitor agents\nallowed-tools: Bash\n---\n\n# Body";
         let path = Path::new("/tmp/fleet/SKILL.md");
         let (name, desc) = parse_frontmatter(content, path);
         assert_eq!(name, "fleet");
@@ -331,6 +520,15 @@ mod tests {
         let (name, desc) = parse_frontmatter(content, path);
         assert_eq!(name, "custom");
         assert_eq!(desc, "");
+    }
+
+    #[test]
+    fn parse_frontmatter_strips_matching_quotes() {
+        let content = "---\nname: \"imagegen\"\ndescription: 'Generate images'\n---\nBody";
+        let path = Path::new("/tmp/imagegen/SKILL.md");
+        let (name, desc) = parse_frontmatter(content, path);
+        assert_eq!(name, "imagegen");
+        assert_eq!(desc, "Generate images");
     }
 
     struct FleetHomeOverride {
@@ -360,6 +558,84 @@ mod tests {
         let d = home.join(".claude").join("skills");
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    struct CodexHomeOverride {
+        prev: Option<std::ffi::OsString>,
+    }
+
+    impl CodexHomeOverride {
+        fn new(path: &Path) -> Self {
+            let prev = std::env::var_os("CODEX_HOME");
+            unsafe { std::env::set_var("CODEX_HOME", path) };
+            Self { prev }
+        }
+    }
+
+    impl Drop for CodexHomeOverride {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(path) => std::env::set_var("CODEX_HOME", path),
+                    None => std::env::remove_var("CODEX_HOME"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scans_codex_user_repo_and_system_scopes() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = FleetHomeOverride::new(temp.path());
+        let codex_home = temp.path().join(".codex");
+        let _codex = CodexHomeOverride::new(&codex_home);
+
+        let user = temp.path().join(".agents/skills/user-skill");
+        fs::create_dir_all(&user).unwrap();
+        fs::write(
+            user.join("SKILL.md"),
+            "---\nname: user-skill\ndescription: user\n---\n",
+        )
+        .unwrap();
+
+        let system = codex_home.join("skills/.system/system-skill");
+        fs::create_dir_all(&system).unwrap();
+        fs::write(
+            system.join("SKILL.md"),
+            "---\nname: system-skill\ndescription: system\n---\n",
+        )
+        .unwrap();
+
+        let repo = temp.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        let repo_skill = repo.join(".agents/skills/repo-skill");
+        fs::create_dir_all(&repo_skill).unwrap();
+        fs::write(
+            repo_skill.join("SKILL.md"),
+            "---\nname: repo-skill\ndescription: repo\n---\n",
+        )
+        .unwrap();
+
+        let skills = scan_all_skills_for_workspaces(&[repo.to_string_lossy().to_string()]);
+        assert!(skills
+            .iter()
+            .any(|skill| skill.name == "user-skill" && skill.scope == "user"));
+        assert!(skills
+            .iter()
+            .any(|skill| skill.name == "repo-skill" && skill.scope == "repo"));
+        let system_item = skills
+            .iter()
+            .find(|skill| skill.name == "system-skill")
+            .unwrap();
+        assert_eq!(system_item.source, "codex");
+        assert!(!system_item.can_delete);
+        assert!(delete_skill(&system_item.path)
+            .unwrap_err()
+            .contains("cannot be deleted"));
+        assert!(read_skill_file(&system_item.path)
+            .unwrap()
+            .contains("description: system"));
     }
 
     #[test]
@@ -407,7 +683,10 @@ mod tests {
         fs::write(&victim, "do not delete").unwrap();
 
         let err = delete_skill(victim.to_str().unwrap()).unwrap_err();
-        assert!(err.contains("outside allowed skills directory"), "got: {err}");
+        assert!(
+            err.contains("outside allowed skills directories"),
+            "got: {err}"
+        );
         assert!(victim.exists(), "victim file must NOT be deleted");
     }
 }
