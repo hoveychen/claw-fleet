@@ -22,6 +22,7 @@ import { ResumeComposer } from "./ResumeComposer";
 import { ScratchpadView } from "./ScratchpadView";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
+import { formatModel } from "./SessionCard";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { CodexTokenPanel } from "./CodexTokenPanel";
@@ -629,6 +630,14 @@ export function SessionDetail({
                 </span>
               ) : (
                 <span className={styles.tag_main}>◈ {t("main")}</span>
+              )}
+              {liveSession.model && (
+                <span
+                  className={styles.meta_chip}
+                  title={t("card.tip_model", { model: liveSession.model })}
+                >
+                  {formatModel(liveSession.model)}
+                </span>
               )}
               {liveSession.contextPercent != null && (
                 <span
