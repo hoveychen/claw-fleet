@@ -181,6 +181,30 @@ pub fn analyze_session_outcome(
     Some(parse_response(&raw))
 }
 
+pub fn analyze_session_outcome_routed(
+    config: &crate::llm_provider::LlmConfig,
+    last_text: &str,
+    locale: &str,
+    session_id: &str,
+    user_title: &str,
+) -> Option<AnalysisResult> {
+    let sid = &session_id[..session_id.len().min(12)];
+    let truncated: String = last_text.chars().take(MAX_INPUT_CHARS).collect();
+    let prompt = build_prompt(&truncated, locale, user_title);
+    let raw = crate::llm_provider::complete_routed(
+        config,
+        crate::llm_provider::ModelSlot::Fast,
+        &prompt,
+        ANALYSIS_TIMEOUT,
+        crate::llm_usage::SCENARIO_SESSION_ANALYZE,
+    )?;
+    log_debug(&format!(
+        "[claude_analyze] [{sid}] routed response (len={}): {:?}",
+        raw.len(), truncate_str(&raw, 200)
+    ));
+    Some(parse_response(&raw))
+}
+
 // ── Response parser ─────────────────────────────────────────────────────────
 
 fn parse_response(raw: &str) -> AnalysisResult {
@@ -414,6 +438,26 @@ pub fn generate_mascot_quips(
             MascotQuips::default()
         }
     }
+}
+
+pub fn generate_mascot_quips_routed(
+    config: &crate::llm_provider::LlmConfig,
+    busy_titles: &[String],
+    done_titles: &[String],
+    locale: &str,
+) -> MascotQuips {
+    if busy_titles.is_empty() && done_titles.is_empty() {
+        return MascotQuips::default();
+    }
+    let prompt = build_quip_prompt(busy_titles, done_titles, locale);
+    let raw = crate::llm_provider::complete_routed(
+        config,
+        crate::llm_provider::ModelSlot::Standard,
+        &prompt,
+        Duration::from_secs(270),
+        crate::llm_usage::SCENARIO_MASCOT_QUIPS,
+    );
+    raw.map(|text| parse_quip_groups(&text)).unwrap_or_default()
 }
 
 /// Parse the two-group output from the LLM into busy/idle quip vectors.
