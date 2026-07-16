@@ -57,6 +57,7 @@ interface LlmConfig {
   provider: string;
   fastModel: string;
   standardModel: string;
+  dailyReportPreference?: string | null;
 }
 
 type NotificationMode = "all" | "user_action" | "none";
@@ -830,6 +831,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     provider: getItem("llm-provider") || "claude",
     fastModel: getItem("llm-model-fast") || "haiku",
     standardModel: getItem("llm-model-standard") || "sonnet",
+    dailyReportPreference: getItem("llm-daily-report-preference") || "claude",
   }));
 
   useEffect(() => {
@@ -839,6 +841,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       setItem("llm-provider", cfg.provider);
       setItem("llm-model-fast", cfg.fastModel);
       setItem("llm-model-standard", cfg.standardModel);
+      setItem("llm-daily-report-preference", cfg.dailyReportPreference || cfg.provider || "claude");
     }).catch(() => {});
   }, []);
 
@@ -856,12 +859,16 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       setItem("llm-provider", next.provider);
       setItem("llm-model-fast", next.fastModel);
       setItem("llm-model-standard", next.standardModel);
+      setItem("llm-daily-report-preference", next.dailyReportPreference || next.provider || "claude");
       invoke("set_llm_config", { config: next }).catch(() => {});
       return next;
     });
   }, [llmProviders]);
 
   const currentProviderInfo = llmProviders.find((p) => p.name === llmConfig.provider);
+  const dualReportProvidersEnabled = ["claude-code", "codex"].every((name) =>
+    sources.some((source) => source.name === name && source.enabled && source.available),
+  );
 
   // ── Auto-resume config ──────────────────────────────────────────────────
   const [autoResume, setAutoResume] = useState<{ enabled: boolean; maxWaitHours: number }>({
@@ -1069,6 +1076,22 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-warning, #e8a838)" }}>
                       {t("settings.llm_disabled_warning")}
                     </span>
+                  </div>
+                )}
+                {llmConfig.provider !== "none" && dualReportProvidersEnabled && (
+                  <div className={styles.row}>
+                    <div>
+                      <span className={styles.row_label}>{t("settings.llm_daily_report_preference")}</span>
+                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                        {t("settings.llm_daily_report_preference_desc")}
+                      </span>
+                    </div>
+                    <select className={styles.select} style={{ flex: "none", width: 180 }}
+                      value={llmConfig.dailyReportPreference || llmConfig.provider || "claude"}
+                      onChange={(e) => handleLlmConfigChange({ dailyReportPreference: e.target.value })}>
+                      <option value="claude">Claude Code</option>
+                      <option value="codex">Codex</option>
+                    </select>
                   </div>
                 )}
                 {currentProviderInfo && currentProviderInfo.models.length > 0 && (

@@ -103,10 +103,7 @@ pub(crate) fn route_daily_report_ai_summary(
                     Ok(Some(report)) => {
                         drop(store);
                         let cfg = llm_config.lock().unwrap().clone();
-                        let provider = llm_provider::resolve_provider(&cfg.provider);
-                        let result = provider.as_ref().and_then(|p| {
-                            generate_ai_summary(p.as_ref(), &cfg.standard_model, &report, lang)
-                        });
+                        let result = generate_ai_summary_routed(&cfg, &report, lang);
                         match result {
                             Some(summary) => {
                                 report_store
@@ -158,10 +155,7 @@ pub(crate) fn route_daily_report_lessons(
                     Ok(Some(report)) => {
                         drop(store);
                         let cfg = llm_config.lock().unwrap().clone();
-                        let provider = llm_provider::resolve_provider(&cfg.provider);
-                        let result = provider.as_ref().and_then(|p| {
-                            generate_lessons(p.as_ref(), &cfg.standard_model, &report, lang)
-                        });
+                        let result = generate_lessons_routed(&cfg, &report, lang);
                         match result {
                             Some(lessons) => {
                                 report_store
