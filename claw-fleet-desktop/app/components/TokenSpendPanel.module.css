@@ -142,6 +142,12 @@
   border-bottom: none;
 }
 
+/* Emphasised total row at the foot of the Codex token legend. */
+.legend_total {
+  border-top: 1px solid var(--color-border);
+  border-bottom: none;
+}
+
 .legend_label {
   display: flex;
   align-items: center;

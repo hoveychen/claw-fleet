@@ -498,6 +498,21 @@
       "residual_unexplained": "未归因残余"
     }
   },
+  "codex_token": {
+    "loading": "正在读取 Codex token…",
+    "no_data": "无数据",
+    "kpi_total": "总 token",
+    "kpi_cost": "花费",
+    "kpi_context": "上下文占用",
+    "section_breakdown": "Token 构成",
+    "row_input": "输入（全价）",
+    "row_cached": "缓存输入（缓存读取价）",
+    "row_output": "输出（含推理）",
+    "row_total": "总计",
+    "col_source": "类别",
+    "col_tokens": "Token",
+    "caveat": "数据取自 Codex 累计的 total_token_usage。缓存输入是原始输入的子集，按缓存读取价计费；输出已包含推理 token。花费按模型公开价档估算。"
+  },
   "inspect": {
     "close": "关闭",
     "path": "路径"

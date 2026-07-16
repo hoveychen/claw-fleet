@@ -982,6 +982,17 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&url)
     }
 
+    fn get_codex_token_breakdown(
+        &self,
+        jsonl_path: &str,
+    ) -> Result<claw_fleet_core::codex_source::CodexTokenBreakdown, String> {
+        self.probe.get(&format!(
+            "{}?path={}",
+            claw_fleet_core::routes::CODEX_TOKEN_BREAKDOWN,
+            encode_path(jsonl_path)
+        ))
+    }
+
     fn get_waiting_alerts(&self) -> Vec<crate::backend::WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

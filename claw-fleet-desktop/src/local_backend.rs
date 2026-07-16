@@ -2370,6 +2370,13 @@ impl Backend for LocalBackend {
         claw_fleet_core::token_analysis::aggregate_task(main_path, project_path)
     }
 
+    fn get_codex_token_breakdown(
+        &self,
+        jsonl_path: &str,
+    ) -> Result<claw_fleet_core::codex_source::CodexTokenBreakdown, String> {
+        claw_fleet_core::codex_source::codex_token_breakdown(jsonl_path)
+    }
+
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }
