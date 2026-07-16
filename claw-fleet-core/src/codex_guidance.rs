@@ -405,7 +405,10 @@ mod tests {
     #[test]
     fn render_carries_both_parts() {
         let g = render_codex_guidance("Boss", "en");
-        assert!(g.contains("Part 1 — PRD Discipline"), "must include PRD discipline part");
+        assert!(
+            g.contains("Part 1 — PRD Discipline"),
+            "must include PRD discipline part"
+        );
         assert!(
             g.contains("Part 2 — Interaction Mode"),
             "must include the fleet__ask interaction part (Boss's 2026-07-16 decision)"
@@ -415,8 +418,14 @@ mod tests {
     #[test]
     fn render_carries_worktree_workflow() {
         let g = render_codex_guidance("Boss", "en");
-        assert!(g.contains("git worktree add -b prd/"), "must show worktree creation");
-        assert!(g.contains("git merge --no-ff"), "must mandate --no-ff merge back");
+        assert!(
+            g.contains("git worktree add -b prd/"),
+            "must show worktree creation"
+        );
+        assert!(
+            g.contains("git merge --no-ff"),
+            "must mandate --no-ff merge back"
+        );
         assert!(
             g.contains("--squash") && g.contains("forbidden"),
             "must forbid --squash so codex doesn't substitute it"
@@ -438,7 +447,10 @@ mod tests {
     #[test]
     fn render_carries_fleet_ask_and_divider() {
         let g = render_codex_guidance("Boss", "en");
-        assert!(g.contains("fleet__ask"), "interaction part must reference the fleet__ask tool");
+        assert!(
+            g.contains("fleet__ask"),
+            "interaction part must reference the fleet__ask tool"
+        );
         assert!(
             g.contains("Speech Summary Divider") && g.contains("---"),
             "must teach the TTS divider rule"
@@ -452,7 +464,10 @@ mod tests {
     #[test]
     fn render_teaches_handoff_and_fleet_plan() {
         let g = render_codex_guidance("Boss", "en");
-        assert!(g.contains("fleet handoff"), "must teach the Rule 5 handoff relay");
+        assert!(
+            g.contains("fleet handoff"),
+            "must teach the Rule 5 handoff relay"
+        );
         assert!(
             g.contains("fleet plan check") && g.contains("fleet plan create"),
             "must teach the fleet plan subcommands"
@@ -463,10 +478,16 @@ mod tests {
     fn render_uses_title_and_locale() {
         let g = render_codex_guidance("师父", "zh");
         assert!(g.contains("师父"), "must interpolate the user title");
-        assert!(g.contains("中文书写"), "zh locale must select the Chinese language line");
+        assert!(
+            g.contains("中文书写"),
+            "zh locale must select the Chinese language line"
+        );
         let g2 = render_codex_guidance("", "en");
         assert!(g2.contains("Boss"), "empty title falls back to Boss");
-        assert!(g2.contains("in English"), "en locale selects the English language line");
+        assert!(
+            g2.contains("in English"),
+            "en locale selects the English language line"
+        );
     }
 
     #[test]
@@ -481,10 +502,16 @@ mod tests {
         let block = format!("{BEGIN_MARKER}\ncodex rules here\n{END_MARKER}\n");
         let existing = "# My project\n\nUser-authored AGENTS.md instructions.\n";
         let once = compose_agents_md(existing, &block);
-        assert!(once.contains("User-authored AGENTS.md instructions."), "must keep user content");
+        assert!(
+            once.contains("User-authored AGENTS.md instructions."),
+            "must keep user content"
+        );
         assert!(once.contains("codex rules here"), "must add Fleet block");
         let twice = compose_agents_md(&once, &block);
-        assert_eq!(once, twice, "composing twice must not accumulate content or blank lines");
+        assert_eq!(
+            once, twice,
+            "composing twice must not accumulate content or blank lines"
+        );
         assert!(!once.contains("\n\n\n"), "no triple newline: {once:?}");
     }
 
