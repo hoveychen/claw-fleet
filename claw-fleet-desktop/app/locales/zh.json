@@ -1299,6 +1299,8 @@
     "work_cat_work": "处理任务",
     "work_steps": "{{count}} 步",
     "work_thinking": "思考",
+    "tool_wait": "等待命令输出",
+    "tool_wait_timed": "等待命令输出 · 最多 {{secs}} 秒",
     "reasoning_summary_unavailable": "模型进行了推理，但没有返回摘要。",
     "redacted_thinking": "推理内容已隐藏",
     "today": "今天",
