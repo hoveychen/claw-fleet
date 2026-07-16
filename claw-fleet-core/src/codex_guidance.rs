@@ -219,6 +219,23 @@ successor is attributed automatically.\n\
 does nothing** — only the actual command spawns a successor. Never use \
 scheduled-wakeup / cron to \"continue later\"; they no-op inside Fleet.\n\
 \n\
+## Rule 6 — Waiting on an external condition (`fleet watch`)\n\
+\n\
+Handoff continues *work*; `fleet watch` waits for an *event* — a CI run \
+finishing, a build producing an artifact, a deploy going live. Do NOT sit in \
+a foreground poll loop or a background task waiting for it: a Fleet turn ends \
+and the process exits, so anything still waiting is lost. Register a watch and \
+end the turn:\n\
+\n\
+```\n\
+fleet watch create --until \"<shell cmd that exits 0 when done>\" --capture \"<shell cmd whose stdout to report>\" --note \"<what you await>\"\n\
+```\n\
+\n\
+- A detached timer polls the condition; the moment it succeeds Fleet resumes \
+THIS session and hands the captured output to your next turn. `fleet watch \
+stop <id>` cancels. It inherits this session's model / effort / source, so a \
+codex session resumes as codex.\n\
+\n\
 ---\n\
 \n\
 # Part 2 — Interaction Mode (`fleet__ask` decision cards)\n\
