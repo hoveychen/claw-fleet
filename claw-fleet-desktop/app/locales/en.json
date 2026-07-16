@@ -1278,6 +1278,7 @@
     "codex_meta_multiagent": "multi_agent_mode",
     "codex_meta_environment": "Environment context",
     "codex_meta_generic": "Injected instructions",
+    "codex_meta_count": "{{count}} items",
     "today": "Today",
     "yesterday": "Yesterday",
     "copy": "Copy message",

@@ -5,7 +5,12 @@ import { parseSkillInjection } from "../../skillInjection";
 import styles from "./MetaFoldBlock.module.css";
 
 interface Props {
-  body: string;
+  /**
+   * One entry per synthetic `isMeta` user turn folded into this card. A single
+   * turn passes a one-element array; a run of adjacent turns passes them all so
+   * they collapse into one divider instead of stacking N identical rows.
+   */
+  segments: string[];
 }
 
 function formatSize(n: number): string {
@@ -15,19 +20,29 @@ function formatSize(n: number): string {
 }
 
 /**
- * The single collapsed-divider fold for every synthetic `isMeta` user turn —
- * content the harness/runtime feeds the agent rather than something the user
- * typed. Covers both the SKILL.md body a `Skill` load injects and codex's
- * developer-role boilerplate (sandbox/permissions preamble, the `/root`
- * multi-agent collaboration prompt, `<multi_agent_mode>` guidance). The header
- * self-labels from the body, so a skill load still reads as a skill while
- * everything else reads as generic system context. Same visual language as
- * `CompactSummaryBlock`. Expands to the full markdown on click.
+ * The collapsed-divider fold for synthetic `isMeta` user turns — content the
+ * harness/runtime feeds the agent rather than something the user typed. Covers
+ * both the SKILL.md body a `Skill` load injects and codex's developer-role
+ * boilerplate (sandbox/permissions preamble, the `/root` multi-agent
+ * collaboration prompt, `<multi_agent_mode>` guidance). A single turn self-labels
+ * from its body (a skill load reads as a skill, everything else as generic
+ * system context); a run of adjacent turns collapses into one divider that shows
+ * the count and expands to each segment, self-labelled, in order. Same visual
+ * language as `CompactSummaryBlock`. Expands to the full markdown on click.
  */
-export function MetaFoldBlock({ body }: Props) {
+export function MetaFoldBlock({ segments }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const { title, tag } = deriveHeader(body, t);
+
+  const total = segments.reduce((n, s) => n + s.length, 0);
+  const merged = segments.length > 1;
+  const { title, tag } = merged
+    ? {
+        title: t("detail.codex_meta", "系统上下文"),
+        tag: t("detail.codex_meta_count", "{{count}} 条", { count: segments.length }),
+      }
+    : deriveHeader(segments[0] ?? "", t);
+
   return (
     <div className={styles.root}>
       <button className={styles.header} onClick={() => setOpen((o) => !o)}>
@@ -36,14 +51,24 @@ export function MetaFoldBlock({ body }: Props) {
           <span className={styles.icon}>⚙</span>
           {title}
           <span className={styles.slug}>{tag}</span>
-          <span className={styles.size}>· {formatSize(body.length)}</span>
+          <span className={styles.size}>· {formatSize(total)}</span>
           <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
         </span>
         <span className={styles.line} />
       </button>
       {open && (
         <div className={styles.body}>
-          <TextBlock text={body} />
+          {segments.map((seg, i) => (
+            <div key={i} className={merged ? styles.segment : undefined}>
+              {merged && (
+                <div className={styles.segment_head}>
+                  {deriveHeader(seg, t).tag}
+                  <span className={styles.size}>· {formatSize(seg.length)}</span>
+                </div>
+              )}
+              <TextBlock text={seg} />
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -71,7 +96,5 @@ function deriveHeader(
     return { title, tag: t("detail.codex_meta_collab", "多智能体协作") };
   if (head.startsWith("<multi_agent_mode>"))
     return { title, tag: t("detail.codex_meta_multiagent", "multi_agent_mode") };
-  if (head.startsWith("<environment_context>"))
-    return { title, tag: t("detail.codex_meta_environment", "环境上下文") };
   return { title, tag: t("detail.codex_meta_generic", "注入指令") };
 }
