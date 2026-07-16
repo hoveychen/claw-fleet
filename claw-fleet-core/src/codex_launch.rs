@@ -491,6 +491,19 @@ fn toml_basic_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// Inline Codex hook config that routes every resolved shell command through
+/// the same synchronous Fleet Guard used by Claude Code.  Codex 0.144+ names
+/// its shell hook `Bash` and passes the compatible `tool_name`/`tool_input`
+/// payload. The hook timeout is deliberately longer than Fleet Guard's own
+/// configurable wait: the guard process owns the user-facing timeout policy.
+fn fleet_codex_guard_config(fleet: &str) -> String {
+    let command = format!("{} guard", shell_words::quote(fleet));
+    format!(
+        "hooks.PreToolUse=[{{matcher=\"^Bash$\",hooks=[{{type=\"command\",command={},timeout=86400,statusMessage=\"Fleet Guard: checking command\"}}]}}]",
+        toml_basic_string(&command)
+    )
+}
+
 /// Args that bridge a Fleet-spawned Codex session to Fleet's Decision Panel
 /// (`fleet__ask` / `fleet__render_a2ui` cards), appended before the `--` prompt
 /// separator by the exec/resume arg builders.
@@ -507,7 +520,12 @@ fn toml_basic_string(s: &str) -> String {
 ///    is accepted deliberately for Fleet-launched headless sessions, which have
 ///    no interactive approver anyway.
 ///
-/// 2. **`-c mcp_servers.fleet.*` overrides.** Register the `fleet mcp` stdio
+/// 2. **Codex `PreToolUse` hook.** Route resolved Bash commands through
+///    `fleet guard`. `--dangerously-bypass-hook-trust` is safe here because the
+///    hook command is generated from Fleet's already-resolved executable, not
+///    loaded from an untrusted workspace.
+///
+/// 3. **`-c mcp_servers.fleet.*` overrides.** Register the `fleet mcp` stdio
 ///    server per-invocation (no global `~/.codex/config.toml` mutation — the
 ///    Claude analogue mutates `~/.claude.json`, but Codex accepts inline `-c`
 ///    overrides so we keep the user's config untouched). `session_env` is passed
@@ -529,6 +547,9 @@ pub fn fleet_decision_card_args(session_env: &[(String, String)]) -> Vec<String>
     let fleet = fleet.to_string_lossy().into_owned();
     let mut args = vec![
         "--dangerously-bypass-approvals-and-sandbox".to_string(),
+        "--dangerously-bypass-hook-trust".to_string(),
+        "-c".to_string(),
+        fleet_codex_guard_config(&fleet),
         "-c".to_string(),
         format!("mcp_servers.fleet.command={}", toml_basic_string(&fleet)),
         "-c".to_string(),
@@ -1339,6 +1360,15 @@ mod tests {
         // parser reads the value back verbatim (Windows paths, odd names).
         assert_eq!(toml_basic_string(r#"a\b"#), r#""a\\b""#);
         assert_eq!(toml_basic_string(r#"a"b"#), r#""a\"b""#);
+    }
+
+    #[test]
+    fn codex_guard_config_matches_bash_and_shell_quotes_fleet_path() {
+        let cfg = fleet_codex_guard_config("/Applications/Fleet Tools/fleet");
+        assert!(cfg.starts_with("hooks.PreToolUse="));
+        assert!(cfg.contains("matcher=\"^Bash$\""));
+        assert!(cfg.contains("'/Applications/Fleet Tools/fleet' guard"));
+        assert!(cfg.contains("timeout=86400"));
     }
 
     #[test]

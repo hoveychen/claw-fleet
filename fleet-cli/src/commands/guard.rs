@@ -4,6 +4,10 @@
 
 // ── Guard CLI (hook entrypoint) ─────────────────────────────────────────────
 
+fn is_headless_codex_source(source: Option<&str>) -> bool {
+    source == Some("codex")
+}
+
 pub(crate) fn cmd_guard_list_rules(json: bool) {
     let rules = claw_fleet_core::audit::list_guard_allow_rules();
     if json {
@@ -54,6 +58,11 @@ pub(crate) fn cmd_guard() {
         Ok(v) => v,
         Err(_) => return, // Malformed input — allow silently.
     };
+    // Claude can fall back to its native permission UI when Fleet has no live
+    // consumer. Fleet-spawned Codex runs headlessly with approval bypassed, so
+    // there is no native approver: Critical commands must fail closed instead.
+    let agent_source = std::env::var("FLEET_AGENT_SOURCE").ok();
+    let codex_fail_closed = is_headless_codex_source(agent_source.as_deref());
 
     // Classify the command.
     match guard::classify_hook_input(&hook_input) {
@@ -72,6 +81,13 @@ pub(crate) fn cmd_guard() {
             let liveness_window = cfg.heartbeat_window();
             let status = consumer_heartbeat::consumer_status(liveness_window);
             if !status.is_alive() {
+                if codex_fail_closed {
+                    println!("{}", serde_json::json!({
+                        "decision": "block",
+                        "reason": "Fleet Guard: no live Fleet decision consumer for headless Codex"
+                    }));
+                    return;
+                }
                 claw_fleet_core::log_debug(&format!(
                     "[guard hook] no live consumer at startup (status={status}); falling back to Claude Code's native UI",
                 ));
@@ -156,6 +172,14 @@ pub(crate) fn cmd_guard() {
                 }
                 let status = consumer_heartbeat::consumer_status(liveness_window);
                 if !status.is_alive() {
+                    if codex_fail_closed {
+                        guard::cleanup(&request_id);
+                        println!("{}", serde_json::json!({
+                            "decision": "block",
+                            "reason": "Fleet Guard: Fleet decision consumer disconnected while headless Codex was waiting"
+                        }));
+                        return;
+                    }
                     // Head went away while we waited — fall through silently.
                     claw_fleet_core::log_debug(&format!(
                         "[guard hook] consumer heartbeat lost after {:.1}s (request {}, status={status}); deleting request file and falling back to native UI",
@@ -168,6 +192,18 @@ pub(crate) fn cmd_guard() {
                 std::thread::sleep(poll_interval);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_headless_codex_source;
+
+    #[test]
+    fn only_codex_guard_hook_requires_fail_closed_fallback() {
+        assert!(is_headless_codex_source(Some("codex")));
+        assert!(!is_headless_codex_source(Some("claude-code")));
+        assert!(!is_headless_codex_source(None));
     }
 }
 
