@@ -1079,10 +1079,25 @@ fn build_session_from_sqlite(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
-    let age_secs = (now_secs - thread.updated_at).max(0) as f64;
-
     let created_at_ms = (thread.created_at as u64) * 1000;
     let mut last_activity_ms = (thread.updated_at as u64) * 1000;
+
+    // Codex writes the SQLite `updated_at` only at turn boundaries, so a session
+    // mid-way through a long turn (>10 min of tool calls) looks stale in SQLite
+    // while its rollout file is still being appended. Consult the rollout mtime
+    // and keep whichever signal is fresher — otherwise the freshness gate below
+    // (keyed off `age_secs`) trusts the stale SQLite value, never reads the file,
+    // and freezes both the "N minutes ago" label and the running status at the
+    // last turn boundary.
+    if let Some(mtime_ms) = fs::metadata(&rollout_path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+    {
+        last_activity_ms = last_activity_ms.max(mtime_ms);
+    }
+    let age_secs = (now_secs as f64 - last_activity_ms as f64 / 1000.0).max(0.0);
 
     // For recently active sessions, read the rollout file for precise status.
     let (status, token_speed, total_output_tokens, last_message_preview, model, thinking_level, context_percent, rate_limit, codex_cost, total_input_tokens) =
@@ -1303,12 +1318,13 @@ fn build_session_from_sqlite(
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_dead_session_status, codex_cost_and_input, codex_last_turn_incomplete,
-        codex_rate_limit_state_from_rollout, codex_rate_limit_state_from_usage,
-        codex_rollout_rate_limit, codex_token_breakdown_from_lines, compute_token_stats,
-        extract_context_percent, last_rollout_rate_limits,
-        latest_total_token_usage, normalize_messages, read_rollout_originator,
-        CodexRateLimitWindow, CodexUsageItem,
+        build_session_from_sqlite, clamp_dead_session_status, codex_cost_and_input,
+        codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
+        codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
+        codex_token_breakdown_from_lines, compute_token_stats, extract_context_percent,
+        last_rollout_rate_limits, latest_total_token_usage, normalize_messages,
+        read_rollout_originator, CodexProcess, CodexRateLimitWindow, CodexUsageItem,
+        SqliteThread,
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
@@ -1352,6 +1368,72 @@ mod tests {
             S::WaitingInput
         );
         assert_eq!(clamp_dead_session_status(S::Idle, false), S::Idle);
+    }
+
+    #[test]
+    fn sqlite_stale_updated_at_uses_fresh_rollout_mtime() {
+        // Codex writes the SQLite `threads.updated_at` only at turn boundaries.
+        // Mid-way through a long turn (>10 min of tool calls) that column goes
+        // stale while the rollout file is still being appended. The card's
+        // "N minutes ago" and running-status both come from
+        // `build_session_from_sqlite`, which must therefore reflect the fresh
+        // rollout mtime — NOT the stale SQLite value.
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // A freshly written rollout file → its mtime is "now".
+        let dir = std::env::temp_dir()
+            .join(format!("codex_stale_mtime_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rollout = dir.join("rollout-test.jsonl");
+        std::fs::write(
+            &rollout,
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"live output\"},\"timestamp\":\"t0\"}\n",
+        )
+        .unwrap();
+
+        let thread = SqliteThread {
+            id: "019f6a0d-test".to_string(),
+            rollout_path: rollout.to_string_lossy().to_string(),
+            created_at: now_secs - 1800, // session started 30 min ago
+            updated_at: now_secs - 1200, // SQLite last touched 20 min ago (stale)
+            source: "codex".to_string(),
+            cwd: "/tmp/ws".to_string(),
+            title: String::new(),
+            model: None,
+            tokens_used: 0,
+            agent_nickname: None,
+            agent_role: None,
+            archived: false,
+            first_user_message: "hi".to_string(),
+        };
+
+        let procs: Vec<CodexProcess> = Vec::new();
+        let info = build_session_from_sqlite(&thread, &procs)
+            .expect("should build a SessionInfo");
+
+        // last_activity must track the fresh file mtime (~now), not the stale
+        // SQLite updated_at (~20 min ago). Old behaviour: gated behind
+        // `age_secs < 600` computed from the stale value, so the file is never
+        // consulted and last_activity_ms stays ~1_200_000 ms behind now.
+        let age_ms = (now_secs * 1000 - info.last_activity_ms as i64).abs() as u64;
+        assert!(
+            age_ms < 120_000,
+            "last_activity_ms should track fresh rollout mtime (age {age_ms} ms), \
+             not stale SQLite updated_at (~1_200_000 ms)"
+        );
+
+        // The rollout was parsed (proves the freshness gate opened), so the
+        // last-message preview is populated from the live content.
+        assert_eq!(
+            info.last_message_preview.as_deref(),
+            Some("live output"),
+            "fresh long-turn session must have its rollout parsed for preview/status"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
