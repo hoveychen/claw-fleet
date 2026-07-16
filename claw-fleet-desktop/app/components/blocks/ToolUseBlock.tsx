@@ -40,7 +40,16 @@ interface MultiEditEdit {
   replace_all?: boolean;
 }
 
-function formatInput(input: Record<string, unknown>): string {
+function formatInput(input: Record<string, unknown>, name?: string): string {
+  // Bash carries a model-written `description` on every call ("Find files
+  // referencing meta block names"). It reads far better in the collapsed row
+  // than the raw one-liner — which is often a long escaped grep. The command
+  // itself still shows in full inside the expanded body (BashBody). Fall back
+  // to the command when no description was recorded (older transcripts).
+  if (name === "Bash") {
+    const desc = typeof input.description === "string" ? input.description.trim() : "";
+    if (desc) return desc;
+  }
   // Show a compact one-liner for common tools
   if ("command" in input) return String(input.command);
   if ("file_path" in input) return String(input.file_path);
@@ -192,7 +201,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   const result =
     full && resultProp ? { ...resultProp, content: full.content as ToolResultBlock["content"] } : resultProp;
 
-  const summary = formatInput(block.input);
+  const summary = formatInput(block.input, block.name);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
   const custom = hasCustomBody(block.name, meta, result);
