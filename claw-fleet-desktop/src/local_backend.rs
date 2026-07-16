@@ -1947,6 +1947,17 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
+    fn set_session_title(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        title: Option<String>,
+    ) -> Result<(), String> {
+        claw_fleet_core::session_title::set_title(&session_id, &workspace_path, title)?;
+        self.restamp_marks_and_emit();
+        Ok(())
+    }
+
     fn mark_sessions_read(
         &self,
         items: Vec<claw_fleet_core::session_read::SessionReadItem>,
