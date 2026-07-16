@@ -1775,6 +1775,8 @@
       "ahead": "{{n}} 未推送",
       "behind": "{{n}} 落后",
       "dirty": "{{n}} 个未提交",
+      "dirty_toggle": "展开/收起未提交文件列表",
+      "reveal_file": "在文件树中定位并打开",
       "push": "推送",
       "pull": "拉取",
       "pushing": "推送中…",
