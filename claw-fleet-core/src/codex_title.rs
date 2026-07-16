@@ -225,6 +225,33 @@ fn clean_title(raw: &str) -> Option<String> {
     Some(capped.trim().to_string())
 }
 
+/// Preference order for the cheapest *working* Codex model.
+///
+/// NB: the provider's `default_fast_model()` returns `gpt-5.1-codex-mini`, which
+/// a ChatGPT-account login rejects with HTTP 400 ("model is not supported when
+/// using Codex with a ChatGPT account") — verified live. Fleet's Codex is driven
+/// by the ChatGPT quota, so we must pick a model that account can actually run.
+/// Luna is Codex's fast/cheap tier; Terra is the balanced fallback. We avoid the
+/// `-mini` slugs precisely because the mini tier is the one that 400s.
+const CHEAP_MODEL_PREFS: &[&str] = &["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5"];
+
+/// Pick the cheapest available Codex model this login can run.
+fn cheap_codex_model(provider: &CodexCliProvider) -> String {
+    let ids: Vec<String> = provider.list_models().into_iter().map(|m| m.id).collect();
+    select_cheap_model(&ids)
+}
+
+/// Pure model-selection logic: first preferred slug that is available, else the
+/// first available model, else a hardcoded default.
+fn select_cheap_model(available: &[String]) -> String {
+    CHEAP_MODEL_PREFS
+        .iter()
+        .find(|pref| available.iter().any(|id| id == **pref))
+        .map(|s| s.to_string())
+        .or_else(|| available.first().cloned())
+        .unwrap_or_else(|| "gpt-5.6-luna".to_string())
+}
+
 /// Run one blocking generation via Codex's cheapest model. Returns the cleaned
 /// title, or `None` on any failure (Codex unavailable, timeout, empty output).
 fn generate_blocking(first_message: &str) -> Option<String> {
@@ -232,7 +259,7 @@ fn generate_blocking(first_message: &str) -> Option<String> {
     if !provider.is_available() {
         return None;
     }
-    let model = provider.default_fast_model().to_string();
+    let model = cheap_codex_model(&provider);
     let prompt = build_prompt(first_message);
     let raw = crate::llm_usage::complete_accounted(
         &provider,
@@ -272,6 +299,23 @@ mod tests {
     }
 
     #[test]
+    fn select_cheap_model_prefers_luna_then_falls_back() {
+        let s = |a: &[&str]| select_cheap_model(&a.iter().map(|x| x.to_string()).collect::<Vec<_>>());
+        // Luna present → luna wins even when pricier models are listed first.
+        assert_eq!(s(&["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.5"]), "gpt-5.6-luna");
+        // No luna → terra is next preference.
+        assert_eq!(s(&["gpt-5.6-sol", "gpt-5.6-terra"]), "gpt-5.6-terra");
+        // None of the preferred slugs → first available.
+        assert_eq!(s(&["gpt-5.4", "gpt-5.4-mini"]), "gpt-5.4");
+        // Empty list → hardcoded default.
+        assert_eq!(s(&[]), "gpt-5.6-luna");
+        // The known-broken mini must NEVER be selected on its own list unless
+        // it's the only thing available (degenerate) — here luna is absent so
+        // it falls through to first-available, which is acceptable.
+        assert_eq!(s(&["gpt-5.1-codex-mini"]), "gpt-5.1-codex-mini");
+    }
+
+    #[test]
     fn clean_title_rejects_empty() {
         assert_eq!(clean_title(""), None);
         assert_eq!(clean_title("\n\n  \n"), None);
@@ -283,6 +327,20 @@ mod tests {
         let long = "x".repeat(200);
         let out = clean_title(&long).unwrap();
         assert_eq!(out.chars().count(), MAX_TITLE_CHARS);
+    }
+
+    /// Live end-to-end: hits the real Codex CLI. Ignored by default (network +
+    /// quota + ~15s). Run with `cargo test -p claw-fleet-core -- --ignored
+    /// live_generate_blocking --nocapture` to eyeball a real title.
+    #[test]
+    #[ignore]
+    fn live_generate_blocking() {
+        let msg = "帮我将仓库里的命令 tab，将相同的命令 group 起来，支持创建为 shortcut 放到页面顶部，并且支持跨应用重启持久保存";
+        let title = generate_blocking(msg);
+        println!("LIVE TITLE = {title:?}");
+        let title = title.expect("codex should return a title");
+        assert!(!title.is_empty());
+        assert!(title.chars().count() <= MAX_TITLE_CHARS);
     }
 
     #[test]
