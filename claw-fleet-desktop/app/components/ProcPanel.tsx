@@ -1,10 +1,59 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronRight, Play, RotateCw, Square, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Pin,
+  PinOff,
+  Play,
+  RotateCw,
+  Square,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useProcStore } from "../store";
+import { getItem, setItem } from "../storage";
 import type { ProcRecord } from "../types";
 import styles from "./FilesView.module.css";
+
+const SHORTCUTS_KEY = "proc-shortcuts";
+
+export interface ProcGroup {
+  command: string;
+  records: ProcRecord[];
+  runningCount: number;
+}
+
+/** Collapse repeated commands while retaining every execution, newest first. */
+export function groupProcs(procs: ProcRecord[]): ProcGroup[] {
+  const groups = new Map<string, ProcGroup>();
+  for (const proc of procs) {
+    let group = groups.get(proc.command);
+    if (!group) {
+      group = { command: proc.command, records: [], runningCount: 0 };
+      groups.set(proc.command, group);
+    }
+    group.records.push(proc);
+    if (proc.status !== "exited") group.runningCount += 1;
+  }
+  return [...groups.values()];
+}
+
+export function parseProcShortcuts(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!Array.isArray(value)) return [];
+    return [
+      ...new Set(
+        value.filter((item): item is string => typeof item === "string" && !!item.trim()),
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
 
 /** The "命令" tab of a workspace's 仓库 detail pane: quick command launcher at
  * the workspace cwd + the list of procs (running and exited) hosted by detached
@@ -26,12 +75,28 @@ export function ProcPanel({
   const [command, setCommand] = useState("");
   const [runError, setRunError] = useState<string | null>(null);
   const [openTermId, setOpenTermId] = useState<string | null>(null);
+  const [openGroupCommand, setOpenGroupCommand] = useState<string | null>(null);
+  const [shortcuts, setShortcuts] = useState<string[]>(() =>
+    parseProcShortcuts(getItem(SHORTCUTS_KEY)),
+  );
 
   const wsProcs = useMemo(
     () => procs.filter((p) => p.workspacePath === workspace),
     [procs, workspace],
   );
   const hasFinished = wsProcs.some((p) => p.status === "exited");
+  const procGroups = useMemo(() => groupProcs(wsProcs), [wsProcs]);
+
+  const updateShortcuts = (next: string[]) => {
+    setShortcuts(next);
+    setItem(SHORTCUTS_KEY, JSON.stringify(next));
+  };
+
+  const toggleShortcut = (cmd: string) => {
+    updateShortcuts(
+      shortcuts.includes(cmd) ? shortcuts.filter((item) => item !== cmd) : [...shortcuts, cmd],
+    );
+  };
 
   /** Start `cmd` as a brand-new proc at the workspace cwd. Both the launcher
    * input and a row's 重跑 button land here — a re-run is just another launch. */
@@ -82,6 +147,34 @@ export function ProcPanel({
 
   return (
     <section className={styles.proc_panel}>
+      {shortcuts.length > 0 && (
+        <div className={styles.proc_shortcuts}>
+          <div className={styles.proc_section_label}>{t("files.proc_shortcuts")}</div>
+          <div className={styles.proc_shortcut_list}>
+            {shortcuts.map((shortcut) => (
+              <div className={styles.proc_shortcut} key={shortcut}>
+                <button
+                  className={styles.proc_shortcut_run}
+                  onClick={() => void launch(shortcut)}
+                  title={shortcut}
+                >
+                  <Play size={10} fill="currentColor" />
+                  <code>{shortcut}</code>
+                </button>
+                <button
+                  className={styles.proc_shortcut_remove}
+                  onClick={() => toggleShortcut(shortcut)}
+                  title={t("files.proc_shortcut_remove")}
+                  aria-label={t("files.proc_shortcut_remove")}
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {hasFinished && (
         <div className={styles.proc_header}>
           <span className={styles.proc_spacer} />
@@ -118,55 +211,108 @@ export function ProcPanel({
       {wsProcs.length === 0 && <p className={styles.proc_empty}>{t("files.proc_empty")}</p>}
 
       <div className={styles.proc_list}>
-        {wsProcs.map((p) => {
-          const termOpen = openTermId === p.id;
-          const running = p.status !== "exited";
+        {procGroups.map((group) => {
+          const groupOpen = openGroupCommand === group.command;
+          const pinned = shortcuts.includes(group.command);
+          const latest = group.records[0];
           return (
-            <div key={p.id} className={styles.proc_item}>
-              <div className={styles.proc_row}>
+            <div key={group.command} className={styles.proc_group}>
+              <div className={styles.proc_group_row}>
                 <button
                   className={styles.proc_row_main}
-                  onClick={() => setOpenTermId(termOpen ? null : p.id)}
-                  title={p.command}
+                  onClick={() => setOpenGroupCommand(groupOpen ? null : group.command)}
+                  title={group.command}
                 >
-                  {termOpen ? (
+                  {groupOpen ? (
                     <ChevronDown size={12} strokeWidth={1.5} />
                   ) : (
                     <ChevronRight size={12} strokeWidth={1.5} />
                   )}
                   <span
                     className={`${styles.proc_dot} ${
-                      running ? styles.proc_dot_running : styles.proc_dot_exited
+                      group.runningCount > 0 ? styles.proc_dot_running : styles.proc_dot_exited
                     }`}
                   />
-                  <code className={styles.proc_command}>{p.command}</code>
-                  <span className={styles.proc_status}>{statusLabel(p, t)}</span>
+                  <code className={styles.proc_command}>{group.command}</code>
+                  <span className={styles.proc_status}>
+                    {group.records.length > 1 &&
+                      `${t("files.proc_run_count", { count: group.records.length })} · `}
+                    {group.runningCount > 0
+                      ? t("files.proc_running_count", { count: group.runningCount })
+                      : statusLabel(latest, t)}
+                  </span>
                 </button>
                 <button
                   className={styles.proc_action}
-                  onClick={() => void launch(p.command)}
-                  title={p.command}
+                  onClick={() => toggleShortcut(group.command)}
+                  title={
+                    pinned
+                      ? t("files.proc_shortcut_remove")
+                      : t("files.proc_shortcut_add")
+                  }
                 >
+                  {pinned ? (
+                    <PinOff size={11} strokeWidth={1.5} />
+                  ) : (
+                    <Pin size={11} strokeWidth={1.5} />
+                  )}
+                  {t("files.proc_shortcut")}
+                </button>
+                <button className={styles.proc_action} onClick={() => void launch(group.command)}>
                   <RotateCw size={11} strokeWidth={1.5} />
                   {t("files.proc_rerun")}
                 </button>
-                {running ? (
-                  <button
-                    className={`${styles.proc_action} ${styles.proc_action_danger}`}
-                    onClick={() => void kill(p.id)}
-                  >
-                    <Square size={11} strokeWidth={2} />
-                    {t("files.proc_kill")}
-                  </button>
-                ) : (
-                  <button className={styles.proc_action} onClick={() => void clear(p.id)}>
-                    <Trash2 size={11} strokeWidth={1.5} />
-                    {t("files.proc_clear")}
-                  </button>
-                )}
               </div>
-              {termOpen && renderTerminal && (
-                <div className={styles.proc_term_wrap}>{renderTerminal(p)}</div>
+              {groupOpen && (
+                <div className={styles.proc_group_runs}>
+                  {group.records.map((p) => {
+                    const termOpen = openTermId === p.id;
+                    const running = p.status !== "exited";
+                    return (
+                      <div key={p.id} className={styles.proc_item}>
+                        <div className={styles.proc_row}>
+                          <button
+                            className={styles.proc_row_main}
+                            onClick={() => setOpenTermId(termOpen ? null : p.id)}
+                            title={p.command}
+                          >
+                            {termOpen ? (
+                              <ChevronDown size={12} strokeWidth={1.5} />
+                            ) : (
+                              <ChevronRight size={12} strokeWidth={1.5} />
+                            )}
+                            <span
+                              className={`${styles.proc_dot} ${
+                                running ? styles.proc_dot_running : styles.proc_dot_exited
+                              }`}
+                            />
+                            <span className={styles.proc_execution_label}>
+                              {t("files.proc_execution")}
+                            </span>
+                            <span className={styles.proc_status}>{statusLabel(p, t)}</span>
+                          </button>
+                          {running ? (
+                            <button
+                              className={`${styles.proc_action} ${styles.proc_action_danger}`}
+                              onClick={() => void kill(p.id)}
+                            >
+                              <Square size={11} strokeWidth={2} />
+                              {t("files.proc_kill")}
+                            </button>
+                          ) : (
+                            <button className={styles.proc_action} onClick={() => void clear(p.id)}>
+                              <Trash2 size={11} strokeWidth={1.5} />
+                              {t("files.proc_clear")}
+                            </button>
+                          )}
+                        </div>
+                        {termOpen && renderTerminal && (
+                          <div className={styles.proc_term_wrap}>{renderTerminal(p)}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           );
