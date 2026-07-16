@@ -41,3 +41,16 @@ pub(crate) fn get_usage_history(
     state.backend.read().unwrap().usage_history(from_ms, to_ms)
 }
 
+#[tauri::command]
+pub(crate) fn get_codex_usage_history(
+    from_ms: i64,
+    to_ms: i64,
+    state: tauri::State<AppState>,
+) -> Vec<claw_fleet_core::codex_usage_history::CodexUsageHistoryPoint> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .codex_usage_history(from_ms, to_ms)
+}
+

@@ -1835,6 +1835,7 @@ pub fn run() {
             set_llm_config,
             list_fleet_llm_usage_daily,
             get_usage_history,
+            get_codex_usage_history,
             get_sources_config,
             set_source_enabled,
             list_claude_binaries,
