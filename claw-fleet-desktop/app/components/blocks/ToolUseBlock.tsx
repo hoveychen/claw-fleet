@@ -75,6 +75,10 @@ function formatInput(input: Record<string, unknown>, name?: string, wsRoot?: str
   }
   // Show a compact one-liner for common tools
   if ("command" in input) return String(input.command);
+  // codex's `exec_command` carries the shell command under `cmd` (not
+  // `command`), so surface it the same way — otherwise the whole args object
+  // ({cmd, workdir, yield_time_ms, max_output_tokens}) dumps as raw JSON.
+  if ("cmd" in input) return String(input.cmd);
   if ("file_path" in input) return relToWorkspace(String(input.file_path), wsRoot);
   if ("pattern" in input) return String(input.pattern);
   if ("path" in input) return relToWorkspace(String(input.path), wsRoot);
@@ -84,18 +88,76 @@ function formatInput(input: Record<string, unknown>, name?: string, wsRoot?: str
 }
 
 /**
- * codex's `wait` tool blocks on a background exec cell for more output. Its raw
- * input — `{cell_id, max_tokens, yield_time_ms}` — used to fall through to
- * JSON.stringify and render as `{ "cell_id": "54", ... }`. Only the timeout is
- * meaningful to a reader; the cell id and token cap are plumbing. Return the
- * yield timeout as a compact seconds string (30000 → "30", 1500 → "1.5"), or
- * null when the field is absent so the caller can drop the "up to Ns" suffix.
+ * Coerce a millisecond timeout to a compact seconds string (30000 → "30",
+ * 1500 → "1.5"), or null when it is absent / unusable. codex serialises these
+ * fields inconsistently — `wait.yield_time_ms` arrives as a JSON number, while
+ * `wait_agent.timeout_ms` / `exec_command.yield_time_ms` arrive as numeric
+ * strings — so accept both shapes.
  */
-export function waitTimeoutSecs(input: Record<string, unknown>): string | null {
-  const ms = input.yield_time_ms;
+export function timeoutMsToSecs(value: unknown): string | null {
+  const ms = typeof value === "string" ? Number(value) : value;
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return null;
   const s = ms / 1000;
   return Number.isInteger(s) ? String(s) : s.toFixed(1);
+}
+
+/** Back-compat alias: `wait`'s timeout lives in `yield_time_ms`. */
+export function waitTimeoutSecs(input: Record<string, unknown>): string | null {
+  return timeoutMsToSecs(input.yield_time_ms);
+}
+
+/**
+ * Friendly one-liner for codex's function-call tools, which otherwise fall
+ * through to a raw `JSON.stringify` of their args (a survey of 156 local
+ * rollouts showed `wait`, `write_stdin`, `wait_agent`, `spawn_agent`,
+ * `update_plan`, `request_user_input` all rendering as noise). Returns null for
+ * anything not handled here so the caller falls back to `formatInput`. The full
+ * args JSON still shows in the expanded body — this only rewrites the collapsed
+ * summary. `t` is the i18next translator; keys live under `detail.tool_*`.
+ */
+export function codexToolSummary(
+  name: string,
+  input: Record<string, unknown>,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string | null {
+  const withTimeout = (base: string, timedKey: string, value: unknown) => {
+    const secs = timeoutMsToSecs(value);
+    return secs ? t(timedKey, { secs }) : t(base);
+  };
+  switch (name) {
+    // Blocks on a background exec cell for more output; only the timeout reads.
+    case "wait":
+      return withTimeout("detail.tool_wait", "detail.tool_wait_timed", input.yield_time_ms);
+    // Feeds stdin to a running session. Empty `chars` is a pure poll for more
+    // output (same shape as `wait`); non-empty is real typed input.
+    case "write_stdin": {
+      const chars = typeof input.chars === "string" ? input.chars : "";
+      if (chars.trim()) return t("detail.tool_stdin", { text: chars.trim() });
+      return withTimeout("detail.tool_wait", "detail.tool_wait_timed", input.yield_time_ms);
+    }
+    // Waits for spawned subagent(s) to finish.
+    case "wait_agent":
+      return withTimeout(
+        "detail.tool_wait_agent",
+        "detail.tool_wait_agent_timed",
+        input.timeout_ms,
+      );
+    // Spawns a subagent; label by its task name / type (the `message` is often
+    // an opaque encrypted blob, so never surface it).
+    case "spawn_agent": {
+      const label =
+        (typeof input.task_name === "string" && input.task_name.trim()) ||
+        (typeof input.agent_type === "string" && input.agent_type.trim()) ||
+        "";
+      return label ? t("detail.tool_spawn_agent_named", { name: label }) : t("detail.tool_spawn_agent");
+    }
+    case "update_plan":
+      return t("detail.tool_update_plan");
+    case "request_user_input":
+      return t("detail.tool_request_input");
+    default:
+      return null;
+  }
 }
 
 /** True when an Agent call has a description or prompt worth rendering as
@@ -248,14 +310,11 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   const result =
     full && resultProp ? { ...resultProp, content: full.content as ToolResultBlock["content"] } : resultProp;
 
-  // codex's `wait` gets a friendly one-liner instead of its raw args object.
+  // codex's function-call tools get a friendly one-liner instead of their raw
+  // args object; everything else falls back to the generic formatter.
   const summary =
-    block.name === "wait"
-      ? (() => {
-          const secs = waitTimeoutSecs(block.input);
-          return secs ? t("detail.tool_wait_timed", { secs }) : t("detail.tool_wait");
-        })()
-      : formatInput(block.input, block.name, paths?.workspaceRoot);
+    codexToolSummary(block.name, block.input, t) ??
+    formatInput(block.input, block.name, paths?.workspaceRoot);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
   const custom = hasCustomBody(block.name, meta, result);

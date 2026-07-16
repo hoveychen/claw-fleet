@@ -1,20 +1,90 @@
 import { describe, expect, it } from "vitest";
-import { waitTimeoutSecs } from "./ToolUseBlock";
+import { codexToolSummary, timeoutMsToSecs, waitTimeoutSecs } from "./ToolUseBlock";
 
-describe("waitTimeoutSecs", () => {
+// Stub translator: echoes the key plus any interpolation params so tests can
+// assert which i18n key + values the router picked, without loading i18next.
+const t = (key: string, opts?: Record<string, unknown>) =>
+  opts ? `${key}|${JSON.stringify(opts)}` : key;
+
+describe("timeoutMsToSecs", () => {
   it("formats whole-second timeouts without a decimal", () => {
-    expect(waitTimeoutSecs({ cell_id: "54", max_tokens: 20000, yield_time_ms: 30000 })).toBe("30");
+    expect(timeoutMsToSecs(30000)).toBe("30");
   });
 
   it("keeps one decimal for sub-second precision", () => {
-    expect(waitTimeoutSecs({ yield_time_ms: 1500 })).toBe("1.5");
-    expect(waitTimeoutSecs({ yield_time_ms: 500 })).toBe("0.5");
+    expect(timeoutMsToSecs(1500)).toBe("1.5");
+    expect(timeoutMsToSecs(500)).toBe("0.5");
   });
 
-  it("returns null when the timeout is missing or unusable", () => {
+  it("coerces numeric strings (codex serialises some timeouts as strings)", () => {
+    expect(timeoutMsToSecs("30000")).toBe("30");
+    expect(timeoutMsToSecs("10000")).toBe("10");
+  });
+
+  it("returns null when the value is absent or unusable", () => {
+    expect(timeoutMsToSecs(undefined)).toBeNull();
+    expect(timeoutMsToSecs(0)).toBeNull();
+    expect(timeoutMsToSecs(-5)).toBeNull();
+    expect(timeoutMsToSecs("nope")).toBeNull();
+  });
+});
+
+describe("waitTimeoutSecs (alias reading yield_time_ms)", () => {
+  it("reads the wait tool's timeout field", () => {
+    expect(waitTimeoutSecs({ cell_id: "54", max_tokens: 20000, yield_time_ms: 30000 })).toBe("30");
     expect(waitTimeoutSecs({ cell_id: "54" })).toBeNull();
-    expect(waitTimeoutSecs({ yield_time_ms: 0 })).toBeNull();
-    expect(waitTimeoutSecs({ yield_time_ms: -5 })).toBeNull();
-    expect(waitTimeoutSecs({ yield_time_ms: "30000" })).toBeNull();
+  });
+});
+
+describe("codexToolSummary", () => {
+  it("wait → timed key with seconds", () => {
+    expect(codexToolSummary("wait", { cell_id: "54", yield_time_ms: 30000 }, t)).toBe(
+      'detail.tool_wait_timed|{"secs":"30"}',
+    );
+  });
+
+  it("wait without timeout → bare key", () => {
+    expect(codexToolSummary("wait", { cell_id: "54" }, t)).toBe("detail.tool_wait");
+  });
+
+  it("write_stdin with typed input → stdin key carrying the text", () => {
+    expect(codexToolSummary("write_stdin", { session_id: "1", chars: "yes\n" }, t)).toBe(
+      'detail.tool_stdin|{"text":"yes"}',
+    );
+  });
+
+  it("write_stdin with empty chars → treated as a poll (wait)", () => {
+    expect(
+      codexToolSummary("write_stdin", { session_id: "1", chars: "", yield_time_ms: 1000 }, t),
+    ).toBe('detail.tool_wait_timed|{"secs":"1"}');
+  });
+
+  it("wait_agent → subagent-wait key with string timeout coerced", () => {
+    expect(codexToolSummary("wait_agent", { timeout_ms: "30000" }, t)).toBe(
+      'detail.tool_wait_agent_timed|{"secs":"30"}',
+    );
+    expect(codexToolSummary("wait_agent", {}, t)).toBe("detail.tool_wait_agent");
+  });
+
+  it("spawn_agent → named by task_name, else agent_type, else bare", () => {
+    expect(
+      codexToolSummary("spawn_agent", { task_name: "create_sub_file", message: "gAAA..." }, t),
+    ).toBe('detail.tool_spawn_agent_named|{"name":"create_sub_file"}');
+    expect(codexToolSummary("spawn_agent", { agent_type: "explorer" }, t)).toBe(
+      'detail.tool_spawn_agent_named|{"name":"explorer"}',
+    );
+    expect(codexToolSummary("spawn_agent", {}, t)).toBe("detail.tool_spawn_agent");
+  });
+
+  it("update_plan / request_user_input → their own keys", () => {
+    expect(codexToolSummary("update_plan", { plan: "[...]" }, t)).toBe("detail.tool_update_plan");
+    expect(codexToolSummary("request_user_input", { questions: "[...]" }, t)).toBe(
+      "detail.tool_request_input",
+    );
+  });
+
+  it("returns null for tools it does not handle (falls back to formatInput)", () => {
+    expect(codexToolSummary("exec_command", { cmd: "pwd" }, t)).toBeNull();
+    expect(codexToolSummary("Bash", { command: "ls" }, t)).toBeNull();
   });
 });
