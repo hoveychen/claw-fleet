@@ -102,6 +102,7 @@ fn build_bundle() -> String {
         claw_fleet_core::token_analysis::OutputBuckets,
         claw_fleet_core::token_analysis::SessionTokenBreakdown,
         claw_fleet_core::token_analysis::TaskTokenBreakdown,
+        claw_fleet_core::codex_source::CodexTokenBreakdown,
     );
 
     // ── todos / bg / prd / handoff / live thinking ───────────────────────────
