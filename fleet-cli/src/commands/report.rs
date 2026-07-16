@@ -5,12 +5,10 @@ use crate::fmt::*;
 pub(crate) fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool, gen_lessons: bool, gen_summary: bool, as_json: bool, lang: &str) {
     use claw_fleet_core::daily_report::{
         ReportStore, generate_report_from_sessions, scan_sessions_for_date,
-        generate_lessons, generate_ai_summary,
+        generate_lessons_routed, generate_ai_summary_routed,
     };
-    use claw_fleet_core::llm_provider::{self, LlmConfig};
+    use claw_fleet_core::llm_provider::LlmConfig;
     let llm_cfg = LlmConfig::default();
-    let llm_prov = llm_provider::resolve_provider(&llm_cfg.provider)
-        .expect("default LLM provider not available");
 
     let store = ReportStore::open().expect("cannot open report store");
 
@@ -65,7 +63,7 @@ pub(crate) fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool,
         match store.get_report(&target_date) {
             Ok(Some(report)) => {
                 eprint!("Generating AI summary (may take up to 2 minutes)...");
-                match generate_ai_summary(llm_prov.as_ref(), &llm_cfg.standard_model, &report, lang) {
+                match generate_ai_summary_routed(&llm_cfg, &report, lang) {
                     Some(summary) => {
                         eprintln!(" done");
                         store.update_ai_summary(&target_date, &summary).ok();
@@ -94,7 +92,7 @@ pub(crate) fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool,
         match store.get_report(&target_date) {
             Ok(Some(report)) => {
                 eprint!("Generating lessons (may take up to 3 minutes)...");
-                match generate_lessons(llm_prov.as_ref(), &llm_cfg.standard_model, &report, lang) {
+                match generate_lessons_routed(&llm_cfg, &report, lang) {
                     Some(lessons) => {
                         eprintln!(" done ({} lessons found)", lessons.len());
                         store.update_lessons(&target_date, &lessons).ok();

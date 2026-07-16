@@ -848,6 +848,20 @@ pub fn generate_ai_summary(
     )
 }
 
+pub fn generate_ai_summary_routed(
+    config: &crate::llm_provider::LlmConfig,
+    report: &DailyReport,
+    locale: &str,
+) -> Option<String> {
+    for route in crate::llm_provider::daily_report_routes(config) {
+        log_debug(&format!("[daily_report] trying summary provider '{}' model '{}'", route.provider.name(), route.model));
+        if let Some(summary) = generate_ai_summary(route.provider.as_ref(), &route.model, report, locale) {
+            return Some(summary);
+        }
+    }
+    None
+}
+
 // ── Lessons extraction ───────────────────────────────────────────────────────
 
 const LESSONS_TIMEOUT: Duration = Duration::from_secs(180);
@@ -1208,6 +1222,20 @@ pub fn generate_lessons(
     }
 
     Some(parse_lessons(&raw, &all_pairs))
+}
+
+pub fn generate_lessons_routed(
+    config: &crate::llm_provider::LlmConfig,
+    report: &DailyReport,
+    locale: &str,
+) -> Option<Vec<Lesson>> {
+    for route in crate::llm_provider::daily_report_routes(config) {
+        log_debug(&format!("[daily_report] trying lessons provider '{}' model '{}'", route.provider.name(), route.model));
+        if let Some(lessons) = generate_lessons(route.provider.as_ref(), &route.model, report, locale) {
+            return Some(lessons);
+        }
+    }
+    None
 }
 
 /// Append a single lesson to `~/.claude/CLAUDE.md`.
@@ -1596,18 +1624,9 @@ fn run_backfill_check(
 
         let mut any_failed = false;
 
-        let provider = crate::llm_provider::resolve_provider(&llm_config.provider);
-        let Some(provider) = provider else {
-            log_debug(&format!(
-                "[report-scheduler] unknown provider '{}', skipping AI",
-                llm_config.provider
-            ));
-            break;
-        };
-
         if report.ai_summary.is_none() {
             log_debug(&format!("[report-scheduler] generating AI summary for {date}..."));
-            if let Some(summary) = generate_ai_summary(provider.as_ref(), &llm_config.standard_model, &report, locale) {
+            if let Some(summary) = generate_ai_summary_routed(llm_config, &report, locale) {
                 let store = lock_store(report_store);
                 store.update_ai_summary(&date, &summary).ok();
                 log_debug(&format!("[report-scheduler] AI summary for {date} done"));
@@ -1618,7 +1637,7 @@ fn run_backfill_check(
         }
         if report.lessons.is_none() {
             log_debug(&format!("[report-scheduler] generating lessons for {date}..."));
-            if let Some(lessons) = generate_lessons(provider.as_ref(), &llm_config.standard_model, &report, locale) {
+            if let Some(lessons) = generate_lessons_routed(llm_config, &report, locale) {
                 let store = lock_store(report_store);
                 store.update_lessons(&date, &lessons).ok();
                 log_debug(&format!(

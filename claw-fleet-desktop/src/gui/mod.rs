@@ -1382,7 +1382,7 @@ pub fn run() {
             tray_fingerprint: Arc::new(Mutex::new(0)),
             tray_last_click: Arc::new(Mutex::new(None)),
             tray_rebuild_pending: Arc::new(Mutex::new(false)),
-            llm_config: Arc::new(Mutex::new(llm_provider::LlmConfig::default())),
+            llm_config: Arc::new(Mutex::new(llm_provider::LlmConfig::load())),
             cached_llm_providers: Arc::new(Mutex::new(Vec::new())),
             decision_float_snapshot: Arc::new(Mutex::new(None)),
         })
@@ -1410,6 +1410,7 @@ pub fn run() {
                 let state = app.state::<AppState>();
                 let locale = state.locale.clone();
                 let llm_cfg = state.llm_config.clone();
+                llm_provider::set_shared_config(llm_cfg.lock().unwrap().clone());
 
                 // Build the agent source registry from config (~/.fleet/fleet-sources.json).
                 let sources = agent_source::build_sources();

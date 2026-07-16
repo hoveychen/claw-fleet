@@ -1506,6 +1506,8 @@
     "keep_awake_desc": "Prevent idle sleep while Fleet is running (like caffeinate -i) so long sessions keep streaming; the display may still sleep and closing the lid still sleeps the machine",
     "llm_provider": "LLM Provider",
     "llm_provider_select": "Provider",
+    "llm_daily_report_preference": "Daily report preference",
+    "llm_daily_report_preference_desc": "Prefer this provider, then switch automatically if its quota is exhausted or the call fails",
     "llm_fast_model": "Fast model",
     "llm_fast_model_desc": "Used for quick tasks (outcome analysis)",
     "llm_standard_model": "Standard model",

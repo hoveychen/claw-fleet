@@ -40,6 +40,11 @@ pub struct LlmConfig {
     pub provider: String,
     pub fast_model: String,
     pub standard_model: String,
+    /// Preferred provider for daily-report AI work. Reports automatically use
+    /// the other monitored provider when this one is rate-limited. `None`
+    /// preserves legacy configs by inheriting `provider`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily_report_preference: Option<String>,
 }
 
 impl Default for LlmConfig {
@@ -48,8 +53,48 @@ impl Default for LlmConfig {
             provider: "claude".into(),
             fast_model: "haiku".into(),
             standard_model: "sonnet".into(),
+            daily_report_preference: Some("claude".into()),
         }
     }
+}
+
+impl LlmConfig {
+    pub fn load() -> Self {
+        let Some(path) = config_path() else { return Self::default() };
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self) -> Result<(), String> {
+        let path = config_path().ok_or_else(|| "cannot determine home dir".to_string())?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        std::fs::write(path, json).map_err(|e| e.to_string())
+    }
+
+    pub fn effective_daily_report_preference(&self) -> &str {
+        self.daily_report_preference
+            .as_deref()
+            .filter(|name| matches!(*name, "claude" | "codex"))
+            .or_else(|| matches!(self.provider.as_str(), "claude" | "codex").then_some(self.provider.as_str()))
+            .unwrap_or("claude")
+    }
+
+    pub fn standard_model_for(&self, provider: &dyn LlmProvider) -> String {
+        if self.provider == provider.name() && !self.standard_model.is_empty() {
+            self.standard_model.clone()
+        } else {
+            provider.default_standard_model().to_string()
+        }
+    }
+}
+
+fn config_path() -> Option<std::path::PathBuf> {
+    crate::session::real_home_dir().map(|home| home.join(".fleet").join("llm-config.json"))
 }
 
 /// Process-wide current config, for callers with no handle on the owning
@@ -458,6 +503,81 @@ pub fn all_provider_infos() -> Vec<LlmProviderInfo> {
     infos
 }
 
+// ── Daily-report routing ────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuotaState { Healthy, Limited, Unknown }
+
+pub struct LlmRoute {
+    pub provider: Box<dyn LlmProvider>,
+    pub model: String,
+}
+
+fn rank_daily_report_providers(preference: &str, states: &[(String, QuotaState)]) -> Vec<String> {
+    let mut usable: Vec<&(String, QuotaState)> = states.iter()
+        .filter(|(_, state)| *state != QuotaState::Limited)
+        .collect();
+    usable.sort_by_key(|(name, state)| {
+        (usize::from(name != preference), usize::from(*state == QuotaState::Unknown))
+    });
+    usable.into_iter().map(|(name, _)| name.clone()).collect()
+}
+
+fn claude_quota_state() -> QuotaState {
+    const MAX_SNAPSHOT_AGE_MS: i64 = 20 * 60 * 1000;
+    let Some(snapshot) = crate::account::latest_usage_snapshot() else { return QuotaState::Unknown };
+    if chrono::Utc::now().timestamp_millis() - snapshot.ts > MAX_SNAPSHOT_AGE_MS {
+        return QuotaState::Unknown;
+    }
+    let values = [snapshot.five_hour, snapshot.seven_day, snapshot.seven_day_sonnet];
+    if values.iter().flatten().any(|value| *value >= 0.999) {
+        QuotaState::Limited
+    } else if values.iter().any(Option::is_some) {
+        QuotaState::Healthy
+    } else {
+        QuotaState::Unknown
+    }
+}
+
+fn codex_quota_state() -> QuotaState {
+    match crate::codex_source::fetch_codex_usage_blocking() {
+        Ok(usage) if usage.rate_limit_reached_type.is_some() => QuotaState::Limited,
+        Ok(_) => QuotaState::Healthy,
+        Err(e) => {
+            log_debug(&format!("[daily_report] codex quota probe unavailable: {e}"));
+            QuotaState::Unknown
+        }
+    }
+}
+
+/// Resolve daily-report providers using monitoring toggles as the allow-list.
+/// Preference wins while healthy; known-limited providers are omitted.
+pub fn daily_report_routes(config: &LlmConfig) -> Vec<LlmRoute> {
+    if config.provider == "none" { return Vec::new() }
+    let sources = crate::agent_source::SourcesConfig::load();
+    let mut providers = Vec::<(String, Box<dyn LlmProvider>)>::new();
+    for name in ["claude", "codex"] {
+        if !sources.is_source_enabled(name) { continue }
+        let Some(provider) = resolve_provider(name) else { continue };
+        if provider.is_available() { providers.push((name.to_string(), provider)); }
+    }
+    let states: Vec<(String, QuotaState)> = providers.iter().map(|(name, _)| {
+        let state = match name.as_str() {
+            "claude" => claude_quota_state(),
+            "codex" => codex_quota_state(),
+            _ => QuotaState::Unknown,
+        };
+        (name.clone(), state)
+    }).collect();
+    let order = rank_daily_report_providers(config.effective_daily_report_preference(), &states);
+    order.into_iter().filter_map(|name| {
+        let index = providers.iter().position(|(candidate, _)| candidate == &name)?;
+        let (_, provider) = providers.swap_remove(index);
+        let model = config.standard_model_for(provider.as_ref());
+        Some(LlmRoute { provider, model })
+    }).collect()
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -467,6 +587,20 @@ mod tests {
     #[test]
     fn resolve_unknown_provider_returns_none() {
         assert!(resolve_provider("unknown").is_none());
+    }
+
+    #[test]
+    fn daily_report_routing_prefers_choice_and_skips_limited() {
+        let healthy = vec![("claude".into(), QuotaState::Healthy), ("codex".into(), QuotaState::Healthy)];
+        assert_eq!(rank_daily_report_providers("codex", &healthy), ["codex", "claude"]);
+        let limited = vec![("claude".into(), QuotaState::Limited), ("codex".into(), QuotaState::Healthy)];
+        assert_eq!(rank_daily_report_providers("claude", &limited), ["codex"]);
+    }
+
+    #[test]
+    fn legacy_config_inherits_general_provider_for_report_preference() {
+        let cfg = LlmConfig { provider: "codex".into(), fast_model: "fast".into(), standard_model: "standard".into(), daily_report_preference: None };
+        assert_eq!(cfg.effective_daily_report_preference(), "codex");
     }
 
     #[test]

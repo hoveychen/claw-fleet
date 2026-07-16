@@ -3051,11 +3051,8 @@ impl Backend for LocalBackend {
 
         let lang = self.locale.lock().unwrap().clone();
         let cfg = self.llm_config.lock().unwrap().clone();
-        let provider = crate::llm_provider::resolve_provider(&cfg.provider)
-            .ok_or_else(|| format!("unknown LLM provider '{}'", cfg.provider))?;
-        let summary = crate::daily_report::generate_ai_summary(
-            provider.as_ref(), &cfg.standard_model, &report, &lang,
-        ).ok_or_else(|| "AI summary generation failed".to_string())?;
+        let summary = crate::daily_report::generate_ai_summary_routed(&cfg, &report, &lang)
+            .ok_or_else(|| "AI summary generation failed".to_string())?;
 
         self.report_store
             .lock()
@@ -3077,11 +3074,8 @@ impl Backend for LocalBackend {
 
         let lang = self.locale.lock().unwrap().clone();
         let cfg = self.llm_config.lock().unwrap().clone();
-        let provider = crate::llm_provider::resolve_provider(&cfg.provider)
-            .ok_or_else(|| format!("unknown LLM provider '{}'", cfg.provider))?;
-        let lessons = crate::daily_report::generate_lessons(
-            provider.as_ref(), &cfg.standard_model, &report, &lang,
-        ).ok_or_else(|| "Lessons generation failed".to_string())?;
+        let lessons = crate::daily_report::generate_lessons_routed(&cfg, &report, &lang)
+            .ok_or_else(|| "Lessons generation failed".to_string())?;
 
         self.report_store
             .lock()
@@ -3107,6 +3101,7 @@ impl Backend for LocalBackend {
     fn set_llm_config(&self, config: crate::llm_provider::LlmConfig) -> Result<(), String> {
         // Mirror into the process-wide slot so the mobile relay's
         // `guard_analyze` follows the same provider choice.
+        config.save()?;
         crate::llm_provider::set_shared_config(config.clone());
         *self.llm_config.lock().unwrap() = config;
         Ok(())
