@@ -545,6 +545,78 @@ pub fn fleet_notify_args() -> Vec<String> {
     ]
 }
 
+/// `-c` overrides that disable Codex's WebSocket transport by routing through an
+/// HTTP-only custom provider — **only** when Codex is logged in with a ChatGPT
+/// account. Empty otherwise.
+///
+/// Codex tries a `responses_websocket` transport first; on many machines each
+/// attempt times out (~15s) before it falls back to HTTP/SSE, adding seconds of
+/// dead time to every `codex exec` turn and logging the misleading
+/// `timeout waiting for child process to exit` (openai/codex#22634). Setting
+/// `supports_websockets = false` skips that. Codex forbids overriding the
+/// built-in `openai` provider ("Built-in providers cannot be overridden"), so the
+/// only way to flip the flag is to declare a custom provider — which requires a
+/// hardcoded `base_url`. That URL is the ChatGPT backend, so these overrides are
+/// safe to emit **only** for a ChatGPT login; for an API-key / Azure / OpenRouter
+/// / custom-endpoint login they would repoint the session at the wrong backend
+/// and break it, hence the [`codex_uses_chatgpt_auth`] gate.
+///
+/// Measured effect: median `codex exec` turn ~19s→16s on a ChatGPT-team account
+/// (n=4 interleaved A/B). The variance is large; this shaves a few seconds off
+/// every spawned/resumed Codex turn without touching the user's `config.toml`.
+pub fn codex_ws_disable_args() -> Vec<String> {
+    if !codex_uses_chatgpt_auth() {
+        return Vec::new();
+    }
+    ws_disable_provider_args()
+}
+
+/// The concrete `-c` provider overrides, factored out (no I/O) for testing.
+fn ws_disable_provider_args() -> Vec<String> {
+    [
+        "model_provider=chatgpt-http",
+        "model_providers.chatgpt-http.name=ChatGPT HTTP",
+        "model_providers.chatgpt-http.base_url=https://chatgpt.com/backend-api/codex",
+        "model_providers.chatgpt-http.wire_api=responses",
+        "model_providers.chatgpt-http.requires_openai_auth=true",
+        "model_providers.chatgpt-http.supports_websockets=false",
+    ]
+    .iter()
+    .flat_map(|kv| ["-c".to_string(), (*kv).to_string()])
+    .collect()
+}
+
+/// Whether Codex is authenticated with a ChatGPT login (vs an API key / other),
+/// per `$CODEX_HOME/auth.json` (falling back to `~/.codex/auth.json`). Gates
+/// [`codex_ws_disable_args`]. Any read/parse failure returns `false` — we never
+/// repoint a session we can't positively confirm is a ChatGPT login.
+fn codex_uses_chatgpt_auth() -> bool {
+    let Some(codex_home) = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| crate::session::real_home_dir().map(|h| h.join(".codex")))
+    else {
+        return false;
+    };
+    let Ok(raw) = std::fs::read_to_string(codex_home.join("auth.json")) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<Value>(&raw) else {
+        return false;
+    };
+    auth_json_is_chatgpt(&v)
+}
+
+/// Pure predicate over a parsed `auth.json`: a ChatGPT login iff `auth_mode` is
+/// `"chatgpt"` and no `OPENAI_API_KEY` is present. Split out for unit testing.
+fn auth_json_is_chatgpt(v: &Value) -> bool {
+    let mode_is_chatgpt = v.get("auth_mode").and_then(Value::as_str) == Some("chatgpt");
+    let no_api_key = match v.get("OPENAI_API_KEY") {
+        None => true,
+        Some(k) => k.is_null() || k.as_str() == Some(""),
+    };
+    mode_is_chatgpt && no_api_key
+}
+
 /// Build the `codex exec` argv for a headless spawn.
 ///
 /// `workspace_path` is passed to Codex via `-C` (Codex's own working-dir flag)
@@ -689,6 +761,8 @@ pub fn spawn_new_codex_session(
     // when this session's turn ends — even after the Fleet app quits.
     let mut pre_prompt = decision_args;
     pre_prompt.extend(fleet_notify_args());
+    // Skip Codex's flaky WebSocket transport on ChatGPT logins (no-op otherwise).
+    pre_prompt.extend(codex_ws_disable_args());
     // Channel B: prepend the workspace's active TASKS.md plans (new session has
     // no thread id yet, so no backtrack backstop — pass None).
     let prompt = maybe_prepend_active_plans(&workspace_path, None, prompt);
@@ -925,6 +999,8 @@ pub fn resume_codex_session(
     // codex-notify` so a pending handoff fires when this resumed turn ends.
     let mut pre_prompt = decision_args;
     pre_prompt.extend(fleet_notify_args());
+    // Skip Codex's flaky WebSocket transport on ChatGPT logins (no-op otherwise).
+    pre_prompt.extend(codex_ws_disable_args());
     // Channel B: prepend the workspace's active TASKS.md plans; this resume knows
     // its thread id, so the backtrack backstop can fire for a completed child.
     let prompt = maybe_prepend_active_plans(&workspace_path, Some(session_id), prompt);
@@ -1180,6 +1256,37 @@ mod tests {
         assert_eq!(dd, args.len() - 2, "-- immediately precedes the prompt");
         // no model/effort flags when not given
         assert!(!args.contains(&"-m".to_string()));
+    }
+
+    #[test]
+    fn auth_json_gate_only_true_for_chatgpt_login() {
+        use serde_json::json;
+        // ChatGPT login: auth_mode == chatgpt, no API key → gated ON.
+        assert!(auth_json_is_chatgpt(&json!({"auth_mode": "chatgpt", "OPENAI_API_KEY": null})));
+        assert!(auth_json_is_chatgpt(&json!({"auth_mode": "chatgpt"})));
+        assert!(auth_json_is_chatgpt(&json!({"auth_mode": "chatgpt", "OPENAI_API_KEY": ""})));
+        // API-key login (even if auth_mode still says chatgpt) → OFF: repointing
+        // the base_url would break a non-ChatGPT backend.
+        assert!(!auth_json_is_chatgpt(&json!({"auth_mode": "chatgpt", "OPENAI_API_KEY": "sk-xyz"})));
+        assert!(!auth_json_is_chatgpt(&json!({"auth_mode": "apikey", "OPENAI_API_KEY": "sk-xyz"})));
+        // Missing / malformed → OFF.
+        assert!(!auth_json_is_chatgpt(&json!({})));
+        assert!(!auth_json_is_chatgpt(&json!({"auth_mode": "other"})));
+    }
+
+    #[test]
+    fn ws_disable_provider_args_shape_pairs_c_flags() {
+        let args = ws_disable_provider_args();
+        // Even count: every value is preceded by its own `-c`.
+        assert_eq!(args.len() % 2, 0);
+        for pair in args.chunks(2) {
+            assert_eq!(pair[0], "-c");
+        }
+        // Selects the custom provider and disables WebSockets.
+        assert!(args.contains(&"model_provider=chatgpt-http".to_string()));
+        assert!(args.contains(&"model_providers.chatgpt-http.supports_websockets=false".to_string()));
+        // Never touches the reserved built-in `openai` provider (Codex rejects that).
+        assert!(!args.iter().any(|a| a.contains("model_providers.openai.")));
     }
 
     #[test]
