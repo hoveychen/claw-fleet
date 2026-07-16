@@ -100,6 +100,10 @@ function deriveHeader(
     return { title, tag: t("detail.codex_meta_environment", "环境上下文") };
   if (head.startsWith("<user_instructions>"))
     return { title, tag: t("detail.codex_meta_instructions", "用户指令") };
+  // Newer codex CLI emits the AGENTS.md guidance under this markdown heading
+  // instead of a <user_instructions> wrapper (see codex_source.rs).
+  if (head.startsWith("# AGENTS.md instructions"))
+    return { title, tag: t("detail.codex_meta_instructions", "用户指令") };
   if (head.startsWith("<turn_aborted>"))
     return { title, tag: t("detail.codex_meta_turn_aborted", "轮次中断") };
   if (head.startsWith("<subagent_notification>"))
