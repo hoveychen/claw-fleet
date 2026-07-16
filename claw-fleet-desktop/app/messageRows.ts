@@ -194,3 +194,22 @@ export function daysAgo(key: string, today: Date): number | null {
   const now = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   return Math.round((now.getTime() - then.getTime()) / 86_400_000);
 }
+
+/** Short clock time for a transcript record: `HH:MM` for today, `MM-DD HH:MM`
+ *  otherwise. Absolute (not relative) so rendered rows never go stale. Shared
+ *  by the per-row usage line and the WorkRunBlock band tail. */
+export function formatMsgTime(ts: string): { short: string; full: string } | null {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return {
+    short: sameDay ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`,
+    full: d.toLocaleString(),
+  };
+}
