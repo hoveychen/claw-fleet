@@ -2,14 +2,14 @@ use super::*;
 
 // ── Plan approval (ExitPlanMode interception) ───────────────────────────────
 
-#[tauri::command]
-pub(crate) fn apply_plan_approval_hook(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().apply_plan_approval_hook()
+#[tauri::command(async)]
+pub(crate) fn apply_plan_approval_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().apply_plan_approval_hook()
 }
 
-#[tauri::command]
-pub(crate) fn remove_plan_approval_hook(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().remove_plan_approval_hook()
+#[tauri::command(async)]
+pub(crate) fn remove_plan_approval_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().remove_plan_approval_hook()
 }
 
 #[tauri::command(async)]
@@ -19,9 +19,9 @@ pub(crate) fn list_pending_plan_approvals(
     state.backend.read().unwrap().list_pending_plan_approvals()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn respond_to_plan_approval(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     id: String,
     decision: String,
     edited_plan: Option<String>,
@@ -29,7 +29,7 @@ pub(crate) fn respond_to_plan_approval(
 ) -> Result<(), String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .respond_to_plan_approval(&id, &decision, edited_plan, feedback)
 }
@@ -69,19 +69,19 @@ pub(crate) fn get_mobile_relay_config(
     state.backend.read().unwrap().get_mobile_relay_config()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn set_mobile_relay_config(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     cfg: claw_fleet_core::mobile_relay::MobileRelayConfig,
 ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
-    state.backend.read().unwrap().set_mobile_relay_config(cfg)
+    state.backend.write().unwrap().set_mobile_relay_config(cfg)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn rotate_mobile_relay_secret(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
-    state.backend.read().unwrap().rotate_mobile_relay_secret()
+    state.backend.write().unwrap().rotate_mobile_relay_secret()
 }
 
 #[tauri::command(async)]

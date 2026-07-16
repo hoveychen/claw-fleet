@@ -2,48 +2,48 @@ use super::*;
 
 // ── Elicitation (AskUserQuestion interception) ──────────────────────────────
 
-#[tauri::command]
-pub(crate) fn apply_elicitation_hook(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().apply_elicitation_hook()
+#[tauri::command(async)]
+pub(crate) fn apply_elicitation_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().apply_elicitation_hook()
 }
 
-#[tauri::command]
-pub(crate) fn remove_elicitation_hook(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().remove_elicitation_hook()
+#[tauri::command(async)]
+pub(crate) fn remove_elicitation_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().remove_elicitation_hook()
 }
 
-#[tauri::command]
-pub(crate) fn apply_interaction_mode(state: tauri::State<AppState>) -> Result<(), String> {
+#[tauri::command(async)]
+pub(crate) fn apply_interaction_mode(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
-    state.backend.read().unwrap().apply_interaction_mode(&title, &locale)
+    state.backend.write().unwrap().apply_interaction_mode(&title, &locale)
 }
 
-#[tauri::command]
-pub(crate) fn remove_interaction_mode(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().remove_interaction_mode()
+#[tauri::command(async)]
+pub(crate) fn remove_interaction_mode(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().remove_interaction_mode()
 }
 
-#[tauri::command]
-pub(crate) fn apply_wiki_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+#[tauri::command(async)]
+pub(crate) fn apply_wiki_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let locale = state.locale.lock().unwrap().clone();
-    state.backend.read().unwrap().apply_wiki_guidance(&locale)
+    state.backend.write().unwrap().apply_wiki_guidance(&locale)
 }
 
-#[tauri::command]
-pub(crate) fn remove_wiki_guidance(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().remove_wiki_guidance()
+#[tauri::command(async)]
+pub(crate) fn remove_wiki_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().remove_wiki_guidance()
 }
 
-#[tauri::command]
-pub(crate) fn apply_model_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+#[tauri::command(async)]
+pub(crate) fn apply_model_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let locale = state.locale.lock().unwrap().clone();
-    state.backend.read().unwrap().apply_model_guidance(&locale)
+    state.backend.write().unwrap().apply_model_guidance(&locale)
 }
 
-#[tauri::command]
-pub(crate) fn remove_model_guidance(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().remove_model_guidance()
+#[tauri::command(async)]
+pub(crate) fn remove_model_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().remove_model_guidance()
 }
 
 #[tauri::command(async)]
@@ -109,77 +109,77 @@ pub(crate) async fn test_fleet_ask_via_claude_cli(
         .map_err(|e| format!("task join error: {e}"))?
 }
 
-#[tauri::command]
-pub(crate) fn apply_prd_mode(state: tauri::State<AppState>) -> Result<(), String> {
+#[tauri::command(async)]
+pub(crate) fn apply_prd_mode(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
-    state.backend.read().unwrap().apply_prd_mode(&title, &locale)
+    state.backend.write().unwrap().apply_prd_mode(&title, &locale)
 }
 
-#[tauri::command]
-pub(crate) fn remove_prd_mode(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().remove_prd_mode()
+#[tauri::command(async)]
+pub(crate) fn remove_prd_mode(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().remove_prd_mode()
 }
 
 /// Mirror the Claude concept toggles onto codex's AGENTS.md. Called by the
 /// desktop after any concept toggle (interaction / PRD / wiki / model) and on
 /// startup, so codex's per-concept blocks always match the Claude sentinels.
-#[tauri::command]
-pub(crate) fn reconcile_codex_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+#[tauri::command(async)]
+pub(crate) fn reconcile_codex_guidance(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .reconcile_codex_guidance(&title, &locale)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn respond_to_elicitation(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     id: String,
     declined: bool,
     answers: std::collections::HashMap<String, String>,
 ) -> Result<(), String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .respond_to_elicitation(&id, declined, answers)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn respond_to_fleet_ask(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     id: String,
     cancelled: bool,
     answers: std::collections::BTreeMap<String, String>,
 ) -> Result<(), String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .respond_to_fleet_ask(&id, cancelled, answers)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn respond_to_permission_prompt(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     id: String,
     allow: bool,
     reason: Option<String>,
 ) -> Result<(), String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .respond_to_permission_prompt(&id, allow, reason)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn respond_to_a2ui_render(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     id: String,
     cancelled: bool,
     action_name: Option<String>,
@@ -187,7 +187,7 @@ pub(crate) fn respond_to_a2ui_render(
 ) -> Result<(), String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .respond_to_a2ui_render(&id, cancelled, action_name, action_context)
 }
@@ -196,25 +196,25 @@ pub(crate) fn respond_to_a2ui_render(
 /// sibling binary and re-acquires the `mcpServers.fleet` entry in
 /// `~/.claude.json`. Returns an error when the sibling binary can't be
 /// located so the frontend can surface a useful hint.
-#[tauri::command]
-pub(crate) fn apply_mcp_injector(state: tauri::State<AppState>) -> Result<(), String> {
+#[tauri::command(async)]
+pub(crate) fn apply_mcp_injector(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let p = crate::fleet_binary::resolve_fleet_binary()
         .ok_or("Fleet sibling binary not found near this Fleet desktop process — \
                  build fleet-cli or install the production sidecar so the MCP \
                  injector can point at a real `command` path")?;
     let fleet_path = p.to_string_lossy().to_string();
-    state.backend.read().unwrap().apply_mcp_injector(&fleet_path)
+    state.backend.write().unwrap().apply_mcp_injector(&fleet_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn upload_elicitation_attachment(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     source_path: String,
     from_clipboard: bool,
 ) -> Result<String, String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .upload_attachment(std::path::Path::new(&source_path), from_clipboard)
 }

@@ -21,8 +21,8 @@ pub(crate) fn list_skill_files(
     state.backend.read().unwrap().list_skill_files(&skill_path)
 }
 
-#[tauri::command]
-pub(crate) fn delete_skill(skill_path: String, state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().delete_skill(&skill_path)
+#[tauri::command(async)]
+pub(crate) fn delete_skill(skill_path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().delete_skill(&skill_path)
 }
 
