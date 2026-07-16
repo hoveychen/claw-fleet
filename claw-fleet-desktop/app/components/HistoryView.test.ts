@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { CHAT_HIDDEN, CHAT_ONLY, matchesWorkspaceFilter, sessionEq } from "./HistoryView";
+import {
+  applyFrozenOrder,
+  CHAT_HIDDEN,
+  CHAT_ONLY,
+  matchesWorkspaceFilter,
+  sessionEq,
+} from "./HistoryView";
 import type { SessionInfo } from "../types";
 
 /**
@@ -161,5 +167,52 @@ describe("matchesWorkspaceFilter", () => {
       expect(matchesWorkspaceFilter(s, CHAT_ONLY, null)).toBe(true);
       expect(matchesWorkspaceFilter(s, CHAT_HIDDEN, null)).toBe(true);
     }
+  });
+});
+
+/**
+ * `applyFrozenOrder` holds the list still while the pointer is parked over it.
+ * The behaviours that matter: it preserves the frozen order (not the live sort),
+ * appends genuinely new rows at the end (never splices them into the frozen
+ * block — that reflow under the cursor is the whole bug this fixes), drops rows
+ * that vanished, and keeps each row's *live* content.
+ */
+describe("applyFrozenOrder", () => {
+  const row = (id: string, activity: number): SessionInfo =>
+    ({ ...base(), id, jsonlPath: `/p/${id}.jsonl`, agentLastActivityMs: activity }) as SessionInfo;
+
+  it("passes rows through untouched when nothing is frozen", () => {
+    const rows = [row("a", 3), row("b", 2)];
+    expect(applyFrozenOrder(rows, null)).toBe(rows);
+  });
+
+  it("keeps the frozen order even after the live list re-sorts", () => {
+    // Frozen while a<b<c; then a scan makes c the most recent, flipping the live
+    // sort. The frozen order must win.
+    const live = [row("c", 9), row("a", 3), row("b", 2)];
+    const out = applyFrozenOrder(live, ["a", "b", "c"]);
+    expect(out.map((s) => s.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("appends a newly-arrived session at the end, not into the frozen block", () => {
+    // `n` is the freshest by activity but was absent when the order froze; it
+    // must land last so no frozen row shifts under the cursor.
+    const live = [row("n", 99), row("a", 3), row("b", 2)];
+    const out = applyFrozenOrder(live, ["a", "b"]);
+    expect(out.map((s) => s.id)).toEqual(["a", "b", "n"]);
+  });
+
+  it("drops a frozen id whose row has left the live list", () => {
+    const live = [row("a", 3)];
+    const out = applyFrozenOrder(live, ["a", "gone"]);
+    expect(out.map((s) => s.id)).toEqual(["a"]);
+  });
+
+  it("resolves each id against the live row so content stays fresh", () => {
+    // The returned object for `a` must be the live one (activity 42), not a
+    // stale snapshot — only the *order* is frozen.
+    const live = [row("a", 42)];
+    const out = applyFrozenOrder(live, ["a"]);
+    expect(out[0]).toBe(live[0]);
   });
 });

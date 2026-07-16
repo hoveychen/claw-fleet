@@ -384,6 +384,17 @@
   font-weight: 600;
 }
 
+/* Agent-source glyph (Claude / Codex …) riding ahead of the title, shown only
+   when the list mixes sources. Inline so it flows with the clamped title's
+   first line; dimmed so it reads as a marker rather than competing with the
+   run-status dot. */
+.row_source {
+  display: inline-flex;
+  vertical-align: -1px;
+  margin-right: 4px;
+  color: var(--color-text-dim);
+}
+
 .row_meta {
   display: flex;
   align-items: center;
