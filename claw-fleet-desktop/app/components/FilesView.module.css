@@ -307,6 +307,73 @@
   gap: 6px;
 }
 
+.proc_shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.proc_section_label {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.proc_shortcut_list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.proc_shortcut {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.proc_shortcut_run,
+.proc_shortcut_remove {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.proc_shortcut_run {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 4px 4px 9px;
+}
+
+.proc_shortcut_run code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-size: 11px;
+}
+
+.proc_shortcut_remove {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 7px 4px 3px;
+}
+
+.proc_shortcut_run:hover,
+.proc_shortcut_remove:hover {
+  color: var(--color-accent);
+}
+
 .proc_spacer {
   flex: 1;
 }
@@ -378,6 +445,28 @@
 
 .proc_item {
   border-radius: var(--radius-sm);
+}
+
+.proc_group {
+  border-radius: var(--radius-sm);
+}
+
+.proc_group_row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.proc_group_runs {
+  margin: 2px 0 6px 18px;
+  padding-left: 8px;
+  border-left: 1px solid var(--color-border);
+}
+
+.proc_execution_label {
+  flex: 1;
+  color: var(--color-text-secondary);
+  font-size: 11px;
 }
 
 .proc_row {

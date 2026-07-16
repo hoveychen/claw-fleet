@@ -41,6 +41,8 @@ const ALL_KEYS = [
   // File-tree columns inside a detail pane (SkillsView / FilesView / ScratchpadView).
   "skills-tree-width",
   "files-tree-width",
+  // Commands pinned to the top of the repository command runner.
+  "proc-shortcuts",
   "scratchpad-tree-width",
   // 启动台 (HistoryView) rail filters — the search box is deliberately absent,
   // it stays in-memory only.

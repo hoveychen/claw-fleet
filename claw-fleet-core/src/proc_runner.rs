@@ -562,7 +562,7 @@ fn run_host(_dir: &Path, _id: &str) -> Result<i32, String> {
 #[cfg(unix)]
 fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
     use std::io::Write;
-    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::os::unix::process::CommandExt;
 
     let mut rec = read_record(dir, id)?;
@@ -591,6 +591,21 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
     // Owned wrappers so the fds close on every exit path.
     let master_fd: OwnedFd = unsafe { OwnedFd::from_raw_fd(master) };
     let slave_fd: OwnedFd = unsafe { OwnedFd::from_raw_fd(slave) };
+    // A test process can run several hosts concurrently. Without CLOEXEC, a
+    // command spawned by one host inherits every other host's pty fds, keeps
+    // their slave sides open, and prevents their master reads from ever
+    // observing EOF. Production also benefits from not leaking unrelated pty
+    // descriptors into commands.
+    for fd in [&master_fd, &slave_fd] {
+        let raw = fd.as_raw_fd();
+        let flags = unsafe { libc::fcntl(raw, libc::F_GETFD) };
+        if flags < 0 || unsafe { libc::fcntl(raw, libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0 {
+            return Err(format!(
+                "set pty close-on-exec: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
 
     // 2. Spawn `$SHELL -lc <command>` at the workspace cwd, as a session
     //    leader with the pty slave as its controlling terminal. Login shell
@@ -604,10 +619,15 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
         }
     });
     let stdio = |fd: &OwnedFd| -> Result<std::process::Stdio, String> {
-        use std::os::fd::AsRawFd;
-        let dup = unsafe { libc::dup(fd.as_raw_fd()) };
+        // Keep the duplicate close-on-exec as well. Command's child setup
+        // moves it onto fd 0/1/2, which clears CLOEXEC for the intended stdio,
+        // while concurrent commands cannot inherit the temporary duplicate.
+        let dup = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
         if dup < 0 {
-            return Err(format!("dup pty slave: {}", std::io::Error::last_os_error()));
+            return Err(format!(
+                "dup pty slave: {}",
+                std::io::Error::last_os_error()
+            ));
         }
         Ok(unsafe { std::process::Stdio::from_raw_fd(dup) })
     };
