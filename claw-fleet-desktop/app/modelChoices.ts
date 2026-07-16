@@ -32,6 +32,36 @@ export const AGENT_TOOL_CHOICES: { value: string; label: string }[] = [
   { value: "codex", label: "Codex" },
 ];
 
+/** A source entry as returned by the `get_sources_config` backend command. */
+export interface SourceInfo {
+  name: string;
+  enabled: boolean;
+  available: boolean;
+}
+
+/** Map an agent-source name (as used by the backend registry) to the launcher's
+ *  tool value. The Claude source is registered under "claude-code" but the
+ *  launcher tool value is the bare "claude". */
+function sourceNameToTool(name: string): string {
+  return name === "claude-code" ? "claude" : name;
+}
+
+/** Restrict the launchable agent tools to the sources that are actually being
+ *  monitored — a source must be both enabled (the settings toggle) and available
+ *  (installed). This is what keeps Codex out of the launcher when its source is
+ *  turned off or the CLI isn't installed. Falls back to Claude-only when the
+ *  config hasn't loaded yet or nothing matched, so the launcher is never empty
+ *  and never flashes an unmonitored tool before hiding it. */
+export function agentToolsForSources(
+  sources: SourceInfo[],
+): { value: string; label: string }[] {
+  const active = new Set(
+    sources.filter((s) => s.enabled && s.available).map((s) => sourceNameToTool(s.name)),
+  );
+  const filtered = AGENT_TOOL_CHOICES.filter((c) => active.has(c.value));
+  return filtered.length ? filtered : [AGENT_TOOL_CHOICES[0]];
+}
+
 // `claude --permission-mode <mode>` values exposed in the new-session
 // launcher (a curated subset of the CLI's choices — "auto"/"dontAsk" are
 // omitted as they mostly matter for interactive runs). Labels come from the
