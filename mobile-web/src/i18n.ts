@@ -84,6 +84,11 @@ export function t(zh: string, ...args: Array<string | number>): string {
 
 const DICT: Record<string, string> = {
   "其他": "Other",
+  // ── codex 注入的系统上下文折叠卡 ──
+  "系统上下文": "System context",
+  "权限 / 沙箱": "Permissions / sandbox",
+  "多智能体协作": "Multi-agent collab",
+  "注入指令": "Injected instructions",
   // ── App shell / 配对 gate ──
   "Fleet 移动端": "Fleet Mobile",
   "请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。":

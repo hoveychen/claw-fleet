@@ -4,7 +4,7 @@
 // sidecar method while the session is working.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, MessageSquareDashed, Puzzle, Sparkles } from "lucide-react";
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, Cog, MessageSquareDashed, Puzzle, Sparkles } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
@@ -174,6 +174,42 @@ function SkillLoadCard({ slug, body }: { slug: string; body: string }) {
   );
 }
 
+/**
+ * Codex injects boilerplate system context (sandbox/permissions preamble, the
+ * `/root` multi-agent collaboration prompt, `<multi_agent_mode>` guidance) as
+ * `role:"developer"` messages, tagged `isMeta` in codex_source.rs. Fold them
+ * into the same collapsed card as skill injections rather than a raw bubble.
+ */
+function MetaContextCard({ body }: { body: string }) {
+  const [open, setOpen] = useState(false);
+  const label = deriveMetaLabel(body);
+  return (
+    <div className={styles.skillCard}>
+      <button className={styles.skillHeader} onClick={() => setOpen((o) => !o)}>
+        <Cog size={14} className={styles.skillIcon} />
+        <span className={styles.skillLabel}>{t("系统上下文")}</span>
+        <span className={styles.skillSlug}>{label}</span>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      </button>
+      {open && (
+        <div className={styles.skillBody}>
+          <LazyMarkdown text={body} bare />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Short tag for the fold header so the reader can tell which codex injection
+ * it is without expanding; falls back to a generic label. */
+function deriveMetaLabel(body: string): string {
+  const head = body.slice(0, 200);
+  if (head.startsWith("<permissions instructions>")) return t("权限 / 沙箱");
+  if (head.includes("primary agent in a team")) return t("多智能体协作");
+  if (head.startsWith("<multi_agent_mode>")) return "multi_agent_mode";
+  return t("注入指令");
+}
+
 type DetailTab = "messages" | "decisions" | "plans" | "token" | "workflow" | "handoff";
 
 const TABS: Array<[DetailTab, string]> = [
@@ -283,6 +319,15 @@ const MessageRow = memo(function MessageRow({
           </div>
         );
       }
+      // Any other injected meta (codex sandbox/permissions preamble, the
+      // `/root` collaboration prompt, `<multi_agent_mode>`) folds into the same
+      // collapsed card rather than a raw user bubble.
+      return (
+        <div className={styles.assistantRow}>
+          <MetaContextCard body={text} />
+          <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
+        </div>
+      );
     }
     // A subagent-completion notice renders as a card, not a raw-XML bubble.
     const notif = parseTaskNotification(text);
