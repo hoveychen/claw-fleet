@@ -802,11 +802,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::REMOVE_PRD_MODE => route_remove_prd_mode(ctx, request, &query, json_header, path),
 
-            // ── Codex guidance endpoints (writes remote ~/.codex/AGENTS.md) ───
-            crate::routes::APPLY_CODEX_GUIDANCE => route_apply_codex_guidance(ctx, request, &query, json_header, path),
-
-            crate::routes::REMOVE_CODEX_GUIDANCE => route_remove_codex_guidance(ctx, request, &query, json_header, path),
-
+            // ── Codex guidance endpoint (writes remote ~/.codex/AGENTS.md) ────
             crate::routes::RECONCILE_CODEX_GUIDANCE => route_reconcile_codex_guidance(ctx, request, &query, json_header, path),
 
             // ── Plan-approval hook endpoints ─────────────────────────────────

@@ -23,14 +23,28 @@ fn main() {
 
     match cmd {
         "install" => {
-            claw_fleet_core::codex_guidance::apply_codex_guidance(&title, &locale)
-                .expect("apply_codex_guidance");
+            // Exercise all four per-concept blocks at once.
+            claw_fleet_core::codex_guidance::reconcile_codex_agents_md(
+                claw_fleet_core::codex_guidance::CodexGuidanceSet {
+                    prd: true,
+                    interaction: true,
+                    wiki: true,
+                    model: true,
+                },
+                &title,
+                &locale,
+            )
+            .expect("reconcile_codex_agents_md install");
             let installed = claw_fleet_core::codex_guidance::is_codex_guidance_installed();
             println!("installed={installed}");
         }
         "remove" => {
-            claw_fleet_core::codex_guidance::remove_codex_guidance()
-                .expect("remove_codex_guidance");
+            claw_fleet_core::codex_guidance::reconcile_codex_agents_md(
+                claw_fleet_core::codex_guidance::CodexGuidanceSet::default(),
+                &title,
+                &locale,
+            )
+            .expect("reconcile_codex_agents_md remove");
             println!(
                 "installed={}",
                 claw_fleet_core::codex_guidance::is_codex_guidance_installed()
