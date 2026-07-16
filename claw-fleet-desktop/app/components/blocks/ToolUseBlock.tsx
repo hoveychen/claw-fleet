@@ -11,7 +11,7 @@ import type { PathLinkContext } from "../../markdown/pathLinks";
 import { DiffView } from "./DiffView";
 import { ExpandableText } from "./ExpandableText";
 import { ImageThumb } from "./ImageThumb";
-import { ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
+import { AgentInput, ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
 import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
 import styles from "./ToolUseBlock.module.css";
 
@@ -71,6 +71,14 @@ function formatInput(input: Record<string, unknown>, name?: string, wsRoot?: str
   if ("query" in input) return String(input.query);
   if ("url" in input) return String(input.url);
   return JSON.stringify(input, null, 2);
+}
+
+/** True when an Agent call has a description or prompt worth rendering as
+ *  text; if neither is present we keep the raw-JSON fallback. */
+function hasAgentInput(block: ToolUseBlockType): boolean {
+  return (
+    typeof block.input.description === "string" || typeof block.input.prompt === "string"
+  );
 }
 
 /** Error colouring comes from `.result_error .result_text` on the wrapper. */
@@ -253,6 +261,13 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
             </div>
           ) : custom ? (
             <ToolBody block={block} meta={meta} result={result} />
+          ) : block.name === "Agent" && hasAgentInput(block) ? (
+            // A running (or non-Claude) subagent has no `toolUseResult` yet, so
+            // the custom body can't render — but its description + prompt are
+            // right here in the input. Show them readably instead of raw JSON.
+            <div className={styles.input_section}>
+              <AgentInput block={block} paths={paths} />
+            </div>
           ) : (
             <div className={styles.input_section}>
               <span className={styles.section_label}>Input</span>
