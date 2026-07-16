@@ -181,7 +181,16 @@ fn scan_skill_root(
             // Directory-based skill: <name>/SKILL.md
             let skill_file = path.join("SKILL.md");
             if skill_file.is_file() {
-                if let Some(item) = read_skill_item(&skill_file, &path, source, scope, can_delete) {
+                let managed_projection = fs::symlink_metadata(&path)
+                    .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                    || path.join(".fleet-managed.json").is_file();
+                if let Some(item) = read_skill_item(
+                    &skill_file,
+                    &path,
+                    source,
+                    scope,
+                    can_delete && !managed_projection,
+                ) {
                     results.push(item);
                 }
             } else if scope == "system" {

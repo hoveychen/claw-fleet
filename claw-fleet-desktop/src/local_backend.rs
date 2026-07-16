@@ -2341,6 +2341,26 @@ impl Backend for LocalBackend {
         crate::skills::scan_all_skills_for_workspaces(&self.known_workspaces())
     }
 
+    fn skill_sync_inventory(&self) -> Result<Vec<crate::skill_sync::SkillSyncEntry>, String> {
+        crate::skill_sync::inventory()
+    }
+
+    fn skill_sync_apply(&self) -> Result<crate::skill_sync::SkillSyncReport, String> {
+        crate::skill_sync::sync(true)
+    }
+
+    fn skill_sync_adopt(&self, path: &str) -> Result<crate::skill_sync::SkillSyncReport, String> {
+        crate::skill_sync::adopt(std::path::Path::new(path))
+    }
+
+    fn skill_sync_unlink(
+        &self,
+        slug: &str,
+        target: crate::skill_sync::SkillTarget,
+    ) -> Result<crate::skill_sync::SkillSyncAction, String> {
+        crate::skill_sync::unlink(slug, target)
+    }
+
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {
         crate::plugins::scan_with_catalog()
     }

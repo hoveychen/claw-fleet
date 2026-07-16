@@ -32,6 +32,64 @@ pub(crate) fn route_skills(
                 );
             }
 
+pub(crate) fn route_skill_sync(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    _query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    if request.method() == &tiny_http::Method::Get {
+        return respond_skill_sync(request, crate::skill_sync::inventory(), json_header);
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "operation", rename_all = "kebab-case")]
+    enum Operation {
+        Sync,
+        Adopt { path: String },
+        Unlink {
+            slug: String,
+            target: crate::skill_sync::SkillTarget,
+        },
+    }
+
+    let mut body = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut body);
+    let result = serde_json::from_str::<Operation>(&body)
+        .map_err(|error| error.to_string())
+        .and_then(|operation| match operation {
+            Operation::Sync => crate::skill_sync::sync(true)
+                .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+            Operation::Adopt { path } => crate::skill_sync::adopt(std::path::Path::new(&path))
+                .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+            Operation::Unlink { slug, target } => crate::skill_sync::unlink(&slug, target)
+                .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        });
+    respond_skill_sync(request, result, json_header);
+}
+
+fn respond_skill_sync<T: serde::Serialize>(
+    request: tiny_http::Request,
+    result: Result<T, String>,
+    json_header: tiny_http::Header,
+) {
+    match result {
+        Ok(value) => {
+            let body = serde_json::to_string(&value).unwrap_or_else(|_| "null".to_string());
+            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(error) => {
+            let body = serde_json::json!({"error": error}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
 pub(crate) fn route_plugins(
     ctx: &ServeCtx,
     request: tiny_http::Request,
