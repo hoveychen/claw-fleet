@@ -85,7 +85,7 @@ The [66-second field guide](https://hoveychen.github.io/claw-fleet/#demo) in one
 | | Agent | Status |
 |---|---|---|
 | <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/claude.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/claude-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/claude-dark.svg" width="24" height="24"></picture> | **Claude Code** | Fully supported — monitoring, decisions, orchestration |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/codex.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/codex-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/codex-dark.svg" width="24" height="24"></picture> | **Codex** | Monitoring supported |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/codex.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/codex-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/codex-dark.svg" width="24" height="24"></picture> | **Codex** | Monitoring + security audit supported |
 
 > Decision routing, plan approval, and orchestration features are built on Claude Code's hooks & MCP; monitoring works for all sources. Claw Fleet auto-detects which tools are installed.
 

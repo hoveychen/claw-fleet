@@ -1369,11 +1369,138 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{}…", &s[..end])
 }
 
+/// Extract concrete shell commands from Codex's code-mode `exec` wrapper.
+/// Auditing the whole JavaScript script would misclassify command text inside
+/// patches/prompts, so only literal `cmd` arguments of real
+/// `tools.exec_command` calls are returned.
+fn extract_codex_exec_commands(script: &str) -> Vec<String> {
+    const CALL: &str = "tools.exec_command";
+    let mut commands = Vec::new();
+    let mut offset = 0;
+
+    while let Some(found) = find_js_code_token(script, offset, CALL) {
+        let call_start = found + CALL.len();
+        let Some(open_rel) = script[call_start..].find('(') else { break };
+        let args_start = call_start + open_rel + 1;
+        let next_call = find_js_code_token(script, args_start, CALL).unwrap_or(script.len());
+        let args = &script[args_start..next_call];
+        if let Some((value_start, quote)) = find_js_cmd_literal(args) {
+            if let Some(command) = parse_js_string(&args[value_start..], quote) {
+                commands.push(command);
+            }
+        }
+        offset = next_call;
+        if offset >= script.len() { break; }
+    }
+    commands
+}
+
+/// Find a token in JavaScript code while ignoring quoted strings and comments.
+fn find_js_code_token(script: &str, start: usize, needle: &str) -> Option<usize> {
+    let bytes = script.as_bytes();
+    let needle = needle.as_bytes();
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            quote @ (b'"' | b'\'' | b'`') => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        i = (i + 2).min(bytes.len());
+                    } else if bytes[i] == quote {
+                        i += 1;
+                        break;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' { i += 1; }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i + 1 < bytes.len() && &bytes[i..i + 2] != b"*/" { i += 1; }
+                i = (i + 2).min(bytes.len());
+            }
+            _ if bytes[i..].starts_with(needle) => return Some(i),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+fn find_js_cmd_literal(s: &str) -> Option<(usize, u8)> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 3 <= bytes.len() {
+        if &bytes[i..i + 3] != b"cmd" {
+            i += 1;
+            continue;
+        }
+        let before_ok = i == 0 || !is_js_ident(bytes[i - 1]);
+        let after_ok = i + 3 == bytes.len() || !is_js_ident(bytes[i + 3]);
+        if !before_ok || !after_ok {
+            i += 3;
+            continue;
+        }
+        let mut j = i + 3;
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() { j += 1; }
+        if bytes.get(j) != Some(&b':') {
+            i += 3;
+            continue;
+        }
+        j += 1;
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() { j += 1; }
+        let quote = *bytes.get(j)?;
+        if matches!(quote, b'"' | b'\'' | b'`') { return Some((j, quote)); }
+        return None; // Dynamic commands cannot be reconstructed from JSONL.
+    }
+    None
+}
+
+fn is_js_ident(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'_' | b'$')
+}
+
+fn parse_js_string(s: &str, quote: u8) -> Option<String> {
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&quote) { return None; }
+    let mut out = String::new();
+    let mut chunk_start = 1;
+    let mut i = 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b if b == quote => {
+                out.push_str(&s[chunk_start..i]);
+                return Some(out);
+            }
+            b'\\' => {
+                out.push_str(&s[chunk_start..i]);
+                i += 1;
+                let escaped = *bytes.get(i)?;
+                match escaped {
+                    b'n' => out.push('\n'), b'r' => out.push('\r'), b't' => out.push('\t'),
+                    b'b' => out.push('\u{0008}'), b'f' => out.push('\u{000c}'),
+                    b'\\' => out.push('\\'), b'"' => out.push('"'),
+                    b'\'' => out.push('\''), b'`' => out.push('`'),
+                    _ => { out.push('\\'); out.push(escaped as char); }
+                }
+                i += 1;
+                chunk_start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /// Extract audit events from a single session's messages.
-/// Only Bash tool_use blocks are inspected; read-only tools (Read, Write,
-/// Grep, WebFetch, WebSearch, Agent, etc.) are ignored.
+/// Bash blocks and concrete shell calls inside Codex code-mode `exec` wrappers
+/// are inspected; read-only/non-shell tools are ignored.
 pub fn extract_audit_events(
     messages: &[Value],
     session: &SessionInfo,
@@ -1401,32 +1528,33 @@ pub fn extract_audit_events(
             if block.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
                 continue;
             }
-            if block.get("name").and_then(|n| n.as_str()) != Some("Bash") {
-                continue;
-            }
-
-            let cmd = block
+            let tool_name = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let input_command = block
                 .get("input")
                 .and_then(|i| i.get("command"))
                 .and_then(|c| c.as_str())
                 .unwrap_or("");
-            if cmd.is_empty() {
-                continue;
-            }
-            if let Some((level, tags)) = classify_bash_command(cmd) {
-                events.push(AuditEvent {
-                    session_id: session.id.clone(),
-                    workspace_name: session.workspace_name.clone(),
-                    workspace_path: session.workspace_path.clone(),
-                    agent_source: session.agent_source.clone(),
-                    tool_name: "Bash".to_string(),
-                    command_summary: truncate(cmd, 120),
-                    full_command: cmd.to_string(),
-                    risk_level: level,
-                    risk_tags: tags,
-                    timestamp: timestamp.clone(),
-                    jsonl_path: session.jsonl_path.clone(),
-                });
+            let commands = match tool_name {
+                "Bash" if !input_command.is_empty() => vec![input_command.to_string()],
+                "exec" if !input_command.is_empty() => extract_codex_exec_commands(input_command),
+                _ => Vec::new(),
+            };
+            for cmd in commands {
+                if let Some((level, tags)) = classify_bash_command(&cmd) {
+                    events.push(AuditEvent {
+                        session_id: session.id.clone(),
+                        workspace_name: session.workspace_name.clone(),
+                        workspace_path: session.workspace_path.clone(),
+                        agent_source: session.agent_source.clone(),
+                        tool_name: "Bash".to_string(),
+                        command_summary: truncate(&cmd, 120),
+                        full_command: cmd,
+                        risk_level: level,
+                        risk_tags: tags,
+                        timestamp: timestamp.clone(),
+                        jsonl_path: session.jsonl_path.clone(),
+                    });
+                }
             }
         }
     }
@@ -1615,6 +1743,28 @@ mod tests {
         let prefix = out.strip_suffix('…').expect("must end with ellipsis");
         assert!(prefix.len() <= 120, "prefix exceeds budget: {}", prefix.len());
         assert_eq!(prefix, "a".repeat(119), "must stop at the char boundary right before 中");
+    }
+
+    #[test]
+    fn codex_exec_extracts_concrete_shell_commands_and_escapes() {
+        let script = r#"const a = await tools.exec_command({cmd:"git push origin main"});
+            const b = await tools.exec_command({cmd:'printf "x"\nchmod +x run.sh'});"#;
+        assert_eq!(extract_codex_exec_commands(script), vec![
+            "git push origin main", "printf \"x\"\nchmod +x run.sh"
+        ]);
+    }
+
+    #[test]
+    fn codex_exec_ignores_command_text_inside_patch_string() {
+        let script = r#"const patch = "tools.exec_command({cmd:\"git push --force\"})";
+            const result = await tools.apply_patch(patch); text(result);"#;
+        assert!(extract_codex_exec_commands(script).is_empty());
+    }
+
+    #[test]
+    fn codex_exec_ignores_dynamic_command() {
+        let script = "const cmd = buildCommand(); await tools.exec_command({cmd, workdir});";
+        assert!(extract_codex_exec_commands(script).is_empty());
     }
 
     // ── Command-start matching unit tests ───────────────────────────────────
