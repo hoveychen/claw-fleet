@@ -153,7 +153,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
   if (isUser && msg.isMeta) {
     return (
       <div className={styles.compact_row} data-msg-idx={msgIdx}>
-        <MetaFoldBlock segments={[messageToText(msg)]} />
+        <MetaFoldBlock segments={[messageToText(msg)]} forceOpen={isActiveMatch} />
       </div>
     );
   }
@@ -664,6 +664,9 @@ export function MessageList({
         const prev = i > 0 ? dayKey(visibleMsgs[i - 1].timestamp) : null;
         const showDay = today !== null && (i === 0 || today !== prev);
         const globalStart = effectiveStart + i;
+        // The active search hit sits inside this unit — folds follow it open.
+        const holdsMatch = (len: number) =>
+          searchMatchIndex >= globalStart && searchMatchIndex < globalStart + len;
         if (unit.kind === "work-group") {
           // Same anchor scheme as the meta fold: every folded record keeps a
           // `data-msg-idx` so search navigation can land on the band.
@@ -682,6 +685,7 @@ export function MessageList({
                   searchTerms={searchTerms}
                   paths={paths}
                   defaultOpen={isWorkingNow && unitIdx === renderUnits.length - 1}
+                  forceOpen={holdsMatch(unit.msgs.length)}
                 />
               </div>
             </Fragment>
@@ -698,7 +702,10 @@ export function MessageList({
                 {unit.msgs.slice(1).map((_, k) => (
                   <span key={k} data-msg-idx={globalStart + 1 + k} aria-hidden />
                 ))}
-                <MetaFoldBlock segments={unit.msgs.map(messageToText)} />
+                <MetaFoldBlock
+                  segments={unit.msgs.map(messageToText)}
+                  forceOpen={holdsMatch(unit.msgs.length)}
+                />
               </div>
             </Fragment>
           );
