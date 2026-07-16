@@ -364,6 +364,241 @@ fn claim_fire_in(dir: &Path, id: &str, generation: u64) -> Result<WatchRecord, C
     Ok(rec)
 }
 
+// ── condition timer + resume ────────────────────────────────────────────────────
+
+/// Longest a timer naps in one go before re-checking. Caps how long a timer
+/// lingers after `fleet watch stop` deletes the record (it notices on the next
+/// wake and exits), and bounds clock-drift from one long nap over a suspend.
+const POLL_CAP_MS: u64 = 30_000;
+
+/// What the timer should do this iteration. Pure decision, split out so the
+/// nap/fire/exit logic is unit-testable without spawning subprocesses or sleeping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TimerStep {
+    /// Record gone or superseded — the timer should exit.
+    Exit,
+    /// Fire now. `timed_out` distinguishes "condition met" from "deadline passed".
+    Fire { timed_out: bool },
+    /// Not yet — nap this many milliseconds and re-check.
+    Nap { ms: u64 },
+}
+
+/// Decide the timer's next move. `condition_met` is evaluated lazily, only after
+/// the generation and deadline checks pass, so the shell poll runs no more than
+/// once per wake and never for an already-stale timer.
+fn decide(
+    rec: &WatchRecord,
+    generation: u64,
+    now: u64,
+    condition_met: impl FnOnce() -> bool,
+) -> TimerStep {
+    if rec.generation != generation {
+        return TimerStep::Exit;
+    }
+    if rec.is_expired(now) {
+        return TimerStep::Fire { timed_out: true };
+    }
+    if condition_met() {
+        return TimerStep::Fire { timed_out: false };
+    }
+    let remaining = rec.deadline_at.saturating_sub(now);
+    // Nap at most one poll interval, never past POLL_CAP_MS, and never past the
+    // deadline (so the timeout fire lands on time rather than a poll-cap late).
+    let nap = rec
+        .poll_secs
+        .saturating_mul(1000)
+        .min(POLL_CAP_MS)
+        .min(remaining.max(1));
+    TimerStep::Nap { ms: nap }
+}
+
+/// Run the `until` command; exit status 0 ⇒ the condition is met. stdout/stderr
+/// are suppressed — only the exit code matters here (the event text comes from
+/// the separate `capture` command).
+fn poll_met(cmd: &str) -> bool {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Run the `capture` command; its trimmed stdout becomes the event text handed to
+/// the resumed session. Empty when there is no capture command or it produced
+/// nothing — the resume prompt then just says the watch fired.
+fn capture_event(rec: &WatchRecord) -> String {
+    let Some(cmd) = &rec.capture_cmd else {
+        return String::new();
+    };
+    match std::process::Command::new("sh").arg("-c").arg(cmd).output() {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        Err(_) => String::new(),
+    }
+}
+
+/// The prompt the resumed turn wakes up to: why it came back (condition met vs
+/// timed out), what it was waiting for, the captured event text, and a footer
+/// making clear this is a Fleet-driven resume, not a user message.
+pub fn compose_resume_prompt(rec: &WatchRecord, event_text: &str, timed_out: bool) -> String {
+    let mut out = String::new();
+    if timed_out {
+        out.push_str(&format!(
+            "你注册的 Fleet watch `{}` 已超时——等待的条件在超时前没有满足。",
+            rec.id
+        ));
+    } else {
+        out.push_str(&format!(
+            "你注册的 Fleet watch `{}` 触发了——等待的条件已满足。",
+            rec.id
+        ));
+    }
+    if let Some(note) = &rec.note {
+        out.push_str(&format!("\n\n等待的是：{note}"));
+    }
+    if !event_text.is_empty() {
+        out.push_str("\n\n---\n");
+        out.push_str(event_text);
+    }
+    out.push_str(
+        "\n\n---\n（这是 Fleet watch 在后台轮询到条件后自动 resume 本会话的，\
+         不是用户消息。请据此向老板汇报结果，别再重复注册 Monitor/后台任务。）",
+    );
+    out
+}
+
+/// Signature of the resume side-effect — injected so the fire path is testable
+/// without launching a real `claude --resume`. Given the claimed record and the
+/// composed prompt, reanimate the session.
+type ResumeFn<'a> = dyn Fn(&WatchRecord, &str) -> Result<(), String> + 'a;
+
+/// Fire the watch: claim the single slot (retiring the record), capture the event
+/// text, compose the prompt, and resume the session. A resume failure is logged
+/// rather than propagated — the record is already consumed, and re-arming would
+/// risk a double-resume. Returns the claimed record, or the claim error if a
+/// racing timer already fired it.
+fn fire_in(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    timed_out: bool,
+    capture: &dyn Fn(&WatchRecord) -> String,
+    resume: &ResumeFn<'_>,
+) -> Result<WatchRecord, ClaimError> {
+    let rec = claim_fire_in(dir, id, generation)?;
+    let event_text = if timed_out { String::new() } else { capture(&rec) };
+    let prompt = compose_resume_prompt(&rec, &event_text, timed_out);
+    match resume(&rec, &prompt) {
+        Ok(()) => crate::log_debug(&format!(
+            "watch {id}: fired ({}) -> resumed session {}",
+            if timed_out { "timeout" } else { "condition" },
+            rec.session_id
+        )),
+        Err(e) => crate::log_debug(&format!(
+            "watch {id}: fired ({}) but resume failed: {e} (event lost)",
+            if timed_out { "timeout" } else { "condition" }
+        )),
+    }
+    Ok(rec)
+}
+
+/// Reanimate the session via its agent source, mirroring how auto-resume fires
+/// `claude --resume <id> -p <prompt>` — but untracked (no concurrency slot to
+/// free), so a no-op `on_exit`.
+fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
+    crate::agent_source::resume_session(
+        rec.agent_source.as_deref().unwrap_or("claude"),
+        &crate::agent_source::ResumeSpec {
+            session_id: rec.session_id.clone(),
+            workspace_path: rec.workspace_path.clone(),
+            prompt: prompt.to_string(),
+            model: rec.model.clone(),
+            effort: rec.effort.clone(),
+            permission_mode: None,
+        },
+        Box::new(|_| {}),
+    )
+}
+
+fn fire_real(id: &str, generation: u64, timed_out: bool) -> Result<WatchRecord, ClaimError> {
+    let dir = watches_dir().ok_or(ClaimError::Gone)?;
+    fire_in(&dir, id, generation, timed_out, &capture_event, &|rec, prompt| {
+        spawn_resume(rec, prompt)
+    })
+}
+
+/// The blocking timer loop — the body of `fleet watch fire <id> <gen>`. Polls the
+/// condition each interval; on a met condition (or a passed deadline) it fires
+/// once and returns. Exits quietly when the record is gone (stopped / already
+/// fired) or superseded by a newer generation. Thin by design — the fire/nap
+/// decision lives in the unit-tested [`decide`], only the real `sleep` and shell
+/// poll live here.
+pub fn run_timer_blocking(id: &str, generation: u64) {
+    loop {
+        let Some(rec) = get(id) else {
+            crate::log_debug(&format!("watch {id}: record gone, timer exiting"));
+            return;
+        };
+        match decide(&rec, generation, now_ms(), || poll_met(&rec.until_cmd)) {
+            TimerStep::Exit => {
+                crate::log_debug(&format!(
+                    "watch {id}: superseded (held gen {generation}), timer exiting"
+                ));
+                return;
+            }
+            TimerStep::Fire { timed_out } => {
+                if let Err(e) = fire_real(id, generation, timed_out) {
+                    crate::log_debug(&format!("watch {id}: fire refused ({e})"));
+                }
+                return;
+            }
+            TimerStep::Nap { ms } => {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+            }
+        }
+    }
+}
+
+/// Spawn a detached timer process (`fleet watch fire <id> <gen>`) that polls the
+/// condition and fires it. Detached into its own session (`setsid`) so quitting
+/// the desktop app / `fleet serve` does not take the timer down — same contract
+/// as the loop timer and handoff relay. Used by `fleet watch create` and the
+/// reconcile sweep.
+pub fn arm_timer(rec: &WatchRecord) -> Result<u32, String> {
+    let fleet = crate::hooks::resolve_fleet_binary()
+        .ok_or("cannot find fleet binary to arm watch timer")?;
+    arm_timer_with(&fleet, rec)
+}
+
+fn arm_timer_with(fleet_bin: &str, rec: &WatchRecord) -> Result<u32, String> {
+    let mut cmd = std::process::Command::new(fleet_bin);
+    cmd.arg("watch")
+        .arg("fire")
+        .arg(&rec.id)
+        .arg(rec.generation.to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("spawn watch timer: {e}"))?;
+    let pid = child.id();
+    // Reap the direct child handle; the timer keeps running detached.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -561,5 +796,170 @@ mod tests {
         assert_eq!(rec2.model, None);
         assert_eq!(rec2.effort, None);
         assert_eq!(rec2.agent_source, None);
+    }
+
+    // ── P2: timer decision + fire ──────────────────────────────────────────────
+
+    /// A timer holding a stale generation (reconcile re-armed under a newer one)
+    /// exits without polling or firing.
+    #[test]
+    fn decide_exits_on_stale_generation() {
+        let d = dir();
+        let mut rec = make(d.path(), "w1", 0);
+        rec.generation = 3;
+        let step = decide(&rec, 2, 1_000, || panic!("must not poll a stale timer"));
+        assert_eq!(step, TimerStep::Exit);
+    }
+
+    /// Past the deadline ⇒ fire a timeout resume, and the condition is never even
+    /// polled (the wait is over regardless).
+    #[test]
+    fn decide_fires_timeout_past_deadline() {
+        let d = dir();
+        let rec = make(d.path(), "w1", 0); // deadline_at = DEFAULT_TIMEOUT_SECS*1000
+        let step = decide(&rec, 0, rec.deadline_at + 1, || {
+            panic!("must not poll after deadline")
+        });
+        assert_eq!(step, TimerStep::Fire { timed_out: true });
+    }
+
+    /// Condition met before the deadline ⇒ fire a normal resume.
+    #[test]
+    fn decide_fires_when_condition_met() {
+        let d = dir();
+        let rec = make(d.path(), "w1", 0);
+        let step = decide(&rec, 0, 1_000, || true);
+        assert_eq!(step, TimerStep::Fire { timed_out: false });
+    }
+
+    /// Not met, well before the deadline ⇒ nap one poll interval, capped at the
+    /// poll cap.
+    #[test]
+    fn decide_naps_one_poll_interval() {
+        let d = dir();
+        let mut rec = make(d.path(), "w1", 0);
+        rec.poll_secs = 10; // 10_000ms < POLL_CAP_MS
+        let step = decide(&rec, 0, 1_000, || false);
+        assert_eq!(step, TimerStep::Nap { ms: 10_000 });
+
+        rec.poll_secs = 600; // 600_000ms — capped to POLL_CAP_MS
+        let step = decide(&rec, 0, 1_000, || false);
+        assert_eq!(step, TimerStep::Nap { ms: POLL_CAP_MS });
+    }
+
+    /// Near the deadline, the nap shrinks so the timeout fire is not one poll-cap
+    /// late.
+    #[test]
+    fn decide_nap_never_overshoots_the_deadline() {
+        let d = dir();
+        let mut rec = make(d.path(), "w1", 0);
+        rec.poll_secs = 30;
+        // 3s before the deadline: nap 3s, not 30s.
+        let step = decide(&rec, 0, rec.deadline_at - 3_000, || false);
+        assert_eq!(step, TimerStep::Nap { ms: 3_000 });
+    }
+
+    #[test]
+    fn resume_prompt_condition_vs_timeout_and_footer() {
+        let d = dir();
+        let rec = make(d.path(), "w1", 0); // note = "CI run 123"
+        let hit = compose_resume_prompt(&rec, "conclusion=success", false);
+        assert!(hit.contains("触发了"));
+        assert!(hit.contains("CI run 123"));
+        assert!(hit.contains("conclusion=success"));
+        assert!(hit.contains("不是用户消息"));
+
+        let out = compose_resume_prompt(&rec, "", true);
+        assert!(out.contains("已超时"));
+        assert!(!out.contains("conclusion"));
+        assert!(out.contains("不是用户消息"));
+    }
+
+    use std::cell::RefCell;
+
+    /// A fire claims the slot, composes the prompt, and resumes exactly once; the
+    /// record is retired so a racing second fire resumes nothing.
+    #[test]
+    fn fire_claims_captures_and_resumes_once() {
+        let d = dir();
+        make(d.path(), "w1", 0);
+        let seen: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
+        let capture = |_r: &WatchRecord| "conclusion=success".to_string();
+        let resume = |r: &WatchRecord, prompt: &str| {
+            seen.borrow_mut().push((r.session_id.clone(), prompt.to_string()));
+            Ok(())
+        };
+        let claimed = fire_in(d.path(), "w1", 0, false, &capture, &resume).unwrap();
+        assert_eq!(claimed.session_id, "sess-1");
+        assert!(get_in(d.path(), "w1").is_none(), "fire retires the record");
+
+        let seen = seen.into_inner();
+        assert_eq!(seen.len(), 1, "resumed exactly once");
+        assert_eq!(seen[0].0, "sess-1");
+        assert!(seen[0].1.contains("conclusion=success"), "event text carried into prompt");
+        assert!(seen[0].1.contains("触发了"));
+
+        // a racing second fire finds the record gone and resumes nothing
+        let err = fire_in(d.path(), "w1", 0, false, &capture, &|_, _| {
+            panic!("must not resume after the record is consumed")
+        })
+        .unwrap_err();
+        assert_eq!(err, ClaimError::Gone);
+    }
+
+    /// A timeout fire skips the capture command (there is no event to report) and
+    /// still resumes with the timeout wording.
+    #[test]
+    fn timeout_fire_skips_capture() {
+        let d = dir();
+        make(d.path(), "w1", 0);
+        let captured = RefCell::new(false);
+        let capture = |_r: &WatchRecord| {
+            *captured.borrow_mut() = true;
+            "should-not-run".to_string()
+        };
+        let last = RefCell::new(String::new());
+        let resume = |_r: &WatchRecord, prompt: &str| {
+            *last.borrow_mut() = prompt.to_string();
+            Ok(())
+        };
+        fire_in(d.path(), "w1", 0, true, &capture, &resume).unwrap();
+        assert!(!*captured.borrow(), "timeout fire must not run the capture command");
+        assert!(last.borrow().contains("已超时"));
+        assert!(!last.borrow().contains("should-not-run"));
+    }
+
+    /// A resume failure is swallowed: the record is already consumed, so the fire
+    /// still returns Ok (re-arming would risk a double-resume).
+    #[test]
+    fn resume_failure_is_swallowed() {
+        let d = dir();
+        make(d.path(), "w1", 0);
+        let capture = |_r: &WatchRecord| String::new();
+        let resume = |_r: &WatchRecord, _p: &str| Err("claude --resume boom".to_string());
+        let claimed = fire_in(d.path(), "w1", 0, false, &capture, &resume);
+        assert!(claimed.is_ok(), "fire returns Ok even when resume fails");
+        assert!(get_in(d.path(), "w1").is_none(), "record still retired");
+    }
+
+    /// A stale timer that reaches fire (e.g. deadline hit while superseded) claims
+    /// nothing — the winner already holds the live generation.
+    #[test]
+    fn fire_with_stale_generation_is_refused() {
+        let d = dir();
+        let mut rec = make(d.path(), "w1", 0);
+        rec.generation = 5;
+        write_record(d.path(), &rec).unwrap();
+        let err = fire_in(
+            d.path(),
+            "w1",
+            4,
+            false,
+            &|_r| String::new(),
+            &|_r, _p| panic!("stale timer must not resume"),
+        )
+        .unwrap_err();
+        assert_eq!(err, ClaimError::StaleGeneration { expected: 4, found: 5 });
+        assert!(get_in(d.path(), "w1").is_some(), "record untouched for the live timer");
     }
 }
