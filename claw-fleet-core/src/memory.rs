@@ -1,6 +1,8 @@
-//! Memory scanning — reads Claude Code auto-memory files from
-//! `~/.claude/projects/<project>/memory/` and traces their edit history
-//! by scanning session JSONL files for Write/Edit tool calls.
+//! Memory scanning for Claude Code and Codex.
+//!
+//! Claude Code stores Markdown under `~/.claude/projects/*/memory/`. Codex
+//! stores durable Markdown under `$CODEX_HOME/memories/` and keeps the
+//! background stage-1 summaries in `$CODEX_HOME/memories_1.sqlite`.
 
 use std::collections::HashMap;
 use std::fs;
@@ -17,6 +19,9 @@ use crate::session::get_claude_dir;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceMemory {
+    /// Agent that owns this memory bucket (`claude-code` or `codex`).
+    #[serde(default = "default_memory_source")]
+    pub source: String,
     /// Display name of the workspace (last path component).
     pub workspace_name: String,
     /// Full workspace path (decoded from directory name).
@@ -27,6 +32,10 @@ pub struct WorkspaceMemory {
     pub has_claude_md: bool,
     /// Memory files found in the memory/ subdirectory.
     pub files: Vec<MemoryFile>,
+}
+
+fn default_memory_source() -> String {
+    "claude-code".to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -125,13 +134,13 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
         let has_claude_md = if crate::tcc::is_tcc_protected(ws_root) {
             false
         } else {
-            ws_root.join("CLAUDE.md").exists()
-                || ws_root.join(".claude").join("CLAUDE.md").exists()
+            ws_root.join("CLAUDE.md").exists() || ws_root.join(".claude").join("CLAUDE.md").exists()
         };
 
         let files = scan_memory_dir(&memory_dir);
 
         results.push(WorkspaceMemory {
+            source: default_memory_source(),
             workspace_name,
             workspace_path,
             project_key,
@@ -155,6 +164,7 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
             results.insert(
                 0,
                 WorkspaceMemory {
+                    source: default_memory_source(),
                     workspace_name: "(Global)".to_string(),
                     // Point to ~/.claude/ so read_claude_md finds ~/.claude/CLAUDE.md
                     workspace_path: claude_dir.to_string_lossy().to_string(),
@@ -167,7 +177,10 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
     }
 
     // Sort project memories by workspace name (global stays at front)
-    let global = if results.first().map_or(false, |r| r.project_key == "__global__") {
+    let global = if results
+        .first()
+        .map_or(false, |r| r.project_key == "__global__")
+    {
         Some(results.remove(0))
     } else {
         None
@@ -177,6 +190,148 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
         results.insert(0, g);
     }
     results
+}
+
+// ── Codex memories ──────────────────────────────────────────────────────────
+
+const CODEX_MEMORY_URI_PREFIX: &str = "codex-memory://stage1/";
+
+fn codex_home_dir() -> Option<PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| crate::session::real_home_dir().map(|h| h.join(".codex")))
+}
+
+/// Scan both public Codex memory surfaces: generated files and the stage-1
+/// SQLite store used by current Codex builds before entries are consolidated.
+pub fn scan_codex_memories() -> Vec<WorkspaceMemory> {
+    let Some(codex_home) = codex_home_dir() else {
+        return vec![];
+    };
+    let mut files = Vec::new();
+    let memories_dir = codex_home.join("memories");
+    if memories_dir.is_dir() {
+        scan_codex_memory_dir(&memories_dir, &memories_dir, &mut files);
+    }
+    files.extend(scan_codex_stage1(&codex_home.join("memories_1.sqlite")));
+    files.sort_by(|a, b| {
+        b.modified_ms
+            .cmp(&a.modified_ms)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    if files.is_empty() {
+        return vec![];
+    }
+    vec![WorkspaceMemory {
+        source: "codex".to_string(),
+        workspace_name: "Codex".to_string(),
+        workspace_path: codex_home.to_string_lossy().to_string(),
+        project_key: "__codex__".to_string(),
+        has_claude_md: false,
+        files,
+    }]
+}
+
+fn scan_codex_memory_dir(root: &Path, dir: &Path, out: &mut Vec<MemoryFile>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            scan_codex_memory_dir(root, &path, out);
+            continue;
+        }
+        if !path.is_file() {
+            continue;
+        }
+        let Some(metadata) = fs::metadata(&path).ok() else {
+            continue;
+        };
+        let name = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let modified_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        out.push(MemoryFile {
+            title: Some(name.clone()),
+            name,
+            path: path.to_string_lossy().to_string(),
+            size_bytes: metadata.len(),
+            modified_ms,
+            hook: None,
+            mem_type: None,
+            description: None,
+            in_index: true,
+        });
+    }
+}
+
+fn scan_codex_stage1(db_path: &Path) -> Vec<MemoryFile> {
+    if !db_path.is_file() {
+        return vec![];
+    }
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return vec![];
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT thread_id, raw_memory, rollout_summary, rollout_slug, generated_at \
+         FROM stage1_outputs ORDER BY generated_at DESC",
+    ) else {
+        return vec![];
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, i64>(4)?,
+        ))
+    }) else {
+        return vec![];
+    };
+
+    rows.flatten()
+        .map(|(thread_id, raw_memory, summary, slug, generated_at)| {
+            let stem = slug.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
+                format!("memory-{}", thread_id.chars().take(8).collect::<String>())
+            });
+            let description = summary
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .map(|line| line.chars().take(180).collect::<String>());
+            let size_bytes = raw_memory.len().saturating_add(summary.len()) as u64;
+            let generated_at = u64::try_from(generated_at).unwrap_or(0);
+            let modified_ms = if generated_at < 10_000_000_000 {
+                generated_at.saturating_mul(1000)
+            } else {
+                generated_at
+            };
+            MemoryFile {
+                name: format!("{stem}.md"),
+                path: format!("{CODEX_MEMORY_URI_PREFIX}{thread_id}"),
+                size_bytes,
+                modified_ms,
+                title: Some(stem),
+                hook: None,
+                mem_type: None,
+                description,
+                in_index: true,
+            }
+        })
+        .collect()
 }
 
 // ── Memory directory scan helper ─────────────────────────────────────────────
@@ -395,6 +550,10 @@ fn parse_yaml_kv(line: &str) -> Option<(String, String)> {
 // ── Read a memory file's content ─────────────────────────────────────────────
 
 pub fn read_memory_file(path: &str) -> Result<String, String> {
+    if let Some(thread_id) = path.strip_prefix(CODEX_MEMORY_URI_PREFIX) {
+        return read_codex_stage1_memory(thread_id);
+    }
+
     // Safety: only allow reading from ~/.claude/projects/*/memory/ or ~/.claude/memory/
     let claude_dir = get_claude_dir().ok_or("cannot determine home dir")?;
     let canonical = fs::canonicalize(path).map_err(|e| e.to_string())?;
@@ -412,11 +571,45 @@ pub fn read_memory_file(path: &str) -> Result<String, String> {
         false
     };
 
-    if !allowed {
+    let codex_allowed = codex_home_dir()
+        .and_then(|home| fs::canonicalize(home.join("memories")).ok())
+        .map(|root| canonical.starts_with(root))
+        .unwrap_or(false);
+
+    if !allowed && !codex_allowed {
         return Err("path is outside allowed memory directories".into());
     }
 
     fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+fn read_codex_stage1_memory(thread_id: &str) -> Result<String, String> {
+    if thread_id.is_empty() || thread_id.contains('/') || thread_id.contains('\\') {
+        return Err("invalid Codex memory id".into());
+    }
+    let db_path = codex_home_dir()
+        .ok_or("cannot determine Codex home dir")?
+        .join("memories_1.sqlite");
+    let conn = rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| e.to_string())?;
+    let (raw, summary): (String, String) = conn
+        .query_row(
+            "SELECT raw_memory, rollout_summary FROM stage1_outputs WHERE thread_id = ?1",
+            [thread_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    let mut sections = Vec::new();
+    if !summary.trim().is_empty() {
+        sections.push(format!("# Rollout summary\n\n{}", summary.trim()));
+    }
+    if !raw.trim().is_empty() {
+        sections.push(format!("# Memory\n\n{}", raw.trim()));
+    }
+    Ok(sections.join("\n\n"))
 }
 
 // ── Read CLAUDE.md from a workspace ─────────────────────────────────────────
@@ -449,11 +642,7 @@ pub fn read_claude_md(workspace_path: &str) -> Result<String, String> {
 ///   - global  → appends to `~/.claude/CLAUDE.md`
 ///
 /// After appending, the memory file is deleted and MEMORY.md is updated.
-pub fn promote_memory(
-    memory_path: &str,
-    target: &str,
-    workspace_path: &str,
-) -> Result<(), String> {
+pub fn promote_memory(memory_path: &str, target: &str, workspace_path: &str) -> Result<(), String> {
     let mem_pb = PathBuf::from(memory_path);
     if !mem_pb.is_file() {
         return Err("memory file not found".into());
@@ -525,7 +714,7 @@ fn strip_frontmatter(s: &str) -> &str {
     // Find the closing ---
     if let Some(end) = trimmed[3..].find("\n---") {
         let after = &trimmed[3 + end + 4..]; // skip past \n---
-        // Skip the newline after closing ---
+                                             // Skip the newline after closing ---
         if after.starts_with('\n') {
             &after[1..]
         } else {
@@ -550,7 +739,7 @@ pub fn trace_memory_history(memory_path: &str) -> Vec<MemoryHistoryEntry> {
     // Extract the project key from the memory path
     // e.g. ~/.claude/projects/-Users-foo-bar/memory/MEMORY.md → -Users-foo-bar
     let project_key = memory_pb
-        .parent()  // memory/
+        .parent() // memory/
         .and_then(|p| p.parent()) // project dir
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str())
@@ -674,7 +863,10 @@ fn scan_jsonl_for_memory_edits(
                 continue;
             }
 
-            let tool_name = block.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+            let tool_name = block
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or_default();
             let input = block.get("input");
 
             match tool_name {
@@ -696,7 +888,9 @@ fn scan_jsonl_for_memory_edits(
                             workspace_name: workspace_name.to_string(),
                             timestamp: last_timestamp.clone(),
                             tool: "Write".to_string(),
-                            detail: MemoryEditDetail::Write { content: content_val },
+                            detail: MemoryEditDetail::Write {
+                                content: content_val,
+                            },
                         });
                     }
                 }
@@ -768,6 +962,80 @@ fn decode_project_key(encoded: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct CodexHomeOverride {
+        prev: Option<std::ffi::OsString>,
+    }
+
+    impl CodexHomeOverride {
+        fn new(path: &Path) -> Self {
+            let prev = std::env::var_os("CODEX_HOME");
+            unsafe { std::env::set_var("CODEX_HOME", path) };
+            Self { prev }
+        }
+    }
+
+    impl Drop for CodexHomeOverride {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(path) => std::env::set_var("CODEX_HOME", path),
+                    None => std::env::remove_var("CODEX_HOME"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scans_codex_file_and_stage1_sqlite_memories() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let codex_home = temp.path().join(".codex");
+        let memories = codex_home.join("memories");
+        fs::create_dir_all(memories.join("durable")).unwrap();
+        fs::write(
+            memories.join("durable").join("preference.md"),
+            "likes tests",
+        )
+        .unwrap();
+
+        let db = rusqlite::Connection::open(codex_home.join("memories_1.sqlite")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE stage1_outputs (
+                thread_id TEXT PRIMARY KEY,
+                source_updated_at INTEGER NOT NULL,
+                raw_memory TEXT NOT NULL,
+                rollout_summary TEXT NOT NULL,
+                rollout_slug TEXT,
+                generated_at INTEGER NOT NULL
+            );
+            INSERT INTO stage1_outputs VALUES
+                ('thread-1', 1, 'remember the API shape', 'Implemented API', 'api-shape', 1700000000);",
+        )
+        .unwrap();
+        drop(db);
+        let _override = CodexHomeOverride::new(&codex_home);
+
+        let buckets = scan_codex_memories();
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].source, "codex");
+        assert_eq!(buckets[0].files.len(), 2);
+        let sqlite_memory = buckets[0]
+            .files
+            .iter()
+            .find(|file| file.path.starts_with(CODEX_MEMORY_URI_PREFIX))
+            .unwrap();
+        assert_eq!(sqlite_memory.name, "api-shape.md");
+        assert!(read_memory_file(&sqlite_memory.path)
+            .unwrap()
+            .contains("remember the API shape"));
+        let disk_memory = buckets[0]
+            .files
+            .iter()
+            .find(|file| file.name == "durable/preference.md")
+            .unwrap();
+        assert_eq!(read_memory_file(&disk_memory.path).unwrap(), "likes tests");
+    }
     use serde_json::json;
 
     // ── path_matches_memory tests ───────────────────────────────────────────
@@ -826,7 +1094,8 @@ mod tests {
                     }
                 }]
             }
-        }).to_string();
+        })
+        .to_string();
 
         let mut history = Vec::new();
         scan_jsonl_for_memory_edits(
@@ -865,7 +1134,8 @@ mod tests {
                     }
                 }]
             }
-        }).to_string();
+        })
+        .to_string();
 
         let mut history = Vec::new();
         scan_jsonl_for_memory_edits(
@@ -879,7 +1149,10 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].tool, "Edit");
         match &history[0].detail {
-            MemoryEditDetail::Edit { old_string, new_string } => {
+            MemoryEditDetail::Edit {
+                old_string,
+                new_string,
+            } => {
                 assert_eq!(old_string, "old text");
                 assert_eq!(new_string, "new text");
             }
@@ -902,7 +1175,8 @@ mod tests {
                     }
                 }]
             }
-        }).to_string();
+        })
+        .to_string();
 
         let mut history = Vec::new();
         scan_jsonl_for_memory_edits(
@@ -931,7 +1205,8 @@ mod tests {
                     }
                 }]
             }
-        }).to_string();
+        })
+        .to_string();
 
         let mut history = Vec::new();
         scan_jsonl_for_memory_edits(
@@ -951,7 +1226,8 @@ mod tests {
             "type": "assistant",
             "timestamp": "2026-03-01T10:00:00Z",
             "message": { "content": [] }
-        }).to_string();
+        })
+        .to_string();
         let line2 = json!({
             "type": "assistant",
             "message": {
@@ -964,7 +1240,8 @@ mod tests {
                     }
                 }]
             }
-        }).to_string();
+        })
+        .to_string();
         let content = format!("{}\n{}", line1, line2);
 
         let mut history = Vec::new();
@@ -985,13 +1262,7 @@ mod tests {
     fn scan_handles_invalid_json_gracefully() {
         let content = "not valid json\n{also invalid}\n";
         let mut history = Vec::new();
-        scan_jsonl_for_memory_edits(
-            content,
-            "/memory/MEMORY.md",
-            "sess6",
-            "proj",
-            &mut history,
-        );
+        scan_jsonl_for_memory_edits(content, "/memory/MEMORY.md", "sess6", "proj", &mut history);
         assert!(history.is_empty());
     }
 
@@ -1080,7 +1351,10 @@ mod tests {
     fn frontmatter_extracts_description_and_type() {
         let s = "---\nname: feedback-testing\ndescription: integration tests must hit a real database\nmetadata:\n  type: feedback\n---\n\nBody content";
         let fm = parse_frontmatter_str(s).unwrap();
-        assert_eq!(fm.description.as_deref(), Some("integration tests must hit a real database"));
+        assert_eq!(
+            fm.description.as_deref(),
+            Some("integration tests must hit a real database")
+        );
         assert_eq!(fm.mem_type.as_deref(), Some("feedback"));
     }
 

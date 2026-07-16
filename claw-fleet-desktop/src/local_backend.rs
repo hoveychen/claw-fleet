@@ -437,8 +437,11 @@ impl LocalBackend {
                         for path in &event.paths {
                             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-                            // Memory file change: .md file inside a `memory/` directory.
-                            if ext == "md" && path_is_in_memory_dir(path) {
+                            // Claude writes Markdown under `memory/`; Codex
+                            // writes under `memories/` and updates a SQLite WAL.
+                            if (ext == "md" && path_is_in_memory_dir(path))
+                                || path_is_codex_memory_db(path)
+                            {
                                 pending_memory_rescan = true;
                             }
 
@@ -1342,10 +1345,19 @@ fn incremental_rescan_and_emit(
     publish_mobile_sessions(&s);
 }
 
-/// Returns true when `path` is a `.md` file residing inside a `memory/`
-/// directory — the marker we use to identify auto-memory files for any source.
+/// Returns true when `path` resides inside a known memory directory.
 fn path_is_in_memory_dir(path: &std::path::Path) -> bool {
-    path.components().any(|c| c.as_os_str() == "memory")
+    path.components().any(|c| {
+        let component = c.as_os_str();
+        component == "memory" || component == "memories"
+    })
+}
+
+fn path_is_codex_memory_db(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.starts_with("memories_1.sqlite"))
+        .unwrap_or(false)
 }
 
 fn emit_tail_lines(path: &std::path::Path, app: &AppHandle, watch: &crate::WatchState) {
@@ -2297,7 +2309,7 @@ impl Backend for LocalBackend {
     }
 
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
-        crate::skills::scan_all_skills()
+        crate::skills::scan_all_skills_for_workspaces(&self.known_workspaces())
     }
 
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {

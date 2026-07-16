@@ -16,7 +16,16 @@ pub(crate) fn route_skills(
     path: &str,
 ) {
 
-                let items = skills::scan_all_skills();
+                let mut workspaces: Vec<String> = ctx
+                    .sources
+                    .iter()
+                    .flat_map(|source| source.scan_sessions())
+                    .map(|session| session.workspace_path)
+                    .filter(|path| !path.is_empty())
+                    .collect();
+                workspaces.sort();
+                workspaces.dedup();
+                let items = skills::scan_all_skills_for_workspaces(&workspaces);
                 let body = serde_json::to_string(&items).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),

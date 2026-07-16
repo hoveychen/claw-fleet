@@ -15,11 +15,14 @@ import skillStyles from "./SkillsView.module.css";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface SkillItem {
+  source: "claude-code" | "codex" | string;
+  scope: "user" | "repo" | "admin" | "system" | string;
   name: string;
   description: string;
   path: string;
   sizeBytes: number;
   modifiedMs: number;
+  canDelete: boolean;
 }
 
 interface SkillFileEntry {
@@ -96,6 +99,7 @@ export function SkillsView() {
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "claude-code" | "codex">("all");
   const [selected, setSelected] = useState<SkillItem | null>(null);
 
   const load = useCallback(async () => {
@@ -114,13 +118,18 @@ export function SkillsView() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return skills;
     return skills.filter(
-      (s) =>
+      (s) => (sourceFilter === "all" || s.source === sourceFilter) &&
+        (!q ||
         s.name.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q),
+        s.description.toLowerCase().includes(q)),
     );
-  }, [skills, query]);
+  }, [skills, query, sourceFilter]);
+
+  const sourceCounts = useMemo(() => ({
+    "claude-code": skills.filter((s) => s.source === "claude-code").length,
+    codex: skills.filter((s) => s.source === "codex").length,
+  }), [skills]);
 
   useEffect(() => {
     if (!selected) return;
@@ -139,6 +148,24 @@ export function SkillsView() {
         placeholder: t("skills.panel_title"),
       }}
       bannerCenter={<SkillsSourceTabs />}
+      subBar={
+        <>
+          <button
+            className={`${styles.chip} ${sourceFilter === "claude-code" ? styles.chip_active : ""}`}
+            onClick={() => setSourceFilter((v) => v === "claude-code" ? "all" : "claude-code")}
+          >
+            <span>{t("skills.source_claude")}</span>
+            <span className={styles.chip_count}>{sourceCounts["claude-code"]}</span>
+          </button>
+          <button
+            className={`${styles.chip} ${sourceFilter === "codex" ? styles.chip_active : ""}`}
+            onClick={() => setSourceFilter((v) => v === "codex" ? "all" : "codex")}
+          >
+            <span>{t("skills.source_codex")}</span>
+            <span className={styles.chip_count}>{sourceCounts.codex}</span>
+          </button>
+        </>
+      }
       secondary={
         <div className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("skills.loading")}</p>}
@@ -192,6 +219,7 @@ function SkillCard({
   active: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       className={`${styles.card} ${active ? styles.card_active : ""}`}
@@ -204,6 +232,11 @@ function SkillCard({
           <div className={styles.card_hook}>{skill.description}</div>
         )}
         <div className={styles.card_meta}>
+          <span className={skillStyles.source_tag}>
+            {skill.source === "codex" ? "Codex" : "Claude"}
+          </span>
+          <span>{t(`skills.scope_${skill.scope}`, { defaultValue: skill.scope })}</span>
+          <span className={styles.card_meta_dot}>·</span>
           <span>{formatSize(skill.sizeBytes)}</span>
           {skill.modifiedMs > 0 && (
             <>
@@ -358,14 +391,16 @@ function SkillDetail({
               {t("skills.reveal_in_finder")}
             </button>
           )}
-          <button
-            className={skillStyles.danger_btn}
-            onClick={handleDelete}
-            disabled={deleting}
-            title={t("skills.delete")}
-          >
-            {t("skills.delete")}
-          </button>
+          {skill.canDelete && (
+            <button
+              className={skillStyles.danger_btn}
+              onClick={handleDelete}
+              disabled={deleting}
+              title={t("skills.delete")}
+            >
+              {t("skills.delete")}
+            </button>
+          )}
         </div>
       </div>
 
