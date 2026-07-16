@@ -902,14 +902,13 @@ mod tests {
 
     // --- reconcile_codex_agents_md: exercised against a temp CODEX_HOME ---
     //
-    // These tests set $CODEX_HOME to an isolated temp dir. They run serially
-    // (guarded by a mutex) because they mutate a process-global env var.
-
-    use std::sync::Mutex;
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    // These tests set $CODEX_HOME to an isolated temp dir. They serialize on the
+    // shared process-wide home lock (the SAME lock codex_launch's notify-config
+    // tests hold) so no other test ever reads CODEX_HOME while we've repointed
+    // it — a private mutex here would not prevent that cross-module race.
 
     fn with_temp_codex_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::session::fleet_home_lock();
         let base = std::env::temp_dir().join(format!("fleet-codex-guidance-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
