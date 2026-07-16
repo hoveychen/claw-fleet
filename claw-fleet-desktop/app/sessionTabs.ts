@@ -13,6 +13,20 @@ export interface TabState {
   activeId: string | null;
 }
 
+/**
+ * Synthetic tab id for the single "new session" draft tab. It never resolves to
+ * a scanned `SessionInfo` — the host renders the compose form (then a starting
+ * spinner) in its place, and `replaceTab` swaps this id for the real session id
+ * once the spawned session is discovered, morphing the draft tab into its
+ * SessionDetail without moving slots. The `new:` prefix can't collide with a
+ * real session id (a UUID) or the pseudo-workspace values. */
+export const DRAFT_TAB_ID = "new:draft";
+
+/** True for the synthetic draft tab, which has no backing session. */
+export function isDraftTab(id: string): boolean {
+  return id === DRAFT_TAB_ID;
+}
+
 /** Open `id`, or focus it if it is already open. New tabs append to the right. */
 export function openTab(state: TabState, id: string): TabState {
   return {
@@ -98,6 +112,39 @@ export function pruneMissingTabs(
       ? state.activeId
       : tabIds[0] ?? null;
   return { tabIds, activeId };
+}
+
+/**
+ * Swap `oldId` for `newId` in place, keeping its slot and focus. Used to morph
+ * the draft tab into the real session tab the moment the spawn is discovered, so
+ * the tab the user is watching turns from the compose form into the session's
+ * SessionDetail without jumping position.
+ *
+ * Edge cases: if `oldId` is gone (the user closed the draft mid-spawn) it falls
+ * back to `openTab(newId)` so the session still lands in a tab; if `newId` is
+ * somehow already open, the old slot is dropped and focus moves to the existing
+ * one rather than creating a duplicate.
+ */
+export function replaceTab(
+  state: TabState,
+  oldId: string,
+  newId: string,
+): TabState {
+  const idx = state.tabIds.indexOf(oldId);
+  if (idx < 0) return openTab(state, newId);
+  if (oldId === newId) return state;
+  if (state.tabIds.includes(newId)) {
+    return {
+      tabIds: state.tabIds.filter((t) => t !== oldId),
+      activeId: state.activeId === oldId ? newId : state.activeId,
+    };
+  }
+  const tabIds = [...state.tabIds];
+  tabIds[idx] = newId;
+  return {
+    tabIds,
+    activeId: state.activeId === oldId ? newId : state.activeId,
+  };
 }
 
 /** Move `fromId` into `toId`'s slot, shifting the rest along. */

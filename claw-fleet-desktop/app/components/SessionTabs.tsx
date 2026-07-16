@@ -24,6 +24,15 @@ function tabLabel(s: SessionInfo): string {
   return s.aiTitle || s.slug || s.workspaceName || s.id.slice(0, 8);
 }
 
+/** One entry in the strip. `session` is the live session behind the tab, or
+ *  `null` for the synthetic new-session draft tab, which shows `label` instead
+ *  of a title + status dot. */
+export interface TabItem {
+  id: string;
+  session: SessionInfo | null;
+  label?: string;
+}
+
 export function SessionTabs({
   tabs,
   activeId,
@@ -34,7 +43,7 @@ export function SessionTabs({
   onCloseAll,
   onReorder,
 }: {
-  tabs: SessionInfo[];
+  tabs: TabItem[];
   activeId: string | null;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
@@ -97,10 +106,13 @@ export function SessionTabs({
   return (
     <div className={styles.strip} role="tablist">
       {tabs.map((tab) => {
-        const live = liveById.get(tab.id) ?? tab;
-        const dot = rowBarColor(live);
+        // The draft tab has no backing session — it wears its own label and no
+        // status dot. Real tabs resolve their live session from the store so a
+        // long-parked tab still shows the agent's current title and dot.
+        const live = tab.session ? liveById.get(tab.id) ?? tab.session : null;
+        const dot = live ? rowBarColor(live) : null;
         const isActive = tab.id === activeId;
-        const label = tabLabel(live);
+        const label = live ? tabLabel(live) : tab.label ?? "";
         return (
           <div
             key={tab.id}
@@ -110,7 +122,7 @@ export function SessionTabs({
             className={`${styles.tab} ${isActive ? styles.tab_active : ""} ${
               tab.id === dragId ? styles.tab_dragging : ""
             }`}
-            title={`${label}\n${live.workspaceName}`}
+            title={live ? `${label}\n${live.workspaceName}` : label}
             draggable
             onDragStart={(e) => {
               setDragId(tab.id);
@@ -145,11 +157,13 @@ export function SessionTabs({
               onClose(tab.id);
             }}
           >
-            <span
-              className={styles.dot}
-              style={dot ? { background: dot } : undefined}
-              data-idle={dot ? undefined : ""}
-            />
+            {tab.session && (
+              <span
+                className={styles.dot}
+                style={dot ? { background: dot } : undefined}
+                data-idle={dot ? undefined : ""}
+              />
+            )}
             <span className={styles.label}>{label}</span>
             <button
               className={styles.close}
