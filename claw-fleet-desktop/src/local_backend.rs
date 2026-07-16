@@ -2553,6 +2553,10 @@ impl Backend for LocalBackend {
         crate::codex_guidance::remove_codex_guidance()
     }
 
+    fn reconcile_codex_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
+        crate::codex_guidance::reconcile_codex_from_claude_state(user_title, locale)
+    }
+
     fn respond_to_elicitation(
         &self,
         id: &str,

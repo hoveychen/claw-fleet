@@ -1235,6 +1235,12 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::APPLY_CODEX_GUIDANCE, &Req { user_title, locale })
     }
 
+    fn reconcile_codex_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { user_title: &'a str, locale: &'a str }
+        self.probe.post_json_ok(claw_fleet_core::routes::RECONCILE_CODEX_GUIDANCE, &Req { user_title, locale })
+    }
+
 
 
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {

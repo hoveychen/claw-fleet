@@ -799,6 +799,17 @@ pub trait Backend: Send + Sync {
         Err("codex guidance not supported by this backend".into())
     }
 
+    /// Mirror the Claude-side concept toggles (interaction / PRD / wiki / model)
+    /// onto codex's `~/.codex/AGENTS.md`. One concept toggle drives both
+    /// carriers: the desktop calls this after any concept toggle and on startup,
+    /// so codex's per-concept blocks always match the Claude sentinels. Reads
+    /// the enabled set from the Claude carriers, so it is idempotent and
+    /// order-independent. Default-bodied so unsupported backends fail loudly;
+    /// LocalBackend and RemoteBackend override it.
+    fn reconcile_codex_guidance(&self, _user_title: &str, _locale: &str) -> Result<(), String> {
+        Err("codex guidance not supported by this backend".into())
+    }
+
     // ── Agent sources config ─────────────────────────────────────────────────
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo>;
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String>;
