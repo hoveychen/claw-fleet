@@ -3776,13 +3776,48 @@ pub async fn fetch_codex_usage() -> Result<CodexUsageItem, String> {
         tokio::task::spawn_blocking(move || fetch_codex_usage_blocking_impl(&bin))
             .await
             .map_err(|e| format!("join error: {e}"))?;
+    if let Ok(ref item) = result {
+        crate::codex_usage_history::record_snapshot(item);
+    }
     result
 }
 
 /// Blocking wrapper for use in fleet CLI (no tauri async runtime).
 pub fn fetch_codex_usage_blocking() -> Result<CodexUsageItem, String> {
     let bin = find_codex_binary().ok_or("Codex binary not found")?;
-    fetch_codex_usage_blocking_impl(&bin)
+    let result = fetch_codex_usage_blocking_impl(&bin);
+    if let Ok(ref item) = result {
+        crate::codex_usage_history::record_snapshot(item);
+    }
+    result
+}
+
+/// Guards against spawning more than one codex sampler thread per process.
+static CODEX_SAMPLER_STARTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Spawn (once per process) a background thread that samples codex usage every
+/// `interval` and records a snapshot as a side effect of
+/// `fetch_codex_usage_blocking`. This gives the codex 24h occupancy chart
+/// continuous coverage even when the desktop usage panel isn't polling — the
+/// codex parallel of [`crate::account::start_background_sampler`].
+///
+/// Unlike the Claude sampler, each tick first checks `find_codex_binary`: a
+/// user without codex installed never pays the cost of spawning `codex
+/// app-server`, and a codex install that appears later is picked up on the next
+/// tick. Idempotent per process; errors (not logged in, timeout) are swallowed
+/// and retried next tick. The thread runs until process exit; no handle is kept.
+pub fn start_codex_background_sampler(interval: std::time::Duration) {
+    use std::sync::atomic::Ordering;
+    if CODEX_SAMPLER_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || loop {
+        if find_codex_binary().is_some() {
+            let _ = fetch_codex_usage_blocking();
+        }
+        std::thread::sleep(interval);
+    });
 }
 
 /// Blocking implementation of the Codex app-server query.
