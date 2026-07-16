@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { codexToolSummary, timeoutMsToSecs, waitTimeoutSecs } from "./ToolUseBlock";
+import {
+  codexToolSummary,
+  parsePatchFiles,
+  timeoutMsToSecs,
+  waitTimeoutSecs,
+} from "./ToolUseBlock";
 
 // Stub translator: echoes the key plus any interpolation params so tests can
 // assert which i18n key + values the router picked, without loading i18next.
@@ -86,5 +91,58 @@ describe("codexToolSummary", () => {
   it("returns null for tools it does not handle (falls back to formatInput)", () => {
     expect(codexToolSummary("exec_command", { cmd: "pwd" }, t)).toBeNull();
     expect(codexToolSummary("Bash", { command: "ls" }, t)).toBeNull();
+  });
+
+  it("apply_patch → names a single touched file, action-aware + ws-relative", () => {
+    const patch = `*** Begin Patch
+*** Update File: /ws/app/foo.ts
+@@
+-old
++new
+*** End Patch`;
+    expect(codexToolSummary("apply_patch", { command: patch }, t, "/ws")).toBe(
+      'detail.tool_patch_update|{"path":"app/foo.ts"}',
+    );
+    expect(
+      codexToolSummary("apply_patch", { command: "*** Begin Patch\n*** Add File: a.ts\n" }, t),
+    ).toBe('detail.tool_patch_add|{"path":"a.ts"}');
+    expect(
+      codexToolSummary("apply_patch", { command: "*** Begin Patch\n*** Delete File: a.ts\n" }, t),
+    ).toBe('detail.tool_patch_delete|{"path":"a.ts"}');
+  });
+
+  it("apply_patch → counts multiple files", () => {
+    const patch = `*** Begin Patch
+*** Update File: a.ts
+*** Add File: b.ts
+*** Delete File: c.ts
+*** End Patch`;
+    expect(codexToolSummary("apply_patch", { command: patch }, t)).toBe(
+      'detail.tool_patch_multi|{"count":3}',
+    );
+  });
+
+  it("apply_patch with an unparseable body → null (formatInput shows it raw)", () => {
+    expect(codexToolSummary("apply_patch", { command: "garbage" }, t)).toBeNull();
+    expect(codexToolSummary("apply_patch", {}, t)).toBeNull();
+  });
+});
+
+describe("parsePatchFiles", () => {
+  it("extracts op + path for every file header", () => {
+    const patch = `*** Begin Patch
+*** Add File: src/new.ts
+*** Update File: src/old.ts
+*** Delete File: src/gone.ts
+*** End Patch`;
+    expect(parsePatchFiles(patch)).toEqual([
+      { op: "Add", path: "src/new.ts" },
+      { op: "Update", path: "src/old.ts" },
+      { op: "Delete", path: "src/gone.ts" },
+    ]);
+  });
+
+  it("returns [] when there are no file headers", () => {
+    expect(parsePatchFiles("just some text")).toEqual([]);
   });
 });
