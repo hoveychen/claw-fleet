@@ -961,6 +961,137 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
           '<task-notification>\n<task-id>a1389701e02753075</task-id>\n<tool-use-id>toolu_01ABCdefGHIjklMNOpqrs</tool-use-id>\n<output-file>/Users/demo/.claude/tasks/a1389701e02753075.output</output-file>\n<status>completed</status>\n<summary>Agent "审计露馅硬编码 批次3" finished</summary>\n<result>扫了 26 个 module.css，确认 3 处裸色需要换成语义 token：\n\n- `DecisionPanel.module.css` 的预览画布底色\n- `UsageBar.module.css` 的进度条底槽\n- `TrayPanel.module.css` 的分隔线\n\n其余命中都是 on-accent 白字或已有 light 覆盖，不用动。</result>\n</task-notification>',
       },
     },
+    // A tool-heavy stretch in the real transcript shape: each API step is its
+    // own assistant record, tool results ride user records (filtered from the
+    // row list). This is what exercises the WorkRunBlock fold — without it the
+    // mock never shows a band.
+    {
+      type: "user",
+      uuid: "msg-6",
+      timestamp: new Date(NOW - 12 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: "Great. Can you also wire the mock into CI so the screenshots regenerate on every release?",
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-7",
+      timestamp: new Date(NOW - 11 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "thinking",
+            thinking: "CI screenshots need a headless browser against the vite dev server in mock mode. Let me look at the existing release workflow first...",
+          },
+          {
+            type: "tool_use",
+            id: "tool-3",
+            name: "Bash",
+            input: {
+              command: "ls .github/workflows && grep -l 'release' .github/workflows/*.yml",
+              description: "List release-related CI workflows",
+            },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 5100, output_tokens: 210 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-7b",
+      timestamp: new Date(NOW - 11 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tool-3", content: "release.yml\nrelay-image.yml" },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-8",
+      timestamp: new Date(NOW - 10 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-4",
+            name: "Read",
+            input: { file_path: "/Users/demo/workspace/claw-fleet/.github/workflows/release.yml" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 5400, output_tokens: 95 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-8b",
+      timestamp: new Date(NOW - 10 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tool-4", content: "name: release\non:\n  push:\n    tags: ['v*']\njobs:\n  build:\n    runs-on: macos-14" },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-9",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "thinking",
+            thinking: "The release workflow builds on macos-14. A screenshot job can run headless chromium on ubuntu in parallel and upload artifacts...",
+          },
+          {
+            type: "tool_use",
+            id: "tool-5",
+            name: "Grep",
+            input: { pattern: "playwright|puppeteer", glob: "package.json" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 5700, output_tokens: 180 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-9b",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tool-5", content: "No matches found" },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-10",
+      timestamp: new Date(NOW - 8 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "text",
+            text: "The release workflow has no browser tooling yet. I'll add a `screenshots` job that starts `vite dev` in mock mode, drives it with Playwright, and uploads the PNGs as release artifacts.",
+          },
+        ],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 6100, output_tokens: 320 },
+      },
+    },
   ],
 
   // API server session — shorter

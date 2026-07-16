@@ -125,6 +125,66 @@ export function dayKey(timestamp: string | undefined): string | null {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/**
+ * Display form of a transcript model id: `claude-opus-4-8` → `opus 4.8`,
+ * `claude-haiku-4-5-20251001` → `haiku 4.5`, `claude-sonnet-5` → `sonnet 5`.
+ * Ids outside the claude naming scheme (`gpt-5.6-sol`) pass through unchanged.
+ */
+export function shortModelName(model: string): string {
+  const m = model.replace(/^claude-/, "").replace(/-\d{8}$/, "");
+  const twoPart = m.match(/^(.*?)-(\d+)-(\d+)$/);
+  if (twoPart) return `${twoPart[1]} ${twoPart[2]}.${twoPart[3]}`;
+  const onePart = m.match(/^(.*?)-(\d+)$/);
+  if (onePart) return `${onePart[1]} ${onePart[2]}`;
+  return m;
+}
+
+/** Aggregated token usage for one turn, shown on its final assistant row. */
+export interface TurnUsage {
+  /** The turn's last recorded `input_tokens` — the context size, not a sum. */
+  inputTokens: number;
+  /** Summed `output_tokens` across the turn's assistant records. */
+  outputTokens: number;
+}
+
+/**
+ * One usage entry per *turn*, keyed by the index of the turn's final assistant
+ * row. A turn is a maximal run of adjacent assistant rows; anything else (a
+ * user prompt, a meta injection) ends it. Claude Code writes each API step as
+ * its own assistant record, so per-record usage rows repeat near-identical
+ * `↑ ↓ · model · time` lines a dozen times a minute — this map is what lets
+ * the list draw that line once, with honest turn totals.
+ */
+export function turnUsageByRow(rows: RawMessage[]): Map<number, TurnUsage> {
+  const out = new Map<number, TurnUsage>();
+  let sumOut = 0;
+  let lastIn = 0;
+  let sawUsage = false;
+  for (let i = 0; i < rows.length; i++) {
+    const msg = rows[i];
+    if (msg.type !== "assistant") {
+      sumOut = 0;
+      lastIn = 0;
+      sawUsage = false;
+      continue;
+    }
+    const usage = msg.message?.usage;
+    if (usage) {
+      sumOut += usage.output_tokens;
+      lastIn = usage.input_tokens;
+      sawUsage = true;
+    }
+    const isTurnEnd = i === rows.length - 1 || rows[i + 1].type !== "assistant";
+    if (isTurnEnd && sawUsage) {
+      out.set(i, { inputTokens: lastIn, outputTokens: sumOut });
+      sumOut = 0;
+      lastIn = 0;
+      sawUsage = false;
+    }
+  }
+  return out;
+}
+
 /** Offset in days from `today` — 0 today, 1 yesterday, ... Null if unparseable. */
 export function daysAgo(key: string, today: Date): number | null {
   const parts = key.split("-").map(Number);
