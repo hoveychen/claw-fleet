@@ -18,6 +18,10 @@ interface Props {
    *  follows it both ways: open to show the tools streaming in, closed again
    *  once the agent moves on — a just-finished run tidies itself up. */
   defaultOpen: boolean;
+  /** True while the active search hit lives inside this run. Like
+   *  `defaultOpen`, the band follows the signal both ways — open on the hit,
+   *  closed again once the reader steps off it. */
+  forceOpen?: boolean;
 }
 
 /** Compact token count for the band tail: 843 → "843", 12 340 → "12.3k". */
@@ -41,10 +45,11 @@ export function WorkRunBlock({
   searchTerms,
   paths,
   defaultOpen,
+  forceOpen,
 }: Props) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(defaultOpen);
-  useEffect(() => setOpen(defaultOpen), [defaultOpen]);
+  const [open, setOpen] = useState(defaultOpen || !!forceOpen);
+  useEffect(() => setOpen(defaultOpen || !!forceOpen), [defaultOpen, forceOpen]);
 
   const summary = summarizeWorkRun(msgs);
   const counts = summary.toolCounts

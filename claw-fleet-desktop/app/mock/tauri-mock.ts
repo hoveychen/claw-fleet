@@ -10,6 +10,7 @@ import { emit } from "@tauri-apps/api/event";
 import type { SessionInfo } from "../types";
 import {
   MOCK_SESSIONS,
+  MOCK_MESSAGES,
   MOCK_CHAT_WORKSPACE,
   mockBrowseDir,
   MOCK_ACCOUNT_INFO,
@@ -184,8 +185,22 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return [];
     case "clear_workspace_procs":
       return 0;
-    case "search_sessions":
-      return [];
+    case "search_sessions": {
+      // Real-shaped FTS over the mock transcripts: match any message whose
+      // JSON carries the query, so the search → open-with-query → fold
+      // auto-expand path is exercisable in mock mode.
+      const q = String(args.query ?? "").toLowerCase();
+      if (q.length < 2) return [];
+      const hits: unknown[] = [];
+      for (const [sid, msgs] of Object.entries(MOCK_MESSAGES)) {
+        const hit = msgs.some((m) => JSON.stringify(m.message?.content ?? "").toLowerCase().includes(q));
+        if (!hit) continue;
+        const sess = MOCK_SESSIONS.find((s) => s.id === sid);
+        if (!sess) continue;
+        hits.push({ sessionId: sid, jsonlPath: sess.jsonlPath, snippet: q, rank: hits.length });
+      }
+      return hits;
+    }
     case "resume_fleet_session":
     case "resume_rate_limited_session":
       return null;

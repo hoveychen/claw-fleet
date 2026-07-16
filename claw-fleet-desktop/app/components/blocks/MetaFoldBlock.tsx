@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextBlock } from "./TextBlock";
 import { parseSkillInjection } from "../../skillInjection";
@@ -11,6 +11,10 @@ interface Props {
    * they collapse into one divider instead of stacking N identical rows.
    */
   segments: string[];
+  /** True while the active search hit lives inside this fold. The fold follows
+   *  the search: it opens when the reader steps onto the hit and closes again
+   *  when they step off (manual toggles still work in between). */
+  forceOpen?: boolean;
 }
 
 function formatSize(n: number): string {
@@ -30,9 +34,10 @@ function formatSize(n: number): string {
  * the count and expands to each segment, self-labelled, in order. Same visual
  * language as `CompactSummaryBlock`. Expands to the full markdown on click.
  */
-export function MetaFoldBlock({ segments }: Props) {
+export function MetaFoldBlock({ segments, forceOpen }: Props) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!forceOpen);
+  useEffect(() => setOpen(!!forceOpen), [forceOpen]);
 
   const total = segments.reduce((n, s) => n + s.length, 0);
   const merged = segments.length > 1;
