@@ -357,6 +357,53 @@ fn extract_last_text(lines: &[Value]) -> Option<String> {
     None
 }
 
+/// Extract the *first* user message text from a rollout, forward-scanning.
+///
+/// Mirrors [`extract_last_text`] but looks for the earliest user turn — used to
+/// feed [`crate::codex_title`] on the filesystem fallback path (the SQLite path
+/// already carries `first_user_message`).
+fn extract_first_user_text(lines: &[Value]) -> Option<String> {
+    for line in lines.iter() {
+        let Some(line_type) = line.get("type").and_then(|t| t.as_str()) else {
+            continue;
+        };
+        let Some(payload) = line.get("payload") else {
+            continue;
+        };
+        match line_type {
+            "event_msg" => {
+                if payload.get("type").and_then(|t| t.as_str()) == Some("user_message") {
+                    if let Some(text) = payload.get("message").and_then(|m| m.as_str()) {
+                        if !text.trim().is_empty() {
+                            return Some(text.to_string());
+                        }
+                    }
+                }
+            }
+            "response_item" => {
+                let item_type = payload.get("type").and_then(|t| t.as_str());
+                let role = payload.get("role").and_then(|r| r.as_str());
+                if item_type == Some("message") && role == Some("user") {
+                    if let Some(content) = payload.get("content").and_then(|c| c.as_array()) {
+                        for block in content.iter() {
+                            let block_type = block.get("type").and_then(|t| t.as_str());
+                            if block_type == Some("input_text") || block_type == Some("text") {
+                                if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                                    if !text.trim().is_empty() {
+                                        return Some(text.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Determine session status from the last JSONL lines and file age.
 fn determine_status(last_lines: &[Value], file_age_secs: f64) -> SessionStatus {
     // Look for the last turn_complete, turn_started, or approval request event.
@@ -1075,10 +1122,19 @@ fn build_session_from_sqlite(
     let (pid, pid_precise) = resolve_pid(codex_processes, &thread.id, &thread.cwd);
     let proc_alive = codex_proc_alive(codex_processes, &thread.id);
 
-    // Prefer: source-embedded nickname > SQLite agent_nickname > title
+    // Codex stores only the raw first prompt as `title`; for non-subagent
+    // threads Fleet generates a semantic title from the first user message
+    // (background, cached). Kick that off and prefer any cached result.
+    if !source_info.is_subagent {
+        crate::codex_title::maybe_generate(&thread.id, &thread.first_user_message);
+    }
+
+    // Prefer: source-embedded nickname > SQLite agent_nickname
+    //       > Fleet-generated semantic title > raw codex title (first prompt)
     let ai_title = source_info
         .agent_nickname
         .or_else(|| thread.agent_nickname.clone())
+        .or_else(|| crate::codex_title::cached_title(&thread.id))
         .or_else(|| {
             if !thread.title.is_empty() {
                 Some(thread.title.clone())
@@ -1153,10 +1209,45 @@ mod tests {
     use super::{
         codex_cost_and_input, codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit, compute_token_stats,
-        extract_context_percent, last_rollout_rate_limits, read_rollout_originator,
-        CodexRateLimitWindow, CodexUsageItem,
+        extract_context_percent, extract_first_user_text, last_rollout_rate_limits,
+        read_rollout_originator, CodexRateLimitWindow, CodexUsageItem,
     };
     use serde_json::json;
+
+    #[test]
+    fn extract_first_user_text_finds_earliest_user_turn() {
+        // event_msg user_message form, preceded by a non-user line.
+        let lines = vec![
+            json!({"type": "event_msg", "payload": {"type": "session_meta"}}),
+            json!({"type": "event_msg", "payload": {"type": "user_message", "message": "first ask"}}),
+            json!({"type": "event_msg", "payload": {"type": "user_message", "message": "second ask"}}),
+        ];
+        assert_eq!(extract_first_user_text(&lines).as_deref(), Some("first ask"));
+
+        // response_item message/user with input_text content block.
+        let lines2 = vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "help me refactor"}]
+            }
+        })];
+        assert_eq!(
+            extract_first_user_text(&lines2).as_deref(),
+            Some("help me refactor")
+        );
+
+        // Assistant turns and empty messages are ignored.
+        let lines3 = vec![
+            json!({"type": "event_msg", "payload": {"type": "agent_message", "message": "hi"}}),
+            json!({"type": "event_msg", "payload": {"type": "user_message", "message": "   "}}),
+            json!({"type": "event_msg", "payload": {"type": "user_message", "message": "real one"}}),
+        ];
+        assert_eq!(extract_first_user_text(&lines3).as_deref(), Some("real one"));
+
+        assert_eq!(extract_first_user_text(&[]), None);
+    }
 
     #[test]
     fn parse_source_exec_is_top_level_not_subagent() {
@@ -1814,10 +1905,21 @@ fn parse_codex_session(
     let (pid, pid_precise) = resolve_pid(codex_processes, &session_id, &workspace_path);
     let proc_alive = codex_proc_alive(codex_processes, &session_id);
 
+    // Codex stores only the raw first prompt as its title; for non-subagent
+    // threads Fleet generates a semantic title from the first user message
+    // (background, cached). Kick that off and prefer any cached result.
+    if !source_info.is_subagent {
+        if let Some(first_user) = extract_first_user_text(&all_parsed) {
+            crate::codex_title::maybe_generate(&session_id, &first_user);
+        }
+    }
+
     // Prefer source-embedded nickname > rollout meta nickname
+    //      > Fleet-generated semantic title
     let ai_title = source_info
         .agent_nickname
-        .or(agent_nickname);
+        .or(agent_nickname)
+        .or_else(|| crate::codex_title::cached_title(&session_id));
 
     let agent_type = source_info.agent_role.or_else(|| {
         meta.and_then(|m| m.get("agent_role").and_then(|r| r.as_str()))
