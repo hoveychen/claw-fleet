@@ -15,6 +15,7 @@ pub const ANALYZE: &str = "/analyze";
 pub const APPLY_ELICITATION_HOOK: &str = "/apply_elicitation_hook";
 pub const APPLY_GUARD_HOOK: &str = "/apply_guard_hook";
 pub const APPLY_CODEX_GUIDANCE: &str = "/apply_codex_guidance";
+pub const RECONCILE_CODEX_GUIDANCE: &str = "/reconcile_codex_guidance";
 pub const APPLY_HOOKS: &str = "/apply_hooks";
 pub const APPLY_INTERACTION_MODE: &str = "/apply_interaction_mode";
 pub const APPLY_MODEL_GUIDANCE: &str = "/apply_model_guidance";

@@ -640,6 +640,22 @@ pub fn reconcile_codex_agents_md(
     Ok(())
 }
 
+/// Mirror the Claude-side concept toggles onto codex's AGENTS.md. Reads which
+/// concepts are enabled from their Claude carriers (the `@import` sentinels in
+/// `~/.claude/CLAUDE.md`) and reconciles the matching codex blocks. This is the
+/// unified entry point: one concept toggle drives both carriers, so the desktop
+/// calls this after any concept toggle and on startup. Idempotent and
+/// order-independent — the Claude write always lands first, then this reads it.
+pub fn reconcile_codex_from_claude_state(user_title: &str, locale: &str) -> Result<(), String> {
+    let set = CodexGuidanceSet {
+        prd: crate::prd_discipline::is_prd_discipline_installed(),
+        interaction: crate::interaction_mode::is_interaction_mode_installed(),
+        wiki: crate::wiki_guidance::is_wiki_guidance_installed(),
+        model: crate::model_guidance::is_model_guidance_installed(),
+    };
+    reconcile_codex_agents_md(set, user_title, locale)
+}
+
 /// Backward-compat shim: the legacy single "codex guidance" toggle applied both
 /// PRD and interaction (never wiki/model). Routed through the new reconcile
 /// writer so old callers keep working while the per-concept toggles are wired up

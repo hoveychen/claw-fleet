@@ -137,6 +137,20 @@ pub(crate) fn remove_codex_guidance(state: tauri::State<AppState>) -> Result<(),
     state.backend.read().unwrap().remove_codex_guidance()
 }
 
+/// Mirror the Claude concept toggles onto codex's AGENTS.md. Called by the
+/// desktop after any concept toggle (interaction / PRD / wiki / model) and on
+/// startup, so codex's per-concept blocks always match the Claude sentinels.
+#[tauri::command]
+pub(crate) fn reconcile_codex_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+    let title = state.user_title.lock().unwrap().clone();
+    let locale = state.locale.lock().unwrap().clone();
+    state
+        .backend
+        .read()
+        .unwrap()
+        .reconcile_codex_guidance(&title, &locale)
+}
+
 #[tauri::command]
 pub(crate) fn respond_to_elicitation(
     state: tauri::State<AppState>,

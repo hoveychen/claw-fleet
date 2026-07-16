@@ -807,6 +807,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::REMOVE_CODEX_GUIDANCE => route_remove_codex_guidance(ctx, request, &query, json_header, path),
 
+            crate::routes::RECONCILE_CODEX_GUIDANCE => route_reconcile_codex_guidance(ctx, request, &query, json_header, path),
+
             // ── Plan-approval hook endpoints ─────────────────────────────────
             crate::routes::APPLY_PLAN_APPROVAL_HOOK => route_apply_plan_approval_hook(ctx, request, &query, json_header, path),
 

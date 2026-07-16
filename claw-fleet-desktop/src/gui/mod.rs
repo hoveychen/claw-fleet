@@ -1804,6 +1804,7 @@ pub fn run() {
             remove_prd_mode,
             apply_codex_guidance,
             remove_codex_guidance,
+            reconcile_codex_guidance,
             respond_to_elicitation,
             respond_to_fleet_ask,
             respond_to_a2ui_render,
