@@ -373,6 +373,9 @@ pub fn spawn_claude_detached_with_envs(
         .stdin(std::process::Stdio::null())
         .stdout(stdout_stdio)
         .stderr(std::process::Stdio::from(stderr_file));
+    // Own process group: a terminal Ctrl-C / group signal at the spawner must
+    // not interrupt the agent's in-flight turn (see process_util docs).
+    crate::process_util::detach_process_group(&mut cmd);
     // Pin the child's HOME to the real home dir. Origin: the desktop app
     // used to ship sandboxed (macOS App Sandbox), where its own $HOME
     // pointed at the container (~/Library/Containers/.../Data) and an
@@ -663,6 +666,45 @@ pub(crate) fn spawn_new_session_impl(
 mod tests {
     use super::normalize_workspace_path_with_home;
     use std::path::Path;
+
+    /// The spawned agent CLI must live in its own process group. When it
+    /// inherits the spawner's group, any group-wide signal aimed at the Fleet
+    /// process — Ctrl-C in the terminal running a dev build being the shipping
+    /// case — lands on every in-flight agent too, and a Codex turn dies with
+    /// `turn_aborted reason='interrupted'` (observed on thread 019f6aba…,
+    /// 2026-07-16: three aborts, none matching any Fleet interrupt log).
+    /// `/bin/sleep` stands in for the claude binary; the helper doesn't care.
+    #[cfg(unix)]
+    #[test]
+    fn spawned_agent_gets_its_own_process_group() {
+        let dir = std::env::temp_dir();
+        let stderr_log = dir.join(format!("fleet-pgroup-test-{}.log", std::process::id()));
+        let pid = super::spawn_claude_detached_with_envs(
+            "/bin/sleep",
+            &["30".to_string()],
+            dir.to_str().unwrap(),
+            &stderr_log,
+            "pgroup-test",
+            "sleep 30",
+            &[],
+            false,
+            |_| {},
+        )
+        .expect("spawn sleep");
+
+        let child_pgid = unsafe { libc::getpgid(pid as libc::pid_t) };
+        let own_pgid = unsafe { libc::getpgid(0) };
+        // Clean up before asserting so a failure doesn't leak the sleeper.
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        let _ = std::fs::remove_file(&stderr_log);
+
+        assert!(child_pgid >= 0, "getpgid failed for child {pid}");
+        assert_ne!(
+            child_pgid, own_pgid,
+            "agent child {pid} shares the spawner's process group {own_pgid}; \
+             a terminal Ctrl-C at the spawner would interrupt the agent's turn"
+        );
+    }
 
     /// The mobile composer's "自定义路径…" box is a bare text input, so the two
     /// shapes a phone user actually types (`~/...` and a bare relative) reach
