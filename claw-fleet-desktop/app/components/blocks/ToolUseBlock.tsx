@@ -41,12 +41,14 @@ interface MultiEditEdit {
 }
 
 function formatInput(input: Record<string, unknown>, name?: string): string {
-  // Bash carries a model-written `description` on every call ("Find files
-  // referencing meta block names"). It reads far better in the collapsed row
-  // than the raw one-liner — which is often a long escaped grep. The command
-  // itself still shows in full inside the expanded body (BashBody). Fall back
-  // to the command when no description was recorded (older transcripts).
-  if (name === "Bash") {
+  // Bash and Agent both carry a model-written `description` on every call — for
+  // Bash a one-line summary ("Find files referencing meta block names"), for
+  // Agent a 3-5 word task name. It reads far better in the collapsed row than
+  // the alternatives: Bash's raw command is often a long escaped grep, and
+  // Agent has no compact field so it used to fall through to JSON.stringify.
+  // The full command / prompt still shows in the expanded body (BashBody /
+  // AgentBody). Fall back when no description was recorded (older transcripts).
+  if (name === "Bash" || name === "Agent") {
     const desc = typeof input.description === "string" ? input.description.trim() : "";
     if (desc) return desc;
   }
