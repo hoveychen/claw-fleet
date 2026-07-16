@@ -35,6 +35,7 @@ import {
   WorkflowTab,
 } from "./SessionDetailTabs";
 import { parseSkillInjection } from "../skillInjection";
+import { groupMetaRuns } from "./metaGrouping";
 import styles from "./SessionDetailView.module.css";
 
 const TAIL_POLL_MS = 2500;
@@ -154,19 +155,26 @@ function TaskNotificationCard({ data }: { data: ParsedTaskNotification }) {
 }
 
 /**
- * One collapsed fold for every synthetic `isMeta` user turn — the SKILL.md body
- * a `Skill` load injects, or codex's developer-role boilerplate (sandbox/
+ * A collapsed fold for synthetic `isMeta` user turns — the SKILL.md body a
+ * `Skill` load injects, or codex's developer-role boilerplate (sandbox/
  * permissions preamble, the `/root` multi-agent collaboration prompt,
  * `<multi_agent_mode>` guidance, tagged `isMeta` in codex_source.rs). Neither is
- * user-authored; both fold into the same card, which self-labels from the body
- * so a skill load still reads as a skill and everything else as system context.
+ * user-authored. A single turn self-labels from its body (a skill load reads as
+ * a skill, everything else as system context); a run of adjacent turns collapses
+ * into one card that shows the count and expands to each self-labelled segment.
  */
-function MetaFoldCard({ body }: { body: string }) {
+function MetaFoldCard({ segments }: { segments: string[] }) {
   const [open, setOpen] = useState(false);
-  const skill = parseSkillInjection(body);
+  const merged = segments.length > 1;
+  const first = segments[0] ?? "";
+  const skill = merged ? null : parseSkillInjection(first);
   const Icon = skill ? Puzzle : Cog;
   const label = skill ? t("已加载 SKILL") : t("系统上下文");
-  const tag = skill ? skill.slug : deriveMetaLabel(body);
+  const tag = merged
+    ? t("{0} 条", segments.length)
+    : skill
+      ? skill.slug
+      : deriveMetaLabel(first);
   return (
     <div className={styles.skillCard}>
       <button className={styles.skillHeader} onClick={() => setOpen((o) => !o)}>
@@ -177,7 +185,12 @@ function MetaFoldCard({ body }: { body: string }) {
       </button>
       {open && (
         <div className={styles.skillBody}>
-          <LazyMarkdown text={body} bare />
+          {segments.map((seg, i) => (
+            <div key={i} className={merged ? styles.skillSegment : undefined}>
+              {merged && <div className={styles.skillSegHead}>{deriveMetaLabel(seg)}</div>}
+              <LazyMarkdown text={seg} bare />
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -302,7 +315,7 @@ const MessageRow = memo(function MessageRow({
     if (msg.isMeta) {
       return (
         <div className={styles.assistantRow}>
-          <MetaFoldCard body={text} />
+          <MetaFoldCard segments={[text]} />
           <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
         </div>
       );
@@ -589,15 +602,29 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
             {t("加载更早的消息")}
           </button>
         )}
-        {mainRows.map((msg, i) => (
-          <MessageRow
-            key={i}
-            msg={msg}
-            index={i}
-            expandedThinking={expandedThinking}
-            onToggleThinking={toggleThinking}
-          />
-        ))}
+        {groupMetaRuns(mainRows).map((unit) => {
+          if (unit.kind === "meta-group") {
+            // One card for the whole run of adjacent system-context turns.
+            const segments = unit.msgs.map(userText).filter(Boolean);
+            if (segments.length === 0) return null;
+            const last = unit.msgs[unit.msgs.length - 1];
+            return (
+              <div key={unit.startLocal} className={styles.assistantRow}>
+                <MetaFoldCard segments={segments} />
+                <div className={styles.rowTime}>{fmtTime(last.timestamp)}</div>
+              </div>
+            );
+          }
+          return (
+            <MessageRow
+              key={unit.startLocal}
+              msg={unit.msg}
+              index={unit.startLocal}
+              expandedThinking={expandedThinking}
+              onToggleThinking={toggleThinking}
+            />
+          );
+        })}
         {liveThinking && (
           <div className={styles.liveThinking}>
             <div className={styles.liveThinkingHead}>
