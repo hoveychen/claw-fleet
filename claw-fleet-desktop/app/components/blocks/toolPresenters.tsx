@@ -26,7 +26,9 @@ import {
   diffStats,
 } from "../../toolResults";
 import type { ToolResultBlock, ToolUseBlock as ToolUseBlockType } from "../../types";
+import type { PathLinkContext } from "../../markdown/pathLinks";
 import { ExpandableText } from "./ExpandableText";
+import { TextBlock } from "./TextBlock";
 import styles from "./toolPresenters.module.css";
 
 /**
@@ -221,6 +223,50 @@ function AgentBody({ meta }: { meta: unknown }) {
         </>
       )}
       {agent.content && <Stream label="result" text={agent.content} />}
+    </>
+  );
+}
+
+/**
+ * The Agent card's *input*, rendered readably instead of as raw JSON.
+ *
+ * A subagent call carries a short `description` (the 3-5 word task name) and a
+ * long `prompt` (the full brief). Before this, whenever no `toolUseResult` was
+ * recorded — i.e. while the subagent is still running, or for non-Claude
+ * sources — the card fell through to the generic `JSON.stringify(input)` branch,
+ * so the prompt showed as one blob with literal `\n` escapes. Rendering the
+ * prompt as Markdown — via the transcript's own `TextBlock` — turns the
+ * `## headings`, fenced diffs and `code` spans into real structure, matching
+ * how assistant text renders elsewhere. A bounded, scrollable box keeps a long
+ * brief from swamping the conversation.
+ */
+export function AgentInput({
+  block,
+  paths,
+}: {
+  block: ToolUseBlockType;
+  paths?: PathLinkContext;
+}) {
+  const desc = typeof block.input.description === "string" ? block.input.description.trim() : "";
+  const prompt = typeof block.input.prompt === "string" ? block.input.prompt : "";
+  const subagentType =
+    typeof block.input.subagent_type === "string" ? block.input.subagent_type.trim() : "";
+  return (
+    <>
+      {(desc || subagentType) && (
+        <div className={styles.agent_meta}>
+          {subagentType && <span className={styles.chip}>{subagentType}</span>}
+          {desc && <span className={styles.agent_task}>{desc}</span>}
+        </div>
+      )}
+      {prompt && (
+        <div className={styles.agent_prompt}>
+          <span className={styles.stream_label}>prompt</span>
+          <div className={styles.agent_prompt_body}>
+            <TextBlock text={prompt} paths={paths} />
+          </div>
+        </div>
+      )}
     </>
   );
 }
