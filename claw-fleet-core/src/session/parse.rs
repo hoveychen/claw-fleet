@@ -732,6 +732,7 @@ pub fn parse_session_info(
         token_speed: stats.token_speed,
         agent_token_speed: stats.token_speed,
         total_output_tokens: stats.total_output_tokens,
+        reasoning_output_tokens: 0,
         total_input_tokens,
         total_cost_usd: stats.total_cost_usd,
         agent_total_cost_usd: stats.total_cost_usd,
@@ -774,4 +775,3 @@ pub fn parse_session_info(
     })
     .map(|info| (info, state))
 }
-

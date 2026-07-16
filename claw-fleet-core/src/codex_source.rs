@@ -566,8 +566,9 @@ fn clamp_dead_session_status(
 }
 
 /// Compute token speed and total output tokens from parsed JSONL lines.
-fn compute_token_stats(lines: &[Value]) -> (f64, u64) {
+fn compute_token_stats(lines: &[Value]) -> (f64, u64, u64) {
     let mut total_output: u64 = 0;
+    let mut total_reasoning: u64 = 0;
     let mut timed_tokens: Vec<(f64, u64)> = Vec::new();
 
     for line in lines {
@@ -591,6 +592,11 @@ fn compute_token_stats(lines: &[Value]) -> (f64, u64) {
                     if cumulative_output > 0 {
                         total_output = cumulative_output; // token_count is cumulative
                     }
+                    total_reasoning = info
+                        .get("total_token_usage")
+                        .and_then(|u| u.get("reasoning_output_tokens"))
+                        .and_then(|t| t.as_u64())
+                        .unwrap_or(total_reasoning);
 
                     let incremental_output = info
                         .get("last_token_usage")
@@ -653,7 +659,7 @@ fn compute_token_stats(lines: &[Value]) -> (f64, u64) {
         0.0
     };
 
-    (speed, total_output)
+    (speed, total_output, total_reasoning)
 }
 
 /// Compute USD cost and cumulative input tokens for a Codex session from its
@@ -1131,7 +1137,7 @@ fn build_session_from_sqlite(
     let age_secs = (now_secs as f64 - last_activity_ms as f64 / 1000.0).max(0.0);
 
     // For recently active sessions, read the rollout file for precise status.
-    let (status, token_speed, total_output_tokens, last_message_preview, model, thinking_level, context_percent, rate_limit, codex_cost, total_input_tokens) =
+    let (status, token_speed, total_output_tokens, reasoning_output_tokens, last_message_preview, model, thinking_level, context_percent, rate_limit, codex_cost, total_input_tokens) =
         if age_secs < 600.0 && rollout_path.exists() {
             // Update last_activity_ms from file mtime for sub-second precision.
             if let Ok(meta) = fs::metadata(&rollout_path) {
@@ -1171,7 +1177,7 @@ fn build_session_from_sqlite(
                         } else {
                             st
                         };
-                        let (spd, tok) = compute_token_stats(&all_parsed);
+                        let (spd, tok, reasoning) = compute_token_stats(&all_parsed);
                         let preview = extract_last_text(last_n);
                         let mdl = extract_model(&all_parsed).or_else(|| thread.model.clone());
 
@@ -1190,12 +1196,13 @@ fn build_session_from_sqlite(
                         let tok = if tok > 0 { tok } else { thread.tokens_used as u64 };
                         let ctx = extract_context_percent(&all_parsed, mdl.as_deref());
                         let (cost, input) = codex_cost_and_input(&all_parsed, mdl.as_deref());
-                        (st, spd, tok, preview, mdl, tl, ctx, rl, cost, input)
+                        (st, spd, tok, reasoning, preview, mdl, tl, ctx, rl, cost, input)
                     } else {
                         (
                             determine_status_from_age(file_age.as_secs_f64()),
                             0.0,
                             thread.tokens_used as u64,
+                            0,
                             None,
                             thread.model.clone(),
                             None,
@@ -1210,6 +1217,7 @@ fn build_session_from_sqlite(
                         determine_status_from_age(age_secs),
                         0.0,
                         thread.tokens_used as u64,
+                        0,
                         None,
                         thread.model.clone(),
                         None,
@@ -1224,6 +1232,7 @@ fn build_session_from_sqlite(
                     determine_status_from_age(age_secs),
                     0.0,
                     thread.tokens_used as u64,
+                    0,
                     None,
                     thread.model.clone(),
                     None,
@@ -1256,6 +1265,7 @@ fn build_session_from_sqlite(
                 determine_status_from_age(age_secs),
                 0.0,
                 thread.tokens_used as u64,
+                0,
                 preview,
                 thread.model.clone(),
                 None,
@@ -1328,6 +1338,7 @@ fn build_session_from_sqlite(
         token_speed,
         agent_token_speed: token_speed,
         total_output_tokens,
+        reasoning_output_tokens,
         total_input_tokens,
         total_cost_usd: codex_cost,
         agent_total_cost_usd: codex_cost,
@@ -2574,7 +2585,7 @@ mod tests {
                 "payload": {
                     "type": "token_count",
                     "info": {
-                        "total_token_usage": { "output_tokens": 779 },
+                        "total_token_usage": { "output_tokens": 779, "reasoning_output_tokens": 120 },
                         "last_token_usage": { "output_tokens": 428 }
                     }
                 }
@@ -2585,15 +2596,16 @@ mod tests {
                 "payload": {
                     "type": "token_count",
                     "info": {
-                        "total_token_usage": { "output_tokens": 815 },
+                        "total_token_usage": { "output_tokens": 815, "reasoning_output_tokens": 175 },
                         "last_token_usage": { "output_tokens": 36 }
                     }
                 }
             }),
         ];
 
-        let (_, total_output) = compute_token_stats(&lines);
+        let (_, total_output, reasoning_output) = compute_token_stats(&lines);
         assert_eq!(total_output, 815);
+        assert_eq!(reasoning_output, 175);
     }
 
     #[test]
@@ -2609,7 +2621,7 @@ mod tests {
             }
         })];
 
-        let (_, total_output) = compute_token_stats(&lines);
+        let (_, total_output, _) = compute_token_stats(&lines);
         assert_eq!(total_output, 123);
     }
 
@@ -2843,7 +2855,7 @@ fn parse_codex_session(
     let source_info = parse_source(&source_str);
 
     let status = determine_status(last_n, age.as_secs_f64());
-    let (token_speed, total_output_tokens) = compute_token_stats(&all_parsed);
+    let (token_speed, total_output_tokens, reasoning_output_tokens) = compute_token_stats(&all_parsed);
     let last_message_preview = extract_last_text(last_n);
     let model = extract_model(&all_parsed);
     let context_percent = extract_context_percent(&all_parsed, model.as_deref());
@@ -2919,6 +2931,7 @@ fn parse_codex_session(
         token_speed,
         agent_token_speed: token_speed,
         total_output_tokens,
+        reasoning_output_tokens,
         total_input_tokens,
         total_cost_usd: codex_cost,
         agent_total_cost_usd: codex_cost,
