@@ -63,6 +63,16 @@ function formatInput(input: Record<string, unknown>, name?: string, wsRoot?: str
     const desc = typeof input.description === "string" ? input.description.trim() : "";
     if (desc) return desc;
   }
+  // codex runs in "code mode": every tool call is an `exec` running a JS/TS
+  // script with no per-call description. The injected AGENTS.md (Rule 7) asks
+  // the model to put a `// ...` summary on the first line, which the backend
+  // lifts into `exec_note`. Prefer it in the collapsed row so 老板 sees intent
+  // instead of raw code; the full script still shows in the expanded body.
+  // Fall back to the raw command when the summary is absent.
+  if (name === "exec") {
+    const note = typeof input.exec_note === "string" ? input.exec_note.trim() : "";
+    if (note) return note;
+  }
   // Show a compact one-liner for common tools
   if ("command" in input) return String(input.command);
   if ("file_path" in input) return relToWorkspace(String(input.file_path), wsRoot);

@@ -1321,8 +1321,9 @@ mod tests {
         build_session_from_sqlite, clamp_dead_session_status, codex_cost_and_input,
         codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
-        codex_token_breakdown_from_lines, compute_token_stats, extract_context_percent,
-        last_rollout_rate_limits, latest_total_token_usage, normalize_messages,
+        codex_token_breakdown_from_lines, compute_token_stats, exec_note_from_script,
+        extract_context_percent, last_rollout_rate_limits, latest_total_token_usage,
+        normalize_messages,
         read_rollout_originator, CodexProcess, CodexRateLimitWindow, CodexUsageItem,
         SqliteThread,
     };
@@ -1820,6 +1821,66 @@ mod tests {
             content.contains("Success") && content.contains("M foo.rs"),
             "tool_result must carry the joined output text, got: {content}"
         );
+    }
+
+    #[test]
+    fn exec_note_from_script_extracts_leading_line_comment() {
+        // First non-empty line is a `//` comment → lifted (sans `//`, trimmed).
+        assert_eq!(
+            exec_note_from_script("// 列出 sample 目录的全部文件\nconst f = ls();"),
+            Some("列出 sample 目录的全部文件".to_string())
+        );
+        // Leading blank lines are skipped.
+        assert_eq!(
+            exec_note_from_script("\n\n  // do a thing  \ncode();"),
+            Some("do a thing".to_string())
+        );
+        // No leading comment → None (falls back to raw code in the card).
+        assert_eq!(
+            exec_note_from_script("const x = ALL_TOOLS.filter(t => t.name);"),
+            None
+        );
+        // A `//` with no text is not a usable summary.
+        assert_eq!(exec_note_from_script("//\ncode();"), None);
+    }
+
+    #[test]
+    fn normalize_messages_lifts_exec_note_from_first_comment() {
+        // An exec whose first line is a `// ...` comment surfaces `exec_note`
+        // alongside `command`, so the card can show the human summary.
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call",
+                "call_id": "call_1",
+                "name": "exec",
+                "input": "// 运行脚本并核对输出\nrun(\"python fizzbuzz.py\");"
+            },
+            "timestamp": "t0"
+        })];
+        let out = normalize_messages(lines);
+        let block = &out[0]["message"]["content"][0];
+        assert_eq!(block["name"], json!("exec"));
+        assert_eq!(block["input"]["exec_note"], json!("运行脚本并核对输出"));
+        assert!(block["input"]["command"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fizzbuzz"));
+
+        // An exec without a leading comment carries no exec_note.
+        let bare = normalize_messages(vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call",
+                "call_id": "call_2",
+                "name": "exec",
+                "input": "const x = 1;"
+            },
+            "timestamp": "t1"
+        })]);
+        assert!(bare[0]["message"]["content"][0]["input"]
+            .get("exec_note")
+            .is_none());
     }
 
     #[test]
@@ -2735,6 +2796,23 @@ fn parse_codex_session(
 
 // ── Message normalization ────────────────────────────────────────────────────
 
+/// Lift the human-readable summary comment off a codex "code mode" exec script.
+///
+/// Rule 7 of the injected AGENTS.md asks the model to make the first line of
+/// every exec a `// ...` comment describing what the exec does. We surface that
+/// as the card summary. Returns the comment text (sans `//`) of the first
+/// non-empty line iff that line is a `//` line comment; otherwise `None`.
+fn exec_note_from_script(script: &str) -> Option<String> {
+    let first = script.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let rest = first.strip_prefix("//")?;
+    let note = rest.trim();
+    if note.is_empty() {
+        None
+    } else {
+        Some(note.to_string())
+    }
+}
+
 /// Normalize Codex rollout lines into Claude-Code-compatible message format.
 ///
 /// Codex format: `{"timestamp":"...","type":"<variant>","payload":{...}}`
@@ -3293,8 +3371,23 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                         // `command` so the generic tool card renders it as a
                         // one-liner. Fall back to structured JSON if a future
                         // custom tool ever sends an object.
+                        //
+                        // codex runs in "code mode": every exec is a JS/TS
+                        // script with no per-call description. Rule 7 of the
+                        // injected AGENTS.md asks the model to make the first
+                        // line a `// ...` comment stating what the exec does;
+                        // lift that into `exec_note` so the card can show a
+                        // human-readable summary instead of raw code.
                         let input = match payload.get("input") {
-                            Some(Value::String(s)) => json!({ "command": s }),
+                            Some(Value::String(s)) => {
+                                let mut obj = json!({ "command": s });
+                                if name == "exec" {
+                                    if let Some(note) = exec_note_from_script(s) {
+                                        obj["exec_note"] = Value::String(note);
+                                    }
+                                }
+                                obj
+                            }
                             Some(other) => other.clone(),
                             None => json!({}),
                         };
