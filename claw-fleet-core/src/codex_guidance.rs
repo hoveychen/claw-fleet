@@ -305,12 +305,18 @@ to {title} with a plain-text message, call **`fleet__ask`** instead. \
 Mid-turn status lines (a one-sentence note before a tool call) stay as text; \
 it's the **final surface** of a turn that must be a card. {ix_lang}\n\
 \n\
-`fleet__ask` is available from turn 1 (Fleet injects its MCP server at \
-spawn/resume). It takes `{{ \"questions\": Question[] }}` — 1 to 4 questions, \
-each with 2–4 `options` (do NOT add an \"Other\" option; the UI appends one). \
-It is a superset of a plain question card and also supports `html` previews, \
-`images`, and `formFields` — reach for those only when a rich preview or \
-structured input is genuinely the better answer.\n\
+`fleet__ask` is registered from turn 1 (Fleet injects its MCP server at \
+spawn/resume), but codex **defers MCP tools** — so `fleet__ask` will NOT show \
+up in your upfront tool list, and if you introspect your available tools you \
+may not see it. It is still available: reach for it by name and codex \
+discovers and calls it on demand (the fully-qualified name is \
+`mcp__fleet__fleet__ask`). Do NOT fall back to a plain-text turn ending just \
+because it is not in your immediate toolset — that deferral is exactly the \
+trap this mode exists to avoid. It takes `{{ \"questions\": Question[] }}` — 1 \
+to 4 questions, each with 2–4 `options` (do NOT add an \"Other\" option; the \
+UI appends one). It is a superset of a plain question card and also supports \
+`html` previews, `images`, and `formFields` — reach for those only when a \
+rich preview or structured input is genuinely the better answer.\n\
 \n\
 ## Tone\n\
 \n\
@@ -796,6 +802,10 @@ mod tests {
         assert!(
             g.contains("Session-end exemption"),
             "must keep the session-end plain-text exemption so codex doesn't loop cards forever"
+        );
+        assert!(
+            g.contains("defer") && g.contains("mcp__fleet__fleet__ask"),
+            "must warn that codex defers MCP tools (fleet__ask absent from the upfront list) and give the qualified name"
         );
         // The interaction block must NOT drag in worktree/PRD mechanics — those
         // live in the PRD block now.
