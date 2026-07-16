@@ -386,6 +386,14 @@ export const useDetailStore = create<DetailState>((set, get) => ({
   initialTab: null,
 
   open: async (session, searchQuery, initialTab) => {
+    // The global detail drawer only renders on the Sessions page, so any
+    // opener (tray, waiting alert, mascot bubble) must land there first —
+    // otherwise open() would set a selected session that nothing displays.
+    const ui = useUIStore.getState();
+    if (ui.viewMode !== "list" && ui.viewMode !== "gallery") {
+      ui.setViewMode(ui.lastSessionViewMode);
+    }
+
     await get().close();
 
     set({
