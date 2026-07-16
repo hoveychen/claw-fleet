@@ -1071,6 +1071,13 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     ))}
                   </select>
                 </div>
+                {llmConfig.provider !== "none" && dualReportProvidersEnabled && (
+                  <div className={styles.row}>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                      {t("settings.llm_provider_routing_desc")}
+                    </span>
+                  </div>
+                )}
                 {llmConfig.provider === "none" && (
                   <div className={styles.row}>
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-warning, #e8a838)" }}>
@@ -1133,6 +1140,13 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       </select>
                     </div>
                   </>
+                )}
+                {llmConfig.provider !== "none" && dualReportProvidersEnabled && (
+                  <div className={styles.row}>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                      {t("settings.llm_model_alignment_desc")}
+                    </span>
+                  </div>
                 )}
               </div>
             )}

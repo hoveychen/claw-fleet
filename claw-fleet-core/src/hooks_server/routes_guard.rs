@@ -174,19 +174,13 @@ pub(crate) fn route_guard_analyze(
                             &req.command, &risk_tags, &req.context, &req.lang,
                         );
                         let cfg = llm_config.lock().unwrap().clone();
-                        let provider = llm_provider::resolve_provider(&cfg.provider);
-                        let result = provider.as_ref().and_then(|p| {
-                            if !p.is_available() { return None; }
-                            let model = &cfg.fast_model;
-                            let timeout = std::time::Duration::from_secs(30);
-                            crate::llm_usage::complete_accounted(
-                                p.as_ref(),
-                                &prompt,
-                                model,
-                                timeout,
-                                crate::llm_usage::SCENARIO_GUARD_COMMAND,
-                            )
-                        });
+                        let result = llm_provider::complete_routed(
+                            &cfg,
+                            llm_provider::ModelSlot::Fast,
+                            &prompt,
+                            std::time::Duration::from_secs(30),
+                            crate::llm_usage::SCENARIO_GUARD_COMMAND,
+                        );
                         match result {
                             Some(analysis) => {
                                 let body = serde_json::json!({"analysis": analysis}).to_string();
