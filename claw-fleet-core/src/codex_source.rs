@@ -2142,6 +2142,71 @@ mod tests {
     }
 
     #[test]
+    fn normalize_messages_rehydrates_nested_fleet_ask_completion() {
+        // Deferred MCP calls made from code-mode exec are represented only by
+        // mcp_tool_call_end. Preserve the question and answer as a standard
+        // decision tool pair so the resolved card remains in the conversation.
+        let lines = vec![json!({
+            "type": "event_msg",
+            "timestamp": "t0",
+            "payload": {
+                "type": "mcp_tool_call_end",
+                "call_id": "exec-inner-1",
+                "invocation": {
+                    "server": "fleet",
+                    "tool": "fleet__ask",
+                    "arguments": {
+                        "questions": [{
+                            "header": "Merge",
+                            "question": "Merge now?",
+                            "options": [{"label": "Yes", "description": "Merge it"}]
+                        }]
+                    }
+                },
+                "result": {
+                    "Ok": {
+                        "content": [{"type": "text", "text": "{\"Merge now?\":\"Yes\"}"}],
+                        "isError": false
+                    }
+                }
+            }
+        })];
+
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0]["message"]["content"][0]["type"], json!("tool_use"));
+        assert_eq!(
+            out[0]["message"]["content"][0]["name"],
+            json!("mcp__fleet__fleet__ask")
+        );
+        assert_eq!(
+            out[0]["message"]["content"][0]["input"]["questions"][0]["question"],
+            json!("Merge now?")
+        );
+        assert_eq!(out[1]["tool_use_id"], json!("exec-inner-1"));
+        assert!(out[1]["content"].as_str().unwrap().contains("Yes"));
+        assert_eq!(out[1]["is_error"], json!(false));
+    }
+
+    #[test]
+    fn normalize_messages_ignores_unrelated_mcp_completion_events() {
+        let lines = vec![json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "mcp_tool_call_end",
+                "call_id": "other-1",
+                "invocation": {
+                    "server": "another-server",
+                    "tool": "lookup",
+                    "arguments": {}
+                },
+                "result": {"Ok": {"content": []}}
+            }
+        })];
+        assert!(normalize_messages(lines).is_empty());
+    }
+
+    #[test]
     fn exec_note_from_script_extracts_leading_line_comment() {
         // First non-empty line is a `//` comment → lifted (sans `//`, trimmed).
         assert_eq!(
@@ -3469,6 +3534,88 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                             },
                             "timestamp": timestamp
                         }));
+                    }
+                    "mcp_tool_call_end" => {
+                        // Code-mode Codex invokes deferred MCP tools from
+                        // inside the outer `exec` custom tool. The rollout has
+                        // no top-level function_call for that inner invocation;
+                        // only this completion event retains its arguments and
+                        // result. Rehydrate Fleet decision calls into the same
+                        // tool_use/tool_result shape used by Claude so the
+                        // conversation keeps the card after it is answered.
+                        let invocation = payload.get("invocation");
+                        let server = invocation
+                            .and_then(|v| v.get("server"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let tool = invocation
+                            .and_then(|v| v.get("tool"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let arguments = invocation
+                            .and_then(|v| v.get("arguments"))
+                            .cloned()
+                            .unwrap_or_else(|| json!({}));
+
+                        if server == "fleet"
+                            && tool == "fleet__ask"
+                            && arguments.get("questions").and_then(Value::as_array).is_some()
+                        {
+                            let call_id = payload
+                                .get("call_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("fleet-ask");
+                            messages.push(json!({
+                                "type": "assistant",
+                                "message": {
+                                    "role": "assistant",
+                                    "content": [{
+                                        "type": "tool_use",
+                                        "id": call_id,
+                                        "name": "mcp__fleet__fleet__ask",
+                                        "input": arguments
+                                    }]
+                                },
+                                "timestamp": timestamp
+                            }));
+
+                            let result = payload.get("result");
+                            let ok = result.and_then(|v| v.get("Ok"));
+                            let content = ok
+                                .and_then(|v| v.get("content"))
+                                .and_then(Value::as_array)
+                                .map(|blocks| {
+                                    blocks
+                                        .iter()
+                                        .filter_map(|block| {
+                                            block
+                                                .get("text")
+                                                .and_then(Value::as_str)
+                                                .or_else(|| block.as_str())
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n")
+                                })
+                                .or_else(|| {
+                                    result
+                                        .and_then(|v| v.get("Err"))
+                                        .map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))
+                                })
+                                .unwrap_or_default();
+                            let is_error = ok.is_none()
+                                || ok
+                                    .and_then(|v| v.get("isError"))
+                                    .and_then(Value::as_bool)
+                                    .unwrap_or(false);
+
+                            messages.push(json!({
+                                "type": "tool_result",
+                                "tool_use_id": call_id,
+                                "content": content,
+                                "is_error": is_error,
+                                "timestamp": timestamp
+                            }));
+                        }
                     }
                     _ => {
                         // Pass through other event_msg types as system messages.
