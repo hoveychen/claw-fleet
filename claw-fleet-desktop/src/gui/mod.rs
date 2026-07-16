@@ -1410,6 +1410,7 @@ pub fn run() {
                 let state = app.state::<AppState>();
                 let locale = state.locale.clone();
                 let llm_cfg = state.llm_config.clone();
+                llm_provider::set_shared_config(llm_cfg.lock().unwrap().clone());
 
                 // Build the agent source registry from config (~/.fleet/fleet-sources.json).
                 let sources = agent_source::build_sources();

@@ -148,6 +148,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
     // LLM provider config — shared with the desktop app on this host.
     let llm_config: Arc<Mutex<LlmConfig>> = Arc::new(Mutex::new(LlmConfig::load()));
+    crate::llm_provider::set_shared_config(llm_config.lock().unwrap().clone());
 
     // Load the persistent audit history.
     let audit_history = Arc::new(Mutex::new(
