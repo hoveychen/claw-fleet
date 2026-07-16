@@ -70,6 +70,15 @@ function blocksOf(msg: RawMessage): ContentBlock[] {
 const TOOL_SUMMARY_FIELDS = ["command", "file_path", "pattern", "path", "query", "url", "skill"];
 
 function toolSummary(block: ContentBlock): string {
+  // Bash/Agent carry a model-written `description` — a readable summary that
+  // beats Bash's raw command (often a long escaped grep) and Agent's absent
+  // compact field. Mirrors the desktop cards. Fall back to the field list when
+  // no description was recorded (older transcripts).
+  const name = (block as { name?: string }).name;
+  if (name === "Bash" || name === "Agent") {
+    const desc = block.input?.description;
+    if (typeof desc === "string" && desc.trim()) return desc.trim();
+  }
   for (const field of TOOL_SUMMARY_FIELDS) {
     const v = block.input?.[field];
     if (typeof v === "string" && v) return v;
