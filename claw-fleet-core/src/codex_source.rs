@@ -1670,6 +1670,33 @@ mod tests {
     }
 
     #[test]
+    fn standalone_user_instructions_user_msg_is_tagged_is_meta() {
+        // Codex injects the AGENTS.md guidance as a `<user_instructions>`
+        // role=user message. Like <environment_context>, it can arrive standalone
+        // (no <recommended_plugins> prefix). It is runtime-injected context, not a
+        // user turn, so it must fold into a collapsed system-context row too.
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "<user_instructions>\n  Follow the house style.\n</user_instructions>"
+                }]
+            }
+        })];
+
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0]["isMeta"],
+            json!(true),
+            "standalone <user_instructions> must be tagged isMeta so the frontend folds it"
+        );
+    }
+
+    #[test]
     fn normalize_messages_renders_custom_tool_call_and_output() {
         // Current Codex rollouts record tool calls as `custom_tool_call` /
         // `custom_tool_call_output` (name="exec", input is a script string,
@@ -3029,16 +3056,19 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                                 .join("");
                             // Codex prepends a few runtime-boilerplate blocks as
                             // `role:"user"` messages (not `developer`): the
-                            // `<recommended_plugins>` list and the standalone
+                            // `<recommended_plugins>` list, the standalone
                             // `<environment_context>` preamble (cwd/shell/date/
-                            // sandbox). Neither is user-authored, so fold them
-                            // like the developer boilerplate.
+                            // sandbox), and the `<user_instructions>` AGENTS.md
+                            // guidance. None is user-authored, so fold them like
+                            // the developer boilerplate.
                             let trimmed = text.trim_start();
                             let is_injected_user_context = role == "user"
                                 && ((trimmed.starts_with("<recommended_plugins>")
                                     && text.contains("</recommended_plugins>"))
                                     || (trimmed.starts_with("<environment_context>")
-                                        && text.contains("</environment_context>")));
+                                        && text.contains("</environment_context>"))
+                                    || (trimmed.starts_with("<user_instructions>")
+                                        && text.contains("</user_instructions>")));
 
                             if role == "developer" || is_injected_user_context {
                                 msg["isMeta"] = json!(true);
