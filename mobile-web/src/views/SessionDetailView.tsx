@@ -215,6 +215,9 @@ function deriveMetaLabel(body: string): string {
   if (head.startsWith("<multi_agent_mode>")) return "multi_agent_mode";
   if (head.startsWith("<environment_context>")) return t("环境上下文");
   if (head.startsWith("<user_instructions>")) return t("用户指令");
+  // Newer codex CLI emits the AGENTS.md guidance under this markdown heading
+  // instead of a <user_instructions> wrapper (see codex_source.rs).
+  if (head.startsWith("# AGENTS.md instructions")) return t("用户指令");
   if (head.startsWith("<turn_aborted>")) return t("轮次中断");
   if (head.startsWith("<subagent_notification>")) return t("子智能体通知");
   return t("注入指令");
