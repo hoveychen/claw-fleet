@@ -217,6 +217,13 @@ pub fn poll_response(id: &str, timeout: Duration) -> Option<FleetAskResponse> {
 
 /// Write a response file. Called by the desktop / fleet serve after the
 /// user resolves the Decision Card.
+///
+/// Normally the blocked MCP producer consumes the file within its 200ms poll
+/// loop. Codex can, however, end the outer code-mode `exec` while the nested
+/// MCP call is still waiting. In that state the request survives but its
+/// producer and turn are gone. Detect that exact condition synchronously after
+/// writing and resume the Fleet-owned session with the answer instead of
+/// leaving an unconsumed response forever.
 pub fn write_response(resp: &FleetAskResponse) -> Result<(), String> {
     // Only a live pending request may be answered — see guard::write_response.
     if !request_path(&resp.id).map(|p| p.exists()).unwrap_or(false) {
@@ -224,7 +231,105 @@ pub fn write_response(resp: &FleetAskResponse) -> Result<(), String> {
     }
     let path = response_path(&resp.id).ok_or("cannot determine home dir")?;
     let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("write fleet-ask response: {e}"))
+    fs::write(&path, json).map_err(|e| format!("write fleet-ask response: {e}"))?;
+    recover_orphaned_response(&resp.id).map(|_| ())
+}
+
+/// Recover an answered request whose MCP producer no longer exists.
+///
+/// `Ok(false)` means the live producer still owns the response (or this was
+/// not a Fleet-owned session). `Ok(true)` means the orphan was consumed here:
+/// cancellation cleans it up, while a real answer resumes the session through
+/// the source-aware parked path.
+pub fn recover_orphaned_response(id: &str) -> Result<bool, String> {
+    recover_orphaned_response_with(
+        id,
+        crate::parked::session_alive,
+        |session_id, workspace, prompt, model, effort, permission_mode| {
+            crate::parked::resume_session(
+                session_id,
+                workspace,
+                prompt,
+                model,
+                effort,
+                permission_mode,
+            )
+        },
+    )
+}
+
+fn recover_orphaned_response_with<A, S>(id: &str, alive: A, spawn: S) -> Result<bool, String>
+where
+    A: FnOnce(&str) -> bool,
+    S: FnOnce(&str, &str, &str, Option<&str>, Option<&str>, Option<&str>) -> Result<(), String>,
+{
+    let Some(req) = read_request(id) else {
+        return Ok(false);
+    };
+    let Some(resp) = try_read_response(id) else {
+        return Ok(false);
+    };
+
+    // This is the load-bearing duplicate-resume gate. A live producer owns the
+    // response even if it has not reached its next 200ms poll yet.
+    if alive(&req.session_id) {
+        return Ok(false);
+    }
+    let Some(workspace) = crate::parked::parkable_workspace(&req.session_id) else {
+        return Ok(false);
+    };
+
+    let outcome = if resp.cancelled {
+        crate::decision_history::FleetAskOutcome::Cancelled
+    } else {
+        crate::decision_history::FleetAskOutcome::Answered
+    };
+
+    if resp.cancelled {
+        cleanup(id);
+    } else {
+        let model = crate::session::resolve_session_model_spec(&req.session_id);
+        let effort = crate::launch_spec::effort_of(&req.session_id);
+        crate::parked::park_with(
+            id,
+            crate::parked::ParkedKind::FleetAsk,
+            &req.session_id,
+            &workspace,
+            &req,
+            model.as_deref(),
+            effort.as_deref(),
+        )?;
+        // From here the parked copy is authoritative. Removing the live pair
+        // prevents the stale response from being rediscovered after restart.
+        cleanup(id);
+        let payload = serde_json::to_value(&resp)
+            .map_err(|e| format!("serialize orphaned fleet-ask response: {e}"))?;
+        crate::parked::answer_with(id, &payload, spawn)?;
+    }
+
+    let answers = if resp.cancelled {
+        BTreeMap::new()
+    } else {
+        resp.answers.clone()
+    };
+    let record = crate::decision_history::build_fleet_ask_record(
+        &req,
+        outcome,
+        answers,
+        chrono::Utc::now().to_rfc3339(),
+    );
+    if let Err(e) = crate::decision_history::append_record(
+        &crate::decision_history::DecisionHistoryRecord::FleetAsk(record),
+    ) {
+        crate::log_debug(&format!(
+            "fleet-ask orphan recovery: append history for {id}: {e}"
+        ));
+    }
+    crate::log_debug(&format!(
+        "fleet-ask orphan recovery: consumed {id} for session {} (cancelled={})",
+        req.session_id, resp.cancelled
+    ));
+    Ok(true)
 }
 
 /// Remove the request + response pair. Called by the MCP server once it has
@@ -600,6 +705,64 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    struct TmpHome {
+        dir: std::path::PathBuf,
+        previous_fleet: Option<std::ffi::OsString>,
+        previous_codex: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TmpHome {
+        fn new(tag: &str) -> Self {
+            let lock = crate::session::fleet_home_lock();
+            let dir = fresh_tmp_dir(tag);
+            std::fs::create_dir_all(&dir).unwrap();
+            let previous_fleet = std::env::var_os("FLEET_HOME");
+            let previous_codex = std::env::var_os("CODEX_HOME");
+            unsafe {
+                std::env::set_var("FLEET_HOME", &dir);
+                std::env::set_var("CODEX_HOME", dir.join(".codex"));
+            }
+            Self { dir, previous_fleet, previous_codex, _lock: lock }
+        }
+
+        fn plant_codex_session(&self, id: &str, workspace: &std::path::Path) {
+            let sessions = self.dir.join(".codex/sessions/2026/07/16");
+            std::fs::create_dir_all(&sessions).unwrap();
+            let record = json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": id,
+                    "session_id": id,
+                    "originator": "fleet",
+                    "cwd": workspace,
+                    "source": "exec"
+                }
+            });
+            std::fs::write(
+                sessions.join(format!("rollout-2026-07-16T00-00-00-{id}.jsonl")),
+                format!("{record}\n"),
+            )
+            .unwrap();
+        }
+    }
+
+    impl Drop for TmpHome {
+        fn drop(&mut self) {
+            unsafe {
+                match self.previous_fleet.take() {
+                    Some(value) => std::env::set_var("FLEET_HOME", value),
+                    None => std::env::remove_var("FLEET_HOME"),
+                }
+                match self.previous_codex.take() {
+                    Some(value) => std::env::set_var("CODEX_HOME", value),
+                    None => std::env::remove_var("CODEX_HOME"),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
     fn empty_request(id: &str) -> FleetAskRequest {
         FleetAskRequest {
             parked: false,
@@ -743,6 +906,116 @@ mod tests {
         let ids = list_pending_in_dir(&dir).unwrap();
         assert!(ids.is_empty(), "answered orphan leaked: {ids:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn answered_orphan_resumes_codex_and_cleans_live_pair() {
+        let home = TmpHome::new("orphan-resume");
+        let workspace = home.dir.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let session_id = "019f6aba-6dd8-7c90-a70e-c969ea896bd2";
+        home.plant_codex_session(session_id, &workspace);
+
+        let mut req = empty_request("orphan-1");
+        req.session_id = session_id.into();
+        req.timestamp = "2026-07-16T11:41:31Z".into();
+        write_request(&req).unwrap();
+        let response = FleetAskResponse {
+            id: req.id.clone(),
+            answers: BTreeMap::from([("q".into(), "继续".into())]),
+            cancelled: false,
+        };
+        std::fs::write(
+            response_path(&req.id).unwrap(),
+            serde_json::to_vec(&response).unwrap(),
+        )
+        .unwrap();
+
+        let mut resumed = None;
+        let recovered = recover_orphaned_response_with(
+            &req.id,
+            |_| false,
+            |id, cwd, prompt, model, effort, _| {
+                resumed = Some((
+                    id.to_string(),
+                    cwd.to_string(),
+                    prompt.to_string(),
+                    model.map(str::to_string),
+                    effort.map(str::to_string),
+                ));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(recovered);
+        let (id, cwd, prompt, _, _) = resumed.expect("orphan must resume");
+        assert_eq!(id, session_id);
+        assert_eq!(cwd, workspace.to_string_lossy());
+        assert!(prompt.contains("【老板的选择】继续"), "{prompt}");
+        assert!(!request_path(&req.id).unwrap().exists());
+        assert!(!response_path(&req.id).unwrap().exists());
+        assert!(!crate::parked::is_parked(&req.id));
+    }
+
+    #[test]
+    fn live_producer_keeps_ownership_of_response() {
+        let home = TmpHome::new("live-owner");
+        let mut req = empty_request("live-1");
+        req.session_id = "still-running".into();
+        write_request(&req).unwrap();
+        let response = FleetAskResponse {
+            id: req.id.clone(),
+            answers: BTreeMap::from([("q".into(), "继续".into())]),
+            cancelled: false,
+        };
+        std::fs::write(
+            response_path(&req.id).unwrap(),
+            serde_json::to_vec(&response).unwrap(),
+        )
+        .unwrap();
+
+        let recovered = recover_orphaned_response_with(
+            &req.id,
+            |_| true,
+            |_, _, _, _, _, _| panic!("a live producer must not be resumed"),
+        )
+        .unwrap();
+        assert!(!recovered);
+        assert!(request_path(&req.id).unwrap().exists());
+        assert!(response_path(&req.id).unwrap().exists());
+        drop(home);
+    }
+
+    #[test]
+    fn cancelled_orphan_is_cleaned_without_resume() {
+        let home = TmpHome::new("orphan-cancel");
+        let workspace = home.dir.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let session_id = "019f6aba-6dd8-7c90-a70e-c969ea896bd3";
+        home.plant_codex_session(session_id, &workspace);
+        let mut req = empty_request("orphan-cancel-1");
+        req.session_id = session_id.into();
+        write_request(&req).unwrap();
+        let response = FleetAskResponse {
+            id: req.id.clone(),
+            answers: BTreeMap::new(),
+            cancelled: true,
+        };
+        std::fs::write(
+            response_path(&req.id).unwrap(),
+            serde_json::to_vec(&response).unwrap(),
+        )
+        .unwrap();
+
+        assert!(recover_orphaned_response_with(
+            &req.id,
+            |_| false,
+            |_, _, _, _, _, _| panic!("cancel must not resume"),
+        )
+        .unwrap());
+        assert!(!request_path(&req.id).unwrap().exists());
+        assert!(!response_path(&req.id).unwrap().exists());
     }
 
     #[test]
