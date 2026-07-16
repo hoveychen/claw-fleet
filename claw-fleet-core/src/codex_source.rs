@@ -1697,6 +1697,36 @@ mod tests {
     }
 
     #[test]
+    fn runtime_marker_user_msgs_are_tagged_is_meta() {
+        // Codex also injects two low-frequency runtime markers as role=user
+        // messages: `<turn_aborted>` (interrupt notice; its developer-role
+        // variant already folds) and `<subagent_notification>` (subagent status
+        // JSON). Both are runtime-injected, not user turns, so they must fold
+        // into collapsed system-context rows too.
+        let cases = [
+            "<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>",
+            "<subagent_notification>\n{\"agent_id\":\"abc\",\"status\":{}}\n</subagent_notification>",
+        ];
+        for text in cases {
+            let lines = vec![json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": text }]
+                }
+            })];
+            let out = normalize_messages(lines);
+            assert_eq!(out.len(), 1);
+            assert_eq!(
+                out[0]["isMeta"],
+                json!(true),
+                "runtime-marker user message must be tagged isMeta: {text}"
+            );
+        }
+    }
+
+    #[test]
     fn normalize_messages_renders_custom_tool_call_and_output() {
         // Current Codex rollouts record tool calls as `custom_tool_call` /
         // `custom_tool_call_output` (name="exec", input is a script string,
@@ -3054,21 +3084,29 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                                 .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
                                 .collect::<Vec<_>>()
                                 .join("");
-                            // Codex prepends a few runtime-boilerplate blocks as
-                            // `role:"user"` messages (not `developer`): the
+                            // Codex prepends several runtime-boilerplate blocks
+                            // as `role:"user"` messages (not `developer`): the
                             // `<recommended_plugins>` list, the standalone
                             // `<environment_context>` preamble (cwd/shell/date/
-                            // sandbox), and the `<user_instructions>` AGENTS.md
-                            // guidance. None is user-authored, so fold them like
-                            // the developer boilerplate.
+                            // sandbox), the `<user_instructions>` AGENTS.md
+                            // guidance, and two low-frequency runtime markers
+                            // `<turn_aborted>` (interrupt notice) and
+                            // `<subagent_notification>` (subagent status JSON).
+                            // None is user-authored, so fold them like the
+                            // developer boilerplate. Each match requires the open
+                            // tag at the start AND its close tag, so a real user
+                            // message merely mentioning one of these won't fold.
                             let trimmed = text.trim_start();
+                            let wrapped_in = |tag: &str| {
+                                trimmed.starts_with(&format!("<{tag}>"))
+                                    && text.contains(&format!("</{tag}>"))
+                            };
                             let is_injected_user_context = role == "user"
-                                && ((trimmed.starts_with("<recommended_plugins>")
-                                    && text.contains("</recommended_plugins>"))
-                                    || (trimmed.starts_with("<environment_context>")
-                                        && text.contains("</environment_context>"))
-                                    || (trimmed.starts_with("<user_instructions>")
-                                        && text.contains("</user_instructions>")));
+                                && (wrapped_in("recommended_plugins")
+                                    || wrapped_in("environment_context")
+                                    || wrapped_in("user_instructions")
+                                    || wrapped_in("turn_aborted")
+                                    || wrapped_in("subagent_notification"));
 
                             if role == "developer" || is_injected_user_context {
                                 msg["isMeta"] = json!(true);
