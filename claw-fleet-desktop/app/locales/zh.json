@@ -1289,6 +1289,8 @@
     "work_cat_work": "处理任务",
     "work_steps": "{{count}} 步",
     "work_thinking": "思考",
+    "reasoning_summary_unavailable": "模型进行了推理，但没有返回摘要。",
+    "redacted_thinking": "推理内容已隐藏",
     "today": "今天",
     "yesterday": "昨天",
     "copy": "复制消息",
