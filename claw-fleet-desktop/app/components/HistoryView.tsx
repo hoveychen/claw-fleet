@@ -999,6 +999,14 @@ export function HistoryView() {
                 <option key={path} value={path} title={path}>{name}</option>
               ))}
             </select>
+          </div>
+          {/* Row 2: the "only active" pill sits beside the mark segments rather
+              than inside the workspace-select row. On WebKit (Tauri's WKWebView)
+              a <select> refuses to shrink below its widest option even with
+              min-width:0, so pairing it with the pill wrapped the pill onto its
+              own orphaned line. Giving the pill its own row removes that
+              dependency and reads the same in both engines. */}
+          <div className={styles.mark_row}>
             <button
               type="button"
               className={`${styles.active_toggle} ${activeOnly ? styles.active_toggle_on : ""}`}
@@ -1010,12 +1018,11 @@ export function HistoryView() {
               {t("history.only_active", "仅活跃")}
               <span>{activeCount}</span>
             </button>
-          </div>
-          <div
-            className={styles.mark_filter}
-            role="group"
-            aria-label={t("history.mark_filter_label", "按标记状态筛选")}
-          >
+            <div
+              className={styles.mark_filter}
+              role="group"
+              aria-label={t("history.mark_filter_label", "按标记状态筛选")}
+            >
             {MARK_SEGMENTS.map((key) => {
               const label =
                 key === "all"
@@ -1043,6 +1050,7 @@ export function HistoryView() {
                 </button>
               );
             })}
+            </div>
           </div>
         </div>
 

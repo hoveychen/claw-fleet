@@ -94,6 +94,15 @@
   cursor: pointer;
 }
 
+/* Row 2 of the filter block: the "only active" pill + the mark segments,
+   sharing one line. Kept separate from .filter_row (the workspace <select>)
+   because a WebKit <select> won't shrink to share a row — see HistoryView.tsx. */
+.mark_row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
 /* "Only active" pill — filters the list down to sessions the agent still owns. */
 .active_toggle {
   display: inline-flex;
@@ -138,6 +147,8 @@
    workspace / query / active filters. */
 .mark_filter {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: 7px;
   overflow: hidden;
