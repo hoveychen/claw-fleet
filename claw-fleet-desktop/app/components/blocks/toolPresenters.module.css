@@ -106,6 +106,19 @@
   word-break: break-word;
 }
 
+/* The subagent brief, rendered as Markdown (TextBlock) and kept bounded so a
+   long prompt scrolls within the card instead of swamping the conversation. */
+.agent_prompt_body {
+  margin-top: 3px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-secondary);
+  font-size: 12px;
+}
+
 .stat_key { color: var(--color-text-dim); }
 .stat_val {
   color: var(--color-text);

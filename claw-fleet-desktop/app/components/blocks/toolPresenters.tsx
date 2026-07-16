@@ -26,7 +26,9 @@ import {
   diffStats,
 } from "../../toolResults";
 import type { ToolResultBlock, ToolUseBlock as ToolUseBlockType } from "../../types";
+import type { PathLinkContext } from "../../markdown/pathLinks";
 import { ExpandableText } from "./ExpandableText";
+import { TextBlock } from "./TextBlock";
 import styles from "./toolPresenters.module.css";
 
 /**
@@ -233,10 +235,18 @@ function AgentBody({ meta }: { meta: unknown }) {
  * recorded — i.e. while the subagent is still running, or for non-Claude
  * sources — the card fell through to the generic `JSON.stringify(input)` branch,
  * so the prompt showed as one blob with literal `\n` escapes. Rendering the
- * prompt through ExpandableText (a `<pre>`) restores real line breaks and gives
- * it a preview + copy button, matching how the completed card shows it.
+ * prompt as Markdown — via the transcript's own `TextBlock` — turns the
+ * `## headings`, fenced diffs and `code` spans into real structure, matching
+ * how assistant text renders elsewhere. A bounded, scrollable box keeps a long
+ * brief from swamping the conversation.
  */
-export function AgentInput({ block }: { block: ToolUseBlockType }) {
+export function AgentInput({
+  block,
+  paths,
+}: {
+  block: ToolUseBlockType;
+  paths?: PathLinkContext;
+}) {
   const desc = typeof block.input.description === "string" ? block.input.description.trim() : "";
   const prompt = typeof block.input.prompt === "string" ? block.input.prompt : "";
   const subagentType =
@@ -249,7 +259,14 @@ export function AgentInput({ block }: { block: ToolUseBlockType }) {
           {desc && <span className={styles.agent_task}>{desc}</span>}
         </div>
       )}
-      {prompt && <Stream label="prompt" text={prompt} />}
+      {prompt && (
+        <div className={styles.agent_prompt}>
+          <span className={styles.stream_label}>prompt</span>
+          <div className={styles.agent_prompt_body}>
+            <TextBlock text={prompt} paths={paths} />
+          </div>
+        </div>
+      )}
     </>
   );
 }
