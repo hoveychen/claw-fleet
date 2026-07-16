@@ -11,6 +11,7 @@ import {
   dayKey,
   daysAgo,
   findMatches,
+  formatMsgTime,
   isRenderableRow,
   messageSearchText,
   messageToText,
@@ -76,26 +77,6 @@ function buildResultMap(
     }
   }
   return map;
-}
-
-// ── Message timestamp ─────────────────────────────────────────────────────────
-
-/** Short clock time for a transcript record: `HH:MM` for today, `MM-DD HH:MM`
- *  otherwise. Absolute (not relative) so rendered rows never go stale. */
-function formatMsgTime(ts: string): { short: string; full: string } | null {
-  const d = new Date(ts);
-  if (isNaN(d.getTime())) return null;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  return {
-    short: sameDay ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`,
-    full: d.toLocaleString(),
-  };
 }
 
 // ── Single message row ────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { DecisionHistoryRecord, RawMessage, ToolResultBlock } from "../../types";
 import type { PathLinkContext } from "../../markdown/pathLinks";
 import { summarizeWorkRun } from "../workRuns";
+import { formatMsgTime } from "../../messageRows";
 import { ContentBlocks } from "./ContentBlocks";
 import styles from "./WorkRunBlock.module.css";
 
@@ -56,6 +57,19 @@ export function WorkRunBlock({
     .map(([name, c]) => `${name === "thinking" ? t("detail.work_thinking") : name}×${c}`)
     .join(" · ");
 
+  // The band collapses several records into one row, so show when the run
+  // ended — the last member's timestamp — the way an unfolded row would.
+  const lastTime = (() => {
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const ts = msgs[i]?.timestamp;
+      if (ts) {
+        const parsed = formatMsgTime(ts);
+        if (parsed) return parsed;
+      }
+    }
+    return null;
+  })();
+
   return (
     <div className={styles.root}>
       <button className={styles.header} onClick={() => setOpen((o) => !o)}>
@@ -67,6 +81,11 @@ export function WorkRunBlock({
         </span>
         {summary.outputTokens > 0 && (
           <span className={styles.tokens}>↓{fmtTokens(summary.outputTokens)}</span>
+        )}
+        {lastTime && (
+          <span className={styles.time} title={lastTime.full}>
+            {lastTime.short}
+          </span>
         )}
       </button>
       {open && (
