@@ -38,6 +38,9 @@ pub const DAILY_REPORT_APPEND_LESSON: &str = "/daily_report/append_lesson";
 pub const DAILY_REPORT_GENERATE: &str = "/daily_report/generate";
 pub const DAILY_REPORT_LESSONS: &str = "/daily_report/lessons";
 pub const DAILY_REPORT_STATS: &str = "/daily_report_stats";
+/// Managed lessons store (`~/.claude/fleet-lessons.md`): list + remove.
+pub const MANAGED_LESSONS: &str = "/managed_lessons";
+pub const MANAGED_LESSON_REMOVE: &str = "/managed_lessons/remove";
 pub const DECISION_ASSET: &str = "/decision_asset";
 pub const ENQUEUE_MESSAGE: &str = "/enqueue_message";
 pub const ELICITATION_PENDING: &str = "/elicitation/pending";

@@ -1875,6 +1875,8 @@ pub fn run() {
             generate_daily_report_ai_summary,
             generate_daily_report_lessons,
             append_lesson_to_claude_md,
+            list_managed_lessons,
+            remove_managed_lesson,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
