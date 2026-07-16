@@ -6,8 +6,10 @@ use super::*;
 pub(crate) fn set_locale(app: tauri::AppHandle, locale: String, state: tauri::State<AppState>) {
     let prev = std::mem::replace(&mut *state.locale.lock().unwrap(), locale.clone());
     let title = state.user_title.lock().unwrap().clone();
-    reapply_interaction_mode_if_installed(&state, &title, Some(&locale));
-    reapply_prd_mode_if_installed(&state, &title, Some(&locale));
+    // Refresh every installed guidance carrier on this startup sync (set_locale
+    // fires on every App mount), so wiki/model/codex pick up the latest bundled
+    // template after an app upgrade instead of only when Settings is opened.
+    reapply_all_guidance_if_installed(&state, &title, Some(&locale));
     // Rebuild the app menu only if the language prefix actually changed, so
     // we don't churn the native menu on every startup call.
     let prev_prefix = prev.get(..2).unwrap_or("");
