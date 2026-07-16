@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import {
   INITIAL_TAIL,
   LOAD_EARLIER_STEP,
   useConnectionStore,
+  useDecisionStore,
   useDetailStore,
   useSessionsStore,
   useUIStore,
@@ -24,6 +25,7 @@ import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { CodexTokenPanel } from "./CodexTokenPanel";
+import { inlineCodexFleetAsk } from "./codexDecision";
 import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -46,6 +48,13 @@ const LIVE_TAIL_POLL_MS = 1500;
 
 /** How close to the bottom still counts as "following the newest message". */
 const FOLLOW_SLACK_PX = 200;
+
+// DecisionPanel already embeds SessionDetail for its history sidecar. Keep the
+// reverse dependency lazy so projecting a pending Codex card into the dialogue
+// does not create an eager ESM cycle between the two modules.
+const InlineFleetAskCard = lazy(() =>
+  import("./DecisionPanel").then(({ FleetAskCard }) => ({ default: FleetAskCard })),
+);
 
 function shortId(id: string) {
   return id.slice(0, 8);
@@ -184,6 +193,11 @@ export function SessionDetail({
     if (!session) return null;
     return sessions.find((s) => s.id === session.id) ?? session;
   }, [session, sessions]);
+  const pendingDecisions = useDecisionStore((s) => s.decisions);
+  const inlineFleetAsk = useMemo(
+    () => inlineCodexFleetAsk(liveSession, pendingDecisions),
+    [liveSession, pendingDecisions],
+  );
   const reasoningPercent =
     liveSession && liveSession.totalOutputTokens > 0
       ? (liveSession.reasoningOutputTokens / liveSession.totalOutputTokens) * 100
@@ -511,7 +525,7 @@ export function SessionDetail({
     for (const child of Array.from(el.children)) ro.observe(child);
     pin();
     return () => ro.disconnect();
-  }, [viewTab, liveSession?.id, hasMessages, hasLiveThinking]);
+  }, [viewTab, liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -939,6 +953,13 @@ export function SessionDetail({
                     paths={pathLinks}
                     jsonlPath={session?.jsonlPath}
                   />
+                  {inlineFleetAsk && (
+                    <div className={styles.inline_fleet_ask} data-testid="inline-codex-fleet-ask">
+                      <Suspense fallback={<div className={styles.inline_fleet_ask_loading}>…</div>}>
+                        <InlineFleetAskCard decision={inlineFleetAsk} compact />
+                      </Suspense>
+                    </div>
+                  )}
                 </AgentNavProvider>
                 {liveThinking?.streaming && liveThinking.thinking && (
                   <ThinkingBlock thinking={liveThinking.thinking} live />

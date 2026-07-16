@@ -1349,7 +1349,7 @@ function FleetAskFormFieldRow({
   }
 }
 
-function FleetAskCard({
+export function FleetAskCard({
   decision,
   compact = false,
 }: {
