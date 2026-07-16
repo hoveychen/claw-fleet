@@ -348,15 +348,21 @@ impl LlmProvider for CodexCliProvider {
                 return models;
             }
         }
-        // Fallback
+        // Fallback when the cache is missing. Keep these to models a current
+        // ChatGPT-account login can actually run — the older `*-codex` /
+        // `*-codex-mini` slugs 400 with "not supported when using Codex with a
+        // ChatGPT account" (verified live).
         vec![
-            LlmModel { id: "gpt-5.3-codex".into(), display_name: "gpt-5.3-codex".into() },
-            LlmModel { id: "gpt-5.1-codex-mini".into(), display_name: "gpt-5.1-codex-mini".into() },
+            LlmModel { id: "gpt-5.6-terra".into(), display_name: "GPT-5.6-Terra".into() },
+            LlmModel { id: "gpt-5.6-luna".into(), display_name: "GPT-5.6-Luna".into() },
         ]
     }
 
-    fn default_fast_model(&self) -> &str { "gpt-5.1-codex-mini" }
-    fn default_standard_model(&self) -> &str { "gpt-5.3-codex" }
+    // Luna is Codex's fast/cheap tier; Terra the balanced one. The previous
+    // defaults (`gpt-5.1-codex-mini` / `gpt-5.3-codex`) 400 under a ChatGPT
+    // account, so any scenario using Codex as its analysis provider failed.
+    fn default_fast_model(&self) -> &str { "gpt-5.6-luna" }
+    fn default_standard_model(&self) -> &str { "gpt-5.6-terra" }
 
     fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
         let bin = self.bin_path.as_deref()?;
