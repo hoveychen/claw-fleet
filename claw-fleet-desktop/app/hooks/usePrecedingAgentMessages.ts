@@ -82,7 +82,12 @@ function isUserInput(
   }
   for (const b of blocks) {
     if (b.type === "tool_result") {
-      const name = toolNameById.get((b as ToolResultBlock).tool_use_id);
+      const tr = b as ToolResultBlock;
+      // A failed ask call (is_error) was never actually answered — the card
+      // errored out before the user could respond, so it is NOT user input and
+      // must not end the agent's narration span.
+      if (tr.is_error) continue;
+      const name = toolNameById.get(tr.tool_use_id);
       if (name && isAskTool(name)) return true;
     }
   }
