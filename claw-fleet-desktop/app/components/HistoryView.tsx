@@ -14,12 +14,26 @@ import {
   CheckCircle2,
   Circle,
   Clock,
+  Copy,
+  Eye,
+  Folder,
+  FolderOpen,
   FolderGit2,
   History,
+  PanelRightOpen,
   Plus,
+  Square,
   Waypoints,
 } from "lucide-react";
-import { useReadStore, useSessionsStore, useUIStore, type MarkFilter } from "../store";
+import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import {
+  useConnectionStore,
+  useReadStore,
+  useSessionsStore,
+  useUIStore,
+  type MarkFilter,
+} from "../store";
 import type { SessionInfo } from "../types";
 import { LIVE_STATUSES, isFleetOwnedEntrypoint, rowBarColor, sessionUnread } from "../types";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
@@ -45,8 +59,10 @@ import {
   type TabState,
 } from "../sessionTabs";
 import { getItem, setItem } from "../storage";
-import { StopControl, canControl } from "./StopControl";
+import { StopControl, canControl, stopMode, performStop } from "./StopControl";
 import { MarkControl } from "./MarkControl";
+import { AgentSourceIcon } from "./SessionCard";
+import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./ContextMenu";
 import styles from "./HistoryView.module.css";
 
 /** A session spawned but not yet discovered by the scanner. We poll the session
@@ -200,6 +216,34 @@ export function sessionEq(a: SessionInfo, b: SessionInfo): boolean {
   return true;
 }
 
+/**
+ * Reorder `rows` (the live filtered+sorted list) back into a frozen id order,
+ * used to hold the list still while the pointer is parked over it. Rows named in
+ * `frozenOrder` keep that order (their live content is preserved — we resolve
+ * each id against `rows`); rows absent from the snapshot — freshly spawned, or
+ * newly matching the filter — are appended in their natural sort position rather
+ * than spliced into the frozen block. Ids in `frozenOrder` whose row has since
+ * dropped out of `rows` simply fall away. `null` = no freeze, pass through.
+ */
+export function applyFrozenOrder(
+  rows: SessionInfo[],
+  frozenOrder: string[] | null,
+): SessionInfo[] {
+  if (!frozenOrder) return rows;
+  const byId = new Map(rows.map((s) => [s.id, s]));
+  const seen = new Set<string>();
+  const ordered: SessionInfo[] = [];
+  for (const id of frozenOrder) {
+    const s = byId.get(id);
+    if (s) {
+      ordered.push(s);
+      seen.add(id);
+    }
+  }
+  for (const s of rows) if (!seen.has(s.id)) ordered.push(s);
+  return ordered;
+}
+
 type SessionRowProps = {
   session: SessionInfo;
   snippet: string | undefined;
@@ -211,7 +255,13 @@ type SessionRowProps = {
   /** Bumped every 30s by the parent so relative times keep advancing. Without
    *  it the memo would freeze the elapsed "3 分钟" at whatever it said on mount. */
   nowTick: number;
+  /** True only when the task page holds more than one agent source at once
+   *  (e.g. Claude and Codex): the little source glyph then rides ahead of the
+   *  title so the two are told apart at a glance. Hidden when everything is the
+   *  same source — a badge that never varies is just noise. */
+  showSource: boolean;
   onClick: (s: SessionInfo) => void;
+  onContextMenu: (e: React.MouseEvent, s: SessionInfo) => void;
 };
 
 const SessionRow = memo(function SessionRow({
@@ -220,7 +270,9 @@ const SessionRow = memo(function SessionRow({
   isSelected,
   isOpen,
   unread,
+  showSource,
   onClick,
+  onContextMenu,
 }: SessionRowProps) {
   const { t } = useTranslation();
   const runColor = rowBarColor(s);
@@ -242,6 +294,7 @@ const SessionRow = memo(function SessionRow({
       className={`${styles.row_wrap} ${hovered ? styles.hovered : ""}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onContextMenu={(e) => onContextMenu(e, s)}
     >
       <button
         type="button"
@@ -263,6 +316,11 @@ const SessionRow = memo(function SessionRow({
         )}
         <span className={styles.row_body}>
           <span className={`${styles.row_title} ${unread ? styles.row_title_unread : ""}`}>
+            {showSource && (
+              <span className={styles.row_source} title={s.agentSource}>
+                <AgentSourceIcon source={s.agentSource} />
+              </span>
+            )}
             {s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
           </span>
           <span className={styles.row_meta}>
@@ -338,7 +396,9 @@ const SessionRow = memo(function SessionRow({
   prev.unread === next.unread &&
   prev.snippet === next.snippet &&
   prev.nowTick === next.nowTick &&
+  prev.showSource === next.showSource &&
   prev.onClick === next.onClick &&
+  prev.onContextMenu === next.onContextMenu &&
   sessionEq(prev.session, next.session));
 
 /**
@@ -365,6 +425,10 @@ export function HistoryView() {
   const readOverrides = useReadStore((s) => s.overrides);
   const markRead = useReadStore((s) => s.markRead);
   const markManyRead = useReadStore((s) => s.markManyRead);
+  // Remote workspaces live on the probe host — their files can't be revealed in
+  // the local file manager, so the row menu hides that item for them.
+  const connection = useConnectionStore((s) => s.connection);
+  const isLocal = connection?.type !== "remote";
 
   // Rail filters live in the store, not here: this component is unmounted every
   // time `viewMode` leaves "history", which would otherwise reset them behind
@@ -417,6 +481,16 @@ export function HistoryView() {
   const [composing, setComposing] = useState(false);
   const [pending, setPending] = useState<PendingSpawn | null>(null);
   const [startTimedOut, setStartTimedOut] = useState(false);
+
+  // Sort freeze: while the pointer is over the list, hold the row *order* still
+  // so a scan landing under the cursor can't re-sort a row out from under a
+  // click. `frozenOrder` is the session-id order captured on enter; null means
+  // live sorting. New sessions that appear while frozen are appended at the end
+  // (see `displayRows`), never spliced into the middle. The order alone is
+  // frozen — each row's *content* still updates from the live scan, and filters
+  // still apply. Cleared on leave and on window blur (pointer yanked out of the
+  // window without a mouseleave, same failure the per-row hover guards handle).
+  const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
 
   const { searching, ftsMatchPaths, snippetByPath } = useSessionSearch(query);
 
@@ -505,6 +579,37 @@ export function HistoryView() {
       .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
     return { rows, markCounts: counts };
   }, [adhocSessions, workspaceFilter, chatPath, activeOnly, query, ftsMatchPaths, markFilter]);
+
+  // Whether the task page currently mixes agent sources (Claude + Codex + …).
+  // Only then does the per-row source glyph earn its place; a uniform list gets
+  // no badge. Scoped to the launchpad's own sessions, not the global scan, so
+  // the badge tracks what this page actually shows.
+  const multiSource = useMemo(
+    () => new Set(adhocSessions.map((s) => s.agentSource)).size > 1,
+    [adhocSessions],
+  );
+
+  // The order shown, honouring the sort freeze. `rows` stays the live
+  // filtered+sorted list (its length still drives the header count); this only
+  // reshuffles it back into the frozen order while the pointer is parked.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const displayRows = useMemo(
+    () => applyFrozenOrder(rows, frozenOrder),
+    [rows, frozenOrder],
+  );
+
+  const freezeSort = useCallback(() => {
+    setFrozenOrder((prev) => prev ?? rowsRef.current.map((s) => s.id));
+  }, []);
+  const thawSort = useCallback(() => setFrozenOrder(null), []);
+  // A pointer yanked out of the window (drag onto another app, alt-tab) fires no
+  // mouseleave; clear the freeze on blur so it can't latch on forever.
+  useEffect(() => {
+    if (!frozenOrder) return;
+    window.addEventListener("blur", thawSort);
+    return () => window.removeEventListener("blur", thawSort);
+  }, [frozenOrder, thawSort]);
 
   const activeCount = useMemo(
     () => adhocSessions.filter((s) => LIVE_STATUSES.has(s.status)).length,
@@ -607,6 +712,111 @@ export function HistoryView() {
       openTab(s, isFtsHit ? query.trim() : null);
     },
     [query, ftsMatchPaths, openTab],
+  );
+
+  // Row context menu. Anchor + subject are held here (not via useContextMenu) so
+  // the open handler stays referentially stable — SessionRow is memoised and a
+  // fresh onContextMenu each render would re-render every row on every scan.
+  const [menuAnchor, setMenuAnchor] = useState<ContextMenuAnchor | null>(null);
+  const [menuSession, setMenuSession] = useState<SessionInfo | null>(null);
+  const openRowMenu = useCallback((e: React.MouseEvent, s: SessionInfo) => {
+    // Suppress the app-wide (Settings/About/Quit) menu, same as ContextMenu's
+    // own callers do.
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuSession(s);
+    setMenuAnchor({ x: e.clientX, y: e.clientY });
+  }, []);
+  const closeRowMenu = useCallback(() => {
+    setMenuAnchor(null);
+    setMenuSession(null);
+  }, []);
+
+  // A failed clipboard write (Tauri ACL) must not read as success. The menu is
+  // gone by the time the promise settles, so failures are swallowed rather than
+  // faked — the same fire-and-forget the header menu uses for reveal.
+  const copyText = useCallback((text: string) => {
+    writeText(text).catch(() => {});
+  }, []);
+
+  const rowMenuItems = useCallback(
+    (s: SessionInfo): ContextMenuItem[] => {
+      const unread = sessionUnread(s, readOverrides[s.id]);
+      const isDone = s.userMark === "done";
+      const revealKey =
+        document.documentElement.getAttribute("data-platform") === "windows"
+          ? "paths.reveal_in_explorer"
+          : "paths.reveal_in_finder";
+      const items: ContextMenuItem[] = [
+        {
+          id: "open",
+          label: t("history.menu_open", "打开"),
+          icon: <PanelRightOpen size={13} />,
+          onSelect: () => handleRowClick(s),
+        },
+      ];
+      if (unread) {
+        items.push({
+          id: "mark-read",
+          label: t("history.menu_mark_read", "标为已读"),
+          icon: <Eye size={13} />,
+          onSelect: () => markRead(s),
+        });
+      }
+      items.push({
+        id: "toggle-mark",
+        label: isDone
+          ? t("history.menu_mark_pending", "标为进行中")
+          : t("history.menu_mark_done", "标为已完成"),
+        icon: isDone ? <Circle size={13} /> : <CheckCircle2 size={13} />,
+        onSelect: () => {
+          // Same backend call the row's MarkControl fires; the store converges
+          // via the `sessions-updated` it emits.
+          invoke("set_session_mark", {
+            sessionId: s.id,
+            workspacePath: s.workspacePath,
+            mark: isDone ? null : "done",
+          }).catch(() => {});
+        },
+      });
+      items.push({
+        id: "copy-id",
+        label: t("detail.copy_session_id", "复制会话 ID"),
+        sub: s.id,
+        icon: <Copy size={13} />,
+        onSelect: () => copyText(s.id),
+      });
+      items.push({
+        id: "copy-workspace",
+        label: t("detail.copy_workspace_path", "复制工作目录"),
+        sub: s.workspacePath,
+        icon: <Folder size={13} />,
+        onSelect: () => copyText(s.workspacePath),
+      });
+      if (isLocal) {
+        items.push({
+          id: "reveal",
+          label: t(revealKey),
+          icon: <FolderOpen size={13} />,
+          onSelect: () => {
+            invoke("reveal_path", { path: s.workspacePath }).catch(() => {});
+          },
+        });
+      }
+      if (canControl(s) && stopMode(s) !== "spent") {
+        items.push({
+          id: "stop",
+          label: t("history.menu_stop", "停止会话"),
+          icon: <Square size={13} />,
+          danger: true,
+          onSelect: () => {
+            void performStop(s, t);
+          },
+        });
+      }
+      return items;
+    },
+    [t, readOverrides, isLocal, handleRowClick, markRead, copyText],
   );
 
   const closeTab = useCallback(
@@ -803,7 +1013,11 @@ export function HistoryView() {
           </div>
         </div>
 
-        <div className={styles.list}>
+        <div
+          className={styles.list}
+          onMouseEnter={freezeSort}
+          onMouseLeave={thawSort}
+        >
           {!scanReady ? (
             <div className={styles.empty}>{t("scanning")}</div>
           ) : rows.length === 0 ? (
@@ -813,7 +1027,7 @@ export function HistoryView() {
                 : t("history.no_match", "没有匹配的会话")}
             </div>
           ) : (
-            rows.map((s) => (
+            displayRows.map((s) => (
               <SessionRow
                 key={s.jsonlPath}
                 session={s}
@@ -824,9 +1038,18 @@ export function HistoryView() {
                 isOpen={activeId !== s.id && tabIds.includes(s.id)}
                 unread={sessionUnread(s, readOverrides[s.id])}
                 nowTick={nowTick}
+                showSource={multiSource}
                 onClick={handleRowClick}
+                onContextMenu={openRowMenu}
               />
             ))
+          )}
+          {menuAnchor && menuSession && (
+            <ContextMenu
+              anchor={menuAnchor}
+              items={rowMenuItems(menuSession)}
+              onClose={closeRowMenu}
+            />
           )}
         </div>
 
