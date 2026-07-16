@@ -12,11 +12,11 @@ pub(crate) fn get_llm_config(state: tauri::State<'_, AppState>) -> llm_provider:
     state.backend.read().unwrap().get_llm_config()
 }
 
-#[tauri::command]
-pub(crate) fn set_llm_config(state: tauri::State<AppState>, config: llm_provider::LlmConfig) -> Result<(), String> {
+#[tauri::command(async)]
+pub(crate) fn set_llm_config(state: tauri::State<'_, AppState>, config: llm_provider::LlmConfig) -> Result<(), String> {
     // Update both AppState (for background threads) and Backend.
     *state.llm_config.lock().unwrap() = config.clone();
-    state.backend.read().unwrap().set_llm_config(config)
+    state.backend.write().unwrap().set_llm_config(config)
 }
 
 #[tauri::command(async)]

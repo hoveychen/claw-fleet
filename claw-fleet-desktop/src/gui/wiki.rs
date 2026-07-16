@@ -59,43 +59,43 @@ pub(crate) fn search_wiki_docs(
     state.backend.read().unwrap().search_wiki_docs(&query)
 }
 
-#[tauri::command]
-pub(crate) fn delete_wiki_doc(slug: String, state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().delete_wiki_doc(&slug)
+#[tauri::command(async)]
+pub(crate) fn delete_wiki_doc(slug: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().delete_wiki_doc(&slug)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn delete_wiki_version(
     slug: String,
     version: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.backend.read().unwrap().delete_wiki_version(&slug, &version)
+    state.backend.write().unwrap().delete_wiki_version(&slug, &version)
 }
 
 /// Re-key a doc — how the 知识库 board drags a doc into another folder.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn move_wiki_doc(
     from: String,
     to: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::wiki::WikiDoc, String> {
-    state.backend.read().unwrap().move_wiki_doc(&from, &to)
+    state.backend.write().unwrap().move_wiki_doc(&from, &to)
 }
 
 /// Rename a folder, or dissolve it into the tree root when `to` is empty.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn move_wiki_folder(
     from: String,
     to: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<claw_fleet_core::wiki::WikiDoc>, String> {
-    state.backend.read().unwrap().move_wiki_folder(&from, &to)
+    state.backend.write().unwrap().move_wiki_folder(&from, &to)
 }
 
 /// Delete every doc under a folder. Returns how many were removed.
-#[tauri::command]
-pub(crate) fn delete_wiki_folder(prefix: String, state: tauri::State<AppState>) -> Result<usize, String> {
-    state.backend.read().unwrap().delete_wiki_folder(&prefix)
+#[tauri::command(async)]
+pub(crate) fn delete_wiki_folder(prefix: String, state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    state.backend.write().unwrap().delete_wiki_folder(&prefix)
 }
 

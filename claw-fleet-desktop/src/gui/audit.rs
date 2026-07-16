@@ -14,19 +14,19 @@ pub(crate) fn get_audit_rules(state: tauri::State<'_, AppState>) -> Vec<audit::A
     state.backend.read().unwrap().get_audit_rules()
 }
 
-#[tauri::command]
-pub(crate) fn set_audit_rule_enabled(state: tauri::State<AppState>, id: String, enabled: bool) -> Result<(), String> {
-    state.backend.read().unwrap().set_audit_rule_enabled(&id, enabled)
+#[tauri::command(async)]
+pub(crate) fn set_audit_rule_enabled(state: tauri::State<'_, AppState>, id: String, enabled: bool) -> Result<(), String> {
+    state.backend.write().unwrap().set_audit_rule_enabled(&id, enabled)
 }
 
-#[tauri::command]
-pub(crate) fn save_custom_audit_rule(state: tauri::State<AppState>, rule: audit::AuditRuleInfo) -> Result<(), String> {
-    state.backend.read().unwrap().save_custom_audit_rule(rule)
+#[tauri::command(async)]
+pub(crate) fn save_custom_audit_rule(state: tauri::State<'_, AppState>, rule: audit::AuditRuleInfo) -> Result<(), String> {
+    state.backend.write().unwrap().save_custom_audit_rule(rule)
 }
 
-#[tauri::command]
-pub(crate) fn delete_custom_audit_rule(state: tauri::State<AppState>, id: String) -> Result<(), String> {
-    state.backend.read().unwrap().delete_custom_audit_rule(&id)
+#[tauri::command(async)]
+pub(crate) fn delete_custom_audit_rule(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    state.backend.write().unwrap().delete_custom_audit_rule(&id)
 }
 
 #[tauri::command(async)]
@@ -113,16 +113,16 @@ pub(crate) fn get_pattern_info() -> PatternInfo {
     PatternInfo { version, path }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn start_watching_session(
     jsonl_path: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<u64, String> {
-    state.backend.read().unwrap().start_watch(jsonl_path)
+    state.backend.write().unwrap().start_watch(jsonl_path)
 }
 
-#[tauri::command]
-pub(crate) fn stop_watching_session(state: tauri::State<AppState>) {
-    state.backend.read().unwrap().stop_watch();
+#[tauri::command(async)]
+pub(crate) fn stop_watching_session(state: tauri::State<'_, AppState>) {
+    state.backend.write().unwrap().stop_watch();
 }
 

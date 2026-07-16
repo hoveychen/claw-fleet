@@ -2,19 +2,19 @@ use super::*;
 
 // ── Guard (real-time interception) ───────────────────────────────────────────
 
-#[tauri::command]
-pub(crate) fn apply_guard_hook(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().apply_guard_hook()
+#[tauri::command(async)]
+pub(crate) fn apply_guard_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().apply_guard_hook()
 }
 
-#[tauri::command]
-pub(crate) fn remove_guard_hook(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().remove_guard_hook()
+#[tauri::command(async)]
+pub(crate) fn remove_guard_hook(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.write().unwrap().remove_guard_hook()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn respond_to_guard(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     id: String,
     allow: bool,
     always_allow: Option<claw_fleet_core::guard::GuardAlwaysAllow>,
@@ -22,7 +22,7 @@ pub(crate) fn respond_to_guard(
 ) -> Result<(), String> {
     state
         .backend
-        .read()
+        .write()
         .unwrap()
         .respond_to_guard(&id, allow, always_allow, reason)
 }
@@ -34,9 +34,9 @@ pub(crate) fn list_guard_allow_rules(
     state.backend.read().unwrap().list_guard_allow_rules()
 }
 
-#[tauri::command]
-pub(crate) fn remove_guard_allow_rule(state: tauri::State<AppState>, id: String) -> Result<(), String> {
-    state.backend.read().unwrap().remove_guard_allow_rule(&id)
+#[tauri::command(async)]
+pub(crate) fn remove_guard_allow_rule(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    state.backend.write().unwrap().remove_guard_allow_rule(&id)
 }
 
 #[tauri::command]
