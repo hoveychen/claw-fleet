@@ -406,22 +406,34 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       initialTab: initialTab ?? null,
     });
 
-    const rawMessages = await invoke<RawMessage[]>("get_messages_tail", {
-      jsonlPath: session.jsonlPath,
-      tail: INITIAL_TAIL,
-    });
+    // Any rejection below (bad path, backend error, watcher failure) must still
+    // clear `isLoading` — otherwise the detail view is stuck on "加载中…"
+    // forever. Mirrors the standalone-mode fetch's `.catch` in SessionDetail.
+    try {
+      const rawMessages = await invoke<RawMessage[]>("get_messages_tail", {
+        jsonlPath: session.jsonlPath,
+        tail: INITIAL_TAIL,
+      });
 
-    await invoke("start_watching_session", { jsonlPath: session.jsonlPath });
+      await invoke("start_watching_session", { jsonlPath: session.jsonlPath });
 
-    tailUnlisten = await listen<RawMessage[]>("session-tail", (event) => {
-      get().appendMessages(event.payload);
-    });
+      tailUnlisten = await listen<RawMessage[]>("session-tail", (event) => {
+        get().appendMessages(event.payload);
+      });
 
-    set({
-      messages: rawMessages,
-      isLoading: false,
-      fullyLoaded: rawMessages.length < INITIAL_TAIL,
-    });
+      set({
+        messages: rawMessages,
+        isLoading: false,
+        fullyLoaded: rawMessages.length < INITIAL_TAIL,
+      });
+    } catch (err) {
+      console.error("Failed to open session detail:", err);
+      // Only clear loading if this open() is still the active one — a newer
+      // open()/close() may have superseded us while awaiting.
+      if (get().session === session) {
+        set({ isLoading: false, fullyLoaded: true });
+      }
+    }
   },
 
   close: async () => {
