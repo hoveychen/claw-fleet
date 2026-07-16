@@ -14,6 +14,7 @@ import { DirPickerDialog } from "./DirPickerDialog";
 import { PillMenu } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
 import { SessionOptionPills } from "./SessionOptionPills";
+import { agentToolsForSources, type SourceInfo } from "../modelChoices";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
@@ -155,6 +156,26 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   // disjoint, so a leftover Claude model would reach `codex exec -m` (and vice
   // versa) as an invalid value.
   const setTool = (v: string) => patch({ tool: v, model: "", effort: "" });
+
+  // Only offer the agent tools whose source is actually being monitored (source
+  // enabled in settings AND the CLI installed). Codex must not appear in the
+  // launcher when its source is off — selecting it would only fail at spawn.
+  const [sources, setSources] = useState<SourceInfo[] | null>(null);
+  useEffect(() => {
+    invoke<SourceInfo[]>("get_sources_config").then(setSources).catch(() => {});
+  }, []);
+  // `null` = not loaded yet → keep Claude-only so we never flash Codex then hide
+  // it. Once loaded, filter to the monitored sources.
+  const toolChoices = useMemo(() => agentToolsForSources(sources ?? []), [sources]);
+  // If a stale draft (or a since-disabled source) left `tool` pointing at a tool
+  // that's no longer offered, snap it back to the first available one.
+  useEffect(() => {
+    if (sources === null) return;
+    if (!toolChoices.some((c) => c.value === tool)) {
+      setTool(toolChoices[0].value);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sources, toolChoices, tool]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pathDraft, setPathDraft] = useState("");
@@ -354,6 +375,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
       permissionMode={permissionMode}
       tool={tool}
       onToolChange={setTool}
+      toolChoices={toolChoices}
       onModelChange={setModel}
       onEffortChange={setEffort}
       onPermissionModeChange={setPermissionMode}

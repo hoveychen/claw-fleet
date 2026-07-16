@@ -25,6 +25,7 @@ export function SessionOptionPills({
   placement = "above",
   tool = "claude",
   onToolChange,
+  toolChoices = AGENT_TOOL_CHOICES,
 }: {
   model: string;
   effort: string;
@@ -46,10 +47,14 @@ export function SessionOptionPills({
   /** When provided, a leading tool-selector pill is shown (new-session only).
    *  Resume composers omit it — you can't change tool on an existing session. */
   onToolChange?: (v: string) => void;
+  /** The agent tools offered by the tool-selector pill, already filtered to the
+   *  monitored sources by the host. Defaults to the full catalog. When only one
+   *  tool remains the pill is hidden — there is nothing to switch between. */
+  toolChoices?: { value: string; label: string }[];
 }) {
   const { t } = useTranslation();
   const isCodex = tool === "codex";
-  const toolLabel = AGENT_TOOL_CHOICES.find((x) => x.value === tool)?.label ?? "Claude";
+  const toolLabel = toolChoices.find((x) => x.value === tool)?.label ?? "Claude";
   const modelChoices = isCodex ? CODEX_MODEL_CHOICES : CLAUDE_MODEL_CHOICES;
   const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : CLAUDE_EFFORT_CHOICES;
   const modelLabel =
@@ -61,13 +66,13 @@ export function SessionOptionPills({
     : t("new_session.permission_pill_default");
   return (
     <>
-      {onToolChange && (
+      {onToolChange && toolChoices.length > 1 && (
         <PillMenu
           placement={placement}
           label={toolLabel}
           title={t("new_session.tool")}
           disabled={disabled}
-          items={AGENT_TOOL_CHOICES.map((x) => ({
+          items={toolChoices.map((x) => ({
             id: x.value,
             label: x.label,
             checked: x.value === tool,
