@@ -1276,6 +1276,7 @@
     "codex_meta_permissions": "Permissions / sandbox",
     "codex_meta_collab": "Multi-agent collab",
     "codex_meta_multiagent": "multi_agent_mode",
+    "codex_meta_environment": "Environment context",
     "codex_meta_generic": "Injected instructions",
     "today": "Today",
     "yesterday": "Yesterday",

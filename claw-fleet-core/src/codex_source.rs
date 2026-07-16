@@ -1643,6 +1643,33 @@ mod tests {
     }
 
     #[test]
+    fn standalone_environment_context_user_msg_is_tagged_is_meta() {
+        // Codex also injects `<environment_context>` as its own role=user
+        // message (cwd/shell/date/sandbox preamble) without the
+        // `<recommended_plugins>` prefix. It is runtime boilerplate, not a user
+        // turn, so it must fold into a collapsed system-context row too.
+        let lines = vec![json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "<environment_context>\n  <cwd>/tmp</cwd>\n  <shell>zsh</shell>\n</environment_context>"
+                }]
+            }
+        })];
+
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0]["isMeta"],
+            json!(true),
+            "standalone <environment_context> must be tagged isMeta so the frontend folds it"
+        );
+    }
+
+    #[test]
     fn normalize_messages_renders_custom_tool_call_and_output() {
         // Current Codex rollouts record tool calls as `custom_tool_call` /
         // `custom_tool_call_output` (name="exec", input is a script string,
@@ -3000,9 +3027,18 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                                 .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
                                 .collect::<Vec<_>>()
                                 .join("");
+                            // Codex prepends a few runtime-boilerplate blocks as
+                            // `role:"user"` messages (not `developer`): the
+                            // `<recommended_plugins>` list and the standalone
+                            // `<environment_context>` preamble (cwd/shell/date/
+                            // sandbox). Neither is user-authored, so fold them
+                            // like the developer boilerplate.
+                            let trimmed = text.trim_start();
                             let is_injected_user_context = role == "user"
-                                && text.trim_start().starts_with("<recommended_plugins>")
-                                && text.contains("</recommended_plugins>");
+                                && ((trimmed.starts_with("<recommended_plugins>")
+                                    && text.contains("</recommended_plugins>"))
+                                    || (trimmed.starts_with("<environment_context>")
+                                        && text.contains("</environment_context>")));
 
                             if role == "developer" || is_injected_user_context {
                                 msg["isMeta"] = json!(true);
