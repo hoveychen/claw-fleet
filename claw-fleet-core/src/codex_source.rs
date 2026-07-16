@@ -2379,6 +2379,51 @@ mod tests {
         assert_eq!(read_rollout_originator(g.path()), None);
     }
 
+    #[test]
+    fn codex_tail_completeness_counts_normalized_not_raw_lines() {
+        use super::CodexSource;
+        use crate::agent_source::AgentSource;
+        use std::io::Write;
+
+        // A rollout with 10 renderable assistant turns followed by a long run of
+        // `token_count` events that normalize to ZERO messages. The raw line
+        // count far exceeds the requested tail, but normalization collapses the
+        // trailing lines away.
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(f, r#"{{"type":"session_meta","payload":{{"id":"t1"}}}}"#).unwrap();
+        for i in 0..10 {
+            writeln!(
+                f,
+                r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"reply {i}"}}]}}}}"#
+            )
+            .unwrap();
+        }
+        for _ in 0..20 {
+            writeln!(f, r#"{{"type":"event_msg","payload":{{"type":"token_count"}}}}"#).unwrap();
+        }
+        f.flush().unwrap();
+
+        let uri = format!("codex://{}", f.path().display());
+        let src = CodexSource::new();
+
+        // A tail of 5 must surface >=5 normalized messages when the file holds
+        // 10, so the frontend's `len < tail` completeness heuristic stays honest.
+        // The old raw-line window returned 0 here (the last 5 raw lines are all
+        // `token_count`), so `fullyLoaded` was wrongly set and earlier turns —
+        // including the user's opening prompt — became unreachable.
+        let tail5 = src.get_messages_tail(&uri, 5).unwrap();
+        assert!(
+            tail5.len() >= 5,
+            "tail(5) should surface >=5 normalized messages, got {}",
+            tail5.len()
+        );
+
+        // Asking for more than the file holds returns every message; being
+        // `< tail` this correctly signals "fully loaded".
+        let tail100 = src.get_messages_tail(&uri, 100).unwrap();
+        assert_eq!(tail100.len(), 10, "tail(100) should return every message");
+    }
+
     fn window(used_percent: i32, window_mins: i64, resets_at_secs: i64) -> CodexRateLimitWindow {
         CodexRateLimitWindow {
             used_percent,
@@ -3802,28 +3847,54 @@ impl AgentSource for CodexSource {
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or_default();
+        let is_zst = name.ends_with(".jsonl.zst");
 
-        // Plain `.jsonl` can use the byte-level reverse-scan tail reader. The
-        // zstd-compressed variant must be fully decompressed first; in that
-        // case we still avoid parsing every line by slicing to the last n
-        // before `serde_json::from_str`.
-        let parsed: Vec<Value> = if name.ends_with(".jsonl.zst") {
-            let content = read_zst_file(&file_path)?;
-            let lines: Vec<&str> = content
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .collect();
-            let start = lines.len().saturating_sub(n);
-            lines[start..]
-                .iter()
-                .filter_map(|l| serde_json::from_str(l).ok())
-                .collect()
-        } else {
-            crate::jsonl_tail::read_tail_lines_as_json(&file_path, n)
-                .map_err(|e| e.to_string())?
+        // Read the last `k` raw rollout lines as parsed JSON. Plain `.jsonl`
+        // uses the byte-level reverse-scan tail reader; the zstd variant must be
+        // fully decompressed first, then we slice to the last `k` before parsing.
+        let read_raw_tail = |k: usize| -> Result<Vec<Value>, String> {
+            if is_zst {
+                let content = read_zst_file(&file_path)?;
+                let lines: Vec<&str> = content
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .collect();
+                let start = lines.len().saturating_sub(k);
+                Ok(lines[start..]
+                    .iter()
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect())
+            } else {
+                crate::jsonl_tail::read_tail_lines_as_json(&file_path, k)
+                    .map_err(|e| e.to_string())
+            }
         };
 
-        Ok(normalize_messages(parsed))
+        // Codex normalization COLLAPSES many raw rollout lines to zero output
+        // (`token_count`, `exec_command_*` events, `session_meta`, and the
+        // dedup'd assistant/user event mirrors), so a fixed window of the last
+        // `n` raw lines can normalize to far fewer than `n` messages. The
+        // frontend infers "whole transcript loaded" from `returned.len() < tail`
+        // (honest for Claude, whose tail is 1:1 raw↔message); if we returned a
+        // short normalized slice it would wrongly latch `fullyLoaded`, hide the
+        // "load earlier" affordance, and strand the opening prompt + early turns
+        // above an unreachable window (the "Codex 看不到更早消息" bug).
+        //
+        // So grow the raw window until normalization yields at least `n`
+        // messages or we've consumed the whole file, then return the last `n`.
+        // This mirrors Claude's raw-record tail semantics in normalized space:
+        // `len < n` ⟺ the entire file fit ⟺ genuinely fully loaded.
+        let mut k = n.max(1);
+        loop {
+            let parsed = read_raw_tail(k)?;
+            let reached_start = parsed.len() < k;
+            let messages = normalize_messages(parsed);
+            if messages.len() >= n || reached_start {
+                let start = messages.len().saturating_sub(n);
+                return Ok(messages[start..].to_vec());
+            }
+            k = k.saturating_mul(4);
+        }
     }
 
     fn resolve_file_path(&self, path: &str) -> Option<PathBuf> {
