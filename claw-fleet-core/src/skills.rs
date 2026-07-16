@@ -457,6 +457,11 @@ pub fn read_skill_file(path: &str) -> Result<String, String> {
 /// backends as well.
 fn allowed_skill_root(path: &Path) -> Option<(PathBuf, bool)> {
     let mut candidates = Vec::new();
+    if let Some(fleet_dir) = crate::session::get_fleet_dir() {
+        // Fleet-managed canonical skills are inspectable through runtime
+        // projections, but may only be changed via `skill_sync` operations.
+        candidates.push((fleet_dir.join("skills"), false));
+    }
     if let Some(claude_dir) = get_claude_dir() {
         candidates.push((claude_dir.join("skills"), true));
     }

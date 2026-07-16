@@ -97,6 +97,7 @@ pub mod session_read;
 pub mod session_title;
 pub mod session_todos;
 pub mod skill_history;
+pub mod skill_sync;
 pub mod skills;
 pub mod tcc;
 pub mod today_usage;
