@@ -156,17 +156,9 @@ pub(crate) fn route_analyze(
                 match serde_json::from_slice::<claude_analyze::AnalyzeRequest>(&body_bytes) {
                     Ok(req) => {
                         let cfg = llm_config.lock().unwrap().clone();
-                        let provider = llm_provider::resolve_provider(&cfg.provider);
-                        let result = provider.as_ref().and_then(|p| {
-                            claude_analyze::analyze_session_outcome(
-                                p.as_ref(),
-                                &cfg.fast_model,
-                                &req.last_text,
-                                &req.locale,
-                                &req.session_id,
-                                &req.user_title,
-                            )
-                        });
+                        let result = claude_analyze::analyze_session_outcome_routed(
+                            &cfg, &req.last_text, &req.locale, &req.session_id, &req.user_title,
+                        );
                         match result {
                             Some(analysis) => {
                                 let body = serde_json::to_string(&analysis).unwrap_or_default();
