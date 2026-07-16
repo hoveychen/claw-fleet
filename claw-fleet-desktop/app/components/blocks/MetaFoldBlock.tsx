@@ -100,5 +100,9 @@ function deriveHeader(
     return { title, tag: t("detail.codex_meta_environment", "环境上下文") };
   if (head.startsWith("<user_instructions>"))
     return { title, tag: t("detail.codex_meta_instructions", "用户指令") };
+  if (head.startsWith("<turn_aborted>"))
+    return { title, tag: t("detail.codex_meta_turn_aborted", "轮次中断") };
+  if (head.startsWith("<subagent_notification>"))
+    return { title, tag: t("detail.codex_meta_subagent", "子智能体通知") };
   return { title, tag: t("detail.codex_meta_generic", "注入指令") };
 }

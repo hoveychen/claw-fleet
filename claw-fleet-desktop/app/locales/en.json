@@ -1279,6 +1279,8 @@
     "codex_meta_multiagent": "multi_agent_mode",
     "codex_meta_environment": "Environment context",
     "codex_meta_instructions": "User instructions",
+    "codex_meta_turn_aborted": "Turn aborted",
+    "codex_meta_subagent": "Subagent notice",
     "codex_meta_generic": "Injected instructions",
     "codex_meta_count": "{{count}} items",
     "today": "Today",

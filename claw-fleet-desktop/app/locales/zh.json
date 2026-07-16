@@ -1276,6 +1276,8 @@
     "codex_meta_multiagent": "multi_agent_mode",
     "codex_meta_environment": "环境上下文",
     "codex_meta_instructions": "用户指令",
+    "codex_meta_turn_aborted": "轮次中断",
+    "codex_meta_subagent": "子智能体通知",
     "codex_meta_generic": "注入指令",
     "codex_meta_count": "{{count}} 条",
     "today": "今天",
