@@ -59,8 +59,14 @@ pub(crate) fn enqueue_session_message(
         .enqueue_message(session_id, workspace_path, text)
 }
 
+/// Async so the spawn never blocks the UI thread. The codex path
+/// (`spawn_new_codex_session`) synchronously waits up to 30s for the child's
+/// `thread.started` line to learn its thread id before returning — on the main
+/// thread that froze the whole window. `spawn_blocking` moves that wait onto a
+/// tokio worker; the claude path returns immediately regardless, so both stay
+/// responsive.
 #[tauri::command]
-pub(crate) fn spawn_new_claude_session(
+pub(crate) async fn spawn_new_claude_session(
     workspace_path: String,
     prompt: String,
     model: Option<String>,
@@ -70,11 +76,15 @@ pub(crate) fn spawn_new_claude_session(
     tool: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
-    state
-        .backend
-        .read()
-        .unwrap()
-        .spawn_new_session(workspace_path, prompt, model, effort, permission_mode, tool)
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || {
+        backend
+            .read()
+            .unwrap()
+            .spawn_new_session(workspace_path, prompt, model, effort, permission_mode, tool)
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
 }
 
 /// Absolute path of the pure-chat workspace, created on demand. The launcher
