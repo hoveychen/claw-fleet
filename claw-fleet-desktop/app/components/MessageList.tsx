@@ -34,9 +34,7 @@ import {
 import { UserContent } from "./blocks/UserContent";
 import { CopyButton } from "./CopyButton";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
-import { SkillLoadBlock } from "./blocks/SkillLoadBlock";
-import { MetaContextBlock } from "./blocks/MetaContextBlock";
-import { parseSkillInjection } from "../skillInjection";
+import { MetaFoldBlock } from "./blocks/MetaFoldBlock";
 import styles from "./MessageList.module.css";
 
 // ── Search highlight ─────────────────────────────────────────────────────────
@@ -275,26 +273,16 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     );
   }
 
-  // Skill-body injection: when a `Skill` tool loads, the harness feeds the whole
-  // SKILL.md to the agent as a synthetic `isMeta` user turn. It is not something
-  // the user typed, so fold it into a collapsed card instead of a giant bubble.
+  // Every synthetic `isMeta` user turn — the SKILL.md body a `Skill` load
+  // injects, or codex's developer-role boilerplate (sandbox/permissions
+  // preamble, the `/root` collaboration prompt, `<multi_agent_mode>`) — is
+  // harness/runtime content, not something the user typed. Fold them all into
+  // one collapsed divider that self-labels from its body, instead of letting
+  // them fall through to a full-width user bubble.
   if (isUser && msg.isMeta) {
-    const text = messageToText(msg);
-    const skill = parseSkillInjection(text);
-    if (skill) {
-      return (
-        <div className={styles.compact_row} data-msg-idx={msgIdx}>
-          <SkillLoadBlock slug={skill.slug} body={skill.body} />
-        </div>
-      );
-    }
-    // Any other injected `isMeta` context (codex's sandbox/permissions
-    // preamble, the `/root` collaboration prompt, `<multi_agent_mode>`) is
-    // runtime boilerplate, not a user turn — fold it into a collapsed card too
-    // rather than falling through to a full-width user bubble.
     return (
       <div className={styles.compact_row} data-msg-idx={msgIdx}>
-        <MetaContextBlock body={text} />
+        <MetaFoldBlock body={messageToText(msg)} />
       </div>
     );
   }
