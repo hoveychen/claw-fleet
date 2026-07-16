@@ -33,7 +33,24 @@ pub struct GitStatus {
     /// Commits behind upstream. `None` without an upstream.
     pub behind: Option<usize>,
     /// Working-tree entries not yet committed: staged + unstaged + untracked.
+    /// Always equal to `dirty_files.len()` — kept as its own field so callers
+    /// that only need the badge count don't have to look at the list.
     pub dirty_count: usize,
+    /// The uncommitted entries themselves (path + a one-char status code), so
+    /// the badge can expand into a file list. Sorted by path.
+    pub dirty_files: Vec<DirtyFile>,
+}
+
+/// One uncommitted working-tree entry.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DirtyFile {
+    /// Path relative to the repository work directory.
+    pub path: String,
+    /// One-char status code, git-porcelain flavoured: `M` modified, `A` staged
+    /// add, `D` deleted, `R` renamed, `T` typechange, `?` untracked, `U` merge
+    /// conflict.
+    pub status: String,
 }
 
 impl GitStatus {
@@ -45,6 +62,7 @@ impl GitStatus {
             ahead: None,
             behind: None,
             dirty_count: 0,
+            dirty_files: Vec::new(),
         }
     }
 }
@@ -70,13 +88,15 @@ pub fn git_status(
     };
 
     let (branch, upstream, ahead, behind) = head_tracking(&repo);
+    let dirty_files = dirty_files(&repo);
     Ok(GitStatus {
         is_git: true,
         branch,
         upstream,
         ahead,
         behind,
-        dirty_count: dirty_count(&repo),
+        dirty_count: dirty_files.len(),
+        dirty_files,
     })
 }
 
@@ -109,23 +129,60 @@ fn head_tracking(
     (branch, upstream, ahead, behind)
 }
 
-/// Working-tree entries that are neither clean nor gitignored.
+/// Count of working-tree entries that are neither clean nor gitignored. Kept
+/// for the repo-overview surface (`list_repos` / `repo_detail` / worktree
+/// health), which needs only the number, not the paths.
 fn dirty_count(repo: &git2::Repository) -> usize {
+    dirty_files(repo).len()
+}
+
+/// Working-tree entries that are neither clean nor gitignored, each with a
+/// one-char status code. Sorted by path for a stable list.
+fn dirty_files(repo: &git2::Repository) -> Vec<DirtyFile> {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)
         .include_ignored(false);
-    repo.statuses(Some(&mut opts))
-        .map(|statuses| {
-            statuses
-                .iter()
-                .filter(|e| {
-                    let s = e.status();
-                    !s.is_empty() && !s.contains(git2::Status::IGNORED)
-                })
-                .count()
+    let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
+        return Vec::new();
+    };
+    let mut out: Vec<DirtyFile> = statuses
+        .iter()
+        .filter_map(|e| {
+            let s = e.status();
+            if s.is_empty() || s.contains(git2::Status::IGNORED) {
+                return None;
+            }
+            Some(DirtyFile {
+                path: e.path().unwrap_or_default().to_string(),
+                status: status_code(s).to_string(),
+            })
         })
-        .unwrap_or(0)
+        .collect();
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
+}
+
+/// Reduce a git2 status bitset to a single representative porcelain-style code.
+/// A file can be dirty in several ways at once (e.g. staged + modified again);
+/// we surface the most salient one in a fixed priority order.
+fn status_code(s: git2::Status) -> &'static str {
+    use git2::Status as St;
+    if s.contains(St::CONFLICTED) {
+        "U"
+    } else if s.contains(St::WT_NEW) {
+        "?"
+    } else if s.contains(St::INDEX_NEW) {
+        "A"
+    } else if s.intersects(St::INDEX_DELETED | St::WT_DELETED) {
+        "D"
+    } else if s.intersects(St::INDEX_RENAMED | St::WT_RENAMED) {
+        "R"
+    } else if s.intersects(St::INDEX_TYPECHANGE | St::WT_TYPECHANGE) {
+        "T"
+    } else {
+        "M"
+    }
 }
 
 /// `git push` in the root's working directory.
@@ -511,6 +568,20 @@ mod tests {
 
         let st = git_status(w, w, &known(&ws)).unwrap();
         assert_eq!(st.dirty_count, 3, "status: {st:?}");
+        // dirty_files carries the paths + a one-char code, sorted by path, and
+        // its length always matches dirty_count.
+        assert_eq!(st.dirty_files.len(), st.dirty_count);
+        let files: Vec<(&str, &str)> = st
+            .dirty_files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status.as_str()))
+            .collect();
+        assert_eq!(
+            files,
+            vec![("a.txt", "M"), ("staged.txt", "A"), ("untracked.txt", "?")],
+            "dirty_files: {:?}",
+            st.dirty_files
+        );
     }
 
     #[test]
