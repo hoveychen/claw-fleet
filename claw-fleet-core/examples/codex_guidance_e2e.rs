@@ -29,8 +29,12 @@ fn main() {
             println!("installed={installed}");
         }
         "remove" => {
-            claw_fleet_core::codex_guidance::remove_codex_guidance().expect("remove_codex_guidance");
-            println!("installed={}", claw_fleet_core::codex_guidance::is_codex_guidance_installed());
+            claw_fleet_core::codex_guidance::remove_codex_guidance()
+                .expect("remove_codex_guidance");
+            println!(
+                "installed={}",
+                claw_fleet_core::codex_guidance::is_codex_guidance_installed()
+            );
         }
         "spawn" => {
             let ws = args.get(1).expect("workspace path");
