@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
@@ -831,6 +831,46 @@ function ResultContent({ result }: { result: ToolResultBlock }) {
   );
 }
 
+/** DEBUG(image-render): true when `result` still carries an image whose base64
+ *  was replaced by the Fleet truncation marker — i.e. the on-expand refetch has
+ *  not (yet / successfully) swapped in the real bytes. */
+function hasUnrecoveredTruncatedImage(result?: ToolResultBlock): boolean {
+  const c = result?.content;
+  if (!Array.isArray(c)) return false;
+  return c.some(
+    (b) =>
+      (b as { type?: string }).type === "image" &&
+      typeof (b as { source?: { data?: unknown } }).source?.data === "string" &&
+      ((b as { source: { data: string } }).source.data).includes("Fleet truncated"),
+  );
+}
+
+/** DEBUG(image-render): a loud, temporary diagnostic banner rendered in place of
+ *  a silently-empty image body, so one screenshot reveals which link broke —
+ *  refetch never fired (no toolFetch → jsonlPath missing), fired-and-errored, or
+ *  still loading. Remove once the root cause is pinned. */
+function imgRecoveryDiag(
+  result: ToolResultBlock | undefined,
+  s: { wasTruncated: boolean; hasToolFetch: boolean; loadingFull: boolean; hasFull: boolean; refetchError: string | null },
+): ReactNode {
+  if (!hasUnrecoveredTruncatedImage(result) && !s.refetchError) return null;
+  return (
+    <div
+      style={{
+        background: "#7a1f1f",
+        color: "#fff",
+        font: "11px/1.5 ui-monospace, monospace",
+        padding: "6px 8px",
+        borderRadius: 4,
+        whiteSpace: "pre-wrap",
+        margin: "4px 0",
+      }}
+    >
+      {`⚠ IMG-DIAG · wasTruncated=${s.wasTruncated} · toolFetch=${s.hasToolFetch} · loading=${s.loadingFull} · full=${s.hasFull} · err=${s.refetchError ?? "—"}`}
+    </div>
+  );
+}
+
 /**
  * Render Edit/MultiEdit/Write input as a diff view; falls back to null.
  *
@@ -907,7 +947,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // needs this — the fetch is deferred until the reader actually opens the card.
   const toolFetch = useToolResultFetch();
   const wasTruncated = !!block.id && (toolFetch?.truncatedIds.has(block.id) ?? false);
-  const { full, loadingFull } = useFullToolResult(open, wasTruncated, toolFetch, block.id);
+  const { full, loadingFull, error: refetchError } = useFullToolResult(open, wasTruncated, toolFetch, block.id);
 
   // Swap the recovered full body in for the truncated preview once it lands.
   const meta = full ? full.toolUseResult : metaProp;
@@ -964,6 +1004,17 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
           {loadingFull && !full && (
             <div className={styles.pending}>Loading full output…</div>
           )}
+          {/* DEBUG(image-render): whenever an expanded card still holds an
+              unrecovered truncated image (or the refetch errored), surface WHY
+              instead of a silent empty body. Distinguishes: refetch never fired
+              (toolFetch null → jsonlPath missing) vs. fired-and-failed (err). */}
+          {imgRecoveryDiag(result, {
+            wasTruncated,
+            hasToolFetch: !!toolFetch,
+            loadingFull,
+            hasFull: !!full,
+            refetchError,
+          })}
           {/* A failed Edit/Write applied nothing — drawing its intended diff
               would claim a change that never landed. Show the error instead. */}
           {isDiffTool && !result?.is_error ? (
