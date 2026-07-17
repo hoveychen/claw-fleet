@@ -10,8 +10,10 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Folder,
   FolderInput,
   FolderOutput,
+  Library,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -210,6 +212,40 @@ function buildTree(docs: WikiDoc[]): TreeNode[] {
   return sortLevel(root.children);
 }
 
+/** True when doc `slug` lives at or below folder `path`. */
+function slugUnderFolder(slug: string, path: string): boolean {
+  return slug.startsWith(`${path}/`);
+}
+
+// ── Sort ─────────────────────────────────────────────────────────────────────
+
+type SortKey = "recent" | "title" | "size" | "workspace";
+
+/** A doc's size = its current version's bytes (0 when the version is missing). */
+function docSize(d: WikiDoc): number {
+  return d.versions.find((v) => v.id === d.currentVersion)?.sizeBytes ?? 0;
+}
+
+/**
+ * Sort a copy of `docs`. `recent` keeps the backend's newest-first order (docs
+ * already arrive that way), so it's a plain clone.
+ */
+function sortDocs(docs: WikiDoc[], key: SortKey): WikiDoc[] {
+  const out = [...docs];
+  switch (key) {
+    case "title":
+      return out.sort((a, b) => a.title.localeCompare(b.title));
+    case "size":
+      return out.sort((a, b) => docSize(b) - docSize(a));
+    case "workspace":
+      return out.sort(
+        (a, b) => a.workspaceName.localeCompare(b.workspaceName) || b.updatedMs - a.updatedMs,
+      );
+    default:
+      return out;
+  }
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function WikiView() {
@@ -218,6 +254,9 @@ export function WikiView() {
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
+  const [sortKey, setSortKey] = useState<SortKey>("recent");
+  // Which virtual folder the grid is scoped to. `null` = 全部 (every doc).
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<
     | { kind: "doc"; slug: string }
@@ -267,20 +306,35 @@ export function WikiView() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return docs.filter((d) => {
-      if (workspaceFilter !== "all" && d.workspacePath !== workspaceFilter) return false;
-      if (!q) return true;
-      // Backend full-text hits (metadata + content); metadata fallback while
-      // the debounced search is still in flight.
-      if (hits) return hits.has(d.slug);
-      return [d.title, d.slug, d.workspaceName].join(" ").toLowerCase().includes(q);
-    });
-  }, [docs, query, workspaceFilter, hits]);
+  const searching = query.trim().length > 0;
 
-  // Look up in the full doc set (not `filtered`) so cross-doc link jumps land
-  // even when the target is hidden by the current search/workspace filter.
+  // Workspace-filtered set drives the folder rail — the tree stays stable while
+  // searching (search narrows the grid, not the rail's folder list).
+  const wsFiltered = useMemo(
+    () => docs.filter((d) => workspaceFilter === "all" || d.workspacePath === workspaceFilter),
+    [docs, workspaceFilter],
+  );
+
+  // Docs shown in the centre grid: workspace ∩ (search OR folder scope), sorted.
+  const gridDocs = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let base = wsFiltered;
+    if (q) {
+      // Search flattens across folders — the rail selection is ignored so a hit
+      // in another folder still shows.
+      base = base.filter((d) =>
+        hits
+          ? hits.has(d.slug)
+          : [d.title, d.slug, d.workspaceName].join(" ").toLowerCase().includes(q),
+      );
+    } else if (selectedFolder) {
+      base = base.filter((d) => slugUnderFolder(d.slug, selectedFolder));
+    }
+    return sortDocs(base, sortKey);
+  }, [wsFiltered, query, hits, selectedFolder, sortKey]);
+
+  // Look up in the full doc set (not the grid) so cross-doc link jumps land even
+  // when the target is hidden by the current search / workspace / folder scope.
   const selected = useMemo(
     () => docs.find((d) => d.slug === selectedSlug) ?? null,
     [docs, selectedSlug],
@@ -294,9 +348,8 @@ export function WikiView() {
     };
   }, [docs]);
 
-  // The doc list is a virtual directory tree keyed off slug prefixes. Workspace
-  // is no longer a grouping dimension — it stays as the header's filter.
-  const tree = useMemo(() => buildTree(filtered), [filtered]);
+  // Folder rail tree — folders only, off the workspace-filtered set.
+  const tree = useMemo(() => buildTree(wsFiltered), [wsFiltered]);
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleFolder = (path: string) => {
@@ -307,8 +360,6 @@ export function WikiView() {
       return next;
     });
   };
-  // While searching, collapse state is ignored so matches stay visible.
-  const searching = query.trim().length > 0;
 
   const handleDelete = async () => {
     if (!confirmDelete) return;
@@ -319,6 +370,12 @@ export function WikiView() {
       } else if (confirmDelete.kind === "folder") {
         await invoke("delete_wiki_folder", { prefix: confirmDelete.path });
         if (selectedSlug?.startsWith(`${confirmDelete.path}/`)) setSelectedSlug(null);
+        if (
+          selectedFolder &&
+          (selectedFolder === confirmDelete.path ||
+            selectedFolder.startsWith(`${confirmDelete.path}/`))
+        )
+          setSelectedFolder(null);
       } else {
         await invoke("delete_wiki_version", {
           slug: confirmDelete.slug,
@@ -395,8 +452,8 @@ export function WikiView() {
 
   /**
    * Docs a folder op will actually touch. Counted over the full `docs` set, NOT
-   * the search-filtered tree: the backend acts on every doc under the prefix,
-   * so a count taken from `filtered` would under-report what delete destroys.
+   * a filtered view: the backend acts on every doc under the prefix, so a count
+   * taken from a filtered view would under-report what delete destroys.
    */
   const docsUnder = useCallback(
     (path: string) => docs.filter((d) => d.slug.startsWith(`${path}/`)).length,
@@ -411,6 +468,15 @@ export function WikiView() {
         if (!cur?.startsWith(`${from}/`)) return cur;
         const rest = cur.slice(from.length + 1);
         return to ? `${to}/${rest}` : rest;
+      });
+      setSelectedFolder((cur) => {
+        if (cur === null) return cur;
+        if (cur === from) return to || null;
+        if (cur.startsWith(`${from}/`)) {
+          const rest = cur.slice(from.length + 1);
+          return to ? `${to}/${rest}` : rest;
+        }
+        return cur;
       });
       await load();
     },
@@ -486,9 +552,9 @@ export function WikiView() {
   ];
 
   /**
-   * Accept a drop into folder `path` ("" is the root). Doc cards carry their
-   * parent folder's path, so anywhere in a folder's region drops into it; the
-   * stopPropagation keeps a nested card from bubbling up to the root zone.
+   * Accept a drop into folder `path` ("" is the root). Folder rows and the rail
+   * background both use this; the stopPropagation keeps a nested folder from
+   * bubbling its drop up to the root zone.
    */
   const dropProps = (path: string) => ({
     onDragOver: (e: DragEvent) => {
@@ -504,97 +570,121 @@ export function WikiView() {
     },
   });
 
-  /** Indent one tree level; depth 0 sits flush with the pane. */
-  const indent = (depth: number) => ({ paddingLeft: `${depth * 12}px` });
+  /** Indent one tree level; depth 0 sits flush with the rail. */
+  const indent = (depth: number) => ({ paddingLeft: `${8 + depth * 12}px` });
 
-  const renderNodes = (nodes: TreeNode[], depth: number, parentPath: string): ReactNode =>
-    nodes.map((node) => {
-      if (node.type === "folder") {
-        const isCollapsed = !searching && collapsed.has(node.path);
+  // ── Folder rail (folders only) ───────────────────────────────────────────
+  const renderFolderNodes = (nodes: TreeNode[], depth: number): ReactNode =>
+    nodes
+      .filter((n): n is FolderNode => n.type === "folder")
+      .map((folder) => {
+        const hasSub = folder.children.some((c) => c.type === "folder");
+        const isCollapsed = collapsed.has(folder.path);
+        const active = selectedFolder === folder.path;
         return (
-          <div key={`d:${node.path}`} className={styles.group}>
+          <div key={`d:${folder.path}`} className={styles.folder_group}>
             <button
-              className={`${styles.group_header} ${dropPath === node.path ? styles.drop_target : ""}`}
+              className={`${styles.folder_row} ${active ? styles.folder_row_active : ""} ${
+                dropPath === folder.path ? styles.drop_target : ""
+              }`}
               style={indent(depth)}
-              onClick={() => toggleFolder(node.path)}
+              onClick={() => setSelectedFolder(folder.path)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setFolderCtx({ path: node.path, anchor: { x: e.clientX, y: e.clientY } });
+                setFolderCtx({ path: folder.path, anchor: { x: e.clientX, y: e.clientY } });
               }}
-              title={node.path}
-              {...dropProps(node.path)}
+              title={folder.path}
+              {...dropProps(folder.path)}
             >
-              {isCollapsed ? (
-                <ChevronRight size={12} strokeWidth={2} className={styles.group_chevron} />
-              ) : (
-                <ChevronDown size={12} strokeWidth={2} className={styles.group_chevron} />
-              )}
-              <span className={styles.group_name}>{node.name}</span>
-              <span className={styles.group_count}>{node.docCount}</span>
+              <span
+                className={styles.folder_chevron}
+                onClick={(e) => {
+                  // Toggle collapse without changing the grid scope.
+                  if (!hasSub) return;
+                  e.stopPropagation();
+                  toggleFolder(folder.path);
+                }}
+              >
+                {hasSub ? (
+                  isCollapsed ? (
+                    <ChevronRight size={12} strokeWidth={2} />
+                  ) : (
+                    <ChevronDown size={12} strokeWidth={2} />
+                  )
+                ) : null}
+              </span>
+              <Folder size={13} strokeWidth={1.7} className={styles.folder_icon} />
+              <span className={styles.folder_name}>{folder.name}</span>
+              <span className={styles.folder_count}>{folder.docCount}</span>
             </button>
-            {!isCollapsed && renderNodes(node.children, depth + 1, node.path)}
+            {hasSub && !isCollapsed && renderFolderNodes(folder.children, depth + 1)}
           </div>
         );
-      }
+      });
 
-      const d = node.doc;
-      return (
-        <button
-          key={`f:${d.slug}`}
-          className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""} ${
-            dragSlug === d.slug ? styles.card_dragging : ""
-          }`}
-          style={indent(depth)}
-          onClick={() => setSelectedSlug(d.slug)}
-          onContextMenu={(e) => {
-            // preventDefault also suppresses the app-wide Settings/About menu.
-            e.preventDefault();
-            e.stopPropagation();
-            setCtxMenu({ doc: d, anchor: { x: e.clientX, y: e.clientY } });
-          }}
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.effectAllowed = "move";
-            // Firefox refuses to start a drag with an empty payload.
-            e.dataTransfer.setData("text/plain", d.slug);
-            setDragSlug(d.slug);
-          }}
-          onDragEnd={() => {
-            setDragSlug(null);
-            setDropPath(null);
-          }}
-          {...dropProps(parentPath)}
-        >
-          <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
-            {KIND_CONFIG[d.kind]?.short ?? d.kind}
+  // ── Centre grid card ──────────────────────────────────────────────────────
+  const renderGridCard = (d: WikiDoc): ReactNode => (
+    <button
+      key={`g:${d.slug}`}
+      className={`${styles.grid_card} ${selectedSlug === d.slug ? styles.grid_card_active : ""} ${
+        dragSlug === d.slug ? styles.card_dragging : ""
+      }`}
+      onClick={() => setSelectedSlug(d.slug)}
+      onContextMenu={(e) => {
+        // preventDefault also suppresses the app-wide Settings/About menu.
+        e.preventDefault();
+        e.stopPropagation();
+        setCtxMenu({ doc: d, anchor: { x: e.clientX, y: e.clientY } });
+      }}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        // Firefox refuses to start a drag with an empty payload.
+        e.dataTransfer.setData("text/plain", d.slug);
+        setDragSlug(d.slug);
+      }}
+      onDragEnd={() => {
+        setDragSlug(null);
+        setDropPath(null);
+      }}
+    >
+      <span className={styles.grid_card_top}>
+        <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
+          {KIND_CONFIG[d.kind]?.short ?? d.kind}
+        </span>
+        {d.versions.length > 1 && (
+          <span className={styles.grid_versions}>
+            {t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}
           </span>
-          <span className={styles.card_body}>
-            <span className={styles.card_title}>
-              {searching ? highlightTerm(d.title, query) : d.title}
-            </span>
-            {/* Under a folder the prefix is already on screen — show the leaf. */}
-            <span className={styles.card_slug} title={d.slug}>
-              {slugBasename(d.slug)}
-            </span>
-            {searching && hits?.get(d.slug)?.snippet ? (
-              <span className={styles.card_snippet}>
-                {highlightTerm(hits.get(d.slug)!.snippet, query)}
-              </span>
-            ) : null}
-            <span className={styles.card_meta}>
-              <span>{relativeTime(d.updatedMs)}</span>
-              {d.versions.length > 1 && (
-                <>
-                  <span className={styles.card_meta_dot}>·</span>
-                  <span>{t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}</span>
-                </>
-              )}
-            </span>
+        )}
+      </span>
+      <span className={styles.grid_title}>
+        {searching ? highlightTerm(d.title, query) : d.title}
+      </span>
+      <span className={styles.grid_slug} title={d.slug}>
+        {d.slug}
+      </span>
+      {searching && hits?.get(d.slug)?.snippet ? (
+        <span className={styles.grid_snippet}>
+          {highlightTerm(hits.get(d.slug)!.snippet, query)}
+        </span>
+      ) : null}
+      <span className={styles.grid_meta}>
+        {workspaceFilter === "all" && (
+          <span className={styles.ws_badge} title={d.workspacePath}>
+            {d.workspaceName}
           </span>
-        </button>
-      );
-    });
+        )}
+        <span className={styles.grid_time}>{relativeTime(d.updatedMs)}</span>
+      </span>
+    </button>
+  );
+
+  // Breadcrumb-ish label for the grid header.
+  const scopeLabel = searching
+    ? t("wiki.scope_search", "搜索结果")
+    : selectedFolder ?? t("wiki.scope_all", "全部文档");
 
   return (
     <PageShell
@@ -627,29 +717,24 @@ export function WikiView() {
         </button>
       }
       secondary={
-        // The list is itself the root drop zone: dropping outside any folder
-        // strips a doc's directory prefix.
+        // The rail is the folder tree AND the root drop zone: dropping onto the
+        // pane background (outside any folder) strips a doc's directory prefix.
         <div
-          className={`${styles.list_pane} ${dragSlug && dropPath === "" ? styles.drop_target_root : ""}`}
+          className={`${styles.rail_pane} ${dragSlug && dropPath === "" ? styles.drop_target_root : ""}`}
           {...dropProps("")}
         >
-          {moveError && (
-            <p className={styles.move_error} onClick={() => setMoveError(null)}>
-              {t("wiki.move_failed", "Move failed: {{error}}", { error: moveError })}
-            </p>
-          )}
-          {!loaded && <p className={styles.empty}>{t("wiki.loading", "Loading…")}</p>}
-          {loaded && filtered.length === 0 && (
-            <EmptyState
-              icon={<BookOpen size={28} strokeWidth={1.5} />}
-              title={t("wiki.empty_title", "No wiki docs yet")}
-              subtitle={t(
-                "wiki.empty_subtitle",
-                "Agents publish reports and demos here with `fleet wiki publish <path>`.",
-              )}
-            />
-          )}
-          {renderNodes(tree, 0, "")}
+          <button
+            className={`${styles.folder_row} ${styles.all_row} ${
+              selectedFolder === null ? styles.folder_row_active : ""
+            }`}
+            onClick={() => setSelectedFolder(null)}
+          >
+            <span className={styles.folder_chevron} />
+            <Library size={13} strokeWidth={1.7} className={styles.folder_icon} />
+            <span className={styles.folder_name}>{t("wiki.scope_all", "全部文档")}</span>
+            <span className={styles.folder_count}>{wsFiltered.length}</span>
+          </button>
+          {loaded && wsFiltered.length > 0 && renderFolderNodes(tree, 0)}
         </div>
       }
       afterBody={<>
@@ -724,19 +809,70 @@ export function WikiView() {
       )}
       </>}
     >
-      {selected ? (
-        <WikiDetail
-          doc={selected}
-          wikiLinks={wikiLinks}
-          onMove={() => openMoveDialog(selected)}
-          onDeleteDoc={() => setConfirmDelete({ kind: "doc", slug: selected.slug })}
-          onDeleteVersion={(version) =>
-            setConfirmDelete({ kind: "version", slug: selected.slug, version })
-          }
-        />
-      ) : (
-        <div className={styles.placeholder}>{t("wiki.select_hint", "Select a doc to preview")}</div>
-      )}
+      <div className={styles.layout}>
+        <div className={`${styles.grid_pane} ${selected ? styles.grid_pane_split : ""}`}>
+          <div className={styles.grid_header}>
+            <span className={styles.grid_scope} title={scopeLabel}>
+              {scopeLabel}
+            </span>
+            <span className={styles.grid_scope_count}>{gridDocs.length}</span>
+            <span className={styles.grid_header_spacer} />
+            <select
+              className={styles.sort_select}
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              title={t("wiki.sort_by", "Sort by")}
+            >
+              <option value="recent">{t("wiki.sort_recent", "最近更新")}</option>
+              <option value="title">{t("wiki.sort_title", "名称")}</option>
+              <option value="size">{t("wiki.sort_size", "大小")}</option>
+              <option value="workspace">{t("wiki.sort_workspace", "工作区")}</option>
+            </select>
+          </div>
+          {moveError && (
+            <p className={styles.move_error} onClick={() => setMoveError(null)}>
+              {t("wiki.move_failed", "Move failed: {{error}}", { error: moveError })}
+            </p>
+          )}
+          {!loaded && <p className={styles.empty}>{t("wiki.loading", "Loading…")}</p>}
+          {loaded && gridDocs.length === 0 && (
+            <EmptyState
+              icon={<BookOpen size={28} strokeWidth={1.5} />}
+              title={
+                docs.length === 0
+                  ? t("wiki.empty_title", "No wiki docs yet")
+                  : t("wiki.empty_scope_title", "这个范围没有文档")
+              }
+              subtitle={
+                docs.length === 0
+                  ? t(
+                      "wiki.empty_subtitle",
+                      "Agents publish reports and demos here with `fleet wiki publish <path>`.",
+                    )
+                  : t("wiki.empty_scope_subtitle", "换个目录或清空搜索试试。")
+              }
+            />
+          )}
+          {loaded && gridDocs.length > 0 && (
+            <div className={styles.grid}>{gridDocs.map(renderGridCard)}</div>
+          )}
+        </div>
+
+        {selected && (
+          <div className={styles.preview_pane}>
+            <WikiDetail
+              doc={selected}
+              wikiLinks={wikiLinks}
+              onClose={() => setSelectedSlug(null)}
+              onMove={() => openMoveDialog(selected)}
+              onDeleteDoc={() => setConfirmDelete({ kind: "doc", slug: selected.slug })}
+              onDeleteVersion={(version) =>
+                setConfirmDelete({ kind: "version", slug: selected.slug, version })
+              }
+            />
+          </div>
+        )}
+      </div>
     </PageShell>
   );
 }
@@ -746,12 +882,14 @@ export function WikiView() {
 function WikiDetail({
   doc,
   wikiLinks,
+  onClose,
   onMove,
   onDeleteDoc,
   onDeleteVersion,
 }: {
   doc: WikiDoc;
   wikiLinks: WikiLinkContext;
+  onClose: () => void;
   onMove: () => void;
   onDeleteDoc: () => void;
   onDeleteVersion: (version: string) => void;
@@ -874,6 +1012,13 @@ function WikiDetail({
           >
             <Trash2 size={12} strokeWidth={1.7} />
             {t("wiki.delete_doc_short", "Doc")}
+          </button>
+          <button
+            className={styles.action_btn}
+            onClick={onClose}
+            title={t("wiki.close_preview", "Close preview")}
+          >
+            {t("wiki.close_preview_short", "关闭")}
           </button>
         </div>
       </div>
