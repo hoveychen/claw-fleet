@@ -123,6 +123,37 @@ describe("inline SVG blank lines", () => {
     const md = "line one\n\nline two\n";
     expect(normalizeSvgBlankLines(md)).toBe(md);
   });
+
+  it("does not collapse paragraphs when prose only mentions an unclosed <svg>", () => {
+    // A message discussing the `<svg>` tag has no matching </svg>; the span is
+    // unbalanced, so paragraph breaks after it must survive untouched.
+    const md = "先说 `<svg>` 标签。\n\n第一段。\n\n第二段。\n\n第三段。";
+    expect(normalizeSvgBlankLines(md)).toBe(md);
+  });
+
+  it("still strips blanks inside a balanced svg that follows an svg mention", () => {
+    const md = [
+      "介绍 `<svg>` 用法。",
+      "",
+      "看图:",
+      "",
+      '<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">',
+      '  <rect x="0" y="0" width="200" height="100" fill="#fafafa"/>',
+      "",
+      '  <text x="10" y="20" fill="#16a34a">label</text>',
+      "</svg>",
+      "",
+      "图说完了。",
+    ].join("\n");
+    const out = normalizeSvgBlankLines(md);
+    // The paragraph breaks outside the svg are preserved...
+    expect(out).toContain("介绍 `<svg>` 用法。\n\n看图:");
+    expect(out).toContain("</svg>\n\n图说完了。");
+    // ...but the blank line *inside* the drawing is gone.
+    const inner = svgInner(render(out));
+    expect(inner).toContain("#fafafa");
+    expect(inner).toContain("label");
+  });
 });
 
 describe("GFM survives the sanitize pass", () => {
