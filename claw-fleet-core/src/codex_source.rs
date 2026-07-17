@@ -2966,6 +2966,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// A freshly spawned Codex turn has no thread id in argv, but Fleet records
+    /// its pid as soon as Codex reports the minted thread id. That note must
+    /// make Stop target the one session even when a sibling Codex shares cwd.
+    #[test]
+    fn codex_resolve_pid_recognises_running_spawn_via_pid_note() {
+        use super::{resolve_pid, CodexProcess};
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-resolve-spawnpid-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &tmp);
+
+        crate::codex_launch::record_spawn_pid("t-new", 4242);
+        let running = vec![
+            CodexProcess { pid: 3131, cwd: "/ws".into(), thread_id: None },
+            CodexProcess { pid: 4242, cwd: "/ws".into(), thread_id: None },
+        ];
+
+        assert_eq!(
+            resolve_pid(&running, "t-new", "/ws"),
+            (Some(4242), true),
+            "the live recorded spawn pid must be precise despite a sibling in cwd"
+        );
+
+        match prev {
+            Some(p) => std::env::set_var("FLEET_HOME", p),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn read_rollout_originator_none_without_meta_or_field() {
         use std::io::Write;
