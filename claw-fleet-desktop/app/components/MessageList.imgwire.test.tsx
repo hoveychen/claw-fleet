@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// DEBUG(image-render): renders the REAL MessageList with a truncated image Read
+// Renders the real MessageList with a truncated image Read
 // (message flagged `_fleetTruncated`) + a jsonlPath, mocking the backend
 // `get_tool_result_full`. This exercises the wiring the ToolUseBlock-level probe
 // bypassed: truncatedIds building, toolFetch provider, block.id ↔ tool_use_id
@@ -87,11 +87,6 @@ describe("MessageList image refetch wiring", () => {
     });
 
     const imgs = [...container!.querySelectorAll("img")].map((i) => i.getAttribute("src"));
-    // Debug aid if it fails:
-    if (!imgs.some((s) => s === `data:image/png;base64,${IMG}`)) {
-      // eslint-disable-next-line no-console
-      console.log("DEBUG imgs:", JSON.stringify(imgs), "\nBODY:", container!.textContent?.slice(0, 300));
-    }
     expect(imgs).toContain(`data:image/png;base64,${IMG}`);
   });
 
