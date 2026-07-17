@@ -389,11 +389,13 @@ export function MessageList({
     return ids;
   }, [messages]);
 
-  // Provide on-demand full-output recovery only when we have both a jsonl path
-  // to fetch from and at least one truncated card — otherwise leave the context
-  // null so cards render their inline content unchanged.
+  // Keep the on-demand reader available whenever the session has a transcript.
+  // Most calls use it only when transport trimming set `_fleetTruncated`, but a
+  // completed Read can also arrive without its tool_result in the current
+  // message window. Its card must still be able to recover that result on
+  // expand instead of staying permanently empty.
   const toolFetch = useMemo<ToolResultFetch | null>(() => {
-    if (!jsonlPath || truncatedIds.size === 0) return null;
+    if (!jsonlPath) return null;
     return {
       truncatedIds,
       fetchFull: (toolUseId: string) =>
