@@ -164,10 +164,11 @@
   overflow: hidden;
 }
 
-/* When a preview is open the grid holds a stable ~44% and the preview takes the
-   rest — a fixed split reads calmer than one that reflows on every selection. */
+/* Selecting a doc replaces the grid with the detail (master→detail): the grid
+   pane hides whenever a preview is open, at every width, and 返回 brings it back.
+   A single-pane read is roomier than the four-column nav+rail+grid+detail split. */
 .grid_pane_split {
-  flex: 0 1 44%;
+  display: none;
 }
 
 .grid_header {
@@ -435,13 +436,12 @@
 /* ── Preview pane ────────────────────────────────────────────────────────── */
 
 .preview_pane {
-  flex: 1.4 1 0;
+  flex: 1 1 100%;
   min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  border-left: 1px solid var(--color-border);
 }
 
 .detail_header {
@@ -588,21 +588,6 @@
   font-size: 12px;
   color: var(--color-error);
   padding: 20px;
-}
-
-/* ── Narrow windows ──────────────────────────────────────────────────────────
-   The three-pane split needs room. Below this width, opening a doc hands the
-   whole main area to the preview (master → detail); the "关闭" button returns
-   to the grid, and the folder rail can be collapsed via the shell's own toggle.
-   The unselected grid already reflows to fewer columns via auto-fill. */
-@media (max-width: 1080px) {
-  .grid_pane_split {
-    display: none;
-  }
-  .preview_pane {
-    flex: 1 1 100%;
-    border-left: none;
-  }
 }
 
 /* macOS vibrancy — divider weights come from the platform-wide --color-border
