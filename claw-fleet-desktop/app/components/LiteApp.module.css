@@ -287,7 +287,7 @@
   gap: 6px;
 }
 
-/* One task: the card fills the row, the stop/mark controls sit to its right. */
+/* One task: the card fills the row, the mark control sits to its right. */
 .task_row {
   display: flex;
   align-items: center;

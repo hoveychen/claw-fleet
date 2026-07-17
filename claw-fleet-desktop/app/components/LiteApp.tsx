@@ -21,7 +21,6 @@ import { LiteSessionCard } from "./LiteSessionCard";
 import { MarkControl } from "./MarkControl";
 import { NewSessionForm, distinctWorkspaces, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
-import { StopControl, canControl } from "./StopControl";
 import { TodayUsageBadge } from "./TodayUsageBadge";
 import styles from "./LiteApp.module.css";
 
@@ -30,12 +29,6 @@ const MARK_SEGMENTS: MarkFilter[] = ["all", "pending", "done"];
 /** Which mark bucket a session falls in — mirrors HistoryView.markBucket. */
 function markBucket(s: SessionInfo): "pending" | "done" {
   return s.userMark === "done" ? "done" : "pending";
-}
-
-/** A row shows the stop control only when the session is controllable and
- *  actually live/has a pid — mirrors HistoryView.showsControl. */
-function showsControl(s: SessionInfo): boolean {
-  return canControl(s) && (s.pid !== null || LIVE_STATUSES.has(s.status));
 }
 
 /**
@@ -318,7 +311,6 @@ export function LiteApp() {
                 <div key={s.jsonlPath} className={styles.task_row}>
                   <LiteSessionCard session={s} onClick={() => open(s).catch(() => {})} />
                   <div className={styles.task_actions}>
-                    {showsControl(s) && <StopControl session={s} />}
                     <MarkControl session={s} />
                   </div>
                 </div>

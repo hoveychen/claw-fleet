@@ -62,7 +62,7 @@ import {
   type TabState,
 } from "../sessionTabs";
 import { getItem, setItem } from "../storage";
-import { StopControl, canControl, stopMode, performStop } from "./StopControl";
+import { canControl, stopMode, performStop } from "./StopControl";
 import { MarkControl } from "./MarkControl";
 import { AgentSourceIcon } from "./SessionCard";
 import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./ContextMenu";
@@ -169,13 +169,6 @@ function formatRunning(ms: number, t: (k: string, opts?: Record<string, unknown>
   return t("ran_d", { n: Math.floor(diff / 86_400_000) });
 }
 
-/** Rows keep their control while there is a live process to aim it at; once the
- *  session is spent the control renders disabled rather than vanishing, so the
- *  row doesn't reflow under the cursor mid-click. */
-function showsControl(s: SessionInfo): boolean {
-  return canControl(s) && (s.pid !== null || LIVE_STATUSES.has(s.status));
-}
-
 /** FTS5 snippets arrive with literal `<mark>…</mark>` markers (see
  *  search_index.rs). Split them into React nodes instead of trusting the
  *  transcript text as HTML. */
@@ -280,24 +273,9 @@ const SessionRow = memo(function SessionRow({
 }: SessionRowProps) {
   const { t } = useTranslation();
   const runColor = rowBarColor(s);
-  // Reveal-on-hover for the stop button is driven by this JS state, not CSS
-  // `:hover`: wry/WebKit fails to recompute `:hover` when a row reflows without a
-  // fresh pointer event, so a CSS-only reveal could stick on after the cursor
-  // left. State set only by real enter/leave events can't latch across
-  // re-renders; `window blur` clears it if the pointer is yanked out of the
-  // window without a mouseleave. (Same fix as SessionCard.)
-  const [hovered, setHovered] = useState(false);
-  useEffect(() => {
-    if (!hovered) return;
-    const clear = () => setHovered(false);
-    window.addEventListener("blur", clear);
-    return () => window.removeEventListener("blur", clear);
-  }, [hovered]);
   return (
     <div
-      className={`${styles.row_wrap} ${hovered ? styles.hovered : ""}`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      className={styles.row_wrap}
       onContextMenu={(e) => onContextMenu(e, s)}
     >
       <button
@@ -384,11 +362,6 @@ const SessionRow = memo(function SessionRow({
         </span>
       </button>
       <span className={styles.row_actions}>
-        {showsControl(s) && (
-          <span className={styles.stop_slot}>
-            <StopControl session={s} />
-          </span>
-        )}
         <MarkControl session={s} />
       </span>
     </div>
