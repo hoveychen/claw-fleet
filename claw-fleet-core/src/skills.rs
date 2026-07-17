@@ -147,10 +147,7 @@ pub fn scan_all_skills_for_workspaces(workspaces: &[String]) -> Vec<SkillItem> {
 }
 
 fn codex_home_dir() -> Option<PathBuf> {
-    std::env::var_os("CODEX_HOME")
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| crate::session::real_home_dir().map(|h| h.join(".codex")))
+    crate::session::get_codex_dir()
 }
 
 #[allow(clippy::too_many_arguments)]

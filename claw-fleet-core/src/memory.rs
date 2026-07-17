@@ -197,10 +197,7 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
 const CODEX_MEMORY_URI_PREFIX: &str = "codex-memory://stage1/";
 
 fn codex_home_dir() -> Option<PathBuf> {
-    std::env::var_os("CODEX_HOME")
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| crate::session::real_home_dir().map(|h| h.join(".codex")))
+    crate::session::get_codex_dir()
 }
 
 /// Scan both public Codex memory surfaces: generated files and the stage-1

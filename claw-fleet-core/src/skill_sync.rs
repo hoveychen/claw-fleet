@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::session::{get_claude_dir, get_fleet_dir, real_home_dir};
+use crate::session::{get_claude_dir, get_codex_dir, get_fleet_dir, real_home_dir};
 
 const SKILL_FILE: &str = "SKILL.md";
 const COPY_MARKER: &str = ".fleet-managed.json";
@@ -99,10 +99,14 @@ struct Roots {
 fn roots() -> Result<Roots, String> {
     let home = real_home_dir().ok_or_else(|| "cannot determine user home".to_string())?;
     let fleet = get_fleet_dir().ok_or_else(|| "cannot determine Fleet directory".to_string())?;
+    let codex = get_codex_dir().ok_or_else(|| "cannot determine Codex directory".to_string())?;
     Ok(Roots {
         canonical: fleet.join("skills"),
         claude: home.join(".claude").join("skills"),
-        codex: home.join(".agents").join("skills"),
+        // Codex discovers skills from `$CODEX_HOME/skills` (default
+        // `~/.codex/skills`) — per Codex's own skill-installer — NOT the legacy
+        // `~/.agents/skills`.
+        codex: codex.join("skills"),
     })
 }
 
@@ -677,22 +681,33 @@ pub fn auto_sync_enabled() -> bool {
 }
 
 /// Flip the auto-sync toggle on disk.
+///
+/// Enabling is not a filesystem event, so the directory watcher won't pick up
+/// skills that were already present before the toggle. To match user
+/// expectation ("turn it on → my skills sync"), a fresh enable reconciles once
+/// immediately, adopting the already-present skills. Best-effort: a reconcile
+/// error doesn't undo the toggle, and the gate inside `auto_reconcile` makes it
+/// a no-op when only one runtime is present.
 pub fn set_auto_sync_enabled(enabled: bool) -> Result<(), String> {
-    save_autosync_config(&AutoSyncConfig { enabled })
+    save_autosync_config(&AutoSyncConfig { enabled })?;
+    if enabled {
+        let _ = auto_reconcile();
+    }
+    Ok(())
 }
 
 /// Are both Claude Code and Codex present on this machine?
 ///
 /// Purely filesystem-based so it stays deterministic under a redirected
-/// `FLEET_HOME` (tests) and matches interop semantics: Codex skills project
-/// into `~/.agents/skills`, so a Codex install with no home directory has
-/// nowhere to sync. We therefore key off directory presence
-/// (`~/.codex` **or** `~/.agents`) rather than `which codex` — the latter would
-/// escape the test home and spawn a process on every reconcile.
+/// `FLEET_HOME` (tests) and matches interop semantics: Codex discovers skills
+/// from `$CODEX_HOME/skills` (default `~/.codex/skills`), so a Codex install
+/// with no home directory has nowhere to sync. We therefore key off directory
+/// presence ([`get_claude_dir`] and [`get_codex_dir`]) rather than
+/// `which codex` — the latter would escape the test home and spawn a process on
+/// every reconcile.
 pub fn both_runtimes_present() -> bool {
     let claude = get_claude_dir().is_some_and(|dir| dir.is_dir());
-    let codex = real_home_dir()
-        .is_some_and(|home| home.join(".codex").is_dir() || home.join(".agents").is_dir());
+    let codex = get_codex_dir().is_some_and(|dir| dir.is_dir());
     claude && codex
 }
 
@@ -777,22 +792,38 @@ pub fn auto_reconcile() -> Result<SkillSyncReport, String> {
 mod tests {
     use super::*;
 
-    struct HomeGuard(Option<std::ffi::OsString>);
+    struct HomeGuard {
+        fleet_home: Option<std::ffi::OsString>,
+        codex_home: Option<std::ffi::OsString>,
+    }
 
     impl HomeGuard {
         fn new(path: &Path) -> Self {
-            let old = std::env::var_os("FLEET_HOME");
-            unsafe { std::env::set_var("FLEET_HOME", path) };
-            Self(old)
+            let fleet_home = std::env::var_os("FLEET_HOME");
+            let codex_home = std::env::var_os("CODEX_HOME");
+            unsafe {
+                std::env::set_var("FLEET_HOME", path);
+                // Pin CODEX_HOME into the temp home so get_codex_dir() resolves
+                // to <temp>/.codex regardless of the ambient CODEX_HOME.
+                std::env::set_var("CODEX_HOME", path.join(".codex"));
+            }
+            Self {
+                fleet_home,
+                codex_home,
+            }
         }
     }
 
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             unsafe {
-                match &self.0 {
+                match &self.fleet_home {
                     Some(old) => std::env::set_var("FLEET_HOME", old),
                     None => std::env::remove_var("FLEET_HOME"),
+                }
+                match &self.codex_home {
+                    Some(old) => std::env::set_var("CODEX_HOME", old),
+                    None => std::env::remove_var("CODEX_HOME"),
                 }
             }
         }
@@ -841,7 +872,7 @@ mod tests {
             "---\nname: same-name\ndescription: canonical\n---\n",
         );
         let foreign = write_skill(
-            &temp.path().join(".agents/skills"),
+            &temp.path().join(".codex/skills"),
             "same-name",
             "---\nname: same-name\ndescription: foreign\n---\n",
         );
@@ -862,7 +893,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let _guard = HomeGuard::new(temp.path());
         write_skill(
-            &temp.path().join(".agents/skills"),
+            &temp.path().join(".codex/skills"),
             "foreign",
             "---\nname: foreign\ndescription: foreign\n---\n",
         );
@@ -870,7 +901,7 @@ mod tests {
         assert!(error.contains("unmanaged"));
         assert!(temp
             .path()
-            .join(".agents/skills/foreign/SKILL.md")
+            .join(".codex/skills/foreign/SKILL.md")
             .is_file());
     }
 
@@ -909,7 +940,7 @@ mod tests {
         assert_eq!(item.state, SkillSyncState::Shared);
         assert!(!flat.exists());
         assert!(temp.path().join(".claude/skills/flat/SKILL.md").is_file());
-        assert!(temp.path().join(".agents/skills/flat/SKILL.md").is_file());
+        assert!(temp.path().join(".codex/skills/flat/SKILL.md").is_file());
     }
 
     /// Mark Codex as present so `both_runtimes_present()` is satisfied.
@@ -957,7 +988,7 @@ mod tests {
         let report = auto_reconcile().unwrap();
         assert!(report.actions.is_empty());
         assert!(!temp.path().join(".fleet/skills/solo").exists());
-        assert!(!temp.path().join(".agents/skills/solo").exists());
+        assert!(!temp.path().join(".codex/skills/solo").exists());
     }
 
     #[test]
@@ -981,7 +1012,7 @@ mod tests {
         assert_eq!(item.state, SkillSyncState::Shared);
         assert!(temp.path().join(".fleet/skills/fresh/SKILL.md").is_file());
         assert!(temp.path().join(".claude/skills/fresh/SKILL.md").is_file());
-        assert!(temp.path().join(".agents/skills/fresh/SKILL.md").is_file());
+        assert!(temp.path().join(".codex/skills/fresh/SKILL.md").is_file());
     }
 
     #[test]
@@ -1001,7 +1032,7 @@ mod tests {
         assert_eq!(item.state, SkillSyncState::Shared);
         assert_eq!(item.compatibility, SkillCompatibility::Incompatible);
         assert!(!item.warnings.is_empty());
-        assert!(temp.path().join(".agents/skills/mixed/SKILL.md").is_file());
+        assert!(temp.path().join(".codex/skills/mixed/SKILL.md").is_file());
     }
 
     #[test]
@@ -1017,13 +1048,13 @@ mod tests {
         );
         // First pass adopts to both.
         auto_reconcile().unwrap();
-        assert!(temp.path().join(".agents/skills/doomed").exists());
+        assert!(temp.path().join(".codex/skills/doomed").exists());
         // User deletes the Claude projection.
         fs::remove_dir_all(temp.path().join(".claude/skills/doomed")).unwrap();
         // Second pass propagates the deletion to Codex + canonical.
         let report = auto_reconcile().unwrap();
         assert!(report.actions.iter().any(|a| a.action == "removed"));
-        assert!(!temp.path().join(".agents/skills/doomed").exists());
+        assert!(!temp.path().join(".codex/skills/doomed").exists());
         assert!(!temp.path().join(".fleet/skills/doomed").exists());
     }
 
@@ -1043,7 +1074,7 @@ mod tests {
         );
         // ...but Codex holds an unmanaged, differing copy → Conflict.
         let foreign = write_skill(
-            &temp.path().join(".agents/skills"),
+            &temp.path().join(".codex/skills"),
             "clash",
             "---\nname: clash\ndescription: foreign\n---\n",
         );
@@ -1053,5 +1084,55 @@ mod tests {
             .unwrap()
             .contains("foreign"));
         assert!(temp.path().join(".fleet/skills/clash/SKILL.md").is_file());
+    }
+
+    // ── Bug-fix tests (skill-codex-dir-fix) ─────────────────────────────────
+
+    /// Codex skills live in `$CODEX_HOME/skills` (default `~/.codex/skills`),
+    /// per Codex's own skill-installer. The projection must target that, NOT the
+    /// legacy `~/.agents/skills`. (Red against the old roots(); green after fix.)
+    #[test]
+    fn codex_projection_targets_codex_home_not_agents() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        mark_codex_present(temp.path());
+        let source = write_skill(
+            &temp.path().join(".claude/skills"),
+            "codex-dir",
+            "---\nname: codex-dir\ndescription: x\n---\nBody",
+        );
+        adopt(&source.join(SKILL_FILE)).unwrap();
+        assert!(
+            temp.path().join(".codex/skills/codex-dir/SKILL.md").exists(),
+            "Codex projection must land in ~/.codex/skills"
+        );
+        assert!(
+            !temp.path().join(".agents/skills/codex-dir").exists(),
+            "must NOT project into the legacy ~/.agents/skills"
+        );
+    }
+
+    /// Enabling auto-sync must reconcile immediately so already-present skills
+    /// get adopted — the watcher is event-driven and won't fire for skills that
+    /// existed before the toggle. (Red: old set_auto_sync_enabled only writes
+    /// config; green after fix triggers a reconcile on enable.)
+    #[test]
+    fn enabling_autosync_adopts_existing_skills() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        mark_codex_present(temp.path());
+        write_skill(
+            &temp.path().join(".claude/skills"),
+            "preexisting",
+            "---\nname: preexisting\ndescription: was here before enable\n---\nBody",
+        );
+        // Toggle on — should collect the already-present skill right away.
+        set_auto_sync_enabled(true).unwrap();
+        assert!(
+            temp.path().join(".fleet/skills/preexisting/SKILL.md").is_file(),
+            "enabling auto-sync should adopt the pre-existing skill immediately"
+        );
     }
 }
