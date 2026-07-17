@@ -69,8 +69,8 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 2. **压缩后的任务失忆。**上下文压缩后，代理记得自己刚做完 P2，却丢了\
 「P3..Pn 仍待办」这个宏观状态。\n\
 3. **进度汇报式打卡。**代理做完一个 P-task 就停下来问「要我继续下一个吗？」\
-或「进展不错，P4 前要不要先审一下？」。{title}本来就能看到 TASKS.md 的勾选框\
-和（Rule 3 生效时）worktree 提交——进度无需{title}被打断就一目了然。\n\
+或「进展不错，P4 前要不要先审一下？」。TASKS.md 勾选框和 worktree 提交已让进度\
+一目了然。\n\
 \n\
 ## Rule 1 —— 多步计划期间的提交纪律\n\
 \n\
@@ -93,9 +93,6 @@ worktree 特性分支（`prd/<plan-id>`）上的提交由 Rule 3 管辖、在每
      见 Rule 3。\n\
 - **`git push` 永远受闸控**——无论计划处于什么状态，没有{title}在本回合的明确\
   批准绝不 push。\n\
-- **为什么：**{title}受够了长 PRD 里每 5–10 分钟被「要提交吗？」打断一次。每次\
-  打断耗掉一整个对话回合，而且提交成功后代理常常忘了剩余工作（绿色的 hash 让人\
-  感觉「完事了」）。把整个计划当作一个单位，既消除打断模式，也消除提交后失忆。\n\
 \n\
 ### 「完成」意味着什么\n\
 \n\
@@ -272,9 +269,6 @@ TASKS.md 是代理的临时草稿状态——它不该进版本控制。你在�
 定义的限制。多步计划里，`<task-id>` 就是你为 TASKS.md 哨兵块挑的那个 id（Rule\
 2）；单步改动里，当场挑一个短 kebab-case 标识（如 `fix-zombie-pid`、\
 `rename-task-fields`）。\n\
-\n\
-工作以把 worktree 分支合并回 main 作为一个原子步骤结束。多步计划里，那次合并是\
-最后一个 P-task；单步改动里，它只是测试变绿后的收尾动作。\n\
 \n\
 **约定：**\n\
 \n\
@@ -454,8 +448,7 @@ Fleet 的 Stop hook 就消费这个登记，并在同一 workspace spawn 一个�
 **叙述一次交接不等于登记一次。**在你的回复文本里写「接下来我起下一棒」/\
 「handing off to the next session」/「剩下的我接力」什么都不做：Fleet 的 Stop\
 hook 消费的是一次*登记*，不是一句话。如果你本回合没真的跑 `fleet handoff`\
-Bash 命令，就没有后继者被 spawn，计划会在你交出的那一刻悄然死掉——与诚实规则\
-要杀的「宣称了却没做」的失败同类，只是矛头指向你自己的接力。所以在结束这样一个\
+Bash 命令，就没有后继者被 spawn，计划会在你交出的那一刻悄然死掉。所以在结束这样一个\
 回合前，你做的最后一件事就是那个工具调用本身：跑 `fleet handoff --note \"...\"`，\
 等 `ok: handoff registered` 结果回来，然后才停。绝不让一个回合以只活在文字里的\
 交接结束，也绝不去用 ScheduleWakeup / `/loop` / cron 来「稍后继续」——那些在\
@@ -492,8 +485,6 @@ per-venv site-packages、yarn classic 的 `node_modules/`）会为每个 worktre
   不要试图在 worktree 间共享 `target/`。\n\
 - **Go**：`go` 已全局共享 `$GOMODCACHE` 和 `$GOCACHE`；worktree 在依赖侧花费\
   约等于零。无需动作。\n\
-- **Java / Kotlin**：Gradle 和 Maven 缓存（`~/.gradle/caches`、\
-  `~/.m2/repository`）默认全局；无需动作。\n\
 \n\
 **对已有项目，不要只因为你要创建 worktree 就悄悄迁移 lockfile 或包管理器。**\
 一个 `package-lock.json` 的 repo 在{title}同意切换之前一直留在 npm。切换包\
@@ -537,9 +528,8 @@ remembers it just finished P2 but loses the macro state that P3..Pn are still \
 pending.\n\
 3. **Progress-report checkpointing.** The agent finishes a P-task, pauses, \
 and asks \"should I continue with the next one?\" or \"I've made good \
-progress, want to review before P4?\". {title} can already see TASKS.md \
-checkboxes and (when Rule 3 is active) worktree commits — the progress is \
-legible without {title}'s interruption.\n\
+progress, want to review before P4?\". TASKS.md checkboxes and worktree \
+commits already make progress legible.\n\
 \n\
 ## Rule 1 — Commit discipline during multi-step plans\n\
 \n\
@@ -568,12 +558,6 @@ cases below.\n\
      worktree branch — see Rule 3 for the exact procedure.\n\
 - **`git push` is always gated** — never push without {title}'s explicit \
   approval in the current turn, regardless of plan state.\n\
-- **Why:** {title} got tired of being interrupted with \"shall I commit?\" \
-  questions every 5–10 minutes during long PRDs. Each interruption costs a \
-  full conversational turn and the agent often forgets remaining work after \
-  the commit succeeds (the green hash feels like \"done\"). Treating the \
-  whole plan as one unit eliminates the interruption pattern and the \
-  post-commit amnesia.\n\
 \n\
 ### What \"finished\" means\n\
 \n\
@@ -779,10 +763,6 @@ gated by Rule 1's multi-step plan definition. For multi-step plans, \
 `<task-id>` is the same id you picked for the TASKS.md sentinel block \
 (Rule 2); for single-step changes, pick a short kebab-case identifier on \
 the spot (e.g. `fix-zombie-pid`, `rename-task-fields`).\n\
-\n\
-The work ends by merging the worktree branch back to main as one atomic \
-step. For multi-step plans, that merge is the final P-task; for \
-single-step changes, it is simply the finishing move once tests are green.\n\
 \n\
 **The contract:**\n\
 \n\
@@ -1017,9 +997,8 @@ relay instead of wrapping up.\n\
 / \"handing off to the next session\" / \"I'll relay the rest\" in your reply \
 text does NOTHING: Fleet's Stop hook consumes a *registration*, not a \
 sentence. If you did not actually run the `fleet handoff` Bash command this \
-turn, no successor spawns and the plan dies silently the moment you yield — \
-the same \"claimed it, never did it\" failure the honesty rules exist to \
-kill, just aimed at your own relay. So the LAST thing you do before ending \
+turn, no successor spawns and the plan dies silently the moment you yield. \
+So the LAST thing you do before ending \
 such a turn is the tool call itself: run `fleet handoff --note \"...\"`, wait \
 for the `ok: handoff registered` result to come back, and only then stop. \
 Never let a turn end with the handoff living only as prose, and never reach \
@@ -1067,8 +1046,6 @@ choice.\n\
   try to share `target/` across worktrees.\n\
 - **Go**: `go` already shares `$GOMODCACHE` and `$GOCACHE` globally; \
   worktrees cost ~nothing on the dependency side. No action needed.\n\
-- **Java / Kotlin**: Gradle and Maven caches (`~/.gradle/caches`, \
-  `~/.m2/repository`) are global by default; no action needed.\n\
 \n\
 **For existing projects, do NOT silently migrate the lockfile or package \
 manager just because you're about to create a worktree.** A \
