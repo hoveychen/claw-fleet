@@ -327,6 +327,39 @@ export function asFileSearchResult(v: unknown): FileSearchToolResult | null {
   };
 }
 
+/** One link a `WebSearch` returned. */
+export interface WebSearchLink {
+  title: string;
+  url: string;
+}
+
+/** `WebSearch`. `results` on the wire is a mixed array — narration strings
+ *  interleaved with `{tool_use_id, content: [{title, url}, …]}` objects
+ *  (measured; a search can also return only narration and no links at all).
+ *  This reader flattens just the links. */
+export interface WebSearchToolResult {
+  query: string;
+  durationSeconds?: number;
+  links: WebSearchLink[];
+}
+
+export function asWebSearchResult(v: unknown): WebSearchToolResult | null {
+  if (!isRecord(v)) return null;
+  const query = str(v.query);
+  if (query === undefined || !Array.isArray(v.results)) return null;
+  const links: WebSearchLink[] = [];
+  for (const r of v.results) {
+    if (!isRecord(r) || !Array.isArray(r.content)) continue;
+    for (const item of r.content) {
+      if (!isRecord(item)) continue;
+      const title = str(item.title);
+      const url = str(item.url);
+      if (title !== undefined && url !== undefined) links.push({ title, url });
+    }
+  }
+  return { query, durationSeconds: num(v.durationSeconds), links };
+}
+
 // ── Failed calls ─────────────────────────────────────────────────────────────
 
 /**

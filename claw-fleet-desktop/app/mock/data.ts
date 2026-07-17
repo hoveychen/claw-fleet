@@ -1087,6 +1087,61 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
     },
     {
       type: "assistant",
+      uuid: "msg-9c",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-5w",
+            name: "WebSearch",
+            input: { query: "playwright github actions upload-artifact screenshots" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 5900, output_tokens: 60 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-9d",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      // toolUseResult mirrors the real WebSearch payload shape: narration
+      // strings interleaved with {tool_use_id, content:[{title,url}]} objects.
+      // Exercises the favicon result-card body + "N results" header chip.
+      toolUseResult: {
+        query: "playwright github actions upload-artifact screenshots",
+        searchCount: 1,
+        durationSeconds: 4.21,
+        results: [
+          "I'll search for Playwright CI screenshot patterns.",
+          {
+            tool_use_id: "srvtoolu_mock1",
+            content: [
+              { title: "Setting up CI | Playwright", url: "https://playwright.dev/docs/ci-intro" },
+              { title: "actions/upload-artifact - GitHub", url: "https://github.com/actions/upload-artifact" },
+              { title: "Visual comparisons | Playwright", url: "https://playwright.dev/docs/test-snapshots" },
+              { title: "Storing workflow data as artifacts - GitHub Docs", url: "https://docs.github.com/en/actions/using-workflows/storing-workflow-data-as-artifacts" },
+              { title: "Screenshots | Playwright", url: "https://playwright.dev/docs/screenshots" },
+            ],
+          },
+        ],
+      },
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-5w",
+            content: "Web search results for query: playwright github actions upload-artifact screenshots",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
       uuid: "msg-10",
       timestamp: new Date(NOW - 8 * MIN).toISOString(),
       message: {
