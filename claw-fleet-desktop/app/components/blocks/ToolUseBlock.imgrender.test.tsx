@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// DEBUG(image-render): end-to-end render probe for image `Read` tool cards.
+// End-to-end render coverage for image `Read` tool cards.
 // Renders the REAL ToolUseBlock and asserts an <img> with the image's data URI
 // appears — (A) for a full inline image, (B) for a truncated image recovered
 // via the on-expand refetch. jsdom does not decode images, so we assert the
