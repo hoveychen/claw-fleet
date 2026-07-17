@@ -3,8 +3,27 @@
 // relay method (no watcher push over the relay); live thinking polls its own
 // sidecar method while the session is working.
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, Cog, MessageSquareDashed, Puzzle, Sparkles } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Bot,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleCheck,
+  CircleHelp,
+  Clock,
+  Cog,
+  FileText,
+  Globe,
+  ListTodo,
+  MessageSquareDashed,
+  Pencil,
+  Puzzle,
+  Search,
+  Sparkles,
+  Terminal,
+  Wrench,
+} from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
@@ -36,6 +55,7 @@ import {
 } from "./SessionDetailTabs";
 import { parseSkillInjection } from "../skillInjection";
 import { groupMetaRuns } from "./metaGrouping";
+import { countSteps, groupWorkRuns, isDecisionTool, workRunTitle } from "./workRuns";
 import styles from "./SessionDetailView.module.css";
 
 const TAIL_POLL_MS = 2500;
@@ -316,6 +336,179 @@ function LazyMarkdown({ text, bare }: { text: string; bare?: boolean }) {
   );
 }
 
+// ── Rail steps (mirrors the desktop's de-chromed work-block language) ────────
+
+const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch"]);
+const SHELL_TOOLS = new Set(["Bash", "exec", "exec_command", "write_stdin"]);
+const WEB_TOOLS = new Set(["WebSearch", "WebFetch"]);
+const SEARCH_TOOLS = new Set(["Grep", "Glob", "Explore", "LSP"]);
+const AGENT_TOOLS = new Set(["Agent", "spawn_agent", "wait_agent"]);
+const PLAN_TOOLS = new Set(["TodoWrite", "TodoRead", "update_plan"]);
+
+function railToolIcon(name: string): ReactNode {
+  if (SHELL_TOOLS.has(name)) return <Terminal />;
+  if (EDIT_TOOLS.has(name)) return <Pencil />;
+  if (name === "Read") return <FileText />;
+  if (SEARCH_TOOLS.has(name)) return <Search />;
+  if (WEB_TOOLS.has(name)) return <Globe />;
+  if (AGENT_TOOLS.has(name)) return <Bot />;
+  if (PLAN_TOOLS.has(name)) return <ListTodo />;
+  if (isDecisionTool(name)) return <CircleHelp />;
+  return <Wrench />;
+}
+
+function RailStep({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className={styles.railStep}>
+      <span className={styles.railIcon} aria-hidden>
+        {icon}
+      </span>
+      <div className={styles.railBody}>{children}</div>
+    </div>
+  );
+}
+
+/** Thinking as plain muted prose, clamped behind a bottom fade when it
+ *  overflows; tap toggles the full text. The fade only draws when there is
+ *  hidden text for it to hint at. */
+function ClampedThinking({
+  text,
+  open,
+  onToggle,
+}: {
+  text: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) setOverflowing(el.scrollHeight > el.clientHeight + 1);
+  }, [text, open]);
+  return (
+    <div
+      ref={ref}
+      className={styles.thinkText}
+      data-clamped={!open || undefined}
+      data-fade={(!open && overflowing) || undefined}
+      onClick={onToggle}
+    >
+      {text}
+    </div>
+  );
+}
+
+/** One assistant record's blocks in the rail language: thinking and tool calls
+ *  as icon-guttered steps, prose flush and full width — same convention as the
+ *  desktop transcript. */
+function AssistantBlocks({
+  blocks,
+  index,
+  expandedThinking,
+  onToggleThinking,
+}: {
+  blocks: ContentBlock[];
+  index: number;
+  expandedThinking: Set<number>;
+  onToggleThinking: (key: number) => void;
+}) {
+  return (
+    <>
+      {blocks.map((b, j) => {
+        if (b.type === "thinking" && b.thinking?.trim()) {
+          const key = index * 1000 + j;
+          return (
+            <RailStep key={j} icon={<Clock />}>
+              <ClampedThinking
+                text={b.thinking}
+                open={expandedThinking.has(key)}
+                onToggle={() => onToggleThinking(key)}
+              />
+            </RailStep>
+          );
+        }
+        if (b.type === "text" && b.text?.trim()) {
+          return <LazyMarkdown key={j} text={b.text} />;
+        }
+        if (b.type === "tool_use") {
+          const name = (b as { name?: string }).name ?? "";
+          const summary = toolSummary(b);
+          return (
+            <RailStep key={j} icon={railToolIcon(name)}>
+              <div className={styles.toolLine} title={name}>
+                {summary || name}
+              </div>
+            </RailStep>
+          );
+        }
+        return null;
+      })}
+    </>
+  );
+}
+
+/**
+ * A run of ≥2 adjacent pure-work records folded behind one summary line —
+ * the mobile counterpart of the desktop WorkRunBlock. `live` (the run is the
+ * transcript's working tail) opens the band and shimmers the headline; a
+ * finished run closes with the Done check.
+ */
+function WorkRunBand({
+  msgs,
+  baseIndex,
+  expandedThinking,
+  onToggleThinking,
+  live,
+}: {
+  msgs: RawMessage[];
+  baseIndex: number;
+  expandedThinking: Set<number>;
+  onToggleThinking: (key: number) => void;
+  live: boolean;
+}) {
+  const [open, setOpen] = useState(live);
+  useEffect(() => setOpen(live), [live]);
+  const last = msgs[msgs.length - 1];
+  // The relay's slim tail strips `stop_reason`, so mobile can't see whether the
+  // last record has terminated — `live` (working session + tail run) is the
+  // approximation: the band streams while live and closes with Done after.
+  const title = workRunTitle(msgs) ?? t("处理任务");
+  return (
+    <div className={styles.assistantRow}>
+      <button className={styles.bandHeader} onClick={() => setOpen((o) => !o)}>
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <span className={`${styles.bandTitle}${live ? ` ${styles.shimmer}` : ""}`}>
+          {title}
+        </span>
+        <span className={styles.bandSteps}>{t("{0} 步", countSteps(msgs))}</span>
+      </button>
+      {open && (
+        <div className={styles.bandBody}>
+          {msgs.map((m, i) => (
+            <AssistantBlocks
+              key={(m as { uuid?: string }).uuid ?? i}
+              blocks={blocksOf(m)}
+              index={baseIndex + i}
+              expandedThinking={expandedThinking}
+              onToggleThinking={onToggleThinking}
+            />
+          ))}
+          {!live && (
+            <div className={`${styles.railStep} ${styles.doneStep}`}>
+              <span className={`${styles.railIcon} ${styles.doneIcon}`} aria-hidden>
+                <CircleCheck />
+              </span>
+              <div className={styles.doneLabel}>{t("完成")}</div>
+            </div>
+          )}
+        </div>
+      )}
+      <div className={styles.rowTime}>{fmtTime(last?.timestamp)}</div>
+    </div>
+  );
+}
+
 interface MessageRowProps {
   msg: RawMessage;
   index: number;
@@ -379,35 +572,12 @@ const MessageRow = memo(function MessageRow({
     .join("\n\n");
   return (
     <div className={styles.assistantRow}>
-      {blocks.map((b, j) => {
-        if (b.type === "thinking" && b.thinking?.trim()) {
-          const key = index * 1000 + j;
-          const open = expandedThinking.has(key);
-          return (
-            <div key={j} className={styles.thinkingBlock} data-open={open}>
-              <button className={styles.thinkingToggle} onClick={() => onToggleThinking(key)}>
-                <Sparkles size={13} />
-                {t("思考")}
-                {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              </button>
-              {open && <div className={styles.thinkingBody}>{b.thinking}</div>}
-            </div>
-          );
-        }
-        if (b.type === "text" && b.text?.trim()) {
-          return <LazyMarkdown key={j} text={b.text} />;
-        }
-        if (b.type === "tool_use") {
-          const summary = toolSummary(b);
-          return (
-            <div key={j} className={styles.toolChip}>
-              <span className={styles.toolName}>{b.name}</span>
-              {summary && <span className={styles.toolSummary}>{summary}</span>}
-            </div>
-          );
-        }
-        return null;
-      })}
+      <AssistantBlocks
+        blocks={blocks}
+        index={index}
+        expandedThinking={expandedThinking}
+        onToggleThinking={onToggleThinking}
+      />
       <div className={styles.rowTime}>
         {assistantText && <CopyButton text={assistantText} />}
         {fmtTime(msg.timestamp)}
@@ -696,29 +866,47 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
             {t("加载更早的消息")}
           </button>
         )}
-        {groupMetaRuns(mainRows).map((unit) => {
-          if (unit.kind === "meta-group") {
-            // One card for the whole run of adjacent system-context turns.
-            const segments = unit.msgs.map(userText).filter(Boolean);
-            if (segments.length === 0) return null;
-            const last = unit.msgs[unit.msgs.length - 1];
+        {(() => {
+          const units = groupWorkRuns(groupMetaRuns(mainRows));
+          return units.map((unit, unitIdx) => {
+            if (unit.kind === "work-group") {
+              // A run of pure-work records folds behind one summary line; the
+              // working tail's run opens itself and shimmers its headline.
+              const live = working && unitIdx === units.length - 1;
+              return (
+                <WorkRunBand
+                  key={unit.startLocal}
+                  msgs={unit.msgs}
+                  baseIndex={unit.startLocal}
+                  expandedThinking={expandedThinking}
+                  onToggleThinking={toggleThinking}
+                  live={live}
+                />
+              );
+            }
+            if (unit.kind === "meta-group") {
+              // One card for the whole run of adjacent system-context turns.
+              const segments = unit.msgs.map(userText).filter(Boolean);
+              if (segments.length === 0) return null;
+              const last = unit.msgs[unit.msgs.length - 1];
+              return (
+                <div key={unit.startLocal} className={styles.assistantRow}>
+                  <MetaFoldCard segments={segments} />
+                  <div className={styles.rowTime}>{fmtTime(last.timestamp)}</div>
+                </div>
+              );
+            }
             return (
-              <div key={unit.startLocal} className={styles.assistantRow}>
-                <MetaFoldCard segments={segments} />
-                <div className={styles.rowTime}>{fmtTime(last.timestamp)}</div>
-              </div>
+              <MessageRow
+                key={unit.startLocal}
+                msg={unit.msg}
+                index={unit.startLocal}
+                expandedThinking={expandedThinking}
+                onToggleThinking={toggleThinking}
+              />
             );
-          }
-          return (
-            <MessageRow
-              key={unit.startLocal}
-              msg={unit.msg}
-              index={unit.startLocal}
-              expandedThinking={expandedThinking}
-              onToggleThinking={toggleThinking}
-            />
-          );
-        })}
+          });
+        })()}
         {liveThinking && (
           <div className={styles.liveThinking}>
             <div className={styles.liveThinkingHead}>
