@@ -130,6 +130,76 @@
   user-select: none;
 }
 
+/* apply_patch: touched-file header over the raw patch body */
+.patch_files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.patch_file {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+}
+
+.patch_op {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-dim);
+}
+
+.patch_op[data-op="Add"] { color: var(--color-success); }
+.patch_op[data-op="Delete"] { color: var(--color-error-fg, #d05a5a); }
+
+/* update_plan: checklist mirroring the TodoWrite body */
+.plan_list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.plan_item {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.plan_mark {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  font-size: 11px;
+}
+
+.plan_text { word-break: break-word; }
+
+.plan_done .plan_text {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.plan_done .plan_mark { color: var(--color-success); }
+
+.plan_current {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.plan_current .plan_mark { color: var(--color-warning, #dcaa3c); }
+
 /* Result */
 .result {
   padding: 8px 10px;
