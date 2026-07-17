@@ -2853,6 +2853,53 @@ mod tests {
         );
     }
 
+    /// The stall predicate: a live pid with a rollout silent past the
+    /// threshold is stalled; fresh writes, a missing pid (turn already ended),
+    /// or no observable timestamp at all must all read as not-stalled.
+    #[test]
+    fn evaluate_codex_stall_thresholds() {
+        use super::{evaluate_codex_stall, CODEX_STALL_SILENCE_SECS};
+        use std::time::{Duration, SystemTime};
+
+        let now = SystemTime::now();
+        let silent = now - Duration::from_secs(CODEX_STALL_SILENCE_SECS + 5);
+        let fresh = now - Duration::from_secs(30);
+
+        // Alive + long-silent → stalled, silence reported.
+        let hit = evaluate_codex_stall(Some(42), Some(silent), now);
+        assert_eq!(hit.map(|(pid, _)| pid), Some(42));
+        assert!(hit.unwrap().1 >= CODEX_STALL_SILENCE_SECS);
+
+        // Alive + recent write → healthy.
+        assert!(evaluate_codex_stall(Some(42), Some(fresh), now).is_none());
+
+        // No live process → nothing to interrupt.
+        assert!(evaluate_codex_stall(None, Some(silent), now).is_none());
+
+        // No observable timestamp → stay hands-off rather than guess.
+        assert!(evaluate_codex_stall(Some(42), None, now).is_none());
+    }
+
+    /// The silence floor must use the freshest of rollout mtime and spawn-note
+    /// time: a just-resumed turn whose rollout mtime is old (the hang happened
+    /// before its first write) must not be interrupted right away.
+    #[test]
+    fn evaluate_codex_stall_spawn_floor() {
+        use super::{evaluate_codex_stall, CODEX_STALL_SILENCE_SECS};
+        use std::time::{Duration, SystemTime};
+
+        let now = SystemTime::now();
+        let old_mtime = now - Duration::from_secs(CODEX_STALL_SILENCE_SECS * 2);
+        let fresh_spawn = now - Duration::from_secs(60);
+
+        // Caller computes last_write = max(mtime, spawn) — replicate that here.
+        let last_write = Some(old_mtime.max(fresh_spawn));
+        assert!(
+            evaluate_codex_stall(Some(42), last_write, now).is_none(),
+            "fresh spawn must floor the silence even with an old rollout mtime"
+        );
+    }
+
     /// A freshly spawned `codex exec` mints its thread id *after* launch, so that
     /// id is in no argv while its first turn runs — the argv match above reads it
     /// as dead. The spawn-pid note closes that gap: liveness falls back to "the
@@ -3385,6 +3432,184 @@ pub fn refresh_dead_codex_liveness(sessions: &mut [crate::session::SessionInfo])
     }
     let processes = scan_codex_processes();
     reconcile_codex_liveness(sessions, &processes)
+}
+
+// ── Stall watchdog: alive-but-hung Codex turns ───────────────────────────────
+
+/// Rollout silence (seconds) past which a live `codex exec` turn is judged
+/// stalled. codex's streaming model request has NO timeout in the
+/// request-header phase (verified rust-v0.144.5: streaming `responses`
+/// requests default `timeout: None`; only the stream body gets the 300s idle
+/// timeout, and `ModelProviderInfo` exposes no knob for the header phase), so
+/// a proxy that silently drops a connection strands the process forever:
+/// alive, all threads parked, rollout silent. `codex exec` runs exactly one
+/// turn per process, so a live process plus a long-silent rollout means the
+/// turn is stuck — unless it is legitimately blocked on a human (see
+/// [`session_has_pending_decision`]).
+///
+/// The threshold sits above codex's own 300s stream-idle timeout plus retry
+/// backoff so every self-recovery path gets to run first. Healthy long
+/// commands never trip it: wait/exec yields are clamped to 30s
+/// (`MAX_YIELD_TIME_MS` in codex), so a working turn writes its rollout every
+/// ≲30s, and a long thinking block is bounded by the stream idle timeout.
+pub const CODEX_STALL_SILENCE_SECS: u64 = 600;
+
+/// Marker prefix for the watchdog's queued resume note, used to keep the note
+/// idempotent across repeated fires.
+pub const CODEX_STALL_NOTE_PREFIX: &str = "[Fleet stall watchdog]";
+
+/// A live Codex turn the watchdog judged stalled.
+#[derive(Debug, Clone)]
+pub struct StalledCodexTurn {
+    pub session_id: String,
+    pub workspace_path: String,
+    pub pid: u32,
+    pub silence_secs: u64,
+}
+
+/// Pure stall predicate, split out for unit tests. `last_write` is the last
+/// observable progress mark: rollout mtime floored by the spawn-note time (a
+/// freshly resumed turn may take a while before its first rollout write, and
+/// the rollout mtime alone would count that pre-spawn stretch as silence).
+/// Returns the silence in seconds when it crosses the threshold.
+fn evaluate_codex_stall(
+    pid: Option<u32>,
+    last_write: Option<SystemTime>,
+    now: SystemTime,
+) -> Option<(u32, u64)> {
+    let pid = pid?;
+    // No observable timestamp at all → cannot judge silence; stay hands-off.
+    let last = last_write?;
+    let silence = now.duration_since(last).unwrap_or_default().as_secs();
+    (silence >= CODEX_STALL_SILENCE_SECS).then_some((pid, silence))
+}
+
+/// True when any decision-panel channel holds an unanswered request for this
+/// session. A turn blocked on `fleet__ask` / guard / elicitation / plan
+/// approval / permission prompt writes nothing to its rollout (the Begin
+/// events are transient in codex's rollout persistence policy), so from the
+/// outside it looks exactly like a stall — these must be exempted or the
+/// watchdog would interrupt sessions waiting on the user. Parked cards are
+/// deliberately NOT counted: parking means the blocking producer already
+/// timed out and returned, so the turn is no longer waiting on that card.
+pub fn session_has_pending_decision(session_id: &str) -> bool {
+    let guard = crate::guard::list_pending_requests()
+        .iter()
+        .filter_map(|id| crate::guard::read_request(id))
+        .any(|r| r.session_id == session_id);
+    if guard {
+        return true;
+    }
+    let elicitation = crate::elicitation::list_pending_requests()
+        .iter()
+        .filter_map(|id| crate::elicitation::read_request(id))
+        .any(|r| r.session_id == session_id);
+    if elicitation {
+        return true;
+    }
+    let fleet_ask = crate::mcp_ipc::list_pending_requests()
+        .iter()
+        .filter_map(|id| crate::mcp_ipc::read_request(id))
+        .any(|r| r.session_id == session_id);
+    if fleet_ask {
+        return true;
+    }
+    let a2ui = crate::mcp_a2ui_ipc::list_pending_requests()
+        .iter()
+        .filter_map(|id| crate::mcp_a2ui_ipc::read_request(id))
+        .any(|r| r.session_id == session_id);
+    if a2ui {
+        return true;
+    }
+    let plan = crate::plan_approval::list_pending_requests()
+        .iter()
+        .filter_map(|id| crate::plan_approval::read_request(id))
+        .any(|r| r.session_id == session_id);
+    if plan {
+        return true;
+    }
+    crate::permission_prompt_ipc::list_pending_requests()
+        .iter()
+        .filter_map(|id| crate::permission_prompt_ipc::read_request(id))
+        .any(|r| r.session_id == session_id)
+}
+
+/// Detect stalled live Codex turns among `sessions`. Cheap checks (fresh
+/// process table, rollout mtime) run first; the pending-decision exemption —
+/// six directory listings — is consulted only for sessions already past the
+/// silence threshold, which is rare.
+pub fn detect_stalled_codex_turns(
+    sessions: &[crate::session::SessionInfo],
+) -> Vec<StalledCodexTurn> {
+    let codex: Vec<&crate::session::SessionInfo> = sessions
+        .iter()
+        .filter(|s| s.agent_source == crate::codex_launch::FLEET_AGENT_SOURCE_CODEX)
+        .collect();
+    if codex.is_empty() {
+        return Vec::new();
+    }
+    let now = SystemTime::now();
+    let mut out = Vec::new();
+    for s in codex {
+        // Fresh liveness — the snapshot's proc_alive can lag in both directions.
+        let pid = codex_session_pid(&s.id);
+        if pid.is_none() {
+            continue;
+        }
+        let mtime = resolve_uri(&s.jsonl_path)
+            .and_then(|p| fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        let spawn_at = crate::codex_launch::spawn_pid_recorded_at(&s.id);
+        let last_write = match (mtime, spawn_at) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        let Some((pid, silence_secs)) = evaluate_codex_stall(pid, last_write, now) else {
+            continue;
+        };
+        if session_has_pending_decision(&s.id) {
+            continue;
+        }
+        out.push(StalledCodexTurn {
+            session_id: s.id.clone(),
+            workspace_path: s.workspace_path.clone(),
+            pid,
+            silence_secs,
+        });
+    }
+    out
+}
+
+fn codex_stall_resume_note(silence_secs: u64) -> String {
+    format!(
+        "{CODEX_STALL_NOTE_PREFIX} 上一轮模型请求疑似挂死（rollout 静默 {} 分钟，进程仍在但无任何事件），已被自动中断。请核对上一轮已完成的进度并从中断处继续；若工作其实已完成，请补上最终汇报。",
+        silence_secs / 60
+    )
+}
+
+/// Interrupt a stalled turn (SIGINT — codex records `turn_aborted` and exits,
+/// keeping the rollout resumable) and queue a continuation note so the
+/// standard drain pipeline (`pending_message::maybe_drain`, which re-checks
+/// process death itself) restarts the session. The note is queued at most
+/// once, and a user-queued follow-up is left untouched — the note is appended
+/// alongside it, so both reach the resumed turn in one prompt.
+pub fn interrupt_stalled_codex_turn(stall: &StalledCodexTurn) -> Result<(), String> {
+    crate::session::interrupt_pid_impl(stall.pid)?;
+    let already_noted = crate::pending_message::get(&stall.session_id)
+        .map(|q| {
+            q.messages
+                .iter()
+                .any(|m| m.starts_with(CODEX_STALL_NOTE_PREFIX))
+        })
+        .unwrap_or(false);
+    if already_noted {
+        return Ok(());
+    }
+    crate::pending_message::enqueue(
+        &stall.session_id,
+        &stall.workspace_path,
+        &codex_stall_resume_note(stall.silence_secs),
+    )
 }
 
 fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Option<u32>, bool) {
