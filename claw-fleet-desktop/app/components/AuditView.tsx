@@ -165,6 +165,15 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   const [rules, setRules] = useState<AuditRuleInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<AuditRiskLevel | "all">("all");
+  // "Unread only" is orthogonal to the risk-level filter but presented as one
+  // mutually-exclusive chip group with All/CRIT/HIGH/MED: picking any risk chip
+  // turns it off, picking the unread chip turns it back on and resets to "all".
+  // Default on so the view opens straight on the events that need attention.
+  const [unreadOnly, setUnreadOnly] = useState(true);
+  // Set when we auto-fell-back to "all" because there was nothing unread — drives
+  // a one-line hint so an empty unread view never looks broken. Cleared the moment
+  // the user picks any chip themselves.
+  const [autoRevealed, setAutoRevealed] = useState(false);
   const [catFilter, setCatFilter] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
@@ -195,6 +204,18 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   }, [setCriticalEvents]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Once data is in, if there's nothing unread, fall back to "all" so the default
+  // unread-only view never opens empty; also fires when the user reads the last
+  // unread critical event. Only nudges while unreadOnly is still on — once the
+  // user picks any chip we leave their choice alone.
+  useEffect(() => {
+    if (loading) return;
+    if (unreadOnly && unreadCriticalCount === 0) {
+      setUnreadOnly(false);
+      setAutoRevealed(true);
+    }
+  }, [loading, unreadOnly, unreadCriticalCount]);
 
   const ruleByTag = useMemo(() => {
     const map = new Map<string, AuditRuleInfo>();
@@ -254,6 +275,9 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   }, [summary]);
 
   const filtered = (summary?.events ?? []).filter((e) => {
+    // Unread only = unread critical events (critical is the only level with a
+    // read concept; high/medium have none, so they never qualify as "unread").
+    if (unreadOnly && !(e.riskLevel === "critical" && !isRead(e))) return false;
     if (filter !== "all" && e.riskLevel !== filter) return false;
     if (catFilter && resolveFor(e).category !== catFilter) return false;
     if (workspaceFilter !== "all" && e.workspacePath !== workspaceFilter) return false;
@@ -345,19 +369,26 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
       subBar={
         <>
         <FilterChip
+          label={t("audit.unread_only")}
+          count={unreadCriticalCount}
+          active={unreadOnly}
+          tone={RISK_CLASS.critical}
+          onClick={() => { setUnreadOnly(true); setFilter("all"); setAutoRevealed(false); }}
+        />
+        <FilterChip
           label={t("audit.all")}
           count={summary?.events.length ?? 0}
-          active={filter === "all"}
-          onClick={() => setFilter("all")}
+          active={!unreadOnly && filter === "all"}
+          onClick={() => { setUnreadOnly(false); setFilter("all"); setAutoRevealed(false); }}
         />
         {(["critical", "high", "medium"] as const).map((level) => (
           <FilterChip
             key={level}
             label={RISK_LABELS[level]}
             count={counts[level]}
-            active={filter === level}
+            active={!unreadOnly && filter === level}
             tone={RISK_CLASS[level]}
-            onClick={() => setFilter(level)}
+            onClick={() => { setUnreadOnly(false); setFilter(level); setAutoRevealed(false); }}
           />
         ))}
         {workspaces.length > 1 && (
@@ -430,6 +461,9 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
               </div>
             </div>
           )}
+          {!loading && autoRevealed && (
+            <p className={styles.unread_hint}>{t("audit.unread_auto_revealed")}</p>
+          )}
           {!loading && hasEvents && filtered.length === 0 && (
             <p className={styles.empty}>{t("audit.no_matching_events")}</p>
           )}
@@ -447,13 +481,14 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
               <div className={styles.card_list}>
                 {events.map((event, i) => {
                   const read = event.riskLevel === "critical" && isRead(event);
+                  const unread = event.riskLevel === "critical" && !isRead(event);
                   const active = selectedEvent === event;
                   const rv = resolveFor(event);
                   const CatIcon = categoryIcon(rv.category);
                   return (
                     <button
                       key={`${sessionId}-${i}`}
-                      className={`${styles.card} ${active ? styles.card_active : ""} ${read ? styles.card_read : ""}`}
+                      className={`${styles.card} ${active ? styles.card_active : ""} ${read ? styles.card_read : ""} ${unread ? styles.card_unread : ""}`}
                       onClick={() => setSelectedEvent(event)}
                     >
                       <span className={`${styles.risk_badge} ${styles[RISK_CLASS[event.riskLevel]]}`}>

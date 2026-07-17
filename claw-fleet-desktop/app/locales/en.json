@@ -319,6 +319,8 @@
     "no_events": "No non-trivial operations found.",
     "no_matching_events": "No operations match the current filter.",
     "overview_title": "Risk Overview",
+    "unread_only": "Unread only",
+    "unread_auto_revealed": "No unread events — showing all.",
     "all": "All",
     "all_workspaces": "All workspaces",
     "refresh": "Refresh",
