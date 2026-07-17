@@ -4131,7 +4131,11 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                         let mut changes: Vec<(&str, &Value)> = payload
                             .get("changes")
                             .and_then(|c| c.as_object())
-                            .map(|map| map.iter().map(|(path, meta)| (path.as_str(), meta)).collect())
+                            .map(|map| {
+                                map.iter()
+                                    .map(|(path, meta)| (path.as_str(), meta))
+                                    .collect()
+                            })
                             .unwrap_or_default();
                         changes.sort_by_key(|(path, _)| *path);
 
