@@ -1523,7 +1523,7 @@
     "llm_provider": "LLM 分析引擎",
     "llm_provider_select": "默认 LLM 倾向",
     "llm_provider_routing_desc": "所有 Fleet AI 功能优先使用所选引擎；额度触顶或调用失败时自动切换",
-    "llm_model_alignment_desc": "跨引擎按档位对齐：Haiku ↔ Luna、Sonnet ↔ Terra、Opus/Fable ↔ Sol",
+    "llm_model_alignment_desc": "选项中斜杠后为同档位的另一引擎模型；当前引擎额度触顶时自动切换到它。",
     "llm_daily_report_preference": "日报 LLM 倾向",
     "llm_daily_report_preference_desc": "优先使用所选引擎；额度触顶或调用失败时自动切换到另一引擎",
     "llm_fast_model": "快速模型",

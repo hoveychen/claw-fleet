@@ -1526,7 +1526,7 @@
     "llm_provider": "LLM Provider",
     "llm_provider_select": "Default LLM preference",
     "llm_provider_routing_desc": "All Fleet AI features prefer this provider, then switch automatically on quota exhaustion or call failure",
-    "llm_model_alignment_desc": "Cross-provider tiers: Haiku ↔ Luna, Sonnet ↔ Terra, Opus/Fable ↔ Sol",
+    "llm_model_alignment_desc": "After the slash is the same-tier model in the other engine; Fleet switches to it when the current engine hits its quota.",
     "llm_daily_report_preference": "Daily report preference",
     "llm_daily_report_preference_desc": "Prefer this provider, then switch automatically if its quota is exhausted or the call fails",
     "llm_fast_model": "Fast model",
