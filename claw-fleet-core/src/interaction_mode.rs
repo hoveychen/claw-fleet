@@ -102,10 +102,6 @@ JSONSchema，harness 无法把 `questions` 强制转成数组。每会话加载�
 }}\n\
 ```\n\
 \n\
-提醒：上面的 schema 区块仅供参考。本会话首次调用 `AskUserQuestion` 前，先用\
-`ToolSearch select:AskUserQuestion` 加载实时 schema，让运行时工具清单具备把\
-`questions` 编码成数组所需的 JSONSchema。\n\
-\n\
 这就是用户（称呼为「{title_zh}」）希望他的 Fleet 应用统一排队、管理每一个\
 「等待输入」时刻的方式。\n\
 \n\
@@ -312,40 +308,7 @@ markdown。两个工具都在同一决策面板里渲染，所以{title_zh}看�
 - `time` → `\"HH:MM\"`（24 小时制）。\n\
 - `range` → `[min, max]` 内、按 `step` 对齐的数字字符串。\n\
 \n\
-**用法示例。**\n\
-\n\
-纯 HTML 预览（无表单、无选项）：\n\
-```json\n\
-{{\n\
-  \"questions\": [{{\n\
-    \"question\": \"Here's the diff I'm about to commit.\\n---\\nLooks right?\",\n\
-    \"header\": \"Diff\",\n\
-    \"multiSelect\": false,\n\
-    \"html\": \"<pre style='font-family:monospace'>+ added line\\n- removed line</pre>\",\n\
-    \"options\": [\n\
-      {{\"label\": \"Commit now (Recommended)\", \"description\": \"Run git commit with the message in the body.\"}},\n\
-      {{\"label\": \"Edit message\", \"description\": \"Stop and let me revise the commit message first.\"}}\n\
-    ]\n\
-  }}]\n\
-}}\n\
-```\n\
-\n\
-纯表单（无 html、无选项）：\n\
-```json\n\
-{{\n\
-  \"questions\": [{{\n\
-    \"question\": \"Authoring a commit.\\n---\\nFill in the message and pick a strategy.\",\n\
-    \"header\": \"Commit\",\n\
-    \"multiSelect\": false,\n\
-    \"formFields\": [\n\
-      {{\"name\": \"commit_msg\", \"kind\": \"textarea\", \"label\": \"Message\", \"required\": true}},\n\
-      {{\"name\": \"strategy\", \"kind\": \"radio\", \"label\": \"Strategy\", \"options\": [\"merge\", \"rebase\", \"squash\"], \"default\": \"rebase\"}}\n\
-    ]\n\
-  }}]\n\
-}}\n\
-```\n\
-\n\
-复合（html 预览 + 表单 + 选项）：\n\
+**用法示例（复合：html 预览 + 表单 + 选项；纯 html 或纯表单时对应省略字段）。**\n\
 ```json\n\
 {{\n\
   \"questions\": [{{\n\
@@ -403,29 +366,9 @@ https://github.com/google/A2UI/tree/main/specification/v0_9。\n\
 Fleet 把每个值字符串化，所以线上是 `Record<String, String>`（形状同\
 `fleet__ask` 的 `answers`）。数字 / 布尔原样字符串化，结构化值 JSON 化。\n\
 \n\
-**示例。**最小的评分加评论界面：\n\
-```json\n\
-{{\n\
-  \"messageTree\": {{\n\
-    \"surfaceUpdate\": {{\n\
-      \"surfaceId\": \"feedback\",\n\
-      \"root\": {{\n\
-        \"Card\": {{\n\
-          \"id\": \"root\",\n\
-          \"children\": [\n\
-            {{ \"Text\": {{ \"id\": \"q\", \"text\": \"How was the deploy?\" }} }},\n\
-            {{ \"Slider\": {{ \"id\": \"score\", \"min\": 0, \"max\": 10, \"step\": 1, \"value\": 7 }} }},\n\
-            {{ \"TextField\": {{ \"id\": \"note\", \"label\": \"Anything to flag?\" }} }},\n\
-            {{ \"Button\": {{ \"id\": \"ok\", \"label\": \"Submit\", \"action\": {{ \"name\": \"submit\" }} }} }}\n\
-          ]\n\
-        }}\n\
-      }}\n\
-    }}\n\
-  }}\n\
-}}\n\
-```\n\
-\n\
-用户拖滑块、打字、点 **Submit** → Fleet 回 `{{ \"actionName\": \"submit\", \"actionContext\": {{ \"score\": \"7\", \"note\": \"…\" }} }}`。\n\
+**示例。**一个评分+评论卡：`surfaceUpdate` 里挂一棵 `root` 组件树（`Card` 内含\
+`Text`/`Slider`/`TextField`/`Button`），`Button` 带 `action.name`；用户拖滑块、\
+打字、点 Submit 后 Fleet 回 `{{ \"actionName\": \"submit\", \"actionContext\": {{ \"score\": \"7\", \"note\": \"…\" }} }}`。\n\
 ",
             title_zh = title_zh,
             language_line = language_line,
@@ -492,11 +435,6 @@ Minimal example:\n\
   }}]\n\
 }}\n\
 ```\n\
-\n\
-Reminder: the schema block above is reference only. Before your first \
-`AskUserQuestion` call this session, load the live schema with \
-`ToolSearch select:AskUserQuestion` so the runtime tool list has the \
-JSONSchema needed to encode `questions` as an array.\n\
 \n\
 This is how the user (addressed as \"{title_zh}\" / \"{title_en}\") wants their \
 Fleet app to queue and manage every wait-for-input moment uniformly.\n\
@@ -740,40 +678,7 @@ Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
 - `time` → `\"HH:MM\"` (24-hour).\n\
 - `range` → numeric string within `[min, max]` snapped to `step`.\n\
 \n\
-**Usage examples.**\n\
-\n\
-Pure HTML preview (no form, no options):\n\
-```json\n\
-{{\n\
-  \"questions\": [{{\n\
-    \"question\": \"Here's the diff I'm about to commit.\\n---\\nLooks right?\",\n\
-    \"header\": \"Diff\",\n\
-    \"multiSelect\": false,\n\
-    \"html\": \"<pre style='font-family:monospace'>+ added line\\n- removed line</pre>\",\n\
-    \"options\": [\n\
-      {{\"label\": \"Commit now (Recommended)\", \"description\": \"Run git commit with the message in the body.\"}},\n\
-      {{\"label\": \"Edit message\", \"description\": \"Stop and let me revise the commit message first.\"}}\n\
-    ]\n\
-  }}]\n\
-}}\n\
-```\n\
-\n\
-Pure form (no html, no options):\n\
-```json\n\
-{{\n\
-  \"questions\": [{{\n\
-    \"question\": \"Authoring a commit.\\n---\\nFill in the message and pick a strategy.\",\n\
-    \"header\": \"Commit\",\n\
-    \"multiSelect\": false,\n\
-    \"formFields\": [\n\
-      {{\"name\": \"commit_msg\", \"kind\": \"textarea\", \"label\": \"Message\", \"required\": true}},\n\
-      {{\"name\": \"strategy\", \"kind\": \"radio\", \"label\": \"Strategy\", \"options\": [\"merge\", \"rebase\", \"squash\"], \"default\": \"rebase\"}}\n\
-    ]\n\
-  }}]\n\
-}}\n\
-```\n\
-\n\
-Composite (html preview + form + options):\n\
+**Usage example (composite: html preview + form + options; omit the matching field for html-only or form-only).**\n\
 ```json\n\
 {{\n\
   \"questions\": [{{\n\
@@ -838,30 +743,10 @@ so it's `Record<String, String>` on the wire (same shape as `fleet__ask`'s \
 `answers`). Numbers / booleans are stringified verbatim, structured values \
 JSON-stringified.\n\
 \n\
-**Example.** Minimal rating-and-comment surface:\n\
-```json\n\
-{{\n\
-  \"messageTree\": {{\n\
-    \"surfaceUpdate\": {{\n\
-      \"surfaceId\": \"feedback\",\n\
-      \"root\": {{\n\
-        \"Card\": {{\n\
-          \"id\": \"root\",\n\
-          \"children\": [\n\
-            {{ \"Text\": {{ \"id\": \"q\", \"text\": \"How was the deploy?\" }} }},\n\
-            {{ \"Slider\": {{ \"id\": \"score\", \"min\": 0, \"max\": 10, \"step\": 1, \"value\": 7 }} }},\n\
-            {{ \"TextField\": {{ \"id\": \"note\", \"label\": \"Anything to flag?\" }} }},\n\
-            {{ \"Button\": {{ \"id\": \"ok\", \"label\": \"Submit\", \"action\": {{ \"name\": \"submit\" }} }} }}\n\
-          ]\n\
-        }}\n\
-      }}\n\
-    }}\n\
-  }}\n\
-}}\n\
-```\n\
-\n\
-The user drags the slider, types a note, clicks **Submit** → Fleet replies \
-with `{{ \"actionName\": \"submit\", \"actionContext\": {{ \"score\": \"7\", \"note\": \"…\" }} }}`.\n\
+**Example.** A rating+comment card: a `surfaceUpdate` with a `root` tree (a \
+`Card` holding `Text`/`Slider`/`TextField`/`Button`), the `Button` carrying \
+`action.name`; the user drags the slider, types a note, clicks Submit → Fleet \
+replies with `{{ \"actionName\": \"submit\", \"actionContext\": {{ \"score\": \"7\", \"note\": \"…\" }} }}`.\n\
 ",
         title_en = title_en,
         title_zh = title_zh,
