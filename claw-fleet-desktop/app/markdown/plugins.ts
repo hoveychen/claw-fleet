@@ -85,7 +85,11 @@ const schema = {
  * plugin could see the tree, the `**` is already plain text.
  */
 export const safeRemarkPlugins: PluggableList = [
-  remarkGfm,
+  // A bare home path starts with `~`. With remark-gfm's permissive default,
+  // two paths such as `~/.claude/skills` and `~/.codex/skills` can swallow
+  // everything between them into a <del>. GFM's standard `~~text~~` form
+  // remains enabled when the single-tilde extension is disabled.
+  [remarkGfm, { singleTilde: false }],
   remarkCjkFriendly,
   remarkMath,
   remarkCjkAutolinkFix,
