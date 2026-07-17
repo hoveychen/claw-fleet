@@ -446,6 +446,7 @@
     "back_short": "返回",
     "section_folders": "目录",
     "section_docs": "文档",
+    "section_recent": "最近更新",
     "doc_count": "{{count}} 篇",
     "current": "当前",
     "move_failed": "移动失败：{{error}}",
