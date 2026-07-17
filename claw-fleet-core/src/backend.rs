@@ -413,6 +413,10 @@ pub trait Backend: Send + Sync {
     /// Sums live per-session totals for sessions created today plus Fleet's own
     /// LLM spend today. See [`crate::today_usage`].
     fn today_usage(&self) -> TodayUsage;
+    /// Per-model "receipt" breakdown behind the [`Self::today_usage`] counter:
+    /// one line per (source, model) with token counts, official unit prices and
+    /// line cost; the total reconciles with `today_usage` to the cent.
+    fn today_usage_breakdown(&self) -> crate::today_usage::TodayUsageBreakdown;
     fn check_setup(&self) -> SetupStatus;
     /// Start tailing a session file for new lines.
     /// Returns the initial byte offset (file size at call time).

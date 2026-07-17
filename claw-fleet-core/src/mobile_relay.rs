@@ -1233,6 +1233,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "workflow_trees" => serve_workflow_trees(params),
         "token_breakdown" => serve_token_breakdown(params),
         "today_usage" => serve_today_usage(params),
+        "today_usage_breakdown" => serve_today_usage_breakdown(params),
         "account_usage" => serve_account_usage(params),
         "usage_history" => serve_usage_history(params),
         "skill_history" => serve_skill_history(params),
@@ -1466,6 +1467,15 @@ fn serve_today_usage(_params: &Value) -> Result<Value, String> {
     let sessions = crate::session::scan_all_sources(&sources);
     let usage = crate::today_usage::today_usage(&sessions);
     serde_json::to_value(usage).map_err(|e| e.to_string())
+}
+
+// Per-model receipt breakdown behind the header counter (mirrors
+// `LocalBackend::today_usage_breakdown` / `/today_usage_breakdown`).
+fn serve_today_usage_breakdown(_params: &Value) -> Result<Value, String> {
+    let sources = crate::agent_source::build_sources();
+    let sessions = crate::session::scan_all_sources(&sources);
+    let breakdown = crate::today_usage::today_usage_breakdown(&sessions);
+    serde_json::to_value(breakdown).map_err(|e| e.to_string())
 }
 
 // Account + rate-limit usage for the mobile 「账号与用量」 page: the Claude
