@@ -24,6 +24,8 @@ import type {
   PlanApprovalDecision,
 } from "../types";
 import { A2uiRenderCard } from "./A2uiRenderCard";
+import { fileExtIcon } from "./blocks/Rail";
+import { basename } from "./blocks/ToolUseBlock";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { SessionDetail } from "./SessionDetail";
 import { StructuredCommandView } from "./StructuredCommandView";
@@ -313,15 +315,75 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
  * guard card (allow / deny + optional deny reason), but the payload is a
  * tool name + its full input JSON rather than a shell command AST.
  */
+// Tools whose primary input is a filesystem path — surfaced with an extension
+// glyph + basename headline (full path below) instead of a JSON dump.
+const PERM_FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+type PermPrimary =
+  | { kind: "command"; text: string }
+  | { kind: "file"; path: string }
+  | { kind: "pattern"; text: string; path?: string }
+  | { kind: "url"; text: string }
+  | { kind: "json"; text: string };
+
+/**
+ * Pick the single field that matters for approving `toolName` — the actual
+ * command / path / pattern / url the AI wants to run — so the card leads with
+ * what 老板 is deciding on, not a raw JSON dump. This is a security gate, so we
+ * surface the real actionable value (Bash's `command`, not its `description`).
+ * Unknown tools fall back to pretty-printed JSON. Field names mirror Claude
+ * Code's native tool schema (Bash→command, Read/Edit/Write→file_path,
+ * Grep/Glob→pattern, WebFetch→url, WebSearch→query).
+ */
+function permissionPrimary(
+  toolName: string,
+  input: Record<string, unknown>,
+): PermPrimary {
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  if (PERM_FILE_TOOLS.has(toolName) && str(input.file_path)) {
+    return { kind: "file", path: str(input.file_path) };
+  }
+  if ((toolName === "Grep" || toolName === "Glob") && str(input.pattern)) {
+    return { kind: "pattern", text: str(input.pattern), path: str(input.path) || undefined };
+  }
+  if (toolName === "WebFetch" && str(input.url)) return { kind: "url", text: str(input.url) };
+  if (toolName === "WebSearch" && str(input.query)) return { kind: "url", text: str(input.query) };
+  // Generic field fallbacks for any other tool.
+  if (str(input.command)) return { kind: "command", text: str(input.command) };
+  if (str(input.cmd)) return { kind: "command", text: str(input.cmd) };
+  if (str(input.file_path)) return { kind: "file", path: str(input.file_path) };
+  if (str(input.path)) return { kind: "file", path: str(input.path) };
+  if (str(input.pattern)) return { kind: "pattern", text: str(input.pattern) };
+  if (str(input.url)) return { kind: "url", text: str(input.url) };
+  if (str(input.query)) return { kind: "url", text: str(input.query) };
+  try {
+    return { kind: "json", text: JSON.stringify(input, null, 2) };
+  } catch {
+    return { kind: "json", text: String(input) };
+  }
+}
+
 function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision }) {
   const { t } = useTranslation();
   const respondToPermissionPrompt = useDecisionStore((s) => s.respondToPermissionPrompt);
   const setPermissionPromptDenyReason = useDecisionStore(
     (s) => s.setPermissionPromptDenyReason,
   );
+  const [showRaw, setShowRaw] = useState(false);
   const req = decision.request;
 
-  const inputPreview = useMemo(() => {
+  const input = useMemo<Record<string, unknown>>(
+    () =>
+      req.toolInput && typeof req.toolInput === "object"
+        ? (req.toolInput as Record<string, unknown>)
+        : {},
+    [req.toolInput],
+  );
+  const primary = useMemo(
+    () => permissionPrimary(req.toolName, input),
+    [req.toolName, input],
+  );
+  const rawJson = useMemo(() => {
     try {
       const text = JSON.stringify(req.toolInput ?? {}, null, 2);
       return text.length > 6000 ? `${text.slice(0, 6000)}\n…` : text;
@@ -329,6 +391,12 @@ function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision
       return String(req.toolInput);
     }
   }, [req.toolInput]);
+
+  // The raw-params toggle is redundant when the primary display already *is* the
+  // JSON fallback, or when the input has no fields beyond the one we lead with.
+  const primaryKeyCount = primary.kind === "pattern" && primary.path ? 2 : 1;
+  const hasExtraParams =
+    primary.kind !== "json" && Object.keys(input).length > primaryKeyCount;
 
   const handleAllow = useCallback(
     () => respondToPermissionPrompt(decision.id, true),
@@ -370,7 +438,38 @@ function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision
         <span className={styles.tag}>{req.toolName}</span>
       </div>
 
-      <div className={styles.command}>{inputPreview}</div>
+      {primary.kind === "file" ? (
+        <div className={styles.perm_file}>
+          <div className={styles.perm_file_head}>
+            <span className={styles.perm_file_icon} aria-hidden>
+              {fileExtIcon(primary.path)}
+            </span>
+            <span className={styles.perm_file_name}>{basename(primary.path)}</span>
+          </div>
+          <span className={styles.perm_file_path}>{primary.path}</span>
+        </div>
+      ) : primary.kind === "pattern" ? (
+        <div className={styles.command}>
+          {primary.path
+            ? `${primary.text}\n${t("permission_prompt.in_path", "in")} ${primary.path}`
+            : primary.text}
+        </div>
+      ) : (
+        <div className={styles.command}>{primary.text}</div>
+      )}
+
+      {hasExtraParams && (
+        <button
+          type="button"
+          className={styles.perm_raw_toggle}
+          onClick={() => setShowRaw((v) => !v)}
+        >
+          {showRaw
+            ? t("permission_prompt.hide_params", "隐藏参数详情")
+            : t("permission_prompt.show_params", "查看参数详情")}
+        </button>
+      )}
+      {hasExtraParams && showRaw && <div className={styles.command}>{rawJson}</div>}
 
       <div className={styles.block_reason_row}>
         <input

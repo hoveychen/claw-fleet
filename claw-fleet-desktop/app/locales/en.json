@@ -1662,7 +1662,10 @@
     "title": "Permission Request",
     "allow": "Allow",
     "deny": "Deny",
-    "deny_reason_placeholder": "Reason for AI (optional)"
+    "deny_reason_placeholder": "Reason for AI (optional)",
+    "in_path": "in",
+    "show_params": "Show all params",
+    "hide_params": "Hide params"
   },
   "guard": {
     "title": "Critical Command Detected",
