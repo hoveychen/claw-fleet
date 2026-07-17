@@ -368,6 +368,66 @@ mod tests {
         // ASCII / short inputs are unaffected.
         assert_eq!(truncate_command("ls -la", 100), "ls -la");
     }
+
+    // ── Missing-description reminder ─────────────────────────────────────────
+
+    fn bash_hook_full(command: &str, description: Option<&str>) -> HookInput {
+        let mut input = serde_json::json!({ "command": command });
+        if let Some(d) = description {
+            input["description"] = serde_json::Value::String(d.to_string());
+        }
+        HookInput {
+            session_id: Some("sess-1".into()),
+            tool_name: Some("Bash".into()),
+            tool_input: Some(input),
+        }
+    }
+
+    #[test]
+    fn bash_missing_description_detects_absent_and_blank() {
+        // Absent key.
+        assert!(bash_missing_description(&bash_hook_full("ls", None)));
+        // Present but blank / whitespace-only.
+        assert!(bash_missing_description(&bash_hook_full("ls", Some(""))));
+        assert!(bash_missing_description(&bash_hook_full("ls", Some("   "))));
+        // Present and meaningful → not missing.
+        assert!(!bash_missing_description(&bash_hook_full("ls", Some("List files"))));
+    }
+
+    #[test]
+    fn bash_missing_description_ignores_non_bash() {
+        let input = HookInput {
+            session_id: Some("s".into()),
+            tool_name: Some("Read".into()),
+            tool_input: Some(serde_json::json!({ "file_path": "/x" })),
+        };
+        assert!(!bash_missing_description(&input));
+    }
+
+    #[test]
+    fn claim_first_reminder_fires_once_per_session() {
+        let dir = fresh_tmp_dir("desc-once");
+        // First call for a session wins; the second (same id) is suppressed.
+        assert!(claim_first_reminder_in(&dir, "session-A"));
+        assert!(!claim_first_reminder_in(&dir, "session-A"));
+        // A different session id is independent.
+        assert!(claim_first_reminder_in(&dir, "session-B"));
+        // Empty session id is always suppressed (can't throttle reliably).
+        assert!(!claim_first_reminder_in(&dir, ""));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reminder_output_shape_is_allow_plus_context() {
+        let out = build_reminder_output();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow");
+        assert!(v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("description"));
+    }
 }
 
 // ── Guard logic (used by `fleet guard` CLI) ─────────────────────────────────
@@ -440,6 +500,100 @@ pub fn classify_hook_input_with_rules(
         }
         _ => GuardClassification::Allow,
     }
+}
+
+// ── Missing-description reminder ─────────────────────────────────────────────
+//
+// Fleet's transcript UI renders a Bash call's `description` as the command's
+// intent (`formatInput` in ToolUseBlock.tsx); without it the card can only show
+// the raw command. Empirically a session either fills `description` on *every*
+// Bash call or omits it on *all* of them (measured: 22/22, 59/59 — never mixed),
+// so a single nudge on the first offender is enough to break the pattern for the
+// rest of the session. This rides the existing `fleet guard` PreToolUse hook, so
+// no new hook wiring is needed.
+
+/// One-time context injected when a Bash call omits its `description`.
+pub const MISSING_DESCRIPTION_REMINDER: &str = "Fleet: that Bash call omitted the `description` parameter. Please add a short one-line `description` to every Bash tool call (e.g. \"Find files referencing X\", \"Run unit tests\") — Fleet's transcript renders it as the command's intent, and without it the card shows only the raw command. This note fires once per session.";
+
+/// True when `input` is a Bash call whose `description` is missing or blank.
+/// Pure — no side effects.
+pub fn bash_missing_description(input: &HookInput) -> bool {
+    if input.tool_name.as_deref() != Some("Bash") {
+        return false;
+    }
+    let desc = input
+        .tool_input
+        .as_ref()
+        .and_then(|v| v.get("description"))
+        .and_then(|d| d.as_str())
+        .unwrap_or("");
+    desc.trim().is_empty()
+}
+
+/// Per-session marker directory: `~/.fleet/bash-desc-reminded/`.
+fn desc_reminder_dir() -> Option<PathBuf> {
+    crate::session::get_fleet_dir().map(|d| d.join("bash-desc-reminded"))
+}
+
+/// Record that `session_id` has been reminded, returning `true` only the first
+/// time so the caller emits the reminder exactly once per session.
+///
+/// Uses an atomic `create_new` so concurrent Bash hooks in the same session race
+/// safely — exactly one wins. Returns `false` (suppress) on an empty session id
+/// or any filesystem error: better silent than spammed.
+fn claim_first_reminder_in(dir: &std::path::Path, session_id: &str) -> bool {
+    if session_id.is_empty() {
+        return false;
+    }
+    if fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    // Session ids are uuids, but sanitize defensively so the id can never escape
+    // the marker directory.
+    let safe: String = session_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dir.join(safe))
+        .is_ok()
+}
+
+/// The exact stdout `fleet guard` prints to inject the reminder — the documented
+/// PreToolUse `allow` + `additionalContext` shape (both fields are independent;
+/// `allow` matches the non-critical classification this call already got).
+fn build_reminder_output() -> String {
+    serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "additionalContext": MISSING_DESCRIPTION_REMINDER,
+        }
+    })
+    .to_string()
+}
+
+/// If this Bash call omitted its `description` and the session has not been
+/// reminded yet, return the JSON `fleet guard` should print to inject a one-time
+/// reminder. Returns `None` otherwise, so the caller keeps its silent-allow path.
+pub fn missing_description_reminder_output(input: &HookInput) -> Option<String> {
+    if !bash_missing_description(input) {
+        return None;
+    }
+    let dir = desc_reminder_dir()?;
+    let session_id = input.session_id.as_deref().unwrap_or("");
+    if !claim_first_reminder_in(&dir, session_id) {
+        return None;
+    }
+    Some(build_reminder_output())
 }
 
 /// Generate a new unique guard request ID.
