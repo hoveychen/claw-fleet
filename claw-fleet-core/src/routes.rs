@@ -120,6 +120,7 @@ pub const SKILL_CONTENT: &str = "/skill_content";
 pub const SKILL_DELETE: &str = "/skill_delete";
 pub const SKILL_FILES: &str = "/skill_files";
 pub const SKILL_HISTORY: &str = "/skill_history";
+pub const SKILL_SYNC: &str = "/skill_sync";
 pub const SKILLS: &str = "/skills";
 pub const SOURCES_CLAUDE_ACCOUNT: &str = "/sources/claude/account";
 pub const SOURCES_CONFIG: &str = "/sources_config";
@@ -152,4 +153,3 @@ pub const WORKFLOW_TREES: &str = "/workflow_trees";
 /// Prefix arm: `/sources/<name>/account|usage` is matched by prefix on the
 /// server and built with `format!` on the client.
 pub const SOURCES_PREFIX: &str = "/sources/";
-

@@ -155,6 +155,23 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
 
     case "list_skills":
       return MOCK_SKILLS;
+    case "skill_sync_inventory":
+      return MOCK_SKILLS.map((skill) => ({
+        slug: skill.name,
+        state: "unmanaged",
+        compatibility: "both",
+        warnings: [],
+        canonicalPath: null,
+        claudePath: skill.path,
+        codexPath: null,
+        claudeManaged: false,
+        codexManaged: false,
+      }));
+    case "skill_sync_apply":
+    case "skill_sync_adopt":
+      return { items: [], actions: [], conflicts: [] };
+    case "skill_sync_unlink":
+      return { slug: args.slug, target: args.target, action: "unlinked", path: "" };
     // The pure-chat workspace. Returning it (rather than falling through to
     // `default: return null`) is what makes the launchpad's chat filter and the
     // new-session form's pinned chat entry appear in mock mode.

@@ -1,7 +1,7 @@
 mod commands;
 mod fmt;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 // ── CLI definition ─────────────────────────────────────────────────────────────
 
@@ -244,8 +244,50 @@ enum Commands {
 
 #[derive(Subcommand)]
 pub(crate) enum SkillCommands {
-    /// Install Fleet skill to all detected AI tools (Claude Code, Copilot, Gemini CLI)
+    /// Install Fleet skill to all detected AI tools
     Install,
+    /// Show cross-runtime user-skill status
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview or apply projections for Fleet-managed skills
+    Sync {
+        /// Apply changes; without this flag the command is a dry run
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Adopt one global Claude or Codex user skill and share it with both
+    Adopt {
+        path: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove one managed runtime projection, preserving the canonical copy
+    Unlink {
+        slug: String,
+        #[arg(long, value_enum)]
+        target: SkillRuntime,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum SkillRuntime {
+    Claude,
+    Codex,
+}
+
+impl From<SkillRuntime> for claw_fleet_core::skill_sync::SkillTarget {
+    fn from(value: SkillRuntime) -> Self {
+        match value {
+            SkillRuntime::Claude => Self::ClaudeCode,
+            SkillRuntime::Codex => Self::Codex,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -644,6 +686,12 @@ fn main() {
         Commands::Serve { port, token, port_file } => commands::serve::cmd_serve(port, token, port_file),
         Commands::Skill { action } => match action {
             SkillCommands::Install => commands::skill::cmd_skill_install(),
+            SkillCommands::Status { json } => commands::skill::cmd_skill_status(json),
+            SkillCommands::Sync { apply, json } => commands::skill::cmd_skill_sync(apply, json),
+            SkillCommands::Adopt { path, json } => commands::skill::cmd_skill_adopt(&path, json),
+            SkillCommands::Unlink { slug, target, json } => {
+                commands::skill::cmd_skill_unlink(&slug, target.into(), json)
+            }
         },
         Commands::Guard { action } => match action {
             None => commands::guard::cmd_guard(),

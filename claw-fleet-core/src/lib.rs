@@ -98,6 +98,7 @@ pub mod session_read;
 pub mod session_title;
 pub mod session_todos;
 pub mod skill_history;
+pub mod skill_sync;
 pub mod skills;
 pub mod tcc;
 pub mod today_usage;
@@ -250,8 +251,10 @@ pub fn check_cli_installed() -> (bool, Option<String>) {
 
 pub const FLEET_SKILL_MD: &str = include_str!("../../skills/fleet/SKILL.md");
 
-pub const SKILL_TARGETS: &[(&str, &str)] = &[
-    ("Claude Code", ".claude"),
-    ("GitHub Copilot", ".copilot"),
-    ("Gemini CLI", ".gemini"),
+/// `(display name, installation detection dir, native skills dir)`.
+pub const SKILL_TARGETS: &[(&str, &str, &str)] = &[
+    ("Claude Code", ".claude", ".claude/skills"),
+    ("Codex", ".codex", ".agents/skills"),
+    ("GitHub Copilot", ".copilot", ".copilot/skills"),
+    ("Gemini CLI", ".gemini", ".gemini/skills"),
 ];

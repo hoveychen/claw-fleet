@@ -231,7 +231,21 @@
     "scope_user": "User",
     "scope_repo": "Repository",
     "scope_admin": "Admin",
-    "scope_system": "Built-in"
+    "scope_system": "Built-in",
+    "sync_all": "Sync managed skills",
+    "syncing": "Syncing…",
+    "share_both": "Share with Claude + Codex",
+    "unlink_target": "Unlink from this runtime",
+    "sync_failed": "Skill sync failed: {{error}}",
+    "sync_conflicts": "Sync completed with {{count}} same-name conflict(s) left untouched.",
+    "sync_state_shared": "Shared",
+    "sync_state_partial": "Pending sync",
+    "sync_state_conflict": "Conflict",
+    "sync_state_unmanaged": "Unmanaged",
+    "compat_both": "Compatible with Claude and Codex",
+    "compat_claude-only": "Claude only",
+    "compat_codex-only": "Codex only",
+    "compat_incompatible": "Manual adaptation required"
   },
   "plugins": {
     "panel_title": "Plugins",

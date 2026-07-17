@@ -181,7 +181,16 @@ fn scan_skill_root(
             // Directory-based skill: <name>/SKILL.md
             let skill_file = path.join("SKILL.md");
             if skill_file.is_file() {
-                if let Some(item) = read_skill_item(&skill_file, &path, source, scope, can_delete) {
+                let managed_projection = fs::symlink_metadata(&path)
+                    .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                    || path.join(".fleet-managed.json").is_file();
+                if let Some(item) = read_skill_item(
+                    &skill_file,
+                    &path,
+                    source,
+                    scope,
+                    can_delete && !managed_projection,
+                ) {
                     results.push(item);
                 }
             } else if scope == "system" {
@@ -457,6 +466,11 @@ pub fn read_skill_file(path: &str) -> Result<String, String> {
 /// backends as well.
 fn allowed_skill_root(path: &Path) -> Option<(PathBuf, bool)> {
     let mut candidates = Vec::new();
+    if let Some(fleet_dir) = crate::session::get_fleet_dir() {
+        // Fleet-managed canonical skills are inspectable through runtime
+        // projections, but may only be changed via `skill_sync` operations.
+        candidates.push((fleet_dir.join("skills"), false));
+    }
     if let Some(claude_dir) = get_claude_dir() {
         candidates.push((claude_dir.join("skills"), true));
     }
@@ -688,5 +702,31 @@ mod tests {
             "got: {err}"
         );
         assert!(victim.exists(), "victim file must NOT be deleted");
+    }
+
+    #[test]
+    fn managed_projections_are_inspectable_but_not_deletable() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _override = FleetHomeOverride::new(tmp.path());
+        let source = tmp.path().join(".claude/skills/shared");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("SKILL.md"),
+            "---\nname: shared\ndescription: shared\n---\n",
+        )
+        .unwrap();
+
+        crate::skill_sync::adopt(&source.join("SKILL.md")).unwrap();
+        let skills = scan_all_skills();
+        let projections: Vec<_> = skills.iter().filter(|item| item.name == "shared").collect();
+        assert_eq!(projections.len(), 2);
+        assert!(projections.iter().all(|item| !item.can_delete));
+        assert!(read_skill_file(&projections[0].path)
+            .unwrap()
+            .contains("description: shared"));
+        assert!(delete_skill(&projections[0].path)
+            .unwrap_err()
+            .contains("cannot be deleted"));
     }
 }

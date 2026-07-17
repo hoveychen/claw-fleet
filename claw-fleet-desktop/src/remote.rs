@@ -949,6 +949,35 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&format!("{}?path={}", claw_fleet_core::routes::SKILL_CONTENT, encode_path(path)))
     }
 
+    fn skill_sync_inventory(&self) -> Result<Vec<crate::skill_sync::SkillSyncEntry>, String> {
+        self.probe.get(claw_fleet_core::routes::SKILL_SYNC)
+    }
+
+    fn skill_sync_apply(&self) -> Result<crate::skill_sync::SkillSyncReport, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::SKILL_SYNC,
+            &serde_json::json!({"operation": "sync"}),
+        )
+    }
+
+    fn skill_sync_adopt(&self, path: &str) -> Result<crate::skill_sync::SkillSyncReport, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::SKILL_SYNC,
+            &serde_json::json!({"operation": "adopt", "path": path}),
+        )
+    }
+
+    fn skill_sync_unlink(
+        &self,
+        slug: &str,
+        target: crate::skill_sync::SkillTarget,
+    ) -> Result<crate::skill_sync::SkillSyncAction, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::SKILL_SYNC,
+            &serde_json::json!({"operation": "unlink", "slug": slug, "target": target}),
+        )
+    }
+
     fn list_skill_files(
         &self,
         skill_path: &str,

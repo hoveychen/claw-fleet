@@ -659,6 +659,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::SKILLS => route_skills(ctx, request, &query, json_header, path),
 
+            crate::routes::SKILL_SYNC => route_skill_sync(ctx, request, &query, json_header, path),
+
             crate::routes::PLUGINS => route_plugins(ctx, request, &query, json_header, path),
 
             crate::routes::PLUGINS_SET_ENABLED
