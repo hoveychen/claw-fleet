@@ -5,7 +5,11 @@ import {
   CircleCheck,
   CircleHelp,
   Clock,
+  File,
+  FileCode,
+  FileJson,
   FileText,
+  FileType,
   Globe,
   Image,
   ListTodo,
@@ -49,6 +53,29 @@ export function railToolIcon(name: string): ReactNode {
  *  lookups, magnifier otherwise (mixed batches read as exploration). */
 export function railGroupIcon(names: string[]): ReactNode {
   return names.every((n) => WEB_TOOLS.has(n)) ? <Globe /> : <Search />;
+}
+
+// Extension buckets for the inline file-type glyph. Kept to the same lucide
+// stroke family as the rail tool icons so a file row reads as one style line.
+const CODE_EXTS = new Set([
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "go", "py", "rb", "java", "kt",
+  "swift", "c", "cc", "cpp", "h", "hpp", "cs", "php", "sh", "bash", "zsh", "lua",
+  "ets", "vue", "svelte", "sql",
+]);
+const DATA_EXTS = new Set(["json", "yaml", "yml", "toml"]);
+const STYLE_EXTS = new Set(["css", "scss", "sass", "less"]);
+const DOC_EXTS = new Set(["md", "mdx", "txt", "rst"]);
+
+/** Small file-type glyph for a path's extension, shown inline before the
+ *  basename in a file tool's collapsed row. Unknown extensions get a blank
+ *  file rather than nothing, so every file row carries a glyph. */
+export function fileExtIcon(path: string): ReactNode {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (CODE_EXTS.has(ext)) return <FileCode />;
+  if (DATA_EXTS.has(ext)) return <FileJson />;
+  if (STYLE_EXTS.has(ext)) return <FileType />;
+  if (DOC_EXTS.has(ext)) return <FileText />;
+  return <File />;
 }
 
 export const railThinkingIcon = (<Clock />);
