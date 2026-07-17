@@ -396,7 +396,9 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
               <DiffSection block={block} meta={meta} />
             </div>
           ) : custom ? (
-            <ToolBody block={block} meta={meta} result={result} />
+            <div className={styles.input_section}>
+              <ToolBody block={block} meta={meta} result={result} />
+            </div>
           ) : block.name === "Agent" && hasAgentInput(block) ? (
             // A running (or non-Claude) subagent has no `toolUseResult` yet, so
             // the custom body can't render — but its description + prompt are
