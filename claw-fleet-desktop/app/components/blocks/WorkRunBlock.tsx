@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DecisionHistoryRecord, RawMessage, ToolResultBlock } from "../../types";
 import type { PathLinkContext } from "../../markdown/pathLinks";
-import { summarizeWorkRun } from "../workRuns";
+import { summarizeWorkRun, workRunTitle } from "../workRuns";
 import { formatMsgTime } from "../../messageRows";
 import { ContentBlocks } from "./ContentBlocks";
 import { RailDone } from "./Rail";
@@ -54,6 +54,9 @@ export function WorkRunBlock({
   useEffect(() => setOpen(defaultOpen || !!forceOpen), [defaultOpen, forceOpen]);
 
   const summary = summarizeWorkRun(msgs);
+  // A thinking-derived headline (the model's own summary sentence) beats the
+  // rule-mapped category; runs with no thinking keep the category label.
+  const title = workRunTitle(msgs);
   const counts = summary.toolCounts
     .map(([name, c]) => `${name === "thinking" ? t("detail.work_thinking") : name}×${c}`)
     .join(" · ");
@@ -75,7 +78,11 @@ export function WorkRunBlock({
     <div className={styles.root}>
       <button className={styles.header} onClick={() => setOpen((o) => !o)}>
         <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
-        <span className={styles.category}>{t(`detail.work_cat_${summary.category}`)}</span>
+        {title ? (
+          <span className={styles.title}>{title}</span>
+        ) : (
+          <span className={styles.category}>{t(`detail.work_cat_${summary.category}`)}</span>
+        )}
         <span className={styles.stats}>
           {t("detail.work_steps", { count: summary.steps })}
           {counts && ` · ${counts}`}

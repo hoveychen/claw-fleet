@@ -115,6 +115,41 @@ export function runCategory(toolNames: string[]): WorkRunCategory {
   return "work";
 }
 
+/** Longest band title before it gets clipped with an ellipsis. */
+const TITLE_MAX = 64;
+
+/** First sentence of a thinking text, clipped to `TITLE_MAX` chars. Sentence
+ *  ends at CJK terminal punctuation, an English ". " (a bare dot may be a
+ *  filename or version), or the first line break. */
+export function firstSentence(text: string): string {
+  const firstLine = text.trimStart().split("\n", 1)[0].trim();
+  const m = firstLine.match(/^.*?(?:[。！？]|[.!?](?=\s|$))/);
+  const sentence = (m ? m[0] : firstLine).trim();
+  return sentence.length > TITLE_MAX ? `${sentence.slice(0, TITLE_MAX - 1)}…` : sentence;
+}
+
+/**
+ * Band title: the first sentence of the run's first thinking segment. With
+ * `--thinking-display summarized` (the spawn default) the thinking blocks are
+ * model-written summaries, so their opening sentence works as a headline the
+ * way claude.ai titles its work blocks. Runs with no thinking (or empty
+ * thinking) return null and the band falls back to the rule-mapped category.
+ */
+export function workRunTitle(msgs: RawMessage[]): string | null {
+  for (const msg of msgs) {
+    const content = msg.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block.type !== "thinking") continue;
+      const text = (block as { thinking?: unknown }).thinking;
+      if (typeof text !== "string" || !text.trim()) continue;
+      const sentence = firstSentence(text);
+      if (sentence) return sentence;
+    }
+  }
+  return null;
+}
+
 export function summarizeWorkRun(msgs: RawMessage[]): WorkRunSummary {
   const toolNames: string[] = [];
   const counts = new Map<string, number>();
