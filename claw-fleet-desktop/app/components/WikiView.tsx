@@ -631,12 +631,12 @@ export function WikiView() {
       });
 
   // ── Centre grid card ──────────────────────────────────────────────────────
-  const renderGridCard = (d: WikiDoc): ReactNode => (
+  const renderGridCard = (d: WikiDoc, extraClass = ""): ReactNode => (
     <button
       key={`g:${d.slug}`}
-      className={`${styles.grid_card} ${selectedSlug === d.slug ? styles.grid_card_active : ""} ${
-        dragSlug === d.slug ? styles.card_dragging : ""
-      }`}
+      className={`${styles.grid_card} ${extraClass} ${
+        selectedSlug === d.slug ? styles.grid_card_active : ""
+      } ${dragSlug === d.slug ? styles.card_dragging : ""}`}
       onClick={() => setSelectedSlug(d.slug)}
       onContextMenu={(e) => {
         // preventDefault also suppresses the app-wide Settings/About menu.
@@ -724,6 +724,9 @@ export function WikiView() {
   // or searching drops straight to the plain doc grid.
   const showLanding = selectedFolder === null && !searching;
   const topFolders = tree.filter((n): n is FolderNode => n.type === "folder");
+  // Recency-pinned quick strip for the landing — always newest-first regardless
+  // of the grid's sort dropdown, so it stays a stable "jump to what changed".
+  const recentDocs = [...wsFiltered].sort((a, b) => b.updatedMs - a.updatedMs).slice(0, 6);
 
   // Breadcrumb-ish label for the grid header.
   const scopeLabel = searching
@@ -899,14 +902,26 @@ export function WikiView() {
           )}
           {loaded && gridDocs.length > 0 && (
             <div className={styles.grid_scroll}>
-              {showLanding && topFolders.length > 0 && (
+              {showLanding && (
                 <>
-                  <div className={styles.section_head}>{t("wiki.section_folders", "目录")}</div>
-                  <div className={styles.folder_tiles}>{topFolders.map(renderFolderTile)}</div>
+                  {recentDocs.length > 0 && (
+                    <>
+                      <div className={styles.section_head}>{t("wiki.section_recent", "最近更新")}</div>
+                      <div className={styles.recent_row}>
+                        {recentDocs.map((d) => renderGridCard(d, styles.recent_card))}
+                      </div>
+                    </>
+                  )}
+                  {topFolders.length > 0 && (
+                    <>
+                      <div className={styles.section_head}>{t("wiki.section_folders", "目录")}</div>
+                      <div className={styles.folder_tiles}>{topFolders.map(renderFolderTile)}</div>
+                    </>
+                  )}
                   <div className={styles.section_head}>{t("wiki.section_docs", "文档")}</div>
                 </>
               )}
-              <div className={styles.grid}>{gridDocs.map(renderGridCard)}</div>
+              <div className={styles.grid}>{gridDocs.map((d) => renderGridCard(d))}</div>
             </div>
           )}
         </div>

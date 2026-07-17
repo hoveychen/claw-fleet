@@ -242,6 +242,20 @@
   gap: 10px;
 }
 
+/* Recency-pinned quick strip — a single horizontal scroller of fixed-width
+   cards, so "what changed" stays one glance above the fold. */
+.recent_row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.recent_card {
+  flex: 0 0 210px;
+  max-width: 210px;
+}
+
 .folder_tile {
   display: flex;
   flex-direction: column;

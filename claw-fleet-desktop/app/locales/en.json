@@ -449,6 +449,7 @@
     "back_short": "Back",
     "section_folders": "Folders",
     "section_docs": "Documents",
+    "section_recent": "Recently updated",
     "doc_count": "{{count}} docs",
     "current": "current",
     "move_failed": "Move failed: {{error}}",
