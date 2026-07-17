@@ -86,6 +86,30 @@ pub const FLEET_AGENT_SOURCE_CODEX: &str = "codex";
 /// directly.
 pub const FLEET_CODEX_LAUNCH_TOKEN_ENV: &str = "FLEET_CODEX_LAUNCH_TOKEN";
 
+/// Narrow `RUST_LOG` filter stamped on every Codex child so its stderr — which
+/// Fleet already redirects to a disk log — carries an HTTP transport trail.
+///
+/// `codex exec` honours `RUST_LOG` and writes tracing to stderr (verified
+/// 2026-07-17, codex-cli 0.144.5). This filter surfaces one line per HTTP
+/// request (`codex_http_client::default_client` at DEBUG logs `Request
+/// completed … status … `) plus connection-pool open/close, which is exactly
+/// what diagnoses a turn-close stall like the observed 35s tail: was the
+/// backend holding the response stream open, or was it local? Deliberately
+/// **not** `hyper=trace` / `reqwest=trace` — those are a firehose and dump
+/// request auth headers. Fleet sets this unconditionally rather than inheriting
+/// the parent's `RUST_LOG`, so a noisy Fleet-side filter can't leak into the
+/// codex child.
+const CODEX_TRANSPORT_RUST_LOG: &str =
+    "codex_http_client=debug,hyper_util::client::legacy::pool=debug";
+
+/// Size ceiling for the shared, append-only Codex stderr logs. They are not
+/// per-session — every spawn / resume appends to one file — so with the
+/// always-on transport trace above they would grow without bound. Before each
+/// launch [`cap_stderr_log`] rotates a file past this size to `<name>.1`,
+/// capping on-disk use at ~2× this while keeping one generation of recent
+/// history. 8 MiB ≈ hundreds of turns of DEBUG transport lines.
+const CODEX_STDERR_LOG_CAP_BYTES: u64 = 8 * 1024 * 1024;
+
 /// Directory holding the `token → thread-id` notes (`<token>` file whose
 /// contents are the Codex thread id). Lives under the Fleet dir alongside
 /// `launch-spec`.
@@ -487,6 +511,32 @@ fn apply_codex_launch_env(cmd: &mut std::process::Command) {
     cmd.env("PATH", augmented_path_with_front(&front));
     cmd.env("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", CODEX_FLEET_ORIGINATOR);
     cmd.env("FLEET_AGENT_SOURCE", FLEET_AGENT_SOURCE_CODEX);
+    // Always-on HTTP transport trail (see `CODEX_TRANSPORT_RUST_LOG`) so the
+    // codex stderr log can later answer "network stall or local?" for a hung
+    // turn without needing to reproduce it.
+    cmd.env("RUST_LOG", CODEX_TRANSPORT_RUST_LOG);
+}
+
+/// Rotate a codex stderr log that has grown past [`CODEX_STDERR_LOG_CAP_BYTES`]
+/// to `<path>.1` (overwriting a prior rotation) so the next append starts fresh.
+///
+/// Best-effort: the log is a diagnostic sink, never load-bearing, so any IO
+/// error is logged and swallowed rather than failing the launch. Called just
+/// before the append-open on both the spawn and resume paths.
+fn cap_stderr_log(path: &Path, max_bytes: u64) {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.len() > max_bytes => {
+            let mut rotated = path.as_os_str().to_owned();
+            rotated.push(".1");
+            if let Err(e) = std::fs::rename(path, &rotated) {
+                crate::log_debug(&format!(
+                    "cap_stderr_log: rotate {} failed: {e}",
+                    path.display()
+                ));
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Quote a value as a TOML basic string for a Codex `-c key=<value>` override.
@@ -817,6 +867,7 @@ pub fn spawn_new_codex_session(
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("create stderr log dir {}: {e}", parent.display()))?;
     }
+    cap_stderr_log(&stderr_log, CODEX_STDERR_LOG_CAP_BYTES);
 
     // Token the child reads back (via `FLEET_CODEX_LAUNCH_TOKEN`) to learn its
     // own thread id once `thread.started` lands and we write the note below.
@@ -1071,6 +1122,7 @@ pub fn resume_codex_session(
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("create stderr log dir {}: {e}", parent.display()))?;
     }
+    cap_stderr_log(&stderr_log, CODEX_STDERR_LOG_CAP_BYTES);
 
     // Bridge to Fleet's Decision Panel: a resume already knows its thread id, so
     // hand `fleet mcp` the session id directly (no launch-token indirection) plus
@@ -2024,5 +2076,57 @@ mod tests {
             "pipe-backed child is killed by the broken-pipe write — the bug the fix removes"
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn apply_codex_launch_env_stamps_transport_rust_log() {
+        let mut cmd = std::process::Command::new("codex");
+        apply_codex_launch_env(&mut cmd);
+        let rust_log = cmd
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("RUST_LOG"))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().into_owned());
+        assert_eq!(
+            rust_log.as_deref(),
+            Some(CODEX_TRANSPORT_RUST_LOG),
+            "every codex child must carry the narrow transport RUST_LOG"
+        );
+        // Guard the filter against widening into a firehose that leaks auth headers.
+        assert!(
+            !CODEX_TRANSPORT_RUST_LOG.contains("trace"),
+            "transport filter must stay at debug — trace dumps request auth headers"
+        );
+    }
+
+    #[test]
+    fn cap_stderr_log_rotates_only_when_over_size() {
+        let path = tmp_sink("cap");
+        let rotated = {
+            let mut r = path.as_os_str().to_owned();
+            r.push(".1");
+            std::path::PathBuf::from(r)
+        };
+        let _ = std::fs::remove_file(&rotated);
+
+        // Under the cap: left untouched, no rotation file.
+        std::fs::write(&path, b"small").unwrap();
+        cap_stderr_log(&path, 1024);
+        assert!(path.is_file(), "under-cap log must be left in place");
+        assert!(!rotated.exists(), "under-cap log must not rotate");
+
+        // Over the cap: original moves to `.1`, original path is now free for a
+        // fresh append.
+        std::fs::write(&path, vec![b'x'; 2048]).unwrap();
+        cap_stderr_log(&path, 1024);
+        assert!(!path.exists(), "over-cap log must be rotated away");
+        assert_eq!(
+            std::fs::read(&rotated).unwrap().len(),
+            2048,
+            "rotated file must hold the previous contents"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&rotated);
     }
 }
