@@ -16,9 +16,13 @@ fn sync_is_dry_run_until_apply_is_explicit() {
     let home = tempfile::tempdir().unwrap();
     write_skill(&home.path().join(".fleet/skills"), "portable");
 
+    // Pin CODEX_HOME into the temp home so the projected Codex root is
+    // <home>/.codex/skills and never the ambient real ~/.codex.
+    let codex_home = home.path().join(".codex");
     let dry = Command::new(env!("CARGO_BIN_EXE_fleet-cli"))
         .args(["skill", "sync", "--json"])
         .env("FLEET_HOME", home.path())
+        .env("CODEX_HOME", &codex_home)
         .output()
         .unwrap();
     assert!(
@@ -34,11 +38,12 @@ fn sync_is_dry_run_until_apply_is_explicit() {
         .iter()
         .all(|action| action["action"] == "would-link"));
     assert!(!home.path().join(".claude/skills/portable").exists());
-    assert!(!home.path().join(".agents/skills/portable").exists());
+    assert!(!codex_home.join("skills/portable").exists());
 
     let apply = Command::new(env!("CARGO_BIN_EXE_fleet-cli"))
         .args(["skill", "sync", "--apply", "--json"])
         .env("FLEET_HOME", home.path())
+        .env("CODEX_HOME", &codex_home)
         .output()
         .unwrap();
     assert!(
@@ -50,14 +55,12 @@ fn sync_is_dry_run_until_apply_is_explicit() {
         .path()
         .join(".claude/skills/portable/SKILL.md")
         .is_file());
-    assert!(home
-        .path()
-        .join(".agents/skills/portable/SKILL.md")
-        .is_file());
+    // Codex skills live in $CODEX_HOME/skills (default ~/.codex/skills).
+    assert!(codex_home.join("skills/portable/SKILL.md").is_file());
 }
 
 #[test]
-fn install_detects_codex_and_uses_agents_skill_root() {
+fn install_detects_codex_and_uses_codex_skill_root() {
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(home.path().join(".codex")).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_fleet-cli"))
@@ -71,6 +74,8 @@ fn install_detects_codex_and_uses_agents_skill_root() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(home.path().join(".agents/skills/fleet/SKILL.md").is_file());
-    assert!(!home.path().join(".codex/skills/fleet/SKILL.md").exists());
+    // Codex's Fleet skill installs into ~/.codex/skills, not the legacy
+    // ~/.agents/skills.
+    assert!(home.path().join(".codex/skills/fleet/SKILL.md").is_file());
+    assert!(!home.path().join(".agents/skills/fleet/SKILL.md").exists());
 }

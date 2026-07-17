@@ -42,6 +42,23 @@ pub fn get_fleet_dir() -> Option<PathBuf> {
     real_home_dir().map(|h| h.join(".fleet"))
 }
 
+/// Codex's config home: `$CODEX_HOME` if set (Codex honours it), else `~/.codex`.
+///
+/// This is where Codex keeps its data *and* discovers skills — Codex's own
+/// skill-installer installs into `$CODEX_HOME/skills` (default `~/.codex/skills`).
+/// Canonical lookup so projection (`skill_sync`) and discovery (`skills`,
+/// `memory`) agree; `FLEET_HOME` is honoured transitively through
+/// [`real_home_dir`] for test isolation.
+pub fn get_codex_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("CODEX_HOME") {
+        let path = PathBuf::from(dir);
+        if !path.as_os_str().is_empty() {
+            return Some(path);
+        }
+    }
+    real_home_dir().map(|h| h.join(".codex"))
+}
+
 #[cfg(unix)]
 pub fn is_process_alive(pid: u32) -> bool {
     let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };

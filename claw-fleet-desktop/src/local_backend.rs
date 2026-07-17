@@ -368,14 +368,15 @@ impl LocalBackend {
         // the process that *owns* the skill files — the desktop LocalBackend —
         // runs this; remote auto-reconcile is deliberately out of scope for the
         // MVP (manual adopt/sync/unlink already work over the Backend trait).
-        let skills_watch_dirs: Vec<std::path::PathBuf> = crate::session::real_home_dir()
-            .map(|home| {
-                vec![
-                    home.join(".claude").join("skills"),
-                    home.join(".agents").join("skills"),
-                ]
-            })
-            .unwrap_or_default();
+        let mut skills_watch_dirs: Vec<std::path::PathBuf> = Vec::new();
+        if let Some(claude) = crate::session::get_claude_dir() {
+            skills_watch_dirs.push(claude.join("skills"));
+        }
+        // Codex discovers skills from `$CODEX_HOME/skills` (default
+        // `~/.codex/skills`), not the legacy `~/.agents/skills`.
+        if let Some(codex) = crate::session::get_codex_dir() {
+            skills_watch_dirs.push(codex.join("skills"));
+        }
         for dir in &skills_watch_dirs {
             if dir.is_dir() && !watched_dirs.contains(dir) {
                 if let Err(e) = watcher.watch(dir, RecursiveMode::Recursive) {
@@ -387,6 +388,26 @@ impl LocalBackend {
         }
 
         step!("skills watch paths registered");
+
+        // Enabling auto-sync (or restarting with it on) is not a filesystem
+        // event, so the watcher won't retroactively adopt skills that already
+        // existed. Reconcile once at startup so an opted-in user's current
+        // skills are collected without needing a fresh drop. Gated + best-effort.
+        if crate::skill_sync::auto_sync_enabled() && crate::skill_sync::both_runtimes_present() {
+            match crate::skill_sync::auto_reconcile() {
+                Ok(report) if !report.actions.is_empty() || !report.conflicts.is_empty() => {
+                    log_debug(&format!(
+                        "[SKILL-AUTOSYNC] startup reconcile: {} actions, {} conflicts",
+                        report.actions.len(),
+                        report.conflicts.len()
+                    ));
+                }
+                Ok(_) => {}
+                Err(e) => log_debug(&format!("[SKILL-AUTOSYNC] startup reconcile failed: {e}")),
+            }
+        }
+
+        step!("skills startup reconcile done");
 
         // Shared analyzing set — prevents duplicate analysis when both the
         // filesystem watcher and the polling thread detect the same transition.
