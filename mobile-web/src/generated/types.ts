@@ -62,6 +62,17 @@ agentCostUsd: number,
 fleetCostUsd: number, 
 sessionCount: number, };
 
+export type ModelReceiptLine = { 
+model: string, 
+source: string, inputTokens: number, cacheCreationTokens: number, cacheReadTokens: number, outputTokens: number, 
+inputPrice: number, outputPrice: number, cacheWritePrice: number, cacheReadPrice: number, 
+costUsd: number, };
+
+export type TodayUsageBreakdown = { 
+date: string, 
+lines: Array<ModelReceiptLine>, totalInputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalOutputTokens: number, 
+totalCostUsd: number, agentCostUsd: number, fleetCostUsd: number, };
+
 export type SearchHit = { sessionId: string, jsonlPath: string, snippet: string, rank: number, };
 
 export type WaitingAlert = { sessionId: string, workspaceName: string, summary: string, detectedAtMs: number, jsonlPath: string, 

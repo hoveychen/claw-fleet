@@ -291,6 +291,20 @@ pub(crate) fn route_today_usage(
                 );
             }
 
+pub(crate) fn route_today_usage_breakdown(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    _query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let sources = ctx.sources;
+    let sessions = scan_all_sources(sources);
+    let breakdown = crate::today_usage::today_usage_breakdown(&sessions);
+    let body = serde_json::to_string(&breakdown).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_session_decisions(
     ctx: &ServeCtx,
     request: tiny_http::Request,

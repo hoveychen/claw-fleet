@@ -314,6 +314,7 @@ impl crate::backend::Backend for RemoteBackend {
         get {
             list_procs -> Vec<claw_fleet_core::proc_runner::ProcRecord> = PROCS;
             today_usage -> crate::today_usage::TodayUsage = TODAY_USAGE;
+            today_usage_breakdown -> crate::today_usage::TodayUsageBreakdown = TODAY_USAGE_BREAKDOWN;
             list_memories -> Vec<crate::memory::WorkspaceMemory> = MEMORIES;
             list_wiki_docs -> Vec<crate::wiki::WikiDoc> = WIKI_DOCS;
             list_skills -> Vec<crate::skills::SkillItem> = SKILLS;
