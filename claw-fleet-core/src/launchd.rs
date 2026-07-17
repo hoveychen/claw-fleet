@@ -1,4 +1,4 @@
-//! Canonical `fleet serve` discovery files under `~/.claude/fleet/`.
+//! Canonical `fleet serve` discovery files under `~/.fleet/`.
 //!
 //! `fleet serve` writes its live port + auth token here (see
 //! `hooks_server::serve`) so tools launched inside managed sessions and the
@@ -10,12 +10,12 @@ use std::path::PathBuf;
 
 use crate::session::real_home_dir;
 
-/// `~/.claude/fleet/port` — written by `fleet serve` on startup.
+/// `~/.fleet/port` — written by `fleet serve` on startup.
 pub fn port_file_path() -> Option<PathBuf> {
-    real_home_dir().map(|h| h.join(".claude").join("fleet").join("port"))
+    real_home_dir().map(|h| h.join(".fleet").join("port"))
 }
 
-/// `~/.claude/fleet/token` — written by `fleet serve` on startup.
+/// `~/.fleet/token` — written by `fleet serve` on startup.
 pub fn token_file_path() -> Option<PathBuf> {
-    real_home_dir().map(|h| h.join(".claude").join("fleet").join("token"))
+    real_home_dir().map(|h| h.join(".fleet").join("token"))
 }

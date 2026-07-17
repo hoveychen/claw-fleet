@@ -1442,7 +1442,7 @@ pub fn run() {
                 });
             }
 
-            // Publish the bundled fleet CLI into ~/.claude/fleet/bin, which
+            // Publish the bundled fleet CLI into ~/.fleet/bin, which
             // session_launch already prepends to every spawned agent's PATH.
             // Without this the directory stays empty and the agent's
             // `fleet plan …` calls — which the PRD-discipline guidance tells it
