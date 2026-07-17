@@ -96,15 +96,15 @@ describe("codexToolSummary", () => {
     expect(codexToolSummary("Bash", { command: "ls" }, t)).toBeNull();
   });
 
-  it("apply_patch → names a single touched file, action-aware + ws-relative", () => {
+  it("apply_patch → names a single touched file, action-aware + basename", () => {
     const patch = `*** Begin Patch
 *** Update File: /ws/app/foo.ts
 @@
 -old
 +new
 *** End Patch`;
-    expect(codexToolSummary("apply_patch", { command: patch }, t, "/ws")).toBe(
-      'detail.tool_patch_update|{"path":"app/foo.ts"}',
+    expect(codexToolSummary("apply_patch", { command: patch }, t)).toBe(
+      'detail.tool_patch_update|{"path":"foo.ts"}',
     );
     expect(
       codexToolSummary("apply_patch", { command: "*** Begin Patch\n*** Add File: a.ts\n" }, t),
