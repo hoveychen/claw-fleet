@@ -177,11 +177,7 @@ mod tests {
         }
 
         let published = published.expect("ensure_link_from failed");
-        let expected = home
-            .join(".claude")
-            .join("fleet")
-            .join("bin")
-            .join(LINK_NAME);
+        let expected = home.join(".fleet").join("bin").join(LINK_NAME);
         assert_eq!(published, expected, "published to the wrong path");
         assert!(
             expected.exists(),
