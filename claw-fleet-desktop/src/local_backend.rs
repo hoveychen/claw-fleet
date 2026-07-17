@@ -437,6 +437,9 @@ impl LocalBackend {
             .map(|(i, s)| (i, s.watch_paths()))
             .collect();
 
+        // Index of the codex source, for the [CODEX-WATCH] probe below.
+        let codex_source_idx = sources.iter().position(|s| s.name() == "codex");
+
         // Filesystem watcher thread — batches events so we rescan at most once
         // every 2 seconds, while still tailing the viewed session immediately.
         // Only rescans sources whose watch directories contain changed paths.
@@ -453,6 +456,18 @@ impl LocalBackend {
             let mut last_skills_reconcile = Instant::now();
             let skills_reconcile_interval = Duration::from_secs(2);
             let mut pending_skills_reconcile = false;
+
+            // Rate-limited probe for the intermittent codex sidebar staleness:
+            // separates "fs events for ~/.codex never arrived" (this log stays
+            // silent while a rollout is being appended) from "events arrived
+            // but the codex rescan/tail never ran" (evts>0 with flushes=0 or
+            // tail_miss>0). One summary line at most every 15s.
+            let mut codex_probe_last_log = Instant::now();
+            let mut codex_probe_events: u64 = 0;
+            let mut codex_probe_latest = String::new();
+            let mut codex_probe_tail_match: u64 = 0;
+            let mut codex_probe_tail_miss: u64 = 0;
+            let mut codex_probe_flushes: u64 = 0;
 
             loop {
                 // Wait for events; use a short timeout when a rescan is pending
@@ -526,10 +541,26 @@ impl LocalBackend {
                             // Tail the currently-viewed session immediately (keeps
                             // the detail view responsive even while rescans are batched).
                             if ext == "jsonl" {
+                                let path_str = path.to_string_lossy();
+                                let is_codex_path = path_str.contains("/.codex/");
+                                if is_codex_path {
+                                    codex_probe_events += 1;
+                                    codex_probe_latest = path
+                                        .file_name()
+                                        .map(|n| n.to_string_lossy().into_owned())
+                                        .unwrap_or_default();
+                                }
                                 if let Some(ref vpath) = watch2.current_path() {
-                                    let path_str = path.to_string_lossy();
                                     if vpath == path_str.as_ref() {
                                         emit_tail_lines(path, &app2, &watch2);
+                                        if is_codex_path {
+                                            codex_probe_tail_match += 1;
+                                        }
+                                    } else if is_codex_path && vpath.contains("/.codex/") {
+                                        // Viewing a codex session while a codex
+                                        // rollout changed under a different path —
+                                        // candidate for the frozen-detail symptom.
+                                        codex_probe_tail_miss += 1;
                                     }
                                 }
                             }
@@ -542,6 +573,9 @@ impl LocalBackend {
 
                 // Flush the batched session rescan once the coalescing window has elapsed.
                 if !dirty_sources.is_empty() && last_rescan.elapsed() >= rescan_interval {
+                    if codex_source_idx.is_some_and(|i| dirty_sources.contains(&i)) {
+                        codex_probe_flushes += 1;
+                    }
                     incremental_rescan_and_emit(
                         &sources2, &app2, &sess2, &so2, &dirty_sources,
                     );
@@ -600,6 +634,27 @@ impl LocalBackend {
                     }
                     last_skills_reconcile = Instant::now();
                     pending_skills_reconcile = false;
+                }
+
+                // Flush the [CODEX-WATCH] probe summary (see declaration above).
+                if (codex_probe_events > 0 || codex_probe_flushes > 0)
+                    && codex_probe_last_log.elapsed() >= Duration::from_secs(15)
+                {
+                    log_debug(&format!(
+                        "[CODEX-WATCH] evts={} latest={} tail_match={} tail_miss={} flushes={} window={}s",
+                        codex_probe_events,
+                        codex_probe_latest,
+                        codex_probe_tail_match,
+                        codex_probe_tail_miss,
+                        codex_probe_flushes,
+                        codex_probe_last_log.elapsed().as_secs(),
+                    ));
+                    codex_probe_last_log = Instant::now();
+                    codex_probe_events = 0;
+                    codex_probe_latest.clear();
+                    codex_probe_tail_match = 0;
+                    codex_probe_tail_miss = 0;
+                    codex_probe_flushes = 0;
                 }
             }
         });
