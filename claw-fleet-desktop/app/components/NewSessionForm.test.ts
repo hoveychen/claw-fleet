@@ -24,6 +24,14 @@ describe("isTempWorkspacePath", () => {
     expect(isTempWorkspacePath("/var/folders/xy/abc123/T/something")).toBe(true);
   });
 
+  it("flags macOS per-user temp under the /private/var/folders alias", () => {
+    // On macOS /var is a symlink to /private/var, so canonicalized cwds surface
+    // as /private/var/folders/... — codex e2e scratch workspaces land here.
+    expect(
+      isTempWorkspacePath("/private/var/folders/3_/hh7x529n3s59vbxbrn71v/T/fleet-codex-e2e-45523"),
+    ).toBe(true);
+  });
+
   it("leaves a real project path alone", () => {
     expect(isTempWorkspacePath("/Users/hoveychen/workspace/claude-fleet")).toBe(false);
   });
