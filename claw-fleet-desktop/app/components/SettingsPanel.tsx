@@ -42,6 +42,8 @@ interface ClaudeBinary {
 interface LlmModel {
   id: string;
   displayName: string;
+  /** Same-tier model name in the other engine (e.g. "Luna" for "Haiku"). */
+  alignedDisplay?: string;
 }
 
 interface LlmProviderInfo {
@@ -870,6 +872,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     sources.some((source) => source.name === name && source.enabled && source.available),
   );
 
+  // Show the cross-engine tier sibling (e.g. "Haiku / Luna") only when both
+  // engines are active, since that's the only time quota fallback swaps them.
+  const modelOptionLabel = useCallback((m: LlmModel) => (
+    dualReportProvidersEnabled && m.alignedDisplay
+      ? `${m.displayName} / ${m.alignedDisplay}`
+      : m.displayName
+  ), [dualReportProvidersEnabled]);
+
   // ── Auto-resume config ──────────────────────────────────────────────────
   const [autoResume, setAutoResume] = useState<{ enabled: boolean; maxWaitHours: number }>({
     enabled: true,
@@ -1117,7 +1127,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                         onChange={(e) => handleLlmConfigChange({ fastModel: e.target.value })}
                       >
                         {currentProviderInfo.models.map((m) => (
-                          <option key={m.id} value={m.id}>{m.displayName}</option>
+                          <option key={m.id} value={m.id}>{modelOptionLabel(m)}</option>
                         ))}
                       </select>
                     </div>
@@ -1135,7 +1145,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                         onChange={(e) => handleLlmConfigChange({ standardModel: e.target.value })}
                       >
                         {currentProviderInfo.models.map((m) => (
-                          <option key={m.id} value={m.id}>{m.displayName}</option>
+                          <option key={m.id} value={m.id}>{modelOptionLabel(m)}</option>
                         ))}
                       </select>
                     </div>
