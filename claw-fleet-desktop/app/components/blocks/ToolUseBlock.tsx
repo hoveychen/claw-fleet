@@ -955,12 +955,29 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // needs this — the fetch is deferred until the reader actually opens the card.
   const toolFetch = useToolResultFetch();
   const wasTruncated = !!block.id && (toolFetch?.truncatedIds.has(block.id) ?? false);
-  const { full, loadingFull, error: refetchError } = useFullToolResult(open, wasTruncated, toolFetch, block.id);
+  // A completed Read may be present in the rendered window without its adjacent
+  // tool_result (for example after live-tail/window reconciliation). That is
+  // exactly the empty expanded card shape: use the transcript path to recover
+  // the result lazily, just as we do for an explicitly truncated result.
+  const missingReadResult = block.name === "Read" && !resultProp && !isPartial;
+  const { full, loadingFull, error: refetchError } = useFullToolResult(
+    open,
+    wasTruncated || missingReadResult,
+    toolFetch,
+    block.id,
+  );
 
   // Swap the recovered full body in for the truncated preview once it lands.
   const meta = full ? full.toolUseResult : metaProp;
-  const result =
-    full && resultProp ? { ...resultProp, content: full.content as ToolResultBlock["content"] } : resultProp;
+  const result = full
+    ? resultProp
+      ? { ...resultProp, content: full.content as ToolResultBlock["content"] }
+      : {
+          type: "tool_result" as const,
+          tool_use_id: block.id ?? "",
+          content: full.content as ToolResultBlock["content"],
+        }
+    : resultProp;
 
   // codex's function-call tools get a friendly one-liner instead of their raw
   // args object; everything else falls back to the generic formatter.
