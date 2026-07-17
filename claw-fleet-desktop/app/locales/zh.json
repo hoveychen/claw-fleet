@@ -1661,7 +1661,10 @@
     "title": "权限请求",
     "allow": "允许",
     "deny": "拒绝",
-    "deny_reason_placeholder": "原因（可选，告诉 AI）"
+    "deny_reason_placeholder": "原因（可选，告诉 AI）",
+    "in_path": "位于",
+    "show_params": "查看参数详情",
+    "hide_params": "隐藏参数详情"
   },
   "guard": {
     "title": "检测到高危命令",

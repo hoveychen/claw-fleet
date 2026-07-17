@@ -638,6 +638,66 @@
   margin-bottom: 8px;
 }
 
+/* Permission-prompt file headline: extension glyph + basename, full path below */
+.perm_file {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--color-bg-tool);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+
+.perm_file_head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.perm_file_icon {
+  display: inline-flex;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+.perm_file_icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.perm_file_name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.perm_file_path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-dim);
+  word-break: break-all;
+}
+
+.perm_raw_toggle {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 8px;
+  text-decoration: underline;
+}
+
+.perm_raw_toggle:hover {
+  color: var(--color-text);
+}
+
 /* Risk tags */
 .tags {
   display: flex;

@@ -24,6 +24,9 @@ import type {
   PlanApprovalDecision,
 } from "../types";
 import { A2uiRenderCard } from "./A2uiRenderCard";
+import { fileExtIcon } from "./blocks/Rail";
+import { basename } from "./blocks/ToolUseBlock";
+import { permissionPrimary } from "./permissionPrimary";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { SessionDetail } from "./SessionDetail";
 import { StructuredCommandView } from "./StructuredCommandView";
@@ -319,9 +322,21 @@ function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision
   const setPermissionPromptDenyReason = useDecisionStore(
     (s) => s.setPermissionPromptDenyReason,
   );
+  const [showRaw, setShowRaw] = useState(false);
   const req = decision.request;
 
-  const inputPreview = useMemo(() => {
+  const input = useMemo<Record<string, unknown>>(
+    () =>
+      req.toolInput && typeof req.toolInput === "object"
+        ? (req.toolInput as Record<string, unknown>)
+        : {},
+    [req.toolInput],
+  );
+  const primary = useMemo(
+    () => permissionPrimary(req.toolName, input),
+    [req.toolName, input],
+  );
+  const rawJson = useMemo(() => {
     try {
       const text = JSON.stringify(req.toolInput ?? {}, null, 2);
       return text.length > 6000 ? `${text.slice(0, 6000)}\n…` : text;
@@ -329,6 +344,12 @@ function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision
       return String(req.toolInput);
     }
   }, [req.toolInput]);
+
+  // The raw-params toggle is redundant when the primary display already *is* the
+  // JSON fallback, or when the input has no fields beyond the one we lead with.
+  const primaryKeyCount = primary.kind === "pattern" && primary.path ? 2 : 1;
+  const hasExtraParams =
+    primary.kind !== "json" && Object.keys(input).length > primaryKeyCount;
 
   const handleAllow = useCallback(
     () => respondToPermissionPrompt(decision.id, true),
@@ -370,7 +391,38 @@ function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision
         <span className={styles.tag}>{req.toolName}</span>
       </div>
 
-      <div className={styles.command}>{inputPreview}</div>
+      {primary.kind === "file" ? (
+        <div className={styles.perm_file}>
+          <div className={styles.perm_file_head}>
+            <span className={styles.perm_file_icon} aria-hidden>
+              {fileExtIcon(primary.path)}
+            </span>
+            <span className={styles.perm_file_name}>{basename(primary.path)}</span>
+          </div>
+          <span className={styles.perm_file_path}>{primary.path}</span>
+        </div>
+      ) : primary.kind === "pattern" ? (
+        <div className={styles.command}>
+          {primary.path
+            ? `${primary.text}\n${t("permission_prompt.in_path", "in")} ${primary.path}`
+            : primary.text}
+        </div>
+      ) : (
+        <div className={styles.command}>{primary.text}</div>
+      )}
+
+      {hasExtraParams && (
+        <button
+          type="button"
+          className={styles.perm_raw_toggle}
+          onClick={() => setShowRaw((v) => !v)}
+        >
+          {showRaw
+            ? t("permission_prompt.hide_params", "隐藏参数详情")
+            : t("permission_prompt.show_params", "查看参数详情")}
+        </button>
+      )}
+      {hasExtraParams && showRaw && <div className={styles.command}>{rawJson}</div>}
 
       <div className={styles.block_reason_row}>
         <input
