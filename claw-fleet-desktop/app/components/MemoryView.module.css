@@ -266,7 +266,7 @@
   padding: 2px 0;
   border-radius: var(--radius-xs);
   margin-top: 1px;
-  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .type_badge.type_user {
@@ -563,14 +563,14 @@
   color: var(--color-text-dim);
   font-size: 10px;
   margin-left: auto;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .history_body {
   padding: 8px 12px;
   font-size: 11px;
   line-height: 1.5;
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--color-text);
@@ -679,7 +679,7 @@
 }
 
 .lesson_session {
-  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;

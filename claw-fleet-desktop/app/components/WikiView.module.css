@@ -186,7 +186,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .grid_scope_count {
@@ -350,7 +350,7 @@
 .grid_slug {
   font-size: 10px;
   color: var(--color-text-dim);
-  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -489,7 +489,7 @@
   font-size: 11px;
   color: var(--color-text);
   outline: none;
-  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   max-width: 260px;
 }
 

@@ -1065,7 +1065,7 @@
 }
 
 .elicitation_preview {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
   font-size: 12px;
   line-height: 1.45;
   padding: 8px 10px;
