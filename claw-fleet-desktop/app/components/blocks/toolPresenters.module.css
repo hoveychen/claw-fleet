@@ -269,3 +269,14 @@
   flex-shrink: 0;
   margin-left: auto;
 }
+
+/* WebFetch: the model's page summary, kept visually quieter than message
+   prose — it is tool output, not the agent speaking. */
+.fetch_result {
+  font-size: 12px;
+}
+
+.fetch_result > :global(div) {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}

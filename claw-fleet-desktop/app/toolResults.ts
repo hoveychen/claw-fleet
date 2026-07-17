@@ -360,6 +360,34 @@ export function asWebSearchResult(v: unknown): WebSearchToolResult | null {
   return { query, durationSeconds: num(v.durationSeconds), links };
 }
 
+/** `WebFetch`. `result` is the model's own summary of the fetched page —
+ *  markdown prose, not raw HTML. */
+export interface WebFetchToolResult {
+  url: string;
+  code?: number;
+  codeText?: string;
+  bytes?: number;
+  durationMs?: number;
+  result?: string;
+}
+
+export function asWebFetchResult(v: unknown): WebFetchToolResult | null {
+  if (!isRecord(v)) return null;
+  const url = str(v.url);
+  // `code` is the discriminator against foreign url-bearing payloads
+  // (e.g. Artifact, which carries `url` + `title` but never a status code).
+  const code = num(v.code);
+  if (url === undefined || code === undefined) return null;
+  return {
+    url,
+    code,
+    codeText: str(v.codeText),
+    bytes: num(v.bytes),
+    durationMs: num(v.durationMs),
+    result: str(v.result),
+  };
+}
+
 // ── Failed calls ─────────────────────────────────────────────────────────────
 
 /**
