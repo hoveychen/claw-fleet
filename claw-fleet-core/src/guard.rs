@@ -7,6 +7,7 @@
 //! watches this directory, shows a dialog to the user, and writes the response.
 
 use std::fs;
+use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -260,6 +261,7 @@ mod tests {
     fn bash_hook(command: &str) -> HookInput {
         HookInput {
             session_id: None,
+            transcript_path: None,
             tool_name: Some("Bash".into()),
             tool_input: Some(serde_json::json!({ "command": command })),
         }
@@ -378,6 +380,7 @@ mod tests {
         }
         HookInput {
             session_id: Some("sess-1".into()),
+            transcript_path: None,
             tool_name: Some("Bash".into()),
             tool_input: Some(input),
         }
@@ -398,6 +401,7 @@ mod tests {
     fn bash_missing_description_ignores_non_bash() {
         let input = HookInput {
             session_id: Some("s".into()),
+            transcript_path: None,
             tool_name: Some("Read".into()),
             tool_input: Some(serde_json::json!({ "file_path": "/x" })),
         };
@@ -513,6 +517,7 @@ mod tests {
 #[derive(Deserialize, Debug)]
 pub struct HookInput {
     pub session_id: Option<String>,
+    pub transcript_path: Option<String>,
     pub tool_name: Option<String>,
     pub tool_input: Option<serde_json::Value>,
 }
@@ -647,15 +652,19 @@ fn claim_first_reminder_in(dir: &std::path::Path, session_id: &str) -> bool {
 /// The exact stdout `fleet guard` prints to inject the reminder — the documented
 /// PreToolUse `allow` + `additionalContext` shape (both fields are independent;
 /// `allow` matches the non-critical classification this call already got).
-fn build_reminder_output() -> String {
+fn build_context_reminder_output(context: &str) -> String {
     serde_json::json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
-            "additionalContext": MISSING_DESCRIPTION_REMINDER,
+            "additionalContext": context,
         }
     })
     .to_string()
+}
+
+fn build_reminder_output() -> String {
+    build_context_reminder_output(MISSING_DESCRIPTION_REMINDER)
 }
 
 /// If this Bash call omitted its `description` and the session has not been
@@ -671,6 +680,110 @@ pub fn missing_description_reminder_output(input: &HookInput) -> Option<String> 
         return None;
     }
     Some(build_reminder_output())
+}
+
+// ── Missing Codex exec-note reminder ───────────────────────────────────────
+
+/// Context returned after the first observed Codex `exec` script that omitted
+/// Rule 7's leading summary comment. `PreToolUse` cannot block the already
+/// started outer `exec`, but the context is added to the model before its next
+/// tool decision, which corrects the rest of the session without spawning a
+/// surprise follow-up turn.
+pub const MISSING_EXEC_NOTE_REMINDER: &str = "Fleet Rule 7 violation: your latest `functions.exec` script omitted its required summary comment. On EVERY `functions.exec` call, make the exact FIRST line `// <one short summary in Boss's language>`. Do this before any pragma or JavaScript. This reminder fires once per session.";
+
+/// Bound transcript work in the synchronous hook. The current outer exec call
+/// is adjacent to the nested tool hook, so 256 KiB leaves ample room while
+/// avoiding a full read of multi-megabyte rollouts on every command.
+const EXEC_NOTE_TRANSCRIPT_TAIL_BYTES: u64 = 256 * 1024;
+
+fn exec_script_has_note(script: &str) -> bool {
+    let Some(first) = script.lines().map(str::trim).find(|line| !line.is_empty()) else {
+        return false;
+    };
+    first
+        .strip_prefix("//")
+        .map(str::trim)
+        .is_some_and(|note| !note.is_empty())
+}
+
+/// Read the bounded tail of a Codex rollout and inspect its newest `exec`
+/// custom-tool call. Any non-Codex transcript or malformed/incomplete tail is
+/// a silent `false`: a cosmetic reminder must never interfere with Guard.
+fn latest_codex_exec_missing_note(transcript_path: &std::path::Path) -> bool {
+    let Ok(mut file) = fs::File::open(transcript_path) else {
+        return false;
+    };
+    let Ok(len) = file.metadata().map(|meta| meta.len()) else {
+        return false;
+    };
+    let start = len.saturating_sub(EXEC_NOTE_TRANSCRIPT_TAIL_BYTES);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return false;
+    }
+    let mut tail = String::new();
+    if file.read_to_string(&mut tail).is_err() {
+        return false;
+    }
+    if start > 0 {
+        let Some(after_partial) = tail.split_once('\n').map(|(_, rest)| rest) else {
+            return false;
+        };
+        tail = after_partial.to_string();
+    }
+
+    for line in tail.lines().rev() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value.get("type").and_then(|v| v.as_str()) != Some("response_item") {
+            continue;
+        }
+        let Some(payload) = value.get("payload") else {
+            continue;
+        };
+        if payload.get("type").and_then(|v| v.as_str()) != Some("custom_tool_call")
+            || payload.get("name").and_then(|v| v.as_str()) != Some("exec")
+        {
+            continue;
+        }
+        return payload
+            .get("input")
+            .and_then(|v| v.as_str())
+            .is_some_and(|script| !exec_script_has_note(script));
+    }
+    false
+}
+
+fn exec_note_reminder_dir() -> Option<PathBuf> {
+    crate::session::get_fleet_dir().map(|dir| dir.join("codex-exec-note-reminded"))
+}
+
+fn missing_exec_note_reminder_output_in(
+    transcript_path: &std::path::Path,
+    session_id: &str,
+    marker_dir: &std::path::Path,
+) -> Option<String> {
+    if !latest_codex_exec_missing_note(transcript_path)
+        || !claim_first_reminder_in(marker_dir, session_id)
+    {
+        return None;
+    }
+    Some(build_context_reminder_output(MISSING_EXEC_NOTE_REMINDER))
+}
+
+/// Return the one-time Rule 7 correction for the latest missing-note Codex
+/// outer `exec`, if the hook supplied a readable rollout path.
+pub fn missing_exec_note_reminder_output(input: &HookInput) -> Option<String> {
+    let transcript = input.transcript_path.as_deref()?.trim();
+    if transcript.is_empty() {
+        return None;
+    }
+    let marker_dir = exec_note_reminder_dir()?;
+    missing_exec_note_reminder_output_in(
+        std::path::Path::new(transcript),
+        input.session_id.as_deref().unwrap_or(""),
+        &marker_dir,
+    )
 }
 
 /// Generate a new unique guard request ID.
