@@ -39,6 +39,11 @@ export function isMarkdown(name: string): boolean {
   return e === "md" || e === "markdown";
 }
 
+export function isHtml(name: string): boolean {
+  const e = extOf(name);
+  return e === "html" || e === "htm";
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
@@ -235,12 +240,15 @@ export function FilePreview({
   const [content, setContent] = useState<ExplorerFileContent | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
+  // HTML files render live in a sandboxed iframe; this flips to the raw source.
+  const [showSource, setShowSource] = useState(false);
   const relPath = file.relativePath;
 
   useEffect(() => {
     setContent(null);
     setError(false);
     setLoading(true);
+    setShowSource(false);
     let stale = false;
     load(relPath)
       .then((c) => {
@@ -279,6 +287,42 @@ export function FilePreview({
         <div className={fileStyles.image_meta}>
           {file.name} · {formatSize(content.sizeBytes)}
         </div>
+      </div>
+    );
+  }
+
+  // HTML renders live in a locked-down iframe (sandbox="" — no scripts, no
+  // same-origin, no forms), with a toggle back to the highlighted source. The
+  // srcDoc is a single string, so a page's relative assets (./style.css,
+  // ./logo.png) won't resolve; inline styles and external URLs render fine.
+  if (isHtml(file.name)) {
+    return (
+      <div className={styles.content_markdown}>
+        {content.truncated && (
+          <p className={fileStyles.truncated_notice}>
+            {t("files.truncated_notice", { size: formatSize(content.sizeBytes) })}
+          </p>
+        )}
+        <div className={fileStyles.copy_content_row}>
+          <button
+            type="button"
+            className={fileStyles.html_toggle}
+            onClick={() => setShowSource((s) => !s)}
+          >
+            {showSource ? t("files.html_show_preview") : t("files.html_show_source")}
+          </button>
+          <CopyButton text={content.content} />
+        </div>
+        {showSource ? (
+          <TextBlock text={"```html\n" + content.content + "\n```"} />
+        ) : (
+          <iframe
+            className={fileStyles.html_preview}
+            sandbox=""
+            srcDoc={content.content}
+            title={file.name}
+          />
+        )}
       </div>
     );
   }
