@@ -10,12 +10,16 @@ import {
   ChevronRight,
   Copy,
   Download,
+  FileCode,
+  FileStack,
+  FileText,
   Folder,
   FolderInput,
   FolderOutput,
   Library,
   RefreshCw,
   Trash2,
+  type LucideIcon,
 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
@@ -55,10 +59,12 @@ interface WikiSearchHit {
   snippet: string;
 }
 
-const KIND_CONFIG: Record<WikiDoc["kind"], { short: string; cssClass: string }> = {
-  html: { short: "HTML", cssClass: "kind_html" },
-  htmlDir: { short: "DIR", cssClass: "kind_dir" },
-  markdown: { short: "MD", cssClass: "kind_md" },
+// A file-type icon per kind reads more "file-like" than a text badge, while the
+// kind colour keeps markdown / single-page HTML / bundled-HTML-dir distinct.
+const KIND_CONFIG: Record<WikiDoc["kind"], { short: string; cssClass: string; Icon: LucideIcon }> = {
+  html: { short: "HTML", cssClass: "kind_html", Icon: FileCode },
+  htmlDir: { short: "HTML dir", cssClass: "kind_dir", Icon: FileStack },
+  markdown: { short: "Markdown", cssClass: "kind_md", Icon: FileText },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -650,9 +656,18 @@ export function WikiView() {
       }}
     >
       <span className={styles.grid_card_top}>
-        <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
-          {KIND_CONFIG[d.kind]?.short ?? d.kind}
-        </span>
+        {(() => {
+          const cfg = KIND_CONFIG[d.kind];
+          const Icon = cfg?.Icon ?? FileText;
+          return (
+            <span
+              className={`${styles.kind_icon} ${styles[cfg?.cssClass ?? "kind_md"]}`}
+              title={cfg?.short ?? d.kind}
+            >
+              <Icon size={16} strokeWidth={1.7} />
+            </span>
+          );
+        })()}
         {d.versions.length > 1 && (
           <span className={styles.grid_versions}>
             {t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}
