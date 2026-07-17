@@ -1,11 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
+  defaultAgentTool,
   defaultWorkspace,
   distinctWorkspaces,
   isTempWorkspacePath,
   repoRootPath,
   type WorkspaceOption,
 } from "./NewSessionForm";
+
+describe("defaultAgentTool", () => {
+  const choices = [
+    { value: "claude", label: "Claude" },
+    { value: "codex", label: "Codex" },
+  ];
+
+  it("restores the remembered agent when it is still available", () => {
+    expect(defaultAgentTool(choices, "codex")).toBe("codex");
+  });
+
+  it("falls back to the first available agent when the remembered one is unavailable", () => {
+    expect(defaultAgentTool(choices.slice(0, 1), "codex")).toBe("claude");
+  });
+
+  it("falls back to Claude when source discovery has no usable choices", () => {
+    expect(defaultAgentTool([], "codex")).toBe("claude");
+  });
+});
 
 describe("isTempWorkspacePath", () => {
   it("flags scratchpad paths under /private/tmp", () => {
