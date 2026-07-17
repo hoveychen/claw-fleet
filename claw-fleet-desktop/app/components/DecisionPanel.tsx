@@ -1803,8 +1803,10 @@ function PastHistoryStrip({
     };
   }, [sessionId]);
 
-  if (records.length === 0) return null;
-
+  // Always render the handle (as long as the parent has a session): it toggles
+  // the inline SessionDetail column, which is useful even on the very first
+  // card of a session when no *prior* decision has been logged yet. The count
+  // badge only shows once there is at least one past decision to count.
   const fullTitle = t(
     "decision_panel.history_title",
     "Recent in this session",
@@ -1832,7 +1834,9 @@ function PastHistoryStrip({
         <circle cx="12" cy="12" r="9" />
         <path d="M12 7v5l3 2" />
       </svg>
-      <span className={styles.history_handle_count}>{records.length}</span>
+      {records.length > 0 && (
+        <span className={styles.history_handle_count}>{records.length}</span>
+      )}
     </button>
   );
 }
