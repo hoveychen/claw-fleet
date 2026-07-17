@@ -68,6 +68,27 @@ describe("recentWorkspaces", () => {
     const recents = recentWorkspaces(sessions, "/home/chat");
     expect(recents.map(([path]) => path)).toEqual(["/home/repo"]);
   });
+
+  it("worktree checkout 折叠回 repo 根，去重后只出现一次（对齐桌面端）", () => {
+    // 同一 repo 的主 checkout 与 .worktrees/<id> 子目录应折叠到 repo 根 /home/repo。
+    const sessions = [
+      session("/home/repo", "Repo", 100),
+      session("/home/repo/.worktrees/feat-x", "Repo", 500),
+    ];
+    const recents = recentWorkspaces(sessions, null);
+    expect(recents).toEqual([["/home/repo", "Repo"]]);
+  });
+
+  it("剔除临时目录下的 workspace（/tmp、/private/tmp、/var/folders）", () => {
+    const sessions = [
+      session("/tmp/scratch", "Scratch", 400),
+      session("/private/tmp/foo", "Foo", 300),
+      session("/var/folders/ab/T/bar", "Bar", 200),
+      session("/home/repo", "Repo", 100),
+    ];
+    const recents = recentWorkspaces(sessions, null);
+    expect(recents.map(([path]) => path)).toEqual(["/home/repo"]);
+  });
 });
 
 describe("defaultWorkspace", () => {
