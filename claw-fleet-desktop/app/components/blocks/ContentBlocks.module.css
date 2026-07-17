@@ -4,3 +4,23 @@
   font-style: italic;
   padding: 2px 0;
 }
+
+/* Fallback shell for a content block whose type has no dedicated renderer —
+   keeps unknown / future block types visible instead of silently dropped. */
+.unknown {
+  margin: 4px 0;
+  padding: 6px 10px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+.unknown_type {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-dim);
+}
