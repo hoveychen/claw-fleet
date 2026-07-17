@@ -67,11 +67,16 @@ pub(crate) fn cmd_guard() {
     // Classify the command.
     match guard::classify_hook_input(&hook_input) {
         GuardClassification::Allow => {
-            // Not critical — allow. But if this Bash call omitted `description`,
-            // nudge the model once per session so its transcript cards keep
-            // showing the command's intent (see
-            // guard::missing_description_reminder_output).
-            if let Some(out) = guard::missing_description_reminder_output(&hook_input) {
+            // Not critical — allow. Codex's outer code-mode `exec` has no
+            // description field, so inspect its rollout and inject the Rule 7
+            // correction instead. Claude keeps the original Bash-description
+            // reminder. Both paths are once-per-session and never block tools.
+            let reminder = if codex_fail_closed {
+                guard::missing_exec_note_reminder_output(&hook_input)
+            } else {
+                guard::missing_description_reminder_output(&hook_input)
+            };
+            if let Some(out) = reminder {
                 println!("{out}");
             }
             return;
