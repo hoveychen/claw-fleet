@@ -124,14 +124,23 @@
   opacity: 0;
 }
 
-/* Collapse toggle button: lives in the panel's top-left corner, above the
- * `.history_handle` slot — the left edge already reserves a column for that
- * handle, so the button gets free breathing room without crowding the rounded
- * accent border on the right. */
+/* Panel toolbar: slim top strip holding the panel-level controls (collapse on
+ * the left, history on the right). Replaces the two absolutely-positioned
+ * gutter buttons so they read as one aligned control group instead of orphaned
+ * floaters. Collapses to zero height when it has no children. */
+.panel_toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 12px 0;
+}
+.panel_toolbar_spacer {
+  flex: 1 1 auto;
+}
+
+/* Collapse toggle button: sits at the left of the panel toolbar. */
 .collapse_btn {
-  position: absolute;
-  top: 10px;
-  left: 10px;
   width: 22px;
   height: 22px;
   display: inline-flex;
@@ -143,7 +152,6 @@
   background: transparent;
   color: var(--color-text-dim);
   cursor: pointer;
-  z-index: 2;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .collapse_btn:hover {
@@ -217,9 +225,9 @@
 .card_area {
   flex: 1 1 auto;
   overflow-y: auto;
-  /* Extra left padding reserves room for the square `.history_handle` icon
-   * button (and its count badge overflow) at the left edge of `.main_column`. */
-  padding: 10px 14px 10px 44px;
+  /* History + collapse now live in `.panel_toolbar` above, so the card body no
+   * longer reserves a left gutter for the floating handle. */
+  padding: 10px 14px;
   animation: cardFadeIn 0.2s ease;
 }
 
@@ -257,29 +265,23 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Past-history handle: small icon button on the left edge of the card ──
+/* ── Past-history handle: a chip on the right of the panel toolbar ──
  * Clicking toggles `historyOpen`, which (in normal mode) opens the inline
- * SessionDetail column on the panel's left. Sits absolutely-positioned in
- * the same coordinate space as `.collapse_btn`. */
+ * SessionDetail column. Neutral styling with an inline count — it's context,
+ * not an alert, so no red overlapping notification badge. */
 
 .history_handle {
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 28px;
-  height: 28px;
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
   border: none;
   border-radius: var(--radius-sm);
   background: var(--color-bg-tool);
   color: var(--color-text-secondary, rgba(255, 255, 255, 0.55));
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 3;
-  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .history_handle:hover {
@@ -290,7 +292,6 @@
 .history_handle_open {
   background: var(--color-accent-soft, rgba(96, 165, 250, 0.12));
   color: var(--color-accent, #60a5fa);
-  box-shadow: inset 2px 0 0 var(--color-accent, #60a5fa);
 }
 
 .history_handle_icon {
@@ -299,20 +300,11 @@
 }
 
 .history_handle_count {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 7px;
-  background: var(--color-accent, #60a5fa);
-  color: var(--color-on-accent);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
-  line-height: 14px;
-  text-align: center;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
+  color: inherit;
   pointer-events: none;
 }
 
@@ -1623,24 +1615,24 @@
   border-left: 2px solid rgba(var(--color-accent-rgb), 0.35);
   padding-left: 10px;
 }
-/* The always-visible collapsed/expanded toggle bar. */
+/* Subtle borderless text link — no chevron, no full-width hover box — so the
+ * preamble reads as a quiet "view earlier context" affordance and stops
+ * competing with the panel-toolbar collapse chevron. */
 .preceding_toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 4px 6px;
+  gap: 4px;
+  padding: 2px 0;
   background: transparent;
   border: none;
-  border-radius: var(--radius-sm);
   cursor: pointer;
-  color: var(--color-text-secondary);
+  color: var(--color-text-dim);
   text-align: left;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: color 0.12s ease;
 }
 .preceding_toggle:hover {
-  background: rgba(var(--color-accent-rgb), 0.08);
   color: var(--color-text);
+  text-decoration: underline;
 }
 .preceding_chevron {
   width: 13px;
@@ -1653,8 +1645,7 @@
 }
 .preceding_toggle_label {
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-weight: 500;
 }
 /* Expanded narration body: bounded height with its own scroll so a long
  * history never pushes the question off-screen — the card grows up to this
