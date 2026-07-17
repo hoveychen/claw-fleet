@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { useTranslation } from "react-i18next";
 import type {
   DecisionHistoryRecord,
+  LiveThinking,
   RawMessage,
   ToolResultBlock,
 } from "../types";
@@ -21,6 +22,7 @@ import {
 } from "../messageRows";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import { ContentBlocks } from "./blocks/ContentBlocks";
+import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { WorkRunBlock } from "./blocks/WorkRunBlock";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -309,6 +311,11 @@ interface Props {
   /** Live scanner status of the session (e.g. "thinking", "executing");
    *  drives the animated activity indicator under the newest message. */
   status?: string | null;
+  /** Live sidecar reasoning for the in-flight turn. When present, its bare
+   *  streaming block renders in the trailing slot in place of the generic
+   *  "thinking…" spinner, so the reasoning sits inside the message flow rather
+   *  than as a detached box below the list. */
+  liveThinking?: LiveThinking | null;
   /** Decision records for this session. Inline decision cards read them for the
    *  asset id an image-bearing `fleet__ask` needs to re-serve its preview. */
   decisionRecords?: DecisionHistoryRecord[];
@@ -340,6 +347,7 @@ export function MessageList({
   isLoading,
   searchQuery,
   status,
+  liveThinking,
   decisionRecords,
   onLoadEarlier,
   fullyLoaded = true,
@@ -711,7 +719,12 @@ export function MessageList({
           </Fragment>
         );
       })}
-      {trailing === "working" ? (
+      {liveThinking?.streaming && liveThinking.thinking ? (
+        // Live reasoning is streaming: show it inline in the message flow. It
+        // already conveys "the agent is thinking", so it supersedes the generic
+        // spinner rather than stacking a second indicator below it.
+        <ThinkingBlock thinking={liveThinking.thinking} live />
+      ) : trailing === "working" ? (
         // Use the live status label when the scanner knows what the agent is
         // doing; during the resume gap it hasn't flipped yet, so fall back to
         // the generic "Processing…" spinner.
