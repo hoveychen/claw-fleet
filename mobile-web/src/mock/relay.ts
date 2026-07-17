@@ -52,9 +52,18 @@ export class MockRelayClient extends RelayClient {
     setTimeout(() => {
       this.mockHandlers.onStatus?.(true);
       this.mockHandlers.onSessions?.(MOCK_SESSIONS);
+      this.mockHandlers.onSessionsKind?.("full");
+      // A healthy round-trip so the header light comes up green in screenshots.
+      this.mockHandlers.onRttSample?.(80);
       // Last: its handler fetches `pending_snapshot`, which needs the ref set.
       this.mockHandlers.onAgentOnline?.(true);
     }, 0);
+    // A later incremental push, so the More page demonstrates the delta path
+    // engaged (增量 ✓) in mock/screenshot mode.
+    setTimeout(() => {
+      this.mockHandlers.onSessions?.(MOCK_SESSIONS);
+      this.mockHandlers.onSessionsKind?.("delta");
+    }, 1200);
   }
 
   override close(): void {}
