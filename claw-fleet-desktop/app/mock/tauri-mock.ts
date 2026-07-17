@@ -644,6 +644,27 @@ export function installMocks() {
     });
     return id;
   };
+  // Native Claude Code permission prompt routed via fleet__permission_prompt.
+  // Pass overrides to exercise each tool shape, e.g.
+  //   __mock_permission_prompt({ toolName: "Read", toolInput: { file_path: "/a/b/c.ts" } })
+  (window as any).__mock_permission_prompt = (overrides: Record<string, unknown> = {}) => {
+    const id = `mock-perm-${Date.now()}`;
+    emit("permission-prompt-request", {
+      id,
+      sessionId: "sess-fleet-main",
+      workspaceName: "claw-fleet",
+      aiTitle: "Needs approval to touch the filesystem",
+      timestamp: new Date().toISOString(),
+      toolName: "Edit",
+      toolInput: {
+        file_path: "/Users/demo/workspace/claw-fleet/claw-fleet-desktop/src/gui/mod.rs",
+        old_string: "let x = 1;",
+        new_string: "let x = 2;",
+      },
+      ...overrides,
+    });
+    return id;
+  };
   (window as any).__mock_elicitation = (overrides: Record<string, unknown> = {}) => {
     const id = `mock-elic-${Date.now()}`;
     emit("elicitation-request", {
