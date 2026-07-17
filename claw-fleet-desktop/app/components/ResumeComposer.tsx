@@ -187,6 +187,7 @@ export function ResumeComposer({
           enqueueing ? undefined : (
           <SessionOptionPills
             placement="below"
+            tool={agentSource === "codex" ? "codex" : "claude"}
             model={model}
             effort={effort}
             permissionMode={permissionMode}
