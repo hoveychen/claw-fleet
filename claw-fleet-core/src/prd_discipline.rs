@@ -430,13 +430,16 @@ Rule 4 要杀的打断模式*不是*「代理在破坏性操作前问」或「�
 Fleet 有一个一等的接力：\n\
 \n\
 ```\n\
-fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>]\n\
+fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>] [--model <模型>] [--effort <档位>]\n\
 ```\n\
 \n\
 - **--note 是强制的**，是后继者在 TASKS.md 之外知道的一切：什么做完了、什么在\
 飞、关键文件、坑、下一个具体步骤。像换班简报那样写。\n\
 - **当工作是一个 TASKS.md 计划时传 --plan/--next**，好让 Fleet 把后继者自动\
 归属到那个计划和 P；它会在那里恢复节奏，无需自己的任何 `fleet plan` 仪式。\n\
+- **--model / --effort 可选**：钉死后继者的模型（如 `claude-opus-4-8[1m]`，\
+括号后缀原样透传）和推理档位（low|medium|high|max），覆盖否则自动继承的值。\
+不传就沿用当前会话的模型与 CLAUDE_EFFORT。\n\
 - **然后干净地结束回合**：先按 Rule 3 提交 worktree 进度，再停。你一交出，\
 Fleet 的 Stop hook 就消费这个登记，并在同一 workspace spawn 一个全新会话，其\
 开场 prompt 就是你的便条；prd-context hook 会自动重新注入 TASKS.md 宏观计划。\n\
@@ -982,7 +985,7 @@ silently wrap up early, and do NOT leave \"hand off to the next session\" \
 notes that nothing acts on. Fleet has a first-class relay:\n\
 \n\
 ```\n\
-fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>]\n\
+fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>] [--model <model>] [--effort <effort>]\n\
 ```\n\
 \n\
 - **--note is mandatory** and is everything the successor knows beyond \
@@ -991,6 +994,10 @@ concrete step. Write it like a shift-change briefing.\n\
 - **Pass --plan/--next when the work is a TASKS.md plan** so Fleet attributes \
 the successor to that plan and P automatically; it resumes the rhythm there \
 without any `fleet plan` ceremony of its own.\n\
+- **--model / --effort are optional** — pin the successor's model (e.g. \
+`claude-opus-4-8[1m]`, bracketed suffix passed through verbatim) and reasoning \
+effort (low|medium|high|max), overriding the values otherwise auto-inherited. \
+Omit them to keep the current session's model and CLAUDE_EFFORT.\n\
 - **Then finish the turn cleanly**: commit worktree progress per Rule 3 \
 first, then stop. The moment you yield, Fleet's Stop hook consumes the \
 registration and spawns a fresh session in the same workspace whose opening \
