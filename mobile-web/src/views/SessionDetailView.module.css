@@ -322,56 +322,146 @@
   text-overflow: ellipsis;
 }
 
-.toolChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+/* ── Work-block rail (mirrors the desktop transcript's language) ─────────────
+   Each thinking segment / tool call is an icon-guttered step; thin connector
+   segments run between consecutive icons. */
+.railStep {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
   max-width: 100%;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 11.5px;
 }
 
-.toolName {
-  color: var(--color-text-secondary);
-  font-weight: 600;
+.railStep::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 24px;
+  bottom: -4px;
+  width: 1px;
+  background: var(--color-border);
+}
+
+.railStep:last-child::before { display: none; }
+
+.railIcon {
   flex-shrink: 0;
+  width: 17px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-dim);
 }
 
-.toolSummary {
-  color: var(--color-text-dim);
+.railIcon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.railBody {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Tool summary IS the row: full ink so actions scan darker than the muted
+   thinking prose around them. */
+.toolLine {
+  color: var(--color-text);
   font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 22px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.thinkingBlock {
-  max-width: 100%;
-}
-
-.thinkingToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: none;
-  background: none;
-  color: var(--color-text-dim);
-  font-size: 11.5px;
-  padding: 0;
-}
-
-.thinkingBody {
-  margin-top: 4px;
-  border-left: 2px solid var(--color-border-strong);
-  padding: 4px 0 4px 10px;
+/* Thinking as muted prose, clamped behind a bottom fade until tapped. The
+   masks are alpha masks, not painted color — no theme token needed. */
+.thinkText {
   color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  padding: 2px 0;
+}
+
+.thinkText[data-clamped] {
+  max-height: 168px;
+  overflow: hidden;
+}
+
+.thinkText[data-fade] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+}
+
+/* Work-run band: a plain summary line over the rail — no box. */
+.bandHeader {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  max-width: 100%;
+  border: none;
+  background: none;
+  padding: 2px 0;
+  color: var(--color-text-dim);
+  font-size: 12px;
+  text-align: left;
+}
+
+.bandTitle {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.bandSteps {
+  color: var(--color-text-dim);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.bandBody {
+  padding: 2px 0 0;
+  max-width: 100%;
+}
+
+.doneStep { align-items: center; }
+
+.doneIcon { color: var(--color-success, #3fa356); }
+
+.doneLabel {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* In-progress headline shimmer — a light band sweeping over the text. */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-text-dim) 42%,
+    var(--color-text) 50%,
+    var(--color-text-dim) 58%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: bandShimmer 2.2s linear infinite;
+}
+
+@keyframes bandShimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
 }
 
 .skillCard {

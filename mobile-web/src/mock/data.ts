@@ -254,6 +254,128 @@ export const MOCK_TODAY_USAGE: TodayUsage = {
 
 /** Transcript for the chat session — what `tail` serves for its detail view. */
 export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
+  // Work-run fixtures: a finished band (thinking + tools ×2 records) between
+  // prose, then a live tail run — the session is `waitingInput`... the tail run
+  // exercises the collapsed/expanded band; the api-server session status keeps
+  // the last band non-live so the Done row shows.
+  "/Users/demo/.claude/projects/api-server/sess-api-main.jsonl": [
+    {
+      type: "user",
+      uuid: "am1",
+      timestamp: new Date(NOW - 30 * MIN).toISOString(),
+      message: { role: "user", content: "JWT validation rejects valid tokens after the update — investigate and fix." },
+    },
+    {
+      type: "assistant",
+      uuid: "am2",
+      timestamp: new Date(NOW - 29 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking:
+              "The JWT failures started right after the issuer migration deploy. I should check the middleware's verify options first — if the expected issuer changed while old tokens are still in flight, every pre-deploy token fails exactly like this.\n\nThe fix pattern for a rolling migration is to accept both issuers for the overlap window, then drop the old one once max token TTL has passed. Need to confirm the TTL before writing the patch.\n\nAlso worth grepping for any hard-coded issuer strings in tests so the suite doesn't go red when the middleware starts accepting both.",
+          },
+          { type: "tool_use", id: "at1", name: "Read", input: { file_path: "/Users/demo/workspace/api-server/src/middleware/auth.ts" } },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "am3",
+      timestamp: new Date(NOW - 28 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "at2", name: "Grep", input: { pattern: "api-server-v2", path: "src" } },
+          { type: "tool_use", id: "at3", name: "Bash", input: { command: "npm test -- auth", description: "Run the auth middleware suite" } },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "am4",
+      timestamp: new Date(NOW - 26 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Found it — the issuer claim changed from `api-server` to `api-server-v2`, but pre-deploy tokens still carry the old issuer. Accepting both during the migration window:\n\n```ts\nissuer: ['api-server', 'api-server-v2'],\n```",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "am5",
+      timestamp: new Date(NOW - 25 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "at4", name: "Edit", input: { file_path: "/Users/demo/workspace/api-server/src/middleware/auth.ts" } },
+          { type: "tool_use", id: "at5", name: "Bash", input: { command: "npm test -- auth", description: "Re-run the suite against the dual-issuer patch" } },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "am6",
+      timestamp: new Date(NOW - 24 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "Suite is green with both issuers accepted. Wrapping up with a summary." },
+          { type: "tool_use", id: "at6", name: "TodoWrite", input: {} },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "am7",
+      timestamp: new Date(NOW - 23 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Patch applied and the auth suite is green. Old tokens stay valid through the migration window; I'll drop the legacy issuer once the max TTL passes." },
+        ],
+      },
+    },
+  ],
+  // Live-band fixture: the session status is `executing`, so this tail run
+  // renders as the working tail — band auto-open, headline shimmer, no Done.
+  "/Users/demo/.claude/projects/billing-service/sess-billing-3.jsonl": [
+    {
+      type: "user",
+      uuid: "bm1",
+      timestamp: new Date(NOW - 10 * MIN).toISOString(),
+      message: { role: "user", content: "Flip the read path behind the usage_billing_v2 flag and run the cutover checks." },
+    },
+    {
+      type: "assistant",
+      uuid: "bm2",
+      timestamp: new Date(NOW - 2 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "Flipping the flag first, then replaying yesterday's ledger sample against both read paths to diff the outputs before letting the cutover stick." },
+          { type: "tool_use", id: "bt1", name: "Edit", input: { file_path: "/Users/demo/workspace/billing-service/src/flags.ts" } },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "bm3",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "bt2", name: "Bash", input: { command: "npm run replay -- --sample yesterday", description: "Replay ledger sample against both read paths" } },
+        ],
+      },
+    },
+  ],
   "/Users/demo/.claude/projects/chat/sess-chat-idle.jsonl": [
     {
       type: "user",
