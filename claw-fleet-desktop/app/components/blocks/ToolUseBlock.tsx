@@ -373,6 +373,99 @@ function PlanInput({ block }: { block: ToolUseBlockType }) {
   );
 }
 
+/** Expanded body for codex `spawn_agent`: type/model/effort chips over the task
+ *  message. The `message` can be an opaque encrypted blob (a long token with no
+ *  whitespace) — show it only when it reads as prose. */
+function SpawnAgentInput({ block }: { block: ToolUseBlockType }) {
+  const i = block.input;
+  const chips = [i.agent_type, i.model, i.reasoning_effort]
+    .map((v) => (typeof v === "string" ? v.trim() : ""))
+    .filter(Boolean);
+  const message = typeof i.message === "string" ? i.message : "";
+  const isProse = /\s/.test(message.trim());
+  if (chips.length === 0 && !isProse) return <RawInput block={block} />;
+  return (
+    <>
+      {chips.length > 0 && (
+        <div className={styles.codex_chips}>
+          {chips.map((c, k) => (
+            <span key={k} className={styles.codex_chip}>
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+      {isProse && <ExpandableText text={message} />}
+    </>
+  );
+}
+
+interface CodexQuestion {
+  header?: string;
+  question?: string;
+  options?: Array<{ label?: string; description?: string }>;
+}
+
+/** Expanded body for codex `request_user_input`: each question over its options,
+ *  instead of the raw `{questions:[…]}` array. */
+function RequestInput({ block }: { block: ToolUseBlockType }) {
+  const questions = Array.isArray(block.input.questions)
+    ? (block.input.questions as CodexQuestion[])
+    : [];
+  if (questions.length === 0) return <RawInput block={block} />;
+  return (
+    <div className={styles.request_list}>
+      {questions.map((q, i) => (
+        <div key={i} className={styles.request_q}>
+          <div className={styles.request_q_text}>{q.question ?? q.header ?? ""}</div>
+          {Array.isArray(q.options) && q.options.length > 0 && (
+            <ul className={styles.request_opts}>
+              {q.options.map((o, k) => (
+                <li key={k}>
+                  {o.label}
+                  {o.description ? ` — ${o.description}` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Expanded body for codex `write_stdin`: the typed characters, or a note when
+ *  it's an empty poll for more output. */
+function StdinInput({ block }: { block: ToolUseBlockType }) {
+  const chars = typeof block.input.chars === "string" ? block.input.chars : "";
+  if (!chars.trim()) {
+    const secs = waitTimeoutSecs(block.input);
+    return (
+      <div className={styles.codex_note}>{secs ? `Polled for output · ${secs}s` : "Polled for output"}</div>
+    );
+  }
+  return (
+    <>
+      <span className={styles.section_label}>Input</span>
+      <pre className={styles.input_text}>{chars}</pre>
+    </>
+  );
+}
+
+/** Expanded body for codex `wait` / `wait_agent`: a compact note (timeout, cell,
+ *  agent count) rather than the raw field object. */
+function WaitInput({ block }: { block: ToolUseBlockType }) {
+  const secs = timeoutMsToSecs(block.input.yield_time_ms ?? block.input.timeout_ms);
+  const cell = typeof block.input.cell_id === "string" ? block.input.cell_id : "";
+  const ids = Array.isArray(block.input.ids) ? (block.input.ids as string[]) : [];
+  const parts: string[] = [];
+  if (secs) parts.push(`timeout ${secs}s`);
+  if (cell) parts.push(`cell ${cell}`);
+  if (ids.length) parts.push(`${ids.length} agent${ids.length === 1 ? "" : "s"}`);
+  if (parts.length === 0) return <RawInput block={block} />;
+  return <div className={styles.codex_note}>{parts.join(" · ")}</div>;
+}
+
 /** codex's tool set (function-call + custom tools). These have no Claude Code
  *  `toolUseResult`, so they never hit the custom-body path — their expanded body
  *  is dispatched through `CodexToolInput` instead of falling to raw JSON. */
@@ -399,6 +492,15 @@ function CodexToolInput({ block, paths }: { block: ToolUseBlockType; paths?: Pat
       return <PatchInput block={block} paths={paths} />;
     case "update_plan":
       return <PlanInput block={block} />;
+    case "spawn_agent":
+      return <SpawnAgentInput block={block} />;
+    case "request_user_input":
+      return <RequestInput block={block} />;
+    case "write_stdin":
+      return <StdinInput block={block} />;
+    case "wait":
+    case "wait_agent":
+      return <WaitInput block={block} />;
     default:
       return <RawInput block={block} />;
   }

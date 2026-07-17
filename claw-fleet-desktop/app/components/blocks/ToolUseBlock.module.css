@@ -200,6 +200,53 @@
 
 .plan_current .plan_mark { color: var(--color-warning, #dcaa3c); }
 
+/* spawn_agent meta chips */
+.codex_chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.codex_chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--color-bg-tool-hover);
+  color: var(--color-text-secondary);
+}
+
+/* wait / write_stdin poll note */
+.codex_note {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
+/* request_user_input question + options */
+.request_list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.request_q_text {
+  font-size: 12px;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.request_opts {
+  margin: 3px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 /* Result */
 .result {
   padding: 8px 10px;
