@@ -1,23 +1,30 @@
+/* Same visual language as the rail's expanded panels: neutral card surface,
+   plain ink — no accent-colored chip chrome. */
 .root {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   margin: 4px 0;
-  padding: 6px 12px;
+  padding: 5px 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: var(--color-bg-tool);
+  background: var(--color-bg-card);
   font-size: 12px;
 }
 
 .icon {
+  display: inline-flex;
   color: var(--color-text-dim);
-  font-size: 14px;
+}
+
+.icon svg {
+  width: 13px;
+  height: 13px;
 }
 
 .label {
-  font-weight: 600;
-  color: var(--color-accent-tool);
+  font-weight: 500;
+  color: var(--color-text);
   letter-spacing: 0.02em;
 }
 
