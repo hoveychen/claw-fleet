@@ -20,6 +20,13 @@ WORKDIR /src/mobile-web
 COPY mobile-web/package.json mobile-web/pnpm-lock.yaml mobile-web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY mobile-web/ ./
+# The commit this bundle is built from — `.git` isn't in the build context and
+# alpine has no git, so the build passes it in (relay-image.yml sets it to the
+# CI commit). vite bakes it into __APP_COMMIT__ → reported in client_hello so the
+# desktop can flag a phone on a stale deploy. Absent → vite falls back to
+# "unknown" and the desktop raises no stale flag.
+ARG APP_COMMIT=""
+ENV VITE_APP_COMMIT=$APP_COMMIT
 RUN pnpm build
 
 # ── relay binary ─────────────────────────────────────────────────────────────
