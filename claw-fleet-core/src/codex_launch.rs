@@ -550,15 +550,17 @@ fn toml_basic_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Inline Codex hook config that routes every resolved shell command through
-/// the same synchronous Fleet Guard used by Claude Code.  Codex 0.144+ names
-/// its shell hook `Bash` and passes the compatible `tool_name`/`tool_input`
-/// payload. The hook timeout is deliberately longer than Fleet Guard's own
-/// configurable wait: the guard process owns the user-facing timeout policy.
+/// Inline Codex hook config that routes resolved shell commands through the
+/// same synchronous Fleet Guard used by Claude Code, and lets the guard inject
+/// a one-time Rule 7 correction after an outer code-mode `exec` omits its note.
+/// `exec` is included for runtimes that expose the outer custom tool to hooks;
+/// `Bash` / `apply_patch` cover the nested tools on current code-mode runtimes.
+/// The hook timeout is deliberately longer than Fleet Guard's own configurable
+/// wait: the guard process owns the user-facing timeout policy.
 fn fleet_codex_guard_config(fleet: &str) -> String {
     let command = format!("{} guard", shell_words::quote(fleet));
     format!(
-        "hooks.PreToolUse=[{{matcher=\"^Bash$\",hooks=[{{type=\"command\",command={},timeout=86400,statusMessage=\"Fleet Guard: checking command\"}}]}}]",
+        "hooks.PreToolUse=[{{matcher=\"^(Bash|apply_patch|exec)$\",hooks=[{{type=\"command\",command={},timeout=86400,statusMessage=\"Fleet Guard: checking command\"}}]}}]",
         toml_basic_string(&command)
     )
 }
@@ -1440,10 +1442,10 @@ mod tests {
     }
 
     #[test]
-    fn codex_guard_config_matches_bash_and_shell_quotes_fleet_path() {
+    fn codex_guard_config_matches_exec_and_nested_tools_and_quotes_fleet_path() {
         let cfg = fleet_codex_guard_config("/Applications/Fleet Tools/fleet");
         assert!(cfg.starts_with("hooks.PreToolUse="));
-        assert!(cfg.contains("matcher=\"^Bash$\""));
+        assert!(cfg.contains("matcher=\"^(Bash|apply_patch|exec)$\""));
         assert!(cfg.contains("'/Applications/Fleet Tools/fleet' guard"));
         assert!(cfg.contains("timeout=86400"));
     }
