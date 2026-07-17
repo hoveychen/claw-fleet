@@ -63,6 +63,35 @@ pub fn read_tail_lines_as_json(path: &Path, n: usize) -> std::io::Result<Vec<Val
         .collect())
 }
 
+/// Parse a *forward* incremental tail buffer read from a saved byte offset to
+/// EOF, returning the JSON-parsed complete lines plus the number of bytes that
+/// were definitively consumed — the length up to and including the last `\n` in
+/// `buf`.
+///
+/// A trailing fragment with no newline is a record still being flushed by the
+/// writer; it is left **unconsumed** so the caller re-reads it once the write
+/// finishes. Callers MUST advance their saved offset by the returned `consumed`
+/// (i.e. `offset + consumed`), never to EOF — advancing past a partial line
+/// skips its bytes, and when the rest lands the next read starts mid-record,
+/// so that record (often the first thinking/tool_use block of a resumed turn,
+/// written in a burst) is malformed forever and permanently lost.
+///
+/// Complete-but-malformed lines are counted as consumed (re-reading can't help)
+/// but dropped from the parsed output, matching `read_tail_lines_as_json`.
+pub fn parse_incremental_tail(buf: &str) -> (Vec<Value>, usize) {
+    // Consume only through the last newline; a trailing fragment with no `\n`
+    // is a half-written record left for the next read (a `\n` is one byte, so
+    // `idx + 1` is a valid char boundary right after it).
+    let consumed = buf.rfind('\n').map_or(0, |idx| idx + 1);
+    let complete = &buf[..consumed];
+    let lines = complete
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    (lines, consumed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +166,64 @@ mod tests {
         assert_eq!(out[1]["i"], 3);
         assert_eq!(out[2]["i"], 5);
         std::fs::remove_file(p).ok();
+    }
+
+    // ── parse_incremental_tail (forward incremental readers) ─────────────────
+
+    #[test]
+    fn incremental_leaves_trailing_partial_line_unconsumed() {
+        // Simulates the watcher firing mid-burst: "A\n" is fully flushed, but
+        // the next record is only partially written (no trailing newline yet).
+        // The partial fragment must NOT be consumed — its bytes have to be
+        // re-read once the writer finishes, or the record is lost forever.
+        let buf = "{\"i\":1}\n{\"i\":2,\"partia";
+        let (lines, consumed) = parse_incremental_tail(buf);
+        assert_eq!(lines.len(), 1, "only the complete line parses");
+        assert_eq!(lines[0]["i"], 1);
+        // "{\"i\":1}\n" is 8 bytes; the 13-byte partial fragment stays unconsumed.
+        assert_eq!(consumed, 8, "offset must stop at the last newline, not EOF");
+    }
+
+    #[test]
+    fn incremental_resumes_partial_line_next_tick() {
+        // First tick sees the partial; second tick reads from `consumed` and
+        // must recover the record that was mid-flight before.
+        let first = "{\"i\":1}\n{\"i\":2,\"partia";
+        let (l1, consumed1) = parse_incremental_tail(first);
+        assert_eq!(l1.len(), 1);
+        // The rest of record 2 plus a full record 3 land next.
+        let full = "{\"i\":1}\n{\"i\":2,\"partial\":true}\n{\"i\":3}\n";
+        let (l2, _) = parse_incremental_tail(&full[consumed1..]);
+        assert_eq!(l2.len(), 2, "record 2 recovered, record 3 read");
+        assert_eq!(l2[0]["i"], 2);
+        assert_eq!(l2[0]["partial"], true);
+        assert_eq!(l2[1]["i"], 3);
+    }
+
+    #[test]
+    fn incremental_no_complete_line_consumes_nothing() {
+        let (lines, consumed) = parse_incremental_tail("{\"i\":1,\"still_wr");
+        assert!(lines.is_empty());
+        assert_eq!(consumed, 0);
+    }
+
+    #[test]
+    fn incremental_complete_lines_all_consumed() {
+        let buf = "{\"i\":1}\n{\"i\":2}\n";
+        let (lines, consumed) = parse_incremental_tail(buf);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(consumed, buf.len(), "a clean newline-terminated buffer is fully consumed");
+    }
+
+    #[test]
+    fn incremental_malformed_complete_line_consumed_but_dropped() {
+        // A complete (newline-terminated) but unparseable line can't be helped
+        // by re-reading, so it is consumed yet omitted from the parsed output.
+        let buf = "not json\n{\"i\":2}\n";
+        let (lines, consumed) = parse_incremental_tail(buf);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["i"], 2);
+        assert_eq!(consumed, buf.len());
     }
 
     #[test]
