@@ -62,6 +62,17 @@ agentCostUsd: number,
 fleetCostUsd: number, 
 sessionCount: number, };
 
+export type ModelReceiptLine = { 
+model: string, 
+source: string, inputTokens: number, cacheCreationTokens: number, cacheReadTokens: number, outputTokens: number, 
+inputPrice: number, outputPrice: number, cacheWritePrice: number, cacheReadPrice: number, 
+costUsd: number, };
+
+export type TodayUsageBreakdown = { 
+date: string, 
+lines: Array<ModelReceiptLine>, totalInputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalOutputTokens: number, 
+totalCostUsd: number, agentCostUsd: number, fleetCostUsd: number, };
+
 export type SearchHit = { sessionId: string, jsonlPath: string, snippet: string, rank: number, };
 
 export type WaitingAlert = { sessionId: string, workspaceName: string, summary: string, detectedAtMs: number, jsonlPath: string, 
@@ -286,7 +297,8 @@ export type DecisionCardStats = { byType: { [key in string]: DecisionTypeStats }
 
 export type DailyReport = { date: string, timezone: string, generatedAt: number, metrics: DailyMetrics, aiSummary: string | null, aiSummaryGeneratedAt: number | null, sessionIds: Array<string>, lessons: Array<Lesson> | null, lessonsGeneratedAt: number | null, };
 
-export type DailyMetrics = { totalInputTokens: number, totalOutputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalWebSearchRequests: number, totalCostUsd: number, totalSessions: number, totalSubagents: number, totalToolCalls: number, toolCallBreakdown: { [key in string]: number }, modelBreakdown: { [key in string]: ModelTokens }, projects: Array<ProjectMetrics>, sourceBreakdown: { [key in string]: number }, hourlyActivity: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], 
+export type DailyMetrics = { 
+metricsVersion: number, totalInputTokens: number, totalOutputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalWebSearchRequests: number, totalCostUsd: number, totalSessions: number, totalSubagents: number, totalToolCalls: number, toolCallBreakdown: { [key in string]: number }, modelBreakdown: { [key in string]: ModelTokens }, projects: Array<ProjectMetrics>, sourceBreakdown: { [key in string]: number }, hourlyActivity: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], 
 decisionCards: DecisionCardStats, };
 
 export type ModelTokens = { inputTokens: number, outputTokens: number, cacheCreationTokens: number, cacheReadTokens: number, costUsd: number, };

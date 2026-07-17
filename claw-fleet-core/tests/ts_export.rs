@@ -77,6 +77,8 @@ fn build_bundle() -> String {
         claw_fleet_core::session_mark::SessionMark,
         claw_fleet_core::rate_limit_parser::RateLimitType,
         claw_fleet_core::today_usage::TodayUsage,
+        claw_fleet_core::today_usage::ModelReceiptLine,
+        claw_fleet_core::today_usage::TodayUsageBreakdown,
         claw_fleet_core::search_index::SearchHit,
         claw_fleet_core::backend::WaitingAlert,
         claw_fleet_core::backend::PendingDecisions,

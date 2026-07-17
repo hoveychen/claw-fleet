@@ -13,6 +13,22 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
+  /* Rendered as a <button> so it opens the receipt — strip default chrome. */
+  width: 100%;
+  margin: -2px -4px;
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background 0.12s ease;
+}
+
+.row:hover {
+  background: var(--color-bg-secondary);
 }
 
 .cost {
@@ -37,8 +53,12 @@
   gap: 4px;
   padding: 0 2px;
   user-select: none;
-  cursor: default;
+  cursor: pointer;
   white-space: nowrap;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
 }
 
 .badge_inline .cost {
@@ -63,7 +83,14 @@
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   user-select: none;
-  cursor: default;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  width: calc(100% - 16px);
+}
+
+.badge_collapsed:hover {
+  border-color: var(--color-accent, var(--color-text-dim));
 }
 
 .badge_collapsed .cost {
