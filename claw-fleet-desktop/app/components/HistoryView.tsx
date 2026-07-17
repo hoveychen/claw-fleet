@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -81,6 +82,28 @@ interface PendingSpawn extends NewSessionCreated {
 /** Give up on the in-place spinner after this long and offer an escape hatch;
  *  the scanner polls every ~5s so a healthy spawn resolves well within this. */
 const START_TIMEOUT_MS = 30_000;
+
+/**
+ * Keep inactive session panes mounted *and laid out*. On macOS, WKWebView can
+ * restore an overflow scroller from `display: none` without repainting its
+ * contents; the first physical scroll then makes the conversation reappear.
+ * An invisible absolute pane keeps its own box and scroll layer alive without
+ * competing with the active pane in the flex row or accepting input.
+ */
+export function sessionPaneStyle(visible: boolean): CSSProperties {
+  return visible
+    ? {
+        visibility: "visible",
+        position: "relative",
+        pointerEvents: "auto",
+      }
+    : {
+        visibility: "hidden",
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+      };
+}
 
 /**
  * Pick the freshly-spawned session out of the scanned list.
@@ -1108,7 +1131,7 @@ export function HistoryView() {
         />
 
         <div className={styles.detail_body}>
-          {/* Every open tab stays mounted; only the active one is displayed.
+          {/* Every open tab stays mounted; only the active one is visible.
               Unmounting the others would throw away the messages, scroll
               position and view-tab that make a tab worth keeping open. The
               hidden ones are `paused`, so they cost no polling. The draft tab
@@ -1119,7 +1142,8 @@ export function HistoryView() {
               <div
                 key={tab.id}
                 className={styles.pane}
-                style={{ display: visible ? "flex" : "none" }}
+                style={sessionPaneStyle(visible)}
+                aria-hidden={!visible}
               >
                 {tab.id === DRAFT_TAB_ID ? (
                   pending ? (
