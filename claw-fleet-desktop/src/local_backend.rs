@@ -3863,6 +3863,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn live_tail_image_result_uses_transport_trimming_contract() {
+        let path = std::env::temp_dir().join(format!(
+            "fleet-live-tail-image-{}-{}.jsonl",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let tool_use_id = "toolu_live_image";
+        let line = json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": [{
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "A".repeat(8_192)
+                        }
+                    }]
+                }]
+            }
+        });
+        let encoded = format!("{line}\n");
+        fs::write(&path, encoded.as_bytes()).unwrap();
+
+        let (lines, offset) = read_tail_at_offset(&path, 0).expect("one complete line");
+        fs::remove_file(&path).ok();
+
+        assert_eq!(offset, encoded.len() as u64);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["_fleetTruncated"], true);
+        assert_eq!(
+            lines[0]["message"]["content"][0]["tool_use_id"],
+            tool_use_id
+        );
+        let data = lines[0]["message"]["content"][0]["content"][0]["source"]["data"]
+            .as_str()
+            .expect("trimmed base64 preview");
+        assert!(data.len() < 8_192);
+        assert!(data.contains("Fleet truncated"));
+    }
+
     fn mk_session(id: &str, source: &str) -> crate::session::SessionInfo {
         use crate::session::{SessionInfo, SessionStatus};
         SessionInfo {
