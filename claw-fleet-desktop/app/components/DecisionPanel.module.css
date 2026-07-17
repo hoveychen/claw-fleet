@@ -791,6 +791,11 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  /* Separate the button row from the option/composer/form region above it so
+     Cancel/Submit don't sit flush against the "Other" input. Adjacent-margin
+     collapse keeps the guard/permission cards (which precede .actions with a
+     margin-bottom row) visually unchanged. */
+  margin-top: 12px;
 }
 
 .block_reason_row {

@@ -1732,6 +1732,19 @@
     "attach_too_large": "Attachment is too large (max 50 MiB)",
     "attach_error_dismiss": "Dismiss"
   },
+  "fleet_ask": {
+    "title": "Agent Question",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "next": "Next",
+    "back": "Back",
+    "mode_single": "Single",
+    "mode_multi": "Multi",
+    "mode_tooltip": "Switch this question between single and multi select",
+    "select_placeholder": "Select…",
+    "attach_failed": "Attachment upload failed",
+    "attach_error_dismiss": "Dismiss"
+  },
   "composer": {
     "attach": "Attach files",
     "placeholder": "Type a message…",

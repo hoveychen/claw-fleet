@@ -1729,6 +1729,19 @@
     "attach_too_large": "附件过大（上限 50 MiB）",
     "attach_error_dismiss": "关闭"
   },
+  "fleet_ask": {
+    "title": "Agent 提问",
+    "submit": "提交",
+    "cancel": "取消",
+    "next": "下一题",
+    "back": "上一题",
+    "mode_single": "单选",
+    "mode_multi": "多选",
+    "mode_tooltip": "切换此题的单选 / 多选模式",
+    "select_placeholder": "请选择…",
+    "attach_failed": "附件上传失败",
+    "attach_error_dismiss": "关闭"
+  },
   "composer": {
     "attach": "添加附件",
     "placeholder": "输入消息…",
