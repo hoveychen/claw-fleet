@@ -68,3 +68,42 @@ describe("启动台 rail filters", () => {
     expect(getItem("history-query")).toBeNull();
   });
 });
+
+describe("主导航页面浏览上下文", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("keeps all page navigation state outside component lifetimes", async () => {
+    const { useUIStore } = await import("./store");
+    const { updateMainViewState } = useUIStore.getState();
+
+    updateMainViewState("gallery", { query: "worker", showAll: true });
+    updateMainViewState("audit", { tab: "rules", selectedRuleId: "unsafe-shell" });
+    updateMainViewState("memory", { query: "lesson", selectedKey: "file:repo:MEMORY.md" });
+    updateMainViewState("wiki", { selectedSlug: "arch/overview", sortKey: "title" });
+    updateMainViewState("skills", { selectedPath: "/skills/review", activeFilePath: "SKILL.md" });
+    updateMainViewState("plugins", { query: "github", selectedPluginId: "github@official" });
+    updateMainViewState("files", { selectedWorkspace: "/repo", activeFilePath: "src/main.rs" });
+    updateMainViewState("mobile", { editingUrl: true, urlDraft: "wss://relay.example" });
+
+    const state = useUIStore.getState().mainViewState;
+    expect(state.gallery).toMatchObject({ query: "worker", showAll: true });
+    expect(state.audit).toMatchObject({ tab: "rules", selectedRuleId: "unsafe-shell" });
+    expect(state.memory).toMatchObject({ query: "lesson", selectedKey: "file:repo:MEMORY.md" });
+    expect(state.wiki).toMatchObject({ selectedSlug: "arch/overview", sortKey: "title" });
+    expect(state.skills).toMatchObject({ selectedPath: "/skills/review", activeFilePath: "SKILL.md" });
+    expect(state.plugins).toMatchObject({ query: "github", selectedPluginId: "github@official" });
+    expect(state.files).toMatchObject({ selectedWorkspace: "/repo", activeFilePath: "src/main.rs" });
+    expect(state.mobile).toMatchObject({ editingUrl: true, urlDraft: "wss://relay.example" });
+  });
+
+  it("does not persist page browsing context across app restarts", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+
+    useUIStore.getState().updateMainViewState("wiki", { query: "temporary search" });
+
+    expect(getItem("main-view-state")).toBeNull();
+  });
+});
