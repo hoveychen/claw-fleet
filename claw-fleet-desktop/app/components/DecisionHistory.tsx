@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
+import { normalizeSvgBlankLines } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { normalizeAnswer, summarizeQuestion } from "../decisionText";
 import type {
@@ -94,7 +95,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                 remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                 components={md.block}
               >
-                {q.question}
+                {normalizeSvgBlankLines(q.question)}
               </ReactMarkdown>
             </div>
             {q.options.map((opt, oi) => {
@@ -169,7 +170,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
           remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
           components={md.block}
         >
-          {rec.planContent}
+          {normalizeSvgBlankLines(rec.planContent)}
         </ReactMarkdown>
       </div>
       {rec.editedPlan && (
@@ -182,7 +183,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
               remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
               components={md.block}
             >
-              {rec.editedPlan}
+              {normalizeSvgBlankLines(rec.editedPlan)}
             </ReactMarkdown>
           </div>
         </>
@@ -229,7 +230,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                 remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                 components={md.block}
               >
-                {q.question}
+                {normalizeSvgBlankLines(q.question)}
               </ReactMarkdown>
             </div>
             {q.images && q.images.length > 0 ? (

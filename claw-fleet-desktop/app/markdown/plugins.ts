@@ -78,6 +78,48 @@ const schema = {
 };
 
 /**
+ * A bare `<svg>` opens a CommonMark *type-7* HTML block, and — unlike a
+ * `<script>`/`<pre>`/`<style>` block — a type-7 block ends at the first blank
+ * line. Models routinely separate an inline SVG's logical groups with blank
+ * lines; that blank line silently truncates the drawing: every tag after it
+ * escapes the `<svg>` and the browser renders it as an empty inline element, so
+ * the diagram shows as a near-blank box (the "svg renders blank" report). Drop
+ * blank lines that sit *inside* a top-level svg span so the whole drawing stays
+ * one HTML block. Fenced code is left untouched, so an SVG shown as a code
+ * sample keeps its original formatting.
+ */
+export function normalizeSvgBlankLines(text: string): string {
+  if (!text.includes("<svg")) return text;
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let fence: string | null = null; // active ``` / ~~~ fence marker, if any
+  let svgDepth = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const fenceMatch = /^(```+|~~~+)/.exec(trimmed);
+    if (fenceMatch) {
+      if (fence && trimmed.startsWith(fence)) fence = null;
+      else if (!fence) fence = fenceMatch[1];
+      out.push(line);
+      continue;
+    }
+    if (fence) {
+      out.push(line);
+      continue;
+    }
+    // A blank line while inside an <svg> would close the HTML block — drop it.
+    // Checked before the depth update so a blank line right after </svg>
+    // (svgDepth already back to 0) is preserved.
+    if (svgDepth > 0 && trimmed === "") continue;
+    const opens = (line.match(/<svg\b/g) ?? []).length;
+    const closes = (line.match(/<\/svg\s*>/g) ?? []).length;
+    svgDepth = Math.max(0, svgDepth + opens - closes);
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/**
  * `remark-cjk-friendly` is load-bearing, not a nicety: CommonMark refuses to
  * open emphasis when the `**` sits between a CJK character and punctuation, so
  * `一个是**“引号开头”的加粗**` renders the asterisks literally (verified against
