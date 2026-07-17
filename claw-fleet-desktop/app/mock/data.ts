@@ -2369,6 +2369,16 @@ flowchart LR
   SUP --> T
 \`\`\`
 
+A no-language fence keeps its fixed-width layout (horizontal scroll, no wrap):
+
+\`\`\`
+┌──────────────────────────────────────────────────────────────┐
+│  Scanner ──▶ Backend ──▶ UI ──▶ Supervisor ──▶ Agent transcripts │
+│     ▲                                                    │      │
+│     └────────────────────────────────────────────────────┘      │
+└──────────────────────────────────────────────────────────────┘
+\`\`\`
+
 ## Components
 
 | Component | Crate | Responsibility |
