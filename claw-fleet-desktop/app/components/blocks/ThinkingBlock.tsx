@@ -29,7 +29,7 @@ function useOverflow(ref: React.RefObject<HTMLDivElement | null>, deps: unknown[
 }
 
 export function ThinkingBlock({ thinking, live = false, rail = false }: Props) {
-  const [open, setOpen] = useState(live);
+  const [open, setOpen] = useState(false);
   const windowRef = useRef<HTMLDivElement>(null);
   const overflowing = useOverflow(windowRef, [thinking, open, live, rail]);
 
@@ -40,7 +40,22 @@ export function ThinkingBlock({ thinking, live = false, rail = false }: Props) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [live, thinking]);
 
-  if (rail && !live) {
+  // Live sidecar stream: render bare — no border, no "Thinking" toggle header —
+  // so it reads as an in-flow continuation of the conversation instead of a
+  // detached box. The reasoning scrolls behind a fixed-height window pinned to
+  // the newest text, oldest lines fading out at the top.
+  if (live) {
+    return (
+      <div
+        ref={windowRef}
+        className={`${styles.live_bare} ${overflowing ? styles.fade_top : ""}`}
+      >
+        <TextBlock text={thinking} />
+      </div>
+    );
+  }
+
+  if (rail) {
     const clamped = !open;
     return (
       <div
@@ -61,7 +76,7 @@ export function ThinkingBlock({ thinking, live = false, rail = false }: Props) {
     <div className={styles.root} data-live={live || undefined}>
       <button className={styles.toggle} onClick={() => setOpen((o) => !o)}>
         <span className={styles.icon}>{open ? "▾" : "▸"}</span>
-        <span className={styles.label}>{live ? "Thinking…" : "Thinking"}</span>
+        <span className={styles.label}>Thinking</span>
         {!open && (
           <span className={styles.preview}>
             {preview}
@@ -70,12 +85,7 @@ export function ThinkingBlock({ thinking, live = false, rail = false }: Props) {
         )}
       </button>
       {open && (
-        <div
-          ref={windowRef}
-          className={`${styles.content} ${live ? styles.live_window : ""} ${
-            live && overflowing ? styles.fade_top : ""
-          }`}
-        >
+        <div ref={windowRef} className={styles.content}>
           <TextBlock text={thinking} />
         </div>
       )}

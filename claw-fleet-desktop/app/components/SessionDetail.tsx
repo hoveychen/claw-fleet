@@ -18,7 +18,6 @@ import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
 import { MessageList } from "./MessageList";
 import type { PathLinkContext } from "../markdown/pathLinks";
-import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { ResumeComposer } from "./ResumeComposer";
 import { ScratchpadView } from "./ScratchpadView";
 import type { ExplorerEntry } from "./ExplorerPane";
@@ -1052,6 +1051,7 @@ export function SessionDetail({
                     isLoading={isLoading}
                     searchQuery={searchQuery}
                     status={liveSession?.status ?? null}
+                    liveThinking={liveThinking}
                     decisionRecords={decisionRecords}
                     onLoadEarlier={loadEarlier}
                     fullyLoaded={fullyLoaded}
@@ -1067,9 +1067,6 @@ export function SessionDetail({
                     </div>
                   )}
                 </AgentNavProvider>
-                {liveThinking?.streaming && liveThinking.thinking && (
-                  <ThinkingBlock thinking={liveThinking.thinking} live />
-                )}
               </div>
 
               {/* Auto-follow indicator */}
