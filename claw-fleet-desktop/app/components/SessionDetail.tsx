@@ -1034,7 +1034,11 @@ export function SessionDetail({
                     fullyLoaded={fullyLoaded}
                     isLoadingEarlier={isLoading && messages.length > 0}
                     paths={pathLinks}
-                    jsonlPath={session?.jsonlPath}
+                    // Use the live-refreshed session (same source every other
+                    // jsonlPath consumer here uses); `session` is the possibly-
+                    // stale object the drawer was opened with, whose jsonlPath
+                    // can be absent for sessions opened from a partial shape.
+                    jsonlPath={liveSession?.jsonlPath ?? session?.jsonlPath}
                   />
                   {inlineFleetAsk && (
                     <div className={styles.inline_fleet_ask} data-testid="inline-codex-fleet-ask">

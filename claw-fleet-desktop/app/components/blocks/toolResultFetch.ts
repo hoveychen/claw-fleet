@@ -60,9 +60,10 @@ export function useFullToolResult(
   wasTruncated: boolean,
   toolFetch: ToolResultFetch | null,
   blockId: string | undefined,
-): { full: FullToolResult | null; loadingFull: boolean } {
+): { full: FullToolResult | null; loadingFull: boolean; error: string | null } {
   const [full, setFull] = useState<FullToolResult | null>(null);
   const [loadingFull, setLoadingFull] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const toolFetchRef = useRef(toolFetch);
   toolFetchRef.current = toolFetch;
   useEffect(() => {
@@ -70,12 +71,17 @@ export function useFullToolResult(
     if (!open || !wasTruncated || full || !fetcher || !blockId) return;
     let cancelled = false;
     setLoadingFull(true);
+    setError(null);
     fetcher
       .fetchFull(blockId)
       .then((r) => {
         if (!cancelled) setFull(r);
       })
-      .catch(() => {})
+      // Surface the reason instead of swallowing it: a silently-empty card gave
+      // no signal whether the recovery fired at all or failed mid-flight.
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      })
       .finally(() => {
         if (!cancelled) setLoadingFull(false);
       });
@@ -83,5 +89,5 @@ export function useFullToolResult(
       cancelled = true;
     };
   }, [open, wasTruncated, full, blockId]);
-  return { full, loadingFull };
+  return { full, loadingFull, error };
 }
