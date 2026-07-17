@@ -11,6 +11,7 @@ import type { PathLinkContext } from "../../markdown/pathLinks";
 import { DiffView } from "./DiffView";
 import { ExpandableText } from "./ExpandableText";
 import { ImageThumb } from "./ImageThumb";
+import { TextBlock } from "./TextBlock";
 import { AgentInput, ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
 import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
 import styles from "./ToolUseBlock.module.css";
@@ -249,16 +250,82 @@ function hasAgentInput(block: ToolUseBlockType): boolean {
   );
 }
 
-/** Generic fallback: the whole input object as pretty JSON. This is the shape
- *  every codex tool used to render as; the presenters below replace it one tool
- *  at a time, and unhandled tools still land here. */
-function RawInput({ block }: { block: ToolUseBlockType }) {
+/**
+ * One input field as a labeled row. Scalars stay inline (`key  value`); long or
+ * multiline strings break onto their own line with an ExpandableText (copy
+ * button + height cap); scalar arrays become chips; nested objects fall to a
+ * labeled JSON block. Keeps every field readable without ever dumping the whole
+ * args object as one JSON blob.
+ */
+function ParamRow({ name, value }: { name: string; value: unknown }) {
+  if (typeof value === "string") {
+    if (value.includes("\n") || value.length > 80) {
+      return (
+        <div className={styles.param_block}>
+          <span className={styles.param_key}>{name}</span>
+          <ExpandableText text={value} />
+        </div>
+      );
+    }
+    return (
+      <div className={styles.param_row}>
+        <span className={styles.param_key}>{name}</span>
+        <span className={styles.param_val}>{value}</span>
+      </div>
+    );
+  }
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return (
+      <div className={styles.param_row}>
+        <span className={styles.param_key}>{name}</span>
+        <span className={styles.param_val}>{String(value)}</span>
+      </div>
+    );
+  }
+  if (Array.isArray(value) && value.every((v) => typeof v === "string" || typeof v === "number")) {
+    return (
+      <div className={styles.param_row}>
+        <span className={styles.param_key}>{name}</span>
+        <span className={styles.param_chips}>
+          {value.map((v, i) => (
+            <span key={i} className={styles.param_chip}>
+              {String(v)}
+            </span>
+          ))}
+        </span>
+      </div>
+    );
+  }
   return (
-    <>
-      <span className={styles.section_label}>Input</span>
-      <pre className={styles.input_text}>{JSON.stringify(block.input, null, 2)}</pre>
-    </>
+    <div className={styles.param_block}>
+      <span className={styles.param_key}>{name}</span>
+      <ExpandableText text={JSON.stringify(value, null, 2)} />
+    </div>
   );
+}
+
+/**
+ * Generic fallback body: the tool input as a labeled key/value list rather than
+ * a raw `JSON.stringify` blob. Every tool with no dedicated presenter — MCP
+ * tools, NotebookEdit, BashOutput, KillShell, … — lands here, so nothing in the
+ * transcript shows raw JSON anymore. An empty input reads as a short note.
+ */
+function ParamsBody({ block }: { block: ToolUseBlockType }) {
+  const entries = Object.entries(block.input ?? {});
+  if (entries.length === 0) return <div className={styles.codex_note}>No parameters</div>;
+  return (
+    <div className={styles.params}>
+      {entries.map(([k, v]) => (
+        <ParamRow key={k} name={k} value={v} />
+      ))}
+    </div>
+  );
+}
+
+/** Back-compat alias: codex presenters fall back here when their shape doesn't
+ *  match. Now a clean key/value list instead of raw JSON. */
+function RawInput({ block }: { block: ToolUseBlockType }) {
+  return <ParamsBody block={block} />;
 }
 
 /**
@@ -506,6 +573,177 @@ function CodexToolInput({ block, paths }: { block: ToolUseBlockType; paths?: Pat
   }
 }
 
+// ── Claude read-only / plan tools ─────────────────────────────────────────────
+
+/**
+ * Compact line-range note for a `Read` call's `offset`/`limit`: "lines 40–80",
+ * "from line 40", or "first 80 lines". null when the whole file was read (no
+ * offset and no limit), so the header shows just the path.
+ */
+export function readRange(offset: unknown, limit: unknown): string | null {
+  const o = typeof offset === "number" && Number.isFinite(offset) ? offset : undefined;
+  const l = typeof limit === "number" && Number.isFinite(limit) ? limit : undefined;
+  if (o !== undefined && l !== undefined) return `lines ${o}–${o + l - 1}`;
+  if (o !== undefined) return `from line ${o}`;
+  if (l !== undefined) return `first ${l} lines`;
+  return null;
+}
+
+/** Expanded body for `Read`: the file path as the headline with an optional
+ *  line-range note. The file content itself renders below as the tool result. */
+function ReadInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const fp = typeof block.input.file_path === "string" ? block.input.file_path : "";
+  if (!fp) return <ParamsBody block={block} />;
+  const range = readRange(block.input.offset, block.input.limit);
+  return (
+    <div className={styles.target_head}>
+      <span className={styles.target_main}>{relToWorkspace(fp, paths?.workspaceRoot)}</span>
+      {range && <span className={styles.target_note}>{range}</span>}
+    </div>
+  );
+}
+
+/**
+ * The non-empty scalar flags of a `Grep`/`Glob` call as chip labels — search
+ * root (ws-relative), `glob`, `type`, output mode, `-i`, `-n`. Skips the pattern
+ * itself (shown as the headline) and any absent/empty field.
+ */
+export function searchFlags(input: Record<string, unknown>, wsRoot?: string): string[] {
+  const chips: string[] = [];
+  const path = typeof input.path === "string" ? input.path.trim() : "";
+  if (path) chips.push(relToWorkspace(path, wsRoot));
+  const glob = typeof input.glob === "string" ? input.glob.trim() : "";
+  if (glob) chips.push(`glob ${glob}`);
+  const type = typeof input.type === "string" ? input.type.trim() : "";
+  if (type) chips.push(`type ${type}`);
+  const mode = typeof input.output_mode === "string" ? input.output_mode.trim() : "";
+  if (mode) chips.push(mode);
+  if (input["-i"] === true) chips.push("-i");
+  if (input["-n"] === true) chips.push("-n");
+  return chips;
+}
+
+/** Expanded body for `Grep`: the regex as a code headline over its flag chips.
+ *  Matches render below as the tool result. */
+function GrepInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const pattern = typeof block.input.pattern === "string" ? block.input.pattern : "";
+  if (!pattern) return <ParamsBody block={block} />;
+  const chips = searchFlags(block.input, paths?.workspaceRoot);
+  return (
+    <>
+      <pre className={styles.input_text}>{pattern}</pre>
+      {chips.length > 0 && (
+        <div className={styles.param_chips}>
+          {chips.map((c, i) => (
+            <span key={i} className={styles.param_chip}>
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Expanded body for `Glob`: the pattern as the headline with an optional
+ *  search-root note. Matched files render below as the tool result. */
+function GlobInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const pattern = typeof block.input.pattern === "string" ? block.input.pattern : "";
+  if (!pattern) return <ParamsBody block={block} />;
+  const path = typeof block.input.path === "string" ? block.input.path.trim() : "";
+  return (
+    <div className={styles.target_head}>
+      <span className={styles.target_main}>{pattern}</span>
+      {path && <span className={styles.target_note}>{relToWorkspace(path, paths?.workspaceRoot)}</span>}
+    </div>
+  );
+}
+
+/** Expanded body for `WebSearch`: the query as the headline over any allowed /
+ *  blocked domain chips (`+example.com` / `−spam.com`). */
+function WebSearchInput({ block }: { block: ToolUseBlockType }) {
+  const query = typeof block.input.query === "string" ? block.input.query : "";
+  if (!query) return <ParamsBody block={block} />;
+  const allow = Array.isArray(block.input.allowed_domains) ? block.input.allowed_domains : [];
+  const deny = Array.isArray(block.input.blocked_domains) ? block.input.blocked_domains : [];
+  const chips = [
+    ...allow.filter((d): d is string => typeof d === "string").map((d) => `+${d}`),
+    ...deny.filter((d): d is string => typeof d === "string").map((d) => `−${d}`),
+  ];
+  return (
+    <>
+      <div className={styles.target_head}>
+        <span className={styles.target_main}>{query}</span>
+      </div>
+      {chips.length > 0 && (
+        <div className={styles.param_chips}>
+          {chips.map((c, i) => (
+            <span key={i} className={styles.param_chip}>
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Expanded body for `WebFetch`: the URL as the headline with the model prompt
+ *  rendered as Markdown below it. */
+function WebFetchInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const url = typeof block.input.url === "string" ? block.input.url : "";
+  const prompt = typeof block.input.prompt === "string" ? block.input.prompt : "";
+  if (!url && !prompt) return <ParamsBody block={block} />;
+  return (
+    <>
+      {url && (
+        <div className={styles.target_head}>
+          <span className={styles.target_main}>{url}</span>
+        </div>
+      )}
+      {prompt && (
+        <div className={styles.param_block}>
+          <span className={styles.section_label}>Prompt</span>
+          <TextBlock text={prompt} paths={paths} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Expanded body for `ExitPlanMode`: the plan rendered as Markdown (headings,
+ *  lists, code) instead of a single JSON-escaped string. */
+function PlanModeInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const plan = typeof block.input.plan === "string" ? block.input.plan : "";
+  if (!plan) return <ParamsBody block={block} />;
+  return <TextBlock text={plan} paths={paths} />;
+}
+
+/** Claude's read-only / plan tools that otherwise fall through to the generic
+ *  param list. Each gets a headline + chips presenter instead. */
+const CLAUDE_TOOLS = new Set(["Read", "Grep", "Glob", "WebSearch", "WebFetch", "ExitPlanMode"]);
+
+/** Routes each Claude tool to its expanded-body presenter; unhandled names fall
+ *  back to the generic param list. */
+function ClaudeToolInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  switch (block.name) {
+    case "Read":
+      return <ReadInput block={block} paths={paths} />;
+    case "Grep":
+      return <GrepInput block={block} paths={paths} />;
+    case "Glob":
+      return <GlobInput block={block} paths={paths} />;
+    case "WebSearch":
+      return <WebSearchInput block={block} />;
+    case "WebFetch":
+      return <WebFetchInput block={block} paths={paths} />;
+    case "ExitPlanMode":
+      return <PlanModeInput block={block} paths={paths} />;
+    default:
+      return <ParamsBody block={block} />;
+  }
+}
+
 /** Error colouring comes from `.result_error .result_text` on the wrapper. */
 function ResultText({ text }: { text: string }) {
   return <ExpandableText text={text} className={styles.result_text} />;
@@ -707,12 +945,15 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
             <div className={styles.input_section}>
               <CodexToolInput block={block} paths={paths} />
             </div>
+          ) : CLAUDE_TOOLS.has(block.name) ? (
+            // Claude's read-only / plan tools: a headline (path, pattern, query,
+            // url) + chips instead of the raw JSON input object.
+            <div className={styles.input_section}>
+              <ClaudeToolInput block={block} paths={paths} />
+            </div>
           ) : (
             <div className={styles.input_section}>
-              <span className={styles.section_label}>Input</span>
-              <pre className={styles.input_text}>
-                {JSON.stringify(block.input, null, 2)}
-              </pre>
+              <ParamsBody block={block} />
             </div>
           )}
           {/* A custom body already presents the result (stdout, todo list,
