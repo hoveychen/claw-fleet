@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import {
   Bot,
   CircleCheck,
-  CircleHelp,
   Clock,
   File,
   FileCode,
@@ -11,9 +10,7 @@ import {
   FileText,
   FileType,
   Globe,
-  Image,
   ListTodo,
-  MessageSquare,
   Pencil,
   Search,
   Terminal,
@@ -79,9 +76,6 @@ export function fileExtIcon(path: string): ReactNode {
 }
 
 export const railThinkingIcon = (<Clock />);
-export const railTextIcon = (<MessageSquare />);
-export const railMediaIcon = (<Image />);
-export const railDecisionIcon = (<CircleHelp />);
 export const railUnknownIcon = (<Wrench />);
 
 export function RailStep({ icon, children }: { icon: ReactNode; children: ReactNode }) {

@@ -21,10 +21,7 @@ import { DocumentBlock } from "./DocumentBlock";
 import { ExpandableText } from "./ExpandableText";
 import {
   RailStep,
-  railDecisionIcon,
   railGroupIcon,
-  railMediaIcon,
-  railTextIcon,
   railThinkingIcon,
   railToolIcon,
   railUnknownIcon,
@@ -68,10 +65,12 @@ export interface BlocksProps {
   searchTerms?: string[] | null;
   /** Makes path-shaped inline-code spans clickable. */
   paths?: PathLinkContext;
-  /** Render each block as a timeline-rail step (icon gutter + connector line).
-   *  Set by `WorkRunBlock` for expanded work runs; the default flat rendering
-   *  is unchanged. The steps are emitted as direct siblings so runs spanning
-   *  several records still read as one continuous rail. */
+  /** Render *work* blocks — thinking, tool calls, grouped read batches — as
+   *  timeline-rail steps (icon gutter + connector line). Prose, images,
+   *  documents and decision cards always render flush: they are what the agent
+   *  said/produced, not scaffolding, so they keep full width even when the
+   *  record mixes them with tool calls. Steps are emitted as direct siblings
+   *  so runs spanning several records read as one continuous rail. */
   rail?: boolean;
 }
 
@@ -98,9 +97,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
     const block = content[i];
 
     if (block.type === "text") {
-      push(
-        railTextIcon,
-        i,
+      elements.push(
         <TextBlock
           key={i}
           text={(block as { type: "text"; text: string }).text}
@@ -145,9 +142,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
     // across 86 real transcripts rendered as nothing. Reuse the same thumbnail +
     // lightbox the tool_result path uses.
     if (block.type === "image") {
-      push(
-        railMediaIcon,
-        i,
+      elements.push(
         <ImageThumb key={i} block={block as ImageBlock} alt={t("detail.result_image")} />
       );
       i++;
@@ -156,7 +151,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
 
     // A top-level document (a PDF attachment) — also silently skipped before.
     if (block.type === "document") {
-      push(railMediaIcon, i, <DocumentBlock key={i} block={block} />);
+      elements.push(<DocumentBlock key={i} block={block} />);
       i++;
       continue;
     }
@@ -166,12 +161,12 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
       const result = resultMap.get(toolBlock.id);
 
       // A decision card is where the conversation turned — never let it degrade
-      // into the generic card's `JSON.stringify(input)` header. An unrenderable
-      // shape (rejected call, future schema) still falls through to that card.
+      // into the generic card's `JSON.stringify(input)` header, and never fold
+      // it into the rail: it keeps its full-width card even among steps. An
+      // unrenderable shape (rejected call, future schema) still falls through
+      // to the generic card.
       if (isDecisionTool(toolBlock.name) && hasDecisionQuestions(toolBlock.input)) {
-        push(
-          railDecisionIcon,
-          i,
+        elements.push(
           <DecisionToolCard
             key={i}
             block={toolBlock}
