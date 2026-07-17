@@ -283,19 +283,51 @@ fn extract_raw_lessons(content: &str) -> (String, Vec<Lesson>) {
         }
         if depth == 0 {
             if let Some((ws, sid)) = parse_header(line) {
-                // Capture the raw block body until the next boundary.
-                let mut body: Vec<&str> = Vec::new();
-                i += 1;
-                while i < lines.len() {
-                    let l2 = lines[i];
-                    if parse_header(l2).is_some()
+                // A raw block is: one content paragraph, then optional
+                // `**Why:**` / `**How to apply:**` paragraphs. Anything after
+                // that — e.g. the user's own hand-written rules sitting right
+                // below the last lesson — is NOT part of the block. (A looser
+                // "swallow until the next lesson/sentinel/@import" boundary
+                // once migrated 293 lines of user rules into a lesson body.)
+                let is_boundary = |l2: &str| {
+                    parse_header(l2).is_some()
                         || l2.trim().starts_with("<!-- fleet:")
                         || l2.starts_with('@')
-                    {
+                };
+                let mut body: Vec<&str> = Vec::new();
+                i += 1;
+                // Content paragraph: up to the first blank line.
+                while i < lines.len() {
+                    let l2 = lines[i];
+                    if l2.trim().is_empty() || is_boundary(l2) {
                         break;
                     }
                     body.push(l2);
                     i += 1;
+                }
+                // Trailing annotation paragraphs, each separated by blanks.
+                loop {
+                    let mut j = i;
+                    while j < lines.len() && lines[j].trim().is_empty() {
+                        j += 1;
+                    }
+                    let Some(&next) = lines.get(j) else { break };
+                    let nt = next.trim_start();
+                    if !(nt.starts_with("**Why:**") || nt.starts_with("**How to apply:**")) {
+                        break;
+                    }
+                    while i < j {
+                        body.push(lines[i]);
+                        i += 1;
+                    }
+                    while i < lines.len() {
+                        let l2 = lines[i];
+                        if l2.trim().is_empty() || is_boundary(l2) {
+                            break;
+                        }
+                        body.push(l2);
+                        i += 1;
+                    }
                 }
                 if let Some(lesson) = parse_raw_body(ws, sid, &body) {
                     lessons.push(lesson);
@@ -595,6 +627,40 @@ subagent 结论要交叉验证。\n\
         // Idempotent: re-running finds nothing.
         let (_, again) = extract_raw_lessons(&remaining);
         assert!(again.is_empty());
+    }
+
+    #[test]
+    fn migrate_stops_at_prose_after_why_paragraph() {
+        // Real-world layout: the last raw lesson block is followed by ordinary
+        // hand-written rules (no sentinel, no `@`, no next lesson header). The
+        // block must end after its **Why:** (+ optional **How to apply:**)
+        // paragraph — the trailing prose belongs to the user, not the lesson.
+        let claude = "\
+# Lesson (from netferry, session 2026-04-07)\n\
+subagent 结论要交叉验证。\n\
+\n\
+**Why:** 语义推断把包归错了类。\n\
+\n\
+**How to apply:** 关键结论自己 grep 确认。\n\
+\n\
+Before writing any new function, first search the codebase.\n\
+\n\
+**Why:** 重复造轮子是常见毛病。\n\
+\n\
+**How to apply:** 动手前跑一次 grep。\n";
+        let (remaining, lessons) = extract_raw_lessons(claude);
+        assert_eq!(lessons.len(), 1);
+        assert_eq!(lessons[0].content, "subagent 结论要交叉验证。");
+        assert_eq!(
+            lessons[0].reason,
+            "语义推断把包归错了类。\n\n**How to apply:** 关键结论自己 grep 确认。"
+        );
+        // The user's hand-written rule (and its own Why/How lines) must survive.
+        assert!(remaining.contains("Before writing any new function"));
+        assert!(remaining.contains("重复造轮子是常见毛病"));
+        assert!(remaining.contains("动手前跑一次 grep"));
+        // …and must NOT have been swallowed into the lesson.
+        assert!(!lessons[0].reason.contains("Before writing any new function"));
     }
 
     #[test]
