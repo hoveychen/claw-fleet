@@ -84,6 +84,12 @@ async function clickButtonContaining(label: string) {
   await act(async () => button!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 }
 
+async function clickSidebarFolder(path: string) {
+  const button = container!.querySelector<HTMLButtonElement>(`button[title="${path}"]`);
+  expect(button, `sidebar folder not found: ${path}`).toBeTruthy();
+  await act(async () => button!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+}
+
 describe("WikiView navigation state", () => {
   it("keeps the open document when navigating away and back", async () => {
     container = document.createElement("div");
@@ -102,5 +108,22 @@ describe("WikiView navigation state", () => {
 
     expect(container.querySelector("[class*='preview_pane']")).not.toBeNull();
     expect(container.textContent).toContain("architecture/overview");
+  });
+
+  it("returns to the scoped document list when a sidebar folder is selected", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root!.render(<NavigationHarness />));
+    await act(async () => await new Promise((resolve) => setTimeout(resolve, 0)));
+    await clickButtonContaining("Architecture overview");
+    expect(container.querySelector("[class*='preview_pane']")).not.toBeNull();
+
+    await clickSidebarFolder("architecture");
+
+    expect(container.querySelector("[class*='preview_pane']")).toBeNull();
+    expect(container.querySelector("[class*='grid_pane_split']")).toBeNull();
+    expect(container.textContent).toContain("architecture");
   });
 });

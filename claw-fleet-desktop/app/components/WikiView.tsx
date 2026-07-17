@@ -278,6 +278,12 @@ export function WikiView({ selectedSlug, onSelectedSlugChange: setSelectedSlug }
   const [sortKey, setSortKey] = useState<SortKey>("recent");
   // Which virtual folder the grid is scoped to. `null` = 全部 (every doc).
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  // Folder navigation always returns from the document detail to the list;
+  // otherwise the hidden grid updates while the old document stays onscreen.
+  const selectFolder = (path: string | null) => {
+    setSelectedFolder(path);
+    setSelectedSlug(null);
+  };
   const [confirmDelete, setConfirmDelete] = useState<
     | { kind: "doc"; slug: string }
     | { kind: "version"; slug: string; version: string }
@@ -608,7 +614,7 @@ export function WikiView({ selectedSlug, onSelectedSlugChange: setSelectedSlug }
                 dropPath === folder.path ? styles.drop_target : ""
               }`}
               style={indent(depth)}
-              onClick={() => setSelectedFolder(folder.path)}
+              onClick={() => selectFolder(folder.path)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -715,7 +721,7 @@ export function WikiView({ selectedSlug, onSelectedSlugChange: setSelectedSlug }
     <button
       key={`ft:${folder.path}`}
       className={styles.folder_tile}
-      onClick={() => setSelectedFolder(folder.path)}
+      onClick={() => selectFolder(folder.path)}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -787,7 +793,7 @@ export function WikiView({ selectedSlug, onSelectedSlugChange: setSelectedSlug }
             className={`${styles.folder_row} ${styles.all_row} ${
               selectedFolder === null ? styles.folder_row_active : ""
             }`}
-            onClick={() => setSelectedFolder(null)}
+            onClick={() => selectFolder(null)}
           >
             <span className={styles.folder_chevron} />
             <Library size={13} strokeWidth={1.7} className={styles.folder_icon} />
