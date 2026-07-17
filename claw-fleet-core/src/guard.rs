@@ -428,6 +428,83 @@ mod tests {
             .unwrap()
             .contains("description"));
     }
+
+    // ── Missing Codex exec-note reminder ───────────────────────────────────
+
+    fn write_rollout(path: &std::path::Path, exec_script: Option<&str>) {
+        let mut lines = vec![serde_json::json!({
+            "type": "session_meta",
+            "payload": { "id": "sess-codex", "originator": "fleet" }
+        })];
+        if let Some(script) = exec_script {
+            lines.push(serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call",
+                    "name": "exec",
+                    "input": script
+                }
+            }));
+        }
+        let body = lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(path, format!("{body}\n")).unwrap();
+    }
+
+    #[test]
+    fn latest_codex_exec_detects_missing_note_only() {
+        let dir = fresh_tmp_dir("exec-note-detect");
+        fs::create_dir_all(&dir).unwrap();
+        let transcript = dir.join("rollout.jsonl");
+
+        write_rollout(&transcript, Some("const r = await tools.exec_command({});"));
+        assert!(latest_codex_exec_missing_note(&transcript));
+
+        write_rollout(
+            &transcript,
+            Some("// 检查工作区状态。\nconst r = await tools.exec_command({});"),
+        );
+        assert!(!latest_codex_exec_missing_note(&transcript));
+
+        write_rollout(&transcript, None);
+        assert!(!latest_codex_exec_missing_note(&transcript));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn exec_note_reminder_fires_once_per_session() {
+        let dir = fresh_tmp_dir("exec-note-once");
+        fs::create_dir_all(&dir).unwrap();
+        let transcript = dir.join("rollout.jsonl");
+        let markers = dir.join("markers");
+        write_rollout(&transcript, Some("const r = await tools.exec_command({});"));
+
+        let first = missing_exec_note_reminder_output_in(
+            &transcript,
+            "session-A",
+            &markers,
+        )
+        .expect("first missing note should inject context");
+        let parsed: serde_json::Value = serde_json::from_str(&first).unwrap();
+        let context = parsed["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(context.contains("FIRST line"));
+        assert!(context.contains("// "));
+
+        assert!(
+            missing_exec_note_reminder_output_in(&transcript, "session-A", &markers).is_none(),
+            "same session must be reminded only once"
+        );
+        assert!(
+            missing_exec_note_reminder_output_in(&transcript, "session-B", &markers).is_some(),
+            "different sessions are independent"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 // ── Guard logic (used by `fleet guard` CLI) ─────────────────────────────────
