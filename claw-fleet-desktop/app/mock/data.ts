@@ -1182,6 +1182,55 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
     },
     {
       type: "assistant",
+      uuid: "msg-9e",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-5f",
+            name: "WebFetch",
+            input: {
+              url: "https://playwright.dev/docs/ci-intro",
+              prompt: "How do I upload screenshots as artifacts from GitHub Actions?",
+            },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6000, output_tokens: 70 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-9f",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      // Mirrors the real WebFetch payload: status/bytes/duration plus the
+      // model's markdown summary of the page. Exercises the WebFetch chips +
+      // summary body.
+      toolUseResult: {
+        url: "https://playwright.dev/docs/ci-intro",
+        code: 200,
+        codeText: "OK",
+        bytes: 77795,
+        durationMs: 4002,
+        result:
+          "The page recommends the official setup: run tests with `npx playwright test` on `ubuntu-latest`, then upload captured screenshots with `actions/upload-artifact@v4`:\n\n```yaml\n- uses: actions/upload-artifact@v4\n  if: always()\n  with:\n    name: playwright-screenshots\n    path: test-results/\n```\n\nThe `if: always()` matters — artifacts should upload even when the test job fails.",
+      },
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-5f",
+            content: "Fetched https://playwright.dev/docs/ci-intro (200 OK)",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
       uuid: "msg-10",
       timestamp: new Date(NOW - 8 * MIN).toISOString(),
       message: {
@@ -1234,6 +1283,63 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         ],
         stop_reason: "end_turn",
         usage: { input_tokens: 4200, output_tokens: 180 },
+      },
+    },
+    // A live tail run: two adjacent work records whose last record hasn't
+    // terminated. With the session in a working status this is the last render
+    // unit, so the band opens itself, the headline shimmers, the unfinished
+    // Grep shows its spinner, and no Done row is drawn.
+    {
+      type: "assistant",
+      uuid: "msg-12",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "thinking",
+            thinking: "Wiring the screenshots job into CI now. I need the workflow file and the cache key convention before writing the job block.",
+          },
+          {
+            type: "tool_use",
+            id: "tool-6",
+            name: "Read",
+            input: { file_path: "/Users/demo/workspace/claw-fleet/.github/workflows/release.yml" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6400, output_tokens: 140 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-12b",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tool-6", content: "name: release\non:\n  push:\n    tags: ['v*']" },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-13",
+      timestamp: new Date(NOW - 20 * 1000).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-7",
+            name: "Grep",
+            input: { pattern: "actions/cache", glob: ".github/**" },
+          },
+        ],
+        stop_reason: null,
+        usage: { input_tokens: 6600, output_tokens: 60 },
       },
     },
   ],

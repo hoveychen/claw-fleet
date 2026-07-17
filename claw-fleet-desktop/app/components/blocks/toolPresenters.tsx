@@ -23,6 +23,7 @@ import {
   asFileEditResult,
   asFileSearchResult,
   asTodoWriteResult,
+  asWebFetchResult,
   asWebSearchResult,
   bashExitCode,
   diffStats,
@@ -37,7 +38,7 @@ import styles from "./toolPresenters.module.css";
  * Tools whose body this module renders itself. Edit/Write are absent by design:
  * their body is a diff, owned by the caller's `DiffView`.
  */
-const CUSTOM_BODY = new Set(["Bash", "Agent", "TodoWrite", "WebSearch"]);
+const CUSTOM_BODY = new Set(["Bash", "Agent", "TodoWrite", "WebSearch", "WebFetch"]);
 
 /**
  * Whether `ToolBody` will render something for this call. A missing payload or
@@ -57,6 +58,12 @@ function formatDuration(ms: number): string {
   const m = Math.floor(ms / 60_000);
   const s = Math.round((ms % 60_000) / 1000);
   return `${m}m${s.toString().padStart(2, "0")}s`;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatTokens(n: number): string {
@@ -146,6 +153,26 @@ export function headerStats(
     if (!search) return null;
     const n = search.links.length;
     return <span className={styles.chip}>{n} result{n === 1 ? "" : "s"}</span>;
+  }
+
+  if (block.name === "WebFetch") {
+    const fetch = asWebFetchResult(meta);
+    if (!fetch || fetch.code === undefined) return null;
+    const ok = fetch.code >= 200 && fetch.code < 400;
+    return (
+      <>
+        <span className={ok ? styles.chip : styles.chip_err}>
+          {fetch.code}
+          {fetch.codeText ? ` ${fetch.codeText}` : ""}
+        </span>
+        {fetch.bytes !== undefined && (
+          <span className={styles.chip}>{formatBytes(fetch.bytes)}</span>
+        )}
+        {fetch.durationMs !== undefined && (
+          <span className={styles.chip}>{formatDuration(fetch.durationMs)}</span>
+        )}
+      </>
+    );
   }
 
   return null;
@@ -401,6 +428,27 @@ function WebSearchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: u
   );
 }
 
+/** `WebFetch`: the model's summary of the fetched page, rendered as markdown
+ *  under the URL (the URL is skipped in rail mode, where the collapsed summary
+ *  line already shows it — same convention as WebSearchBody). */
+function WebFetchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: unknown; rail?: boolean }) {
+  const fetch = asWebFetchResult(meta);
+  if (!fetch) return null;
+  const url = rail ? "" : fetch.url || (typeof block.input.url === "string" ? block.input.url : "");
+  return (
+    <>
+      {url && <div className={styles.search_query}>{url}</div>}
+      {fetch.result ? (
+        <div className={styles.fetch_result}>
+          <TextBlock text={fetch.result} />
+        </div>
+      ) : (
+        <div className={styles.note}>No summary recorded.</div>
+      )}
+    </>
+  );
+}
+
 /**
  * The custom body for a tool, or null to fall back to the generic
  * input-JSON-plus-result rendering.
@@ -424,6 +472,7 @@ export function ToolBody({
   if (block.name === "Agent") return <AgentBody meta={meta} />;
   if (block.name === "TodoWrite") return <TodoBody meta={meta} />;
   if (block.name === "WebSearch") return <WebSearchBody block={block} meta={meta} rail={rail} />;
+  if (block.name === "WebFetch") return <WebFetchBody block={block} meta={meta} rail={rail} />;
   return null;
 }
 
