@@ -88,9 +88,6 @@ export function SessionList() {
   const runningProcCount = useProcStore((s) => runningProcTotal(s.procs));
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
-  // WikiView is unmounted when another primary page is active. Keep the open
-  // document here so returning to the wiki restores its detail pane.
-  const [wikiSelectedSlug, setWikiSelectedSlug] = useState<string | null>(null);
   const {
     width: sidebarWidth,
     isDragging,
@@ -478,10 +475,7 @@ export function SessionList() {
       ) : viewMode === "memory" ? (
         <MemoryView />
       ) : viewMode === "wiki" ? (
-        <WikiView
-          selectedSlug={wikiSelectedSlug}
-          onSelectedSlugChange={setWikiSelectedSlug}
-        />
+        <WikiView />
       ) : viewMode === "skills" ? (
         <SkillsView />
       ) : viewMode === "files" ? (

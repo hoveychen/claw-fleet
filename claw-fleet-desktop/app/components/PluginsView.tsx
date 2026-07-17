@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Blocks } from "lucide-react";
-import { useConnectionStore } from "../store";
+import { useConnectionStore, useUIStore } from "../store";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { SkillsSourceTabs } from "./SkillsSourceTabs";
@@ -47,18 +47,6 @@ interface MarketplaceItem {
 }
 
 type SectionKey = "enabled" | "downloaded" | "catalog";
-
-interface SectionExpanded {
-  enabled: boolean;
-  downloaded: boolean;
-  catalog: boolean;
-}
-
-const DEFAULT_EXPANDED: SectionExpanded = {
-  enabled: true,
-  downloaded: true,
-  catalog: false,
-};
 
 function formatInstalls(n: number | null): string | null {
   if (n == null) return null;
@@ -170,9 +158,15 @@ export function PluginsView() {
   const [plugins, setPlugins] = useState<PluginItem[]>([]);
   const [marketplaces, setMarketplaces] = useState<MarketplaceItem[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<PluginItem | null>(null);
-  const [expanded, setExpanded] = useState<SectionExpanded>(DEFAULT_EXPANDED);
+  const { query, selectedPluginId, expanded } = useUIStore(
+    (s) => s.mainViewState.plugins,
+  );
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const selected = useMemo(
+    () => plugins.find((plugin) => plugin.pluginId === selectedPluginId) ?? null,
+    [plugins, selectedPluginId],
+  );
+  const setQuery = (value: string) => updateMainViewState("plugins", { query: value });
 
   const load = useCallback(async () => {
     try {
@@ -220,13 +214,15 @@ export function PluginsView() {
   useEffect(() => {
     if (!selected) return;
     if (!filtered.find((p) => p.pluginId === selected.pluginId)) {
-      setSelected(null);
+      updateMainViewState("plugins", { selectedPluginId: null });
     }
-  }, [filtered, selected]);
+  }, [filtered, selected, updateMainViewState]);
 
   const toggleSection = useCallback((key: SectionKey) => {
-    setExpanded((s) => ({ ...s, [key]: !s[key] }));
-  }, []);
+    updateMainViewState("plugins", {
+      expanded: { ...expanded, [key]: !expanded[key] },
+    });
+  }, [expanded, updateMainViewState]);
 
   const renderSection = (
     key: SectionKey,
@@ -261,7 +257,9 @@ export function PluginsView() {
               key={plugin.pluginId}
               plugin={plugin}
               active={selected?.pluginId === plugin.pluginId}
-              onClick={() => setSelected(plugin)}
+              onClick={() =>
+                updateMainViewState("plugins", { selectedPluginId: plugin.pluginId })
+              }
             />
           ))}
       </div>

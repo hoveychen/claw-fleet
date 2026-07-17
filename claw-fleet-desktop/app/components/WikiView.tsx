@@ -4,7 +4,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  type Dispatch,
   type DragEvent,
   type ReactNode,
   type SetStateAction,
@@ -38,6 +37,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { PromptDialog } from "./PromptDialog";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { PageShell } from "./PageShell";
+import { useUIStore } from "../store";
 import styles from "./WikiView.module.css";
 
 // ── Types (mirror claw-fleet-core/src/wiki.rs, camelCase serde) ──────────────
@@ -264,20 +264,36 @@ function sortDocs(docs: WikiDoc[], key: SortKey): WikiDoc[] {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-interface WikiViewProps {
-  selectedSlug: string | null;
-  onSelectedSlugChange: Dispatch<SetStateAction<string | null>>;
-}
-
-export function WikiView({ selectedSlug, onSelectedSlugChange: setSelectedSlug }: WikiViewProps) {
+export function WikiView() {
   const { t } = useTranslation();
   const [docs, setDocs] = useState<WikiDoc[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [query, setQuery] = useState("");
-  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
-  const [sortKey, setSortKey] = useState<SortKey>("recent");
+  const {
+    query,
+    workspaceFilter,
+    sortKey,
+    selectedFolder,
+    selectedSlug,
+    collapsedFolders,
+  } = useUIStore((s) => s.mainViewState.wiki);
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setQuery = (value: string) => updateMainViewState("wiki", { query: value });
+  const setWorkspaceFilter = (value: string) =>
+    updateMainViewState("wiki", { workspaceFilter: value });
+  const setSortKey = (value: SortKey) => updateMainViewState("wiki", { sortKey: value });
+  const setSelectedFolder = useCallback((next: SetStateAction<string | null>) => {
+    const current = useUIStore.getState().mainViewState.wiki.selectedFolder;
+    updateMainViewState("wiki", {
+      selectedFolder: typeof next === "function" ? next(current) : next,
+    });
+  }, [updateMainViewState]);
+  const setSelectedSlug = useCallback((next: SetStateAction<string | null>) => {
+    const current = useUIStore.getState().mainViewState.wiki.selectedSlug;
+    updateMainViewState("wiki", {
+      selectedSlug: typeof next === "function" ? next(current) : next,
+    });
+  }, [updateMainViewState]);
   // Which virtual folder the grid is scoped to. `null` = 全部 (every doc).
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   // Folder navigation always returns from the document detail to the list;
   // otherwise the hidden grid updates while the old document stays onscreen.
   const selectFolder = (path: string | null) => {
@@ -377,14 +393,12 @@ export function WikiView({ selectedSlug, onSelectedSlugChange: setSelectedSlug }
   // Folder rail tree — folders only, off the workspace-filtered set.
   const tree = useMemo(() => buildTree(wsFiltered), [wsFiltered]);
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const collapsed = useMemo(() => new Set(collapsedFolders), [collapsedFolders]);
   const toggleFolder = (path: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+    const next = new Set(collapsed);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    updateMainViewState("wiki", { collapsedFolders: [...next] });
   };
 
   const handleDelete = async () => {
@@ -982,15 +996,16 @@ function WikiDetail({
   onDeleteVersion: (version: string) => void;
 }) {
   const { t } = useTranslation();
-  const [version, setVersion] = useState(doc.currentVersion);
+  const versionBySlug = useUIStore((s) => s.mainViewState.wiki.versionBySlug);
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const version = versionBySlug[doc.slug] ?? doc.currentVersion;
+  const setVersion = (nextVersion: string) =>
+    updateMainViewState("wiki", {
+      versionBySlug: { ...versionBySlug, [doc.slug]: nextVersion },
+    });
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Reset to the current version whenever the selected doc changes.
-  useEffect(() => {
-    setVersion(doc.currentVersion);
-  }, [doc.slug, doc.currentVersion]);
 
   const effectiveVersion = doc.versions.some((v) => v.id === version)
     ? version
