@@ -123,6 +123,24 @@ function userText(msg: RawMessage): string {
   return parts.join("\n\n").trim();
 }
 
+/** A follow-up the user just submitted, echoed as a user bubble while
+ *  `claude --resume` cold-starts — dropped once the real transcript row lands. */
+interface OptimisticSend {
+  id: string;
+  text: string;
+}
+
+/** Synthetic `user` RawMessage from an optimistic send, so it flows through the
+ *  same `isRenderableRow` / `groupMetaRuns` / MessageRow path as real rows. */
+function optimisticToMessage(o: OptimisticSend): RawMessage {
+  return {
+    type: "user",
+    uuid: o.id,
+    timestamp: new Date().toISOString(),
+    message: { role: "user", content: [{ type: "text", text: o.text }] },
+  } as RawMessage;
+}
+
 function TaskNotificationCard({ data }: { data: ParsedTaskNotification }) {
   const [open, setOpen] = useState(true);
   const raw = (data.status ?? "").toLowerCase();
@@ -404,6 +422,8 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
 
   useEffect(() => {
     dwellFired.current = false;
+    // Never carry one session's pending echo into another.
+    setOptimisticSends([]);
     const timer = window.setTimeout(() => {
       if (!dwellFired.current) {
         dwellFired.current = true;
@@ -414,6 +434,11 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id]);
   const [messages, setMessages] = useState<RawMessage[] | null>(null);
+  // Optimistic follow-ups: echoed the moment the desktop acks a resume, dropped
+  // once the real row arrives via tail. Kept out of `messages` so the poller's
+  // setMessages doesn't clobber them.
+  const [optimisticSends, setOptimisticSends] = useState<OptimisticSend[]>([]);
+  const optimisticSeq = useRef(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tailN, setTailN] = useState(TAIL_INITIAL);
   const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
@@ -544,7 +569,44 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
   }, []);
 
   const rows = useMemo(() => (messages ?? []).filter(isRenderableRow), [messages]);
-  const mainRows = useMemo(() => rows.filter((m) => !m.isSidechain), [rows]);
+
+  // Text of every real user row, to tell which optimistic echoes have landed.
+  const realUserTexts = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of messages ?? []) {
+      if (m.type === "user") set.add(userText(m));
+    }
+    return set;
+  }, [messages]);
+
+  const pendingOptimistic = useMemo(
+    () => optimisticSends.filter((o) => !realUserTexts.has(o.text)),
+    [optimisticSends, realUserTexts],
+  );
+
+  // Once an echo lands in the real transcript, prune it (dedup by trimmed text).
+  useEffect(() => {
+    setOptimisticSends((prev) => {
+      const next = prev.filter((o) => !realUserTexts.has(o.text));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [realUserTexts]);
+
+  const handleOptimisticSend = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    optimisticSeq.current += 1;
+    setOptimisticSends((prev) => [
+      ...prev,
+      { id: `optimistic-${Date.now()}-${optimisticSeq.current}`, text: trimmed },
+    ]);
+  }, []);
+
+  const mainRows = useMemo(() => {
+    const base = rows.filter((m) => !m.isSidechain);
+    if (pendingOptimistic.length === 0) return base;
+    return [...base, ...pendingOptimistic.map(optimisticToMessage)];
+  }, [rows, pendingOptimistic]);
 
   return (
     <div className={styles.page}>
@@ -654,7 +716,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
       )}
 
       {tab === "messages" && canResumeSession(session) && (
-        <ResumeComposer session={session} client={client} />
+        <ResumeComposer session={session} client={client} onOptimisticSend={handleOptimisticSend} />
       )}
       {tab === "messages" && canEnqueueSession(session) && (
         <ResumeComposer session={session} client={client} mode="enqueue" />
