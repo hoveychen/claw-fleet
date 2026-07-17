@@ -129,6 +129,43 @@ export function parsePatchFiles(patch: string): PatchFile[] {
   return files;
 }
 
+/** Turn a JS string literal (with its surrounding quotes) into its value.
+ *  Double-quoted literals go through JSON.parse for correct unescaping; single
+ *  and backtick literals get a minimal manual unescape. */
+function unquoteJs(literal: string): string {
+  const quote = literal[0];
+  const inner = literal.slice(1, -1);
+  if (quote === '"') {
+    try {
+      return JSON.parse(literal) as string;
+    } catch {
+      // Malformed escape — fall through to the manual pass below.
+    }
+  }
+  return inner.replace(/\\(.)/g, (_, c: string) =>
+    c === "n" ? "\n" : c === "t" ? "\t" : c === "r" ? "\r" : c,
+  );
+}
+
+/**
+ * Pull the real shell command (and workdir) out of a codex "code mode" exec
+ * script. In code mode the `exec` tool's `command` is not a shell line but a JS
+ * harness — `await tools.exec_command({ cmd: "…", workdir: "…", … })` — so the
+ * command the model actually ran is buried in the `cmd` field. Returns `{}` when
+ * `command` is not that shape (older-style exec, where `command` is already the
+ * shell command, or any script with no `cmd:` field). String literals may be
+ * double-, single-, or backtick-quoted; the first match of each key wins.
+ */
+export function parseExecCommand(command: string): { cmd?: string; workdir?: string } {
+  const field = (key: string): string | undefined => {
+    const m = command.match(
+      new RegExp(`\\b${key}\\s*:\\s*("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|\`[^\`]*\`)`),
+    );
+    return m ? unquoteJs(m[1]) : undefined;
+  };
+  return { cmd: field("cmd"), workdir: field("workdir") };
+}
+
 /**
  * Friendly one-liner for codex's function-call tools, which otherwise fall
  * through to a raw `JSON.stringify` of their args (a survey of 156 local
@@ -209,6 +246,42 @@ export function codexToolSummary(
 function hasAgentInput(block: ToolUseBlockType): boolean {
   return (
     typeof block.input.description === "string" || typeof block.input.prompt === "string"
+  );
+}
+
+/**
+ * Expanded body for a codex `exec` call. Instead of dumping the whole input as
+ * raw JSON (which buries the real shell command inside an escaped JS harness
+ * string), surface the `cmd` the model ran as the headline, its workdir
+ * ws-relative underneath, and keep the full JS script available but folded. When
+ * `command` isn't code-mode (no `cmd:` field) it IS the shell command, so show
+ * it directly; when there's no `command` at all, fall back to the raw input.
+ */
+function ExecInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const command = typeof block.input.command === "string" ? block.input.command : "";
+  const { cmd, workdir } = command ? parseExecCommand(command) : {};
+
+  if (cmd) {
+    return (
+      <>
+        <span className={styles.section_label}>Command</span>
+        <pre className={styles.input_text}>{cmd}</pre>
+        {workdir && (
+          <div className={styles.exec_workdir}>{relToWorkspace(workdir, paths?.workspaceRoot)}</div>
+        )}
+        <details className={styles.exec_script}>
+          <summary className={styles.exec_script_summary}>Script</summary>
+          <pre className={styles.input_text}>{command}</pre>
+        </details>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <span className={styles.section_label}>{command ? "Command" : "Input"}</span>
+      <pre className={styles.input_text}>{command || JSON.stringify(block.input, null, 2)}</pre>
+    </>
   );
 }
 
@@ -405,6 +478,13 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
             // right here in the input. Show them readably instead of raw JSON.
             <div className={styles.input_section}>
               <AgentInput block={block} paths={paths} />
+            </div>
+          ) : block.name === "exec" ? (
+            // codex `exec` has no `toolUseResult`, so it never hits the custom
+            // body path — surface the real shell command from its JS harness
+            // instead of the raw JSON input object.
+            <div className={styles.input_section}>
+              <ExecInput block={block} paths={paths} />
             </div>
           ) : (
             <div className={styles.input_section}>
