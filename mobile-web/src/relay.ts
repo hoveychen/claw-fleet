@@ -88,6 +88,16 @@ export interface RelayHandlers {
   onDecisionCreated?: (kind: DecisionKind, request: unknown) => void;
   onDecisionResolved?: (kind: DecisionKind, id: string) => void;
   onSessions?: (sessions: SessionInfo[]) => void;
+  /** Which kind of sessions frame just landed — `full` (whole snapshot) or
+   *  `delta` (incremental upsert/remove). Lets the UI surface whether the
+   *  desktop's delta path is actually engaged. Fired on every sessions update. */
+  onSessionsKind?: (kind: "full" | "delta") => void;
+  /** One request→reply round-trip time sample (ms), reported when a reply lands
+   *  for a still-pending request. A weak-link congestion signal. */
+  onRttSample?: (rttMs: number) => void;
+  /** Fired each time the socket drops and a reconnect is scheduled — a second
+   *  weak-link signal (frequent reconnects ⇒ congested). */
+  onReconnect?: () => void;
   onAuthError?: (message: string) => void;
 }
 
@@ -135,6 +145,8 @@ export class RelayClient {
       resolve: (v: unknown) => void;
       reject: (e: Error) => void;
       timer: number;
+      /** Epoch ms when request() sent this — used to compute RTT on reply. */
+      sentAt: number;
       // 方案 A: fired once when the desktop's early `ack{req_id}` lands, before
       // the final reply — lets a caller confirm the submit reached the desktop
       // without waiting out the timeout. `acked` guards against a double fire.
@@ -244,6 +256,9 @@ export class RelayClient {
       this.handlers.onStatus?.(false);
       this.failPending(t("连接已断开"));
       if (this.closed) return;
+      // A drop that triggers a reconnect (not an intentional close) — surface it
+      // as a congestion signal. Frequent reconnects ⇒ a flaky/weak link.
+      this.handlers.onReconnect?.();
       const delay = wasAuthed ? 1000 : this.reconnectDelay;
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
       window.setTimeout(() => void this.open(), delay);
@@ -329,6 +344,7 @@ export class RelayClient {
         const list = (payload.sessions ?? []) as SessionInfo[];
         this.sessionsSnapshot = list.slice();
         this.handlers.onSessions?.(list);
+        this.handlers.onSessionsKind?.("full");
         break;
       }
       case "sessions_delta": {
@@ -346,6 +362,7 @@ export class RelayClient {
         );
         this.sessionsSnapshot = merged;
         this.handlers.onSessions?.(merged);
+        this.handlers.onSessionsKind?.("delta");
         break;
       }
       case "ack": {
@@ -366,6 +383,7 @@ export class RelayClient {
         if (!entry) return;
         this.pending.delete(reqId);
         window.clearTimeout(entry.timer);
+        this.handlers.onRttSample?.(Date.now() - entry.sentAt);
         if (payload.ok) {
           entry.resolve(payload.data);
         } else {
@@ -435,6 +453,7 @@ export class RelayClient {
         resolve: resolve as (v: unknown) => void,
         reject,
         timer,
+        sentAt: Date.now(),
         onAck,
       });
       // Only the body is encrypted; reqId/pending bookkeeping is unchanged. If
