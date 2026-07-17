@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { patchToolSummary } from "./toolSummary";
 
-const tr = (key: string, ...args: Array<string | number>) =>
-  args.reduce((out, value, index) => out.replace(`{${index}}`, String(value)), key);
+const tr = (key: string, ...args: Array<string | number>) => {
+  let out = key;
+  args.forEach((value, index) => {
+    out = out.replace(`{${index}}`, String(value));
+  });
+  return out;
+};
 
 describe("patchToolSummary", () => {
   it("names one added, updated, or deleted file without dumping the patch", () => {

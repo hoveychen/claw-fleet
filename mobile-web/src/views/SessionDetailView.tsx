@@ -56,6 +56,7 @@ import {
 import { parseSkillInjection } from "../skillInjection";
 import { groupMetaRuns } from "./metaGrouping";
 import { countSteps, groupWorkRuns, isDecisionTool, workRunTitle } from "./workRuns";
+import { toolSummary } from "./toolSummary";
 import styles from "./SessionDetailView.module.css";
 
 const TAIL_POLL_MS = 2500;
@@ -84,26 +85,6 @@ function blocksOf(msg: RawMessage): ContentBlock[] {
     return content.trim() ? [{ type: "text", text: content }] : [];
   }
   return Array.isArray(content) ? content : [];
-}
-
-/** The one input field a tool chip shows — same list the desktop cards pick from. */
-const TOOL_SUMMARY_FIELDS = ["command", "file_path", "pattern", "path", "query", "url", "skill"];
-
-function toolSummary(block: ContentBlock): string {
-  // Bash/Agent carry a model-written `description` — a readable summary that
-  // beats Bash's raw command (often a long escaped grep) and Agent's absent
-  // compact field. Mirrors the desktop cards. Fall back to the field list when
-  // no description was recorded (older transcripts).
-  const name = (block as { name?: string }).name;
-  if (name === "Bash" || name === "Agent") {
-    const desc = block.input?.description;
-    if (typeof desc === "string" && desc.trim()) return desc.trim();
-  }
-  for (const field of TOOL_SUMMARY_FIELDS) {
-    const v = block.input?.[field];
-    if (typeof v === "string" && v) return v;
-  }
-  return "";
 }
 
 function fmtTime(timestamp?: string): string {
