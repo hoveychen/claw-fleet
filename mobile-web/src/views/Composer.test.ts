@@ -21,8 +21,8 @@ function session(
 }
 
 describe("recentWorkspaces", () => {
-  it("按名称字母序排列——不再受最近活动时间影响", () => {
-    // Zebra 活动时间最新，但字母序把它排到最后；顺序只看名字。
+  it("候选未超过 limit 时全部保留，按名称字母序展示", () => {
+    // Zebra 活动时间最新，但都在 limit 内，全部保留后只按名字排序。
     const sessions = [
       session("/home/zebra", "Zebra", 300),
       session("/home/alpha", "Alpha", 100),
@@ -34,6 +34,17 @@ describe("recentWorkspaces", () => {
       "/home/mid",
       "/home/zebra",
     ]);
+  });
+
+  it("候选超过 limit 时先按最近活动截断，再按名称字母序展示（对齐桌面端）", () => {
+    // limit=2：Alpha(100) 最久未活跃被丢弃，幸存的 Mid/Zebra 再按名字排序。
+    const sessions = [
+      session("/home/zebra", "Zebra", 300),
+      session("/home/alpha", "Alpha", 100),
+      session("/home/mid", "Mid", 200),
+    ];
+    const recents = recentWorkspaces(sessions, null, 2);
+    expect(recents.map(([path]) => path)).toEqual(["/home/mid", "/home/zebra"]);
   });
 
   it("同一路径多条会话时，取最近活动的时间戳与名字去重", () => {

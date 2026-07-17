@@ -293,13 +293,15 @@ interface NewSessionProps {
 const NEW_SESSION_DRAFT_KEY = "new-session";
 const NEW_SESSION_ATTACH_KEY = "new-session:attachments";
 
-/** 最近用过的 workspace（`[path, name]`），去重后**按名称字母序**排列，方便扫读；
- *  剔除纯聊天路径（它单独钉在选项首位）。默认选中**不**依赖这里的顺序——它来自
- *  记住的「上次成功创建会话用的 repo」（见 {@link defaultWorkspace}）。与桌面端
- *  NewSessionForm.distinctWorkspaces 保持一致。*/
+/** 最近用过的 workspace（`[path, name]`）。**两段式排序**（对齐桌面端
+ *  NewSessionForm.distinctWorkspaces）：先按最后活动时间降序取最近 `limit` 个
+ *  （昨天用过的 repo 不会仅因名字排得靠后就被挤掉），幸存者再按名称字母序展示，
+ *  得到稳定、可扫读的列表。剔除纯聊天路径（它单独钉在选项首位）。默认选中**不**依赖
+ *  这里的顺序——它来自记住的「上次成功创建会话用的 repo」（见 {@link defaultWorkspace}）。*/
 export function recentWorkspaces(
   sessions: SessionInfo[],
   chatPath: string | null,
+  limit = 30,
 ): [string, string][] {
   const byPath = new Map<string, { name: string; lastMs: number }>();
   for (const s of sessions) {
@@ -311,6 +313,8 @@ export function recentWorkspaces(
     }
   }
   return [...byPath.entries()]
+    .sort((a, b) => b[1].lastMs - a[1].lastMs)
+    .slice(0, limit)
     .sort((a, b) => a[1].name.localeCompare(b[1].name))
     .map(([path, { name }]) => [path, name]);
 }
