@@ -4115,60 +4115,86 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                         }));
                     }
                     "patch_apply_end" => {
-                        // Codex emits this after applying an apply_patch. The
-                        // full patch already shows in the exec tool card, so
-                        // render a concise "which files changed" summary keyed
-                        // off the per-file change map (path → { type }).
+                        // This event is the authoritative nested apply_patch
+                        // result in code mode. Rehydrate it as a normal tool
+                        // call/result pair so clients render a patch card
+                        // instead of assistant prose. Each change carries the
+                        // exact unified diff Codex applied.
                         let success = payload
                             .get("success")
                             .and_then(|s| s.as_bool())
                             .unwrap_or(true);
-                        let mut files: Vec<String> = payload
+                        let call_id = payload
+                            .get("call_id")
+                            .and_then(|id| id.as_str())
+                            .unwrap_or("codex-apply-patch");
+                        let mut changes: Vec<(&str, &Value)> = payload
                             .get("changes")
                             .and_then(|c| c.as_object())
-                            .map(|map| {
-                                map.iter()
-                                    .map(|(path, meta)| {
-                                        let letter = match meta
-                                            .get("type")
-                                            .and_then(|t| t.as_str())
-                                        {
-                                            Some("add") => "A",
-                                            Some("delete") => "D",
-                                            _ => "M",
-                                        };
-                                        format!("{letter} {path}")
-                                    })
-                                    .collect()
-                            })
+                            .map(|map| map.iter().map(|(path, meta)| (path.as_str(), meta)).collect())
                             .unwrap_or_default();
-                        files.sort();
+                        changes.sort_by_key(|(path, _)| *path);
 
-                        let text = if success {
-                            if files.is_empty() {
-                                "📝 Applied patch".to_string()
-                            } else {
-                                format!("📝 Applied patch:\n{}", files.join("\n"))
+                        let mut command = String::from("*** Begin Patch\n");
+                        for (path, meta) in changes {
+                            let op = match meta.get("type").and_then(|ty| ty.as_str()) {
+                                Some("add") => "Add",
+                                Some("delete") => "Delete",
+                                _ => "Update",
+                            };
+                            command.push_str(&format!("*** {op} File: {path}\n"));
+                            if let Some(move_path) = meta
+                                .get("move_path")
+                                .and_then(|target| target.as_str())
+                                .filter(|target| !target.is_empty())
+                            {
+                                command.push_str(&format!("*** Move to: {move_path}\n"));
                             }
+                            if let Some(diff) = meta
+                                .get("unified_diff")
+                                .and_then(|diff| diff.as_str())
+                                .filter(|diff| !diff.is_empty())
+                            {
+                                command.push_str(diff);
+                                if !diff.ends_with('\n') {
+                                    command.push('\n');
+                                }
+                            }
+                        }
+                        command.push_str("*** End Patch");
+
+                        let content = if success {
+                            payload
+                                .get("stdout")
+                                .and_then(|text| text.as_str())
+                                .filter(|text| !text.trim().is_empty())
+                                .unwrap_or("Patch applied successfully")
                         } else {
-                            let err = payload
+                            payload
                                 .get("stderr")
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("")
-                                .trim();
-                            if err.is_empty() {
-                                "⚠️ Patch failed".to_string()
-                            } else {
-                                format!("⚠️ Patch failed: {err}")
-                            }
+                                .and_then(|text| text.as_str())
+                                .filter(|text| !text.trim().is_empty())
+                                .unwrap_or("Patch failed")
                         };
 
                         messages.push(json!({
                             "type": "assistant",
                             "message": {
                                 "role": "assistant",
-                                "content": [{"type": "text", "text": text}]
+                                "content": [{
+                                    "type": "tool_use",
+                                    "id": call_id,
+                                    "name": "apply_patch",
+                                    "input": { "command": command }
+                                }]
                             },
+                            "timestamp": timestamp.clone()
+                        }));
+                        messages.push(json!({
+                            "type": "tool_result",
+                            "tool_use_id": call_id,
+                            "content": content,
+                            "is_error": !success,
                             "timestamp": timestamp
                         }));
                     }
