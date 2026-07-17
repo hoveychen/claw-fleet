@@ -62,12 +62,6 @@
   margin-bottom: 0;
 }
 
-.header_compact .stop_slot {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-}
-
 /* ── Group-main header strip ───────────────────────────────────────────────
    Linear-style compact metadata row used when the card sits inside a
    GalleryRow group. Status dot drives the only chromatic accent (inherited
@@ -468,32 +462,6 @@
 .context_high { color: var(--color-warning, #e8a838); }
 .compact_chip { color: var(--color-text-dim); }
 .time { color: var(--color-text-dim); }
-
-/* Reveal-on-hover wrapper for StopControl. The control owns its own CSS module,
-   so `.card:hover .btn` could never reach it — the class name is hashed per
-   module. The slot is ours, so we style that instead.
-
-   Reveal is driven by the `.hovered` class (JS onMouseEnter/onMouseLeave in
-   SessionCard), NOT the `:hover` pseudo-class. `:hover` gets stuck in
-   wry/WebKit: active cards reflow every second (live tok/s, cost, ctx%) and the
-   engine never recomputes `:hover` without a fresh pointer event, so the icon
-   lingered after the cursor left. A JS-driven class is set/cleared only by real
-   enter/leave events, so a re-render can never latch it on. */
-.stop_slot {
-  display: inline-flex;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.card.hovered .stop_slot,
-.card.selected .stop_slot,
-.stop_slot:focus-within {
-  opacity: 1;
-}
-
-/* The stop/interrupt button itself now lives in StopControl.module.css; only
-   its slot (reveal-on-hover, compact placement) is this card's business. */
 
 /* macOS vibrancy: rows stay chrome-less (Linear-style); tags/badges keep
    their subtle bg so they read against the bare row. */
