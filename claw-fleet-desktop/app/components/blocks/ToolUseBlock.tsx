@@ -311,6 +311,68 @@ function ExecInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLink
   return <RawInput block={block} />;
 }
 
+/** Expanded body for codex `apply_patch`: a header row naming each touched file
+ *  (op + ws-relative path) over the raw V4A patch text. The patch is already a
+ *  readable diff format, so showing it verbatim beats the JSON-escaped blob it
+ *  replaces. `ExpandableText` handles long patches and gives a copy button. */
+function PatchInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const patch = typeof block.input.command === "string" ? block.input.command : "";
+  if (!patch) return <RawInput block={block} />;
+  const files = parsePatchFiles(patch);
+  return (
+    <>
+      {files.length > 0 && (
+        <div className={styles.patch_files}>
+          {files.map((f, i) => (
+            <span key={i} className={styles.patch_file}>
+              <span className={styles.patch_op} data-op={f.op}>
+                {f.op}
+              </span>
+              {relToWorkspace(f.path, paths?.workspaceRoot)}
+            </span>
+          ))}
+        </div>
+      )}
+      <ExpandableText text={patch} />
+    </>
+  );
+}
+
+const PLAN_MARK: Record<string, string> = {
+  completed: "☑",
+  in_progress: "▶",
+  pending: "☐",
+};
+
+interface PlanStep {
+  step?: string;
+  status?: string;
+}
+
+/** Expanded body for codex `update_plan`: the step list rendered as a checklist,
+ *  mirroring Claude Code's TodoWrite body instead of dumping the plan array. */
+function PlanInput({ block }: { block: ToolUseBlockType }) {
+  const plan = Array.isArray(block.input.plan) ? (block.input.plan as PlanStep[]) : [];
+  if (plan.length === 0) return <RawInput block={block} />;
+  return (
+    <ul className={styles.plan_list}>
+      {plan.map((s, i) => (
+        <li
+          key={i}
+          className={`${styles.plan_item} ${s.status === "completed" ? styles.plan_done : ""} ${
+            s.status === "in_progress" ? styles.plan_current : ""
+          }`}
+        >
+          <span className={styles.plan_mark} aria-hidden>
+            {PLAN_MARK[s.status ?? ""] ?? "☐"}
+          </span>
+          <span className={styles.plan_text}>{s.step ?? ""}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** codex's tool set (function-call + custom tools). These have no Claude Code
  *  `toolUseResult`, so they never hit the custom-body path — their expanded body
  *  is dispatched through `CodexToolInput` instead of falling to raw JSON. */
@@ -333,6 +395,10 @@ function CodexToolInput({ block, paths }: { block: ToolUseBlockType; paths?: Pat
     case "exec":
     case "exec_command":
       return <ExecInput block={block} paths={paths} />;
+    case "apply_patch":
+      return <PatchInput block={block} paths={paths} />;
+    case "update_plan":
+      return <PlanInput block={block} />;
     default:
       return <RawInput block={block} />;
   }
