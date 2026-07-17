@@ -12,6 +12,7 @@ import {
 } from "../store";
 import { canResumeSession, canEnqueueSession, shouldFollowSession, LIVE_STATUSES } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
+import { messageToText } from "../messageRows";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
@@ -45,6 +46,33 @@ const LIVE_TAIL_POLL_MS = 1500;
 
 /** How close to the bottom still counts as "following the newest message". */
 const FOLLOW_SLACK_PX = 200;
+
+/** After a resume/enqueue submit, keep the live-tail + live-thinking pollers
+ *  armed for this long even though the session is still flipping to `live` via
+ *  the next rescan. Without this the user's optimistic bubble would just sit
+ *  there while nothing polls the JSONL, so the real transcript (and the reply)
+ *  would only appear once rescan翻转 status — the exact干等 we're removing. */
+const RESUME_GRACE_MS = 30_000;
+
+/** A pending follow-up the user just submitted, shown immediately as a user
+ *  bubble while `claude --resume` cold-starts and writes it into the JSONL.
+ *  Removed once the real transcript row with the same text lands. */
+interface OptimisticSend {
+  id: string;
+  text: string;
+}
+
+/** Build a synthetic `user` RawMessage from an optimistic send so it flows
+ *  through the normal MessageList renderer (bubble layout, scroll-to-bottom,
+ *  day separators). Passes `isRenderableRow` because it carries a text block. */
+function optimisticToMessage(o: OptimisticSend): RawMessage {
+  return {
+    type: "user",
+    uuid: o.id,
+    timestamp: new Date().toISOString(),
+    message: { role: "user", content: [{ type: "text", text: o.text }] },
+  };
+}
 
 // DecisionPanel already embeds SessionDetail for its history sidecar. Keep the
 // reverse dependency lazy so projecting a pending Codex card into the dialogue
@@ -101,6 +129,16 @@ export function SessionDetail({
   localTailRef.current = localTail;
   const localLoadingRef = useRef(localLoading);
   localLoadingRef.current = localLoading;
+
+  // Optimistic follow-ups: submitting a resume/enqueue spawns a detached
+  // `claude --resume` that only writes the message into the JSONL once the CLI
+  // has cold-started (seconds). We echo the user's text immediately so the
+  // conversation isn't blank during that window, then drop it once the real
+  // transcript row lands. `resumeGrace` arms the tail pollers right away rather
+  // than waiting for rescan to flip the session to `live`.
+  const [optimisticSends, setOptimisticSends] = useState<OptimisticSend[]>([]);
+  const [resumeGrace, setResumeGrace] = useState(false);
+  const optimisticSeq = useRef(0);
 
   // External sessionInfo prop changed → reset local state and refetch.
   useEffect(() => {
@@ -183,6 +221,64 @@ export function SessionDetail({
   );
   const loadEarlier = isStandalone ? standaloneLoadEarlier : global.loadEarlier;
 
+  // Text of every real user row already in the transcript, so we can tell which
+  // optimistic sends have landed and drop them (dedup by trimmed text).
+  const realUserTexts = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of messages) {
+      if (m.type === "user") set.add(messageToText(m).trim());
+    }
+    return set;
+  }, [messages]);
+
+  // Optimistic sends that haven't yet appeared in the real transcript.
+  const pendingOptimistic = useMemo(
+    () => optimisticSends.filter((o) => !realUserTexts.has(o.text.trim())),
+    [optimisticSends, realUserTexts],
+  );
+
+  // Real transcript + not-yet-landed optimistic bubbles, appended at the end.
+  const displayedMessages = useMemo(
+    () =>
+      pendingOptimistic.length === 0
+        ? messages
+        : [...messages, ...pendingOptimistic.map(optimisticToMessage)],
+    [messages, pendingOptimistic],
+  );
+
+  // Once a send has landed in the real transcript, prune it from state so the
+  // list doesn't keep re-appending it (and the memo above stays cheap). Only
+  // set state when something actually changed, to avoid a render loop.
+  useEffect(() => {
+    setOptimisticSends((prev) => {
+      const next = prev.filter((o) => !realUserTexts.has(o.text.trim()));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [realUserTexts]);
+
+  // Let the grace window expire so the pollers fall back to status-driven
+  // arming once the resumed turn is well underway (or has already gone live).
+  useEffect(() => {
+    if (!resumeGrace) return;
+    const timer = window.setTimeout(() => setResumeGrace(false), RESUME_GRACE_MS);
+    return () => window.clearTimeout(timer);
+  }, [resumeGrace]);
+
+  // Called by ResumeComposer the moment a follow-up is accepted by the backend.
+  // Only a *resume* is being delivered now, so only it earns a transcript bubble
+  // + poller grace; an *enqueue* is merely queued (turn still running, already
+  // live), and its honest affordance is the "已排队" pending chip.
+  const handleResumed = useCallback((finalPrompt: string, mode: "resume" | "enqueue") => {
+    if (mode !== "resume") return;
+    const text = finalPrompt.trim();
+    if (text) {
+      optimisticSeq.current += 1;
+      const id = `optimistic-${Date.now()}-${optimisticSeq.current}`;
+      setOptimisticSends((prev) => [...prev, { id, text }]);
+    }
+    setResumeGrace(true);
+  }, []);
+
   const sessions = useSessionsStore((s) => s.sessions);
   const connection = useConnectionStore((s) => s.connection);
   const requestFileNav = useUIStore((s) => s.requestFileNav);
@@ -240,7 +336,9 @@ export function SessionDetail({
   // extension renders, just teed to a file). Stops polling once the session
   // leaves an active status; clears when the stream is no longer streaming.
   const liveSessionId = liveSession?.id;
-  const liveActive = !!liveSession && shouldFollowSession(liveSession);
+  // `resumeGrace` keeps the tail/live-thinking pollers armed in the seconds
+  // right after a submit, before rescan flips the session to a live status.
+  const liveActive = (!!liveSession && shouldFollowSession(liveSession)) || resumeGrace;
   useEffect(() => {
     if (!liveSessionId || !liveActive) {
       setLiveThinking(null);
@@ -335,6 +433,9 @@ export function SessionDetail({
 
   useEffect(() => {
     setDecisionRecords([]);
+    // Switching sessions must not carry another session's pending echo over.
+    setOptimisticSends([]);
+    setResumeGrace(false);
   }, [liveSession?.id]);
 
   // Resume entry: only for "新会话"-launched main sessions (transcript
@@ -947,7 +1048,7 @@ export function SessionDetail({
                     owns the render window this button used to duplicate. */}
                 <AgentNavProvider nav={agentNav}>
                   <MessageList
-                    messages={messages}
+                    messages={displayedMessages}
                     isLoading={isLoading}
                     searchQuery={searchQuery}
                     status={liveSession?.status ?? null}
@@ -993,7 +1094,7 @@ export function SessionDetail({
                     workspacePath={liveSession.workspacePath}
                     agentSource={liveSession.agentSource}
                     session={liveSession}
-                    onResumed={() => {}}
+                    onResumed={handleResumed}
                     mode={canEnqueue ? "enqueue" : "resume"}
                     pendingMessages={liveSession.pendingMessages ?? []}
                   />

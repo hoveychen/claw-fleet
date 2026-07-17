@@ -45,7 +45,11 @@ export function ResumeComposer({
    *  interrupt/kill escalation as the session list) in the empty send slot
    *  while the turn is running. */
   session?: SessionInfo;
-  onResumed: () => void;
+  /** Fired the moment the backend accepts the follow-up, with the final prompt
+   *  text (including any appended attachment context) and which mode delivered
+   *  it. The parent echoes a resume as an optimistic user bubble while
+   *  `claude --resume` cold-starts; an enqueue keeps its "已排队" chip instead. */
+  onResumed: (finalPrompt: string, mode: "resume" | "enqueue") => void;
   /** `"resume"`: the turn ended, submit spawns `claude --resume` now.
    *  `"enqueue"`: the turn is still running, submit queues the message to be
    *  delivered when the turn ends (see `pending_message`). */
@@ -134,7 +138,7 @@ export function ResumeComposer({
         });
       }
       clear();
-      onResumed();
+      onResumed(finalPrompt, mode);
     } catch (e) {
       setError(String((e as { message?: string })?.message ?? e));
     } finally {

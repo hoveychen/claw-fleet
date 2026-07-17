@@ -633,9 +633,19 @@ interface ResumeProps {
   /** `"resume"`: turn ended, submit resumes now. `"enqueue"`: turn still
    *  running, submit queues the message for delivery when the turn ends. */
   mode?: "resume" | "enqueue";
+  /** Fired (resume mode only) with the final text the moment the desktop
+   *  accepts the follow-up, so the parent can echo it as a user bubble while
+   *  `claude --resume` cold-starts — instead of leaving the transcript blank
+   *  for the seconds before the real row lands via `tail`. */
+  onOptimisticSend?: (text: string) => void;
 }
 
-export function ResumeComposer({ session, client, mode = "resume" }: ResumeProps) {
+export function ResumeComposer({
+  session,
+  client,
+  mode = "resume",
+  onOptimisticSend,
+}: ResumeProps) {
   const enqueueing = mode === "enqueue";
   const isCodex = session.agentSource === "codex";
   const pendingMessages = session.pendingMessages ?? [];
@@ -659,15 +669,25 @@ export function ResumeComposer({ session, client, mode = "resume" }: ResumeProps
     // follow-up); resume tolerates empty (= continue).
     if (enqueueing && !text) return;
     setBusy(true);
-    try {
-      if (enqueueing) {
-        await client.request("enqueue_message", {
-          sessionId: session.id,
-          workspacePath: session.workspacePath,
-          text,
-        });
-      } else {
-        await client.request("resume_session", {
+    // 方案 A 乐观收尾:桌面收到写请求会先回一个早 ack(远早于 claude 冷启动
+    // 产出的最终 reply),不必干等那 5-10s。ack 一到就复位输入、回显消息;
+    // settled 防重复(reply 到达会再触发一次,幂等)。
+    let settled = false;
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      // resume 把用户输入乐观回显进消息列表;enqueue 尚未投递,沿用已排队 chip。
+      if (!enqueueing && text) onOptimisticSend?.(text);
+      clearPrompt();
+      reset();
+      setSent(true);
+      setBusy(false);
+      window.setTimeout(() => setSent(false), 3000);
+    };
+    const method = enqueueing ? "enqueue_message" : "resume_session";
+    const params = enqueueing
+      ? { sessionId: session.id, workspacePath: session.workspacePath, text }
+      : {
           sessionId: session.id,
           workspacePath: session.workspacePath,
           // Empty prompt = "continue" (relay side supplies the fallback).
@@ -679,15 +699,24 @@ export function ResumeComposer({ session, client, mode = "resume" }: ResumeProps
           ...(effort ? { effort } : {}),
           // Codex has no --permission-mode analogue; only send it for Claude.
           ...(!isCodex && permissionMode ? { permissionMode } : {}),
-        });
-      }
-      clearPrompt();
-      reset();
-      setSent(true);
-      window.setTimeout(() => setSent(false), 3000);
+        };
+    try {
+      // 5th arg = onAck: fired once when the desktop's early ack arrives.
+      await client.request(method, params, undefined, succeed);
+      succeed(); // reply 到达同样收尾,与 onAck 幂等
     } catch (e) {
+      // 桌面明确拒绝(路径不存在、prompt 非法……):它判断了、说不行,如实报错——
+      // 即便已凭 ack 乐观收尾也要提示,与新建会话一致。
+      if (isDesktopRejection(e)) {
+        window.alert(e.message);
+        setBusy(false);
+        return;
+      }
+      // 已凭早 ack 收尾:随后的超时/掉线 reject 只是那条 reply 没回来,忽略即可。
+      if (settled) return;
+      // 从未 ack 也没 reply——请求可能压根没抵达桌面(relay 尽力而为、不补投),
+      // 如实报超时。
       window.alert(e instanceof Error ? e.message : t("恢复会话失败"));
-    } finally {
       setBusy(false);
     }
   };
