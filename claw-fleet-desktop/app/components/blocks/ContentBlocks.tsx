@@ -120,6 +120,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
         <ThinkingBlock
           key={i}
           thinking={(block as { type: "thinking"; thinking: string }).thinking}
+          rail={rail}
         />
       );
       i++;

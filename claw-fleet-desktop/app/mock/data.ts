@@ -1055,7 +1055,13 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         content: [
           {
             type: "thinking",
-            thinking: "The release workflow builds on macos-14. A screenshot job can run headless chromium on ubuntu in parallel and upload artifacts...",
+            // Long on purpose: exercises the rail thinking window's clamp +
+            // bottom fade (ThinkingBlock rail mode). Keep it several paragraphs.
+            thinking:
+              "The release workflow builds on macos-14. A screenshot job can run headless chromium on ubuntu in parallel and upload artifacts. The key question is whether the mock mode covers enough surface for the screenshots to be representative — the session list, the detail pane, and the decision panel all need seeded data.\n\n" +
+              "Costs matter too: a macos-14 runner is 10× the price of ubuntu-latest per minute, and the screenshot job doesn't need macOS at all since the web UI renders identically in headless chromium. Splitting it out keeps the expensive runner focused on the actual bundle build.\n\n" +
+              "There's also cache placement to consider. GitHub's ref-scoping rule means a cache written by a tag build is invisible to later main builds, so the screenshot job should restore from the main-branch cache and never write its own. Finally, artifact retention defaults to 90 days which is plenty; no need to configure it explicitly.\n\n" +
+              "Plan: add a `screenshots` job on ubuntu-latest, gate it on the build job, start `vite dev` in mock mode, drive it with Playwright, and upload the PNGs with `actions/upload-artifact`.",
           },
           {
             type: "tool_use",
