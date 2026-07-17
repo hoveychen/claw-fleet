@@ -30,6 +30,12 @@ export interface DeviceInfo {
    *  deltas when *every* live client reports `true`, falling back to full
    *  snapshots otherwise. Absent → the desktop treats the client as legacy. */
   supportsDelta: boolean;
+  /** Short git commit this bundle was built from (`__APP_COMMIT__`, see
+   *  vite.config.ts). The desktop compares it against its own build commit and
+   *  flags a device whose bundle is stale — the common "I redeployed the desktop
+   *  but forgot to redeploy the relay" drift. `"unknown"` when the build had no
+   *  commit source; the desktop then shows no version and raises no stale flag. */
+  appCommit: string;
 }
 
 /** A failed `request()`, tagged with *where* the failure came from.

@@ -3,7 +3,36 @@ fn main() {
     // In CI, the real fleet binaries are placed in binaries/ before tauri-action runs
     // and automatically overwrite these placeholders.
     ensure_sidecar_placeholders();
+    stamp_git_commit();
     tauri_build::build();
+}
+
+/// Bake the git commit this desktop binary was built from into `FLEET_GIT_COMMIT`
+/// so `desktop_build_commit()` can hand it to the UI, which compares it against
+/// each connected phone's reported `appCommit` to flag a stale mobile deploy.
+/// CI passes the commit via the `FLEET_GIT_COMMIT` env (release builds run off a
+/// tree where `git` may be absent); a local build falls back to a live `git`
+/// read; neither → "unknown" (the UI then raises no stale flag).
+fn stamp_git_commit() {
+    println!("cargo:rerun-if-env-changed=FLEET_GIT_COMMIT");
+    let commit = std::env::var("FLEET_GIT_COMMIT")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::process::Command::new("git")
+                .args(["rev-parse", "--short=7", "HEAD"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    // Normalize to a 7-char short SHA (CI may pass a full 40-char sha).
+    let commit: String = commit.chars().take(7).collect();
+    println!("cargo:rustc-env=FLEET_GIT_COMMIT={commit}");
 }
 
 fn ensure_sidecar_placeholders() {

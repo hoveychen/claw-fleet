@@ -418,10 +418,14 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
         relayUrl: "https://fleet-relay.example.com",
         secretSet: true,
         devices: [
-          { clientId: "dev-iphone", label: "iPhone 15 Pro", platform: "ios", pushSubscribed: true, connectedAtMs: Date.now() - 3_600_000, lastSeenMs: Date.now() - 4_000 },
-          { clientId: "dev-android", label: "Pixel 9", platform: "android", pushSubscribed: true, connectedAtMs: Date.now() - 7_200_000, lastSeenMs: Date.now() - 65_000 },
+          { clientId: "dev-iphone", label: "iPhone 15 Pro", platform: "ios", pushSubscribed: true, connectedAtMs: Date.now() - 3_600_000, lastSeenMs: Date.now() - 4_000, appCommit: "abc1234" },
+          { clientId: "dev-android", label: "Pixel 9", platform: "android", pushSubscribed: true, connectedAtMs: Date.now() - 7_200_000, lastSeenMs: Date.now() - 65_000, appCommit: "0000000" },
         ],
       };
+    // Desktop build commit; the iPhone above matches (fresh) and the Pixel does
+    // not (stale) so the mock exercises both banner states.
+    case "desktop_build_commit":
+      return "abc1234";
     case "mobile_relay_qr_svg":
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><rect width="29" height="29" fill="#fff"/><path fill="#000" d="M2 2h7v7H2zM20 2h7v7h-7zM2 20h7v7H2zM4 4h3v3H4zM22 4h3v3h-4zM4 22h3v3H4zM11 2h2v2h-2zM15 2h2v3h-2zM11 6h3v2h-3zM16 6h2v2h-2zM11 10h2v3h-2zM15 11h3v2h-3zM20 11h3v2h-3zM25 11h2v3h-2zM2 11h3v2H2zM6 12h3v2H6zM11 15h2v3h-2zM14 16h3v2h-3zM19 15h2v3h-2zM23 16h2v2h-2zM26 16h1v3h-1zM11 20h3v2h-3zM16 21h2v3h-2zM20 20h3v2h-3zM24 21h3v2h-3zM11 24h2v3h-2zM14 25h3v2h-3zM20 24h2v3h-2zM23 25h3v2h-3z"/></svg>`;
 

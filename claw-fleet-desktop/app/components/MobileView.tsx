@@ -17,6 +17,20 @@ interface MobileClientInfo {
   pushSubscribed: boolean;
   connectedAtMs: number;
   lastSeenMs: number;
+  /** Short git commit the phone's bundle was built from (mobile-web
+   *  `__APP_COMMIT__`). Absent for a client that predates the field or built
+   *  without a commit source (e.g. the Harmony native client). */
+  appCommit?: string;
+}
+
+/** True when the phone's bundle commit is known, the desktop's own build commit
+ *  is known, and they differ — i.e. the phone is running a stale deploy. Both
+ *  are normalized to 7 chars so a full-vs-short SHA doesn't false-positive.
+ *  Either side `unknown`/absent → not stale (we can't tell, so we don't cry). */
+function isStale(deviceCommit: string | undefined, desktopCommit: string | null): boolean {
+  if (!deviceCommit || !desktopCommit) return false;
+  if (deviceCommit === "unknown" || desktopCommit === "unknown") return false;
+  return deviceCommit.slice(0, 7) !== desktopCommit.slice(0, 7);
 }
 
 interface MobileRelayStatus {
@@ -59,6 +73,9 @@ export function MobileView() {
   const [editingUrl, setEditingUrl] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The desktop's own build commit, compared against each phone's appCommit to
+  // flag a stale mobile deploy. Fetched once — it's a compile-time constant.
+  const [desktopCommit, setDesktopCommit] = useState<string | null>(null);
 
   const refreshQr = useCallback(async (enabled: boolean) => {
     if (!enabled) {
@@ -89,6 +106,14 @@ export function MobileView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Desktop build commit — compile-time constant, fetch once. A remote backend
+  // without this command just leaves it null (no stale flags shown).
+  useEffect(() => {
+    invoke<string>("desktop_build_commit")
+      .then((c) => setDesktopCommit(c))
+      .catch(() => setDesktopCommit(null));
+  }, []);
 
   // Status poll while the view is open.
   useEffect(() => {
@@ -215,6 +240,23 @@ export function MobileView() {
                         ? t("mobile_device_push_on", "已开通知")
                         : t("mobile_device_push_off", "未开通知")}
                     </span>
+                    {d.appCommit && d.appCommit !== "unknown" && (
+                      <code className={styles.deviceCommit} title={d.appCommit}>
+                        {d.appCommit.slice(0, 7)}
+                      </code>
+                    )}
+                    {isStale(d.appCommit, desktopCommit) && (
+                      <span
+                        className={styles.deviceStale}
+                        title={t(
+                          "mobile_device_stale_hint",
+                          "手机端 bundle 落后于桌面端（桌面 {{desktop}}）。重新构建并部署 relay 让改动生效。",
+                          { desktop: (desktopCommit ?? "").slice(0, 7) },
+                        )}
+                      >
+                        {t("mobile_device_stale", "旧版本")}
+                      </span>
+                    )}
                     <span className={styles.deviceSince}>
                       {t("mobile_device_since", "接入于")} {timeAgo(d.connectedAtMs, t)}
                     </span>
