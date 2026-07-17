@@ -3,6 +3,8 @@ import {
   codexToolSummary,
   parseExecCommand,
   parsePatchFiles,
+  readRange,
+  searchFlags,
   timeoutMsToSecs,
   waitTimeoutSecs,
 } from "./ToolUseBlock";
@@ -159,6 +161,41 @@ describe("parseExecCommand", () => {
 
   it("returns {} for a plain shell command (older-style exec, no cmd: field)", () => {
     expect(parseExecCommand("cargo build")).toEqual({ cmd: undefined, workdir: undefined });
+  });
+});
+
+describe("readRange", () => {
+  it("offset + limit → closed line range", () => {
+    expect(readRange(40, 80)).toBe("lines 40–119");
+  });
+
+  it("offset only → open range", () => {
+    expect(readRange(40, undefined)).toBe("from line 40");
+  });
+
+  it("limit only → head cap", () => {
+    expect(readRange(undefined, 80)).toBe("first 80 lines");
+  });
+
+  it("neither → null (whole file)", () => {
+    expect(readRange(undefined, undefined)).toBeNull();
+    expect(readRange("40", "80")).toBeNull();
+  });
+});
+
+describe("searchFlags", () => {
+  it("collects the present scalar flags, ws-relative path first", () => {
+    expect(
+      searchFlags(
+        { pattern: "foo", path: "/ws/app", glob: "*.ts", type: "rust", output_mode: "content", "-i": true },
+        "/ws",
+      ),
+    ).toEqual(["app", "glob *.ts", "type rust", "content", "-i"]);
+  });
+
+  it("skips absent / empty fields (pattern is never a chip)", () => {
+    expect(searchFlags({ pattern: "foo" })).toEqual([]);
+    expect(searchFlags({ pattern: "foo", path: "  ", glob: "" })).toEqual([]);
   });
 });
 
