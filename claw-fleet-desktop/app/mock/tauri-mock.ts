@@ -37,6 +37,7 @@ import {
   MOCK_HANDOFF_CHAINS,
   MOCK_HEATMAP_STATS,
   MOCK_LESSONS,
+  MOCK_MANAGED_LESSONS,
   MOCK_TIMELINE_REPORTS,
   getMessagesForSession,
 } from "./data";
@@ -303,6 +304,10 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "generate_daily_report_lessons":
       return MOCK_LESSONS;
     case "append_lesson_to_claude_md":
+      return null;
+    case "list_managed_lessons":
+      return MOCK_MANAGED_LESSONS;
+    case "remove_managed_lesson":
       return null;
 
     case "generate_mascot_quips":
