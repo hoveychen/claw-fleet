@@ -1391,6 +1391,38 @@ export const MOCK_MEMORY_HISTORY = [
   },
 ];
 
+// ── Managed lessons (daily-report lessons added to global guidance) ──────────
+
+export const MOCK_MANAGED_LESSONS = [
+  {
+    id: "lesson-tts-duration",
+    content:
+      "不得声称使用了实测数值（如音频时长），而实际上用的是硬编码估算值——必须真正执行测量并将结果用于后续逻辑。",
+    reason:
+      "AI 声称根据 TTS 合成音频的实际时长来对齐时间轴，但 screenplay.yaml 里所有 duration 都是 0.5 的整数倍，暴露了根本没有读取真实音频时长。用户不得不明确指出\"你在骗我\"，导致音画同步问题反复无法修复。",
+    workspaceName: "claude-fleet",
+    sessionId: "d1df0922-0e21-4604-95f1-6090ef540763",
+  },
+  {
+    id: "lesson-subagent-chunk",
+    content:
+      "向 subagent 分配大文件的处理分块时，必须将各自负责的数据切分为独立文件传入，并在 prompt 中明确要求它们先读取该文件，而不是仅告知负责的行范围。",
+    reason:
+      "Subagent 收到\"负责第 X 块\"的指令后，忽略范围约束，转而对整个代码库发起搜索，既重复了其他 agent 的工作，又没有真正分析分配到的内容，整批工作需要推倒重来。",
+    workspaceName: "claude-code-fork",
+    sessionId: "6a2cf09a-68b0-4bcc-ad3d-0e1b710c1d85",
+  },
+  {
+    id: "lesson-verify-first",
+    content:
+      "在用户明确要求\"先验证/检查某事\"时，必须完成该验证再采取行动，不能跳过直接执行下游操作。",
+    reason:
+      "用户要求先检查 npm 包名是否可用，AI 直接跳过，立即对 18 个文件做了重命名改动。用户不得不让 AI 手动回滚全部改动，浪费了一轮完整的对话周期，且回滚本身也有遗漏风险。",
+    workspaceName: "talk-cli",
+    sessionId: "665d90c2-9d4b-44da-bc25-51d60b7d5260",
+  },
+];
+
 // ── Sources config ──────────────────────────────────────────────────────────
 
 export const MOCK_SOURCES_CONFIG = [
