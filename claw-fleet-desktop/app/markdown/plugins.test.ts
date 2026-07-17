@@ -96,3 +96,63 @@ describe("GFM survives the sanitize pass", () => {
     expect(render("```mermaid\ngraph TD;\nA-->B;\n```")).toContain("language-mermaid");
   });
 });
+
+// The chat brief promises "内联 HTML/SVG…它会真实渲染出来", and a model asked to
+// diagram a circuit answers with inline <svg>. GitHub's default sanitize schema
+// allows no SVG tags at all, so without widening every <svg>/<rect>/<line>/…
+// is stripped and only the <text> content survives — flowing into a run-on
+// paragraph. That is the exact "diagram collapsed to one line" bug.
+describe("inline SVG survives the sanitize pass", () => {
+  const svg = [
+    '<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">',
+    '  <rect x="10" y="10" width="60" height="40" fill="#dbeafe" stroke="#1a1a1a"/>',
+    '  <line x1="10" y1="70" x2="190" y2="70" stroke="#2563eb" stroke-width="2"/>',
+    '  <circle cx="100" cy="30" r="5" fill="#16a34a"/>',
+    '  <path d="M120 30 q40 10 55 30" stroke="#dc2626" fill="none"/>',
+    '  <polygon points="150,60 156,53 146,51" fill="#dc2626"/>',
+    '  <text x="20" y="35" font-size="13" fill="#1a1a1a">开关管</text>',
+    "</svg>",
+  ].join("\n");
+
+  it("keeps the svg element and its shape children", () => {
+    const html = render(svg);
+    expect(html).toContain("<svg");
+    expect(html).toContain("<rect");
+    expect(html).toContain("<line");
+    expect(html).toContain("<circle");
+    expect(html).toContain("<path");
+    expect(html).toContain("<polygon");
+    expect(html).toContain("<text");
+  });
+
+  it("keeps the geometry and presentation attributes a diagram needs", () => {
+    const html = render(svg);
+    expect(html).toContain('viewBox="0 0 200 100"');
+    expect(html).toContain('fill="#dbeafe"');
+    expect(html).toContain('stroke="#1a1a1a"');
+    expect(html).toContain('d="M120 30 q40 10 55 30"');
+    expect(html).toContain('points="150,60 156,53 146,51"');
+    expect(html).toContain(">开关管</text>");
+  });
+
+  it("still strips script and event handlers inside svg", () => {
+    const html = render(
+      '<svg viewBox="0 0 10 10"><script>alert(1)</script>' +
+        '<rect width="10" height="10" onload="alert(2)"/></svg>',
+    );
+    expect(html).toContain("<svg");
+    expect(html).toContain("<rect");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("alert(1)");
+    expect(html).not.toContain("onload");
+  });
+
+  it("strips foreignObject, the SVG→HTML script escape hatch", () => {
+    const html = render(
+      '<svg viewBox="0 0 10 10"><foreignObject>' +
+        '<img src=x onerror="alert(1)"></foreignObject></svg>',
+    );
+    expect(html).not.toContain("<foreignObject");
+    expect(html).not.toContain("onerror");
+  });
+});

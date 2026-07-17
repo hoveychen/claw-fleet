@@ -24,19 +24,56 @@ import "katex/dist/katex.min.css";
  * output is never subject to this schema; only the marker class has to survive
  * the pass.
  *
- * Nothing else needs widening: GFM's table alignment rides on the `align`
- * attribute (already in the default schema's global allow-list) and task-list
- * checkboxes on `input[type=checkbox][disabled]`, both verified in
- * plugins.test.ts.
+ * GFM's table alignment rides on the `align` attribute (already in the default
+ * schema's global allow-list) and task-list checkboxes on
+ * `input[type=checkbox][disabled]`, both verified in plugins.test.ts.
+ *
+ * The default schema also allows *no* SVG tags, so a model that answers "draw
+ * the circuit" with inline `<svg>` — which the chat brief explicitly invites —
+ * has every `<svg>/<rect>/<line>/…` stripped, leaving only the `<text>` content
+ * to collapse into a run-on paragraph. `SVG_TAGS` re-admits the static drawing
+ * primitives (deliberately *not* `script`, `foreignObject`, `a`, `image`, or
+ * the `animate*` family — the tags that turn SVG into a script/navigation
+ * vector), and `SVG_ATTRS` re-admits their inert geometry/presentation
+ * attributes (no `href`/`xlink:href`, no `on*`). Attribute names are the hast
+ * property names sanitize matches on (camelCase for hyphenated SVG attrs, e.g.
+ * `stroke-width` → `strokeWidth`), verified byte-for-byte in plugins.test.ts.
  */
+const SVG_TAGS = [
+  "svg", "g", "defs", "title", "desc", "symbol", "use",
+  "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
+  "text", "tspan",
+  "marker", "linearGradient", "radialGradient", "stop", "pattern", "clipPath",
+];
+
+const SVG_ATTRS = [
+  "viewBox", "xmlns", "xmlnsXlink", "version", "preserveAspectRatio",
+  "width", "height", "x", "y", "cx", "cy", "r", "rx", "ry",
+  "x1", "y1", "x2", "y2", "d", "points", "transform", "gradientTransform",
+  "className", "id", "role",
+  "fill", "fillOpacity", "fillRule", "stroke", "strokeWidth", "strokeOpacity",
+  "strokeLineCap", "strokeLineJoin", "strokeDashArray", "strokeDashOffset",
+  "strokeMiterLimit", "opacity", "clipPath", "clipRule",
+  "fontSize", "fontFamily", "fontWeight", "fontStyle", "textAnchor",
+  "dominantBaseline", "letterSpacing",
+  "offset", "stopColor", "stopOpacity", "gradientUnits", "spreadMethod",
+  "patternUnits", "markerStart", "markerMid", "markerEnd",
+  "markerWidth", "markerHeight", "refX", "refY", "orient",
+];
+
 const schema = {
   ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), ...SVG_TAGS],
   attributes: {
     ...defaultSchema.attributes,
     span: [
       ...(defaultSchema.attributes?.span ?? []),
       ["className", "math", "math-inline", "math-display"],
     ],
+    // Presentation attributes are inert, so admitting them globally (rather
+    // than per-SVG-tag) keeps the list readable without opening any HTML
+    // vector — a stray `fill` on a `<div>` does nothing.
+    "*": [...(defaultSchema.attributes?.["*"] ?? []), ...SVG_ATTRS],
   },
 };
 
