@@ -444,7 +444,24 @@
     "section_title": "实时"
   },
   "today_usage": {
-    "title": "今日累计"
+    "title": "今日累计",
+    "open_receipt": "查看今日花费明细"
+  },
+  "token_receipt": {
+    "title": "今日花费明细",
+    "subtitle": "Token 消费小票",
+    "loading": "统计中…",
+    "no_usage": "今天还没有用量",
+    "row_input": "输入",
+    "row_cache_write": "缓存写入",
+    "row_cache_read": "缓存读取",
+    "row_output": "输出",
+    "subtotal": "小计",
+    "grand_total": "合计",
+    "split_agent": "会话",
+    "split_fleet": "Fleet 自身",
+    "tokens": "tokens",
+    "footnote": "价格为各模型官方 $/M 单价 · 含缓存读写 · 与侧边栏计数同口径"
   },
   "chart": {
     "title": "Token 速度",

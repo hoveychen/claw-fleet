@@ -447,7 +447,24 @@
     "section_title": "Live"
   },
   "today_usage": {
-    "title": "Today"
+    "title": "Today",
+    "open_receipt": "View today's spend breakdown"
+  },
+  "token_receipt": {
+    "title": "Today's spend breakdown",
+    "subtitle": "Token receipt",
+    "loading": "Tallying…",
+    "no_usage": "No usage yet today",
+    "row_input": "Input",
+    "row_cache_write": "Cache write",
+    "row_cache_read": "Cache read",
+    "row_output": "Output",
+    "subtotal": "Subtotal",
+    "grand_total": "Total",
+    "split_agent": "Sessions",
+    "split_fleet": "Fleet itself",
+    "tokens": "tokens",
+    "footnote": "Prices are each model's official $/M rate · cache reads/writes included · same basis as the sidebar counter"
   },
   "chart": {
     "title": "Token speed",
