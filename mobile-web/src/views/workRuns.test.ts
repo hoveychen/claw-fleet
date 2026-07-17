@@ -44,11 +44,19 @@ describe("countSteps / workRunTitle / firstSentence", () => {
     expect(countSteps([assistant([think, tool("Bash")]), assistant([tool("Read")])])).toBe(3);
   });
 
-  it("titles from the first thinking sentence, CJK-aware, clipped", () => {
+  it("titles from the last thinking sentence, CJK-aware, clipped", () => {
     const msgs = [assistant([{ type: "thinking", thinking: "重新评估了去杠杆周期。承认之前判断过于乐观。" } as ContentBlock])];
     expect(workRunTitle(msgs)).toBe("重新评估了去杠杆周期。");
     expect(workRunTitle([assistant([tool("Bash")])])).toBe(null);
     expect(firstSentence("Reading release.yml to check")).toBe("Reading release.yml to check");
     expect(firstSentence("x".repeat(100)).length).toBe(64);
+  });
+
+  it("uses the last thinking block, not a mid-run one", () => {
+    const msgs = [
+      assistant([{ type: "thinking", thinking: "An early plan. Ignore me." } as ContentBlock, tool("Bash")]),
+      assistant([{ type: "thinking", thinking: "Final intent here. Then more." } as ContentBlock, tool("Read")]),
+    ];
+    expect(workRunTitle(msgs)).toBe("Final intent here.");
   });
 });
