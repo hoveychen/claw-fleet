@@ -291,20 +291,20 @@ fn fold_session_turns(
 /// single cumulative `total_token_usage` snapshot per session, so this
 /// contributes one folded figure: full-price input (`raw − cached`), cached
 /// input billed at the cache-read rate, and output (already incl. reasoning).
-/// Reuses [`crate::codex_source`]'s canonical parsing so the cost here agrees
-/// with the per-session `CodexTokenPanel`.
+///
+/// `uri` is the session's stored `jsonl_path`, which for codex is a `codex://`
+/// URI (not a filesystem path) that may point at a zstd-compressed rollout — so
+/// this delegates to [`crate::codex_source::codex_token_breakdown`], which
+/// resolves + decompresses + parses it, rather than reading the path directly.
+/// That reuse also keeps the cost here in lock-step with the per-session
+/// `CodexTokenPanel`.
 fn fold_codex_session(
-    jsonl: &str,
+    uri: &str,
     by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
 ) {
-    let lines: Vec<serde_json::Value> = jsonl
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect();
-    let model = crate::codex_source::extract_model(&lines);
-    let bd = crate::codex_source::codex_token_breakdown_from_lines(&lines, model);
+    let Ok(bd) = crate::codex_source::codex_token_breakdown(uri) else {
+        return;
+    };
     if bd.total_tokens == 0 {
         return;
     }
@@ -357,21 +357,22 @@ fn build_breakdown(
         if s.created_at_ms < start {
             continue;
         }
+        // Codex rollouts are shaped differently from Claude JSONL (no
+        // `type:"assistant"` turns with a `message.usage`; instead a cumulative
+        // `token_count` event with codex-native field names) AND their stored
+        // `jsonl_path` is a `codex://` URI over a possibly-zstd rollout, not a
+        // readable filesystem path. So `fold_session_turns` + a plain
+        // `read_to_string` would drop every codex agent session from the
+        // receipt. Fold them via the URI-aware codex reader instead.
+        if s.agent_source == "codex" {
+            fold_codex_session(&s.jsonl_path, &mut by_model);
+            continue;
+        }
         let jsonl = std::fs::read_to_string(&s.jsonl_path).unwrap_or_default();
         if jsonl.is_empty() {
             continue;
         }
-        // Codex rollouts are shaped differently from Claude JSONL (no
-        // `type:"assistant"` turns with a `message.usage`; instead a cumulative
-        // `token_count` event with codex-native field names), so
-        // `fold_session_turns` would skip them entirely and drop every codex
-        // agent session from the receipt. Fold them from their native
-        // `total_token_usage` snapshot instead.
-        if s.agent_source == "codex" {
-            fold_codex_session(&jsonl, &mut by_model);
-        } else {
-            fold_session_turns(&jsonl, &s.agent_source, &mut by_model);
-        }
+        fold_session_turns(&jsonl, &s.agent_source, &mut by_model);
     }
 
     // Fleet's own LLM calls today, folded per model.
@@ -731,14 +732,18 @@ mod breakdown_tests {
         // cumulative snapshot: full-price input = raw − cached, cached →
         // cache-read, output, and no cache-write bucket.
         let jsonl = codex_rollout("gpt-5.6-sol", 100_000, 60_000, 4_000);
-        let sessions = vec![today_session_with_jsonl(
-            "codexfold",
-            "codex",
-            &jsonl,
-            false,
-        )];
+        // Codex sessions store a `codex://` URI over an absolute path, not a
+        // readable filesystem path — write the rollout to an absolute temp file
+        // and point jsonl_path at `codex://<abs>` so the URI-aware reader (which
+        // build_breakdown uses for codex) resolves it, exactly like real data.
+        let dir = std::env::temp_dir().join("fleet-brk-test-codexfold");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout.jsonl");
+        std::fs::write(&path, &jsonl).unwrap();
+        let mut s = today_session_with_jsonl("codexfold", "codex", "", false);
+        s.jsonl_path = format!("codex://{}", path.to_string_lossy());
         let now = chrono::Local::now().timestamp_millis();
-        let b = build_breakdown(&sessions, &[], now);
+        let b = build_breakdown(&[s], &[], now);
 
         assert_eq!(
             b.lines.len(),
