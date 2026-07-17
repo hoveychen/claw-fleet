@@ -131,6 +131,32 @@ export function parseAnswersFromResultText(
   questions: AskQuestion[],
 ): Record<string, string> {
   const answers: Record<string, string> = {};
+
+  // Codex's deferred `fleet__ask` call returns the answer map as bare JSON,
+  // unlike Claude Code's prose wrapper below. Only copy keys belonging to the
+  // questions rendered by this card; a tool-result blob must not be allowed to
+  // inject unrelated fields into the answer UI.
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        const map = parsed as Record<string, unknown>;
+        for (const q of questions) {
+          if (!Object.prototype.hasOwnProperty.call(map, q.question)) continue;
+          const value = map[q.question];
+          if (typeof value === "string") answers[q.question] = value;
+          else if (typeof value === "number" || typeof value === "boolean") {
+            answers[q.question] = String(value);
+          }
+        }
+        if (Object.keys(answers).length > 0) return answers;
+      }
+    } catch {
+      // Not valid JSON — old transcripts use the prose format below.
+    }
+  }
+
   for (const q of questions) {
     const needle = `"${q.question}"="`;
     const at = text.indexOf(needle);

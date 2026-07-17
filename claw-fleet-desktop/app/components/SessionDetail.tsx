@@ -32,6 +32,7 @@ import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
 import { bgTaskIcon, bgTaskDataType } from "../bgTaskKinds";
+import { subscribeDecisionHistoryRefresh } from "../decisionHistoryRefresh";
 import styles from "./SessionDetail.module.css";
 
 
@@ -449,20 +450,26 @@ export function SessionDetail({
     const sid = liveSession?.id;
     if (!sid) return;
     let cancelled = false;
-    invoke<DecisionHistoryRecord[]>("list_session_decisions", {
-      sessionId: sid,
-      jsonlPath: liveSession?.jsonlPath ?? null,
-    })
-      .then((r) => {
-        if (cancelled) return;
-        setDecisionRecords(r ?? []);
+
+    const refresh = () =>
+      invoke<DecisionHistoryRecord[]>("list_session_decisions", {
+        sessionId: sid,
+        jsonlPath: liveSession?.jsonlPath ?? null,
       })
-      .catch(() => {
-        if (cancelled) return;
-        setDecisionRecords([]);
-      });
+        .then((r) => {
+          if (cancelled) return;
+          setDecisionRecords(r ?? []);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setDecisionRecords([]);
+        });
+
+    void refresh();
+    const unsubscribe = subscribeDecisionHistoryRefresh(refresh);
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [liveSession?.id, liveSession?.jsonlPath]);
 
