@@ -94,4 +94,32 @@ describe("MessageList image refetch wiring", () => {
     }
     expect(imgs).toContain(`data:image/png;base64,${IMG}`);
   });
+
+  it("recovers an image Read whose tool_result is absent from the message window", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        createElement(MessageList, {
+          messages: [messages[0]],
+          isLoading: false,
+          jsonlPath: "/fake.jsonl",
+        } as never),
+      );
+    });
+
+    const readHeader = [...container!.querySelectorAll("button")].find((b) =>
+      (b.textContent || "").includes("x.png"),
+    );
+    expect(readHeader, "Read card header not found").toBeTruthy();
+    await act(async () => {
+      readHeader!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect([...container!.querySelectorAll("img")].map((i) => i.getAttribute("src"))).toContain(
+      `data:image/png;base64,${IMG}`,
+    );
+  });
 });
