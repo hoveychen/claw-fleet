@@ -306,6 +306,29 @@
   opacity: 0.5;
 }
 
+/* Unread critical events get a positive marker (red left rail + faint tint) so
+   the nav badge's "N unread" promise maps to something the eye can find in the
+   list — instead of only dimming the ones already read. */
+.card_unread {
+  background: rgb(var(--risk-critical) / 0.06);
+  box-shadow: inset 3px 0 0 rgb(var(--risk-critical));
+}
+
+.card_unread:hover {
+  background: rgb(var(--risk-critical) / 0.1);
+}
+
+/* One-line hint shown when the default unread-only view auto-fell-back to "all"
+   because nothing was unread — keeps an empty state from looking broken. */
+.unread_hint {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+}
+
 .card_body {
   flex: 1;
   min-width: 0;

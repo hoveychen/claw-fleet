@@ -316,6 +316,8 @@
     "no_events": "未发现非平凡操作。",
     "no_matching_events": "没有符合筛选条件的操作。",
     "overview_title": "风险操作概览",
+    "unread_only": "只看未读",
+    "unread_auto_revealed": "暂无未读事件，已显示全部。",
     "all": "全部",
     "all_workspaces": "全部工作区",
     "refresh": "刷新",
