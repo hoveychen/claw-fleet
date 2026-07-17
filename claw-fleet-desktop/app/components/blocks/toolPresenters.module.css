@@ -70,6 +70,8 @@
 .stream_text_err {
   background: var(--color-error-bg);
   color: var(--color-error-fg);
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
 }
 
 .note {
