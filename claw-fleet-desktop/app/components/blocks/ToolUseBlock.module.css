@@ -34,6 +34,18 @@
   flex-shrink: 0;
 }
 
+.file_icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}
+
+.file_icon svg {
+  width: 13px;
+  height: 13px;
+}
+
 .summary {
   flex: 1;
   overflow: hidden;

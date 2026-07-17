@@ -9,6 +9,7 @@ import type {
 import { asFileEditResult } from "../../toolResults";
 import type { PathLinkContext } from "../../markdown/pathLinks";
 import { DiffView } from "./DiffView";
+import { fileExtIcon } from "./Rail";
 import { ExpandableText } from "./ExpandableText";
 import { ImageThumb } from "./ImageThumb";
 import { TextBlock } from "./TextBlock";
@@ -57,7 +58,17 @@ function relToWorkspace(p: string, root?: string): string {
   return p.startsWith(prefix) ? p.slice(prefix.length) : p;
 }
 
-function formatInput(input: Record<string, unknown>, name?: string, wsRoot?: string): string {
+/** `/Users/x/ws/app/foo.ts` → `foo.ts`. The collapsed row only needs to name
+ *  which file a tool touched; the full absolute path lives in the expanded
+ *  body (DiffView path bar / ReadInput headline). Relativizing to the
+ *  workspace root wasn't enough — a file nested under `.worktrees/…` still
+ *  rendered a long, ellipsis-truncated path. */
+function basename(p: string): string {
+  const parts = p.split(/[/\\]/);
+  return parts[parts.length - 1] || p;
+}
+
+function formatInput(input: Record<string, unknown>, name?: string): string {
   // Bash and Agent both carry a model-written `description` on every call — for
   // Bash a one-line summary ("Find files referencing meta block names"), for
   // Agent a 3-5 word task name. It reads far better in the collapsed row than
@@ -85,9 +96,9 @@ function formatInput(input: Record<string, unknown>, name?: string, wsRoot?: str
   // `command`), so surface it the same way — otherwise the whole args object
   // ({cmd, workdir, yield_time_ms, max_output_tokens}) dumps as raw JSON.
   if ("cmd" in input) return String(input.cmd);
-  if ("file_path" in input) return relToWorkspace(String(input.file_path), wsRoot);
+  if ("file_path" in input) return basename(String(input.file_path));
   if ("pattern" in input) return String(input.pattern);
-  if ("path" in input) return relToWorkspace(String(input.path), wsRoot);
+  if ("path" in input) return basename(String(input.path));
   if ("query" in input) return String(input.query);
   if ("url" in input) return String(input.url);
   return JSON.stringify(input, null, 2);
@@ -187,7 +198,6 @@ export function codexToolSummary(
   name: string,
   input: Record<string, unknown>,
   t: (key: string, opts?: Record<string, unknown>) => string,
-  wsRoot?: string,
 ): string | null {
   const withTimeout = (base: string, timedKey: string, value: unknown) => {
     const secs = timeoutMsToSecs(value);
@@ -238,7 +248,7 @@ export function codexToolSummary(
             : op === "Delete"
               ? "detail.tool_patch_delete"
               : "detail.tool_patch_update";
-        return t(key, { path: relToWorkspace(path, wsRoot) });
+        return t(key, { path: basename(path) });
       }
       return t("detail.tool_patch_multi", { count: files.length });
     }
@@ -595,14 +605,16 @@ export function readRange(offset: unknown, limit: unknown): string | null {
 }
 
 /** Expanded body for `Read`: the file path as the headline with an optional
- *  line-range note. The file content itself renders below as the tool result. */
-function ReadInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+ *  line-range note. The collapsed row already names the file by basename, so
+ *  the expanded headline shows the full absolute path — precision belongs here.
+ *  The file content itself renders below as the tool result. */
+function ReadInput({ block }: { block: ToolUseBlockType }) {
   const fp = typeof block.input.file_path === "string" ? block.input.file_path : "";
   if (!fp) return <ParamsBody block={block} />;
   const range = readRange(block.input.offset, block.input.limit);
   return (
     <div className={styles.target_head}>
-      <span className={styles.target_main}>{relToWorkspace(fp, paths?.workspaceRoot)}</span>
+      <span className={styles.target_main}>{fp}</span>
       {range && <span className={styles.target_note}>{range}</span>}
     </div>
   );
@@ -733,7 +745,7 @@ const CLAUDE_TOOLS = new Set(["Read", "Grep", "Glob", "WebSearch", "WebFetch", "
 function ClaudeToolInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
   switch (block.name) {
     case "Read":
-      return <ReadInput block={block} paths={paths} />;
+      return <ReadInput block={block} />;
     case "Grep":
       return <GrepInput block={block} paths={paths} />;
     case "Glob":
@@ -894,12 +906,18 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // codex's function-call tools get a friendly one-liner instead of their raw
   // args object; everything else falls back to the generic formatter.
   const summary =
-    codexToolSummary(block.name, block.input, t, paths?.workspaceRoot) ??
-    formatInput(block.input, block.name, paths?.workspaceRoot);
+    codexToolSummary(block.name, block.input, t) ??
+    formatInput(block.input, block.name);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
   const custom = hasCustomBody(block.name, meta, result);
   const stats = headerStats(block, meta, result);
+  // For file tools (Edit/Read/Write/MultiEdit/NotebookEdit) the summary IS a
+  // filename, so prepend a small glyph keyed on its extension. Gated on
+  // `file_path` so Grep/Glob — whose summary is a pattern, not a file — don't
+  // get a misleading file icon.
+  const fileIconPath =
+    typeof block.input.file_path === "string" ? block.input.file_path : undefined;
 
   return (
     <div className={`${styles.root} ${isReadOnly ? styles.readonly : ""} ${rail ? styles.rail : ""}`}>
@@ -910,6 +928,11 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
       >
         {!rail && <span className={styles.arrow}>{open ? "▾" : "▸"}</span>}
         {!rail && <span className={styles.tool_name}>{block.name}</span>}
+        {(rail || !open) && fileIconPath && (
+          <span className={styles.file_icon} aria-hidden>
+            {fileExtIcon(fileIconPath)}
+          </span>
+        )}
         {(rail || !open) && (
           <span className={styles.summary}>{summary}</span>
         )}
