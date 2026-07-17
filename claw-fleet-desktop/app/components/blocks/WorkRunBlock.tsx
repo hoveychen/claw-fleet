@@ -5,6 +5,7 @@ import type { PathLinkContext } from "../../markdown/pathLinks";
 import { summarizeWorkRun } from "../workRuns";
 import { formatMsgTime } from "../../messageRows";
 import { ContentBlocks } from "./ContentBlocks";
+import { RailDone } from "./Rail";
 import styles from "./WorkRunBlock.module.css";
 
 interface Props {
@@ -103,9 +104,13 @@ export function WorkRunBlock({
                 isPartial={msg.message?.stop_reason === null && i === msgs.length - 1}
                 searchTerms={searchTerms}
                 paths={paths}
+                rail
               />
             );
           })}
+          {/* A finished run closes with the Done check; a still-streaming run
+              (live tail, last record unterminated) keeps the rail open-ended. */}
+          {msgs[msgs.length - 1]?.message?.stop_reason !== null && <RailDone />}
         </div>
       )}
     </div>
