@@ -324,36 +324,6 @@ TASKS.md 是代理的临时草稿状态——它不该进版本控制。你在�
   第一次创建 worktree 时，检查 `.gitignore`；若 `.worktrees/` 缺席，**向{title}\
   提一句并主动提议加一行 `.worktrees/`**。不要悄悄改写 `.gitignore`。\n\
 \n\
-### 实操示例 —— 单步改动\n\
-\n\
-{title}要一个单次机械修复：`LocalBackend::new` 应在启动时调用一次\
-`migrate_zombie_running`。无多步计划、无 TASKS.md、无 P1..Pn——但 Rule 3 仍\
-适用。挑 `fix-zombie-pid` 作 `task-id`，从 repo 根开始的完整工作流是：\n\
-\n\
-```bash\n\
-# 1. Open the worktree off the current main\n\
-git worktree add -b prd/fix-zombie-pid .worktrees/fix-zombie-pid main\n\
-\n\
-# 2. Do the work inside the worktree\n\
-cd .worktrees/fix-zombie-pid\n\
-#   ... edit src/local_backend.rs, add the unit test ...\n\
-cargo test --package claw-fleet-core\n\
-git add -A\n\
-git commit -m \"fix(supervisor): migrate zombie running sessions on startup\"\n\
-\n\
-# 3. Switch back to the main checkout and merge with --no-ff\n\
-cd <repo-root>\n\
-git merge --no-ff prd/fix-zombie-pid\n\
-\n\
-# 4. Clean up — mandatory, orphaned worktrees accumulate fast\n\
-git worktree remove .worktrees/fix-zombie-pid\n\
-git branch -d prd/fix-zombie-pid\n\
-```\n\
-\n\
-第 3 步后，`main` 携带一个概括修复的合并提交，其下是那个单一的 worktree 提交——\
-与多步计划产出的形状相同，只是底下是一个提交而非 N 个。第 1 和第 4 步是代理最常\
-跳过的部分；别跳。\n\
-\n\
 ### Rule 3 何时不适用\n\
 \n\
 Rule 3 覆盖任何触碰生产代码的改动，**无论多步还是单步**。单步改动不是跳过\
@@ -836,39 +806,6 @@ the spot (e.g. `fix-zombie-pid`, `rename-task-fields`).\n\
   the first time you create a worktree in this repo, check `.gitignore`; if \
   `.worktrees/` is absent, **mention it to {title} and offer to add a \
   `.worktrees/` line**. Do not silently rewrite `.gitignore`.\n\
-\n\
-### Worked example — single-step change\n\
-\n\
-{title} asks for a single mechanical fix: `LocalBackend::new` should call \
-`migrate_zombie_running` once on startup. No multi-step plan, no \
-TASKS.md, no P1..Pn — but Rule 3 still applies. Picking \
-`fix-zombie-pid` as the `task-id`, the full workflow from the repo root \
-is:\n\
-\n\
-```bash\n\
-# 1. Open the worktree off the current main\n\
-git worktree add -b prd/fix-zombie-pid .worktrees/fix-zombie-pid main\n\
-\n\
-# 2. Do the work inside the worktree\n\
-cd .worktrees/fix-zombie-pid\n\
-#   ... edit src/local_backend.rs, add the unit test ...\n\
-cargo test --package claw-fleet-core\n\
-git add -A\n\
-git commit -m \"fix(supervisor): migrate zombie running sessions on startup\"\n\
-\n\
-# 3. Switch back to the main checkout and merge with --no-ff\n\
-cd <repo-root>\n\
-git merge --no-ff prd/fix-zombie-pid\n\
-\n\
-# 4. Clean up — mandatory, orphaned worktrees accumulate fast\n\
-git worktree remove .worktrees/fix-zombie-pid\n\
-git branch -d prd/fix-zombie-pid\n\
-```\n\
-\n\
-After step 3, `main` carries one merge commit summarising the fix plus the \
-single worktree commit beneath it — the same shape a multi-step plan \
-produces, just with one underlying commit instead of N. Steps 1 and 4 are \
-the parts agents most often skip; do not skip them.\n\
 \n\
 ### When Rule 3 does NOT apply\n\
 \n\
@@ -1585,29 +1522,6 @@ mod tests {
         assert!(
             r3_body.contains("git status --ignored"),
             "Rule 3 must name the concrete pre-removal self-check command"
-        );
-    }
-
-    #[test]
-    fn render_rule_3_includes_single_step_worked_example() {
-        let g = render_guidance("Boss", "en");
-        let r3_pos = g.find("## Rule 3").expect("Rule 3 must exist");
-        let r3_end = g[r3_pos..].find("## Rule 4").expect("Rule 4 must follow");
-        let r3_body = &g[r3_pos..r3_pos + r3_end];
-        assert!(
-            r3_body.contains("### Worked example"),
-            "Rule 3 must include a worked single-step example so agents have a copy-pastable command line to follow"
-        );
-        assert!(
-            r3_body.contains("git worktree add -b prd/")
-                && r3_body.contains("git merge --no-ff prd/")
-                && r3_body.contains("git worktree remove")
-                && r3_body.contains("git branch -d"),
-            "the worked example must show all four mandatory steps end-to-end (add, merge, remove worktree, delete branch)"
-        );
-        assert!(
-            r3_body.contains("```bash"),
-            "the worked example must be inside a fenced bash block so it renders correctly and agents recognise it as runnable"
         );
     }
 
