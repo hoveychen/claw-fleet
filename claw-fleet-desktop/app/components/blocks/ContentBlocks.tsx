@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
   DecisionHistoryRecord,
+  ImageBlock,
   ToolResultBlock,
   ToolUseBlock,
 } from "../../types";
@@ -15,7 +16,36 @@ import {
   ToolUseBlock as ToolUseBlockComp,
 } from "./ToolUseBlock";
 import { DecisionToolCard, hasDecisionQuestions } from "./DecisionToolCard";
+import { ImageThumb } from "./ImageThumb";
+import { DocumentBlock } from "./DocumentBlock";
+import { ExpandableText } from "./ExpandableText";
 import styles from "./ContentBlocks.module.css";
+
+/**
+ * A content block whose `type` none of the branches above render. Instead of
+ * dropping it silently — which is how top-level images, documents and any
+ * future block type used to vanish from the transcript — show a labeled shell
+ * so the reader at least knows something was there, with its raw shape folded
+ * away for inspection.
+ */
+function UnknownBlock({ block }: { block: ContentBlock }) {
+  const rec = block as Record<string, unknown>;
+  const type = typeof rec.type === "string" ? rec.type : "block";
+  // Prefer a human-readable text/content field when the block carries one;
+  // otherwise fold the whole shape so nothing is hidden.
+  const text =
+    typeof rec.text === "string"
+      ? rec.text
+      : typeof rec.content === "string"
+        ? rec.content
+        : JSON.stringify(block, null, 2);
+  return (
+    <div className={styles.unknown}>
+      <span className={styles.unknown_type}>{type}</span>
+      <ExpandableText text={text} />
+    </div>
+  );
+}
 
 export interface BlocksProps {
   content: ContentBlock[];
@@ -70,6 +100,25 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
           {unavailable ? t("detail.reasoning_summary_unavailable") : t("detail.redacted_thinking")}
         </div>
       );
+      i++;
+      continue;
+    }
+
+    // A top-level image (a pasted screenshot, or an image carried directly on a
+    // message rather than inside a tool_result) used to be skipped — 506 of them
+    // across 86 real transcripts rendered as nothing. Reuse the same thumbnail +
+    // lightbox the tool_result path uses.
+    if (block.type === "image") {
+      elements.push(
+        <ImageThumb key={i} block={block as ImageBlock} alt={t("detail.result_image")} />
+      );
+      i++;
+      continue;
+    }
+
+    // A top-level document (a PDF attachment) — also silently skipped before.
+    if (block.type === "document") {
+      elements.push(<DocumentBlock key={i} block={block} />);
       i++;
       continue;
     }
@@ -142,7 +191,9 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
       continue;
     }
 
-    // Unknown block type: skip
+    // Any other block type: render a labeled shell instead of dropping it, so
+    // no content silently disappears from the transcript.
+    elements.push(<UnknownBlock key={i} block={block} />);
     i++;
   }
 
