@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import "./fonts";
 import "./App.css";
 import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "./markdown/safeLinks";
+import { normalizeSvgBlankLines } from "./markdown/plugins";
 import { resolveTheme, useUIStore } from "./store";
 import styles from "./PreviewApp.module.css";
 
@@ -64,7 +65,7 @@ function PreviewApp() {
       <div className={styles.body}>
         {content ? (
           <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>
-            {content}
+            {normalizeSvgBlankLines(content)}
           </ReactMarkdown>
         ) : null}
       </div>

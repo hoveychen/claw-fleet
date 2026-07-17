@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
+import { normalizeSvgBlankLines } from "../../markdown/plugins";
 import {
   normalizeAnswer,
   parseAnswersFromResultText,
@@ -223,7 +224,7 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
                     remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                     components={safeMarkdownComponents}
                   >
-                    {q.question}
+                    {normalizeSvgBlankLines(q.question)}
                   </ReactMarkdown>
                 </div>
 
