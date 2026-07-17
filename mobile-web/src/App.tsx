@@ -12,6 +12,7 @@ import {
 import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
 import { RelayClient, gzipSupported, binarySupported } from "./relay";
+import { computeCongestion, RECONNECT_WINDOW_MS, type Congestion } from "./connQuality";
 import { reconcileDecisions } from "./decisionReconcile";
 import { MockRelayClient, isMockMode } from "./mock/relay";
 import type {
@@ -111,6 +112,12 @@ export function App() {
     full: number;
     delta: number;
   }>({ last: null, full: 0, delta: 0 });
+  // Header congestion light. Raw signals live in refs (RTT of the last reply,
+  // timestamps of recent reconnects) so they don't each force a re-render; the
+  // level is recomputed and set explicitly when a sample or reconnect lands.
+  const [congestion, setCongestion] = useState<Congestion>("good");
+  const rttRef = useRef<number | null>(null);
+  const reconnectsRef = useRef<number[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   // Flips true the first time a `sessions` snapshot arrives, so the task page
@@ -217,6 +224,18 @@ export function App() {
     }
   }, []);
 
+  // Recompute the header congestion level from the latest RTT sample and the
+  // reconnects still inside the recent window. Called whenever either signal
+  // moves; the 20s today_usage poll keeps RTT samples flowing, so the level
+  // decays back down once a weak link recovers.
+  const recomputeCongestion = useCallback(() => {
+    const now = Date.now();
+    reconnectsRef.current = reconnectsRef.current.filter(
+      (ts) => now - ts < RECONNECT_WINDOW_MS,
+    );
+    setCongestion(computeCongestion(rttRef.current, reconnectsRef.current.length));
+  }, []);
+
   useEffect(() => {
     if (!secret) return;
     const handlers = {
@@ -239,6 +258,14 @@ export function App() {
           full: s.full + (kind === "full" ? 1 : 0),
           delta: s.delta + (kind === "delta" ? 1 : 0),
         })),
+      onRttSample: (rttMs: number) => {
+        rttRef.current = rttMs;
+        recomputeCongestion();
+      },
+      onReconnect: () => {
+        reconnectsRef.current.push(Date.now());
+        recomputeCongestion();
+      },
       onAuthError: (message: string) => setAuthError(message),
     };
     const client = MOCK
@@ -274,7 +301,7 @@ export function App() {
       window.removeEventListener("pagehide", onPageHide);
       client.close();
     };
-  }, [secret, addDecision, removeDecision, refreshPending]);
+  }, [secret, addDecision, removeDecision, refreshPending, recomputeCongestion]);
 
   // Today's cumulative token/cost counter in the header. Polls while the desktop
   // is online; the desktop computes the figure (agent sessions created today +
@@ -482,9 +509,18 @@ export function App() {
         <span
           className={styles.connDot}
           data-state={!connected ? "offline" : agentOnline ? "online" : "agent-offline"}
+          data-congestion={congestion}
         />
         <span className={styles.connLabel}>
-          {!connected ? t("连接中…") : agentOnline ? t("桌面端在线") : t("桌面端离线")}
+          {!connected
+            ? t("连接中…")
+            : !agentOnline
+              ? t("桌面端离线")
+              : congestion === "congested"
+                ? t("在线 · 网络拥挤")
+                : congestion === "fair"
+                  ? t("在线 · 网络一般")
+                  : t("桌面端在线")}
         </span>
       </header>
 

@@ -34,6 +34,16 @@
   background: var(--color-success);
 }
 
+/* When online, the congestion level tints the dot: good stays green, fair goes
+   amber, congested goes red — the weak-link signal the header surfaces. */
+.connDot[data-state="online"][data-congestion="fair"] {
+  background: var(--color-warning);
+}
+
+.connDot[data-state="online"][data-congestion="congested"] {
+  background: var(--color-error);
+}
+
 .connDot[data-state="agent-offline"] {
   background: var(--color-warning);
 }
