@@ -16,6 +16,7 @@ import {
   FileText,
   FileType,
   FileVideo,
+  Eye,
   Globe,
   ListTodo,
   Pencil,
@@ -45,7 +46,7 @@ const PLAN_TOOLS = new Set(["TodoWrite", "TodoRead", "update_plan"]);
 export function railToolIcon(name: string): ReactNode {
   if (SHELL_TOOLS.has(name)) return <Terminal />;
   if (EDIT_TOOLS.has(name)) return <Pencil />;
-  if (name === "Read") return <FileText />;
+  if (name === "Read") return <Eye />;
   if (SEARCH_TOOLS.has(name)) return <Search />;
   if (WEB_TOOLS.has(name)) return <Globe />;
   if (AGENT_TOOLS.has(name)) return <Bot />;
