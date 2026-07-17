@@ -773,11 +773,17 @@ impl LocalBackend {
             let arfail_ar = auto_resume_failures.clone();
             let arse_ar = auto_resume_server_errors.clone();
             let running_ar = running.clone();
+            let app_ar = app.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(30));
                 if !running_ar.load(Ordering::SeqCst) {
                     break;
                 }
+                // Heal Codex sessions frozen at `proc_alive = true` by a turn that
+                // died mid-flight without a `task_complete` (no rollout write means
+                // the fs-watcher never rescans them). Runs before the drain so the
+                // queued follow-up sees the corrected `proc_alive == false`.
+                refresh_dead_codex_liveness_and_emit(&sess_ar, &app_ar);
                 maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar, &arfail_ar, &arse_ar);
                 maybe_drain_pending_messages(&sess_ar);
             });
@@ -1685,6 +1691,32 @@ fn maybe_drain_pending_messages(sessions: &Arc<Mutex<Vec<SessionInfo>>>) {
     let snapshot: Vec<SessionInfo> = { sessions.lock().unwrap().clone() };
     for session in &snapshot {
         claw_fleet_core::pending_message::maybe_drain(session);
+    }
+}
+
+/// Reconcile stale `proc_alive` on Codex sessions against the live process table
+/// and re-emit the snapshot when anything changed. The fs-watcher only rescans a
+/// Codex session on a rollout write, so a turn that dies mid-flight (no
+/// `task_complete`) leaves `proc_alive` frozen `true`, jamming both the drain
+/// gate and the "会话运行中" UI. This runs off the periodic ticker — which fires
+/// regardless of file writes — to unstick both. See
+/// [`claw_fleet_core::codex_source::refresh_dead_codex_liveness`].
+fn refresh_dead_codex_liveness_and_emit(
+    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
+    app: &AppHandle,
+) {
+    let updated: Option<Vec<SessionInfo>> = {
+        let mut s = sessions.lock().unwrap();
+        if claw_fleet_core::codex_source::refresh_dead_codex_liveness(&mut s) {
+            Some(s.clone())
+        } else {
+            None
+        }
+    };
+    if let Some(s) = updated {
+        let _ = app.emit("sessions-updated", &s);
+        crate::update_tray(app, &s);
+        publish_mobile_sessions(&s);
     }
 }
 
