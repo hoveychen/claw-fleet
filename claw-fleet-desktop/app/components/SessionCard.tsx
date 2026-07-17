@@ -5,7 +5,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import { HandoffChainRow } from "./HandoffChainRow";
-import { StopControl, canControl } from "./StopControl";
 import styles from "./SessionCard.module.css";
 import { BG_TASK_KINDS } from "../bgTaskKinds";
 
@@ -395,26 +394,11 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
   // Workflow run rollup, lazily published by SessionDetail once the session has
   // been opened (absent until then). Drives the "wf" chip.
   const workflowRun = useSessionsStore((s) => s.workflowRunCounts[session.id]);
-  // Reveal-on-hover for the stop/interrupt button is driven by this JS state,
-  // not CSS `:hover`. Active cards reflow every second (live tok/s/cost/ctx%),
-  // and wry/WebKit fails to recompute `:hover` on reflow without a fresh pointer
-  // event, so a CSS-only reveal got stuck on after the cursor left. State set
-  // only by real enter/leave events can't latch across re-renders. `blur` on the
-  // window (pointer yanked out of the window without a mouseleave) clears it too.
-  const [hovered, setHovered] = useState(false);
-  useEffect(() => {
-    if (!hovered) return;
-    const clear = () => setHovered(false);
-    window.addEventListener("blur", clear);
-    return () => window.removeEventListener("blur", clear);
-  }, [hovered]);
   return (
     <div
-      className={`${styles.card} ${isSelected ? styles.selected : ""} ${isActive ? styles.active : ""} ${variant === "group-main" ? styles.group_main : ""} ${hovered ? styles.hovered : ""}`}
+      className={`${styles.card} ${isSelected ? styles.selected : ""} ${isActive ? styles.active : ""} ${variant === "group-main" ? styles.group_main : ""}`}
       data-session-id={session.id}
       onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && onClick()}
@@ -469,11 +453,6 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           <span className={styles.gm_spacer} />
           <RateLimitControls session={session} />
           <ServerErrorControls session={session} />
-          {isActive && session.pid !== null && canControl(session) && (
-            <span className={styles.stop_slot}>
-              <StopControl session={session} />
-            </span>
-          )}
         </div>
       ) : (
         <>
@@ -482,11 +461,6 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             {!hideHeader && <StatusBadge status={session.status} />}
             {!hideHeader && <RateLimitControls session={session} />}
             {!hideHeader && <ServerErrorControls session={session} />}
-            {isActive && session.pid !== null && canControl(session) && (
-              <span className={styles.stop_slot}>
-                <StopControl session={session} />
-              </span>
-            )}
           </div>
 
           {/* Meta row */}
