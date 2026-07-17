@@ -82,7 +82,7 @@
   border: none;
   text-align: left;
   width: 100%;
-  font-family: var(--font-mono);
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
 }
 
 .tree_item:hover {

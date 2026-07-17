@@ -145,7 +145,7 @@
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   font-variant-numeric: tabular-nums;
-  font-family: var(--font-mono);
+  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
   white-space: nowrap;
 }
 
