@@ -638,6 +638,10 @@ interface ResumeProps {
    *  `claude --resume` cold-starts — instead of leaving the transcript blank
    *  for the seconds before the real row lands via `tail`. */
   onOptimisticSend?: (text: string) => void;
+  /** Toggled true while a submit is in flight, so the parent can pause its
+   *  tail / live-thinking pollers and yield the single serialized WS to the
+   *  resume req/reply instead of contending with a big tail response. */
+  onSubmitInFlight?: (inFlight: boolean) => void;
 }
 
 export function ResumeComposer({
@@ -645,6 +649,7 @@ export function ResumeComposer({
   client,
   mode = "resume",
   onOptimisticSend,
+  onSubmitInFlight,
 }: ResumeProps) {
   const enqueueing = mode === "enqueue";
   const isCodex = session.agentSource === "codex";
@@ -669,6 +674,9 @@ export function ResumeComposer({
     // follow-up); resume tolerates empty (= continue).
     if (enqueueing && !text) return;
     setBusy(true);
+    // 追问提交在飞:让父级暂停 tail/thinking 轮询,把这条串行加密 WS 让给
+    // resume req/reply,别被一个大 tail 响应堵在前面。收尾时(succeed/catch)复位。
+    onSubmitInFlight?.(true);
     // 方案 A 乐观收尾:桌面收到写请求会先回一个早 ack(远早于 claude 冷启动
     // 产出的最终 reply),不必干等那 5-10s。ack 一到就复位输入、回显消息;
     // settled 防重复(reply 到达会再触发一次,幂等)。
@@ -682,6 +690,8 @@ export function ResumeComposer({
       reset();
       setSent(true);
       setBusy(false);
+      // ack 已到、写入已投递:恢复父级轮询去拉真实转录(reply 很小,不再是瓶颈)。
+      onSubmitInFlight?.(false);
       window.setTimeout(() => setSent(false), 3000);
     };
     const method = enqueueing ? "enqueue_message" : "resume_session";
@@ -705,6 +715,8 @@ export function ResumeComposer({
       await client.request(method, params, undefined, succeed);
       succeed(); // reply 到达同样收尾,与 onAck 幂等
     } catch (e) {
+      // 无论何种失败,提交已不在飞:恢复父级轮询。
+      onSubmitInFlight?.(false);
       // 桌面明确拒绝(路径不存在、prompt 非法……):它判断了、说不行,如实报错——
       // 即便已凭 ack 乐观收尾也要提示,与新建会话一致。
       if (isDesktopRejection(e)) {
