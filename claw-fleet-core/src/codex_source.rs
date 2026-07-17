@@ -3679,7 +3679,16 @@ fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Optio
             }
         }
     }
-    // Second: cwd match. Precise only if exactly one process matches.
+    // Second: a fresh `codex exec` has no thread id in argv because Codex mints
+    // it after launch. Fleet records the minted thread id -> spawn pid once it
+    // appears in stdout; accept that note only while the pid is still a live
+    // Codex process, matching the liveness safety check in `codex_proc_alive`.
+    if let Some(pid) = crate::codex_launch::resolve_spawn_pid(thread_id) {
+        if processes.iter().any(|p| p.pid == pid) {
+            return (Some(pid), true);
+        }
+    }
+    // Third: cwd match. Precise only if exactly one process matches.
     let cwd_matches: Vec<_> = processes.iter().filter(|p| p.cwd == cwd).collect();
     match cwd_matches.len() {
         1 => (Some(cwd_matches[0].pid), true),
