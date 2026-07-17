@@ -107,6 +107,24 @@
 .tag_main    { background: var(--tag-main-bg); color: var(--tag-main-fg); }
 .tag_subagent{ background: var(--tag-sub-bg);  color: var(--tag-sub-fg); }
 
+/* Agent scope trigger — the identity tag made clickable to open the scope
+   dropdown (AgentScopeSwitcher). Composes with .tag_main / .tag_subagent for
+   colour + size; adds the chevron and a hover/open cue. Replaced the old
+   in-row segmented strip so a growing subagent list can't crowd the view tabs. */
+.agent_scope_trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.2;
+  transition: filter 0.12s;
+}
+.agent_scope_trigger:hover,
+.agent_scope_trigger_open { filter: brightness(1.08); }
+.agent_scope_chevron { opacity: 0.7; margin-right: -1px; }
+
 .slug {
   font-size: 11px;
   color: var(--color-text-dim);
@@ -177,50 +195,8 @@
 }
 .tab_bar::-webkit-scrollbar { display: none; }
 
-/* Agent segmented control — canonical pill spec (matches tab-style-unification
-   PILL: container bg-secondary radius 8 padding 3; segment radius 5 active
-   bg-card). Separates agent identity from the view tabs so they don't read as
-   a single confusing two-layer tab strip. */
-.agent_seg_wrap {
-  display: inline-flex;
-  gap: 2px;
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  padding: 3px;
-  margin-bottom: 6px;
-  flex-shrink: 0;
-  /* Cap the strip and scroll it internally so a long list of finished-subagent
-     tabs doesn't push the view tabs (对话/决策/…) off the right edge. */
-  max-width: 60%;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.agent_seg_wrap::-webkit-scrollbar { display: none; }
-
-.agent_seg {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-dim);
-  background: transparent;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.12s, color 0.12s;
-}
-.agent_seg:hover {
-  color: var(--color-text);
-}
-.agent_seg_active {
-  background: var(--color-bg-card);
-  color: var(--color-text);
-  font-weight: 600;
-}
-
+/* Status dot — leads each row in the agent scope dropdown (AgentScopeSwitcher),
+   colour-coded by the subagent's live status. */
 .tab_dot {
   width: 6px;
   height: 6px;
@@ -236,7 +212,8 @@
 .tab_dot[data-status="active"]      { background: var(--badge-active-fg); }
 .tab_dot[data-status="delegating"]  { background: var(--badge-delegating-fg); }
 
-/* View tabs (Decisions / Skills / Messages) — sit in the same .tab_bar row */
+/* View tabs (Decisions / Skills / Messages) — now the only occupants of the
+   .tab_bar row; the agent scope selector moved to the header dropdown. */
 .view_tab {
   padding: 6px 12px;
   font-size: 11px;
