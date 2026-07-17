@@ -19,6 +19,19 @@ use crate::log_debug;
 pub struct LlmModel {
     pub id: String,
     pub display_name: String,
+    /// Short display name of the cross-engine sibling at the same tier
+    /// (e.g. Claude "Haiku" pairs with Codex "Luna"). Populated by
+    /// `all_provider_infos`; the UI shows it as a `Haiku / Luna` suffix when
+    /// both engines are active so the tier alignment is visible. `None` when
+    /// there is no other engine to align against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aligned_display: Option<String>,
+}
+
+impl LlmModel {
+    fn new(id: impl Into<String>, display_name: impl Into<String>) -> Self {
+        Self { id: id.into(), display_name: display_name.into(), aligned_display: None }
+    }
 }
 
 /// Snapshot of a provider's identity + available models (for UI display).
@@ -300,10 +313,10 @@ impl LlmProvider for ClaudeCliProvider {
 
     fn list_models(&self) -> Vec<LlmModel> {
         vec![
-            LlmModel { id: "fable".into(), display_name: "Fable".into() },
-            LlmModel { id: "opus".into(), display_name: "Opus".into() },
-            LlmModel { id: "sonnet".into(), display_name: "Sonnet".into() },
-            LlmModel { id: "haiku".into(), display_name: "Haiku".into() },
+            LlmModel::new("fable", "Fable"),
+            LlmModel::new("opus", "Opus"),
+            LlmModel::new("sonnet", "Sonnet"),
+            LlmModel::new("haiku", "Haiku"),
         ]
     }
 
@@ -465,9 +478,9 @@ impl LlmProvider for CodexCliProvider {
         // `*-codex-mini` slugs 400 with "not supported when using Codex with a
         // ChatGPT account" (verified live).
         vec![
-            LlmModel { id: "gpt-5.6-sol".into(), display_name: "GPT-5.6-Sol".into() },
-            LlmModel { id: "gpt-5.6-terra".into(), display_name: "GPT-5.6-Terra".into() },
-            LlmModel { id: "gpt-5.6-luna".into(), display_name: "GPT-5.6-Luna".into() },
+            LlmModel::new("gpt-5.6-sol", "GPT-5.6-Sol"),
+            LlmModel::new("gpt-5.6-terra", "GPT-5.6-Terra"),
+            LlmModel::new("gpt-5.6-luna", "GPT-5.6-Luna"),
         ]
     }
 
@@ -520,10 +533,7 @@ fn parse_codex_models_cache() -> Option<Vec<LlmModel>> {
         .filter_map(|m| {
             let slug = m.get("slug").and_then(|v| v.as_str())?;
             let display = m.get("display_name").and_then(|v| v.as_str()).unwrap_or(slug);
-            Some(LlmModel {
-                id: slug.to_string(),
-                display_name: display.to_string(),
-            })
+            Some(LlmModel::new(slug, display))
         })
         .collect();
 
@@ -551,13 +561,21 @@ pub fn all_provider_infos() -> Vec<LlmProviderInfo> {
 
     let mut infos: Vec<LlmProviderInfo> = providers
         .into_iter()
-        .map(|p| LlmProviderInfo {
-            name: p.name().into(),
-            display_name: p.display_name().into(),
-            available: p.is_available(),
-            models: p.list_models(),
-            default_fast_model: p.default_fast_model().into(),
-            default_standard_model: p.default_standard_model().into(),
+        .map(|p| {
+            let name = p.name().to_string();
+            let models = p
+                .list_models()
+                .into_iter()
+                .map(|m| LlmModel { aligned_display: aligned_tier_label(&name, &m.id), ..m })
+                .collect();
+            LlmProviderInfo {
+                display_name: p.display_name().into(),
+                available: p.is_available(),
+                models,
+                default_fast_model: p.default_fast_model().into(),
+                default_standard_model: p.default_standard_model().into(),
+                name,
+            }
         })
         .collect();
 
@@ -613,6 +631,32 @@ fn equivalent_model(target_provider: &str, selected_model: &str, slot: ModelSlot
         ("codex", ModelTier::Premium) => "gpt-5.6-sol",
         _ => selected_model,
     }.to_string()
+}
+
+/// Compact tier label for a model id, for the cross-engine `Haiku / Luna`
+/// pairing shown in settings. Codex slugs (`gpt-5.6-luna`) collapse to their
+/// tier word (`Luna`); Claude ids (`haiku`) title-case to their display name
+/// (`Haiku`). Deliberately not the full Codex `displayName` ("GPT-5.6-Luna"),
+/// which would be too verbose as a suffix.
+fn tier_label(id: &str) -> String {
+    let base = id.strip_prefix("gpt-5.6-").unwrap_or(id);
+    let mut chars = base.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Label of the same-tier model in the *other* engine, or `None` when the
+/// provider has no counterpart to align against. Uses `equivalent_model` as the
+/// single source of truth for which sibling maps to which tier.
+fn aligned_tier_label(provider: &str, id: &str) -> Option<String> {
+    let other = match provider {
+        "claude" => "codex",
+        "codex" => "claude",
+        _ => return None,
+    };
+    Some(tier_label(&equivalent_model(other, id, ModelSlot::Standard)))
 }
 
 fn rank_providers(preference: &str, states: &[(String, QuotaState)]) -> Vec<String> {
@@ -768,6 +812,36 @@ mod tests {
         assert_eq!(equivalent_model("claude", "gpt-5.6-luna", ModelSlot::Fast), "haiku");
         assert_eq!(equivalent_model("claude", "gpt-5.6-terra", ModelSlot::Standard), "sonnet");
         assert_eq!(equivalent_model("claude", "gpt-5.6-sol", ModelSlot::Standard), "opus");
+    }
+
+    #[test]
+    fn provider_infos_pair_cross_engine_tier_labels() {
+        let infos = all_provider_infos();
+        let claude = infos.iter().find(|p| p.name == "claude").expect("claude provider");
+        let label = |id: &str| {
+            claude.models.iter().find(|m| m.id == id)
+                .unwrap_or_else(|| panic!("model {id}")).aligned_display.clone()
+        };
+        assert_eq!(label("haiku"), Some("Luna".into()));
+        assert_eq!(label("sonnet"), Some("Terra".into()));
+        assert_eq!(label("opus"), Some("Sol".into()));
+        assert_eq!(label("fable"), Some("Sol".into()));
+
+        let codex = infos.iter().find(|p| p.name == "codex").expect("codex provider");
+        // Codex side always aligns back to one of Claude's short tier names.
+        // (Robust to whether list_models came from the local cache or the
+        // hardcoded fallback.)
+        for m in &codex.models {
+            let aligned = m.aligned_display.as_deref();
+            assert!(
+                matches!(aligned, Some("Haiku" | "Sonnet" | "Opus")),
+                "codex model {} aligned to {:?}", m.id, aligned,
+            );
+        }
+
+        // The "none" provider has no counterpart, so nothing to align.
+        let none = infos.iter().find(|p| p.name == "none").expect("none provider");
+        assert!(none.models.is_empty());
     }
 
     #[test]
