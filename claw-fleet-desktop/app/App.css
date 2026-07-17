@@ -198,7 +198,7 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   /* Inline code */
   --color-code-fg: #e2c08d;
 
-  --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", "Menlo", monospace;
+  --font-mono: "Sarasa Mono SC", "JetBrains Mono", "Cascadia Code", "Fira Code", "Menlo", monospace;
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
 
   /* Mascot panel */
