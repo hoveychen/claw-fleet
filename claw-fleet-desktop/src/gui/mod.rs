@@ -1453,6 +1453,13 @@ pub fn run() {
                 claw_fleet_core::log_debug(&format!("ensure_fleet_cli_link failed: {e}"));
             }
 
+            // One-time migration: port/token/bin and the defunct event log all
+            // moved to ~/.fleet, so the old ~/.claude/fleet directory is now
+            // pure legacy — remove it. Best-effort; a failure is not fatal.
+            if let Err(e) = claw_fleet_core::launchd::remove_legacy_fleet_dir() {
+                claw_fleet_core::log_debug(&format!("remove_legacy_fleet_dir failed: {e}"));
+            }
+
             // Inject Fleet's permissions allowlist into ~/.claude/settings.json
             // so fleet guard becomes the sole audit gate. prune_dead_holders
             // inside acquire self-heals when a prior Fleet process died
