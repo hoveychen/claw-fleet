@@ -26,6 +26,7 @@ import styles from "./TextBlock.module.css";
  *  case — still get full highlighting; only the big command dumps / file bodies
  *  that were never worth reading token-coloured fall back to plain text. */
 const MAX_HIGHLIGHT_CHARS = 8000;
+const LABELED_CODE_PADDING_TOP = "28px";
 
 /** Recursively walk React children and highlight matching terms in string nodes. */
 function highlightChildren(children: ReactNode, regex: RegExp): ReactNode {
@@ -148,6 +149,7 @@ export const TextBlock = memo(function TextBlock({
                         background: "#282c34",
                         color: "#abb2bf",
                         padding: "1em",
+                        ...(lang ? { paddingTop: LABELED_CODE_PADDING_TOP } : {}),
                         overflow: "auto",
                       }}
                     >
@@ -162,6 +164,7 @@ export const TextBlock = memo(function TextBlock({
                         margin: 0,
                         borderRadius: "0 0 6px 6px",
                         fontSize: "12px",
+                        ...(lang ? { paddingTop: LABELED_CODE_PADDING_TOP } : {}),
                       }}
                     >
                       {codeText}
