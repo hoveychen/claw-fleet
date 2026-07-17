@@ -1378,14 +1378,14 @@ fn emit_tail_lines(path: &std::path::Path, app: &AppHandle, watch: &crate::Watch
         return;
     }
 
-    let lines: Vec<Value> = buf
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect();
-
+    // Advance the offset only past lines that ended with a newline. A record
+    // still being flushed (no trailing `\n`) stays unconsumed so the next fire
+    // re-reads it — otherwise its bytes are skipped and, when the rest lands,
+    // the read starts mid-record and that block is lost forever. Common on the
+    // burst of records a resumed turn writes (its first thinking/tool_use).
+    let (lines, consumed) = claw_fleet_core::jsonl_tail::parse_incremental_tail(&buf);
+    *guard = cur + consumed as u64;
     if !lines.is_empty() {
-        *guard = size;
         let _ = app.emit("session-tail", &lines);
     }
 }
