@@ -328,6 +328,60 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
         sessionCount: 37,
       };
 
+    // ── Per-model receipt behind the sidebar badge ──
+    case "today_usage_breakdown":
+      return {
+        date: new Date().toISOString().slice(0, 10),
+        lines: [
+          {
+            model: "claude-opus-4-8",
+            source: "claude-code",
+            inputTokens: 184_200,
+            cacheCreationTokens: 512_000,
+            cacheReadTokens: 8_940_000,
+            outputTokens: 342_500,
+            inputPrice: 5.0,
+            outputPrice: 25.0,
+            cacheWritePrice: 6.25,
+            cacheReadPrice: 0.5,
+            costUsd: 17.82,
+          },
+          {
+            model: "gpt-5.6-sol",
+            source: "codex",
+            inputTokens: 96_400,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 1_240_000,
+            outputTokens: 78_300,
+            inputPrice: 5.0,
+            outputPrice: 30.0,
+            cacheWritePrice: 6.25,
+            cacheReadPrice: 0.5,
+            costUsd: 3.45,
+          },
+          {
+            model: "claude-haiku-4-5",
+            source: "fleet",
+            inputTokens: 42_100,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            outputTokens: 9_800,
+            inputPrice: 1.0,
+            outputPrice: 5.0,
+            cacheWritePrice: 1.25,
+            cacheReadPrice: 0.1,
+            costUsd: 0.09,
+          },
+        ],
+        totalInputTokens: 322_700,
+        totalCacheCreationTokens: 512_000,
+        totalCacheReadTokens: 10_180_000,
+        totalOutputTokens: 430_600,
+        totalCostUsd: 21.36,
+        agentCostUsd: 21.27,
+        fleetCostUsd: 0.09,
+      };
+
     // ── Guard LLM analysis (feeds the "Analyzing command…" beat) ──
     case "get_guard_context":
       return "The agent just finished the migration plan review and asked to apply it. Last assistant message: \"All 3 migrations reviewed; the drop is gated behind usage_billing_v2. Requesting approval to deploy.\"";
