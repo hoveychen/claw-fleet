@@ -15,6 +15,13 @@ use serde_json::{json, Map, Value};
 const FLEET_HOOK_COMMAND: &str =
     r#"sh -c 'cat >> "$HOME/.fleet/hooks.jsonl"'"#;
 
+/// Legacy event-log path that a pre-`~/.fleet` build installed a `cat >>` hook
+/// for. `is_fleet_group` never matched it (it only recognizes the current
+/// `.fleet/hooks.jsonl` path), so once we migrated the write target that group
+/// lingered in settings.json — appended to on every event with no truncation,
+/// seen at 5.3 GB in the wild. `purge_legacy_event_hooks` deletes it on sync.
+const LEGACY_EVENTS_HOOK_SUBSTR: &str = ".claude/fleet/hooks.jsonl";
+
 // Identity markers for the fleet hook groups. These substrings must appear
 // verbatim in the command string produced by `fault_tolerant_command`, which
 // wraps the binary path in double quotes — so the character between `fleet`
@@ -183,6 +190,10 @@ pub fn apply_hook_setup() -> Result<(), String> {
         .and_then(|h| h.as_object_mut())
         .ok_or("hooks is not an object")?;
 
+    // Self-heal: drop any legacy `~/.claude/fleet/hooks.jsonl` groups a pre-move
+    // build left behind before we (re)install the current `~/.fleet` groups.
+    purge_legacy_event_hooks(hooks_obj);
+
     for &event in FLEET_HOOK_EVENTS {
         if has_fleet_hook(hooks_obj, event) {
             continue;
@@ -223,12 +234,50 @@ pub fn remove_fleet_hooks() -> Result<(), String> {
         }
     }
 
+    // Uninstall should leave nothing of ours behind, including any legacy
+    // event-log group from a pre-`~/.fleet` build.
+    purge_legacy_event_hooks(hooks_obj);
+
     // Remove "hooks" key entirely if empty.
     if hooks_obj.is_empty() {
         obj.remove("hooks");
     }
 
     write_settings(&settings)
+}
+
+/// Remove every hook group that appends to the legacy
+/// `~/.claude/fleet/hooks.jsonl` path from all event arrays, dropping any event
+/// array left empty. Pure over the `hooks` object so it can be unit-tested
+/// without touching settings.json.
+fn purge_legacy_event_hooks(hooks_obj: &mut Map<String, Value>) {
+    let events: Vec<String> = hooks_obj.keys().cloned().collect();
+    for event in events {
+        let Some(arr) = hooks_obj.get_mut(&event).and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        arr.retain(|group| !group_targets_legacy_events_file(group));
+        if arr.is_empty() {
+            hooks_obj.remove(&event);
+        }
+    }
+}
+
+/// Whether a hook group appends to the legacy `~/.claude/fleet/hooks.jsonl`
+/// path (installed by an older build, no longer recognized by `is_fleet_group`).
+fn group_targets_legacy_events_file(group: &Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|arr| {
+            arr.iter().any(|hook| {
+                hook.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains(LEGACY_EVENTS_HOOK_SUBSTR))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 // ── Guard hook (synchronous interception) ────────────────────────────────────
@@ -1191,6 +1240,52 @@ mod tests {
         assert!(!is_guard_group(&c));
         assert!(!is_elicitation_group(&c));
         assert!(!is_plan_approval_group(&c));
+    }
+
+    fn legacy_events_group() -> Value {
+        json!({
+            "hooks": [{
+                "type": "command",
+                "command": r#"sh -c 'cat >> "$HOME/.claude/fleet/hooks.jsonl"'"#,
+                "async": true
+            }]
+        })
+    }
+
+    #[test]
+    fn legacy_group_is_not_recognized_as_current_fleet_group() {
+        // The whole reason it lingered: is_fleet_group only matches the
+        // `.fleet/hooks.jsonl` path, and `.claude/fleet/hooks.jsonl` does not
+        // contain that substring (the `f` is preceded by `/`, not `.`).
+        let legacy = legacy_events_group();
+        assert!(!is_fleet_group(&legacy));
+        assert!(group_targets_legacy_events_file(&legacy));
+        assert!(!group_targets_legacy_events_file(&fleet_hook_group()));
+    }
+
+    #[test]
+    fn purge_drops_legacy_groups_but_keeps_others() {
+        let mut hooks: Map<String, Value> = Map::new();
+        // PostToolUse hosts the legacy group alongside the current one and an
+        // unrelated third-party group — only the legacy one must go.
+        let unrelated = json!({
+            "hooks": [{ "type": "command", "command": "echo hi" }]
+        });
+        hooks.insert(
+            "PostToolUse".into(),
+            json!([legacy_events_group(), fleet_hook_group(), unrelated.clone()]),
+        );
+        // Stop hosts ONLY the legacy group — the emptied array must be removed.
+        hooks.insert("Stop".into(), json!([legacy_events_group()]));
+
+        purge_legacy_event_hooks(&mut hooks);
+
+        let post = hooks.get("PostToolUse").unwrap().as_array().unwrap();
+        assert_eq!(post.len(), 2, "legacy dropped, current + unrelated kept");
+        assert!(post.iter().any(is_fleet_group));
+        assert!(post.iter().any(|g| !is_fleet_group(g) && !group_targets_legacy_events_file(g)));
+        assert!(!post.iter().any(group_targets_legacy_events_file));
+        assert!(!hooks.contains_key("Stop"), "emptied event array removed");
     }
 
     #[test]
