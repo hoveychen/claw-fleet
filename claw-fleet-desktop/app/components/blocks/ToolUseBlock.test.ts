@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   codexToolSummary,
+  parseExecCommand,
   parsePatchFiles,
   timeoutMsToSecs,
   waitTimeoutSecs,
@@ -125,6 +126,39 @@ describe("codexToolSummary", () => {
   it("apply_patch with an unparseable body → null (formatInput shows it raw)", () => {
     expect(codexToolSummary("apply_patch", { command: "garbage" }, t)).toBeNull();
     expect(codexToolSummary("apply_patch", {}, t)).toBeNull();
+  });
+});
+
+describe("parseExecCommand", () => {
+  it("extracts cmd + workdir from a code-mode exec harness (double-quoted)", () => {
+    const command =
+      '// 按要求运行完整 Rust 回归并等待结束。\n' +
+      "const r = await tools.exec_command({\n" +
+      '  cmd: "cargo test -p claw-fleet-core -p fleet-cli",\n' +
+      '  workdir: "/Users/hoveychen/workspace/claude-fleet/.worktrees/x",\n' +
+      "  yield_time_ms: 30000,\n" +
+      "  max_output_tokens: 12000\n" +
+      "});\ntext(JSON.stringify(r));\n";
+    expect(parseExecCommand(command)).toEqual({
+      cmd: "cargo test -p claw-fleet-core -p fleet-cli",
+      workdir: "/Users/hoveychen/workspace/claude-fleet/.worktrees/x",
+    });
+  });
+
+  it("unescapes JSON escapes inside a double-quoted cmd", () => {
+    expect(parseExecCommand('tools.exec_command({ cmd: "echo \\"hi\\"\\n" })')).toEqual({
+      cmd: 'echo "hi"\n',
+      workdir: undefined,
+    });
+  });
+
+  it("handles single-quoted and backtick literals", () => {
+    expect(parseExecCommand("exec_command({ cmd: 'ls -la' })").cmd).toBe("ls -la");
+    expect(parseExecCommand("exec_command({ cmd: `pwd` })").cmd).toBe("pwd");
+  });
+
+  it("returns {} for a plain shell command (older-style exec, no cmd: field)", () => {
+    expect(parseExecCommand("cargo build")).toEqual({ cmd: undefined, workdir: undefined });
   });
 });
 
