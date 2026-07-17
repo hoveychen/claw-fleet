@@ -249,19 +249,40 @@ function hasAgentInput(block: ToolUseBlockType): boolean {
   );
 }
 
+/** Generic fallback: the whole input object as pretty JSON. This is the shape
+ *  every codex tool used to render as; the presenters below replace it one tool
+ *  at a time, and unhandled tools still land here. */
+function RawInput({ block }: { block: ToolUseBlockType }) {
+  return (
+    <>
+      <span className={styles.section_label}>Input</span>
+      <pre className={styles.input_text}>{JSON.stringify(block.input, null, 2)}</pre>
+    </>
+  );
+}
+
 /**
- * Expanded body for a codex `exec` call. Instead of dumping the whole input as
- * raw JSON (which buries the real shell command inside an escaped JS harness
- * string), surface the `cmd` the model ran as the headline, its workdir
- * ws-relative underneath, and keep the full JS script available but folded. When
- * `command` isn't code-mode (no `cmd:` field) it IS the shell command, so show
- * it directly; when there's no `command` at all, fall back to the raw input.
+ * Expanded body for codex's two shell tools. `exec_command` carries the shell
+ * command directly under `cmd` (+ `workdir`); `exec` runs in "code mode" where
+ * `command` is a JS harness string and the real command is buried inside a
+ * `tools.exec_command({ cmd, workdir })` call. Either way, surface the shell
+ * command as the headline, its workdir ws-relative underneath, and — only when
+ * there's a JS wrapper worth hiding — keep the full script folded. When no shell
+ * command can be found (e.g. an `exec` calling `tools.view_image`) show the raw
+ * script as a code block; with no `command` at all fall back to raw JSON.
  */
 function ExecInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const directCmd = typeof block.input.cmd === "string" ? block.input.cmd : "";
   const command = typeof block.input.command === "string" ? block.input.command : "";
-  const { cmd, workdir } = command ? parseExecCommand(command) : {};
+  const parsed = command ? parseExecCommand(command) : {};
+  const cmd = directCmd || parsed.cmd;
+  const workdir =
+    (typeof block.input.workdir === "string" ? block.input.workdir : undefined) ?? parsed.workdir;
 
   if (cmd) {
+    // Fold the JS wrapper away only when it adds something beyond the command
+    // itself (code mode); exec_command has no wrapper, so `command` is empty.
+    const hasWrapper = command.trim() !== "" && command.trim() !== cmd.trim();
     return (
       <>
         <span className={styles.section_label}>Command</span>
@@ -269,20 +290,52 @@ function ExecInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLink
         {workdir && (
           <div className={styles.exec_workdir}>{relToWorkspace(workdir, paths?.workspaceRoot)}</div>
         )}
-        <details className={styles.exec_script}>
-          <summary className={styles.exec_script_summary}>Script</summary>
-          <pre className={styles.input_text}>{command}</pre>
-        </details>
+        {hasWrapper && (
+          <details className={styles.exec_script}>
+            <summary className={styles.exec_script_summary}>Script</summary>
+            <pre className={styles.input_text}>{command}</pre>
+          </details>
+        )}
       </>
     );
   }
 
-  return (
-    <>
-      <span className={styles.section_label}>{command ? "Command" : "Input"}</span>
-      <pre className={styles.input_text}>{command || JSON.stringify(block.input, null, 2)}</pre>
-    </>
-  );
+  if (command) {
+    return (
+      <>
+        <span className={styles.section_label}>Command</span>
+        <pre className={styles.input_text}>{command}</pre>
+      </>
+    );
+  }
+  return <RawInput block={block} />;
+}
+
+/** codex's tool set (function-call + custom tools). These have no Claude Code
+ *  `toolUseResult`, so they never hit the custom-body path — their expanded body
+ *  is dispatched through `CodexToolInput` instead of falling to raw JSON. */
+const CODEX_TOOLS = new Set([
+  "exec",
+  "exec_command",
+  "apply_patch",
+  "update_plan",
+  "spawn_agent",
+  "request_user_input",
+  "wait",
+  "wait_agent",
+  "write_stdin",
+]);
+
+/** Routes each codex tool to its expanded-body presenter; unhandled tools fall
+ *  back to raw JSON. */
+function CodexToolInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  switch (block.name) {
+    case "exec":
+    case "exec_command":
+      return <ExecInput block={block} paths={paths} />;
+    default:
+      return <RawInput block={block} />;
+  }
 }
 
 /** Error colouring comes from `.result_error .result_text` on the wrapper. */
@@ -479,12 +532,12 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
             <div className={styles.input_section}>
               <AgentInput block={block} paths={paths} />
             </div>
-          ) : block.name === "exec" ? (
-            // codex `exec` has no `toolUseResult`, so it never hits the custom
-            // body path — surface the real shell command from its JS harness
-            // instead of the raw JSON input object.
+          ) : CODEX_TOOLS.has(block.name) ? (
+            // codex tools have no `toolUseResult`, so they never hit the custom
+            // body path — dispatch each to a readable presenter instead of
+            // dumping the raw JSON input object.
             <div className={styles.input_section}>
-              <ExecInput block={block} paths={paths} />
+              <CodexToolInput block={block} paths={paths} />
             </div>
           ) : (
             <div className={styles.input_section}>
