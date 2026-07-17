@@ -110,6 +110,11 @@
   color: var(--color-text-secondary);
 }
 
+.frameCount {
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
 .actionButton {
   background: var(--color-accent);
   color: #fff;

@@ -17,6 +17,9 @@ const LANG_CHOICES: Array<[Lang, string]> = [
 interface Props {
   connected: boolean;
   agentOnline: boolean;
+  /** Most recent sessions frame kind + running counts, to show whether the
+   *  desktop's delta path is actually engaged. */
+  sessionsFrame: { last: "full" | "delta" | null; full: number; delta: number };
   push: PushState;
   /** True when the user turned notifications off while permission stays granted. */
   pushOptedOut: boolean;
@@ -29,6 +32,7 @@ interface Props {
 export function MoreView({
   connected,
   agentOnline,
+  sessionsFrame,
   push,
   pushOptedOut,
   onEnablePush,
@@ -154,6 +158,24 @@ export function MoreView({
             <span className={styles.connWrap}>
               <span className={styles.connDot} data-state={connState} />
               <span className={styles.connLabel}>{connLabel}</span>
+            </span>
+          </div>
+          <div className={styles.divider} />
+          <div className={styles.row}>
+            <span className={styles.rowLabel}>{t("会话更新")}</span>
+            <span className={styles.connWrap}>
+              <span className={styles.connLabel}>
+                {sessionsFrame.last === null
+                  ? t("等待推送…")
+                  : sessionsFrame.last === "delta"
+                    ? `${t("增量")} ✓`
+                    : t("全量")}
+              </span>
+              {sessionsFrame.full + sessionsFrame.delta > 0 && (
+                <span className={styles.frameCount}>
+                  {t("增量")} {sessionsFrame.delta} · {t("全量")} {sessionsFrame.full}
+                </span>
+              )}
             </span>
           </div>
           <div className={styles.divider} />
