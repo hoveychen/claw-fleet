@@ -7,7 +7,7 @@ import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { useAutoFlip } from "./useAutoFlip";
 import { PageShell } from "./PageShell";
-import { useReportStore } from "../store";
+import { useReportStore, useUIStore } from "../store";
 import type { ManagedLesson } from "../types";
 import styles from "./MemoryView.module.css";
 
@@ -70,6 +70,29 @@ type Selection =
   | { kind: "lessons" }
   | null;
 
+function memorySelectionKey(selection: Exclude<Selection, null>): string {
+  if (selection.kind === "lessons") return "lessons";
+  if (selection.kind === "claudeMd") return `claudeMd:${selection.workspace.projectKey}`;
+  return `file:${selection.workspace.projectKey}:${selection.file.name}`;
+}
+
+function resolveMemorySelection(
+  key: string | null,
+  workspaces: WorkspaceMemory[],
+): Selection {
+  if (key === "lessons") return { kind: "lessons" };
+  for (const workspace of workspaces) {
+    if (key === `claudeMd:${workspace.projectKey}` && workspace.hasClaudeMd) {
+      return { kind: "claudeMd", workspace };
+    }
+    const file = workspace.files.find(
+      (candidate) => key === `file:${workspace.projectKey}:${candidate.name}`,
+    );
+    if (file) return { kind: "file", workspace, file };
+  }
+  return null;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatBytes(bytes: number): string {
@@ -113,12 +136,27 @@ export function MemoryView() {
   const { t } = useTranslation();
   const [memories, setMemories] = useState<WorkspaceMemory[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [query, setQuery] = useState("");
-  const [filterType, setFilterType] = useState<MemType | "all">("all");
-  const [sourceFilter, setSourceFilter] = useState<"all" | "claude-code" | "codex">("all");
-  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
-  const [expandedUnindexed, setExpandedUnindexed] = useState<Set<string>>(new Set());
-  const [selection, setSelection] = useState<Selection>(null);
+  const {
+    query,
+    filterType,
+    sourceFilter,
+    workspaceFilter,
+    expandedKeys,
+    selectedKey,
+  } = useUIStore((s) => s.mainViewState.memory);
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setQuery = (value: string) => updateMainViewState("memory", { query: value });
+  const setFilterType = (value: string) =>
+    updateMainViewState("memory", { filterType: value });
+  const setWorkspaceFilter = (value: string) =>
+    updateMainViewState("memory", { workspaceFilter: value });
+  const setSourceFilter = (value: "all" | "claude-code" | "codex") =>
+    updateMainViewState("memory", { sourceFilter: value });
+  const setSelection = (next: Selection) =>
+    updateMainViewState("memory", {
+      selectedKey: next ? memorySelectionKey(next) : null,
+    });
+  const expandedUnindexed = useMemo(() => new Set(expandedKeys), [expandedKeys]);
 
   // Lessons the user added to global guidance from the daily-report card
   // (~/.claude/fleet-lessons.md), shown as a pinned entry with per-row removal.
@@ -227,30 +265,23 @@ export function MemoryView() {
       .filter((x): x is WorkspaceMemory => x !== null);
   }, [memories, query, filterType, workspaceFilter, sourceFilter]);
 
+  const selection = useMemo(
+    () => resolveMemorySelection(selectedKey, filtered),
+    [selectedKey, filtered],
+  );
+
   // Keep selection valid after refresh / filter changes.
   useEffect(() => {
-    if (!selection) return;
-    if (selection.kind === "lessons") return; // not tied to a workspace
-    if (selection.kind === "file") {
-      const stillThere = filtered
-        .find((ws) => ws.projectKey === selection.workspace.projectKey)
-        ?.files.find((f) => f.path === selection.file.path);
-      if (!stillThere) setSelection(null);
-    } else {
-      const ws = filtered.find((w) => w.projectKey === selection.workspace.projectKey);
-      if (!ws || !ws.hasClaudeMd) setSelection(null);
-    }
-  }, [filtered, selection]);
+    if (loaded && selectedKey && !selection) setSelection(null);
+  }, [loaded, selectedKey, selection]);
 
   const totalFiles = typeCounts.all;
 
   const toggleUnindexed = (key: string) => {
-    setExpandedUnindexed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    const next = new Set(expandedUnindexed);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    updateMainViewState("memory", { expandedKeys: [...next] });
   };
 
   return (
@@ -284,13 +315,13 @@ export function MemoryView() {
             label={t("memory.source_claude")}
             count={sourceCounts["claude-code"]}
             active={sourceFilter === "claude-code"}
-            onClick={() => setSourceFilter((v) => v === "claude-code" ? "all" : "claude-code")}
+            onClick={() => setSourceFilter(sourceFilter === "claude-code" ? "all" : "claude-code")}
           />
           <FilterChip
             label={t("memory.source_codex")}
             count={sourceCounts.codex}
             active={sourceFilter === "codex"}
-            onClick={() => setSourceFilter((v) => v === "codex" ? "all" : "codex")}
+            onClick={() => setSourceFilter(sourceFilter === "codex" ? "all" : "codex")}
           />
           <FilterChip
             label={t("memory.filter_all")}
@@ -484,7 +515,10 @@ function FileDetail({
   onPromoted: () => void;
 }) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"content" | "history">("content");
+  const tab = useUIStore((s) => s.mainViewState.memory.detailTab);
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setTab = (detailTab: "content" | "history") =>
+    updateMainViewState("memory", { detailTab });
   const [content, setContent] = useState<string | null>(null);
   const [history, setHistory] = useState<MemoryHistoryEntry[] | null>(null);
   const [loadingContent, setLoadingContent] = useState(false);
@@ -495,7 +529,6 @@ function FileDetail({
   const promoteSide = useAutoFlip(showPromoteMenu, "below", promoteMenuRef);
 
   useEffect(() => {
-    setTab("content");
     setContent(null);
     setHistory(null);
     setShowPromoteMenu(false);

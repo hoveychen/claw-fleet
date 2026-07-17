@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Sparkles } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
-import { useConnectionStore } from "../store";
+import { useConnectionStore, useUIStore } from "../store";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { PageShell } from "./PageShell";
@@ -116,9 +116,13 @@ export function SkillsView() {
   const { t } = useTranslation();
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [query, setQuery] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<"all" | "claude-code" | "codex">("all");
-  const [selected, setSelected] = useState<SkillItem | null>(null);
+  const { query, sourceFilter, selectedPath } = useUIStore(
+    (s) => s.mainViewState.skills,
+  );
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setQuery = (value: string) => updateMainViewState("skills", { query: value });
+  const setSourceFilter = (value: "all" | "claude-code" | "codex") =>
+    updateMainViewState("skills", { sourceFilter: value });
   const [syncEntries, setSyncEntries] = useState<SkillSyncEntry[]>([]);
   const [syncing, setSyncing] = useState(false);
 
@@ -145,6 +149,11 @@ export function SkillsView() {
         s.description.toLowerCase().includes(q)),
     );
   }, [skills, query, sourceFilter]);
+
+  const selected = useMemo(
+    () => filtered.find((skill) => skill.path === selectedPath) ?? null,
+    [filtered, selectedPath],
+  );
 
   const sourceCounts = useMemo(() => ({
     "claude-code": skills.filter((s) => s.source === "claude-code").length,
@@ -173,9 +182,10 @@ export function SkillsView() {
   }, [load, syncing, t]);
 
   useEffect(() => {
-    if (!selected) return;
-    if (!filtered.find((s) => s.path === selected.path)) setSelected(null);
-  }, [filtered, selected]);
+    if (loaded && selectedPath && !selected) {
+      updateMainViewState("skills", { selectedPath: null });
+    }
+  }, [loaded, selectedPath, selected, updateMainViewState]);
 
   return (
     <PageShell
@@ -193,7 +203,7 @@ export function SkillsView() {
         <>
           <button
             className={`${styles.chip} ${sourceFilter === "claude-code" ? styles.chip_active : ""}`}
-            onClick={() => setSourceFilter((v) => v === "claude-code" ? "all" : "claude-code")}
+            onClick={() => setSourceFilter(sourceFilter === "claude-code" ? "all" : "claude-code")}
           >
             <span>{t("skills.source_claude")}</span>
             <span className={styles.chip_count}>{sourceCounts["claude-code"]}</span>
@@ -204,7 +214,7 @@ export function SkillsView() {
           </button>
           <button
             className={`${styles.chip} ${sourceFilter === "codex" ? styles.chip_active : ""}`}
-            onClick={() => setSourceFilter((v) => v === "codex" ? "all" : "codex")}
+            onClick={() => setSourceFilter(sourceFilter === "codex" ? "all" : "codex")}
           >
             <span>{t("skills.source_codex")}</span>
             <span className={styles.chip_count}>{sourceCounts.codex}</span>
@@ -228,7 +238,7 @@ export function SkillsView() {
                 skill={skill}
                 syncEntry={syncBySlug.get(skill.name)}
                 active={selected?.path === skill.path}
-                onClick={() => setSelected(skill)}
+                onClick={() => updateMainViewState("skills", { selectedPath: skill.path })}
               />
             ))}
           </div>
@@ -240,12 +250,12 @@ export function SkillsView() {
           skill={selected}
           syncEntry={syncBySlug.get(selected.name)}
           onChanged={async () => {
-            setSelected(null);
+            updateMainViewState("skills", { selectedPath: null });
             await load();
           }}
           onDeleted={(path) => {
             setSkills((prev) => prev.filter((s) => s.path !== path));
-            setSelected(null);
+            updateMainViewState("skills", { selectedPath: null });
           }}
         />
       ) : (
@@ -326,10 +336,14 @@ function SkillDetail({
     (s) => s.connection?.type === "local",
   );
   const [files, setFiles] = useState<SkillFileEntry[] | null>(null);
-  const [activeFile, setActiveFile] = useState<SkillFileEntry | null>(null);
+  const { activeFilePath, collapsedPaths, fileQuery } = useUIStore(
+    (s) => s.mainViewState.skills,
+  );
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   // Set of `relativePath` values for directories that are currently collapsed.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [fileQuery, setFileQuery] = useState("");
+  const collapsed = useMemo(() => new Set(collapsedPaths), [collapsedPaths]);
+  const setFileQuery = (value: string) =>
+    updateMainViewState("skills", { fileQuery: value });
   const [deleting, setDeleting] = useState(false);
   const [mutatingSync, setMutatingSync] = useState(false);
   const {
@@ -340,26 +354,31 @@ function SkillDetail({
 
   useEffect(() => {
     setFiles(null);
-    setActiveFile(null);
-    setCollapsed(new Set());
-    setFileQuery("");
     invoke<SkillFileEntry[]>("list_skill_files", { skillPath: skill.path })
       .then((entries) => {
         setFiles(entries);
+        const savedPath = useUIStore.getState().mainViewState.skills.activeFilePath;
         const defaultFile =
+          entries.find((e) => !e.isDir && e.relativePath === savedPath) ??
           entries.find((e) => !e.isDir && e.absolutePath === skill.path) ??
           entries.find((e) => !e.isDir && e.name.toLowerCase() === "skill.md") ??
           entries.find((e) => !e.isDir) ??
           null;
-        setActiveFile(defaultFile);
+        updateMainViewState("skills", {
+          activeFilePath: defaultFile?.relativePath ?? null,
+        });
       })
       .catch(() => {
         setFiles([]);
       });
-  }, [skill.path]);
+  }, [skill.path, updateMainViewState]);
 
   const fileEntries = files ?? [];
   const fileCount = fileEntries.filter((f) => !f.isDir).length;
+  const activeFile = useMemo(
+    () => fileEntries.find((entry) => !entry.isDir && entry.relativePath === activeFilePath) ?? null,
+    [fileEntries, activeFilePath],
+  );
 
   // Hide entries whose ancestor directory is collapsed.
   // While the user is filtering, ignore collapse state and instead match
@@ -397,13 +416,11 @@ function SkillDetail({
   }, [fileEntries, collapsed, fileQuery]);
 
   const toggleDir = useCallback((relativePath: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(relativePath)) next.delete(relativePath);
-      else next.add(relativePath);
-      return next;
-    });
-  }, []);
+    const next = new Set(collapsed);
+    if (next.has(relativePath)) next.delete(relativePath);
+    else next.add(relativePath);
+    updateMainViewState("skills", { collapsedPaths: [...next] });
+  }, [collapsed, updateMainViewState]);
 
   const reveal = useCallback(async () => {
     if (!activeFile) return;
@@ -562,7 +579,9 @@ function SkillDetail({
                   key={entry.absolutePath}
                   className={`${skillStyles.tree_item} ${active ? skillStyles.tree_item_active : ""}`}
                   style={{ paddingLeft: 8 + depth * 12 }}
-                  onClick={() => setActiveFile(entry)}
+                  onClick={() =>
+                    updateMainViewState("skills", { activeFilePath: entry.relativePath })
+                  }
                   title={entry.relativePath}
                 >
                   <span className={skillStyles.tree_name}>{entry.name}</span>

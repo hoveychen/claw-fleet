@@ -80,7 +80,15 @@ describe("主导航页面浏览上下文", () => {
 
     updateMainViewState("gallery", { query: "worker", showAll: true, idleExpanded: true });
     updateMainViewState("audit", { tab: "rules", selectedRuleId: "unsafe-shell" });
-    updateMainViewState("memory", { query: "lesson", selectedKey: "file:repo:MEMORY.md" });
+    updateMainViewState("memory", {
+      query: "lesson",
+      filterType: "feedback",
+      sourceFilter: "codex",
+      workspaceFilter: "repo",
+      expandedKeys: ["repo"],
+      selectedKey: "file:repo:MEMORY.md",
+      detailTab: "history",
+    });
     updateMainViewState("wiki", {
       query: "transport",
       workspaceFilter: "/repo",
@@ -90,7 +98,14 @@ describe("主导航页面浏览上下文", () => {
       collapsedFolders: ["reference"],
       versionBySlug: { "arch/overview": "v2" },
     });
-    updateMainViewState("skills", { selectedPath: "/skills/review", activeFilePath: "SKILL.md" });
+    updateMainViewState("skills", {
+      query: "review",
+      sourceFilter: "claude-code",
+      selectedPath: "/skills/review",
+      activeFilePath: "references/checklist.md",
+      collapsedPaths: ["references"],
+      fileQuery: "checklist",
+    });
     updateMainViewState("plugins", {
       query: "github",
       selectedPluginId: "github@official",
@@ -102,7 +117,15 @@ describe("主导航页面浏览上下文", () => {
     const state = useUIStore.getState().mainViewState;
     expect(state.gallery).toMatchObject({ query: "worker", showAll: true, idleExpanded: true });
     expect(state.audit).toMatchObject({ tab: "rules", selectedRuleId: "unsafe-shell" });
-    expect(state.memory).toMatchObject({ query: "lesson", selectedKey: "file:repo:MEMORY.md" });
+    expect(state.memory).toEqual({
+      query: "lesson",
+      filterType: "feedback",
+      sourceFilter: "codex",
+      workspaceFilter: "repo",
+      expandedKeys: ["repo"],
+      selectedKey: "file:repo:MEMORY.md",
+      detailTab: "history",
+    });
     expect(state.wiki).toEqual({
       query: "transport",
       workspaceFilter: "/repo",
@@ -112,7 +135,14 @@ describe("主导航页面浏览上下文", () => {
       collapsedFolders: ["reference"],
       versionBySlug: { "arch/overview": "v2" },
     });
-    expect(state.skills).toMatchObject({ selectedPath: "/skills/review", activeFilePath: "SKILL.md" });
+    expect(state.skills).toEqual({
+      query: "review",
+      sourceFilter: "claude-code",
+      selectedPath: "/skills/review",
+      activeFilePath: "references/checklist.md",
+      collapsedPaths: ["references"],
+      fileQuery: "checklist",
+    });
     expect(state.plugins).toEqual({
       query: "github",
       selectedPluginId: "github@official",
