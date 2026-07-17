@@ -104,6 +104,13 @@ export function App() {
   const [tab, setTab] = useState<Tab>("decisions");
   const [connected, setConnected] = useState(false);
   const [agentOnline, setAgentOnline] = useState(false);
+  // Whether the desktop's sessions delta path is engaged, surfaced in More.
+  // `last` is the most recent frame kind; the counts accumulate for the session.
+  const [sessionsFrame, setSessionsFrame] = useState<{
+    last: "full" | "delta" | null;
+    full: number;
+    delta: number;
+  }>({ last: null, full: 0, delta: 0 });
   const [authError, setAuthError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   // Flips true the first time a `sessions` snapshot arrives, so the task page
@@ -226,6 +233,12 @@ export function App() {
         setSessions(list);
         setSessionsLoaded(true);
       },
+      onSessionsKind: (kind: "full" | "delta") =>
+        setSessionsFrame((s) => ({
+          last: kind,
+          full: s.full + (kind === "full" ? 1 : 0),
+          delta: s.delta + (kind === "delta" ? 1 : 0),
+        })),
       onAuthError: (message: string) => setAuthError(message),
     };
     const client = MOCK
@@ -537,6 +550,7 @@ export function App() {
           <MoreView
             connected={connected}
             agentOnline={agentOnline}
+            sessionsFrame={sessionsFrame}
             push={push}
             pushOptedOut={pushOptedOut}
             onEnablePush={handleEnablePush}
