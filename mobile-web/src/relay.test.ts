@@ -393,3 +393,43 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     expect(got).toBe("UNTOUCHED");
   });
 });
+
+describe("RelayClient client_hello 携带构建 commit", () => {
+  const clients: RelayClient[] = [];
+
+  beforeEach(() => {
+    FakeWs.instances = [];
+    (globalThis as unknown as { window: unknown }).window = windowShim();
+    (globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWs;
+  });
+
+  afterEach(() => {
+    for (const c of clients.splice(0)) c.close();
+  });
+
+  // 桌面端靠 hello 里的 appCommit 判断这台手机跑的 bundle 是否过期，所以 hello 帧
+  // 必须原样带上 deviceInfo 的 appCommit（sendHello 是 `...info` 展开，这里锁住它）。
+  it("authed 后的 hello 帧带上 deviceInfo.appCommit", async () => {
+    const base = FakeWs.instances.length;
+    const client = new RelayClient(SECRET, {}, () => ({
+      clientId: "c-1",
+      label: "iPhone",
+      platform: "ios",
+      pushSubscribed: false,
+      supportsGzip: true,
+      supportsBinary: true,
+      supportsDelta: true,
+      appCommit: "abc1234",
+    }));
+    clients.push(client);
+    client.connect();
+    const ws = await nextWs(base);
+    ws.onopen?.();
+    ws.deliver({ type: "authed", agent_online: true, clients: 1 });
+
+    await tick();
+    const hello = (await openSent(ws)).find((p) => p.event === "client_hello");
+    expect(hello).toBeTruthy();
+    expect(hello!.appCommit).toBe("abc1234");
+  });
+});
