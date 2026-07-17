@@ -135,6 +135,17 @@ fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// The git commit this desktop binary was built from (baked by build.rs, see
+/// `stamp_git_commit`). The 移动端 view compares it against each connected
+/// phone's `appCommit` to flag a stale mobile bundle. Like `get_app_version`,
+/// this is a compile-time constant of the running app — not backend data — so
+/// it stays a plain command and is identical under Local/Remote backends.
+/// `"unknown"` when no commit source was available at build time.
+#[tauri::command]
+fn desktop_build_commit() -> String {
+    option_env!("FLEET_GIT_COMMIT").unwrap_or("unknown").to_string()
+}
+
 // ── App state ────────────────────────────────────────────────────────────────
 
 pub struct AppState {
@@ -1710,6 +1721,7 @@ pub fn run() {
             reveal_path,
             check_app_version,
             get_app_version,
+            desktop_build_commit,
             interrupt_session,
             kill_session,
             kill_workspace_sessions,

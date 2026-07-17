@@ -247,6 +247,8 @@ export function App() {
               // Delta application is pure JS (see relay.ts sessions_delta) — no
               // browser API to feature-detect, so always true.
               supportsDelta: true,
+              // Static per build; lets the desktop flag a stale bundle.
+              appCommit: __APP_COMMIT__,
             };
           },
         );

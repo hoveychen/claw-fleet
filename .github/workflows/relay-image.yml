@@ -67,5 +67,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Stamp the built mobile-web bundle with this commit so the desktop can
+          # flag a phone running an outdated deploy (see mobile-web vite.config.ts
+          # __APP_COMMIT__). `.git` isn't in the Docker context, so pass it in.
+          build-args: |
+            APP_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

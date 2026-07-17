@@ -11,7 +11,7 @@
 //!   agent → client: `decision_created{kind,request}` / `decision_resolved{kind,id}`
 //!                   / `sessions{sessions}` / `ack{req_id}` / `reply{req_id,ok,data}`
 //!   client → agent: `answer{kind,id,...}` / `req{req_id,method,params}`
-//!                   / `client_hello{clientId,label,platform,pushSubscribed,supportsGzip,supportsBinary}` (presence)
+//!                   / `client_hello{clientId,label,platform,pushSubscribed,supportsGzip,supportsBinary,supportsDelta,appCommit}` (presence)
 //!                   / `client_bye{clientId}`
 //!
 //! Answers are written back through the same channel-agnostic
@@ -211,6 +211,14 @@ pub struct MobileClientInfo {
     /// so an older client keeps receiving full snapshots unchanged.
     #[serde(default)]
     pub supports_delta: bool,
+    /// Short git commit the client's bundle was built from (mobile-web
+    /// `__APP_COMMIT__`, reported in `client_hello`). Surfaced so the desktop UI
+    /// can compare it against its own build commit and flag a phone running a
+    /// stale deploy. `None` when the client predates this field or built without
+    /// a commit source (e.g. the Harmony native client, which doesn't report it)
+    /// — the desktop then shows no version and raises no stale flag.
+    #[serde(default)]
+    pub app_commit: Option<String>,
 }
 
 /// Cheap connectivity probe so callers can skip serialization work while the
@@ -333,6 +341,14 @@ fn upsert_client(payload: &Value) {
         payload.get("supportsBinary").and_then(Value::as_bool).unwrap_or(false);
     let supports_delta =
         payload.get("supportsDelta").and_then(Value::as_bool).unwrap_or(false);
+    // Treat an empty/"unknown" commit as absent so the desktop shows nothing
+    // rather than a bogus version for a bundle built without a commit source.
+    let app_commit = payload
+        .get("appCommit")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "unknown")
+        .map(str::to_string);
     let mut guard = CLIENTS_REGISTRY.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
     let entry = map.entry(client_id.to_string()).or_insert_with(|| MobileClientInfo {
@@ -345,6 +361,7 @@ fn upsert_client(payload: &Value) {
         supports_gzip,
         supports_binary,
         supports_delta,
+        app_commit: app_commit.clone(),
     });
     entry.label = label;
     entry.platform = platform;
@@ -352,6 +369,7 @@ fn upsert_client(payload: &Value) {
     entry.supports_gzip = supports_gzip;
     entry.supports_binary = supports_binary;
     entry.supports_delta = supports_delta;
+    entry.app_commit = app_commit;
     entry.last_seen_ms = now;
 }
 
@@ -3745,6 +3763,28 @@ mod tests {
     // splitting into several `#[test]`s would race them against each other.
     #[test]
     fn client_registry_lifecycle() {
+        clear_clients();
+
+        // appCommit from client_hello is surfaced per device; an empty or
+        // "unknown" commit (a bundle built without a commit source, or the
+        // Harmony client which omits the field) normalizes to None so the
+        // desktop shows no version and raises no stale flag for it.
+        handle_client_payload(&json!({
+            "event": "client_hello", "clientId": "ver", "label": "iPhone",
+            "platform": "ios", "pushSubscribed": false, "appCommit": "ea6c003",
+        }));
+        handle_client_payload(&json!({
+            "event": "client_hello", "clientId": "nover", "label": "unknown-build",
+            "platform": "ios", "pushSubscribed": false, "appCommit": "unknown",
+        }));
+        handle_client_payload(&hello("absent", "legacy", false)); // no appCommit key
+        {
+            let devs = live_devices();
+            let commit = |id: &str| devs.iter().find(|d| d.client_id == id).unwrap().app_commit.clone();
+            assert_eq!(commit("ver"), Some("ea6c003".to_string()), "real commit parsed");
+            assert_eq!(commit("nover"), None, "\"unknown\" normalized to None");
+            assert_eq!(commit("absent"), None, "missing appCommit → None");
+        }
         clear_clients();
 
         // A hello registers a device; a repeat with the same id dedups and
