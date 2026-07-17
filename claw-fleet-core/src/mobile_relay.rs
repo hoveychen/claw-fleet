@@ -1433,12 +1433,12 @@ fn serve_tail_delta(params: &Value) -> Result<Value, String> {
     file.seek(std::io::SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
     let mut buf = String::new();
     file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
-    let lines: Vec<Value> = buf
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect();
-    Ok(json!({ "lines": slim_tail_messages(lines), "newOffset": size }))
+    // Return `newOffset` only past complete (newline-terminated) lines. A
+    // half-written trailing record stays unconsumed so the client polls its
+    // bytes again next tick — advancing to EOF here would skip it and lose the
+    // record forever (same hazard as the local watcher; see parse_incremental_tail).
+    let (lines, consumed) = crate::jsonl_tail::parse_incremental_tail(&buf);
+    Ok(json!({ "lines": slim_tail_messages(lines), "newOffset": offset + consumed as u64 }))
 }
 
 // Serializes to `null` when there's no live sidecar for this session.
@@ -2275,6 +2275,38 @@ mod tests {
         record_if_dedupable(None, Some("whatever"), 333);
         // Nothing recorded under a blank/None key — spawned_session_pid("") stays None.
         assert_eq!(spawned_session_pid(""), None);
+    }
+
+    #[test]
+    fn tail_delta_stops_offset_at_last_newline() {
+        // Watcher/poll fires mid-flush: "A\n" is complete, record 2 is partial.
+        // newOffset must stop at the newline (8), not jump to EOF, or the client
+        // resumes past the half-written record and loses it forever.
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-tail-delta-{}-{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::write(&tmp, b"{\"i\":1}\n{\"i\":2,\"partia").unwrap();
+        let p = tmp.to_str().unwrap();
+
+        let out = serve_tail_delta(&json!({ "path": p, "offset": 0 })).unwrap();
+        assert_eq!(out["lines"].as_array().unwrap().len(), 1, "only complete line");
+        let new_offset = out["newOffset"].as_u64().unwrap();
+        assert_eq!(new_offset, 8, "offset stops at last newline, not EOF");
+
+        // Rest of record 2 plus record 3 land; resuming from new_offset recovers both.
+        fs::write(&tmp, b"{\"i\":1}\n{\"i\":2,\"partial\":true}\n{\"i\":3}\n").unwrap();
+        let out2 = serve_tail_delta(&json!({ "path": p, "offset": new_offset })).unwrap();
+        assert_eq!(
+            out2["lines"].as_array().unwrap().len(),
+            2,
+            "record 2 recovered and record 3 read"
+        );
+        fs::remove_file(&tmp).ok();
     }
 
     fn with_temp_home<F: FnOnce()>(f: F) {
