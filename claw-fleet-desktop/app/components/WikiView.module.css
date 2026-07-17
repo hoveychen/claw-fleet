@@ -416,6 +416,30 @@
   max-width: 260px;
 }
 
+/* The way back to the grid — always at the far left of the detail header, so
+   it never wraps away when the action cluster gets long (esp. narrow windows
+   where the preview is the whole main area and this is the only escape). */
+.back_btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 10px 4px 6px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.back_btn:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-text-dim);
+}
+
 .action_btn {
   display: inline-flex;
   align-items: center;

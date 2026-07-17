@@ -445,6 +445,8 @@
     "sort_workspace": "Workspace",
     "close_preview": "Close preview",
     "close_preview_short": "Close",
+    "back": "Back to list",
+    "back_short": "Back",
     "current": "current",
     "move_failed": "Move failed: {{error}}",
     "copy_ref": "Copy the [[slug]] reference — paste it into a session prompt",
