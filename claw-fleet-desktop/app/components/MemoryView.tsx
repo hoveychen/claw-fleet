@@ -743,30 +743,35 @@ function ManagedLessonsDetail({
         {lessons.length === 0 ? (
           <p className={styles.no_history}>{t("memory.lessons_empty")}</p>
         ) : (
-          <div className={styles.history_list}>
+          <div className={styles.lesson_list}>
             {lessons.map((l) => (
-              <div key={l.id} className={styles.history_entry}>
-                <div className={styles.content_markdown}>
+              <div key={l.id} className={styles.lesson_card}>
+                <div className={styles.lesson_content}>
                   <TextBlock text={l.content} />
                 </div>
                 {l.reason && (
-                  <div className={styles.card_hook}>
-                    <TextBlock text={l.reason} />
+                  <div className={styles.lesson_why}>
+                    <span className={styles.lesson_why_label}>{t("memory.lessons_why")}</span>
+                    <div className={styles.lesson_why_body}>
+                      <TextBlock text={l.reason} />
+                    </div>
                   </div>
                 )}
-                <div className={styles.card_meta}>
-                  <span>{l.workspaceName}</span>
-                  <span className={styles.card_meta_dot}>·</span>
-                  <span>{l.sessionId}</span>
+                <div className={styles.lesson_footer}>
+                  <div className={styles.lesson_meta}>
+                    <span className={styles.lesson_workspace}>{l.workspaceName}</span>
+                    <span className={styles.card_meta_dot}>·</span>
+                    <span className={styles.lesson_session}>{l.sessionId}</span>
+                  </div>
+                  <button
+                    className={styles.lesson_remove}
+                    disabled={removing.has(l.id)}
+                    onClick={() => handleRemove(l.id)}
+                  >
+                    <Trash2 size={12} strokeWidth={2} />
+                    {removing.has(l.id) ? t("memory.lessons_removing") : t("memory.lessons_remove")}
+                  </button>
                 </div>
-                <button
-                  className={styles.promote_btn}
-                  disabled={removing.has(l.id)}
-                  onClick={() => handleRemove(l.id)}
-                >
-                  <Trash2 size={13} strokeWidth={2} />
-                  {removing.has(l.id) ? t("memory.lessons_removing") : t("memory.lessons_remove")}
-                </button>
               </div>
             ))}
           </div>
