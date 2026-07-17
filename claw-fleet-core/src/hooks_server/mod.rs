@@ -185,7 +185,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             eprintln!("[fleet serve] failed to write port-file {}: {}", pf.display(), e);
         }
     }
-    // Always write the canonical port + token files under ~/.claude/fleet/ so
+    // Always write the canonical port + token files under ~/.fleet/ so
     // `fleet session status` (called from inside a managed Claude session) can
     // discover the supervisor regardless of how fleet serve was started.
     if let (Some(pp), Some(tp)) = (

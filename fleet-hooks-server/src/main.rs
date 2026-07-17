@@ -20,11 +20,11 @@ struct Cli {
     #[arg(long, default_value_t = 0)]
     port: u16,
     /// Bearer token required on incoming requests; defaults to the value
-    /// the fleet CLI writes under `~/.claude/fleet/`.
+    /// the fleet CLI writes under `~/.fleet/`.
     #[arg(long)]
     token: Option<String>,
     /// Path to write the chosen port number (for clients that don't read
-    /// the canonical `~/.claude/fleet/port` file).
+    /// the canonical `~/.fleet/port` file).
     #[arg(long)]
     port_file: Option<PathBuf>,
 }

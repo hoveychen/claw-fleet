@@ -1442,7 +1442,7 @@ pub fn run() {
                 });
             }
 
-            // Publish the bundled fleet CLI into ~/.claude/fleet/bin, which
+            // Publish the bundled fleet CLI into ~/.fleet/bin, which
             // session_launch already prepends to every spawned agent's PATH.
             // Without this the directory stays empty and the agent's
             // `fleet plan …` calls — which the PRD-discipline guidance tells it
@@ -1451,6 +1451,13 @@ pub fn run() {
             // failure just means those calls won't resolve.
             if let Err(e) = claw_fleet_core::fleet_cli::ensure_fleet_cli_link() {
                 claw_fleet_core::log_debug(&format!("ensure_fleet_cli_link failed: {e}"));
+            }
+
+            // One-time migration: port/token/bin and the defunct event log all
+            // moved to ~/.fleet, so the old ~/.claude/fleet directory is now
+            // pure legacy — remove it. Best-effort; a failure is not fatal.
+            if let Err(e) = claw_fleet_core::launchd::remove_legacy_fleet_dir() {
+                claw_fleet_core::log_debug(&format!("remove_legacy_fleet_dir failed: {e}"));
             }
 
             // Inject Fleet's permissions allowlist into ~/.claude/settings.json
