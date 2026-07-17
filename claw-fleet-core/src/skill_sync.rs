@@ -251,8 +251,12 @@ fn collect_files(
 
 fn content_hash(root: &Path) -> Result<String, String> {
     if root.is_file() {
-        let bytes = fs::read(root).map_err(|e| e.to_string())?;
-        return Ok(format!("{:x}", Sha256::digest(bytes)));
+        let mut hasher = Sha256::new();
+        hasher.update(SKILL_FILE.as_bytes());
+        hasher.update([0]);
+        hasher.update(fs::read(root).map_err(|e| e.to_string())?);
+        hasher.update([0]);
+        return Ok(format!("{:x}", hasher.finalize()));
     }
     let mut files = Vec::new();
     collect_files(root, root, 0, &mut files)?;
@@ -333,7 +337,10 @@ fn create_projection(canonical: &Path, destination: &Path) -> Result<String, Str
                     staging.display()
                 ));
             }
-            copy_tree(canonical, &staging)?;
+            if let Err(error) = copy_tree(canonical, &staging) {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(error);
+            }
             let marker = CopyMarker {
                 canonical_path: fs::canonicalize(canonical)
                     .map_err(|e| e.to_string())?
@@ -563,7 +570,10 @@ pub fn adopt(path: &Path) -> Result<SkillSyncReport, String> {
         let staging = roots
             .canonical
             .join(format!(".{slug}.staging-{}", std::process::id()));
-        copy_tree(&source, &staging)?;
+        if let Err(error) = copy_tree(&source, &staging) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
         fs::rename(&staging, &canonical).map_err(|e| e.to_string())?;
     }
 
@@ -720,5 +730,26 @@ mod tests {
             "---\nname: codex\ndescription: x\n---\nUse request_user_input",
         );
         assert_eq!(compatibility(&codex).0, SkillCompatibility::CodexOnly);
+    }
+
+    #[test]
+    fn adopt_normalizes_a_flat_claude_skill() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        let flat = temp.path().join(".claude/skills/flat.md");
+        fs::create_dir_all(flat.parent().unwrap()).unwrap();
+        fs::write(&flat, "---\nname: flat\ndescription: flat skill\n---\nBody").unwrap();
+
+        let report = adopt(&flat).unwrap();
+        let item = report
+            .items
+            .iter()
+            .find(|item| item.slug == "flat")
+            .unwrap();
+        assert_eq!(item.state, SkillSyncState::Shared);
+        assert!(!flat.exists());
+        assert!(temp.path().join(".claude/skills/flat/SKILL.md").is_file());
+        assert!(temp.path().join(".agents/skills/flat/SKILL.md").is_file());
     }
 }
