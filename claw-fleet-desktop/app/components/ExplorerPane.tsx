@@ -291,10 +291,13 @@ export function FilePreview({
     );
   }
 
-  // HTML renders live in a locked-down iframe (sandbox="" — no scripts, no
-  // same-origin, no forms), with a toggle back to the highlighted source. The
-  // srcDoc is a single string, so a page's relative assets (./style.css,
-  // ./logo.png) won't resolve; inline styles and external URLs render fine.
+  // HTML renders live in a sandboxed iframe, with a toggle back to the
+  // highlighted source. sandbox="allow-scripts" WITHOUT allow-same-origin: the
+  // page's own JS runs (so interactive/animated pages preview), but the frame
+  // gets a unique opaque origin — its scripts can't reach the parent window,
+  // Tauri APIs, cookies, or app storage. The srcDoc is a single string, so a
+  // page's relative assets (./style.css, ./logo.png) won't resolve; inline
+  // styles and external URLs render fine.
   if (isHtml(file.name)) {
     return (
       <div className={styles.content_markdown}>
@@ -318,7 +321,7 @@ export function FilePreview({
         ) : (
           <iframe
             className={fileStyles.html_preview}
-            sandbox=""
+            sandbox="allow-scripts"
             srcDoc={content.content}
             title={file.name}
           />
