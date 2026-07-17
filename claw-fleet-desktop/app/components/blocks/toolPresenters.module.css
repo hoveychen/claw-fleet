@@ -206,3 +206,66 @@
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
 }
+
+/* WebSearch: query headline over one favicon+title+domain row per link */
+.search_query {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text);
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.search_results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.search_result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.search_result:hover { background: var(--color-bg-tool-hover); }
+
+.favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.favicon_fallback {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+.search_title {
+  font-size: 12px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.search_domain {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+  margin-left: auto;
+}
