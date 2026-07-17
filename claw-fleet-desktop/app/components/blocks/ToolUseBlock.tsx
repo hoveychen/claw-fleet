@@ -249,19 +249,40 @@ function hasAgentInput(block: ToolUseBlockType): boolean {
   );
 }
 
+/** Generic fallback: the whole input object as pretty JSON. This is the shape
+ *  every codex tool used to render as; the presenters below replace it one tool
+ *  at a time, and unhandled tools still land here. */
+function RawInput({ block }: { block: ToolUseBlockType }) {
+  return (
+    <>
+      <span className={styles.section_label}>Input</span>
+      <pre className={styles.input_text}>{JSON.stringify(block.input, null, 2)}</pre>
+    </>
+  );
+}
+
 /**
- * Expanded body for a codex `exec` call. Instead of dumping the whole input as
- * raw JSON (which buries the real shell command inside an escaped JS harness
- * string), surface the `cmd` the model ran as the headline, its workdir
- * ws-relative underneath, and keep the full JS script available but folded. When
- * `command` isn't code-mode (no `cmd:` field) it IS the shell command, so show
- * it directly; when there's no `command` at all, fall back to the raw input.
+ * Expanded body for codex's two shell tools. `exec_command` carries the shell
+ * command directly under `cmd` (+ `workdir`); `exec` runs in "code mode" where
+ * `command` is a JS harness string and the real command is buried inside a
+ * `tools.exec_command({ cmd, workdir })` call. Either way, surface the shell
+ * command as the headline, its workdir ws-relative underneath, and — only when
+ * there's a JS wrapper worth hiding — keep the full script folded. When no shell
+ * command can be found (e.g. an `exec` calling `tools.view_image`) show the raw
+ * script as a code block; with no `command` at all fall back to raw JSON.
  */
 function ExecInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const directCmd = typeof block.input.cmd === "string" ? block.input.cmd : "";
   const command = typeof block.input.command === "string" ? block.input.command : "";
-  const { cmd, workdir } = command ? parseExecCommand(command) : {};
+  const parsed = command ? parseExecCommand(command) : {};
+  const cmd = directCmd || parsed.cmd;
+  const workdir =
+    (typeof block.input.workdir === "string" ? block.input.workdir : undefined) ?? parsed.workdir;
 
   if (cmd) {
+    // Fold the JS wrapper away only when it adds something beyond the command
+    // itself (code mode); exec_command has no wrapper, so `command` is empty.
+    const hasWrapper = command.trim() !== "" && command.trim() !== cmd.trim();
     return (
       <>
         <span className={styles.section_label}>Command</span>
@@ -269,20 +290,220 @@ function ExecInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLink
         {workdir && (
           <div className={styles.exec_workdir}>{relToWorkspace(workdir, paths?.workspaceRoot)}</div>
         )}
-        <details className={styles.exec_script}>
-          <summary className={styles.exec_script_summary}>Script</summary>
-          <pre className={styles.input_text}>{command}</pre>
-        </details>
+        {hasWrapper && (
+          <details className={styles.exec_script}>
+            <summary className={styles.exec_script_summary}>Script</summary>
+            <pre className={styles.input_text}>{command}</pre>
+          </details>
+        )}
       </>
     );
   }
 
+  if (command) {
+    return (
+      <>
+        <span className={styles.section_label}>Command</span>
+        <pre className={styles.input_text}>{command}</pre>
+      </>
+    );
+  }
+  return <RawInput block={block} />;
+}
+
+/** Expanded body for codex `apply_patch`: a header row naming each touched file
+ *  (op + ws-relative path) over the raw V4A patch text. The patch is already a
+ *  readable diff format, so showing it verbatim beats the JSON-escaped blob it
+ *  replaces. `ExpandableText` handles long patches and gives a copy button. */
+function PatchInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const patch = typeof block.input.command === "string" ? block.input.command : "";
+  if (!patch) return <RawInput block={block} />;
+  const files = parsePatchFiles(patch);
   return (
     <>
-      <span className={styles.section_label}>{command ? "Command" : "Input"}</span>
-      <pre className={styles.input_text}>{command || JSON.stringify(block.input, null, 2)}</pre>
+      {files.length > 0 && (
+        <div className={styles.patch_files}>
+          {files.map((f, i) => (
+            <span key={i} className={styles.patch_file}>
+              <span className={styles.patch_op} data-op={f.op}>
+                {f.op}
+              </span>
+              {relToWorkspace(f.path, paths?.workspaceRoot)}
+            </span>
+          ))}
+        </div>
+      )}
+      <ExpandableText text={patch} />
     </>
   );
+}
+
+const PLAN_MARK: Record<string, string> = {
+  completed: "☑",
+  in_progress: "▶",
+  pending: "☐",
+};
+
+interface PlanStep {
+  step?: string;
+  status?: string;
+}
+
+/** Expanded body for codex `update_plan`: the step list rendered as a checklist,
+ *  mirroring Claude Code's TodoWrite body instead of dumping the plan array. */
+function PlanInput({ block }: { block: ToolUseBlockType }) {
+  const plan = Array.isArray(block.input.plan) ? (block.input.plan as PlanStep[]) : [];
+  if (plan.length === 0) return <RawInput block={block} />;
+  return (
+    <ul className={styles.plan_list}>
+      {plan.map((s, i) => (
+        <li
+          key={i}
+          className={`${styles.plan_item} ${s.status === "completed" ? styles.plan_done : ""} ${
+            s.status === "in_progress" ? styles.plan_current : ""
+          }`}
+        >
+          <span className={styles.plan_mark} aria-hidden>
+            {PLAN_MARK[s.status ?? ""] ?? "☐"}
+          </span>
+          <span className={styles.plan_text}>{s.step ?? ""}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Expanded body for codex `spawn_agent`: type/model/effort chips over the task
+ *  message. The `message` can be an opaque encrypted blob (a long token with no
+ *  whitespace) — show it only when it reads as prose. */
+function SpawnAgentInput({ block }: { block: ToolUseBlockType }) {
+  const i = block.input;
+  const chips = [i.agent_type, i.model, i.reasoning_effort]
+    .map((v) => (typeof v === "string" ? v.trim() : ""))
+    .filter(Boolean);
+  const message = typeof i.message === "string" ? i.message : "";
+  const isProse = /\s/.test(message.trim());
+  if (chips.length === 0 && !isProse) return <RawInput block={block} />;
+  return (
+    <>
+      {chips.length > 0 && (
+        <div className={styles.codex_chips}>
+          {chips.map((c, k) => (
+            <span key={k} className={styles.codex_chip}>
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+      {isProse && <ExpandableText text={message} />}
+    </>
+  );
+}
+
+interface CodexQuestion {
+  header?: string;
+  question?: string;
+  options?: Array<{ label?: string; description?: string }>;
+}
+
+/** Expanded body for codex `request_user_input`: each question over its options,
+ *  instead of the raw `{questions:[…]}` array. */
+function RequestInput({ block }: { block: ToolUseBlockType }) {
+  const questions = Array.isArray(block.input.questions)
+    ? (block.input.questions as CodexQuestion[])
+    : [];
+  if (questions.length === 0) return <RawInput block={block} />;
+  return (
+    <div className={styles.request_list}>
+      {questions.map((q, i) => (
+        <div key={i} className={styles.request_q}>
+          <div className={styles.request_q_text}>{q.question ?? q.header ?? ""}</div>
+          {Array.isArray(q.options) && q.options.length > 0 && (
+            <ul className={styles.request_opts}>
+              {q.options.map((o, k) => (
+                <li key={k}>
+                  {o.label}
+                  {o.description ? ` — ${o.description}` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Expanded body for codex `write_stdin`: the typed characters, or a note when
+ *  it's an empty poll for more output. */
+function StdinInput({ block }: { block: ToolUseBlockType }) {
+  const chars = typeof block.input.chars === "string" ? block.input.chars : "";
+  if (!chars.trim()) {
+    const secs = waitTimeoutSecs(block.input);
+    return (
+      <div className={styles.codex_note}>{secs ? `Polled for output · ${secs}s` : "Polled for output"}</div>
+    );
+  }
+  return (
+    <>
+      <span className={styles.section_label}>Input</span>
+      <pre className={styles.input_text}>{chars}</pre>
+    </>
+  );
+}
+
+/** Expanded body for codex `wait` / `wait_agent`: a compact note (timeout, cell,
+ *  agent count) rather than the raw field object. */
+function WaitInput({ block }: { block: ToolUseBlockType }) {
+  const secs = timeoutMsToSecs(block.input.yield_time_ms ?? block.input.timeout_ms);
+  const cell = typeof block.input.cell_id === "string" ? block.input.cell_id : "";
+  const ids = Array.isArray(block.input.ids) ? (block.input.ids as string[]) : [];
+  const parts: string[] = [];
+  if (secs) parts.push(`timeout ${secs}s`);
+  if (cell) parts.push(`cell ${cell}`);
+  if (ids.length) parts.push(`${ids.length} agent${ids.length === 1 ? "" : "s"}`);
+  if (parts.length === 0) return <RawInput block={block} />;
+  return <div className={styles.codex_note}>{parts.join(" · ")}</div>;
+}
+
+/** codex's tool set (function-call + custom tools). These have no Claude Code
+ *  `toolUseResult`, so they never hit the custom-body path — their expanded body
+ *  is dispatched through `CodexToolInput` instead of falling to raw JSON. */
+const CODEX_TOOLS = new Set([
+  "exec",
+  "exec_command",
+  "apply_patch",
+  "update_plan",
+  "spawn_agent",
+  "request_user_input",
+  "wait",
+  "wait_agent",
+  "write_stdin",
+]);
+
+/** Routes each codex tool to its expanded-body presenter; unhandled tools fall
+ *  back to raw JSON. */
+function CodexToolInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  switch (block.name) {
+    case "exec":
+    case "exec_command":
+      return <ExecInput block={block} paths={paths} />;
+    case "apply_patch":
+      return <PatchInput block={block} paths={paths} />;
+    case "update_plan":
+      return <PlanInput block={block} />;
+    case "spawn_agent":
+      return <SpawnAgentInput block={block} />;
+    case "request_user_input":
+      return <RequestInput block={block} />;
+    case "write_stdin":
+      return <StdinInput block={block} />;
+    case "wait":
+    case "wait_agent":
+      return <WaitInput block={block} />;
+    default:
+      return <RawInput block={block} />;
+  }
 }
 
 /** Error colouring comes from `.result_error .result_text` on the wrapper. */
@@ -479,12 +700,12 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
             <div className={styles.input_section}>
               <AgentInput block={block} paths={paths} />
             </div>
-          ) : block.name === "exec" ? (
-            // codex `exec` has no `toolUseResult`, so it never hits the custom
-            // body path — surface the real shell command from its JS harness
-            // instead of the raw JSON input object.
+          ) : CODEX_TOOLS.has(block.name) ? (
+            // codex tools have no `toolUseResult`, so they never hit the custom
+            // body path — dispatch each to a readable presenter instead of
+            // dumping the raw JSON input object.
             <div className={styles.input_section}>
-              <ExecInput block={block} paths={paths} />
+              <CodexToolInput block={block} paths={paths} />
             </div>
           ) : (
             <div className={styles.input_section}>
