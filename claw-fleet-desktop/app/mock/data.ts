@@ -1096,6 +1096,45 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         usage: { input_tokens: 6100, output_tokens: 320 },
       },
     },
+    {
+      type: "assistant",
+      uuid: "msg-11",
+      timestamp: new Date(NOW - 7 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "text",
+            text: "Here's the captured screenshot plus the spec PDF and a raw search block:",
+          },
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              // Small solid PNG — exercises the top-level image thumbnail path.
+              data: "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQklEQVR4nO3OQQ0AIAwAsUlEIhKRgAuOR5MK6Kx9vjL5QEhISKgeCAkJCdUDISEhoXogJCQkVA+EhISE6oGQkNBjF+yE4PHth+9DAAAAAElFTkSuQmCC",
+            },
+          },
+          {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: "JVBERi0xLjcKJeLjz9MKMTEgMCBvYmo8PC9UeXBlL0NhdGFsb2c+PmVuZG9iagp0cmFpbGVyPDwvUm9vdCAxMSAwIFI+PgpzdGFydHhyZWYKMApFT0Y=",
+            },
+          },
+          {
+            // A block type with no dedicated renderer — exercises UnknownBlock.
+            type: "web_search_tool_result",
+            content: "3 results for 'vite mock mode' — vitejs.dev/guide, stackoverflow.com/q/12345, github.com/vitejs/vite",
+          },
+        ],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 4200, output_tokens: 180 },
+      },
+    },
   ],
 
   // API server session — shorter
