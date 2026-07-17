@@ -13,10 +13,12 @@ function agentLabel(s: SessionInfo, t: TFunction): string {
 }
 
 /** Distinguishing tail of a subagent id, so two same-type subagents
- *  (e.g. both `general-purpose`) don't read as one indistinct row. */
+ *  (e.g. both `general-purpose`) don't read as one indistinct row. Uses the
+ *  end of the id, not the start: real ids (`agent-<uuid>`) and mock ids
+ *  (`sess-fleet-*`) alike share a common prefix but diverge at the tail. */
 function agentIdTail(id: string): string {
   const raw = id.replace(/^agent-/, "");
-  return `#${raw.slice(0, 6)}`;
+  return `#${raw.slice(-6)}`;
 }
 
 /**
