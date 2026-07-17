@@ -79,11 +79,13 @@ describe("recentWorkspaces", () => {
     expect(recents).toEqual([["/home/repo", "Repo"]]);
   });
 
-  it("剔除临时目录下的 workspace（/tmp、/private/tmp、/var/folders）", () => {
+  it("剔除临时目录下的 workspace（/tmp、/private/tmp、/var/folders、/private/var/folders）", () => {
+    // macOS 上 /var 软链到 /private/var，规范化后的 cwd 会呈现为 /private/var/folders/...
     const sessions = [
-      session("/tmp/scratch", "Scratch", 400),
-      session("/private/tmp/foo", "Foo", 300),
-      session("/var/folders/ab/T/bar", "Bar", 200),
+      session("/tmp/scratch", "Scratch", 500),
+      session("/private/tmp/foo", "Foo", 400),
+      session("/var/folders/ab/T/bar", "Bar", 300),
+      session("/private/var/folders/3_/hh7x/T/fleet-codex-e2e-1", "Codex", 200),
       session("/home/repo", "Repo", 100),
     ];
     const recents = recentWorkspaces(sessions, null);
