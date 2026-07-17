@@ -225,6 +225,15 @@ pub fn resolve_spawn_pid(thread_id: &str) -> Option<u32> {
     std::fs::read_to_string(&path).ok()?.trim().parse().ok()
 }
 
+/// When Fleet recorded the spawn-pid note for this thread (= spawn time).
+/// Used by the stall watchdog as a silence floor: a freshly resumed turn may
+/// legitimately take a while before its first rollout write, and the rollout
+/// mtime alone would count that pre-spawn idle stretch as silence.
+pub fn spawn_pid_recorded_at(thread_id: &str) -> Option<std::time::SystemTime> {
+    let path = spawn_pid_path(thread_id)?;
+    std::fs::metadata(&path).ok()?.modified().ok()
+}
+
 /// Drop a spawned Codex thread's pid note (called when the child exits).
 /// Idempotent — a missing note is success.
 pub fn clear_spawn_pid(thread_id: &str) {
