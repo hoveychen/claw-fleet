@@ -182,6 +182,12 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
             isPartial={isPartial}
             searchTerms={searchTerms}
             paths={paths}
+            // Every assistant record renders its work blocks in the rail
+            // language — lone tool records (runs of one, too short for a
+            // WorkRunBlock band) and prose-plus-tools records alike — so the
+            // transcript never mixes the old card chrome with rail steps.
+            // ContentBlocks keeps prose/images/decision cards flush.
+            rail
           />
         )}
         {isUser && (
