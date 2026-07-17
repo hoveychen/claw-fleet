@@ -101,6 +101,7 @@ export const ONBOARDING_FEATURES = [
   "prd_discipline",
   "wiki_guidance",
   "model_guidance",
+  "skill_interop",
 ] as const;
 
 export type OnboardingFeatureId = (typeof ONBOARDING_FEATURES)[number];

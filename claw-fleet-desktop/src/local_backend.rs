@@ -363,6 +363,31 @@ impl LocalBackend {
 
         step!("memory watch paths registered");
 
+        // Watch the two runtime skill roots so Fleet can auto-reconcile
+        // cross-runtime skills (opt-in; see `skill_sync::auto_reconcile`). Only
+        // the process that *owns* the skill files — the desktop LocalBackend —
+        // runs this; remote auto-reconcile is deliberately out of scope for the
+        // MVP (manual adopt/sync/unlink already work over the Backend trait).
+        let skills_watch_dirs: Vec<std::path::PathBuf> = crate::session::real_home_dir()
+            .map(|home| {
+                vec![
+                    home.join(".claude").join("skills"),
+                    home.join(".agents").join("skills"),
+                ]
+            })
+            .unwrap_or_default();
+        for dir in &skills_watch_dirs {
+            if dir.is_dir() && !watched_dirs.contains(dir) {
+                if let Err(e) = watcher.watch(dir, RecursiveMode::Recursive) {
+                    eprintln!("[LocalBackend] failed to watch skills {:?}: {}", dir, e);
+                } else {
+                    watched_dirs.insert(dir.clone());
+                }
+            }
+        }
+
+        step!("skills watch paths registered");
+
         // Shared analyzing set — prevents duplicate analysis when both the
         // filesystem watcher and the polling thread detect the same transition.
         let analyzing: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
@@ -404,12 +429,15 @@ impl LocalBackend {
             // Track which source indices have pending changes (replaces boolean flag).
             let mut dirty_sources: HashSet<usize> = HashSet::new();
             let mut pending_memory_rescan = false;
+            let mut last_skills_reconcile = Instant::now();
+            let skills_reconcile_interval = Duration::from_secs(2);
+            let mut pending_skills_reconcile = false;
 
             loop {
                 // Wait for events; use a short timeout when a rescan is pending
                 // so we flush it promptly after the coalescing window.
                 let has_pending = !dirty_sources.is_empty();
-                let timeout = if has_pending || pending_memory_rescan {
+                let timeout = if has_pending || pending_memory_rescan || pending_skills_reconcile {
                     let remaining_session = if has_pending {
                         rescan_interval.saturating_sub(last_rescan.elapsed())
                     } else {
@@ -420,7 +448,14 @@ impl LocalBackend {
                     } else {
                         Duration::from_secs(60)
                     };
-                    remaining_session.min(remaining_memory)
+                    let remaining_skills = if pending_skills_reconcile {
+                        skills_reconcile_interval.saturating_sub(last_skills_reconcile.elapsed())
+                    } else {
+                        Duration::from_secs(60)
+                    };
+                    remaining_session
+                        .min(remaining_memory)
+                        .min(remaining_skills)
                 } else {
                     Duration::from_secs(60)
                 };
@@ -434,8 +469,19 @@ impl LocalBackend {
                             continue;
                         }
 
+                        // A skill dir appearing or disappearing under a watched
+                        // skills root should trigger a debounced reconcile pass.
+                        let is_create_or_remove =
+                            matches!(event.kind, EventKind::Create(_) | EventKind::Remove(_));
+
                         for path in &event.paths {
                             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+                            if is_create_or_remove
+                                && skills_watch_dirs.iter().any(|d| path.starts_with(d))
+                            {
+                                pending_skills_reconcile = true;
+                            }
 
                             // Claude writes Markdown under `memory/`; Codex
                             // writes under `memories/` and updates a SQLite WAL.
@@ -502,6 +548,37 @@ impl LocalBackend {
                     let _ = app2.emit("memories-updated", ());
                     last_memory_rescan = Instant::now();
                     pending_memory_rescan = false;
+                }
+
+                // Flush the batched cross-runtime skill reconcile. Opt-in
+                // (`auto_sync_enabled`) and gated on both runtimes being present,
+                // so single-runtime users and users who never opted in are
+                // untouched. `auto_reconcile` is idempotent, so the watch events
+                // its own writes produce are no-ops on the next pass.
+                if pending_skills_reconcile
+                    && last_skills_reconcile.elapsed() >= skills_reconcile_interval
+                {
+                    if crate::skill_sync::auto_sync_enabled()
+                        && crate::skill_sync::both_runtimes_present()
+                    {
+                        match crate::skill_sync::auto_reconcile() {
+                            Ok(report)
+                                if !report.actions.is_empty() || !report.conflicts.is_empty() =>
+                            {
+                                log_debug(&format!(
+                                    "[SKILL-AUTOSYNC] reconciled: {} actions, {} conflicts",
+                                    report.actions.len(),
+                                    report.conflicts.len()
+                                ));
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                log_debug(&format!("[SKILL-AUTOSYNC] reconcile failed: {e}"))
+                            }
+                        }
+                    }
+                    last_skills_reconcile = Instant::now();
+                    pending_skills_reconcile = false;
                 }
             }
         });
@@ -2364,6 +2441,14 @@ impl Backend for LocalBackend {
         target: crate::skill_sync::SkillTarget,
     ) -> Result<crate::skill_sync::SkillSyncAction, String> {
         crate::skill_sync::unlink(slug, target)
+    }
+
+    fn get_skill_autosync(&self) -> Result<bool, String> {
+        Ok(crate::skill_sync::auto_sync_enabled())
+    }
+
+    fn set_skill_autosync(&self, enabled: bool) -> Result<(), String> {
+        crate::skill_sync::set_auto_sync_enabled(enabled)
     }
 
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {
