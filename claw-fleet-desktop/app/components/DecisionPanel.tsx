@@ -496,17 +496,6 @@ function PrecedingAgentMessagesRegion({
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
-        <svg
-          className={`${styles.preceding_chevron} ${expanded ? styles.preceding_chevron_open : ""}`}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
         <span className={styles.preceding_toggle_label}>
           {expanded
             ? t("decision.preceding_label", "Agent said while working")
@@ -760,13 +749,17 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
       {/* Always-visible footer — options / "Other" / actions stay reachable
           without scrolling (flex-none tail; the body scrolls in .card_scroll). */}
       <div className={styles.card_footer}>
-        <OptionsCollapseBar
-          collapsed={optionsCollapsed}
-          onToggle={() => setOptionsCollapsed((v) => !v)}
-          count={q.options.length}
-          summary={collapsedSummary}
-        />
-        {!optionsCollapsed && (
+        {/* Manual collapse only earns its chevron when the list is long enough
+            to be worth folding; short option sets (≤3) always stay open. */}
+        {q.options.length > 3 && (
+          <OptionsCollapseBar
+            collapsed={optionsCollapsed}
+            onToggle={() => setOptionsCollapsed((v) => !v)}
+            count={q.options.length}
+            summary={collapsedSummary}
+          />
+        )}
+        {(q.options.length <= 3 || !optionsCollapsed) && (
         <SharedOptionsBlock
           decisionId={decision.id}
           sessionId={decision.request.sessionId}
@@ -1630,13 +1623,17 @@ export function FleetAskCard({
       {/* Always-visible footer — form fields / options / "Other" / actions stay
           reachable without scrolling (flex-none tail; body scrolls in .card_scroll). */}
       <div className={styles.card_footer}>
-        <OptionsCollapseBar
-          collapsed={optionsCollapsed}
-          onToggle={() => setOptionsCollapsed((v) => !v)}
-          count={opts.length + formFields.length}
-          summary={collapsedSummary}
-        />
-        {!optionsCollapsed && formFields.length > 0 && (
+        {/* Same rule as elicitation: only surface the collapse chevron when the
+            combined option + form-field count is long enough to fold. */}
+        {opts.length + formFields.length > 3 && (
+          <OptionsCollapseBar
+            collapsed={optionsCollapsed}
+            onToggle={() => setOptionsCollapsed((v) => !v)}
+            count={opts.length + formFields.length}
+            summary={collapsedSummary}
+          />
+        )}
+        {(opts.length + formFields.length <= 3 || !optionsCollapsed) && formFields.length > 0 && (
           <div className={styles.elicitation_options}>
             {formFields.map((f) => (
               <FleetAskFormFieldRow
@@ -1655,7 +1652,7 @@ export function FleetAskCard({
             options .map) is available on option-less fleet__ask cards. With an
             empty options array SharedOptionsBlock renders just the Other input.
             Only the user's collapse toggle hides it. */}
-        {!optionsCollapsed && (
+        {(opts.length + formFields.length <= 3 || !optionsCollapsed) && (
           <SharedOptionsBlock
             decisionId={decision.id}
             sessionId={decision.request.sessionId}
@@ -2105,33 +2102,40 @@ export function DecisionPanel({
         </div>
       )}
       <div className={styles.main_column}>
+        {/* Panel toolbar: aligns the panel-level controls (collapse + history)
+         *  into one slim top strip instead of two orphaned, absolutely-positioned
+         *  buttons floating in the left gutter. Covers all card kinds (guard /
+         *  plan / elicitation / fleet-ask) plus the standalone float window.
+         *  Lite/`compact` keeps its own labeled history_jump chip below. */}
         {!compact && (
-          <button
-            type="button"
-            className={styles.collapse_btn}
-            onClick={() => setDecisionPanelCollapsed(true)}
-            title={t("decision_panel.collapse", "Collapse panel")}
-            aria-label={t("decision_panel.collapse", "Collapse panel")}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
+          <div className={styles.panel_toolbar}>
+            <button
+              type="button"
+              className={styles.collapse_btn}
+              onClick={() => setDecisionPanelCollapsed(true)}
+              title={t("decision_panel.collapse", "Collapse panel")}
+              aria-label={t("decision_panel.collapse", "Collapse panel")}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            <span className={styles.panel_toolbar_spacer} />
+            {/* History toggle opens the inline SessionDetail column. Neutral
+             *  chip styling (no red alarm badge) since it's context, not alert. */}
+            {active.request.sessionId && (
+              <PastHistoryStrip
+                key={active.id}
+                sessionId={active.request.sessionId}
+                expanded={historyOpen}
+                onToggle={() => setHistoryOpen((v) => !v)}
+              />
+            )}
+          </div>
         )}
-        {/* Past-history context.
-         *  - Normal mode: header toggles the inline SessionDetail column
-         *    (managed by DecisionPanel state).
-         *  - Lite mode: a single chip-button swaps the lite body for a
-         *    dedicated decision-history view (LiteDecisionHistory). Avoids
-         *    stuffing the list into the narrow lite window. */}
-        {active.request.sessionId && !compact && (
-          <PastHistoryStrip
-            key={active.id}
-            sessionId={active.request.sessionId}
-            expanded={historyOpen}
-            onToggle={() => setHistoryOpen((v) => !v)}
-          />
-        )}
+        {/* Lite mode: a single chip-button swaps the lite body for a dedicated
+         *  decision-history view (LiteDecisionHistory). Avoids stuffing the list
+         *  into the narrow lite window. */}
         {active.request.sessionId && compact && (
           <button
             type="button"
