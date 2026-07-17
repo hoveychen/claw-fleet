@@ -73,4 +73,57 @@ describe("useFullToolResult", () => {
     expect(seen.full).toEqual(body);
     expect(seen.loadingFull).toBe(false);
   });
+
+  it("survives toolFetch identity churn on a live session — the in-flight fetch is not cancelled", async () => {
+    // Reproduces the image-Read regression: on a live session, every
+    // `session-tail` append rebuilds MessageList's `truncatedIds` Set, which
+    // gives `toolFetch` a brand-new object identity even though nothing about
+    // the fetch changed. When that identity is an effect dep, its cleanup
+    // cancels the in-flight `get_tool_result_full` read (a multi-MB jsonl scan);
+    // on a busy session the appends out-pace the read, so the fetch is cancelled
+    // and restarted forever and the recovered body never lands — the expanded
+    // Read card shows the file path and an empty body (no image).
+    let resolveA!: (r: FullToolResult) => void;
+    const pendingA = new Promise<FullToolResult>((res) => {
+      resolveA = res;
+    });
+    // First identity: the fetch that actually starts reading the transcript.
+    const fetchA: ToolResultFetch = {
+      truncatedIds: new Set(["tool-1"]),
+      fetchFull: () => pendingA,
+    };
+    // A later append hands the hook a fresh object with identical semantics.
+    // Its fetchFull must never be needed once the first read is in flight.
+    const fetchB: ToolResultFetch = {
+      truncatedIds: new Set(["tool-1"]),
+      fetchFull: () => new Promise<FullToolResult>(() => {}),
+    };
+
+    const { seen, Probe } = makeProbe();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    // Expand → the hook starts reading with fetchA.
+    await act(async () => {
+      root!.render(createElement(Probe, { open: true, fetch: fetchA }));
+    });
+    expect(seen.loadingFull).toBe(true);
+
+    // A live-tail append re-renders with a new toolFetch identity, mid-read.
+    await act(async () => {
+      root!.render(createElement(Probe, { open: true, fetch: fetchB }));
+    });
+
+    // The original read now completes. Its result must still land — the identity
+    // churn must not have cancelled it.
+    const body: FullToolResult = { content: "the recovered image block", toolUseResult: null };
+    await act(async () => {
+      resolveA(body);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(seen.full).toEqual(body);
+    expect(seen.loadingFull).toBe(false);
+  });
 });
