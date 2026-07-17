@@ -29,10 +29,22 @@ pub struct DailyReport {
     pub lessons_generated_at: Option<u64>,
 }
 
+/// Bump when the token-accounting口径 (or any metrics-fold logic) changes, so
+/// [`run_backfill_check`] knows a cached past-day report was computed under an
+/// older basis and must be re-scanned. History:
+///   0 — implicit for reports predating this field (last-turn input snapshot).
+///   1 — cumulative input incl. cache (input + cache_creation + cache_read),
+///       matching cost and the sidebar counter's口径.
+pub const CURRENT_METRICS_VERSION: u32 = 1;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DailyMetrics {
+    /// 口径 version these metrics were computed under. Missing (⇒ 0) in reports
+    /// generated before the field existed. See [`CURRENT_METRICS_VERSION`].
+    #[serde(default)]
+    pub metrics_version: u32,
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
     #[serde(default)]
@@ -720,6 +732,7 @@ pub fn generate_report_from_sessions(
         timezone: timezone.to_string(),
         generated_at: now_ms,
         metrics: DailyMetrics {
+            metrics_version: CURRENT_METRICS_VERSION,
             total_input_tokens,
             total_output_tokens,
             total_cache_creation_tokens,
@@ -1534,6 +1547,18 @@ fn lock_store(
     })
 }
 
+/// Whether a **past** day's report must be (re)generated during backfill.
+///
+/// Regenerate when there is no cached report, **or** when the cached one was
+/// computed under an older metrics口径 ([`DailyMetrics::metrics_version`] <
+/// [`CURRENT_METRICS_VERSION`]) — otherwise a口径 change (e.g. switching token
+/// totals to cumulative-incl-cache) would never reach historical reports, which
+/// are skipped on every pass once cached. `days_ago == 0` (today) is handled by
+/// its own always-regenerate path and never routed through here.
+pub(crate) fn past_report_needs_regen(existing: Option<&DailyReport>) -> bool {
+    existing.map_or(true, |r| r.metrics.metrics_version < CURRENT_METRICS_VERSION)
+}
+
 fn run_backfill_check(
     report_store: &std::sync::Arc<std::sync::Mutex<ReportStore>>,
     locale: &str,
@@ -1555,9 +1580,11 @@ fn run_backfill_check(
             store.get_report(&date).ok().flatten()
         };
 
-        // For today, always regenerate (new sessions keep arriving).
-        // For past days, skip if report already exists.
-        if days_ago > 0 && existing.is_some() {
+        // For today, always regenerate (new sessions keep arriving). For past
+        // days, regenerate only when there's no cached report OR the cached one
+        // was computed under an older metrics口径 (so a口径 change backfills
+        // into history instead of stopping at today).
+        if days_ago > 0 && !past_report_needs_regen(existing.as_ref()) {
             continue;
         }
 
@@ -1567,7 +1594,17 @@ fn run_backfill_check(
         }
         let session_refs: Vec<&crate::session::SessionInfo> = sessions.iter().collect();
         let tz = chrono::Local::now().format("%Z").to_string();
-        let r = generate_report_from_sessions(&date, &tz, &session_refs);
+        let mut r = generate_report_from_sessions(&date, &tz, &session_refs);
+        // Preserve the (expensive, LLM-generated) AI summary and lessons from a
+        // stale report we're re-scanning purely to refresh token metrics —
+        // regeneration only recomputes the deterministic JSONL fold, not the AI
+        // outputs, so carry those forward rather than dropping them.
+        if let Some(prev) = &existing {
+            r.ai_summary = prev.ai_summary.clone();
+            r.ai_summary_generated_at = prev.ai_summary_generated_at;
+            r.lessons = prev.lessons.clone();
+            r.lessons_generated_at = prev.lessons_generated_at;
+        }
         {
             let store = lock_store(report_store);
             if let Err(e) = store.save_report(&r) {
@@ -1662,12 +1699,41 @@ fn run_backfill_check(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stale_past_report_is_regenerated_but_current_is_kept() {
+        // Regression: after the token-accounting口径 changed, historical daily
+        // reports were never re-scanned because backfill skipped any past day
+        // that already had a cached report — so old last-turn-snapshot numbers
+        // never got backfilled to the new cumulative口径.
+
+        // No cached report → must generate.
+        assert!(past_report_needs_regen(None), "missing report must generate");
+
+        // Cached under the current口径 → leave it alone (no needless re-scan).
+        let mut current = make_test_report("2026-07-10");
+        current.metrics.metrics_version = CURRENT_METRICS_VERSION;
+        assert!(
+            !past_report_needs_regen(Some(&current)),
+            "up-to-date report must NOT be regenerated"
+        );
+
+        // Cached under an older口径 (e.g. version 0, the pre-field default) →
+        // must be regenerated so its token totals move to the new basis.
+        let mut stale = make_test_report("2026-07-09");
+        stale.metrics.metrics_version = 0;
+        assert!(
+            past_report_needs_regen(Some(&stale)),
+            "stale-口径 report must be regenerated"
+        );
+    }
+
     fn make_test_report(date: &str) -> DailyReport {
         DailyReport {
             date: date.to_string(),
             timezone: "UTC".to_string(),
             generated_at: 1000000,
             metrics: DailyMetrics {
+                metrics_version: CURRENT_METRICS_VERSION,
                 total_input_tokens: 5000,
                 total_output_tokens: 3000,
                 total_cache_creation_tokens: 0,

@@ -1724,6 +1724,7 @@ export const MOCK_DAILY_REPORT: DailyReport = {
   ],
   lessonsGeneratedAt: NOW - HOUR,
   metrics: {
+    metricsVersion: 1,
     totalInputTokens: 892_450,
     totalOutputTokens: 345_120,
     totalSessions: 13,
@@ -1980,6 +1981,7 @@ function buildMockReport(entry: typeof TIMELINE_SUMMARIES[0]): DailyReport {
     lessons: entry.lessons,
     lessonsGeneratedAt: NOW - entry.daysAgo * DAY + HOUR,
     metrics: {
+      metricsVersion: 1,
       totalInputTokens: entry.input,
       totalOutputTokens: entry.output,
       totalSessions: entry.sessions,

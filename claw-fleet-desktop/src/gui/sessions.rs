@@ -13,6 +13,13 @@ pub(crate) fn today_usage(state: tauri::State<'_, AppState>) -> claw_fleet_core:
 }
 
 #[tauri::command(async)]
+pub(crate) fn today_usage_breakdown(
+    state: tauri::State<'_, AppState>,
+) -> claw_fleet_core::today_usage::TodayUsageBreakdown {
+    state.backend.read().unwrap().today_usage_breakdown()
+}
+
+#[tauri::command(async)]
 pub(crate) fn search_sessions(
     query: String,
     limit: Option<usize>,

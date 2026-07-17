@@ -131,6 +131,7 @@ pub const TASK_PLANS: &str = "/task_plans";
 pub const TEST_DECISION_END_TO_END: &str = "/test_decision_end_to_end";
 pub const TEST_DECISION_VIA_CLAUDE_CLI: &str = "/test_decision_via_claude_cli";
 pub const TODAY_USAGE: &str = "/today_usage";
+pub const TODAY_USAGE_BREAKDOWN: &str = "/today_usage_breakdown";
 pub const TOKEN_BREAKDOWN: &str = "/token_breakdown";
 pub const CODEX_TOKEN_BREAKDOWN: &str = "/codex_token_breakdown";
 pub const USAGE_HISTORY: &str = "/usage_history";

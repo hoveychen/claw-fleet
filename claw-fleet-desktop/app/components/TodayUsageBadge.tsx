@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { TodayUsage } from "../types";
+import { TokenReceiptModal } from "./TokenReceiptModal";
 import styles from "./TodayUsageBadge.module.css";
 
 /** Compact token count: 1.2M / 34.5K / 780. */
@@ -23,6 +24,7 @@ export function TodayUsageBadge({
 }: { collapsed?: boolean; inline?: boolean } = {}) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<TodayUsage | null>(null);
+  const [showReceipt, setShowReceipt] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,33 +65,60 @@ export function TodayUsageBadge({
     usage && tokens > 0 ? `\nin ${fmtTokens(inputTokens)} + out ${fmtTokens(outputTokens)}` : "";
   const title = `${label}: $${cost.toFixed(2)} · ${fmtTokens(tokens)} tok${tokenBreakdown}${costBreakdown}`;
 
+  const receipt = showReceipt ? (
+    <TokenReceiptModal onClose={() => setShowReceipt(false)} />
+  ) : null;
+  const openHint = t("today_usage.open_receipt", "查看今日花费明细");
+
   // Compact one-line variant for narrow chrome (lite mode's drag bar):
   // "$x · xK tok" on a single row, no section title.
   if (inline) {
     return (
-      <span className={styles.badge_inline} title={title}>
-        <span className={styles.cost}>${cost.toFixed(2)}</span>
-        <span className={styles.tokens}>{fmtTokens(tokens)}</span>
-      </span>
+      <>
+        <button
+          type="button"
+          className={styles.badge_inline}
+          title={openHint}
+          onClick={() => setShowReceipt(true)}
+        >
+          <span className={styles.cost}>${cost.toFixed(2)}</span>
+          <span className={styles.tokens}>{fmtTokens(tokens)}</span>
+        </button>
+        {receipt}
+      </>
     );
   }
 
   if (collapsed) {
     return (
-      <div className={styles.badge_collapsed} title={title}>
-        <span className={styles.cost}>${cost.toFixed(2)}</span>
-        <span className={styles.tile_label}>{label}</span>
-      </div>
+      <>
+        <button
+          type="button"
+          className={styles.badge_collapsed}
+          title={openHint}
+          onClick={() => setShowReceipt(true)}
+        >
+          <span className={styles.cost}>${cost.toFixed(2)}</span>
+          <span className={styles.tile_label}>{label}</span>
+        </button>
+        {receipt}
+      </>
     );
   }
 
   return (
     <section className={styles.section} title={title} data-wizard="today-usage">
       <h3 className={styles.section_title}>{label}</h3>
-      <div className={styles.row}>
+      <button
+        type="button"
+        className={styles.row}
+        title={openHint}
+        onClick={() => setShowReceipt(true)}
+      >
         <span className={styles.cost}>${cost.toFixed(2)}</span>
         <span className={styles.tokens}>{fmtTokens(tokens)} tok</span>
-      </div>
+      </button>
+      {receipt}
     </section>
   );
 }

@@ -236,6 +236,9 @@ impl Backend for NullBackend {
     fn today_usage(&self) -> crate::today_usage::TodayUsage {
         crate::today_usage::TodayUsage::default()
     }
+    fn today_usage_breakdown(&self) -> crate::today_usage::TodayUsageBreakdown {
+        crate::today_usage::TodayUsageBreakdown::default()
+    }
     fn check_setup(&self) -> SetupStatus {
         SetupStatus {
             cli_installed: false,
