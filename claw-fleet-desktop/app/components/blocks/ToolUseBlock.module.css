@@ -247,6 +247,74 @@
   gap: 2px;
 }
 
+/* Generic param list — the fallback body that replaces the raw-JSON <pre> for
+   every tool without a dedicated presenter (MCP tools, NotebookEdit, …). */
+.params {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.param_row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.param_key {
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+.param_val {
+  color: var(--color-text-secondary);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.param_block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.param_chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.param_chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--color-bg-tool-hover);
+  color: var(--color-text-secondary);
+}
+
+/* Read / Glob / WebSearch / WebFetch headline target line */
+.target_head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.target_main {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+.target_note {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
 /* Result */
 .result {
   padding: 8px 10px;
