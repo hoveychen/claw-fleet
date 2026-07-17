@@ -4,6 +4,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { safeLinkComponent, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
+import { normalizeSvgBlankLines } from "../../markdown/plugins";
 import {
   remarkWikiLinks,
   wikiLinkComponent,
@@ -68,8 +69,10 @@ export const TextBlock = memo(function TextBlock({
   wiki,
   paths,
 }: Props) {
-  // When streaming, strip the last incomplete paragraph to avoid visual flicker
-  const content = isPartial ? stripLastParagraph(text) : text;
+  // When streaming, strip the last incomplete paragraph to avoid visual flicker.
+  // normalizeSvgBlankLines keeps an inline <svg> from being truncated at a blank
+  // line inside the drawing (see plugins.ts) — a no-op for prose without SVG.
+  const content = normalizeSvgBlankLines(isPartial ? stripLastParagraph(text) : text);
 
   const searchRegex = useMemo(() => {
     if (!searchTerms?.length) return null;

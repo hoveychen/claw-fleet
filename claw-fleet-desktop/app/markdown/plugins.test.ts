@@ -3,7 +3,7 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import rehypeStringify from "rehype-stringify";
-import { safeRemarkPlugins, safeRehypePlugins } from "./plugins";
+import { safeRemarkPlugins, safeRehypePlugins, normalizeSvgBlankLines } from "./plugins";
 
 /** Render through the exact chain the app's ReactMarkdown instances use. */
 function render(md: string): string {
@@ -72,6 +72,56 @@ describe("raw HTML", () => {
     const html = render('<img src="https://example.com/a.png" onerror="alert(1)">');
     expect(html).toContain("<img");
     expect(html).not.toContain("onerror");
+  });
+});
+
+describe("inline SVG blank lines", () => {
+  // A bare <svg> opens a CommonMark type-7 HTML block, which ends at the first
+  // blank line. A model that groups an SVG's sections with blank lines truncates
+  // the drawing — everything after the blank line escapes the <svg>.
+  // The blank line closes the type-7 HTML block; the following <text> line is a
+  // complete open tag *not* followed by only whitespace, so remark parses it as
+  // a paragraph — the resulting <p> severs rehype-raw's re-stitching and the
+  // <svg> auto-closes early. This mirrors the real "写入/擦除" diagram.
+  const svg = [
+    '<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">',
+    '  <rect x="0" y="0" width="200" height="100" fill="#fafafa"/>',
+    '',
+    '  <text x="10" y="20" fill="#16a34a">label</text>',
+    '  <circle cx="50" cy="50" r="20" fill="#f59e0b"/>',
+    "</svg>",
+  ].join("\n");
+
+  // Extract the substring between the first <svg and its </svg>.
+  const svgInner = (html: string) => {
+    const start = html.indexOf("<svg");
+    const end = html.indexOf("</svg>");
+    return start >= 0 && end >= 0 ? html.slice(start, end) : "";
+  };
+
+  it("truncates at the blank line without the fix (documents the bug)", () => {
+    const inner = svgInner(render(svg));
+    // The late <circle> escapes the <svg> and lands in a paragraph.
+    expect(inner).not.toContain("#f59e0b");
+    expect(render(svg)).toContain("<p>");
+  });
+
+  it("keeps the whole drawing when blank lines are normalized", () => {
+    const inner = svgInner(render(normalizeSvgBlankLines(svg)));
+    expect(inner).toContain("#fafafa");
+    expect(inner).toContain("#f59e0b");
+    // Nothing escaped into a loose paragraph.
+    expect(render(normalizeSvgBlankLines(svg))).not.toContain("<p>");
+  });
+
+  it("leaves an SVG shown inside a code fence untouched", () => {
+    const fenced = "```html\n" + svg + "\n```";
+    expect(normalizeSvgBlankLines(fenced)).toBe(fenced);
+  });
+
+  it("is a no-op for text with no svg", () => {
+    const md = "line one\n\nline two\n";
+    expect(normalizeSvgBlankLines(md)).toBe(md);
   });
 });
 
