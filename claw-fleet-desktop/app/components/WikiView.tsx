@@ -1,5 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type DragEvent,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -255,7 +264,12 @@ function sortDocs(docs: WikiDoc[], key: SortKey): WikiDoc[] {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function WikiView() {
+interface WikiViewProps {
+  selectedSlug: string | null;
+  onSelectedSlugChange: Dispatch<SetStateAction<string | null>>;
+}
+
+export function WikiView({ selectedSlug, onSelectedSlugChange: setSelectedSlug }: WikiViewProps) {
   const { t } = useTranslation();
   const [docs, setDocs] = useState<WikiDoc[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -264,7 +278,6 @@ export function WikiView() {
   const [sortKey, setSortKey] = useState<SortKey>("recent");
   // Which virtual folder the grid is scoped to. `null` = 全部 (every doc).
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<
     | { kind: "doc"; slug: string }
     | { kind: "version"; slug: string; version: string }
