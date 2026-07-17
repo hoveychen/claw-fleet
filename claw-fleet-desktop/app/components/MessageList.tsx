@@ -34,6 +34,7 @@ import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import { MetaFoldBlock } from "./blocks/MetaFoldBlock";
 import { groupMetaRuns } from "./metaGrouping";
 import { groupWorkRuns } from "./workRuns";
+import { trailingIndicator, WORKING_STATUSES } from "./trailingIndicator";
 import styles from "./MessageList.module.css";
 
 // ── Search highlight ─────────────────────────────────────────────────────────
@@ -266,12 +267,6 @@ function WaitingIndicator() {
 }
 
 // ── Live activity indicator ───────────────────────────────────────────────────
-
-/** Session statuses that mean the agent is actively doing something right now
- *  (as opposed to waiting for the user). Mirrors the scanner's working set. */
-const WORKING_STATUSES = new Set([
-  "thinking", "executing", "streaming", "processing", "active", "delegating",
-]);
 
 /** Animated "still working" indicator pinned under the newest message while
  *  the session is in a working status. */
@@ -579,8 +574,10 @@ export function MessageList({
     }
   }, [displayMsgs.length, searchMatchIndex, effectiveStart]);
 
-  const lastAssistant = [...displayMsgs].reverse().find((m: RawMessage) => m.type === "assistant");
-  const isWaiting = lastAssistant?.message?.stop_reason === "end_turn";
+  // Which indicator (if any) trails the newest message. A fresh user prompt at
+  // the tail — the resume gap before the agent's first block lands and the
+  // scanner status flips — reads as "working", not "waiting for input".
+  const trailing = trailingIndicator(displayMsgs, status);
   // Keeps the trailing work band open while the agent is live in it, so the
   // reader watches tools stream in; it folds itself once the agent moves on.
   const isWorkingNow = !!status && WORKING_STATUSES.has(status);
@@ -708,10 +705,13 @@ export function MessageList({
           </Fragment>
         );
       })}
-      {status && WORKING_STATUSES.has(status) ? (
-        <WorkingIndicator status={status} />
+      {trailing === "working" ? (
+        // Use the live status label when the scanner knows what the agent is
+        // doing; during the resume gap it hasn't flipped yet, so fall back to
+        // the generic "Processing…" spinner.
+        <WorkingIndicator status={status && WORKING_STATUSES.has(status) ? status : "processing"} />
       ) : (
-        isWaiting && <WaitingIndicator />
+        trailing === "waiting" && <WaitingIndicator />
       )}
       <div ref={bottomRef} />
     </div>

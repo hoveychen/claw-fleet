@@ -1437,32 +1437,33 @@ fn path_is_codex_memory_db(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Read the JSONL tail of `path` from byte offset `cur`, returning the complete
+/// lines parsed and the offset to save for the next read. `None` when there is
+/// nothing new (or the file can't be read).
+///
+/// Only advances past newline-terminated lines: a record still being flushed
+/// (no trailing `\n`) stays unconsumed so the next read re-reads it. Advancing
+/// to EOF instead would skip its bytes, and when the rest lands the read starts
+/// mid-record — the block (often the first thinking/tool_use of a resumed
+/// turn's write burst) is then malformed forever and lost.
+fn read_tail_at_offset(path: &std::path::Path, cur: u64) -> Option<(Vec<Value>, u64)> {
+    let mut file = fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    if size <= cur {
+        return None;
+    }
+    file.seek(SeekFrom::Start(cur)).ok()?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).ok()?;
+    let (lines, consumed) = claw_fleet_core::jsonl_tail::parse_incremental_tail(&buf);
+    Some((lines, cur + consumed as u64))
+}
+
 fn emit_tail_lines(path: &std::path::Path, app: &AppHandle, watch: &crate::WatchState) {
     let mut guard = watch.offset.lock().unwrap();
-    let cur = *guard;
-
-    let Ok(mut file) = fs::File::open(path) else { return };
-    let Ok(size) = file.metadata().map(|m| m.len()) else { return };
-    if size <= cur {
-        return;
-    }
-    if file.seek(SeekFrom::Start(cur)).is_err() {
-        return;
-    }
-
-    let mut buf = String::new();
-    if file.read_to_string(&mut buf).is_err() {
-        return;
-    }
-
-    let lines: Vec<Value> = buf
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect();
-
+    let Some((lines, new_offset)) = read_tail_at_offset(path, *guard) else { return };
+    *guard = new_offset;
     if !lines.is_empty() {
-        *guard = size;
         let _ = app.emit("session-tail", &lines);
     }
 }
@@ -3625,6 +3626,71 @@ mod tests {
     use crate::backend::{SourceUsageSummary, UsageBar};
     use serde_json::json;
     use std::path::PathBuf;
+
+    // Reproduces the local watcher path (emit_tail_lines' file read + offset
+    // advance) on a REAL file across a two-stage write: a resumed turn's write
+    // burst is caught mid-flush, so the first read sees a complete line plus a
+    // half-written record; the rest lands on the next read. The half-written
+    // record — the resumed turn's first block — must survive exactly once.
+    #[test]
+    fn resumed_turn_first_block_survives_midflush_watch() {
+        use std::io::Write as _;
+        let path = std::env::temp_dir().join(format!(
+            "fleet-emit-tail-repro-{}-{}.jsonl",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+
+        // Stage 0: the watch starts at the end of the already-complete transcript.
+        let base = "{\"type\":\"user\",\"i\":0}\n";
+        fs::write(&path, base.as_bytes()).unwrap();
+        let mut offset = base.len() as u64;
+
+        let mut seen: Vec<Value> = Vec::new();
+        let mut pump = |offset: &mut u64, seen: &mut Vec<Value>| {
+            if let Some((lines, new_off)) = read_tail_at_offset(&path, *offset) {
+                seen.extend(lines);
+                *offset = new_off; // exactly what emit_tail_lines saves to the guard
+            }
+        };
+
+        // Stage 1: user prompt fully flushed; assistant's first block half-written.
+        {
+            let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+            f.write_all(b"{\"type\":\"user\",\"i\":1}\n{\"type\":\"assistant\",\"blo")
+                .unwrap();
+            f.flush().unwrap();
+        }
+        pump(&mut offset, &mut seen);
+
+        // Stage 2: the rest of that block plus a following record land.
+        {
+            let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+            f.write_all(b"ck\":\"first\"}\n{\"type\":\"assistant\",\"i\":3}\n")
+                .unwrap();
+            f.flush().unwrap();
+        }
+        pump(&mut offset, &mut seen);
+
+        fs::remove_file(&path).ok();
+
+        let first_seen = seen
+            .iter()
+            .filter(|v| v.get("block").and_then(|b| b.as_str()) == Some("first"))
+            .count();
+        assert_eq!(
+            first_seen, 1,
+            "resumed turn's first block must be emitted exactly once, got {seen:?}"
+        );
+        // Sanity: the trailing record after it also arrives.
+        assert!(
+            seen.iter().any(|v| v.get("i").and_then(|i| i.as_i64()) == Some(3)),
+            "record following the recovered block must also arrive, got {seen:?}"
+        );
+    }
 
     fn mk_session(id: &str, source: &str) -> crate::session::SessionInfo {
         use crate::session::{SessionInfo, SessionStatus};
