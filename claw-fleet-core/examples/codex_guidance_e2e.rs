@@ -23,13 +23,14 @@ fn main() {
 
     match cmd {
         "install" => {
-            // Exercise all four per-concept blocks at once.
+            // Exercise all per-concept blocks at once.
             claw_fleet_core::codex_guidance::reconcile_codex_agents_md(
                 claw_fleet_core::codex_guidance::CodexGuidanceSet {
                     prd: true,
                     interaction: true,
                     wiki: true,
                     model: true,
+                    lessons: true,
                 },
                 &title,
                 &locale,
