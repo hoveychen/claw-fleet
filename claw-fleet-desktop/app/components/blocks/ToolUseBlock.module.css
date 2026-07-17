@@ -108,6 +108,28 @@
   gap: 6px;
 }
 
+.exec_workdir {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-dim);
+  word-break: break-all;
+}
+
+.exec_script {
+  margin-top: 6px;
+}
+
+.exec_script_summary {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
 /* Result */
 .result {
   padding: 8px 10px;
