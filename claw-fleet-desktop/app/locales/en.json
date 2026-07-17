@@ -1902,6 +1902,8 @@
     "binary_file": "Binary or non-text file; cannot preview here.",
     "read_error": "Failed to read file.",
     "truncated_notice": "Large file — showing the first 1MB of {{size}}.",
+    "html_show_source": "View source",
+    "html_show_preview": "Preview",
     "show_ignored": "Show ignored files",
     "proc_panel_title": "Commands",
     "proc_input_placeholder": "Run a command in {{name}}…",
