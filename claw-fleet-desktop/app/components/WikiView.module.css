@@ -327,30 +327,23 @@
   margin-left: auto;
 }
 
-/* ── Kind badge ──────────────────────────────────────────────────────────── */
-
-.kind_badge {
+/* ── Kind icon ────────────────────────────────────────────────────────────
+   A file-type glyph rather than a text badge — reads as "a file". The kind
+   colour survives so markdown / single-HTML / bundled-HTML-dir stay distinct. */
+.kind_icon {
   flex-shrink: 0;
-  width: 34px;
-  text-align: center;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  padding: 2px 0;
-  border-radius: var(--radius-xs);
-  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.kind_badge.kind_html {
-  background: rgb(var(--wiki-html) / 0.15);
+.kind_icon.kind_html {
   color: rgb(var(--wiki-html));
 }
-.kind_badge.kind_dir {
-  background: rgb(var(--wiki-dir) / 0.15);
+.kind_icon.kind_dir {
   color: rgb(var(--wiki-dir));
 }
-.kind_badge.kind_md {
-  background: rgb(var(--wiki-md) / 0.15);
+.kind_icon.kind_md {
   color: rgb(var(--wiki-md));
 }
 
@@ -494,6 +487,21 @@
   font-size: 12px;
   color: var(--color-error);
   padding: 20px;
+}
+
+/* ── Narrow windows ──────────────────────────────────────────────────────────
+   The three-pane split needs room. Below this width, opening a doc hands the
+   whole main area to the preview (master → detail); the "关闭" button returns
+   to the grid, and the folder rail can be collapsed via the shell's own toggle.
+   The unselected grid already reflows to fewer columns via auto-fill. */
+@media (max-width: 1080px) {
+  .grid_pane_split {
+    display: none;
+  }
+  .preview_pane {
+    flex: 1 1 100%;
+    border-left: none;
+  }
 }
 
 /* macOS vibrancy — divider weights come from the platform-wide --color-border
