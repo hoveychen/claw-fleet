@@ -147,7 +147,7 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
   plugins: {
     query: "",
     selectedPluginId: null,
-    expanded: { enabled: true, downloaded: true, catalog: true },
+    expanded: { enabled: true, downloaded: true, catalog: false },
   },
   files: {
     selectedWorkspace: null,

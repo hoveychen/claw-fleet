@@ -78,22 +78,46 @@ describe("主导航页面浏览上下文", () => {
     const { useUIStore } = await import("./store");
     const { updateMainViewState } = useUIStore.getState();
 
-    updateMainViewState("gallery", { query: "worker", showAll: true });
+    updateMainViewState("gallery", { query: "worker", showAll: true, idleExpanded: true });
     updateMainViewState("audit", { tab: "rules", selectedRuleId: "unsafe-shell" });
     updateMainViewState("memory", { query: "lesson", selectedKey: "file:repo:MEMORY.md" });
-    updateMainViewState("wiki", { selectedSlug: "arch/overview", sortKey: "title" });
+    updateMainViewState("wiki", {
+      query: "transport",
+      workspaceFilter: "/repo",
+      sortKey: "title",
+      selectedFolder: "arch",
+      selectedSlug: "arch/overview",
+      collapsedFolders: ["reference"],
+      versionBySlug: { "arch/overview": "v2" },
+    });
     updateMainViewState("skills", { selectedPath: "/skills/review", activeFilePath: "SKILL.md" });
-    updateMainViewState("plugins", { query: "github", selectedPluginId: "github@official" });
+    updateMainViewState("plugins", {
+      query: "github",
+      selectedPluginId: "github@official",
+      expanded: { enabled: true, downloaded: false, catalog: true },
+    });
     updateMainViewState("files", { selectedWorkspace: "/repo", activeFilePath: "src/main.rs" });
     updateMainViewState("mobile", { editingUrl: true, urlDraft: "wss://relay.example" });
 
     const state = useUIStore.getState().mainViewState;
-    expect(state.gallery).toMatchObject({ query: "worker", showAll: true });
+    expect(state.gallery).toMatchObject({ query: "worker", showAll: true, idleExpanded: true });
     expect(state.audit).toMatchObject({ tab: "rules", selectedRuleId: "unsafe-shell" });
     expect(state.memory).toMatchObject({ query: "lesson", selectedKey: "file:repo:MEMORY.md" });
-    expect(state.wiki).toMatchObject({ selectedSlug: "arch/overview", sortKey: "title" });
+    expect(state.wiki).toEqual({
+      query: "transport",
+      workspaceFilter: "/repo",
+      sortKey: "title",
+      selectedFolder: "arch",
+      selectedSlug: "arch/overview",
+      collapsedFolders: ["reference"],
+      versionBySlug: { "arch/overview": "v2" },
+    });
     expect(state.skills).toMatchObject({ selectedPath: "/skills/review", activeFilePath: "SKILL.md" });
-    expect(state.plugins).toMatchObject({ query: "github", selectedPluginId: "github@official" });
+    expect(state.plugins).toEqual({
+      query: "github",
+      selectedPluginId: "github@official",
+      expanded: { enabled: true, downloaded: false, catalog: true },
+    });
     expect(state.files).toMatchObject({ selectedWorkspace: "/repo", activeFilePath: "src/main.rs" });
     expect(state.mobile).toMatchObject({ editingUrl: true, urlDraft: "wss://relay.example" });
   });
