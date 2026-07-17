@@ -1,8 +1,8 @@
+/* The band wears no box: like claude.ai's work stream it is a plain summary
+   line over the rail, sitting flush on the transcript background. The rail's
+   own icons, connector and bordered detail panels carry the structure. */
 .root {
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--tool-group-border);
-  overflow: hidden;
-  margin: 4px 0;
+  margin: 6px 0;
 }
 
 .header {
@@ -10,32 +10,30 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  background: var(--tool-group-bg);
+  padding: 3px 0;
+  background: transparent;
   border: none;
   cursor: pointer;
   text-align: left;
   font-size: 12px;
-  min-height: 30px;
+  min-height: 24px;
   color: var(--color-text);
 }
 
-.header:hover { background: var(--tool-group-bg-hover); }
-
 .arrow { color: var(--color-text-dim); font-size: 10px; flex-shrink: 0; }
 
+/* Headline reads as the run's summary sentence — secondary ink like the
+   thinking prose it condenses; hover raises it to full ink to say "expandable". */
 .category {
   font-weight: 600;
-  color: var(--tool-group-label);
+  color: var(--color-text-secondary);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
-/* Thinking-derived headline: reads as prose, not a badge — normal weight,
-   secondary ink, and it may truncate (the stats behind it carry the counts). */
 .title {
   font-weight: 500;
-  color: var(--color-text);
+  color: var(--color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -43,12 +41,17 @@
   min-width: 0;
 }
 
+.header:hover .title,
+.header:hover .category {
+  color: var(--color-text);
+}
+
 .stats {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--color-text-secondary);
+  color: var(--color-text-dim);
   font-size: 11px;
 }
 
@@ -66,9 +69,7 @@
 }
 
 .body {
-  padding: 4px 8px;
-  background: var(--color-bg-secondary);
-  border-top: 1px solid var(--tool-group-border);
+  padding: 2px 0 0;
 }
 
 /* In-progress headline: a light band sweeps across the text while the run

@@ -1,3 +1,4 @@
+import { FileText } from "lucide-react";
 import type { ContentBlock } from "../../types";
 import styles from "./DocumentBlock.module.css";
 
@@ -53,7 +54,7 @@ export function DocumentBlock({ block }: { block: ContentBlock }) {
   return (
     <div className={styles.root}>
       <span className={styles.icon} aria-hidden>
-        ▤
+        <FileText />
       </span>
       <span className={styles.label}>{label}</span>
       {bytes !== null && <span className={styles.size}>{formatBytes(bytes)}</span>}
