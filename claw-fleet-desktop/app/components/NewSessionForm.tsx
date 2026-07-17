@@ -138,6 +138,7 @@ export function distinctWorkspaces(
  *  in. Unlike the in-memory composer draft (cleared on submit), this survives so
  *  reopening the new-session form defaults to that repo. */
 const LAST_WORKSPACE_KEY = "fleet:last-new-session-workspace";
+const LAST_AGENT_TOOL_KEY = "fleet:last-new-session-agent-tool";
 
 function loadLastWorkspace(): string | null {
   try {
@@ -154,6 +155,39 @@ function saveLastWorkspace(path: string): void {
     // best-effort — private mode / quota. Defaulting just falls back to the top
     // of the alphabetical list next time.
   }
+}
+
+/** Remember the new-session agent independently from the transient composer
+ * draft. A successful submit clears that draft, but the next composer should
+ * still reopen on the user's last Claude/Codex choice. */
+function loadLastAgentTool(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_AGENT_TOOL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveLastAgentTool(tool: string): void {
+  try {
+    window.localStorage.setItem(LAST_AGENT_TOOL_KEY, tool);
+  } catch {
+    // Best-effort preference only. If storage is unavailable, the launcher
+    // falls back to the first currently available agent.
+  }
+}
+
+/** Pick the remembered agent when it is still offered; otherwise use the
+ * first available choice. During source discovery the choices are Claude-only,
+ * which avoids briefly rendering Codex-only model controls before config loads. */
+export function defaultAgentTool(
+  choices: { value: string; label: string }[],
+  lastTool: string | null,
+): string {
+  if (lastTool && choices.some((choice) => choice.value === lastTool)) {
+    return lastTool;
+  }
+  return choices[0]?.value ?? "claude";
 }
 
 /** The workspace to select by default in a fresh new-session form: the remembered
@@ -183,26 +217,6 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const sessions = useSessionsStore((s) => s.sessions);
   const { connection } = useConnectionStore();
   const isRemote = connection?.type === "remote";
-  // Draft (prompt / options / attachments / workspace) is lifted into a store
-  // keyed "new" so navigating away from the new-session page and back no longer
-  // wipes it. Headless `-p` sessions in the CLI's default mode can't approve
-  // file edits, so the launcher seeds permissionMode to acceptEdits.
-  const { draft, patch, clear } = useComposerDraft("new", {
-    permissionMode: "acceptEdits",
-  });
-  const { prompt, model, effort, permissionMode, attachments, workspace } = draft;
-  // Empty tool means Claude (older drafts / resume composers never set it).
-  const tool = draft.tool || "claude";
-  const setPrompt = (v: string) => patch({ prompt: v });
-  const setModel = (v: string) => patch({ model: v });
-  const setEffort = (v: string) => patch({ effort: v });
-  const setPermissionMode = (v: string) => patch({ permissionMode: v });
-  const setWorkspace = (v: string) => patch({ workspace: v });
-  // Switching tool clears model/effort: Claude and Codex model ids are
-  // disjoint, so a leftover Claude model would reach `codex exec -m` (and vice
-  // versa) as an invalid value.
-  const setTool = (v: string) => patch({ tool: v, model: "", effort: "" });
-
   // Only offer the agent tools whose source is actually being monitored (source
   // enabled in settings AND the CLI installed). Codex must not appear in the
   // launcher when its source is off — selecting it would only fail at spawn.
@@ -213,15 +227,50 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   // `null` = not loaded yet → keep Claude-only so we never flash Codex then hide
   // it. Once loaded, filter to the monitored sources.
   const toolChoices = useMemo(() => agentToolsForSources(sources ?? []), [sources]);
+  // Draft (prompt / options / attachments / workspace) is lifted into a store
+  // keyed "new" so navigating away from the new-session page and back no longer
+  // wipes it. Headless `-p` sessions in the CLI's default mode can't approve
+  // file edits, so the launcher seeds permissionMode to acceptEdits.
+  const { draft, patch, clear } = useComposerDraft("new", {
+    permissionMode: "acceptEdits",
+  });
+  const { prompt, model, effort, permissionMode, attachments, workspace } = draft;
+  // Empty tool means there is no in-progress override, so restore the durable
+  // last choice when it is available. Older drafts remain compatible.
+  const tool = draft.tool || defaultAgentTool(toolChoices, loadLastAgentTool());
+  const setPrompt = (v: string) => patch({ prompt: v });
+  const setModel = (v: string) => patch({ model: v });
+  const setEffort = (v: string) => patch({ effort: v });
+  const setPermissionMode = (v: string) => patch({ permissionMode: v });
+  const setWorkspace = (v: string) => patch({ workspace: v });
+  // Switching tool clears model/effort: Claude and Codex model ids are
+  // disjoint, so a leftover Claude model would reach `codex exec -m` (and vice
+  // versa) as an invalid value.
+  const setTool = (v: string) => {
+    saveLastAgentTool(v);
+    patch({ tool: v, model: "", effort: "" });
+  };
   // If a stale draft (or a since-disabled source) left `tool` pointing at a tool
-  // that's no longer offered, snap it back to the first available one.
+  // that's no longer offered, snap it back to the first available one. A fresh
+  // draft is also materialized after source discovery: if the remembered tool
+  // changes from the temporary Claude fallback to Codex, clear any Claude-only
+  // model/effort picked while config was loading.
   useEffect(() => {
     if (sources === null) return;
+    if (!draft.tool) {
+      const remembered = defaultAgentTool(toolChoices, loadLastAgentTool());
+      if (remembered === "claude") {
+        patch({ tool: remembered });
+      } else {
+        patch({ tool: remembered, model: "", effort: "" });
+      }
+      return;
+    }
     if (!toolChoices.some((c) => c.value === tool)) {
       setTool(toolChoices[0].value);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sources, toolChoices, tool]);
+  }, [sources, toolChoices, tool, draft.tool]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pathDraft, setPathDraft] = useState("");
