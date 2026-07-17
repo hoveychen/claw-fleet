@@ -1345,6 +1345,7 @@
     "work_cat_think": "思考",
     "work_cat_work": "处理任务",
     "work_steps": "{{count}} 步",
+    "work_done": "完成",
     "work_thinking": "思考",
     "tool_wait": "等待命令输出",
     "tool_wait_timed": "等待命令输出 · 最多 {{secs}} 秒",

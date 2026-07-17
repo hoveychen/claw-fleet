@@ -1348,6 +1348,7 @@
     "work_cat_think": "Thinking",
     "work_cat_work": "Working",
     "work_steps": "{{count}} steps",
+    "work_done": "Done",
     "work_thinking": "thinking",
     "tool_wait": "Waiting for output",
     "tool_wait_timed": "Waiting for output · up to {{secs}}s",

@@ -1,0 +1,72 @@
+/* Timeline rail for expanded work runs: icon gutter + connector line. */
+
+.step {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+/* Connector segment: from just below this step's icon down into the gap before
+   the next step's icon. The final sibling (a live run's last step) draws none,
+   so the rail never dangles; a finished run ends at the Done row instead. */
+.step::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 24px;
+  bottom: -4px;
+  width: 1px;
+  background: var(--tool-group-border);
+}
+
+.step:last-child::before { display: none; }
+
+.icon {
+  flex-shrink: 0;
+  width: 17px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-dim);
+}
+
+.icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Inside the rail the member cards drop their chrome: the gutter icon already
+   names the step, so the border + tinted header read as double framing. Two
+   class levels outweigh the cards' single-class .root rules regardless of CSS
+   module bundle order. */
+.step .body > * {
+  border: none;
+  margin: 0;
+  border-radius: var(--radius-sm);
+}
+
+.step .body > * > button:first-child {
+  background: transparent;
+  padding-left: 0;
+}
+
+.step .body > * > button:first-child:hover {
+  background: var(--tool-group-bg-hover);
+}
+
+/* Done row */
+.done { align-items: center; }
+
+.done_icon { color: var(--color-success); }
+
+.done_label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
