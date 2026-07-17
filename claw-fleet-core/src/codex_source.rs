@@ -2966,6 +2966,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// A freshly spawned Codex turn has no thread id in argv, but Fleet records
+    /// its pid as soon as Codex reports the minted thread id. That note must
+    /// make Stop target the one session even when a sibling Codex shares cwd.
+    #[test]
+    fn codex_resolve_pid_recognises_running_spawn_via_pid_note() {
+        use super::{resolve_pid, CodexProcess};
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-resolve-spawnpid-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &tmp);
+
+        crate::codex_launch::record_spawn_pid("t-new", 4242);
+        let running = vec![
+            CodexProcess { pid: 3131, cwd: "/ws".into(), thread_id: None },
+            CodexProcess { pid: 4242, cwd: "/ws".into(), thread_id: None },
+        ];
+
+        assert_eq!(
+            resolve_pid(&running, "t-new", "/ws"),
+            (Some(4242), true),
+            "the live recorded spawn pid must be precise despite a sibling in cwd"
+        );
+
+        match prev {
+            Some(p) => std::env::set_var("FLEET_HOME", p),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn read_rollout_originator_none_without_meta_or_field() {
         use std::io::Write;
@@ -3641,7 +3679,16 @@ fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Optio
             }
         }
     }
-    // Second: cwd match. Precise only if exactly one process matches.
+    // Second: a fresh `codex exec` has no thread id in argv because Codex mints
+    // it after launch. Fleet records the minted thread id -> spawn pid once it
+    // appears in stdout; accept that note only while the pid is still a live
+    // Codex process, matching the liveness safety check in `codex_proc_alive`.
+    if let Some(pid) = crate::codex_launch::resolve_spawn_pid(thread_id) {
+        if processes.iter().any(|p| p.pid == pid) {
+            return (Some(pid), true);
+        }
+    }
+    // Third: cwd match. Precise only if exactly one process matches.
     let cwd_matches: Vec<_> = processes.iter().filter(|p| p.cwd == cwd).collect();
     match cwd_matches.len() {
         1 => (Some(cwd_matches[0].pid), true),
