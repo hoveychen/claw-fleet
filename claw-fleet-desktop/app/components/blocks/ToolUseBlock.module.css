@@ -387,3 +387,61 @@
   background: var(--color-bg-secondary);
   border-top: 1px solid var(--tool-group-border);
 }
+
+/* ── Rail mode ────────────────────────────────────────────────────────────────
+   Inside a work-run rail the gutter icon already names the step, so the card
+   sheds its chrome: no border, no tinted header band, flush-left text that
+   lines up with the rail's thinking prose. The expandable body stays. */
+.rail {
+  border: none;
+  border-radius: 0;
+  margin: 0;
+}
+
+.rail .header {
+  background: transparent;
+  padding: 3px 6px 3px 0;
+  min-height: 24px;
+}
+
+/* The summary IS the row in rail mode — full-ink so tool steps scan darker
+   than the muted thinking prose around them. Hover underlines to signal the
+   row expands, without re-introducing a background band. */
+.rail .summary {
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.rail .header:hover .summary { text-decoration: underline; }
+
+/* Expanded detail sits in a bordered panel — the claude.ai search-card look —
+   so command/stdout/results read as one contained artifact instead of
+   bleeding into the surrounding steps. */
+.rail .body {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin: 4px 0 10px;
+  overflow: hidden;
+}
+
+.rail .body .input_section { padding: 8px 10px; }
+
+.rail_group {
+  border: none;
+  border-radius: 0;
+  margin: 0;
+}
+
+.rail_group .group_toggle {
+  background: transparent;
+  padding: 3px 6px 3px 0;
+}
+
+.rail_group .group_toggle:hover .group_label { color: var(--color-text); }
+
+.rail_group .group_body {
+  background: transparent;
+  border-top: none;
+  padding: 0 0 0 12px;
+}

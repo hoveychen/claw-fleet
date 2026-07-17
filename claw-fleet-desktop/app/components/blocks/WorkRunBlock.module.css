@@ -31,6 +31,18 @@
   flex-shrink: 0;
 }
 
+/* Thinking-derived headline: reads as prose, not a badge — normal weight,
+   secondary ink, and it may truncate (the stats behind it carry the counts). */
+.title {
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
 .stats {
   flex: 1;
   overflow: hidden;

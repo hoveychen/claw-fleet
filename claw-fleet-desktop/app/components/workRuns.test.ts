@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupWorkRuns, isWorkRow, runCategory, summarizeWorkRun } from "./workRuns";
+import { firstSentence, groupWorkRuns, isWorkRow, runCategory, summarizeWorkRun, workRunTitle } from "./workRuns";
 import { groupMetaRuns } from "./metaGrouping";
 import type { ContentBlock, RawMessage } from "../types";
 
@@ -108,6 +108,46 @@ describe("runCategory", () => {
     expect(runCategory(["WebSearch", "WebFetch"])).toBe("web");
     expect(runCategory([])).toBe("think");
     expect(runCategory(["Agent", "Read"])).toBe("work");
+  });
+});
+
+describe("firstSentence", () => {
+  it("cuts at English sentence end followed by space", () => {
+    expect(firstSentence("Found it. The issuer changed.")).toBe("Found it.");
+  });
+
+  it("cuts at CJK terminal punctuation", () => {
+    expect(firstSentence("重新评估了去杠杆周期。承认之前判断过于乐观。")).toBe("重新评估了去杠杆周期。");
+  });
+
+  it("does not treat a dot inside a filename or version as sentence end", () => {
+    expect(firstSentence("Reading release.yml to check the runner")).toBe(
+      "Reading release.yml to check the runner",
+    );
+  });
+
+  it("stops at the first line break and clips long sentences", () => {
+    expect(firstSentence("first line no punctuation\nsecond line")).toBe(
+      "first line no punctuation",
+    );
+    const long = "x".repeat(100);
+    expect(firstSentence(long).length).toBe(64);
+    expect(firstSentence(long).endsWith("…")).toBe(true);
+  });
+});
+
+describe("workRunTitle", () => {
+  it("uses the first thinking block's first sentence", () => {
+    const msgs = [
+      assistant([tool("Bash")]),
+      assistant([{ type: "thinking", thinking: "Checking CI first. Then more." }, tool("Read")]),
+    ];
+    expect(workRunTitle(msgs)).toBe("Checking CI first.");
+  });
+
+  it("returns null when the run has no usable thinking", () => {
+    expect(workRunTitle([assistant([tool("Bash")])])).toBe(null);
+    expect(workRunTitle([assistant([{ type: "thinking", thinking: "   " }])])).toBe(null);
   });
 });
 

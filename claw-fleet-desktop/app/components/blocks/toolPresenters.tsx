@@ -14,6 +14,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAgentNav } from "../AgentNavContext";
 import {
   asAgentResult,
@@ -22,6 +23,7 @@ import {
   asFileEditResult,
   asFileSearchResult,
   asTodoWriteResult,
+  asWebSearchResult,
   bashExitCode,
   diffStats,
 } from "../../toolResults";
@@ -35,7 +37,7 @@ import styles from "./toolPresenters.module.css";
  * Tools whose body this module renders itself. Edit/Write are absent by design:
  * their body is a diff, owned by the caller's `DiffView`.
  */
-const CUSTOM_BODY = new Set(["Bash", "Agent", "TodoWrite"]);
+const CUSTOM_BODY = new Set(["Bash", "Agent", "TodoWrite", "WebSearch"]);
 
 /**
  * Whether `ToolBody` will render something for this call. A missing payload or
@@ -137,6 +139,13 @@ export function headerStats(
     if (!todo) return null;
     const done = todo.newTodos.filter((it) => it.status === "completed").length;
     return <span className={styles.chip}>{done}/{todo.newTodos.length}</span>;
+  }
+
+  if (block.name === "WebSearch") {
+    const search = asWebSearchResult(meta);
+    if (!search) return null;
+    const n = search.links.length;
+    return <span className={styles.chip}>{n} result{n === 1 ? "" : "s"}</span>;
   }
 
   return null;
@@ -319,6 +328,79 @@ function TodoBody({ meta }: { meta: unknown }) {
   );
 }
 
+/** Favicon for a search-result row, via Google's favicon service. Falls back
+ *  to a neutral tile when offline / blocked — the row must never lose its
+ *  gutter alignment just because an icon failed to load. */
+function Favicon({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    // Malformed URL — keep the fallback tile.
+  }
+  if (!host || failed) return <span className={styles.favicon_fallback} aria-hidden />;
+  return (
+    <img
+      className={styles.favicon}
+      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/** `WebSearch`: the query as a headline over one row per returned link —
+ *  favicon, title, domain — the claude.ai search-card look. Narration strings
+ *  in the payload are dropped; the links are the substance. */
+function WebSearchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: unknown; rail?: boolean }) {
+  const search = asWebSearchResult(meta);
+  if (!search) return null;
+  // In rail mode the collapsed summary line (the query) stays visible above
+  // the expanded body, so repeating it here would read twice in a row.
+  const query = rail
+    ? ""
+    : search.query || (typeof block.input.query === "string" ? block.input.query : "");
+  return (
+    <>
+      {query && <div className={styles.search_query}>{query}</div>}
+      {search.links.length > 0 ? (
+        <ul className={styles.search_results}>
+          {search.links.map((l, i) => {
+            let host = "";
+            try {
+              host = new URL(l.url).hostname.replace(/^www\./, "");
+            } catch {
+              // Row still renders; it just has no domain tag.
+            }
+            return (
+              <li key={i}>
+                <a
+                  className={styles.search_result}
+                  href={l.url}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    // Same surfaced-error pattern as SafeLink: a missing
+                    // opener capability must not fail silently.
+                    openUrl(l.url).catch((err) => console.error("openUrl failed:", l.url, err));
+                  }}
+                >
+                  <Favicon url={l.url} />
+                  <span className={styles.search_title}>{l.title}</span>
+                  {host && <span className={styles.search_domain}>{host}</span>}
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className={styles.note}>No results.</div>
+      )}
+    </>
+  );
+}
+
 /**
  * The custom body for a tool, or null to fall back to the generic
  * input-JSON-plus-result rendering.
@@ -330,15 +412,18 @@ export function ToolBody({
   block,
   meta,
   result,
+  rail,
 }: {
   block: ToolUseBlockType;
   meta: unknown;
   result?: ToolResultBlock;
+  rail?: boolean;
 }): ReactNode {
   if (meta === undefined || result?.is_error) return null;
   if (block.name === "Bash") return <BashBody block={block} meta={meta} />;
   if (block.name === "Agent") return <AgentBody meta={meta} />;
   if (block.name === "TodoWrite") return <TodoBody meta={meta} />;
+  if (block.name === "WebSearch") return <WebSearchBody block={block} meta={meta} rail={rail} />;
   return null;
 }
 

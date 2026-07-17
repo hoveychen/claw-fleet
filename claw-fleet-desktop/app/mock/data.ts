@@ -1008,6 +1008,9 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
       type: "user",
       uuid: "msg-7b",
       timestamp: new Date(NOW - 11 * MIN).toISOString(),
+      // Structured Bash payload so the expanded card exercises BashBody
+      // (command + stdout streams) instead of the generic result text.
+      toolUseResult: { stdout: "release.yml\nrelay-image.yml", stderr: "", interrupted: false },
       message: {
         role: "user",
         content: [
@@ -1055,7 +1058,13 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         content: [
           {
             type: "thinking",
-            thinking: "The release workflow builds on macos-14. A screenshot job can run headless chromium on ubuntu in parallel and upload artifacts...",
+            // Long on purpose: exercises the rail thinking window's clamp +
+            // bottom fade (ThinkingBlock rail mode). Keep it several paragraphs.
+            thinking:
+              "The release workflow builds on macos-14. A screenshot job can run headless chromium on ubuntu in parallel and upload artifacts. The key question is whether the mock mode covers enough surface for the screenshots to be representative — the session list, the detail pane, and the decision panel all need seeded data.\n\n" +
+              "Costs matter too: a macos-14 runner is 10× the price of ubuntu-latest per minute, and the screenshot job doesn't need macOS at all since the web UI renders identically in headless chromium. Splitting it out keeps the expensive runner focused on the actual bundle build.\n\n" +
+              "There's also cache placement to consider. GitHub's ref-scoping rule means a cache written by a tag build is invisible to later main builds, so the screenshot job should restore from the main-branch cache and never write its own. Finally, artifact retention defaults to 90 days which is plenty; no need to configure it explicitly.\n\n" +
+              "Plan: add a `screenshots` job on ubuntu-latest, gate it on the build job, start `vite dev` in mock mode, drive it with Playwright, and upload the PNGs with `actions/upload-artifact`.",
           },
           {
             type: "tool_use",
@@ -1076,6 +1085,61 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         role: "user",
         content: [
           { type: "tool_result", tool_use_id: "tool-5", content: "No matches found" },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-9c",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-5w",
+            name: "WebSearch",
+            input: { query: "playwright github actions upload-artifact screenshots" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 5900, output_tokens: 60 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-9d",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      // toolUseResult mirrors the real WebSearch payload shape: narration
+      // strings interleaved with {tool_use_id, content:[{title,url}]} objects.
+      // Exercises the favicon result-card body + "N results" header chip.
+      toolUseResult: {
+        query: "playwright github actions upload-artifact screenshots",
+        searchCount: 1,
+        durationSeconds: 4.21,
+        results: [
+          "I'll search for Playwright CI screenshot patterns.",
+          {
+            tool_use_id: "srvtoolu_mock1",
+            content: [
+              { title: "Setting up CI | Playwright", url: "https://playwright.dev/docs/ci-intro" },
+              { title: "actions/upload-artifact - GitHub", url: "https://github.com/actions/upload-artifact" },
+              { title: "Visual comparisons | Playwright", url: "https://playwright.dev/docs/test-snapshots" },
+              { title: "Storing workflow data as artifacts - GitHub Docs", url: "https://docs.github.com/en/actions/using-workflows/storing-workflow-data-as-artifacts" },
+              { title: "Screenshots | Playwright", url: "https://playwright.dev/docs/screenshots" },
+            ],
+          },
+        ],
+      },
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-5w",
+            content: "Web search results for query: playwright github actions upload-artifact screenshots",
+          },
         ],
       },
     },

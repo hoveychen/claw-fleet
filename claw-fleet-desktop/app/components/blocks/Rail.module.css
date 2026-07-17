@@ -1,0 +1,57 @@
+/* Timeline rail for expanded work runs: icon gutter + connector line. */
+
+.step {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+/* Connector segment: from just below this step's icon down into the gap before
+   the next step's icon. The final sibling (a live run's last step) draws none,
+   so the rail never dangles; a finished run ends at the Done row instead. */
+.step::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 24px;
+  bottom: -4px;
+  width: 1px;
+  background: var(--tool-group-border);
+}
+
+.step:last-child::before { display: none; }
+
+.icon {
+  flex-shrink: 0;
+  width: 17px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-dim);
+}
+
+.icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Member cards de-chrome themselves via their own rail props (ToolUseBlock
+   .rail, ThinkingBlock rail mode) — no cross-module overrides here, so a card
+   type without a rail mode (e.g. DecisionToolCard) keeps its own look. */
+
+/* Done row */
+.done { align-items: center; }
+
+.done_icon { color: var(--color-success); }
+
+.done_label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
