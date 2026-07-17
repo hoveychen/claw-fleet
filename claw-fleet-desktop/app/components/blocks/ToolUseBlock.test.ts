@@ -129,6 +129,29 @@ describe("codexToolSummary", () => {
     expect(codexToolSummary("apply_patch", { command: "garbage" }, t)).toBeNull();
     expect(codexToolSummary("apply_patch", {}, t)).toBeNull();
   });
+
+  it("exec → prefers the lifted exec_note (Rule 7 leading comment)", () => {
+    expect(
+      codexToolSummary(
+        "exec",
+        { exec_note: "列出 sample 目录", command: "const f = ls();" },
+        t,
+      ),
+    ).toBe("列出 sample 目录");
+  });
+
+  it("exec without a note → falls back to the shell cmd inside the wrapper", () => {
+    // codex skipped Rule 7's `// ` comment, so no exec_note was lifted. The
+    // collapsed row must still show the real command, not the raw JS harness.
+    const command =
+      'const r = await tools.exec_command({"cmd":"sed -n \'1,240p\' README.md","workdir":"/ws"});\ntext(r.output);';
+    expect(codexToolSummary("exec", { command }, t)).toBe("sed -n '1,240p' README.md");
+  });
+
+  it("exec with neither note nor a parseable cmd → null (formatInput shows it raw)", () => {
+    expect(codexToolSummary("exec", { command: "await tools.view_image({path: 'a.png'})" }, t)).toBeNull();
+    expect(codexToolSummary("exec", {}, t)).toBeNull();
+  });
 });
 
 describe("parseExecCommand", () => {
@@ -157,6 +180,16 @@ describe("parseExecCommand", () => {
   it("handles single-quoted and backtick literals", () => {
     expect(parseExecCommand("exec_command({ cmd: 'ls -la' })").cmd).toBe("ls -la");
     expect(parseExecCommand("exec_command({ cmd: `pwd` })").cmd).toBe("pwd");
+  });
+
+  it("extracts from JSON-quoted keys (the shape codex actually emits)", () => {
+    // Real rollouts serialise the wrapper as JSON: `{"cmd":"…","workdir":"…"}`.
+    const command =
+      'const r = await tools.exec_command({"cmd":"sed -n \'1,240p\' README.md","workdir":"/ws","yield_time_ms":10000});\ntext(r.output);';
+    expect(parseExecCommand(command)).toEqual({
+      cmd: "sed -n '1,240p' README.md",
+      workdir: "/ws",
+    });
   });
 
   it("returns {} for a plain shell command (older-style exec, no cmd: field)", () => {
