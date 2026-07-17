@@ -5,6 +5,7 @@ import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { safeLinkComponent, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
 import { normalizeSvgBlankLines } from "../../markdown/plugins";
+import { isFencedBlock } from "../../markdown/codeBlock";
 import {
   remarkWikiLinks,
   wikiLinkComponent,
@@ -106,20 +107,28 @@ export const TextBlock = memo(function TextBlock({
           // Code blocks with syntax highlighting
           code({ node, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || "");
-            const isBlock = !!(props as { inline?: boolean }).inline === false && match;
+            const codeText = String(children).replace(/\n$/, "");
+            // react-markdown v10 dropped the `inline` prop, so block vs inline
+            // is decided by isFencedBlock (a language tag OR multi-line content).
+            // A no-language ``` fence — e.g. an ASCII diagram — must still render
+            // as a <pre> block, not word-wrapped inline code (see codeBlock.ts).
+            const isBlock = isFencedBlock(className, codeText);
             if (isBlock && match?.[1] === "mermaid") {
-              return <MermaidBlock code={String(children).replace(/\n$/, "")} />;
+              return <MermaidBlock code={codeText} />;
             }
-            if (isBlock && match) {
-              const codeText = String(children).replace(/\n$/, "");
+            if (isBlock) {
+              const lang = match?.[1];
               // Big blocks skip Prism: its tokeniser runs synchronously on
               // mount, so highlighting every large block in the initial window
-              // at once is what stalls the main thread. Plain <pre> renders
-              // instantly and stays copy-able.
-              const tooLargeToHighlight = codeText.length > MAX_HIGHLIGHT_CHARS;
+              // at once is what stalls the main thread. A no-language fence has
+              // nothing for Prism to tokenise anyway — both fall back to a plain
+              // <pre>, which renders instantly, stays copy-able, and (crucially
+              // for diagrams/tables) preserves fixed-width layout with a
+              // horizontal scroll instead of wrapping.
+              const usePlain = !lang || codeText.length > MAX_HIGHLIGHT_CHARS;
               return (
                 <div className={styles.code_wrapper}>
-                  <span className={styles.code_lang}>{match[1]}</span>
+                  {lang && <span className={styles.code_lang}>{lang}</span>}
                   <button
                     className={styles.copy_btn}
                     onClick={() =>
@@ -130,7 +139,7 @@ export const TextBlock = memo(function TextBlock({
                   >
                     Copy
                   </button>
-                  {tooLargeToHighlight ? (
+                  {usePlain ? (
                     <pre
                       style={{
                         margin: 0,
@@ -147,7 +156,7 @@ export const TextBlock = memo(function TextBlock({
                   ) : (
                     <SyntaxHighlighter
                       style={oneDark}
-                      language={match[1]}
+                      language={lang}
                       PreTag="pre"
                       customStyle={{
                         margin: 0,
