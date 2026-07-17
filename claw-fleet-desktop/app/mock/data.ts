@@ -941,6 +941,43 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         usage: { input_tokens: 4200, output_tokens: 450 },
       },
     },
+    // A lone work record — a single Bash call between two prose messages, too
+    // short for a WorkRunBlock band. Exercises the unified rail-step rendering
+    // for singles (icon + summary row, no card chrome).
+    {
+      type: "assistant",
+      uuid: "msg-5a",
+      timestamp: new Date(NOW - 15 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-2b",
+            name: "Bash",
+            input: {
+              command: "mkdir -p src/mock && touch src/mock/tauri-mock.ts",
+              description: "Create the mock module skeleton",
+            },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 4300, output_tokens: 55 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-5a2",
+      timestamp: new Date(NOW - 15 * MIN).toISOString(),
+      toolUseResult: { stdout: "", stderr: "", interrupted: false },
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "tool-2b", content: "" },
+        ],
+      },
+    },
     // A background-shell notice with no <result> and a paragraph-long <summary>
     // — the shape Claude Code emits when it can't tell whether a background
     // shell from the previous session finished. Kept in the mock because it is

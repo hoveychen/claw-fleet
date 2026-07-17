@@ -3,13 +3,10 @@ import { useTranslation } from "react-i18next";
 import {
   Bot,
   CircleCheck,
-  CircleHelp,
   Clock,
   FileText,
   Globe,
-  Image,
   ListTodo,
-  MessageSquare,
   Pencil,
   Search,
   Terminal,
@@ -52,9 +49,6 @@ export function railGroupIcon(names: string[]): ReactNode {
 }
 
 export const railThinkingIcon = (<Clock />);
-export const railTextIcon = (<MessageSquare />);
-export const railMediaIcon = (<Image />);
-export const railDecisionIcon = (<CircleHelp />);
 export const railUnknownIcon = (<Wrench />);
 
 export function RailStep({ icon, children }: { icon: ReactNode; children: ReactNode }) {
