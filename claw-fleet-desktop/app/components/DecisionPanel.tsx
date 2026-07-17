@@ -1537,7 +1537,7 @@ export function FleetAskCard({
           <line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
         <span className={styles.card_title}>
-          {t("fleet_ask.title", "Agent Question (fleet__ask)")}
+          {t("fleet_ask.title", "Agent Question")}
         </span>
         {total > 1 && (
           <span className={styles.elicitation_step_badge}>
