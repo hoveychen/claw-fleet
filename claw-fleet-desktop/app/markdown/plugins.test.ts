@@ -92,6 +92,16 @@ describe("GFM survives the sanitize pass", () => {
     expect(render("见 https://example.com 谢谢")).toContain('href="https://example.com"');
   });
 
+  it("does not treat bare home-directory paths as strikethrough", () => {
+    const html = render(
+      "watcher 监听着 ~/.claude/skills、开关=true，但 Codex 目录写错(~/.agents→~/.codex/skills)",
+    );
+    expect(html).not.toContain("<del>");
+    expect(html).toContain("~/.claude/skills");
+    expect(html).toContain("~/.agents");
+    expect(html).toContain("~/.codex/skills");
+  });
+
   it("keeps the language class a mermaid block is recognised by", () => {
     expect(render("```mermaid\ngraph TD;\nA-->B;\n```")).toContain("language-mermaid");
   });
