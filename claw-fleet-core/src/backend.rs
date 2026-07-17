@@ -563,6 +563,14 @@ pub trait Backend: Send + Sync {
 
     // ── Skills ────────────────────────────────────────────────────────────────
     fn list_skills(&self) -> Vec<SkillItem>;
+    fn skill_sync_inventory(&self) -> Result<Vec<crate::skill_sync::SkillSyncEntry>, String>;
+    fn skill_sync_apply(&self) -> Result<crate::skill_sync::SkillSyncReport, String>;
+    fn skill_sync_adopt(&self, path: &str) -> Result<crate::skill_sync::SkillSyncReport, String>;
+    fn skill_sync_unlink(
+        &self,
+        slug: &str,
+        target: crate::skill_sync::SkillTarget,
+    ) -> Result<crate::skill_sync::SkillSyncAction, String>;
     fn get_skill_content(&self, path: &str) -> Result<String, String>;
     fn list_skill_files(&self, skill_path: &str) -> Result<Vec<SkillFileEntry>, String>;
     /// Delete a skill (directory or flat file) under `~/.claude/skills/`.

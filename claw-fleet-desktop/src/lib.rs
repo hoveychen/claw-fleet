@@ -320,6 +320,22 @@ impl Backend for NullBackend {
     fn list_skills(&self) -> Vec<SkillItem> {
         vec![]
     }
+    fn skill_sync_inventory(&self) -> Result<Vec<claw_fleet_core::skill_sync::SkillSyncEntry>, String> {
+        Err("backend not ready".into())
+    }
+    fn skill_sync_apply(&self) -> Result<claw_fleet_core::skill_sync::SkillSyncReport, String> {
+        Err("backend not ready".into())
+    }
+    fn skill_sync_adopt(&self, _: &str) -> Result<claw_fleet_core::skill_sync::SkillSyncReport, String> {
+        Err("backend not ready".into())
+    }
+    fn skill_sync_unlink(
+        &self,
+        _: &str,
+        _: claw_fleet_core::skill_sync::SkillTarget,
+    ) -> Result<claw_fleet_core::skill_sync::SkillSyncAction, String> {
+        Err("backend not ready".into())
+    }
     fn get_skill_content(&self, _: &str) -> Result<String, String> {
         Err("backend not ready".into())
     }

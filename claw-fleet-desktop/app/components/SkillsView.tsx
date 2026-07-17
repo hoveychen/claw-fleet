@@ -33,6 +33,24 @@ interface SkillFileEntry {
   isDir: boolean;
 }
 
+interface SkillSyncEntry {
+  slug: string;
+  state: "shared" | "partial" | "conflict" | "unmanaged";
+  compatibility: "both" | "claude-only" | "codex-only" | "incompatible";
+  warnings: string[];
+  canonicalPath: string | null;
+  claudePath: string | null;
+  codexPath: string | null;
+  claudeManaged: boolean;
+  codexManaged: boolean;
+}
+
+interface SkillSyncReport {
+  items: SkillSyncEntry[];
+  actions: Array<{ slug: string; target: string; action: string; path: string }>;
+  conflicts: string[];
+}
+
 // Extensions we render as text. Others fall back to a "binary" placeholder.
 const TEXT_EXTENSIONS = new Set([
   "md", "markdown", "txt", "text",
@@ -101,15 +119,17 @@ export function SkillsView() {
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<"all" | "claude-code" | "codex">("all");
   const [selected, setSelected] = useState<SkillItem | null>(null);
+  const [syncEntries, setSyncEntries] = useState<SkillSyncEntry[]>([]);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
-    try {
-      const data = await invoke<SkillItem[]>("list_skills");
-      setSkills(data);
-      setLoaded(true);
-    } catch {
-      setLoaded(true);
-    }
+    const [skillsResult, syncResult] = await Promise.allSettled([
+      invoke<SkillItem[]>("list_skills"),
+      invoke<SkillSyncEntry[]>("skill_sync_inventory"),
+    ]);
+    if (skillsResult.status === "fulfilled") setSkills(skillsResult.value);
+    if (syncResult.status === "fulfilled") setSyncEntries(syncResult.value);
+    setLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -130,6 +150,27 @@ export function SkillsView() {
     "claude-code": skills.filter((s) => s.source === "claude-code").length,
     codex: skills.filter((s) => s.source === "codex").length,
   }), [skills]);
+
+  const syncBySlug = useMemo(
+    () => new Map(syncEntries.map((entry) => [entry.slug, entry])),
+    [syncEntries],
+  );
+
+  const applySync = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const report = await invoke<SkillSyncReport>("skill_sync_apply");
+      if (report.conflicts.length > 0) {
+        window.alert(t("skills.sync_conflicts", { count: report.conflicts.length }));
+      }
+      await load();
+    } catch (error) {
+      window.alert(t("skills.sync_failed", { error: String(error) }));
+    } finally {
+      setSyncing(false);
+    }
+  }, [load, syncing, t]);
 
   useEffect(() => {
     if (!selected) return;
@@ -157,6 +198,10 @@ export function SkillsView() {
             <span>{t("skills.source_claude")}</span>
             <span className={styles.chip_count}>{sourceCounts["claude-code"]}</span>
           </button>
+          <span className={skillStyles.sync_spacer} />
+          <button className={styles.chip} onClick={applySync} disabled={syncing}>
+            {syncing ? t("skills.syncing") : t("skills.sync_all")}
+          </button>
           <button
             className={`${styles.chip} ${sourceFilter === "codex" ? styles.chip_active : ""}`}
             onClick={() => setSourceFilter((v) => v === "codex" ? "all" : "codex")}
@@ -181,6 +226,7 @@ export function SkillsView() {
               <SkillCard
                 key={skill.path}
                 skill={skill}
+                syncEntry={syncBySlug.get(skill.name)}
                 active={selected?.path === skill.path}
                 onClick={() => setSelected(skill)}
               />
@@ -192,6 +238,11 @@ export function SkillsView() {
       {selected ? (
         <SkillDetail
           skill={selected}
+          syncEntry={syncBySlug.get(selected.name)}
+          onChanged={async () => {
+            setSelected(null);
+            await load();
+          }}
           onDeleted={(path) => {
             setSkills((prev) => prev.filter((s) => s.path !== path));
             setSelected(null);
@@ -212,10 +263,12 @@ export function SkillsView() {
 
 function SkillCard({
   skill,
+  syncEntry,
   active,
   onClick,
 }: {
   skill: SkillItem;
+  syncEntry?: SkillSyncEntry;
   active: boolean;
   onClick: () => void;
 }) {
@@ -236,6 +289,11 @@ function SkillCard({
             {skill.source === "codex" ? "Codex" : "Claude"}
           </span>
           <span>{t(`skills.scope_${skill.scope}`, { defaultValue: skill.scope })}</span>
+          {syncEntry && (
+            <span className={`${skillStyles.sync_tag} ${skillStyles[`sync_${syncEntry.state}`]}`}>
+              {t(`skills.sync_state_${syncEntry.state}`)}
+            </span>
+          )}
           <span className={styles.card_meta_dot}>·</span>
           <span>{formatSize(skill.sizeBytes)}</span>
           {skill.modifiedMs > 0 && (
@@ -254,9 +312,13 @@ function SkillCard({
 
 function SkillDetail({
   skill,
+  syncEntry,
+  onChanged,
   onDeleted,
 }: {
   skill: SkillItem;
+  syncEntry?: SkillSyncEntry;
+  onChanged: () => Promise<void>;
   onDeleted: (path: string) => void;
 }) {
   const { t } = useTranslation();
@@ -269,6 +331,7 @@ function SkillDetail({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [fileQuery, setFileQuery] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [mutatingSync, setMutatingSync] = useState(false);
   const {
     width: treeWidth,
     isDragging: treeDragging,
@@ -369,6 +432,42 @@ function SkillDetail({
     }
   }, [deleting, onDeleted, skill.name, skill.path, t]);
 
+  const managedForSource = skill.source === "codex"
+    ? syncEntry?.codexManaged === true
+    : syncEntry?.claudeManaged === true;
+
+  const adopt = useCallback(async () => {
+    if (mutatingSync) return;
+    setMutatingSync(true);
+    try {
+      const report = await invoke<SkillSyncReport>("skill_sync_adopt", { path: skill.path });
+      if (report.conflicts.length > 0) {
+        window.alert(t("skills.sync_conflicts", { count: report.conflicts.length }));
+      }
+      await onChanged();
+    } catch (error) {
+      window.alert(t("skills.sync_failed", { error: String(error) }));
+    } finally {
+      setMutatingSync(false);
+    }
+  }, [mutatingSync, onChanged, skill.path, t]);
+
+  const unlink = useCallback(async () => {
+    if (mutatingSync) return;
+    setMutatingSync(true);
+    try {
+      await invoke("skill_sync_unlink", {
+        slug: skill.name,
+        target: skill.source === "codex" ? "codex" : "claude-code",
+      });
+      await onChanged();
+    } catch (error) {
+      window.alert(t("skills.sync_failed", { error: String(error) }));
+    } finally {
+      setMutatingSync(false);
+    }
+  }, [mutatingSync, onChanged, skill.name, skill.source, t]);
+
   return (
     <>
       <div className={styles.detail_header}>
@@ -382,6 +481,16 @@ function SkillDetail({
           )}
         </div>
         <div className={styles.detail_actions}>
+          {skill.scope === "user" && syncEntry?.state === "unmanaged" && (
+            <button className={styles.promote_btn} onClick={adopt} disabled={mutatingSync}>
+              {t("skills.share_both")}
+            </button>
+          )}
+          {managedForSource && (
+            <button className={styles.promote_btn} onClick={unlink} disabled={mutatingSync}>
+              {t("skills.unlink_target")}
+            </button>
+          )}
           {isLocal && activeFile && (
             <button
               className={styles.promote_btn}
@@ -391,7 +500,7 @@ function SkillDetail({
               {t("skills.reveal_in_finder")}
             </button>
           )}
-          {skill.canDelete && (
+          {skill.canDelete && !managedForSource && (
             <button
               className={skillStyles.danger_btn}
               onClick={handleDelete}
@@ -403,6 +512,14 @@ function SkillDetail({
           )}
         </div>
       </div>
+
+      {syncEntry && (
+        <div className={skillStyles.sync_notice}>
+          <strong>{t(`skills.sync_state_${syncEntry.state}`)}</strong>
+          <span>{t(`skills.compat_${syncEntry.compatibility}`)}</span>
+          {syncEntry.warnings.map((warning) => <span key={warning}>⚠ {warning}</span>)}
+        </div>
+      )}
 
       <div className={skillStyles.detail_split}>
         {fileCount > 1 && (

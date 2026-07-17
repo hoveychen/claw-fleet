@@ -231,7 +231,21 @@
     "scope_user": "用户级",
     "scope_repo": "仓库级",
     "scope_admin": "管理员",
-    "scope_system": "内置"
+    "scope_system": "内置",
+    "sync_all": "同步已托管 Skill",
+    "syncing": "同步中…",
+    "share_both": "共享给 Claude + Codex",
+    "unlink_target": "从当前端解绑",
+    "sync_failed": "Skill 同步失败：{{error}}",
+    "sync_conflicts": "同步完成，但有 {{count}} 个同名冲突未覆盖。",
+    "sync_state_shared": "双端共享",
+    "sync_state_partial": "待同步",
+    "sync_state_conflict": "同名冲突",
+    "sync_state_unmanaged": "未托管",
+    "compat_both": "兼容 Claude 与 Codex",
+    "compat_claude-only": "仅兼容 Claude",
+    "compat_codex-only": "仅兼容 Codex",
+    "compat_incompatible": "需人工适配"
   },
   "plugins": {
     "panel_title": "插件",
