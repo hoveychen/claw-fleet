@@ -96,12 +96,8 @@ worktree 特性分支（`prd/<plan-id>`）上的提交由 Rule 3 管辖、在每
 \n\
 ### 「完成」意味着什么\n\
 \n\
-计划完成要求以下全部成立：\n\
-- 每个 P-task / 编号 todo 在 TASKS.md 里都已标记完成（见 Rule 2）。\n\
-- 构建 / 类型检查 / 测试都已跑过（按项目现有规则）。\n\
-- 一份改动摘要已向{title}呈报。\n\
-\n\
-在这三条都为真之前，计划未完成；不要提议提交。\n\
+计划完成 = 所有 P-task 在 TASKS.md 已勾选（见 Rule 2）+ 构建/测试已跑 + 已向\
+{title}呈报改动摘要。三者未全为真前，计划未完成，不要提议提交。\n\
 \n\
 ### 边缘情形\n\
 \n\
@@ -278,17 +274,15 @@ TASKS.md 是代理的临时草稿状态——它不该进版本控制。你在�
   git worktree add -b prd/<task-id> .worktrees/<task-id> main\n\
   ```\n\
 \n\
-  所有代码工作都在这个 worktree 里跑；主 checkout 全程保持干净。多步计划里，\
-  P1..P(n-1) 在这里发生，最后一个 P-task 是合并回 main。单步改动里，整个改动都\
-  在这里发生，测试变绿后合并回去。\n\
+  所有代码工作都在这个 worktree 里跑；主 checkout 全程保持干净。最后一个 P-task\
+  （单步改动则是收尾动作）是合并回 main。\n\
 - **worktree 内的中间提交明确允许，不违反 Rule 1。** Rule 1 的「不主动提交」\
-  针对的是 *main*；`prd/<task-id>` 上的提交是别的工作看不到的进度标记。多步\
-  计划里，只要有助于你推理下一步（如某个后续 P-task 回退了行为时用\
-  `git diff HEAD~1`），就在 P-task 之间提交。单步改动里，若有助于调试，你也可以\
-  把工作拆成多个 worktree 内提交。你仍无需*请求*{title}许可才能在 worktree 内\
+  针对的是 *main*；`prd/<task-id>` 上的提交是别的工作看不到的进度标记。只要有助于\
+  推理下一步（如某个后续改动回退了行为时用 `git diff HEAD~1`），就在 P-task 之间\
+  提交（单步改动也可拆成多个提交）。你仍无需*请求*{title}许可才能在 worktree 内\
   提交——那是私有分支上的自由移动。\n\
-- **工作以一次原子的合并回 main 结束。**多步计划里这是最后一个 P-task；单步\
-  改动里它只是测试变绿后的收尾动作。从主 checkout：\n\
+- **工作以一次原子的合并回 main 结束**（最后一个 P-task，单步改动则是收尾\
+  动作）。从主 checkout：\n\
 \n\
   ```\n\
   git merge --no-ff prd/<task-id>\n\
@@ -379,13 +373,6 @@ worktree 的借口——重点就是哪怕一次 50 行的机械编辑也享受�
    的情况下陷入「修→重试→修→重试」的循环。\n\
 4. **一次破坏性操作**（rebase、force-push、删分支、丢弃 migration、\
    `git reset --hard`）。既有的破坏性操作确认要求仍适用；Rule 4 不覆盖它。\n\
-\n\
-### 本规则要杀死的失败模式\n\
-\n\
-Rule 4 要杀的打断模式*不是*「代理在破坏性操作前问」或「代理真卡住时问」——那些\
-是健康的。要杀的是**主动进度汇报检查点**：「我完成了 P1–P3，P4 前要我审一下\
-吗？」「P4 做完了，继续吗？」「我们进展很大，要我总结一下吗？」。计划勾选框和\
-（Rule 3 下）worktree 提交已经显示进度。代理的活儿是执行计划，不是叙述它。\n\
 \n\
 ## Rule 5 —— 长上下文交接（`fleet handoff`）\n\
 \n\
@@ -531,12 +518,9 @@ cases below.\n\
 \n\
 ### What \"finished\" means\n\
 \n\
-Plan completion requires ALL of:\n\
-- Every P-task / numbered todo is marked complete in TASKS.md (see Rule 2).\n\
-- Build / type-check / tests have been run (per the project's existing rules).\n\
-- A summary of what changed has been surfaced to {title}.\n\
-\n\
-Until those three are true, the plan is not done; do not propose committing.\n\
+Plan completion = all P-tasks checked in TASKS.md (see Rule 2) + build/tests \
+run + a change summary surfaced to {title}. Until all three are true, the \
+plan is not done; do not propose committing.\n\
 \n\
 ### Edge cases\n\
 \n\
@@ -744,21 +728,18 @@ the spot (e.g. `fix-zombie-pid`, `rename-task-fields`).\n\
   ```\n\
 \n\
   All code work runs inside this worktree; the main checkout stays clean \
-  throughout. For multi-step plans, P1..P(n-1) happen here and the final \
-  P-task is the merge back to main. For single-step changes, the entire \
-  change happens here and you merge back when tests are green.\n\
+  throughout. The final P-task (or, for a single-step change, the finishing \
+  move) is the merge back to main.\n\
 - **Intermediate commits inside the worktree are explicitly allowed and do \
   NOT violate Rule 1.** Rule 1's \"no proactive commit\" applies to *main*; \
   commits on `prd/<task-id>` inside the worktree are progress markers that \
-  no other work can see. For multi-step plans, commit between P-tasks \
-  whenever it helps you reason about the next step (e.g. `git diff HEAD~1` \
-  when a later P-task regresses behaviour). For single-step changes, you \
-  may also break the work into multiple commits inside the worktree if it \
-  helps debugging. You still do not need to *ask* {title} for permission \
-  to commit inside the worktree — it's free movement on a private branch.\n\
-- **The work ends with one atomic merge back to main.** For multi-step \
-  plans this is the final P-task; for single-step changes it is simply the \
-  finishing move once tests are green. From the main checkout:\n\
+  no other work can see. Commit between P-tasks (or split a single-step \
+  change into several commits) whenever it helps you reason about the next \
+  step, e.g. `git diff HEAD~1` when a later change regresses behaviour. You \
+  still do not need to *ask* {title} for permission to commit inside the \
+  worktree — it's free movement on a private branch.\n\
+- **The work ends with one atomic merge back to main** (the final P-task, \
+  or the finishing move for a single-step change). From the main checkout:\n\
 \n\
   ```\n\
   git merge --no-ff prd/<task-id>\n\
@@ -883,16 +864,6 @@ to check in?\" is NEVER one of them.\n\
    dropping a migration, `git reset --hard`). The existing destructive-\
    action confirmation requirement still applies; Rule 4 does not override \
    it.\n\
-\n\
-### Failure mode this rule kills\n\
-\n\
-The interruption mode Rule 4 kills is *not* \"agent asks before destructive \
-things\" or \"agent asks when genuinely stuck\" — those are healthy. What's \
-killed is the **proactive progress-report checkpoint**: \"I've completed \
-P1–P3, want me to review before P4?\", \"P4 is done, shall I continue?\", \
-\"we've made a lot of progress, want me to summarise?\". The plan \
-checkboxes and (under Rule 3) the worktree commits already show progress. \
-The agent's job is to execute the plan, not narrate it.\n\
 \n\
 ## Rule 5 — Long-context handoff (`fleet handoff`)\n\
 \n\
