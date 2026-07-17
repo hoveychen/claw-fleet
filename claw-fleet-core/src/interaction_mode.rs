@@ -279,15 +279,9 @@ markdown。两个工具都在同一决策面板里渲染，所以{title_zh}看�
 \n\
 `Question`（字段同 `AskUserQuestion`，外加三个可选）：\n\
 - `question`、`header`、`multiSelect`——与 `AskUserQuestion` 相同。\n\
-- `options`（Option[]，这里**可选**）：Option 形状同 `AskUserQuestion`；卡片是\
-  纯表单或纯 html 时整个省略。\n\
-- `html`（string，可选）：在沙箱 iframe 里渲染的 HTML 正文。按名引用附带的图片\
-  （`<img src=\"name\">`）；绝不 base64 内联。\n\
-- `images`（Image[]，可选）：不经内联展示的本地文件。每项是\
-  `{{ \"name\": string, \"path\": string, \"caption\"?: string }}`——`name` 是你在\
-  `html` 里引用的纯文件名，`path` 是文件在你主机上的位置。完整约定见上面的\
-  images 条目。\n\
-- `formFields`（FormField[]，可选）：动态输入字段。见下。\n\
+- `options`（Option[]，这里**可选**）：形状同 `AskUserQuestion`；卡片是纯表单或\
+  纯 html 时整个省略。\n\
+- `html` / `images` / `formFields`——即上文那三个扩展字段；`formFields` 详见下方。\n\
 \n\
 `FormField`：\n\
 - `name`（string，必填）：answers map 将使用的标识符。\n\
@@ -327,15 +321,8 @@ markdown。两个工具都在同一决策面板里渲染，所以{title_zh}看�
 }}\n\
 ```\n\
 \n\
-`fleet__ask` 返回的 `answers` 是扁平 map。对上面的复合示例，它会长这样：\n\
-```json\n\
-{{\n\
-  \"Migration impact report.\\n---\\nReview the table, fill in the rollout note, and pick a window.\": \"Tonight 02:00 UTC (Recommended)\",\n\
-  \"rollout_note\": \"Adding NOT NULL with backfill default.\"\n\
-}}\n\
-```\n\
-（问题文本 → 选项 label，字段 name → 值，同在一个 map——因为问题文本是散文、\
-字段 name 是标识符，不会撞名。）\n\
+`fleet__ask` 返回的 `answers` 是扁平 map：问题文本 → 选项 label，字段 name → 值，\
+同在一个 map（问题文本是散文、字段 name 是标识符，不会撞名）。\n\
 \n\
 ## 扩展：`fleet__render_a2ui`（更丰富的代理驱动 UI）\n\
 \n\
@@ -649,15 +636,10 @@ Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
 \n\
 `Question` (same fields as `AskUserQuestion`, plus three optional):\n\
 - `question`, `header`, `multiSelect` — identical to `AskUserQuestion`.\n\
-- `options` (Option[], **optional** here): same Option shape as \
-  `AskUserQuestion`; omit entirely when the card is form-only or html-only.\n\
-- `html` (string, optional): HTML body rendered in a sandboxed iframe. \
-  Reference attached images by name (`<img src=\"name\">`); never base64-inline.\n\
-- `images` (Image[], optional): local files shown without inlining. Each is \
-  `{{ \"name\": string, \"path\": string, \"caption\"?: string }}` — `name` is the bare \
-  filename you reference in `html`, `path` is where the file lives on your \
-  host. See the images bullet above for the full contract.\n\
-- `formFields` (FormField[], optional): dynamic input fields. See below.\n\
+- `options` (Option[], **optional** here): same Option shape; omit entirely \
+  when the card is form-only or html-only.\n\
+- `html` / `images` / `formFields` — the three extension fields described \
+  above; `formFields` detailed below.\n\
 \n\
 `FormField`:\n\
 - `name` (string, required): identifier the answers map will use.\n\
@@ -697,17 +679,9 @@ Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
 }}\n\
 ```\n\
 \n\
-The `answers` returned by `fleet__ask` is a flat map. For the composite \
-example above it would look like:\n\
-```json\n\
-{{\n\
-  \"Migration impact report.\\n---\\nReview the table, fill in the rollout note, and pick a window.\": \"Tonight 02:00 UTC (Recommended)\",\n\
-  \"rollout_note\": \"Adding NOT NULL with backfill default.\"\n\
-}}\n\
-```\n\
-(question text → option label, form-field name → value, both in the same \
-map — name collisions are avoided because question text is prose and field \
-names are identifiers.)\n\
+The `answers` returned by `fleet__ask` is a flat map: question text → option \
+label, form-field name → value, both in the same map (name collisions are \
+avoided because question text is prose and field names are identifiers).\n\
 \n\
 ## Extended: `fleet__render_a2ui` (richer agent-driven UI)\n\
 \n\
