@@ -422,8 +422,9 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
 
   useEffect(() => {
     dwellFired.current = false;
-    // Never carry one session's pending echo into another.
+    // Never carry one session's pending echo (or a stuck in-flight flag) over.
     setOptimisticSends([]);
+    submitInFlightRef.current = false;
     const timer = window.setTimeout(() => {
       if (!dwellFired.current) {
         dwellFired.current = true;
@@ -439,6 +440,13 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
   // setMessages doesn't clobber them.
   const [optimisticSends, setOptimisticSends] = useState<OptimisticSend[]>([]);
   const optimisticSeq = useRef(0);
+  // True while a resume/enqueue submit is in flight — the tail / live-thinking
+  // pollers skip their tick then, yielding the single serialized WS to the
+  // resume req/reply rather than contending with a big tail response.
+  const submitInFlightRef = useRef(false);
+  const handleSubmitInFlight = useCallback((v: boolean) => {
+    submitInFlightRef.current = v;
+  }, []);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tailN, setTailN] = useState(TAIL_INITIAL);
   const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
@@ -483,6 +491,13 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
     };
 
     const poll = async () => {
+      // A resume/enqueue submit is on the wire — don't fire a competing tail on
+      // the single serialized WS; the optimistic echo already shows the user's
+      // message, so a skipped tick costs nothing. Retry on the next interval.
+      if (submitInFlightRef.current) {
+        if (!cancelled) timer = window.setTimeout(poll, TAIL_POLL_MS);
+        return;
+      }
       try {
         if (legacyRef.current) {
           await fullTail();
@@ -530,6 +545,11 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
     let cancelled = false;
     let timer = 0;
     const poll = async () => {
+      // Same yield as the tail poller: hold off while a submit is in flight.
+      if (submitInFlightRef.current) {
+        if (!cancelled) timer = window.setTimeout(poll, LIVE_THINKING_POLL_MS);
+        return;
+      }
       try {
         const lt = await client.request<LiveThinking | null>("live_thinking", {
           sessionId: session.id,
@@ -716,10 +736,20 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
       )}
 
       {tab === "messages" && canResumeSession(session) && (
-        <ResumeComposer session={session} client={client} onOptimisticSend={handleOptimisticSend} />
+        <ResumeComposer
+          session={session}
+          client={client}
+          onOptimisticSend={handleOptimisticSend}
+          onSubmitInFlight={handleSubmitInFlight}
+        />
       )}
       {tab === "messages" && canEnqueueSession(session) && (
-        <ResumeComposer session={session} client={client} mode="enqueue" />
+        <ResumeComposer
+          session={session}
+          client={client}
+          mode="enqueue"
+          onSubmitInFlight={handleSubmitInFlight}
+        />
       )}
     </div>
   );
