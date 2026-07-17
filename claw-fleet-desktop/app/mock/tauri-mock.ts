@@ -20,6 +20,7 @@ import {
   MOCK_WIKI_BODIES,
   MOCK_EXPLORER_ROOTS,
   MOCK_EXPLORER_TREE,
+  MOCK_HTML_FILE,
   MOCK_GIT_STATUS,
   MOCK_SKILLS,
   MOCK_SKILL_FILES,
@@ -197,8 +198,15 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return MOCK_EXPLORER_ROOTS;
     case "list_explorer_dir":
       return MOCK_EXPLORER_TREE[(args.relativePath as string) ?? ""] ?? [];
-    case "read_explorer_file":
+    case "read_explorer_file": {
+      const rel = (args.relPath as string) ?? "";
+      // Real HTML (with inline styles + a script) so the iframe preview branch
+      // has something to actually render in ?mock.
+      if (rel.endsWith(".html") || rel.endsWith(".htm")) {
+        return { kind: "text", content: MOCK_HTML_FILE, truncated: false, sizeBytes: MOCK_HTML_FILE.length };
+      }
       return { kind: "text", content: "mock 模式下的占位文件内容。\n", truncated: false, sizeBytes: 42 };
+    }
     case "git_status":
       return MOCK_GIT_STATUS;
 

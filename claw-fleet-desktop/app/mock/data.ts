@@ -2560,6 +2560,7 @@ export const MOCK_EXPLORER_TREE: Record<string, ReturnType<typeof fileEntry>[]> 
     dirEntry("node_modules", "node_modules"),
     fileEntry("package.json", "package.json", 2_140),
     fileEntry("README.md", "README.md", 8_900),
+    fileEntry("index.html", "index.html", 1_180),
     fileEntry(".env.local", ".env.local", 210, true),
   ],
   src: [
@@ -2578,6 +2579,37 @@ export const MOCK_EXPLORER_TREE: Record<string, ReturnType<typeof fileEntry>[]> 
   node_modules: [dirEntry("react", "node_modules/react")],
   "node_modules/react": [fileEntry("index.js", "node_modules/react/index.js", 990, true)],
 };
+
+/** A real, self-contained HTML doc for the .html iframe preview in ?mock.
+ *  Inline styles render regardless of sandbox; the <script> only shows text
+ *  when allow-scripts is on — a live check of the sandbox policy. */
+export const MOCK_HTML_FILE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mock Preview</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 40px; color: #1f2023; }
+  h1 { color: #b8471f; margin: 0 0 12px; }
+  .card { background: #f1efea; border: 1px solid rgba(32,28,18,0.11); border-radius: 8px; padding: 20px; }
+  #js-status { margin-top: 16px; font-weight: 700; color: #6f7078; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Hello from the repo preview</h1>
+    <p>This paragraph is plain HTML with an <strong>inline stylesheet</strong>.</p>
+    <p>If scripts are allowed, the line below turns green and updates.</p>
+    <div id="js-status">script did not run (sandbox blocks JS)</div>
+  </div>
+  <script>
+    var el = document.getElementById("js-status");
+    el.textContent = "✓ script ran — JS is executing in the iframe";
+    el.style.color = "#2e7d32";
+  </script>
+</body>
+</html>
+`;
 
 export const MOCK_GIT_STATUS = {
   isGit: true,
