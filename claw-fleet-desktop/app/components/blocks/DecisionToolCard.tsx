@@ -173,8 +173,9 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
     ? normalizeAnswer(answers[first.question], (first.options ?? []).map((o) => o.label))
     : null;
 
-  const isFleetAsk = block.name.endsWith("fleet__ask");
-  const kindLabel = isFleetAsk ? "fleet__ask" : t("detail.decision_ask");
+  // Both AskUserQuestion and the fleet__ask MCP variant are "the agent asked a
+  // question" — label them identically rather than leaking the raw tool name.
+  const kindLabel = t("detail.decision_ask");
 
   // A card with no parseable questions is not worth a bespoke renderer.
   if (questions.length === 0) return null;
