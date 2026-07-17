@@ -120,6 +120,7 @@ export function waitTimeoutSecs(input: Record<string, unknown>): string | null {
 interface PatchFile {
   op: "Add" | "Update" | "Delete";
   path: string;
+  movePath?: string;
 }
 
 /**
@@ -131,10 +132,16 @@ interface PatchFile {
  */
 export function parsePatchFiles(patch: string): PatchFile[] {
   const files: PatchFile[] = [];
-  const re = /^\*\*\* (Add|Update|Delete) File: (.+)$/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(patch)) !== null) {
-    files.push({ op: m[1] as PatchFile["op"], path: m[2].trim() });
+  for (const line of patch.split("\n")) {
+    const header = line.match(/^\*\*\* (Add|Update|Delete) File: (.+)$/);
+    if (header) {
+      files.push({ op: header[1] as PatchFile["op"], path: header[2].trim() });
+      continue;
+    }
+    const move = line.match(/^\*\*\* Move to: (.+)$/);
+    if (move && files.length > 0) {
+      files[files.length - 1].movePath = move[1].trim();
+    }
   }
   return files;
 }
@@ -422,6 +429,7 @@ function PatchInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLin
                 {f.op}
               </span>
               {relToWorkspace(f.path, paths?.workspaceRoot)}
+              {f.movePath && ` → ${relToWorkspace(f.movePath, paths?.workspaceRoot)}`}
             </span>
           ))}
         </div>

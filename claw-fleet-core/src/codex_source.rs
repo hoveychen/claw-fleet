@@ -2533,10 +2533,11 @@ mod tests {
     }
 
     #[test]
-    fn normalize_messages_summarizes_patch_apply_end() {
+    fn normalize_messages_structures_patch_apply_end_as_tool_call() {
         // Codex emits `patch_apply_end` after applying an apply_patch, carrying
-        // the per-file change map. Surface a concise "which files changed" card
-        // (the full patch already shows in the exec tool card).
+        // the exact applied unified diff for every file. Preserve it as a real
+        // tool call/result pair rather than assistant prose so every client can
+        // render the same patch card as a direct apply_patch invocation.
         let lines = vec![json!({
             "type": "event_msg",
             "payload": {
@@ -2545,32 +2546,54 @@ mod tests {
                 "success": true,
                 "stdout": "Success. Updated the following files:\nM /repo/foo.rs\n",
                 "changes": {
-                    "/repo/foo.rs": {"type": "update"},
-                    "/repo/new.rs": {"type": "add"}
+                    "/repo/foo.rs": {
+                        "type": "update",
+                        "unified_diff": "@@ -1 +1 @@\n-old\n+new\n",
+                        "move_path": null
+                    },
+                    "/repo/new.rs": {
+                        "type": "add",
+                        "unified_diff": "@@ -0,0 +1 @@\n+hello\n",
+                        "move_path": null
+                    },
+                    "/repo/old.rs": {
+                        "type": "delete",
+                        "unified_diff": "@@ -1 +0,0 @@\n-bye\n",
+                        "move_path": null
+                    }
                 }
             },
             "timestamp": "t0"
         })];
 
         let out = normalize_messages(lines);
-        let text = out
+        let tool = out
             .iter()
-            .filter_map(|m| {
-                m.get("message")?
-                    .get("content")?
-                    .as_array()?
-                    .first()?
-                    .get("text")?
-                    .as_str()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .find_map(|m| m.get("message")?.get("content")?.as_array()?.first())
+            .expect("patch event should produce a tool_use block");
+        assert_eq!(tool["type"], json!("tool_use"));
+        assert_eq!(tool["name"], json!("apply_patch"));
+        assert_eq!(tool["id"], json!("exec-abc"));
+        let command = tool["input"]["command"].as_str().unwrap();
+        assert!(command.contains("*** Update File: /repo/foo.rs"));
+        assert!(command.contains("*** Add File: /repo/new.rs"));
+        assert!(command.contains("*** Delete File: /repo/old.rs"));
+        assert!(command.contains("@@ -1 +1 @@\n-old\n+new"));
 
-        assert!(text.contains("foo.rs"), "must name the updated file: {text}");
-        assert!(text.contains("new.rs"), "must name the added file: {text}");
-        // Change-type letters: update→M, add→A.
-        assert!(text.contains('M'), "update should show M: {text}");
-        assert!(text.contains('A'), "add should show A: {text}");
+        let result = out
+            .iter()
+            .find(|m| m.get("type").and_then(|value| value.as_str()) == Some("tool_result"))
+            .expect("patch event should produce a matching tool_result");
+        assert_eq!(result["tool_use_id"], json!("exec-abc"));
+        assert_eq!(result["is_error"], json!(false));
+        assert!(result["content"].as_str().unwrap().contains("Updated"));
+
+        assert!(out.iter().all(|m| {
+            m.get("message")
+                .and_then(|message| message.get("content"))
+                .and_then(|value| value.as_array())
+                .is_none_or(|blocks| blocks.iter().all(|block| block.get("text").is_none()))
+        }), "patch event must no longer emit assistant prose: {out:#?}");
     }
 
     #[test]
@@ -2588,22 +2611,19 @@ mod tests {
         })];
 
         let out = normalize_messages(lines);
-        let text = out
+        let tool = &out[0]["message"]["content"][0];
+        assert_eq!(tool["type"], json!("tool_use"));
+        assert_eq!(tool["name"], json!("apply_patch"));
+        let result = out
             .iter()
-            .filter_map(|m| {
-                m.get("message")?
-                    .get("content")?
-                    .as_array()?
-                    .first()?
-                    .get("text")?
-                    .as_str()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            text.to_lowercase().contains("fail"),
-            "failed patch must be flagged as failure: {text}"
-        );
+            .find(|m| m.get("type").and_then(|value| value.as_str()) == Some("tool_result"))
+            .expect("failed patch still needs a result");
+        assert_eq!(result["tool_use_id"], json!("exec-xyz"));
+        assert_eq!(result["is_error"], json!(true));
+        assert!(result["content"]
+            .as_str()
+            .unwrap()
+            .contains("patch does not apply"));
     }
 
     #[test]
@@ -4095,60 +4115,90 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                         }));
                     }
                     "patch_apply_end" => {
-                        // Codex emits this after applying an apply_patch. The
-                        // full patch already shows in the exec tool card, so
-                        // render a concise "which files changed" summary keyed
-                        // off the per-file change map (path → { type }).
+                        // This event is the authoritative nested apply_patch
+                        // result in code mode. Rehydrate it as a normal tool
+                        // call/result pair so clients render a patch card
+                        // instead of assistant prose. Each change carries the
+                        // exact unified diff Codex applied.
                         let success = payload
                             .get("success")
                             .and_then(|s| s.as_bool())
                             .unwrap_or(true);
-                        let mut files: Vec<String> = payload
+                        let call_id = payload
+                            .get("call_id")
+                            .and_then(|id| id.as_str())
+                            .unwrap_or("codex-apply-patch");
+                        let mut changes: Vec<(&str, &Value)> = payload
                             .get("changes")
                             .and_then(|c| c.as_object())
                             .map(|map| {
                                 map.iter()
-                                    .map(|(path, meta)| {
-                                        let letter = match meta
-                                            .get("type")
-                                            .and_then(|t| t.as_str())
-                                        {
-                                            Some("add") => "A",
-                                            Some("delete") => "D",
-                                            _ => "M",
-                                        };
-                                        format!("{letter} {path}")
-                                    })
+                                    .map(|(path, meta)| (path.as_str(), meta))
                                     .collect()
                             })
                             .unwrap_or_default();
-                        files.sort();
+                        changes.sort_by_key(|(path, _)| *path);
 
-                        let text = if success {
-                            if files.is_empty() {
-                                "📝 Applied patch".to_string()
-                            } else {
-                                format!("📝 Applied patch:\n{}", files.join("\n"))
+                        let mut command = String::from("*** Begin Patch\n");
+                        for (path, meta) in changes {
+                            let op = match meta.get("type").and_then(|ty| ty.as_str()) {
+                                Some("add") => "Add",
+                                Some("delete") => "Delete",
+                                _ => "Update",
+                            };
+                            command.push_str(&format!("*** {op} File: {path}\n"));
+                            if let Some(move_path) = meta
+                                .get("move_path")
+                                .and_then(|target| target.as_str())
+                                .filter(|target| !target.is_empty())
+                            {
+                                command.push_str(&format!("*** Move to: {move_path}\n"));
                             }
+                            if let Some(diff) = meta
+                                .get("unified_diff")
+                                .and_then(|diff| diff.as_str())
+                                .filter(|diff| !diff.is_empty())
+                            {
+                                command.push_str(diff);
+                                if !diff.ends_with('\n') {
+                                    command.push('\n');
+                                }
+                            }
+                        }
+                        command.push_str("*** End Patch");
+
+                        let content = if success {
+                            payload
+                                .get("stdout")
+                                .and_then(|text| text.as_str())
+                                .filter(|text| !text.trim().is_empty())
+                                .unwrap_or("Patch applied successfully")
                         } else {
-                            let err = payload
+                            payload
                                 .get("stderr")
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("")
-                                .trim();
-                            if err.is_empty() {
-                                "⚠️ Patch failed".to_string()
-                            } else {
-                                format!("⚠️ Patch failed: {err}")
-                            }
+                                .and_then(|text| text.as_str())
+                                .filter(|text| !text.trim().is_empty())
+                                .unwrap_or("Patch failed")
                         };
 
                         messages.push(json!({
                             "type": "assistant",
                             "message": {
                                 "role": "assistant",
-                                "content": [{"type": "text", "text": text}]
+                                "content": [{
+                                    "type": "tool_use",
+                                    "id": call_id,
+                                    "name": "apply_patch",
+                                    "input": { "command": command }
+                                }]
                             },
+                            "timestamp": timestamp.clone()
+                        }));
+                        messages.push(json!({
+                            "type": "tool_result",
+                            "tool_use_id": call_id,
+                            "content": content,
+                            "is_error": !success,
                             "timestamp": timestamp
                         }));
                     }

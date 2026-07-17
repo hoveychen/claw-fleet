@@ -246,6 +246,19 @@ describe("parsePatchFiles", () => {
     ]);
   });
 
+  it("keeps a patch_apply_end move target beside its applied unified diff", () => {
+    const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@ -1 +1 @@
+-old
++new
+*** End Patch`;
+    expect(parsePatchFiles(patch)).toEqual([
+      { op: "Update", path: "src/old.ts", movePath: "src/new.ts" },
+    ]);
+  });
+
   it("returns [] when there are no file headers", () => {
     expect(parsePatchFiles("just some text")).toEqual([]);
   });
