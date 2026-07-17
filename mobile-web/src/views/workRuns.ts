@@ -109,15 +109,18 @@ export function firstSentence(text: string): string {
   return sentence.length > TITLE_MAX ? `${sentence.slice(0, TITLE_MAX - 1)}…` : sentence;
 }
 
-/** Band title: the first sentence of the run's first thinking segment (with
- *  `--thinking-display summarized` those are model-written summaries). Null
- *  when the run has no usable thinking — the band falls back to a generic
- *  label. */
+/** Band title: the first sentence of the run's *last* thinking segment (with
+ *  `--thinking-display summarized` those are model-written summaries). The
+ *  first thinking often lands mid-run and describes only what comes next, so
+ *  the last one — the run's most recent intent — reads as the band's
+ *  conclusion. Null when the run has no usable thinking — the band falls back
+ *  to a generic label. */
 export function workRunTitle(msgs: RawMessage[]): string | null {
-  for (const msg of msgs) {
-    const content = msg.message?.content;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const content = msgs[i].message?.content;
     if (!Array.isArray(content)) continue;
-    for (const block of content) {
+    for (let j = content.length - 1; j >= 0; j--) {
+      const block = content[j];
       if (block.type !== "thinking") continue;
       const text = (block as { thinking?: unknown }).thinking;
       if (typeof text !== "string" || !text.trim()) continue;

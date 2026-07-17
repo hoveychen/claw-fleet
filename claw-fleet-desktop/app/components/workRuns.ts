@@ -129,17 +129,22 @@ export function firstSentence(text: string): string {
 }
 
 /**
- * Band title: the first sentence of the run's first thinking segment. With
+ * Band title: the first sentence of the run's *last* thinking segment. With
  * `--thinking-display summarized` (the spawn default) the thinking blocks are
  * model-written summaries, so their opening sentence works as a headline the
- * way claude.ai titles its work blocks. Runs with no thinking (or empty
- * thinking) return null and the band falls back to the rule-mapped category.
+ * way claude.ai titles its work blocks. A band folds many records, and the
+ * first thinking often lands mid-run (after some tool steps) describing only
+ * what comes next — using it as the whole band's title drops the earlier work
+ * and reads wrong. The last thinking is the run's most recent intent, so it
+ * works as the band's conclusion. Runs with no thinking (or empty thinking)
+ * return null and the band falls back to the rule-mapped category.
  */
 export function workRunTitle(msgs: RawMessage[]): string | null {
-  for (const msg of msgs) {
-    const content = msg.message?.content;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const content = msgs[i].message?.content;
     if (!Array.isArray(content)) continue;
-    for (const block of content) {
+    for (let j = content.length - 1; j >= 0; j--) {
+      const block = content[j];
       if (block.type !== "thinking") continue;
       const text = (block as { thinking?: unknown }).thinking;
       if (typeof text !== "string" || !text.trim()) continue;
