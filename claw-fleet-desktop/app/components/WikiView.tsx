@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Copy,
   Download,
   FileCode,
@@ -966,6 +967,14 @@ function WikiDetail({
   return (
     <>
       <div className={styles.detail_header}>
+        <button
+          className={styles.back_btn}
+          onClick={onClose}
+          title={t("wiki.back", "返回列表")}
+        >
+          <ChevronLeft size={14} strokeWidth={2} />
+          {t("wiki.back_short", "返回")}
+        </button>
         <div className={styles.detail_title}>
           {doc.workspaceName}
           <span className={styles.detail_sep}>/</span>
@@ -1027,13 +1036,6 @@ function WikiDetail({
           >
             <Trash2 size={12} strokeWidth={1.7} />
             {t("wiki.delete_doc_short", "Doc")}
-          </button>
-          <button
-            className={styles.action_btn}
-            onClick={onClose}
-            title={t("wiki.close_preview", "Close preview")}
-          >
-            {t("wiki.close_preview_short", "关闭")}
           </button>
         </div>
       </div>
