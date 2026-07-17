@@ -1551,7 +1551,8 @@ fn read_tail_at_offset(path: &std::path::Path, cur: u64) -> Option<(Vec<Value>, 
     file.seek(SeekFrom::Start(cur)).ok()?;
     let mut buf = String::new();
     file.read_to_string(&mut buf).ok()?;
-    let (lines, consumed) = claw_fleet_core::jsonl_tail::parse_incremental_tail(&buf);
+    let (mut lines, consumed) = claw_fleet_core::jsonl_tail::parse_incremental_tail(&buf);
+    claw_fleet_core::message_trim::trim_messages_for_transport(&mut lines);
     Some((lines, cur + consumed as u64))
 }
 

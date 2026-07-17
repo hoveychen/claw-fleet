@@ -471,14 +471,20 @@ pub(crate) fn route_tail(
                             let _ = file.seek(SeekFrom::Start(offset));
                             let mut buf = String::new();
                             let _ = file.read_to_string(&mut buf);
-                            let lines: Vec<serde_json::Value> = buf
-                                .lines()
-                                .filter(|l| !l.trim().is_empty())
-                                .filter_map(|l| serde_json::from_str(l).ok())
-                                .collect();
+                            // Keep the incremental endpoint on the same
+                            // transport contract as `/messages?tail=N` and the
+                            // local filesystem watcher: collapsed tool output
+                            // ships as a marked preview and is recovered by
+                            // `get_tool_result_full` only when expanded.
+                            // Advancing only past newline-terminated records is
+                            // equally load-bearing — a half-written image result
+                            // must be retried, not skipped forever.
+                            let (mut lines, consumed) =
+                                crate::jsonl_tail::parse_incremental_tail(&buf);
+                            crate::message_trim::trim_messages_for_transport(&mut lines);
                             let body = serde_json::json!({
                                 "lines": lines,
-                                "newOffset": file_size
+                                "newOffset": offset + consumed as u64
                             })
                             .to_string();
                             let _ = request.respond(
