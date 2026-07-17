@@ -2798,6 +2798,61 @@ mod tests {
         assert!(!codex_proc_alive(&[], "t-alive"));
     }
 
+    /// A Codex turn that dies mid-flight leaves the snapshot `proc_alive = true`
+    /// with no live process. `reconcile_codex_liveness` must clamp exactly the
+    /// genuinely-dead Codex sessions and leave live ones (and non-Codex ones)
+    /// untouched. Uses the injectable process slice so the result is independent
+    /// of the host's real process table.
+    #[test]
+    fn reconcile_clamps_only_dead_codex_sessions() {
+        use super::{reconcile_codex_liveness, CodexProcess};
+        use crate::session::{SessionInfo, SessionStatus};
+        let _lock = crate::session::fleet_home_lock();
+
+        let mk = |id: &str, source: &str| {
+            let mut s = SessionInfo::default();
+            s.id = id.into();
+            s.agent_source = source.into();
+            s.proc_alive = true;
+            s.status = SessionStatus::Executing;
+            s
+        };
+
+        // dead codex (not in proc set, no spawn-pid note) — must be clamped.
+        // live codex (thread id present in proc set) — must be left running.
+        // claude session — codex reconcile must ignore it entirely.
+        let mut sessions = vec![
+            mk("t-dead-codex", crate::codex_launch::FLEET_AGENT_SOURCE_CODEX),
+            mk("t-live-codex", crate::codex_launch::FLEET_AGENT_SOURCE_CODEX),
+            mk("t-claude", "claude"),
+        ];
+        let procs = vec![CodexProcess {
+            pid: 7,
+            cwd: "/ws".into(),
+            thread_id: Some("t-live-codex".into()),
+        }];
+
+        let changed = reconcile_codex_liveness(&mut sessions, &procs);
+
+        assert!(changed, "a dead codex session must be reconciled");
+        assert!(!sessions[0].proc_alive, "dead session proc_alive cleared");
+        assert_eq!(
+            sessions[0].status,
+            SessionStatus::WaitingInput,
+            "dead session status clamped to WaitingInput"
+        );
+        assert!(sessions[1].proc_alive, "live codex session left untouched");
+        assert_eq!(
+            sessions[1].status,
+            SessionStatus::Executing,
+            "live codex session status preserved"
+        );
+        assert!(
+            sessions[2].proc_alive,
+            "non-codex session must be ignored by codex reconcile"
+        );
+    }
+
     /// A freshly spawned `codex exec` mints its thread id *after* launch, so that
     /// id is in no argv while its first turn runs — the argv match above reads it
     /// as dead. The spawn-pid note closes that gap: liveness falls back to "the
@@ -3279,6 +3334,57 @@ pub fn codex_session_pid(thread_id: &str) -> Option<u32> {
 /// started since the scan, so this re-checks against the current process table.
 pub fn codex_session_alive(thread_id: &str) -> bool {
     codex_session_pid(thread_id).is_some()
+}
+
+/// Reconcile a stale `proc_alive == true` on Codex sessions against a live
+/// process set. Split from [`refresh_dead_codex_liveness`] so tests can inject a
+/// synthetic process slice instead of scanning the real table. Returns true iff
+/// any session was clamped.
+fn reconcile_codex_liveness(
+    sessions: &mut [crate::session::SessionInfo],
+    processes: &[CodexProcess],
+) -> bool {
+    let mut changed = false;
+    for s in sessions.iter_mut() {
+        if s.agent_source != crate::codex_launch::FLEET_AGENT_SOURCE_CODEX || !s.proc_alive {
+            continue;
+        }
+        // Only clamp sessions whose process is genuinely gone; a still-running
+        // turn (argv thread match or a live spawn-pid note) is left untouched.
+        if codex_proc_alive(processes, &s.id) {
+            continue;
+        }
+        s.proc_alive = false;
+        s.status = clamp_dead_session_status(s.status.clone(), false);
+        changed = true;
+    }
+    changed
+}
+
+/// Heal Codex sessions whose cached snapshot still reads `proc_alive == true`
+/// but whose process has actually exited.
+///
+/// A Codex turn that dies mid-flight (killed / crashed, no `task_complete` /
+/// `turn_complete` event) stops writing its rollout. The desktop rebuilds a
+/// Codex session's `proc_alive` only when the fs-watcher sees a write to that
+/// rollout, so a silent death produces no event and `proc_alive` stays frozen
+/// `true`. That jams two gates: the "会话运行中" UI (red stop button) and the
+/// pending-message drain (`pending_message::is_drainable` short-circuits on the
+/// stale flag before the fresh liveness recheck can run). Called off the
+/// periodic ticker — which fires regardless of file writes — this recomputes
+/// liveness against the live process table and clamps the dead ones so both
+/// gates unstick. Returns true iff any session changed (caller should re-emit).
+pub fn refresh_dead_codex_liveness(sessions: &mut [crate::session::SessionInfo]) -> bool {
+    // Cheap early-out: scan the process table only when there is a Codex
+    // session actually flagged live to reconcile.
+    if !sessions
+        .iter()
+        .any(|s| s.agent_source == crate::codex_launch::FLEET_AGENT_SOURCE_CODEX && s.proc_alive)
+    {
+        return false;
+    }
+    let processes = scan_codex_processes();
+    reconcile_codex_liveness(sessions, &processes)
 }
 
 fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Option<u32>, bool) {
