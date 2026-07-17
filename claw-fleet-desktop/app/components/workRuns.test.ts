@@ -137,12 +137,20 @@ describe("firstSentence", () => {
 });
 
 describe("workRunTitle", () => {
-  it("uses the first thinking block's first sentence", () => {
+  it("uses the last thinking block's first sentence", () => {
     const msgs = [
-      assistant([tool("Bash")]),
-      assistant([{ type: "thinking", thinking: "Checking CI first. Then more." }, tool("Read")]),
+      assistant([{ type: "thinking", thinking: "An early plan. Ignore me." }, tool("Bash")]),
+      assistant([{ type: "thinking", thinking: "Final intent here. Then more." }, tool("Read")]),
     ];
-    expect(workRunTitle(msgs)).toBe("Checking CI first.");
+    expect(workRunTitle(msgs)).toBe("Final intent here.");
+  });
+
+  it("skips empty trailing thinking back to the last non-empty one", () => {
+    const msgs = [
+      assistant([{ type: "thinking", thinking: "Real thought." }, tool("Bash")]),
+      assistant([{ type: "thinking", thinking: "   " }, tool("Read")]),
+    ];
+    expect(workRunTitle(msgs)).toBe("Real thought.");
   });
 
   it("returns null when the run has no usable thinking", () => {
