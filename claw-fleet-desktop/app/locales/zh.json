@@ -98,6 +98,8 @@
   "mobile_device_push_on": "已开通知",
   "mobile_device_push_off": "未开通知",
   "mobile_device_since": "接入于",
+  "mobile_device_stale": "旧版本",
+  "mobile_device_stale_hint": "手机端 bundle 落后于桌面端（桌面 {{desktop}}）。重新构建并部署 relay 让改动生效。",
   "mobile_qr_hint": "用手机相机扫码打开。二维码包含配对密钥，请勿截图外传。iPhone 需在 Safari 中「添加到主屏幕」后才能收到推送通知。",
   "mobile_relay_url": "Relay 地址",
   "mobile_rotate": "重新生成配对密钥",
