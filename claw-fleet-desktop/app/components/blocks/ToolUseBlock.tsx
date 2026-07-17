@@ -37,6 +37,11 @@ interface Props {
   /** Workspace context; the collapsed row strips its root from path summaries.
    *  The expanded body keeps absolute paths — precision belongs there. */
   paths?: PathLinkContext;
+  /** Rendered as a work-run rail step: the gutter icon already names the tool,
+   *  so the row drops its card chrome — no border, no tinted header, no
+   *  expand arrow, no tool-name label, no success dot. Just the summary line
+   *  (tool name available on hover via title) over the same expandable body. */
+  rail?: boolean;
 }
 
 interface MultiEditEdit {
@@ -869,7 +874,7 @@ function DiffSection({ block, meta }: { block: ToolUseBlockType; meta?: unknown 
 
 const DIFF_TOOLS = new Set(["Edit", "MultiEdit", "Write"]);
 
-export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaProp, paths }: Props) {
+export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaProp, paths, rail }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
@@ -897,11 +902,15 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   const stats = headerStats(block, meta, result);
 
   return (
-    <div className={`${styles.root} ${isReadOnly ? styles.readonly : ""}`}>
-      <button className={styles.header} onClick={() => setOpen((o) => !o)}>
-        <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
-        <span className={styles.tool_name}>{block.name}</span>
-        {!open && (
+    <div className={`${styles.root} ${isReadOnly ? styles.readonly : ""} ${rail ? styles.rail : ""}`}>
+      <button
+        className={styles.header}
+        onClick={() => setOpen((o) => !o)}
+        title={rail ? block.name : undefined}
+      >
+        {!rail && <span className={styles.arrow}>{open ? "▾" : "▸"}</span>}
+        {!rail && <span className={styles.tool_name}>{block.name}</span>}
+        {(rail || !open) && (
           <span className={styles.summary}>{summary}</span>
         )}
         {stats}
@@ -911,7 +920,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
         {result?.is_error && !open && (
           <span className={styles.error_badge}>error</span>
         )}
-        {result && !result.is_error && !open && !stats && (
+        {!rail && result && !result.is_error && !open && !stats && (
           <span className={styles.ok_dot} />
         )}
       </button>
@@ -929,7 +938,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
             </div>
           ) : custom ? (
             <div className={styles.input_section}>
-              <ToolBody block={block} meta={meta} result={result} />
+              <ToolBody block={block} meta={meta} result={result} rail={rail} />
             </div>
           ) : block.name === "Agent" && hasAgentInput(block) ? (
             // A running (or non-Claude) subagent has no `toolUseResult` yet, so
@@ -973,24 +982,26 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
 interface GroupedProps {
   blocks: Array<{ block: ToolUseBlockType; result?: ToolResultBlock; meta?: unknown }>;
   paths?: PathLinkContext;
+  /** Same de-chroming as `ToolUseBlock`'s rail prop; member cards inherit it. */
+  rail?: boolean;
 }
 
-export function GroupedToolUseBlocks({ blocks, paths }: GroupedProps) {
+export function GroupedToolUseBlocks({ blocks, paths, rail }: GroupedProps) {
   const [open, setOpen] = useState(false);
   // The label used to read "Explored N files" for every group, including runs
   // of WebSearch or TodoWrite, which touch no files at all.
   const label = groupLabel(blocks.map((b) => b.block.name));
 
   return (
-    <div className={styles.group}>
+    <div className={`${styles.group} ${rail ? styles.rail_group : ""}`}>
       <button className={styles.group_toggle} onClick={() => setOpen((o) => !o)}>
-        <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
+        {!rail && <span className={styles.arrow}>{open ? "▾" : "▸"}</span>}
         <span className={styles.group_label}>{label}</span>
       </button>
       {open && (
         <div className={styles.group_body}>
           {blocks.map(({ block, result, meta }, i) => (
-            <ToolUseBlock key={block.id ?? i} block={block} result={result} meta={meta} paths={paths} />
+            <ToolUseBlock key={block.id ?? i} block={block} result={result} meta={meta} paths={paths} rail={rail} />
           ))}
         </div>
       )}

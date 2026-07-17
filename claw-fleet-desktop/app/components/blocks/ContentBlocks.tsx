@@ -214,7 +214,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
           push(
             railGroupIcon(group.map((g) => g.block.name)),
             i,
-            <GroupedToolUseBlocks key={i} blocks={group} paths={paths} />
+            <GroupedToolUseBlocks key={i} blocks={group} paths={paths} rail={rail} />
           );
           i = j;
           continue;
@@ -231,6 +231,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
           isPartial={isPartial && !result}
           meta={metaMap.get(toolBlock.id)}
           paths={paths}
+          rail={rail}
         />
       );
       i++;
