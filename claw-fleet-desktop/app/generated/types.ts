@@ -297,7 +297,8 @@ export type DecisionCardStats = { byType: { [key in string]: DecisionTypeStats }
 
 export type DailyReport = { date: string, timezone: string, generatedAt: number, metrics: DailyMetrics, aiSummary: string | null, aiSummaryGeneratedAt: number | null, sessionIds: Array<string>, lessons: Array<Lesson> | null, lessonsGeneratedAt: number | null, };
 
-export type DailyMetrics = { totalInputTokens: number, totalOutputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalWebSearchRequests: number, totalCostUsd: number, totalSessions: number, totalSubagents: number, totalToolCalls: number, toolCallBreakdown: { [key in string]: number }, modelBreakdown: { [key in string]: ModelTokens }, projects: Array<ProjectMetrics>, sourceBreakdown: { [key in string]: number }, hourlyActivity: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], 
+export type DailyMetrics = { 
+metricsVersion: number, totalInputTokens: number, totalOutputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalWebSearchRequests: number, totalCostUsd: number, totalSessions: number, totalSubagents: number, totalToolCalls: number, toolCallBreakdown: { [key in string]: number }, modelBreakdown: { [key in string]: ModelTokens }, projects: Array<ProjectMetrics>, sourceBreakdown: { [key in string]: number }, hourlyActivity: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], 
 decisionCards: DecisionCardStats, };
 
 export type ModelTokens = { inputTokens: number, outputTokens: number, cacheCreationTokens: number, cacheReadTokens: number, costUsd: number, };
