@@ -286,6 +286,41 @@ fn fold_session_turns(
     }
 }
 
+/// Fold one codex session's cumulative token usage into `by_model` under the
+/// `("codex", model)` key. Unlike Claude's per-turn deltas, codex reports a
+/// single cumulative `total_token_usage` snapshot per session, so this
+/// contributes one folded figure: full-price input (`raw − cached`), cached
+/// input billed at the cache-read rate, and output (already incl. reasoning).
+/// Reuses [`crate::codex_source`]'s canonical parsing so the cost here agrees
+/// with the per-session `CodexTokenPanel`.
+fn fold_codex_session(
+    jsonl: &str,
+    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
+) {
+    let lines: Vec<serde_json::Value> = jsonl
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let model = crate::codex_source::extract_model(&lines);
+    let bd = crate::codex_source::codex_token_breakdown_from_lines(&lines, model);
+    if bd.total_tokens == 0 {
+        return;
+    }
+    // `bd.input_tokens` is already the full-price portion (cached excluded);
+    // codex has no cache-write bucket so `cache_creation` stays 0. `bd.cost_usd`
+    // is the canonical cost from the same price tier the panel uses.
+    let key_model = bd.model.clone().unwrap_or_else(|| "gpt".to_string());
+    let acc = by_model
+        .entry(("codex".to_string(), key_model))
+        .or_default();
+    acc.input += bd.input_tokens;
+    acc.cache_read += bd.cached_input_tokens;
+    acc.output += bd.output_tokens;
+    acc.cost += bd.cost_usd;
+}
+
 /// Build today's per-model receipt on the same口径 as [`today_usage`].
 ///
 /// `sessions` is the already-scanned session list (subagents included). Each
@@ -326,7 +361,17 @@ fn build_breakdown(
         if jsonl.is_empty() {
             continue;
         }
-        fold_session_turns(&jsonl, &s.agent_source, &mut by_model);
+        // Codex rollouts are shaped differently from Claude JSONL (no
+        // `type:"assistant"` turns with a `message.usage`; instead a cumulative
+        // `token_count` event with codex-native field names), so
+        // `fold_session_turns` would skip them entirely and drop every codex
+        // agent session from the receipt. Fold them from their native
+        // `total_token_usage` snapshot instead.
+        if s.agent_source == "codex" {
+            fold_codex_session(&jsonl, &mut by_model);
+        } else {
+            fold_session_turns(&jsonl, &s.agent_source, &mut by_model);
+        }
     }
 
     // Fleet's own LLM calls today, folded per model.
@@ -463,9 +508,9 @@ mod tests {
         let day_start = 1_784_000_000_000i64;
         let sessions = vec![
             session(day_start as u64 - 1, 5.0, 1000, false), // yesterday → excluded
-            session(day_start as u64, 1.0, 100, false),    // exactly at midnight → included
+            session(day_start as u64, 1.0, 100, false),      // exactly at midnight → included
             session(day_start as u64 + 10, 2.0, 200, false), // today → included
-            session(day_start as u64 + 20, 0.5, 50, true),  // today subagent → cost yes, count no
+            session(day_start as u64 + 20, 0.5, 50, true),   // today subagent → cost yes, count no
         ];
         let (cost, _input, output, count) = sum_today_sessions(&sessions, day_start);
         assert!((cost - 3.5).abs() < 1e-9, "cost was {cost}");
@@ -485,7 +530,10 @@ mod tests {
             session_with_input(day_start as u64 + 20, 0.5, 500, 50, true),    // today subagent
         ];
         let (_cost, input, output, _count) = sum_today_sessions(&sessions, day_start);
-        assert_eq!(input, 5500, "input = 4000 + 1000 + 500 (yesterday excluded)");
+        assert_eq!(
+            input, 5500,
+            "input = 4000 + 1000 + 500 (yesterday excluded)"
+        );
         assert_eq!(output, 350);
     }
 
@@ -504,7 +552,12 @@ mod breakdown_tests {
 
     /// Write a JSONL file with the given finalized assistant turns and return a
     /// SessionInfo pointing at it, created `now` (so it lands in "today").
-    fn today_session_with_jsonl(tag: &str, source: &str, jsonl: &str, is_subagent: bool) -> SessionInfo {
+    fn today_session_with_jsonl(
+        tag: &str,
+        source: &str,
+        jsonl: &str,
+        is_subagent: bool,
+    ) -> SessionInfo {
         let now_ms = chrono::Local::now().timestamp_millis() as u64;
         // `tag` keeps parallel tests off each other's temp file (a time-based
         // path alone races when two tests run in the same millisecond).
@@ -572,7 +625,12 @@ mod breakdown_tests {
         // cost = 1000/1e6*3 + 500/1e6*15 + 2000/1e6*3.75 + 5000/1e6*0.30
         //      = 0.003 + 0.0075 + 0.0075 + 0.0015 = 0.0195
         let jsonl = turn("m1", "claude-sonnet-4-5", 1000, 2000, 5000, 500);
-        let sessions = vec![today_session_with_jsonl("reconcile", "claude-code", &jsonl, false)];
+        let sessions = vec![today_session_with_jsonl(
+            "reconcile",
+            "claude-code",
+            &jsonl,
+            false,
+        )];
         let now = chrono::Local::now().timestamp_millis();
         let b = build_breakdown(&sessions, &[], now);
 
@@ -586,7 +644,11 @@ mod breakdown_tests {
         assert_eq!(l.output_tokens, 500);
         assert!((l.input_price - 3.0).abs() < 1e-9);
         assert!((l.output_price - 15.0).abs() < 1e-9);
-        assert!((l.cost_usd - 0.0195).abs() < 1e-9, "line cost {}", l.cost_usd);
+        assert!(
+            (l.cost_usd - 0.0195).abs() < 1e-9,
+            "line cost {}",
+            l.cost_usd
+        );
 
         // Grand total reconciles with the extract-based per-session cost
         // (the same fold `SessionInfo.total_cost_usd` uses).
@@ -609,7 +671,12 @@ mod breakdown_tests {
             turn("hk", "claude-haiku-4-5", 1_000_000, 0, 0, 1_000_000), // $1 + $5 = $6
         ]
         .join("\n");
-        let sessions = vec![today_session_with_jsonl("twomodels", "claude-code", &jsonl, false)];
+        let sessions = vec![today_session_with_jsonl(
+            "twomodels",
+            "claude-code",
+            &jsonl,
+            false,
+        )];
         let now = chrono::Local::now().timestamp_millis();
         let b = build_breakdown(&sessions, &[], now);
 
@@ -632,5 +699,83 @@ mod breakdown_tests {
         let b = build_breakdown(&[s], &[], now);
         assert!(b.lines.is_empty(), "yesterday's session excluded");
         assert_eq!(b.total_cost_usd, 0.0);
+    }
+
+    /// A minimal codex rollout: one `turn_context` (for the model) and one
+    /// cumulative `token_count` event (codex-native field names).
+    fn codex_rollout(model: &str, raw_input: u64, cached: u64, output: u64) -> String {
+        [
+            serde_json::json!({ "type": "turn_context", "payload": { "model": model } })
+                .to_string(),
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": { "total_token_usage": {
+                        "input_tokens": raw_input,
+                        "cached_input_tokens": cached,
+                        "output_tokens": output
+                    }}
+                }
+            })
+            .to_string(),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn codex_session_folds_into_a_line_with_cache_read() {
+        // Regression: codex agent sessions used to be dropped from the receipt
+        // entirely (fold_session_turns is Claude-shaped, needs `type:"assistant"`
+        // turns codex rollouts don't have). They must now fold from the native
+        // cumulative snapshot: full-price input = raw − cached, cached →
+        // cache-read, output, and no cache-write bucket.
+        let jsonl = codex_rollout("gpt-5.6-sol", 100_000, 60_000, 4_000);
+        let sessions = vec![today_session_with_jsonl(
+            "codexfold",
+            "codex",
+            &jsonl,
+            false,
+        )];
+        let now = chrono::Local::now().timestamp_millis();
+        let b = build_breakdown(&sessions, &[], now);
+
+        assert_eq!(
+            b.lines.len(),
+            1,
+            "codex session must produce one receipt line"
+        );
+        let l = &b.lines[0];
+        assert_eq!(l.source, "codex");
+        assert_eq!(l.model, "gpt-5.6-sol");
+        assert_eq!(l.input_tokens, 40_000, "full-price input = raw − cached");
+        assert_eq!(l.cache_read_tokens, 60_000, "cached_input → cache_read");
+        assert_eq!(
+            l.cache_creation_tokens, 0,
+            "codex has no cache-write bucket"
+        );
+        assert_eq!(l.output_tokens, 4_000);
+        assert!(l.cost_usd > 0.0, "codex line must carry a cost");
+
+        // Cost reconciles with the canonical model_cost fold over the same
+        // buckets — proving the fold routes cached to the cache-read rate.
+        let expected = crate::model_cost::turn_cost_usd(
+            "gpt-5.6-sol",
+            &crate::model_cost::TurnUsage {
+                input_tokens: 40_000,
+                output_tokens: 4_000,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 60_000,
+                web_search_requests: 0,
+            },
+        );
+        assert!(
+            (l.cost_usd - expected).abs() < 1e-9,
+            "codex line cost {} vs expected {}",
+            l.cost_usd,
+            expected
+        );
+        assert_eq!(b.total_cache_read_tokens, 60_000);
+        assert!((b.agent_cost_usd - expected).abs() < 1e-9);
     }
 }

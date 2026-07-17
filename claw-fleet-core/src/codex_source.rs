@@ -297,7 +297,7 @@ pub fn codex_fleet_owned_cwd(thread_id: &str) -> Option<String> {
 }
 
 /// Extract the model name from turn_context lines.
-fn extract_model(lines: &[Value]) -> Option<String> {
+pub(crate) fn extract_model(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
         if line.get("type").and_then(|t| t.as_str()) == Some("turn_context") {
             if let Some(model) = line
@@ -1052,7 +1052,10 @@ pub fn codex_token_breakdown(uri: &str) -> Result<CodexTokenBreakdown, String> {
 /// Pure assembly of a [`CodexTokenBreakdown`] from parsed rollout lines. Split
 /// out from [`codex_token_breakdown`] so the token math is unit-testable without
 /// touching the filesystem.
-fn codex_token_breakdown_from_lines(lines: &[Value], model: Option<String>) -> CodexTokenBreakdown {
+pub(crate) fn codex_token_breakdown_from_lines(
+    lines: &[Value],
+    model: Option<String>,
+) -> CodexTokenBreakdown {
     let model_ref = model.as_deref();
     let (raw_input, cached, output) = latest_total_token_usage(lines).unwrap_or((0, 0, 0));
     // `raw_input` is cumulative and already includes `cached`; split it into the
