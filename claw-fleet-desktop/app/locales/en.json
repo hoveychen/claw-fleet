@@ -1386,7 +1386,9 @@
     "copy_session_id": "Copy session ID",
     "copy_transcript_path": "Copy transcript path",
     "copy_workspace_path": "Copy workspace path",
-    "more": "More"
+    "more": "More",
+    "switch_agent": "Switch agent",
+    "agent_current": "current"
   },
   "settings": {
     "title": "Settings",

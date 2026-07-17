@@ -22,6 +22,7 @@ import { ResumeComposer } from "./ResumeComposer";
 import { ScratchpadView } from "./ScratchpadView";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
+import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { formatModel } from "./SessionCard";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
@@ -34,9 +35,9 @@ import { bgTaskIcon, bgTaskDataType } from "../bgTaskKinds";
 import styles from "./SessionDetail.module.css";
 
 
-/** Max subagent tabs in the segmented strip. Active ones win the slots first,
- *  then the most-recently-active finished ones; the wrap scrolls past this. A
- *  parent that fanned out hundreds of subagents would otherwise flood the bar. */
+/** Max subagents listed in the scope dropdown (AgentScopeSwitcher). Active ones
+ *  win the slots first, then the most-recently-active finished ones. A parent
+ *  that fanned out hundreds of subagents would otherwise flood the menu. */
 const SUBAGENT_TAB_CAP = 12;
 
 /** Standalone-mode live tail: re-pull the transcript tail at this cadence
@@ -79,10 +80,6 @@ function optimisticToMessage(o: OptimisticSend): RawMessage {
 const InlineFleetAskCard = lazy(() =>
   import("./DecisionPanel").then(({ FleetAskCard }) => ({ default: FleetAskCard })),
 );
-
-function shortId(id: string) {
-  return id.slice(0, 8);
-}
 
 export function SessionDetail({
   lite = false,
@@ -659,12 +656,12 @@ export function SessionDetail({
     if (subagents.length === 0) return [];
 
     // Show finished subagents too, not just the running one: once a subagent
-    // goes Idle (or stalls at RateLimited) it used to vanish from this strip,
+    // goes Idle (or stalls at RateLimited) it used to vanish from the selector,
     // leaving the only way back into its transcript the "open subagent" button
     // buried in its Agent card. Order active first, then most-recently-active
-    // finished ones, and cap the strip — a parent that fanned out dozens/hundreds
-    // of subagents would otherwise overflow the tab bar. The wrap scrolls
-    // horizontally (see .agent_seg_wrap) so the capped set stays reachable.
+    // finished ones, and cap the list — a parent that fanned out dozens/hundreds
+    // of subagents would otherwise flood the scope dropdown. The menu scrolls
+    // (see AgentScopeSwitcher) so the capped set stays reachable.
     const active = subagents.filter((s) => LIVE_STATUSES.has(s.status));
     const finished = subagents
       .filter((s) => !LIVE_STATUSES.has(s.status))
@@ -720,13 +717,10 @@ export function SessionDetail({
                   {liveSession.workspaceName}
                 </span>
               )}
-              {liveSession.isSubagent ? (
-                <span className={styles.tag_subagent}>
-                  ⎇ {liveSession.agentType ?? t("subagent")}
-                </span>
-              ) : (
-                <span className={styles.tag_main}>◈ {t("main")}</span>
-              )}
+              {/* Agent scope: which member of the session family every facet is
+                  scoped to. A dropdown (not the old in-row segmented strip) so a
+                  growing subagent list never crowds the view tabs. */}
+              <AgentScopeSwitcher tabs={tabs} current={liveSession} onOpen={open} />
               {liveSession.model && (
                 <span
                   className={styles.meta_chip}
@@ -791,27 +785,10 @@ export function SessionDetail({
             {liveSession.handoff && <HandoffChainRow session={liveSession} />}
           </div>
 
-          {/* Combined tab bar: subagent segmented control (if any) + view tabs */}
+          {/* View-tab row. The agent scope selector no longer lives here — it
+              moved to the header as a dropdown (AgentScopeSwitcher) so a growing
+              subagent list can't push these fixed tabs off the right edge. */}
           <div className={styles.tab_bar}>
-            {tabs.length > 0 && (
-              <div className={styles.agent_seg_wrap}>
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    className={`${styles.agent_seg} ${tab.id === liveSession.id ? styles.agent_seg_active : ""}`}
-                    onClick={() => { if (tab.id !== liveSession.id) open(tab); }}
-                  >
-                    <span
-                      className={styles.tab_dot}
-                      data-status={tab.status}
-                    />
-                    {tab.isSubagent
-                      ? `⎇ ${tab.agentType ?? shortId(tab.id)}`
-                      : `◈ ${t("main")}`}
-                  </button>
-                ))}
-              </div>
-            )}
             <button
               className={`${styles.view_tab} ${viewTab === "messages" ? styles.view_tab_active : ""}`}
               onClick={() => pickTab("messages")}
