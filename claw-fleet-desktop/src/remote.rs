@@ -978,6 +978,24 @@ impl crate::backend::Backend for RemoteBackend {
         )
     }
 
+    fn get_skill_autosync(&self) -> Result<bool, String> {
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            enabled: bool,
+        }
+        let resp: Resp = self.probe.get(claw_fleet_core::routes::SKILL_AUTOSYNC)?;
+        Ok(resp.enabled)
+    }
+
+    fn set_skill_autosync(&self, enabled: bool) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req {
+            enabled: bool,
+        }
+        self.probe
+            .post_json_ok(claw_fleet_core::routes::SKILL_AUTOSYNC, &Req { enabled })
+    }
+
     fn list_skill_files(
         &self,
         skill_path: &str,

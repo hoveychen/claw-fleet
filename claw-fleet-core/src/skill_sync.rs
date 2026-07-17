@@ -10,11 +10,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::session::{get_fleet_dir, real_home_dir};
+use crate::session::{get_claude_dir, get_fleet_dir, real_home_dir};
 
 const SKILL_FILE: &str = "SKILL.md";
 const COPY_MARKER: &str = ".fleet-managed.json";
 const MAX_DEPTH: usize = 12;
+const AUTOSYNC_CONFIG_FILE: &str = "skill-autosync.json";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -614,6 +615,164 @@ pub fn unlink(slug: &str, target: SkillTarget) -> Result<SkillSyncAction, String
     })
 }
 
+// ── Automatic cross-runtime reconciliation ──────────────────────────────────
+//
+// The manual `adopt`/`sync`/`unlink` API above is opt-in per skill. On top of
+// it, Fleet can *automatically* keep the two runtimes in lock-step whenever both
+// are installed: newly-dropped skills get adopted and projected to both roots,
+// and a skill deleted from one root is propagated (removed from the other root
+// and the canonical copy). Because deletion propagation removes real user files,
+// the whole behavior is gated behind an explicit opt-in toggle
+// (`~/.fleet/skill-autosync.json`) *and* the "both runtimes present" check, so a
+// single-runtime user is never touched.
+
+/// User-controlled toggle for automatic skill interop.
+///
+/// Persisted at `~/.fleet/skill-autosync.json`, mirroring the
+/// `~/.fleet/*.json` config convention used by
+/// [`crate::permissions_injector`]. Defaults to **disabled** — automatic
+/// reconciliation (which can delete skills) only runs after the user opts in
+/// from onboarding.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AutoSyncConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl Default for AutoSyncConfig {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
+fn autosync_config_path() -> Option<PathBuf> {
+    get_fleet_dir().map(|d| d.join(AUTOSYNC_CONFIG_FILE))
+}
+
+/// Load the auto-sync toggle. Missing / unparseable file → disabled.
+pub fn load_autosync_config() -> AutoSyncConfig {
+    let Some(path) = autosync_config_path() else {
+        return AutoSyncConfig::default();
+    };
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|body| serde_json::from_str(&body).ok())
+        .unwrap_or_default()
+}
+
+/// Persist the auto-sync toggle, creating `~/.fleet/` as needed.
+pub fn save_autosync_config(config: &AutoSyncConfig) -> Result<(), String> {
+    let path =
+        autosync_config_path().ok_or_else(|| "cannot determine Fleet directory".to_string())?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Whether automatic reconciliation is enabled by the user.
+pub fn auto_sync_enabled() -> bool {
+    load_autosync_config().enabled
+}
+
+/// Flip the auto-sync toggle on disk.
+pub fn set_auto_sync_enabled(enabled: bool) -> Result<(), String> {
+    save_autosync_config(&AutoSyncConfig { enabled })
+}
+
+/// Are both Claude Code and Codex present on this machine?
+///
+/// Purely filesystem-based so it stays deterministic under a redirected
+/// `FLEET_HOME` (tests) and matches interop semantics: Codex skills project
+/// into `~/.agents/skills`, so a Codex install with no home directory has
+/// nowhere to sync. We therefore key off directory presence
+/// (`~/.codex` **or** `~/.agents`) rather than `which codex` — the latter would
+/// escape the test home and spawn a process on every reconcile.
+pub fn both_runtimes_present() -> bool {
+    let claude = get_claude_dir().is_some_and(|dir| dir.is_dir());
+    let codex = real_home_dir()
+        .is_some_and(|home| home.join(".codex").is_dir() || home.join(".agents").is_dir());
+    claude && codex
+}
+
+/// Converge both runtimes to a single shared skill set.
+///
+/// Hard-gated on [`both_runtimes_present`]: a single-runtime machine returns an
+/// empty report untouched. For every inventory entry:
+///
+/// - **Unmanaged** (present in a runtime root, no canonical copy) → *new
+///   install* → [`adopt`] it (fully automatic, even when
+///   [`SkillCompatibility::Incompatible`]; the `warnings` stay visible on the
+///   returned items).
+/// - **Partial** (a managed skill lost one of its projections) → *deletion* →
+///   propagate the removal: unlink the surviving projection(s) and delete the
+///   canonical copy.
+/// - **Conflict** (differing content across runtimes) → left untouched for
+///   manual resolution; surfaced in `conflicts`.
+/// - **Shared** → no-op.
+///
+/// Idempotent: it converges on the current inventory snapshot rather than raw
+/// events, so the watch events its own writes produce are no-ops on the next
+/// pass.
+pub fn auto_reconcile() -> Result<SkillSyncReport, String> {
+    if !both_runtimes_present() {
+        return Ok(SkillSyncReport::default());
+    }
+    let roots = roots()?;
+    let mut report = SkillSyncReport::default();
+    for entry in inventory()? {
+        match entry.state {
+            SkillSyncState::Unmanaged => {
+                // New install dropped into a runtime root — adopt from wherever
+                // it appeared (prefer Claude's copy when both have it).
+                let source = entry.claude_path.as_deref().or(entry.codex_path.as_deref());
+                let Some(source) = source else { continue };
+                match adopt(Path::new(source)) {
+                    Ok(result) => {
+                        report.actions.extend(result.actions);
+                        report.conflicts.extend(result.conflicts);
+                    }
+                    Err(error) => report.conflicts.push(format!("{}: {error}", entry.slug)),
+                }
+            }
+            SkillSyncState::Partial => {
+                // A managed skill lost a projection → propagate the deletion:
+                // remove the surviving projection(s) and the canonical copy.
+                if entry.claude_managed {
+                    if let Ok(action) = unlink(&entry.slug, SkillTarget::ClaudeCode) {
+                        report.actions.push(action);
+                    }
+                }
+                if entry.codex_managed {
+                    if let Ok(action) = unlink(&entry.slug, SkillTarget::Codex) {
+                        report.actions.push(action);
+                    }
+                }
+                let canonical = roots.canonical.join(&entry.slug);
+                if canonical.exists() {
+                    fs::remove_dir_all(&canonical).map_err(|e| e.to_string())?;
+                    report.actions.push(SkillSyncAction {
+                        slug: entry.slug.clone(),
+                        target: "canonical".to_string(),
+                        action: "removed".to_string(),
+                        path: canonical.to_string_lossy().to_string(),
+                    });
+                }
+            }
+            SkillSyncState::Conflict => {
+                report.conflicts.push(format!(
+                    "{}: differing content across runtimes, left for manual resolution",
+                    entry.slug
+                ));
+            }
+            SkillSyncState::Shared => {}
+        }
+    }
+    report.items = inventory()?;
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -751,5 +910,148 @@ mod tests {
         assert!(!flat.exists());
         assert!(temp.path().join(".claude/skills/flat/SKILL.md").is_file());
         assert!(temp.path().join(".agents/skills/flat/SKILL.md").is_file());
+    }
+
+    /// Mark Codex as present so `both_runtimes_present()` is satisfied.
+    fn mark_codex_present(home: &Path) {
+        fs::create_dir_all(home.join(".codex")).unwrap();
+    }
+
+    #[test]
+    fn autosync_config_roundtrips() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        assert!(!auto_sync_enabled());
+        set_auto_sync_enabled(true).unwrap();
+        assert!(auto_sync_enabled());
+        assert!(temp.path().join(".fleet/skill-autosync.json").is_file());
+        set_auto_sync_enabled(false).unwrap();
+        assert!(!auto_sync_enabled());
+    }
+
+    #[test]
+    fn both_runtimes_present_requires_both() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        // Claude only.
+        fs::create_dir_all(temp.path().join(".claude/skills")).unwrap();
+        assert!(!both_runtimes_present());
+        // Now Codex present too.
+        mark_codex_present(temp.path());
+        assert!(both_runtimes_present());
+    }
+
+    #[test]
+    fn auto_reconcile_gated_off_when_single_runtime() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        // Claude has a fresh skill, but no Codex present → gate closed.
+        write_skill(
+            &temp.path().join(".claude/skills"),
+            "solo",
+            "---\nname: solo\ndescription: x\n---\nBody",
+        );
+        let report = auto_reconcile().unwrap();
+        assert!(report.actions.is_empty());
+        assert!(!temp.path().join(".fleet/skills/solo").exists());
+        assert!(!temp.path().join(".agents/skills/solo").exists());
+    }
+
+    #[test]
+    fn auto_reconcile_adopts_new_skill_to_both() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        mark_codex_present(temp.path());
+        write_skill(
+            &temp.path().join(".claude/skills"),
+            "fresh",
+            "---\nname: fresh\ndescription: newly dropped\n---\nBody",
+        );
+        let report = auto_reconcile().unwrap();
+        assert!(
+            report.conflicts.is_empty(),
+            "conflicts: {:?}",
+            report.conflicts
+        );
+        let item = report.items.iter().find(|i| i.slug == "fresh").unwrap();
+        assert_eq!(item.state, SkillSyncState::Shared);
+        assert!(temp.path().join(".fleet/skills/fresh/SKILL.md").is_file());
+        assert!(temp.path().join(".claude/skills/fresh/SKILL.md").is_file());
+        assert!(temp.path().join(".agents/skills/fresh/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn auto_reconcile_adopts_incompatible_skill_with_warnings() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        mark_codex_present(temp.path());
+        // References tools from BOTH runtimes → Incompatible, but still adopted.
+        write_skill(
+            &temp.path().join(".claude/skills"),
+            "mixed",
+            "---\nname: mixed\ndescription: x\n---\nUse AskUserQuestion and request_user_input",
+        );
+        let report = auto_reconcile().unwrap();
+        let item = report.items.iter().find(|i| i.slug == "mixed").unwrap();
+        assert_eq!(item.state, SkillSyncState::Shared);
+        assert_eq!(item.compatibility, SkillCompatibility::Incompatible);
+        assert!(!item.warnings.is_empty());
+        assert!(temp.path().join(".agents/skills/mixed/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn auto_reconcile_propagates_deletion() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        mark_codex_present(temp.path());
+        write_skill(
+            &temp.path().join(".claude/skills"),
+            "doomed",
+            "---\nname: doomed\ndescription: x\n---\nBody",
+        );
+        // First pass adopts to both.
+        auto_reconcile().unwrap();
+        assert!(temp.path().join(".agents/skills/doomed").exists());
+        // User deletes the Claude projection.
+        fs::remove_dir_all(temp.path().join(".claude/skills/doomed")).unwrap();
+        // Second pass propagates the deletion to Codex + canonical.
+        let report = auto_reconcile().unwrap();
+        assert!(report.actions.iter().any(|a| a.action == "removed"));
+        assert!(!temp.path().join(".agents/skills/doomed").exists());
+        assert!(!temp.path().join(".fleet/skills/doomed").exists());
+    }
+
+    #[test]
+    fn auto_reconcile_leaves_conflict_untouched() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = HomeGuard::new(temp.path());
+        mark_codex_present(temp.path());
+        // Claude present (both-runtimes gate open) but holds no copy of `clash`.
+        fs::create_dir_all(temp.path().join(".claude/skills")).unwrap();
+        // Canonical copy exists...
+        write_skill(
+            &temp.path().join(".fleet/skills"),
+            "clash",
+            "---\nname: clash\ndescription: canonical\n---\n",
+        );
+        // ...but Codex holds an unmanaged, differing copy → Conflict.
+        let foreign = write_skill(
+            &temp.path().join(".agents/skills"),
+            "clash",
+            "---\nname: clash\ndescription: foreign\n---\n",
+        );
+        let report = auto_reconcile().unwrap();
+        assert!(report.conflicts.iter().any(|c| c.contains("clash")));
+        assert!(fs::read_to_string(foreign.join(SKILL_FILE))
+            .unwrap()
+            .contains("foreign"));
+        assert!(temp.path().join(".fleet/skills/clash/SKILL.md").is_file());
     }
 }

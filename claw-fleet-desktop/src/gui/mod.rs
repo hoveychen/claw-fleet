@@ -1789,6 +1789,8 @@ pub fn run() {
             skill_sync_apply,
             skill_sync_adopt,
             skill_sync_unlink,
+            get_skill_autosync,
+            set_skill_autosync,
             get_skill_content,
             list_skill_files,
             delete_skill,
