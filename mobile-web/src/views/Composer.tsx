@@ -308,7 +308,8 @@ export function repoRootPath(path: string): string {
 
 /** workspace 路径落在 OS 临时/暂存目录下时为 true，这类目录绝不该作为可启动 workspace。
  *  Fleet（与 Claude Code）把 per-session 暂存区丢在 `/tmp`（macOS 上 `/tmp` 软链到
- *  `/private/tmp`），系统用 `/var/folders/.../T` 作 per-user temp——cwd 是其中之一的会话
+ *  `/private/tmp`），系统用 `/var/folders/.../T` 作 per-user temp（规范化后呈现为
+ *  `/private/var/folders/...`，因 `/var`→`/private/var`）——cwd 是其中之一的会话
  *  是临时的、会污染启动器的最近列表。按前导路径段匹配，故一个真的**名叫** `tmp-tools` 的
  *  项目会被保留。与桌面端 NewSessionForm.isTempWorkspacePath 一致。*/
 export function isTempWorkspacePath(path: string): boolean {
@@ -318,7 +319,8 @@ export function isTempWorkspacePath(path: string): boolean {
     p.startsWith("/tmp/") ||
     p === "/private/tmp" ||
     p.startsWith("/private/tmp/") ||
-    p.startsWith("/var/folders/")
+    p.startsWith("/var/folders/") ||
+    p.startsWith("/private/var/folders/")
   );
 }
 
