@@ -1,6 +1,6 @@
 //! Publish the bundled `fleet` CLI where a spawned session's PATH can find it.
 //!
-//! [`crate::session_launch`] prepends `~/.claude/fleet/bin` to every spawned
+//! [`crate::session_launch`] prepends `~/.fleet/bin` to every spawned
 //! agent's PATH so its Bash tool can run `fleet plan check` and friends — the
 //! PRD-discipline guidance we inject into `~/.claude/CLAUDE.md` tells the agent
 //! to do exactly that. Nothing ever created that directory: the only `fleet`
@@ -28,10 +28,10 @@ pub const LINK_NAME: &str = "fleet.exe";
 #[cfg(not(windows))]
 pub const LINK_NAME: &str = "fleet";
 
-/// `~/.claude/fleet/bin` — the directory [`crate::session_launch`] prepends to
+/// `~/.fleet/bin` — the directory [`crate::session_launch`] prepends to
 /// every spawned session's PATH.
 pub fn fleet_bin_dir() -> Option<PathBuf> {
-    crate::session::real_home_dir().map(|h| h.join(".claude").join("fleet").join("bin"))
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("bin"))
 }
 
 /// The CLI as shipped in `exe_dir`, if it is there at all. A `cargo run` of the
@@ -151,7 +151,7 @@ pub fn resolve_fleet_binary() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    /// The whole point of `~/.claude/fleet/bin` is that a spawned agent can run
+    /// The whole point of `~/.fleet/bin` is that a spawned agent can run
     /// `fleet plan check`. That only works if something actually puts the binary
     /// there — which, before this module, nothing did.
     #[test]

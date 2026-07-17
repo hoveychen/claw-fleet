@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 /// Build an augmented PATH that includes common Node.js installation directories,
 /// with `front` dirs placed ahead of everything — used by
-/// [`spawn_claude_detached_with_envs`] to lead with `~/.claude/fleet/bin`.
+/// [`spawn_claude_detached_with_envs`] to lead with `~/.fleet/bin`.
 ///
 /// GUI apps (like Tauri) launched by launchd carry a minimal PATH
 /// (`/usr/bin:/bin:/usr/sbin:/sbin`); a spawned `claude` child inheriting it
@@ -389,7 +389,7 @@ pub fn spawn_claude_detached_with_envs(
     // A GUI app launched by launchd carries a minimal PATH
     // (/usr/bin:/bin:/usr/sbin:/sbin); a child inheriting it can't find
     // user-installed binaries (fleet, cws, node) from its Bash tool.
-    // Prepend ~/.claude/fleet/bin (populated by fleet_cli::ensure_fleet_cli_link)
+    // Prepend ~/.fleet/bin (populated by fleet_cli::ensure_fleet_cli_link)
     // and the common install dirs; the parent's PATH stays at the tail.
     let front: Vec<PathBuf> = crate::fleet_cli::fleet_bin_dir().into_iter().collect();
     cmd.env("PATH", augmented_path_with_front(&front));
@@ -895,7 +895,7 @@ mod tests {
         // (/usr/bin:/bin:/usr/sbin:/sbin). A spawned claude inherits it, so
         // the agent's Bash can't find user-installed binaries (fleet, cws,
         // claude itself in ~/.local/bin). The child must instead see a PATH
-        // covering the common install dirs plus ~/.claude/fleet/bin, with
+        // covering the common install dirs plus ~/.fleet/bin, with
         // the parent's PATH preserved at the tail.
         let _guard = crate::session::fleet_home_lock();
         let tmp = std::env::temp_dir().join(format!(
@@ -943,11 +943,11 @@ mod tests {
         assert!(exited_ok, "child exited nonzero");
 
         let observed = std::fs::read_to_string(&out).unwrap();
-        let fleet_bin = real_home.join(".claude").join("fleet").join("bin");
+        let fleet_bin = real_home.join(".fleet").join("bin");
         let local_bin = real_home.join(".local").join("bin");
         assert!(
             observed.contains(&fleet_bin.display().to_string()),
-            "child PATH must include ~/.claude/fleet/bin, got: {observed}"
+            "child PATH must include ~/.fleet/bin, got: {observed}"
         );
         assert!(
             observed.contains(&local_bin.display().to_string()),
