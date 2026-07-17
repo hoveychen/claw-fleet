@@ -697,6 +697,34 @@ export function WikiView() {
     </button>
   );
 
+  // ── Folder overview tile (landing page) ────────────────────────────────────
+  const renderFolderTile = (folder: FolderNode): ReactNode => (
+    <button
+      key={`ft:${folder.path}`}
+      className={styles.folder_tile}
+      onClick={() => setSelectedFolder(folder.path)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setFolderCtx({ path: folder.path, anchor: { x: e.clientX, y: e.clientY } });
+      }}
+      title={folder.path}
+      {...dropProps(folder.path)}
+    >
+      <Folder size={17} strokeWidth={1.6} className={styles.folder_tile_icon} />
+      <span className={styles.folder_tile_name}>{folder.name}</span>
+      <span className={styles.folder_tile_count}>
+        {t("wiki.doc_count", "{{count}} docs", { count: folder.docCount })}
+      </span>
+    </button>
+  );
+
+  // The landing = the default resting state: 全部文档, no search, so the grid
+  // leads with a folder overview before the flat doc list. Scoping to a folder
+  // or searching drops straight to the plain doc grid.
+  const showLanding = selectedFolder === null && !searching;
+  const topFolders = tree.filter((n): n is FolderNode => n.type === "folder");
+
   // Breadcrumb-ish label for the grid header.
   const scopeLabel = searching
     ? t("wiki.scope_search", "搜索结果")
@@ -870,7 +898,16 @@ export function WikiView() {
             />
           )}
           {loaded && gridDocs.length > 0 && (
-            <div className={styles.grid}>{gridDocs.map(renderGridCard)}</div>
+            <div className={styles.grid_scroll}>
+              {showLanding && topFolders.length > 0 && (
+                <>
+                  <div className={styles.section_head}>{t("wiki.section_folders", "目录")}</div>
+                  <div className={styles.folder_tiles}>{topFolders.map(renderFolderTile)}</div>
+                  <div className={styles.section_head}>{t("wiki.section_docs", "文档")}</div>
+                </>
+              )}
+              <div className={styles.grid}>{gridDocs.map(renderGridCard)}</div>
+            </div>
           )}
         </div>
 
