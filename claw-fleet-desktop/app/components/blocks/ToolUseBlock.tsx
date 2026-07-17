@@ -63,7 +63,7 @@ function relToWorkspace(p: string, root?: string): string {
  *  body (DiffView path bar / ReadInput headline). Relativizing to the
  *  workspace root wasn't enough — a file nested under `.worktrees/…` still
  *  rendered a long, ellipsis-truncated path. */
-function basename(p: string): string {
+export function basename(p: string): string {
   const parts = p.split(/[/\\]/);
   return parts[parts.length - 1] || p;
 }

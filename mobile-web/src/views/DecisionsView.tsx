@@ -35,6 +35,8 @@ import type { Attachment } from "./Composer";
 import { uploadAttachmentFiles } from "./Composer";
 import styles from "./DecisionsView.module.css";
 import { StructuredCommand } from "./StructuredCommand";
+import { basename } from "./taskNotification";
+import { permissionPrimary } from "./permissionPrimary";
 
 const KIND_LABEL: Record<string, string> = {
   guard: "命令审批",
@@ -449,20 +451,49 @@ function PermissionCard({
 }) {
   const [reason, setReason] = useState("");
   const [showReason, setShowReason] = useState(false);
-  const input = useMemo(() => {
+  const [showRaw, setShowRaw] = useState(false);
+  const input = useMemo<Record<string, unknown>>(
+    () =>
+      request.toolInput && typeof request.toolInput === "object"
+        ? (request.toolInput as Record<string, unknown>)
+        : {},
+    [request.toolInput],
+  );
+  const primary = useMemo(() => permissionPrimary(request.toolName, input), [request.toolName, input]);
+  const rawJson = useMemo(() => {
     try {
       return JSON.stringify(request.toolInput, null, 2);
     } catch {
       return String(request.toolInput);
     }
   }, [request.toolInput]);
+  const primaryKeyCount = primary.kind === "pattern" && primary.path ? 2 : 1;
+  const hasExtraParams = primary.kind !== "json" && Object.keys(input).length > primaryKeyCount;
   return (
     <div>
       <div className={styles.toolName}>
         {t("工具：")}
         <code>{request.toolName}</code>
       </div>
-      {input && input !== "null" && <pre className={styles.command}>{truncate(input, 6000)}</pre>}
+      {primary.kind === "file" ? (
+        <div className={styles.permFile}>
+          <div className={styles.permFileName}>📄 {basename(primary.path)}</div>
+          <div className={styles.permFilePath}>{primary.path}</div>
+        </div>
+      ) : primary.kind === "pattern" ? (
+        <pre className={styles.command}>
+          {primary.path ? `${primary.text}\n${t("位于")} ${primary.path}` : primary.text}
+        </pre>
+      ) : (
+        primary.text &&
+        primary.text !== "null" && <pre className={styles.command}>{truncate(primary.text, 6000)}</pre>
+      )}
+      {hasExtraParams && (
+        <button type="button" className={styles.rawToggle} onClick={() => setShowRaw((v) => !v)}>
+          {showRaw ? t("隐藏参数详情") : t("查看参数详情")}
+        </button>
+      )}
+      {hasExtraParams && showRaw && <pre className={styles.command}>{truncate(rawJson, 6000)}</pre>}
       {showReason && (
         <textarea
           className={styles.reasonInput}
