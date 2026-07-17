@@ -62,9 +62,6 @@ export function WorkRunBlock({
   // progress"; it stops the moment the record closes.
   const streaming = defaultOpen && msgs[msgs.length - 1]?.message?.stop_reason === null;
   const shimmer = streaming ? ` ${styles.shimmer}` : "";
-  const counts = summary.toolCounts
-    .map(([name, c]) => `${name === "thinking" ? t("detail.work_thinking") : name}×${c}`)
-    .join(" · ");
 
   // The band collapses several records into one row, so show when the run
   // ended — the last member's timestamp — the way an unfolded row would.
@@ -88,9 +85,10 @@ export function WorkRunBlock({
         ) : (
           <span className={`${styles.category}${shimmer}`}>{t(`detail.work_cat_${summary.category}`)}</span>
         )}
+        {/* Just the step count — the per-tool breakdown reads better as the
+            rail itself, one click away. */}
         <span className={styles.stats}>
           {t("detail.work_steps", { count: summary.steps })}
-          {counts && ` · ${counts}`}
         </span>
         {summary.outputTokens > 0 && (
           <span className={styles.tokens}>↓{fmtTokens(summary.outputTokens)}</span>
