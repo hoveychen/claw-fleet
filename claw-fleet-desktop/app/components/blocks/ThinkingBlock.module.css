@@ -50,11 +50,19 @@
   color: var(--color-text-secondary);
 }
 
-/* Live stream: fixed-height window pinned to the newest text; the oldest
- * lines slide off behind a top fade. Height ≈ 8 lines of 12px reasoning. */
-.live_window {
+/* Live sidecar stream rendered bare — no border, no header — so it merges into
+ * the message flow as an in-flow continuation rather than a detached box. Fixed
+ * height window pinned to the newest text; the oldest lines slide off behind a
+ * top fade. Height ≈ 8 lines of 12px reasoning. */
+.live_bare {
   max-height: 168px;
   overflow-y: hidden;
+  padding: 2px 0;
+}
+
+.live_bare > :global(div) {
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }
 
 .fade_top {
