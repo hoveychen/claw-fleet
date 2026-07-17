@@ -70,3 +70,26 @@
   background: var(--color-bg-secondary);
   border-top: 1px solid var(--tool-group-border);
 }
+
+/* In-progress headline: a light band sweeps across the text while the run
+   streams — the claude.ai "working" shimmer. Pure alpha-mask over the text
+   color, so it needs no theme-specific tokens. */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-text-dim) 42%,
+    var(--color-text) 50%,
+    var(--color-text-dim) 58%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: work_shimmer 2.2s linear infinite;
+}
+
+@keyframes work_shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}

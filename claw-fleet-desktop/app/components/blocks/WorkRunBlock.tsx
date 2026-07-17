@@ -57,6 +57,11 @@ export function WorkRunBlock({
   // A thinking-derived headline (the model's own summary sentence) beats the
   // rule-mapped category; runs with no thinking keep the category label.
   const title = workRunTitle(msgs);
+  // Streaming = this band is the live tail and its last record hasn't
+  // terminated. The headline gets the claude.ai shimmer sweep to say "in
+  // progress"; it stops the moment the record closes.
+  const streaming = defaultOpen && msgs[msgs.length - 1]?.message?.stop_reason === null;
+  const shimmer = streaming ? ` ${styles.shimmer}` : "";
   const counts = summary.toolCounts
     .map(([name, c]) => `${name === "thinking" ? t("detail.work_thinking") : name}×${c}`)
     .join(" · ");
@@ -79,9 +84,9 @@ export function WorkRunBlock({
       <button className={styles.header} onClick={() => setOpen((o) => !o)}>
         <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
         {title ? (
-          <span className={styles.title}>{title}</span>
+          <span className={`${styles.title}${shimmer}`}>{title}</span>
         ) : (
-          <span className={styles.category}>{t(`detail.work_cat_${summary.category}`)}</span>
+          <span className={`${styles.category}${shimmer}`}>{t(`detail.work_cat_${summary.category}`)}</span>
         )}
         <span className={styles.stats}>
           {t("detail.work_steps", { count: summary.steps })}
