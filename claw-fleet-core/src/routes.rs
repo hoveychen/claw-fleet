@@ -121,6 +121,7 @@ pub const SKILL_DELETE: &str = "/skill_delete";
 pub const SKILL_FILES: &str = "/skill_files";
 pub const SKILL_HISTORY: &str = "/skill_history";
 pub const SKILL_SYNC: &str = "/skill_sync";
+pub const SKILL_AUTOSYNC: &str = "/skill_autosync";
 pub const SKILLS: &str = "/skills";
 pub const SOURCES_CLAUDE_ACCOUNT: &str = "/sources/claude/account";
 pub const SOURCES_CONFIG: &str = "/sources_config";

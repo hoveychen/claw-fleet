@@ -751,6 +751,11 @@
       "title": "New: Wiki knowledge base",
       "description": "Agents' HTML reports, demos and markdown docs get archived into a shared wiki (~/.fleet/wiki) via `fleet wiki publish` and browsed in the Wiki board with version history. This toggle injects a short guidance block into ~/.claude/CLAUDE.md so agents publish finished artifacts there automatically."
     },
+    "skill_interop": {
+      "title": "New: automatic skill interop",
+      "description": "Detected both Claude Code and Codex. Turn on to keep your two skill folders in sync automatically: a skill dropped into one is adopted and mirrored to the other, and a skill deleted from one is removed from both. Off by default because deletion propagates.",
+      "toggle_hint": "Watches ~/.claude/skills and ~/.agents/skills. Deleting a skill from either side removes it from both."
+    },
     "copy_hint": "Click to copy"
   },
   "mascot": {
@@ -1478,6 +1483,7 @@
     "prd_mode_enabled": "Enable PRD discipline mode",
     "model_guidance_desc": "Inject a Claude + Codex model capability/cost/effort cheat-sheet so agents pick a model deliberately for subagents, workflow agents, and new sessions. Applies to both Claude and Fleet-launched Codex sessions.",
     "model_guidance_enabled": "Enable model-selection guidance",
+    "skill_autosync_enabled": "Enable automatic skill interop",
     "wiki_guidance_desc": "Tell agents to archive finished HTML reports, demos and markdown docs into the Fleet wiki (`fleet wiki publish`) so they show up in the Wiki board instead of getting lost in workdirs. Applies to both Claude and Fleet-launched Codex sessions.",
     "wiki_guidance_enabled": "Enable wiki publish guidance",
     "codex_mirror_note": "Every toggle above is mirrored automatically onto Fleet-launched Codex sessions — written as a sentinel block in the global ~/.codex/AGENTS.md that leaves your existing AGENTS.md untouched. No separate toggle needed.",

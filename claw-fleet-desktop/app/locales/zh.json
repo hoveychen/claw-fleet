@@ -748,6 +748,11 @@
       "title": "新功能：Wiki 知识库",
       "description": "Agent 产出的 HTML 报告、demo、markdown 文档可以用 `fleet wiki publish` 归档进统一知识库（~/.fleet/wiki），在「知识库」板块浏览并保留版本历史。打开此开关会向 ~/.claude/CLAUDE.md 注入一段指引，让 Agent 完成成品后自动归档。"
     },
+    "skill_interop": {
+      "title": "新功能：Skill 自动互通",
+      "description": "检测到你同时装了 Claude Code 与 Codex。打开后两个 skill 目录会自动保持同步：往一端丢新 skill 会自动收编并镜像到另一端，从一端删除会两端一起移除。因为删除会传播，默认关闭。",
+      "toggle_hint": "监听 ~/.claude/skills 与 ~/.agents/skills。从任一端删除某个 skill 会两端同时移除。"
+    },
     "copy_hint": "点击复制"
   },
   "mascot": {
@@ -1475,6 +1480,7 @@
     "prd_mode_enabled": "启用 PRD 自律模式",
     "model_guidance_desc": "注入一份 Claude 与 Codex 两家模型的能力/成本/effort 速查表，让 Agent 给 subagent、workflow agent、新会话选模型时有据可依。同时对 Claude 与 Fleet 启动的 Codex 会话生效。",
     "model_guidance_enabled": "启用模型选择速查指引",
+    "skill_autosync_enabled": "启用 Skill 自动互通",
     "wiki_guidance_desc": "让 Agent 把完成的 HTML 报告、demo、markdown 文档用 `fleet wiki publish` 归档进知识库，在「知识库」板块统一浏览，不再散落在工作目录里。同时对 Claude 与 Fleet 启动的 Codex 会话生效。",
     "wiki_guidance_enabled": "启用知识库归档指引",
     "codex_mirror_note": "上面每一项开关都会自动同步到 Fleet 启动的 Codex 会话——写入全局 ~/.codex/AGENTS.md 的 sentinel 块，不动你既有的 AGENTS.md 内容，无需单独开关。",

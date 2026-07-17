@@ -336,6 +336,12 @@ impl Backend for NullBackend {
     ) -> Result<claw_fleet_core::skill_sync::SkillSyncAction, String> {
         Err("backend not ready".into())
     }
+    fn get_skill_autosync(&self) -> Result<bool, String> {
+        Err("backend not ready".into())
+    }
+    fn set_skill_autosync(&self, _: bool) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn get_skill_content(&self, _: &str) -> Result<String, String> {
         Err("backend not ready".into())
     }

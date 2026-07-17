@@ -45,6 +45,19 @@ pub(crate) fn skill_sync_unlink(
 }
 
 #[tauri::command(async)]
+pub(crate) fn get_skill_autosync(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    state.backend.read().unwrap().get_skill_autosync()
+}
+
+#[tauri::command(async)]
+pub(crate) fn set_skill_autosync(
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.read().unwrap().set_skill_autosync(enabled)
+}
+
+#[tauri::command(async)]
 pub(crate) fn get_skill_content(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
     state.backend.read().unwrap().get_skill_content(&path)
 }

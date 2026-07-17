@@ -571,6 +571,10 @@ pub trait Backend: Send + Sync {
         slug: &str,
         target: crate::skill_sync::SkillTarget,
     ) -> Result<crate::skill_sync::SkillSyncAction, String>;
+    /// Whether automatic cross-runtime skill reconciliation is enabled.
+    fn get_skill_autosync(&self) -> Result<bool, String>;
+    /// Toggle automatic cross-runtime skill reconciliation on/off.
+    fn set_skill_autosync(&self, enabled: bool) -> Result<(), String>;
     fn get_skill_content(&self, path: &str) -> Result<String, String>;
     fn list_skill_files(&self, skill_path: &str) -> Result<Vec<SkillFileEntry>, String>;
     /// Delete a skill (directory or flat file) under `~/.claude/skills/`.

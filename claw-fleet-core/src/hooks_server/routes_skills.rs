@@ -69,6 +69,46 @@ pub(crate) fn route_skill_sync(
     respond_skill_sync(request, result, json_header);
 }
 
+pub(crate) fn route_skill_autosync(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    _query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    if request.method() == &tiny_http::Method::Get {
+        let body =
+            serde_json::json!({ "enabled": crate::skill_sync::auto_sync_enabled() }).to_string();
+        let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        return;
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Body {
+        enabled: bool,
+    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let result = serde_json::from_str::<Body>(&buf)
+        .map_err(|error| error.to_string())
+        .and_then(|body| crate::skill_sync::set_auto_sync_enabled(body.enabled));
+    match result {
+        Ok(()) => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+            );
+        }
+        Err(error) => {
+            let body = serde_json::json!({ "error": error }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
 fn respond_skill_sync<T: serde::Serialize>(
     request: tiny_http::Request,
     result: Result<T, String>,
