@@ -12,6 +12,7 @@ import type { SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useSourcesConfig } from "../useSourcesConfig";
 import { HistoryLayer } from "../useNavStack";
+import { basename } from "./taskNotification";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 
@@ -293,11 +294,41 @@ interface NewSessionProps {
 const NEW_SESSION_DRAFT_KEY = "new-session";
 const NEW_SESSION_ATTACH_KEY = "new-session:attachments";
 
+/** 把 repo 内的 worktree checkout 折叠回 repo 根。Fleet 在 `<repo-root>/.worktrees/<task-id>`
+ *  里开发计划，这些是临时的（合并后即移除）；启动器应给出持久的 repo 根，绝不给 task-id 叶子。
+ *  路径里没有 `.worktrees` 段的（含无关的 `~/.fleet/worktrees/`，其段是 `worktrees`）原样返回。
+ *  与桌面端 NewSessionForm.repoRootPath 一致。*/
+export function repoRootPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const idx = normalized.split("/").indexOf(".worktrees");
+  if (idx <= 0) return path;
+  const before = normalized.split("/").slice(0, idx).join("/");
+  return before || path;
+}
+
+/** workspace 路径落在 OS 临时/暂存目录下时为 true，这类目录绝不该作为可启动 workspace。
+ *  Fleet（与 Claude Code）把 per-session 暂存区丢在 `/tmp`（macOS 上 `/tmp` 软链到
+ *  `/private/tmp`），系统用 `/var/folders/.../T` 作 per-user temp——cwd 是其中之一的会话
+ *  是临时的、会污染启动器的最近列表。按前导路径段匹配，故一个真的**名叫** `tmp-tools` 的
+ *  项目会被保留。与桌面端 NewSessionForm.isTempWorkspacePath 一致。*/
+export function isTempWorkspacePath(path: string): boolean {
+  const p = path.replace(/\\/g, "/");
+  return (
+    p === "/tmp" ||
+    p.startsWith("/tmp/") ||
+    p === "/private/tmp" ||
+    p.startsWith("/private/tmp/") ||
+    p.startsWith("/var/folders/")
+  );
+}
+
 /** 最近用过的 workspace（`[path, name]`）。**两段式排序**（对齐桌面端
  *  NewSessionForm.distinctWorkspaces）：先按最后活动时间降序取最近 `limit` 个
  *  （昨天用过的 repo 不会仅因名字排得靠后就被挤掉），幸存者再按名称字母序展示，
- *  得到稳定、可扫读的列表。剔除纯聊天路径（它单独钉在选项首位）。默认选中**不**依赖
- *  这里的顺序——它来自记住的「上次成功创建会话用的 repo」（见 {@link defaultWorkspace}）。*/
+ *  得到稳定、可扫读的列表。worktree checkout 折叠回 repo 根（{@link repoRootPath}）
+ *  以去重；剔除临时目录（{@link isTempWorkspacePath}）与纯聊天路径（它单独钉在选项首位）。
+ *  默认选中**不**依赖这里的顺序——它来自记住的「上次成功创建会话用的 repo」（见
+ *  {@link defaultWorkspace}）。*/
 export function recentWorkspaces(
   sessions: SessionInfo[],
   chatPath: string | null,
@@ -305,11 +336,14 @@ export function recentWorkspaces(
 ): [string, string][] {
   const byPath = new Map<string, { name: string; lastMs: number }>();
   for (const s of sessions) {
-    if (!s.workspacePath || s.workspacePath === chatPath) continue;
-    const prev = byPath.get(s.workspacePath);
+    if (!s.workspacePath) continue;
+    const path = repoRootPath(s.workspacePath);
+    if (isTempWorkspacePath(path)) continue;
+    if (path === chatPath) continue;
+    const prev = byPath.get(path);
     // 同一路径下保留最近活动的那条会话的名字与时间戳。
     if (!prev || s.lastActivityMs > prev.lastMs) {
-      byPath.set(s.workspacePath, { name: s.workspaceName, lastMs: s.lastActivityMs });
+      byPath.set(path, { name: s.workspaceName || basename(path), lastMs: s.lastActivityMs });
     }
   }
   return [...byPath.entries()]
