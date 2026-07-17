@@ -1,7 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
 import type { DecisionHistoryRecord, RawMessage, ToolResultBlock } from "../../types";
 import type { PathLinkContext } from "../../markdown/pathLinks";
+import {
+  safeMarkdownComponents,
+  safeRemarkPlugins,
+  safeRehypePlugins,
+} from "../../markdown/safeLinks";
 import { summarizeWorkRun, workRunTitle } from "../workRuns";
 import { formatMsgTime } from "../../messageRows";
 import { ContentBlocks } from "./ContentBlocks";
@@ -31,6 +37,16 @@ function fmtTokens(n: number): string {
   if (n < 1000) return String(n);
   return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
 }
+
+/** The band title is a thinking-derived headline that often carries markdown
+ *  emphasis (`**Planning store test additions**`). Render it inline so the
+ *  markers become real bold/italic/code instead of literal asterisks — `p`
+ *  unwraps to a fragment so the single-sentence headline stays inline inside
+ *  the header's nowrap/ellipsis span rather than becoming a block paragraph. */
+export const titleMarkdownComponents = {
+  ...safeMarkdownComponents,
+  p: ({ children }: { children?: ReactNode }) => <>{children}</>,
+};
 
 /**
  * One collapsed band for a run of tool-call / thinking records between two
@@ -81,7 +97,15 @@ export function WorkRunBlock({
       <button className={styles.header} onClick={() => setOpen((o) => !o)}>
         <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
         {title ? (
-          <span className={`${styles.title}${shimmer}`}>{title}</span>
+          <span className={`${styles.title}${shimmer}`}>
+            <ReactMarkdown
+              remarkPlugins={safeRemarkPlugins}
+              rehypePlugins={safeRehypePlugins}
+              components={titleMarkdownComponents}
+            >
+              {title}
+            </ReactMarkdown>
+          </span>
         ) : (
           <span className={`${styles.category}${shimmer}`}>{t(`detail.work_cat_${summary.category}`)}</span>
         )}

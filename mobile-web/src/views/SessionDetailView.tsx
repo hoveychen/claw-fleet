@@ -448,6 +448,17 @@ function AssistantBlocks({
   );
 }
 
+/** Inline markdown for the work-run band headline: `p` unwraps to a fragment
+ *  so a one-sentence title renders inline (no block paragraph) inside the
+ *  nowrap/ellipsis span, while `**bold**`/`code` still resolve. Links stay
+ *  inert (same as LazyMarkdown) since a title never navigates. */
+const bandTitleMdComponents = {
+  p: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  a: ({ children }: { children?: ReactNode }) => (
+    <span className={styles.mdLink}>{children}</span>
+  ),
+};
+
 /**
  * A run of ≥2 adjacent pure-work records folded behind one summary line —
  * the mobile counterpart of the desktop WorkRunBlock. `live` (the run is the
@@ -479,7 +490,17 @@ function WorkRunBand({
       <button className={styles.bandHeader} onClick={() => setOpen((o) => !o)}>
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <span className={`${styles.bandTitle}${live ? ` ${styles.shimmer}` : ""}`}>
-          {title}
+          {/* The headline is thinking-derived and often carries markdown emphasis
+              (`**Planning store test additions**`); render it inline (p unwrapped
+              to a fragment) so markers become bold/italic/code, not literal
+              asterisks, while staying on one line inside the nowrap/ellipsis span. */}
+          <ReactMarkdown
+            remarkPlugins={mdRemarkPlugins}
+            rehypePlugins={mdRehypePlugins}
+            components={bandTitleMdComponents}
+          >
+            {title}
+          </ReactMarkdown>
         </span>
         <span className={styles.bandSteps}>{t("{0} 步", countSteps(msgs))}</span>
       </button>
