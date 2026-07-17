@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 /** Full tool output recovered on demand from the backend for one tool call. */
 export interface FullToolResult {
@@ -39,8 +39,21 @@ export function useToolResultFetch(): ToolResultFetch | null {
  * Note `loadingFull` is deliberately NOT an effect dependency: setting it fires
  * a re-render, and if the effect re-ran on that change its own cleanup would
  * cancel the in-flight fetch before it could resolve — leaving the card stuck
- * on the placeholder forever. The effect keys only on the inputs that should
- * actually restart a fetch (open / truncated / fetcher / id).
+ * on the placeholder forever.
+ *
+ * `toolFetch` is deliberately NOT a dependency either, for the same reason at a
+ * larger scale. On a live session every `session-tail` append rebuilds
+ * MessageList's `truncatedIds` Set, which hands this hook a brand-new
+ * `toolFetch` object identity even though nothing about the fetch changed. If
+ * that identity were a dep, its cleanup would cancel the in-flight
+ * `get_tool_result_full` read (a multi-MB jsonl scan) on every append — and on
+ * a busy session the appends out-pace the read, so the fetch is cancelled and
+ * restarted forever and the recovered body never lands (an expanded image Read
+ * shows the file path and an empty body). We read the latest fetcher through a
+ * ref instead, and key the effect only on the inputs that should actually
+ * (re)start a fetch: open / truncated / id. `wasTruncated` already flips false→
+ * true when `toolFetch` first becomes available, so that transition still
+ * triggers the initial fetch.
  */
 export function useFullToolResult(
   open: boolean,
@@ -50,11 +63,14 @@ export function useFullToolResult(
 ): { full: FullToolResult | null; loadingFull: boolean } {
   const [full, setFull] = useState<FullToolResult | null>(null);
   const [loadingFull, setLoadingFull] = useState(false);
+  const toolFetchRef = useRef(toolFetch);
+  toolFetchRef.current = toolFetch;
   useEffect(() => {
-    if (!open || !wasTruncated || full || !toolFetch || !blockId) return;
+    const fetcher = toolFetchRef.current;
+    if (!open || !wasTruncated || full || !fetcher || !blockId) return;
     let cancelled = false;
     setLoadingFull(true);
-    toolFetch
+    fetcher
       .fetchFull(blockId)
       .then((r) => {
         if (!cancelled) setFull(r);
@@ -66,6 +82,6 @@ export function useFullToolResult(
     return () => {
       cancelled = true;
     };
-  }, [open, wasTruncated, full, toolFetch, blockId]);
+  }, [open, wasTruncated, full, blockId]);
   return { full, loadingFull };
 }
