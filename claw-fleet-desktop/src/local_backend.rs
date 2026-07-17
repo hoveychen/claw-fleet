@@ -774,18 +774,32 @@ impl LocalBackend {
             let arse_ar = auto_resume_server_errors.clone();
             let running_ar = running.clone();
             let app_ar = app.clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(Duration::from_secs(30));
-                if !running_ar.load(Ordering::SeqCst) {
-                    break;
+            std::thread::spawn(move || {
+                // Stall-watchdog bookkeeping, per app run: interrupts already
+                // fired per session (hard cap) and the last fire time (cooldown),
+                // so a turn that re-stalls after every resume can't be
+                // interrupt-looped forever.
+                let mut stall_fired: HashMap<String, u32> = HashMap::new();
+                let mut stall_last_fire: HashMap<String, Instant> = HashMap::new();
+                loop {
+                    std::thread::sleep(Duration::from_secs(30));
+                    if !running_ar.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    // Heal Codex sessions frozen at `proc_alive = true` by a turn that
+                    // died mid-flight without a `task_complete` (no rollout write means
+                    // the fs-watcher never rescans them). Runs before the drain so the
+                    // queued follow-up sees the corrected `proc_alive == false`.
+                    refresh_dead_codex_liveness_and_emit(&sess_ar, &app_ar);
+                    // Interrupt Codex turns that are alive but hung (process up,
+                    // rollout silent past the threshold, not waiting on a decision
+                    // card). The SIGINT makes codex record `turn_aborted` and exit;
+                    // the liveness refresh above then clamps it on the next tick and
+                    // the drain below delivers the queued continuation note.
+                    maybe_interrupt_stalled_codex(&sess_ar, &mut stall_fired, &mut stall_last_fire);
+                    maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar, &arfail_ar, &arse_ar);
+                    maybe_drain_pending_messages(&sess_ar);
                 }
-                // Heal Codex sessions frozen at `proc_alive = true` by a turn that
-                // died mid-flight without a `task_complete` (no rollout write means
-                // the fs-watcher never rescans them). Runs before the drain so the
-                // queued follow-up sees the corrected `proc_alive == false`.
-                refresh_dead_codex_liveness_and_emit(&sess_ar, &app_ar);
-                maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar, &arfail_ar, &arse_ar);
-                maybe_drain_pending_messages(&sess_ar);
             });
         }
 
@@ -1717,6 +1731,55 @@ fn refresh_dead_codex_liveness_and_emit(
         let _ = app.emit("sessions-updated", &s);
         crate::update_tray(app, &s);
         publish_mobile_sessions(&s);
+    }
+}
+
+/// Per-session hard cap on watchdog interrupts within one app run. A turn that
+/// stalls again after every resume is a persistent environment problem the
+/// watchdog can't fix — stop after this many attempts and leave it to the user.
+const STALL_MAX_INTERRUPTS: u32 = 2;
+/// Minimum spacing between watchdog interrupts of the same session, so the
+/// interrupt → drain → resume → (possibly re-stall) cycle gets a full silence
+/// window to prove itself before the next intervention.
+const STALL_COOLDOWN: Duration = Duration::from_secs(15 * 60);
+
+/// Detect and interrupt alive-but-hung Codex turns (see
+/// [`claw_fleet_core::codex_source::detect_stalled_codex_turns`]). Runs off the
+/// 30s ticker; detection is cheap (a process-table scan plus one stat per live
+/// Codex session) and the interrupt path only fires for sessions past the
+/// 10-minute silence threshold with no pending decision card.
+fn maybe_interrupt_stalled_codex(
+    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
+    fired: &mut HashMap<String, u32>,
+    last_fire: &mut HashMap<String, Instant>,
+) {
+    let snapshot: Vec<SessionInfo> = { sessions.lock().unwrap().clone() };
+    for stall in claw_fleet_core::codex_source::detect_stalled_codex_turns(&snapshot) {
+        let attempts = fired.get(&stall.session_id).copied().unwrap_or(0);
+        if attempts >= STALL_MAX_INTERRUPTS {
+            continue;
+        }
+        if let Some(at) = last_fire.get(&stall.session_id) {
+            if at.elapsed() < STALL_COOLDOWN {
+                continue;
+            }
+        }
+        match claw_fleet_core::codex_source::interrupt_stalled_codex_turn(&stall) {
+            Ok(()) => log_debug(&format!(
+                "[CODEX-STALL] interrupted {} (pid {}) after {}min rollout silence (attempt {}/{})",
+                stall.session_id,
+                stall.pid,
+                stall.silence_secs / 60,
+                attempts + 1,
+                STALL_MAX_INTERRUPTS,
+            )),
+            Err(e) => log_debug(&format!(
+                "[CODEX-STALL] interrupt {} (pid {}) failed: {e}",
+                stall.session_id, stall.pid,
+            )),
+        }
+        fired.insert(stall.session_id.clone(), attempts + 1);
+        last_fire.insert(stall.session_id.clone(), Instant::now());
     }
 }
 
