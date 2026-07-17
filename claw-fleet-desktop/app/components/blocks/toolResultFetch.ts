@@ -9,13 +9,13 @@ export interface FullToolResult {
 }
 
 /**
- * Lets a tool card recover the full output the tail payload truncated.
+ * Lets a tool card recover output directly from the session transcript.
  *
  * `MessageList` provides this when it knows the session's `jsonlPath`. A card
  * whose `tool_use_id` is in `truncatedIds` shipped only a preview (see the Rust
- * `message_trim`); on expand it calls `fetchFull` to pull the real body. Absent
- * (context is null) when nothing was truncated or the caller has no jsonl path,
- * in which case cards render whatever inline content they were given.
+ * `message_trim`); on expand it calls `fetchFull` to pull the real body. The
+ * same reader also repairs a completed Read whose result is absent from the
+ * current message window. Absent only when the caller has no jsonl path.
  */
 export interface ToolResultFetch {
   truncatedIds: Set<string>;
@@ -29,8 +29,8 @@ export function useToolResultFetch(): ToolResultFetch | null {
 }
 
 /**
- * Recover the full, untrimmed output for a truncated tool card, once and only
- * when the reader has actually expanded it.
+ * Recover a tool's result from the transcript, once and only when the reader
+ * has actually expanded it and the caller says recovery is required.
  *
  * The fetch is deferred until `open` so a collapsed card never pays for output
  * the reader may never look at. `loadingFull` drives the "Loading full output…"
@@ -51,13 +51,13 @@ export function useToolResultFetch(): ToolResultFetch | null {
  * restarted forever and the recovered body never lands (an expanded image Read
  * shows the file path and an empty body). We read the latest fetcher through a
  * ref instead, and key the effect only on the inputs that should actually
- * (re)start a fetch: open / truncated / id. `wasTruncated` already flips false→
- * true when `toolFetch` first becomes available, so that transition still
+ * (re)start a fetch: open / recovery-needed / id. `shouldFetch` already flips
+ * false→true when recovery becomes necessary, so that transition still
  * triggers the initial fetch.
  */
 export function useFullToolResult(
   open: boolean,
-  wasTruncated: boolean,
+  shouldFetch: boolean,
   toolFetch: ToolResultFetch | null,
   blockId: string | undefined,
 ): { full: FullToolResult | null; loadingFull: boolean; error: string | null } {
@@ -68,7 +68,7 @@ export function useFullToolResult(
   toolFetchRef.current = toolFetch;
   useEffect(() => {
     const fetcher = toolFetchRef.current;
-    if (!open || !wasTruncated || full || !fetcher || !blockId) return;
+    if (!open || !shouldFetch || full || !fetcher || !blockId) return;
     let cancelled = false;
     setLoadingFull(true);
     setError(null);
@@ -88,6 +88,6 @@ export function useFullToolResult(
     return () => {
       cancelled = true;
     };
-  }, [open, wasTruncated, full, blockId]);
+  }, [open, shouldFetch, full, blockId]);
   return { full, loadingFull, error };
 }
