@@ -249,16 +249,82 @@ function hasAgentInput(block: ToolUseBlockType): boolean {
   );
 }
 
-/** Generic fallback: the whole input object as pretty JSON. This is the shape
- *  every codex tool used to render as; the presenters below replace it one tool
- *  at a time, and unhandled tools still land here. */
-function RawInput({ block }: { block: ToolUseBlockType }) {
+/**
+ * One input field as a labeled row. Scalars stay inline (`key  value`); long or
+ * multiline strings break onto their own line with an ExpandableText (copy
+ * button + height cap); scalar arrays become chips; nested objects fall to a
+ * labeled JSON block. Keeps every field readable without ever dumping the whole
+ * args object as one JSON blob.
+ */
+function ParamRow({ name, value }: { name: string; value: unknown }) {
+  if (typeof value === "string") {
+    if (value.includes("\n") || value.length > 80) {
+      return (
+        <div className={styles.param_block}>
+          <span className={styles.param_key}>{name}</span>
+          <ExpandableText text={value} />
+        </div>
+      );
+    }
+    return (
+      <div className={styles.param_row}>
+        <span className={styles.param_key}>{name}</span>
+        <span className={styles.param_val}>{value}</span>
+      </div>
+    );
+  }
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return (
+      <div className={styles.param_row}>
+        <span className={styles.param_key}>{name}</span>
+        <span className={styles.param_val}>{String(value)}</span>
+      </div>
+    );
+  }
+  if (Array.isArray(value) && value.every((v) => typeof v === "string" || typeof v === "number")) {
+    return (
+      <div className={styles.param_row}>
+        <span className={styles.param_key}>{name}</span>
+        <span className={styles.param_chips}>
+          {value.map((v, i) => (
+            <span key={i} className={styles.param_chip}>
+              {String(v)}
+            </span>
+          ))}
+        </span>
+      </div>
+    );
+  }
   return (
-    <>
-      <span className={styles.section_label}>Input</span>
-      <pre className={styles.input_text}>{JSON.stringify(block.input, null, 2)}</pre>
-    </>
+    <div className={styles.param_block}>
+      <span className={styles.param_key}>{name}</span>
+      <ExpandableText text={JSON.stringify(value, null, 2)} />
+    </div>
   );
+}
+
+/**
+ * Generic fallback body: the tool input as a labeled key/value list rather than
+ * a raw `JSON.stringify` blob. Every tool with no dedicated presenter — MCP
+ * tools, NotebookEdit, BashOutput, KillShell, … — lands here, so nothing in the
+ * transcript shows raw JSON anymore. An empty input reads as a short note.
+ */
+function ParamsBody({ block }: { block: ToolUseBlockType }) {
+  const entries = Object.entries(block.input ?? {});
+  if (entries.length === 0) return <div className={styles.codex_note}>No parameters</div>;
+  return (
+    <div className={styles.params}>
+      {entries.map(([k, v]) => (
+        <ParamRow key={k} name={k} value={v} />
+      ))}
+    </div>
+  );
+}
+
+/** Back-compat alias: codex presenters fall back here when their shape doesn't
+ *  match. Now a clean key/value list instead of raw JSON. */
+function RawInput({ block }: { block: ToolUseBlockType }) {
+  return <ParamsBody block={block} />;
 }
 
 /**
@@ -709,10 +775,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
             </div>
           ) : (
             <div className={styles.input_section}>
-              <span className={styles.section_label}>Input</span>
-              <pre className={styles.input_text}>
-                {JSON.stringify(block.input, null, 2)}
-              </pre>
+              <ParamsBody block={block} />
             </div>
           )}
           {/* A custom body already presents the result (stdout, todo list,
