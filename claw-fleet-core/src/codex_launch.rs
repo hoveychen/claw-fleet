@@ -554,6 +554,16 @@ pub fn fleet_decision_card_args(session_env: &[(String, String)]) -> Vec<String>
         format!("mcp_servers.fleet.command={}", toml_basic_string(&fleet)),
         "-c".to_string(),
         format!("mcp_servers.fleet.args=[{}]", toml_basic_string("mcp")),
+        // Codex's MCP client defaults `tool_timeout_sec` to 300s and kills the
+        // `tools/call` unilaterally when it fires — the fleet MCP server never
+        // learns, so its own wait clock (`decision_panel_config.wait_seconds`,
+        // which drives card-timeout → park → SIGINT → resume-with-answer) never
+        // gets to run. Push the client clock far past any configurable server
+        // clock so the server always times out first; this backstop is never
+        // the user-visible timeout. (Observed live 2026-07-17: card answered
+        // 82s after the 300s client timeout, answer returned to a dead request.)
+        "-c".to_string(),
+        "mcp_servers.fleet.tool_timeout_sec=86400".to_string(),
     ];
     for (k, v) in session_env {
         args.push("-c".to_string());
@@ -1375,6 +1385,33 @@ mod tests {
         assert!(cfg.contains("matcher=\"^Bash$\""));
         assert!(cfg.contains("'/Applications/Fleet Tools/fleet' guard"));
         assert!(cfg.contains("timeout=86400"));
+    }
+
+    /// The fleet MCP server's own wait clock (`decision_panel_config.wait_seconds`)
+    /// drives the card-timeout → park → SIGINT → resume-with-answer flow. Codex's
+    /// MCP client defaults `tool_timeout_sec` to 300s, which fires *first* and
+    /// unilaterally kills the `tools/call` before any of that server-side
+    /// machinery can run (observed live 2026-07-17, session 019f6edc: rollout
+    /// `mcp_tool_call_end` = `Err: timed out awaiting tools/call after 300s`;
+    /// the user's answer landed 82s later into a dead request). The injected
+    /// override must push the client clock far past any configurable server
+    /// clock so the server always wins the race — it is a backstop, never the
+    /// user-visible timeout.
+    #[test]
+    fn decision_card_args_override_codex_client_tool_timeout() {
+        let _home = TmpHome::new("card-tool-timeout");
+        // Make `resolve_fleet_binary()` hit its `~/.fleet/bin` fallback so the
+        // args are non-empty regardless of what's installed on the host.
+        let bin = crate::fleet_cli::fleet_bin_dir().expect("bin dir under FLEET_HOME");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join(if cfg!(windows) { "fleet.exe" } else { "fleet" }), b"#!/bin/sh\n")
+            .unwrap();
+        let args = fleet_decision_card_args(&[]);
+        assert!(!args.is_empty(), "fleet binary must resolve in this test");
+        assert!(
+            args.iter().any(|a| a == "mcp_servers.fleet.tool_timeout_sec=86400"),
+            "must override codex's 300s client-side MCP tool timeout; got: {args:?}"
+        );
     }
 
     #[test]
