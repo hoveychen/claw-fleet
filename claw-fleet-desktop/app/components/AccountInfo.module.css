@@ -450,7 +450,7 @@
 .tool_path {
   font-size: 10px;
   color: var(--color-text-dim);
-  font-family: monospace;
+  font-family: var(--font-mono);
   padding-left: 12px;
   word-break: break-all;
 }
