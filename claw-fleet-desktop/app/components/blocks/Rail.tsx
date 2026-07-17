@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Bot,
+  Brain,
   CircleCheck,
-  Clock,
   File,
   FileArchive,
   FileBox,
@@ -123,7 +123,7 @@ export function fileExtIcon(path: string): ReactNode {
   return <File />;
 }
 
-export const railThinkingIcon = (<Clock />);
+export const railThinkingIcon = (<Brain />);
 export const railUnknownIcon = (<Wrench />);
 
 export function RailStep({ icon, children }: { icon: ReactNode; children: ReactNode }) {
