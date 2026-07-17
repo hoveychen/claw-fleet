@@ -80,16 +80,9 @@ function formatInput(input: Record<string, unknown>, name?: string): string {
     const desc = typeof input.description === "string" ? input.description.trim() : "";
     if (desc) return desc;
   }
-  // codex runs in "code mode": every tool call is an `exec` running a JS/TS
-  // script with no per-call description. The injected AGENTS.md (Rule 7) asks
-  // the model to put a `// ...` summary on the first line, which the backend
-  // lifts into `exec_note`. Prefer it in the collapsed row so 老板 sees intent
-  // instead of raw code; the full script still shows in the expanded body.
-  // Fall back to the raw command when the summary is absent.
-  if (name === "exec") {
-    const note = typeof input.exec_note === "string" ? input.exec_note.trim() : "";
-    if (note) return note;
-  }
+  // codex "code mode" execs (`exec`) are summarised in `codexToolSummary` — it
+  // prefers the lifted `exec_note` and falls back to the wrapper's `cmd`. Only
+  // when both are absent does control reach here, dumping the raw script below.
   // Show a compact one-liner for common tools
   if ("command" in input) return String(input.command);
   // codex's `exec_command` carries the shell command under `cmd` (not
@@ -171,12 +164,15 @@ function unquoteJs(literal: string): string {
  * command the model actually ran is buried in the `cmd` field. Returns `{}` when
  * `command` is not that shape (older-style exec, where `command` is already the
  * shell command, or any script with no `cmd:` field). String literals may be
- * double-, single-, or backtick-quoted; the first match of each key wins.
+ * double-, single-, or backtick-quoted; the first match of each key wins. The
+ * key itself may be bare (`cmd:`, JS object literal) or quoted (`"cmd":`,
+ * `'cmd':` — codex serialises the wrapper as JSON, so real rollouts use the
+ * quoted form); both are accepted.
  */
 export function parseExecCommand(command: string): { cmd?: string; workdir?: string } {
   const field = (key: string): string | undefined => {
     const m = command.match(
-      new RegExp(`\\b${key}\\s*:\\s*("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|\`[^\`]*\`)`),
+      new RegExp(`["'\`]?\\b${key}\\b["'\`]?\\s*:\\s*("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|\`[^\`]*\`)`),
     );
     return m ? unquoteJs(m[1]) : undefined;
   };
@@ -229,6 +225,21 @@ export function codexToolSummary(
         (typeof input.agent_type === "string" && input.agent_type.trim()) ||
         "";
       return label ? t("detail.tool_spawn_agent_named", { name: label }) : t("detail.tool_spawn_agent");
+    }
+    // codex "code mode": the tool call is a JS harness. The injected AGENTS.md
+    // (Rule 7) asks the model to put a `// ...` summary on the first line, which
+    // the backend lifts into `exec_note` — prefer it so the collapsed row shows
+    // intent. When the model skips the comment, fall back to the real shell
+    // command buried in the `tools.exec_command({ cmd })` wrapper, so the row
+    // reads `sed -n …` rather than the raw `const r = await …` JS. Only when
+    // neither exists (e.g. an `exec` calling `tools.view_image`) do we return
+    // null and let formatInput dump the raw script.
+    case "exec": {
+      const note = typeof input.exec_note === "string" ? input.exec_note.trim() : "";
+      if (note) return note;
+      const command = typeof input.command === "string" ? input.command : "";
+      const { cmd } = parseExecCommand(command);
+      return cmd ?? null;
     }
     case "update_plan":
       return t("detail.tool_update_plan");
