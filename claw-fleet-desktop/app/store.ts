@@ -54,7 +54,7 @@ export interface MainViewState {
   gallery: { query: string; showAll: boolean; idleExpanded: boolean };
   audit: {
     tab: "events" | "rules";
-    filter: "all" | "critical" | "high" | "medium" | "low";
+    filter: "all" | "critical" | "high" | "medium";
     unreadOnly: boolean;
     category: string | null;
     workspace: string;
