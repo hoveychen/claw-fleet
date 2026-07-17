@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
@@ -19,6 +19,16 @@ import { DecisionToolCard, hasDecisionQuestions } from "./DecisionToolCard";
 import { ImageThumb } from "./ImageThumb";
 import { DocumentBlock } from "./DocumentBlock";
 import { ExpandableText } from "./ExpandableText";
+import {
+  RailStep,
+  railDecisionIcon,
+  railGroupIcon,
+  railMediaIcon,
+  railTextIcon,
+  railThinkingIcon,
+  railToolIcon,
+  railUnknownIcon,
+} from "./Rail";
 import styles from "./ContentBlocks.module.css";
 
 /**
@@ -58,18 +68,39 @@ export interface BlocksProps {
   searchTerms?: string[] | null;
   /** Makes path-shaped inline-code spans clickable. */
   paths?: PathLinkContext;
+  /** Render each block as a timeline-rail step (icon gutter + connector line).
+   *  Set by `WorkRunBlock` for expanded work runs; the default flat rendering
+   *  is unchanged. The steps are emitted as direct siblings so runs spanning
+   *  several records still read as one continuous rail. */
+  rail?: boolean;
 }
 
-export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, isPartial, searchTerms, paths }: BlocksProps) {
+export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, isPartial, searchTerms, paths, rail }: BlocksProps) {
   const { t } = useTranslation();
   const elements: React.ReactNode[] = [];
   let i = 0;
+
+  /** Push one rendered block, wrapped as a rail step when in rail mode. The
+   *  inner node already carries the same key; keeping it is harmless. */
+  const push = (icon: ReactNode, key: React.Key, node: ReactNode) => {
+    elements.push(
+      rail ? (
+        <RailStep key={key} icon={icon}>
+          {node}
+        </RailStep>
+      ) : (
+        node
+      ),
+    );
+  };
 
   while (i < content.length) {
     const block = content[i];
 
     if (block.type === "text") {
-      elements.push(
+      push(
+        railTextIcon,
+        i,
         <TextBlock
           key={i}
           text={(block as { type: "text"; text: string }).text}
@@ -83,10 +114,13 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
     }
 
     if (block.type === "thinking") {
-      elements.push(
+      push(
+        railThinkingIcon,
+        i,
         <ThinkingBlock
           key={i}
           thinking={(block as { type: "thinking"; thinking: string }).thinking}
+          rail={rail}
         />
       );
       i++;
@@ -95,7 +129,9 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
 
     if (block.type === "redacted_thinking") {
       const unavailable = (block as { reason?: string }).reason === "summary_unavailable";
-      elements.push(
+      push(
+        railThinkingIcon,
+        i,
         <div key={i} className={styles.redacted}>
           {unavailable ? t("detail.reasoning_summary_unavailable") : t("detail.redacted_thinking")}
         </div>
@@ -109,7 +145,9 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
     // across 86 real transcripts rendered as nothing. Reuse the same thumbnail +
     // lightbox the tool_result path uses.
     if (block.type === "image") {
-      elements.push(
+      push(
+        railMediaIcon,
+        i,
         <ImageThumb key={i} block={block as ImageBlock} alt={t("detail.result_image")} />
       );
       i++;
@@ -118,7 +156,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
 
     // A top-level document (a PDF attachment) — also silently skipped before.
     if (block.type === "document") {
-      elements.push(<DocumentBlock key={i} block={block} />);
+      push(railMediaIcon, i, <DocumentBlock key={i} block={block} />);
       i++;
       continue;
     }
@@ -131,7 +169,9 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
       // into the generic card's `JSON.stringify(input)` header. An unrenderable
       // shape (rejected call, future schema) still falls through to that card.
       if (isDecisionTool(toolBlock.name) && hasDecisionQuestions(toolBlock.input)) {
-        elements.push(
+        push(
+          railDecisionIcon,
+          i,
           <DecisionToolCard
             key={i}
             block={toolBlock}
@@ -171,13 +211,19 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
         }
 
         if (group.length >= 2) {
-          elements.push(<GroupedToolUseBlocks key={i} blocks={group} paths={paths} />);
+          push(
+            railGroupIcon(group.map((g) => g.block.name)),
+            i,
+            <GroupedToolUseBlocks key={i} blocks={group} paths={paths} rail={rail} />
+          );
           i = j;
           continue;
         }
       }
 
-      elements.push(
+      push(
+        railToolIcon(toolBlock.name),
+        i,
         <ToolUseBlockComp
           key={i}
           block={toolBlock}
@@ -185,6 +231,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
           isPartial={isPartial && !result}
           meta={metaMap.get(toolBlock.id)}
           paths={paths}
+          rail={rail}
         />
       );
       i++;
@@ -193,7 +240,7 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
 
     // Any other block type: render a labeled shell instead of dropping it, so
     // no content silently disappears from the transcript.
-    elements.push(<UnknownBlock key={i} block={block} />);
+    push(railUnknownIcon, i, <UnknownBlock key={i} block={block} />);
     i++;
   }
 
