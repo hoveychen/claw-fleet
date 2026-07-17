@@ -354,10 +354,14 @@ function Favicon({ url }: { url: string }) {
 /** `WebSearch`: the query as a headline over one row per returned link —
  *  favicon, title, domain — the claude.ai search-card look. Narration strings
  *  in the payload are dropped; the links are the substance. */
-function WebSearchBody({ block, meta }: { block: ToolUseBlockType; meta: unknown }) {
+function WebSearchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: unknown; rail?: boolean }) {
   const search = asWebSearchResult(meta);
   if (!search) return null;
-  const query = search.query || (typeof block.input.query === "string" ? block.input.query : "");
+  // In rail mode the collapsed summary line (the query) stays visible above
+  // the expanded body, so repeating it here would read twice in a row.
+  const query = rail
+    ? ""
+    : search.query || (typeof block.input.query === "string" ? block.input.query : "");
   return (
     <>
       {query && <div className={styles.search_query}>{query}</div>}
@@ -408,16 +412,18 @@ export function ToolBody({
   block,
   meta,
   result,
+  rail,
 }: {
   block: ToolUseBlockType;
   meta: unknown;
   result?: ToolResultBlock;
+  rail?: boolean;
 }): ReactNode {
   if (meta === undefined || result?.is_error) return null;
   if (block.name === "Bash") return <BashBody block={block} meta={meta} />;
   if (block.name === "Agent") return <AgentBody meta={meta} />;
   if (block.name === "TodoWrite") return <TodoBody meta={meta} />;
-  if (block.name === "WebSearch") return <WebSearchBody block={block} meta={meta} />;
+  if (block.name === "WebSearch") return <WebSearchBody block={block} meta={meta} rail={rail} />;
   return null;
 }
 

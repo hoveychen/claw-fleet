@@ -1008,6 +1008,9 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
       type: "user",
       uuid: "msg-7b",
       timestamp: new Date(NOW - 11 * MIN).toISOString(),
+      // Structured Bash payload so the expanded card exercises BashBody
+      // (command + stdout streams) instead of the generic result text.
+      toolUseResult: { stdout: "release.yml\nrelay-image.yml", stderr: "", interrupted: false },
       message: {
         role: "user",
         content: [

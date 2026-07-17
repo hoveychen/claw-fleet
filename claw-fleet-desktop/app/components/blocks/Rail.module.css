@@ -42,24 +42,9 @@
   min-width: 0;
 }
 
-/* Inside the rail the member cards drop their chrome: the gutter icon already
-   names the step, so the border + tinted header read as double framing. Two
-   class levels outweigh the cards' single-class .root rules regardless of CSS
-   module bundle order. */
-.step .body > * {
-  border: none;
-  margin: 0;
-  border-radius: var(--radius-sm);
-}
-
-.step .body > * > button:first-child {
-  background: transparent;
-  padding-left: 0;
-}
-
-.step .body > * > button:first-child:hover {
-  background: var(--tool-group-bg-hover);
-}
+/* Member cards de-chrome themselves via their own rail props (ToolUseBlock
+   .rail, ThinkingBlock rail mode) — no cross-module overrides here, so a card
+   type without a rail mode (e.g. DecisionToolCard) keeps its own look. */
 
 /* Done row */
 .done { align-items: center; }
