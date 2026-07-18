@@ -40,6 +40,17 @@ pub struct EnqueueMessageRequest {
     pub text: String,
 }
 
+/// Request body for the `/cancel_pending_message` endpoint and the relay
+/// `cancel_pending_message` method: drop the queued follow-up at `index`
+/// (0-based, matching the order the UI renders the chips). Crosses the
+/// HTTP/relay boundary, so it needs both `Serialize` and `Deserialize`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelMessageRequest {
+    pub session_id: String,
+    pub index: usize,
+}
+
 /// The queued follow-ups for one session, oldest first.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
@@ -92,6 +103,27 @@ pub fn clear(session_id: &str) -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(format!("remove pending queue: {e}")),
     }
+}
+
+/// Cancel a single queued follow-up by position, `index` 0-based in the same
+/// order the UI renders the chips. Out-of-range is a no-op success (the queue
+/// may have shrunk between the user seeing the chip and the click arriving —
+/// e.g. a concurrent drain — so a stale index must not error). Removing the
+/// last message deletes the queue file, keeping [`has_pending`] honest.
+pub fn remove_at(session_id: &str, index: usize) -> Result<(), String> {
+    let session_id = session_id.trim();
+    let path = queue_path(session_id).ok_or("bad session id")?;
+    let Some(mut q) = get(session_id) else {
+        return Ok(()); // nothing queued — already "cancelled"
+    };
+    if index >= q.messages.len() {
+        return Ok(()); // stale index (queue shrank) — no-op
+    }
+    q.messages.remove(index);
+    if q.messages.is_empty() {
+        return clear(session_id);
+    }
+    write_queue(&path, &q)
 }
 
 /// Append a follow-up message to a session's queue.
@@ -428,6 +460,66 @@ mod tests {
             assert_eq!(fired.len(), 1, "idle codex session must drain its queue");
             assert_eq!(fired[0].0, "sess-codex-idle");
             assert!(get("sess-codex-idle").is_none(), "queue cleared after firing");
+        });
+    }
+
+    #[test]
+    fn remove_at_drops_one_and_keeps_order() {
+        with_temp_home(|| {
+            let path = queue_path("sess-rm").unwrap();
+            write_queue(
+                &path,
+                &PendingQueue {
+                    session_id: "sess-rm".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["a".into(), "b".into(), "c".into()],
+                },
+            )
+            .unwrap();
+            remove_at("sess-rm", 1).unwrap();
+            let q = get("sess-rm").expect("queue still present");
+            assert_eq!(q.messages, vec!["a".to_string(), "c".to_string()]);
+        });
+    }
+
+    #[test]
+    fn remove_at_last_message_deletes_file() {
+        with_temp_home(|| {
+            let path = queue_path("sess-rm1").unwrap();
+            write_queue(
+                &path,
+                &PendingQueue {
+                    session_id: "sess-rm1".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["only".into()],
+                },
+            )
+            .unwrap();
+            remove_at("sess-rm1", 0).unwrap();
+            assert!(get("sess-rm1").is_none(), "empty queue file removed");
+            assert!(!has_pending("sess-rm1"));
+        });
+    }
+
+    #[test]
+    fn remove_at_out_of_range_is_noop_success() {
+        with_temp_home(|| {
+            let path = queue_path("sess-rm2").unwrap();
+            write_queue(
+                &path,
+                &PendingQueue {
+                    session_id: "sess-rm2".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["x".into()],
+                },
+            )
+            .unwrap();
+            // Stale index past the end must not error and must not touch the queue.
+            remove_at("sess-rm2", 5).unwrap();
+            let q = get("sess-rm2").expect("queue untouched");
+            assert_eq!(q.messages, vec!["x".to_string()]);
+            // Missing queue file is likewise a no-op success.
+            remove_at("sess-never", 0).unwrap();
         });
     }
 
