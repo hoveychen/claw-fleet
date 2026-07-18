@@ -225,7 +225,7 @@
   cursor: pointer;
 }
 
-.smallButton:hover {
+.smallButton:hover:not(:disabled) {
   color: var(--color-text);
 }
 
@@ -248,8 +248,14 @@
   cursor: pointer;
 }
 
-.dangerButton:hover {
+.dangerButton:hover:not(:disabled) {
   background: rgba(var(--color-error-rgb), 0.08);
+}
+
+.smallButton:disabled,
+.dangerButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .dangerHint {

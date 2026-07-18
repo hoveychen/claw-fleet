@@ -311,8 +311,13 @@
   cursor: pointer;
 }
 
-.marketplace_chip_remove:hover {
+.marketplace_chip_remove:hover:not(:disabled) {
   color: #b03030;
+}
+
+.marketplace_chip_remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .marketplace_add_btn {
@@ -325,9 +330,14 @@
   cursor: pointer;
 }
 
-.marketplace_add_btn:hover {
+.marketplace_add_btn:hover:not(:disabled) {
   color: var(--color-text);
   border-color: var(--color-text-dim);
+}
+
+.marketplace_add_btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .marketplace_add_form {

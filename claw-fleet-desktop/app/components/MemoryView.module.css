@@ -58,9 +58,14 @@
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
-.chip:hover {
+.chip:hover:not(:disabled) {
   color: var(--color-text);
   border-color: var(--color-text-dim);
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .chip_active {

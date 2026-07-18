@@ -532,14 +532,19 @@
   white-space: nowrap;
 }
 
-.action_btn:hover {
+.action_btn:hover:not(:disabled) {
   color: var(--color-text);
   border-color: var(--color-text-dim);
 }
 
-.action_danger:hover {
+.action_danger:hover:not(:disabled) {
   color: var(--color-error);
   border-color: rgba(var(--color-error-rgb), 0.5);
+}
+
+.action_btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ── Content ────────────────────────────────────────────────────────────── */
