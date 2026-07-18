@@ -15,11 +15,39 @@ import {
 } from "remotion";
 import { clamp01, easeOut, lerp } from "./helpers";
 import { FONT, T } from "./tokens";
+import { HORIZONTAL_VOICE, VERTICAL_VOICE, type VoiceCue } from "./voiceTiming";
 
 const SHADOW = "0 24px 70px rgba(32,28,18,.22)";
 
 const enter = (frame: number, fps: number, delay = 0) =>
   spring({ frame: frame - delay, fps, config: { damping: 15, mass: 0.7 } });
+
+const voiceEnvelope = (frame: number, cue: VoiceCue, fps: number) => {
+  const start = cue.startFrame;
+  const end = start + Math.ceil(cue.measuredSeconds * fps);
+  return Math.min(clamp01((frame - (start - 8)) / 8), clamp01(((end + 10) - frame) / 10));
+};
+
+const bgmVolume = (frame: number, cues: VoiceCue[], fps: number) => {
+  const duck = cues.reduce((level, cue) => Math.max(level, voiceEnvelope(frame, cue, fps)), 0);
+  return lerp(0.34, 0.14, duck);
+};
+
+const VoiceTracks: React.FC<{ cues: VoiceCue[] }> = ({ cues }) => (
+  <>
+    {cues.map((cue) => (
+      <Sequence key={cue.file} from={cue.startFrame}>
+        <Audio src={staticFile(`audio/vo-2026/${cue.file}.mp3`)} volume={0.96} />
+      </Sequence>
+    ))}
+  </>
+);
+
+const SoundCue: React.FC<{ file: "alert" | "click" | "success" | "whoosh"; frame: number; volume?: number }> = ({ file, frame, volume = 0.55 }) => (
+  <Sequence from={frame}>
+    <Audio src={staticFile(`audio/sfx/${file}.wav`)} volume={volume} />
+  </Sequence>
+);
 
 const Brand: React.FC<{ compact?: boolean }> = ({ compact }) => (
   <div style={{ display: "flex", alignItems: "center", gap: compact ? 14 : 20 }}>
@@ -214,22 +242,34 @@ const Outro: React.FC = () => {
   );
 };
 
-export const ClawFleetPromo2026: React.FC = () => (
-  <>
-    <Audio src={staticFile("audio/bgm.mp3")} volume={0.42} />
-    <Series>
-      <Series.Sequence durationInFrames={90}><Intro /></Series.Sequence>
-      <Series.Sequence durationInFrames={150}><Overview /></Series.Sequence>
-      <Series.Sequence durationInFrames={135}><SideFeature eyebrow="Spend without surprises" title="See the meter before it bites." copy="Live token speed, cycle usage, and a model-by-model receipt — in the same place as the work." src="footage/t2-usage.mp4" /></Series.Sequence>
-      <Series.Sequence durationInFrames={180}><Decisions /></Series.Sequence>
-      <Series.Sequence durationInFrames={150}><SideFeature eyebrow="Dispatch" title="One composer. A whole fleet." copy="Pick the workspace, write the job, and send another agent without opening terminal number ten." src="footage/t5-dispatch.mp4" align="right" /></Series.Sequence>
-      <Series.Sequence durationInFrames={135}><SideFeature eyebrow="Handoff" title="The context ends. The mission does not." copy="A fresh agent receives the plan, the exact next task, and the gotchas worth remembering." src="footage/t6-chains.mp4" /></Series.Sequence>
-      <Series.Sequence durationInFrames={210}><MobileHero /></Series.Sequence>
-      <Series.Sequence durationInFrames={150}><ReportWiki /></Series.Sequence>
-      <Series.Sequence durationInFrames={150}><Outro /></Series.Sequence>
-    </Series>
-  </>
-);
+export const ClawFleetPromo2026: React.FC = () => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  return (
+    <>
+      <Audio src={staticFile("audio/bgm.mp3")} volume={() => bgmVolume(frame, HORIZONTAL_VOICE, fps)} />
+      <VoiceTracks cues={HORIZONTAL_VOICE} />
+      {[90, 240, 375, 555, 705, 840, 1050, 1200].map((cueFrame) => <SoundCue key={cueFrame} file="whoosh" frame={cueFrame} volume={0.38} />)}
+      <SoundCue file="alert" frame={407} volume={0.58} />
+      <SoundCue file="click" frame={500} />
+      <SoundCue file="click" frame={665} />
+      <SoundCue file="click" frame={930} />
+      <SoundCue file="success" frame={985} volume={0.62} />
+      <SoundCue file="success" frame={1210} volume={0.52} />
+      <Series>
+        <Series.Sequence durationInFrames={90}><Intro /></Series.Sequence>
+        <Series.Sequence durationInFrames={150}><Overview /></Series.Sequence>
+        <Series.Sequence durationInFrames={135}><SideFeature eyebrow="Spend without surprises" title="See the meter before it bites." copy="Live token speed, cycle usage, and a model-by-model receipt — in the same place as the work." src="footage/t2-usage.mp4" /></Series.Sequence>
+        <Series.Sequence durationInFrames={180}><Decisions /></Series.Sequence>
+        <Series.Sequence durationInFrames={150}><SideFeature eyebrow="Dispatch" title="One composer. A whole fleet." copy="Pick the workspace, write the job, and send another agent without opening terminal number ten." src="footage/t5-dispatch.mp4" align="right" /></Series.Sequence>
+        <Series.Sequence durationInFrames={135}><SideFeature eyebrow="Handoff" title="The context ends. The mission does not." copy="A fresh agent receives the plan, the exact next task, and the gotchas worth remembering." src="footage/t6-chains.mp4" /></Series.Sequence>
+        <Series.Sequence durationInFrames={210}><MobileHero /></Series.Sequence>
+        <Series.Sequence durationInFrames={150}><ReportWiki /></Series.Sequence>
+        <Series.Sequence durationInFrames={150}><Outro /></Series.Sequence>
+      </Series>
+    </>
+  );
+};
 
 export type VerticalTopic = {
   id: string;
@@ -261,9 +301,16 @@ export const ClawFleetVertical: React.FC<{ topic: VerticalTopic }> = ({ topic })
   const footageIn = enter(frame, fps, 54);
   const benefitIn = enter(frame, fps, 454);
   const cta = clamp01((frame - 548) / 16);
+  const voice = VERTICAL_VOICE[topic.id];
   return (
     <>
-      <Audio src={staticFile("audio/bgm.mp3")} volume={0.42} />
+      <Audio src={staticFile("audio/bgm.mp3")} volume={() => bgmVolume(frame, [voice], fps)} />
+      <VoiceTracks cues={[voice]} />
+      <SoundCue file="whoosh" frame={52} volume={0.42} />
+      {(topic.id === "guard" || topic.id === "mobile") && <SoundCue file="alert" frame={280} volume={0.5} />}
+      {(topic.id === "decide" || topic.id === "dispatch" || topic.id === "mobile") && <SoundCue file="click" frame={320} />}
+      <SoundCue file="whoosh" frame={454} volume={0.3} />
+      <SoundCue file="success" frame={550} volume={0.54} />
       <Paper dark>
         <div style={{ position: "absolute", top: 92, left: 72, right: 150, opacity: hookIn, transform: `translateY(${lerp(40, 0, hookIn)}px)` }}>
           <Eyebrow dark>{topic.eyebrow}</Eyebrow>
