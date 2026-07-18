@@ -1,0 +1,1477 @@
+openapi: 3.1.0
+info:
+  title: Fleet Cloud API
+  version: 1.0.0-draft.1
+  summary: Task-first API for the Fleet agent harness
+  description: |
+    Public control-plane API for creating and governing long-running Fleet tasks.
+    A Task is the stable business object; Runs and provider sessions are execution details.
+
+    All mutating endpoints support `Idempotency-Key`. Event delivery is at-least-once;
+    consumers deduplicate by event ID and resume from cursors. Dates are RFC 3339 UTC.
+  license:
+    name: Proprietary or separately agreed Fleet Cloud license
+    identifier: LicenseRef-Fleet-Cloud
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: https://api.fleet.example/v1
+    description: Production
+  - url: https://sandbox-api.fleet.example/v1
+    description: Sandbox
+tags:
+  - name: Tasks
+    description: Stable business tasks that survive individual agent sessions and Runs.
+  - name: Decisions
+    description: Human-in-the-loop questions, approvals, permissions, and rich cards.
+  - name: Runs
+    description: Individual execution attempts and handoff segments within a Task.
+  - name: Events
+    description: Durable, replayable facts and the real-time SSE projection over them.
+  - name: Artifacts
+    description: Reports, patches, images, logs, attachments, and other Task outputs.
+  - name: Runners
+    description: Customer-hosted execution workers, pools, registration, and lifecycle.
+  - name: Webhooks
+    description: At-least-once Event delivery endpoints and signing-secret management.
+  - name: Embed
+    description: Short-lived credentials for embedding Fleet Web views in a business UI.
+security:
+  - ProjectApiKey: []
+
+paths:
+  /tasks:
+    post:
+      tags: [Tasks]
+      operationId: createTask
+      summary: Create and queue a task
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+            examples:
+              repairTicket:
+                value:
+                  project_id: proj_01JZ0A
+                  external_id: ticket-4821
+                  title: Repair duplicate billing
+                  goal: Locate and fix the duplicate charge in the billing service.
+                  workspace:
+                    repository: github:acme/billing
+                    ref: main
+                  agent:
+                    provider: claude_code
+                    model: claude-opus-4-8
+                    effort: high
+                    permission_policy_id: policy_01JZSAFE
+                  metadata:
+                    ticket_url: https://tickets.example/4821
+      responses:
+        '202':
+          description: Task accepted and queued
+          headers:
+            Fleet-Request-Id:
+              $ref: '#/components/headers/FleetRequestId'
+            Location:
+              description: Canonical URL of the new Task
+              schema: { type: string, format: uri-reference }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateTaskResponse'
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/PermissionError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+        '429': { $ref: '#/components/responses/RateLimitError' }
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: List tasks visible to the caller
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdQuery'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TaskStatus'
+        - name: external_id
+          in: query
+          schema: { type: string, maxLength: 256 }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page of Tasks
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Task' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/PermissionError' }
+
+  /tasks/{task_id}:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Tasks]
+      operationId: getTask
+      summary: Get the current Task projection
+      responses:
+        '200':
+          description: Task
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /tasks/{task_id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      operationId: appendTaskMessage
+      summary: Append a user message to a running or resumable Task
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppendMessageRequest'
+      responses:
+        '202':
+          description: Message accepted for delivery
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandReceipt' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /tasks/{task_id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      operationId: cancelTask
+      summary: Request cancellation of a Task
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskControlRequest' }
+      responses:
+        '202':
+          description: Cancellation command accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandReceipt' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+        '412': { $ref: '#/components/responses/VersionConflictError' }
+
+  /tasks/{task_id}/pause:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      operationId: pauseTask
+      summary: Pause scheduling after the current safe boundary
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskControlRequest' }
+      responses:
+        '202':
+          description: Pause command accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandReceipt' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+        '412': { $ref: '#/components/responses/VersionConflictError' }
+
+  /tasks/{task_id}/resume:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [Tasks]
+      operationId: resumeTask
+      summary: Resume a paused, waiting, failed, or lost Task when policy allows
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: { type: string, maxLength: 100000 }
+                agent: { $ref: '#/components/schemas/AgentSpec' }
+      responses:
+        '202':
+          description: Resume command accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandReceipt' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { $ref: '#/components/responses/ConflictError' }
+        '412': { $ref: '#/components/responses/VersionConflictError' }
+
+  /tasks/{task_id}/events:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Events]
+      operationId: listTaskEvents
+      summary: Replay persisted events for one Task
+      parameters:
+        - name: after
+          in: query
+          description: Return events after this Task sequence or event cursor
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Ordered Task events
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Event' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /tasks/{task_id}/artifacts:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Artifacts]
+      operationId: listTaskArtifacts
+      summary: List Task artifacts
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Artifact page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Artifact' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /decisions:
+    get:
+      tags: [Decisions]
+      operationId: listDecisions
+      summary: List decisions
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdQuery'
+        - name: task_id
+          in: query
+          schema: { $ref: '#/components/schemas/ResourceId' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/DecisionStatus' }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Decision page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Decision' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/PermissionError' }
+
+  /decisions/{decision_id}:
+    parameters:
+      - $ref: '#/components/parameters/DecisionId'
+    get:
+      tags: [Decisions]
+      operationId: getDecision
+      summary: Get one Decision
+      responses:
+        '200':
+          description: Decision
+          headers:
+            ETag:
+              description: Decision version for compare-and-set responses
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Decision' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /decisions/{decision_id}/responses:
+    parameters:
+      - $ref: '#/components/parameters/DecisionId'
+    post:
+      tags: [Decisions]
+      operationId: respondToDecision
+      summary: Atomically answer, decline, or cancel a pending Decision
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionResponseRequest' }
+      responses:
+        '202':
+          description: Response persisted and delivery command accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [decision, command]
+                properties:
+                  decision: { $ref: '#/components/schemas/Decision' }
+                  command: { $ref: '#/components/schemas/CommandReceipt' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409':
+          description: Decision is already resolved or idempotency key conflicts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                alreadyResolved:
+                  value:
+                    error:
+                      type: conflict
+                      code: decision_already_resolved
+                      message: Decision has already been resolved.
+                      request_id: req_01JZ0A
+        '412': { $ref: '#/components/responses/VersionConflictError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /runs/{run_id}:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      tags: [Runs]
+      operationId: getRun
+      summary: Get one Run
+      responses:
+        '200':
+          description: Run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /runs/{run_id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      tags: [Runs]
+      operationId: listRunMessages
+      summary: List persisted full transcript records for a Run
+      parameters:
+        - name: after
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Ordered transcript records after structural redaction
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/TranscriptRecord' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /runs/{run_id}/usage:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      tags: [Runs]
+      operationId: getRunUsage
+      summary: Get normalized usage for a Run
+      responses:
+        '200':
+          description: Usage
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usage' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /events/stream:
+    get:
+      tags: [Events]
+      operationId: streamEvents
+      summary: Stream persisted Events with cursor resume
+      description: |
+        Server-Sent Events. Each SSE `id` is the Event cursor and each `data`
+        field is an Event JSON object. Clients reconnect with `after` or
+        `Last-Event-ID`. Heartbeats are comments and do not advance the cursor.
+      parameters:
+        - name: after
+          in: query
+          schema: { type: string }
+        - name: Last-Event-ID
+          in: header
+          schema: { type: string }
+        - $ref: '#/components/parameters/ProjectIdQuery'
+        - name: task_id
+          in: query
+          schema: { $ref: '#/components/schemas/ResourceId' }
+        - name: types
+          in: query
+          description: Comma-separated event type filters
+          schema: { type: string }
+      responses:
+        '200':
+          description: SSE stream
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-cache }
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                examples:
+                  - "id: 019c123\nevent: decision.created\ndata: {\"id\":\"evt_01JZ0A\",\"type\":\"decision.created\"}\n\n"
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+        '403': { $ref: '#/components/responses/PermissionError' }
+
+  /artifacts/{artifact_id}:
+    parameters:
+      - $ref: '#/components/parameters/ArtifactId'
+    get:
+      tags: [Artifacts]
+      operationId: getArtifact
+      summary: Get Artifact metadata
+      responses:
+        '200':
+          description: Artifact
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Artifact' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+    delete:
+      tags: [Artifacts]
+      operationId: deleteArtifact
+      summary: Schedule deletion of an Artifact and its object data
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Deletion accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandReceipt' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /artifacts/{artifact_id}/download-url:
+    parameters:
+      - $ref: '#/components/parameters/ArtifactId'
+    post:
+      tags: [Artifacts]
+      operationId: createArtifactDownloadUrl
+      summary: Create a short-lived signed download URL
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expires_in_seconds:
+                  type: integer
+                  minimum: 30
+                  maximum: 900
+                  default: 300
+      responses:
+        '200':
+          description: Signed URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expires_at]
+                properties:
+                  url: { type: string, format: uri }
+                  expires_at: { type: string, format: date-time }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /runner-registrations:
+    post:
+      tags: [Runners]
+      operationId: createRunnerRegistration
+      summary: Create a one-time Runner registration token
+      description: Requires project_admin or org_admin permission.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pool_id]
+              properties:
+                pool_id: { $ref: '#/components/schemas/ResourceId' }
+                name: { type: string, maxLength: 128 }
+                expires_in_seconds:
+                  type: integer
+                  minimum: 60
+                  maximum: 3600
+                  default: 600
+      responses:
+        '201':
+          description: One-time registration token; shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, token, expires_at]
+                properties:
+                  id: { $ref: '#/components/schemas/ResourceId' }
+                  token: { type: string, writeOnly: true }
+                  expires_at: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/PermissionError' }
+
+  /runners:
+    get:
+      tags: [Runners]
+      operationId: listRunners
+      summary: List Runners
+      parameters:
+        - name: pool_id
+          in: query
+          schema: { $ref: '#/components/schemas/ResourceId' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/RunnerStatus' }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Runner page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Runner' }
+        '403': { $ref: '#/components/responses/PermissionError' }
+
+  /runners/{runner_id}:
+    parameters:
+      - $ref: '#/components/parameters/RunnerId'
+    patch:
+      tags: [Runners]
+      operationId: updateRunner
+      summary: Update Runner labels, capacity, or scheduling state
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 128 }
+                labels:
+                  type: object
+                  additionalProperties: { type: string }
+                max_concurrency: { type: integer, minimum: 1, maximum: 256 }
+                scheduling_enabled: { type: boolean }
+      responses:
+        '200':
+          description: Updated Runner
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Runner' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '412': { $ref: '#/components/responses/VersionConflictError' }
+    delete:
+      tags: [Runners]
+      operationId: revokeRunner
+      summary: Revoke a Runner identity
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204': { description: Runner revoked }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /runners/{runner_id}/drain:
+    parameters:
+      - $ref: '#/components/parameters/RunnerId'
+    post:
+      tags: [Runners]
+      operationId: drainRunner
+      summary: Stop new assignments and drain active Runs
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deadline: { type: string, format: date-time }
+                force_after_deadline: { type: boolean, default: false }
+      responses:
+        '202':
+          description: Drain command accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandReceipt' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /webhook-endpoints:
+    post:
+      tags: [Webhooks]
+      operationId: createWebhookEndpoint
+      summary: Create a Webhook endpoint
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWebhookEndpointRequest' }
+      responses:
+        '201':
+          description: Endpoint and signing secret; secret is shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [endpoint, signing_secret]
+                properties:
+                  endpoint: { $ref: '#/components/schemas/WebhookEndpoint' }
+                  signing_secret: { type: string, writeOnly: true }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    get:
+      tags: [Webhooks]
+      operationId: listWebhookEndpoints
+      summary: List Webhook endpoints
+      responses:
+        '200':
+          description: Webhook endpoints
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/WebhookEndpoint' }
+        '403': { $ref: '#/components/responses/PermissionError' }
+
+  /webhook-endpoints/{webhook_endpoint_id}:
+    parameters:
+      - $ref: '#/components/parameters/WebhookEndpointId'
+    patch:
+      tags: [Webhooks]
+      operationId: updateWebhookEndpoint
+      summary: Update Webhook URL, filters, or enabled state
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                url: { type: string, format: uri }
+                event_types:
+                  type: array
+                  items: { type: string }
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Updated endpoint
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookEndpoint' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '412': { $ref: '#/components/responses/VersionConflictError' }
+    delete:
+      tags: [Webhooks]
+      operationId: deleteWebhookEndpoint
+      summary: Delete a Webhook endpoint
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /webhook-endpoints/{webhook_endpoint_id}/rotate-secret:
+    parameters:
+      - $ref: '#/components/parameters/WebhookEndpointId'
+    post:
+      tags: [Webhooks]
+      operationId: rotateWebhookSecret
+      summary: Rotate the Webhook signing secret
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: New secret; shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signing_secret, previous_valid_until]
+                properties:
+                  signing_secret: { type: string, writeOnly: true }
+                  previous_valid_until: { type: string, format: date-time }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
+  /embed-tokens:
+    post:
+      tags: [Embed]
+      operationId: createEmbedToken
+      summary: Create a short-lived token for an iframe Fleet view
+      description: The token is scoped to one Project or one Task and a fixed set of views.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id, allowed_origins, views]
+              properties:
+                project_id: { $ref: '#/components/schemas/ResourceId' }
+                task_id: { $ref: '#/components/schemas/ResourceId' }
+                allowed_origins:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items: { type: string, format: uri }
+                views:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items:
+                    type: string
+                    enum: [task_detail, decision_inbox, decision_card, usage]
+                expires_in_seconds:
+                  type: integer
+                  minimum: 60
+                  maximum: 3600
+                  default: 600
+      responses:
+        '201':
+          description: Short-lived embed token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, embed_url, expires_at]
+                properties:
+                  token: { type: string, writeOnly: true }
+                  embed_url: { type: string, format: uri }
+                  expires_at: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/PermissionError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+webhooks:
+  fleetEvent:
+    post:
+      operationId: receiveFleetEventWebhook
+      summary: Fleet Event delivery
+      description: |
+        At-least-once delivery. Deduplicate by `Fleet-Event-Id`.
+        Verify `Fleet-Signature` over `<timestamp>.<raw-body>` with HMAC-SHA256.
+      parameters:
+        - name: Fleet-Event-Id
+          in: header
+          required: true
+          schema: { type: string }
+        - name: Fleet-Delivery-Id
+          in: header
+          required: true
+          schema: { type: string }
+        - name: Fleet-Timestamp
+          in: header
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: Fleet-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: '^v1=[0-9a-f]{64}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Event' }
+      responses:
+        '200': { description: Accepted }
+        '204': { description: Accepted with no response body }
+
+components:
+  securitySchemes:
+    ProjectApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: flk_live_xxx
+      description: Project-scoped API key. Store only a hash server-side.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Stable key for safely retrying this mutation.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 255
+        pattern: '^[A-Za-z0-9._:-]+$'
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      schema: { type: string }
+    IfMatchRequired:
+      name: If-Match
+      in: header
+      required: true
+      description: ETag returned by the latest GET.
+      schema: { type: string }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    ProjectIdQuery:
+      name: project_id
+      in: query
+      schema: { $ref: '#/components/schemas/ResourceId' }
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ResourceId' }
+    DecisionId:
+      name: decision_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ResourceId' }
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ResourceId' }
+    RunnerId:
+      name: runner_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ResourceId' }
+    ArtifactId:
+      name: artifact_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ResourceId' }
+    WebhookEndpointId:
+      name: webhook_endpoint_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ResourceId' }
+
+  headers:
+    FleetRequestId:
+      description: Request correlation ID
+      schema: { type: string }
+
+  responses:
+    AuthenticationError:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    PermissionError:
+      description: Authenticated principal lacks permission
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFoundError:
+      description: Resource not found or not visible to this principal
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ConflictError:
+      description: Resource state or idempotency conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    VersionConflictError:
+      description: If-Match does not match the current resource version
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    RateLimitError:
+      description: Rate or quota limit exceeded
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  schemas:
+    ResourceId:
+      type: string
+      minLength: 8
+      maxLength: 80
+      pattern: '^[a-z][a-z0-9]*_[A-Za-z0-9]+$'
+      examples: [task_01JZ0A]
+
+    Metadata:
+      type: object
+      maxProperties: 50
+      additionalProperties:
+        oneOf:
+          - type: string
+          - type: number
+          - type: integer
+          - type: boolean
+          - type: 'null'
+
+    PageMeta:
+      type: object
+      required: [has_more]
+      properties:
+        next_cursor:
+          type: [string, 'null']
+        has_more:
+          type: boolean
+
+    TaskStatus:
+      type: string
+      enum: [queued, running, waiting_input, paused, succeeded, failed, cancelled]
+
+    RunStatus:
+      type: string
+      enum: [assigned, starting, running, waiting_input, stopping, succeeded, failed, cancelled, lost]
+
+    DecisionStatus:
+      type: string
+      enum: [pending, answered, declined, expired, cancelled]
+
+    DecisionKind:
+      type: string
+      enum: [guard, elicitation, fleet_ask, plan_approval, permission_prompt, a2ui]
+
+    RunnerStatus:
+      type: string
+      enum: [online, offline, draining, disabled, revoked]
+
+    AgentSpec:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [claude_code, codex]
+        model:
+          type: string
+          maxLength: 128
+        effort:
+          type: string
+          maxLength: 32
+        permission_policy_id:
+          $ref: '#/components/schemas/ResourceId'
+      additionalProperties: false
+
+    WorkspaceSpec:
+      type: object
+      required: [repository]
+      properties:
+        repository:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Logical repository reference, never a Runner absolute path.
+        ref:
+          type: string
+          maxLength: 512
+          default: main
+        subdirectory:
+          type: string
+          maxLength: 1024
+          pattern: '^(?!/)(?!.*\.\.)[^\\]*$'
+      additionalProperties: false
+
+    CreateTaskRequest:
+      type: object
+      required: [project_id, goal, workspace, agent]
+      properties:
+        project_id: { $ref: '#/components/schemas/ResourceId' }
+        external_id: { type: string, maxLength: 256 }
+        title: { type: string, maxLength: 512 }
+        goal: { type: string, minLength: 1, maxLength: 200000 }
+        workspace: { $ref: '#/components/schemas/WorkspaceSpec' }
+        agent: { $ref: '#/components/schemas/AgentSpec' }
+        runner_pool_id: { $ref: '#/components/schemas/ResourceId' }
+        metadata: { $ref: '#/components/schemas/Metadata' }
+      additionalProperties: false
+
+    CreateTaskResponse:
+      type: object
+      required: [task, run]
+      properties:
+        task: { $ref: '#/components/schemas/Task' }
+        run: { $ref: '#/components/schemas/Run' }
+
+    Task:
+      type: object
+      required:
+        - id
+        - project_id
+        - status
+        - goal
+        - version
+        - created_at
+        - updated_at
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        project_id: { $ref: '#/components/schemas/ResourceId' }
+        external_id: { type: [string, 'null'] }
+        title: { type: [string, 'null'] }
+        goal: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        active_run_id:
+          oneOf:
+            - $ref: '#/components/schemas/ResourceId'
+            - type: 'null'
+        waiting_decision_ids:
+          type: array
+          items: { $ref: '#/components/schemas/ResourceId' }
+        metadata: { $ref: '#/components/schemas/Metadata' }
+        version: { type: integer, minimum: 1 }
+        created_by: { $ref: '#/components/schemas/PrincipalRef' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    PrincipalRef:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [user, api_key, service_account, system]
+        id: { $ref: '#/components/schemas/ResourceId' }
+
+    Run:
+      type: object
+      required:
+        - id
+        - task_id
+        - attempt
+        - status
+        - agent
+        - version
+        - created_at
+        - updated_at
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        task_id: { $ref: '#/components/schemas/ResourceId' }
+        attempt: { type: integer, minimum: 1 }
+        predecessor_run_id:
+          oneOf:
+            - $ref: '#/components/schemas/ResourceId'
+            - type: 'null'
+        runner_id:
+          oneOf:
+            - $ref: '#/components/schemas/ResourceId'
+            - type: 'null'
+        status: { $ref: '#/components/schemas/RunStatus' }
+        agent: { $ref: '#/components/schemas/AgentSpec' }
+        started_at: { type: [string, 'null'], format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+        exit_reason: { type: [string, 'null'] }
+        usage: { $ref: '#/components/schemas/Usage' }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Decision:
+      type: object
+      required:
+        - id
+        - task_id
+        - run_id
+        - kind
+        - status
+        - schema_version
+        - payload
+        - response_schema
+        - version
+        - created_at
+        - updated_at
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        task_id: { $ref: '#/components/schemas/ResourceId' }
+        run_id: { $ref: '#/components/schemas/ResourceId' }
+        kind: { $ref: '#/components/schemas/DecisionKind' }
+        status: { $ref: '#/components/schemas/DecisionStatus' }
+        schema_version: { type: integer, minimum: 1 }
+        payload:
+          type: object
+          additionalProperties: true
+          description: Versioned renderer payload; rich HTML is rendered in a sandboxed iframe.
+        response_schema:
+          type: object
+          additionalProperties: true
+          description: JSON Schema constraining the response body.
+        response:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        deadline: { type: [string, 'null'], format: date-time }
+        resolved_by:
+          oneOf:
+            - $ref: '#/components/schemas/PrincipalRef'
+            - type: 'null'
+        resolved_at: { type: [string, 'null'], format: date-time }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    DecisionResponseRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [answer, decline, cancel]
+        answers:
+          type: object
+          additionalProperties: true
+      allOf:
+        - if:
+            properties:
+              action: { const: answer }
+          then:
+            required: [answers]
+            properties:
+              answers:
+                type: object
+                additionalProperties: true
+      additionalProperties: false
+
+    Event:
+      type: object
+      required:
+        - id
+        - cursor
+        - organization_id
+        - project_id
+        - type
+        - occurred_at
+        - recorded_at
+        - data
+        - schema_version
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        cursor: { type: string }
+        organization_id: { $ref: '#/components/schemas/ResourceId' }
+        project_id: { $ref: '#/components/schemas/ResourceId' }
+        task_id:
+          oneOf:
+            - $ref: '#/components/schemas/ResourceId'
+            - type: 'null'
+        run_id:
+          oneOf:
+            - $ref: '#/components/schemas/ResourceId'
+            - type: 'null'
+        type:
+          type: string
+          pattern: '^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$'
+          examples: [decision.created]
+        sequence: { type: [integer, 'null'], minimum: 1 }
+        occurred_at: { type: string, format: date-time }
+        recorded_at: { type: string, format: date-time }
+        data:
+          type: object
+          additionalProperties: true
+        schema_version: { type: integer, minimum: 1 }
+
+    TranscriptRecord:
+      type: object
+      required: [id, run_id, sequence, role, content, occurred_at]
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        run_id: { $ref: '#/components/schemas/ResourceId' }
+        sequence: { type: integer, minimum: 1 }
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          type: array
+          items:
+            type: object
+            required: [type]
+            properties:
+              type: { type: string }
+            additionalProperties: true
+        redactions:
+          type: array
+          items:
+            type: object
+            required: [kind, count]
+            properties:
+              kind: { type: string }
+              count: { type: integer, minimum: 1 }
+        occurred_at: { type: string, format: date-time }
+
+    Artifact:
+      type: object
+      required:
+        - id
+        - project_id
+        - task_id
+        - kind
+        - filename
+        - mime_type
+        - size_bytes
+        - sha256
+        - created_at
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        project_id: { $ref: '#/components/schemas/ResourceId' }
+        task_id: { $ref: '#/components/schemas/ResourceId' }
+        run_id:
+          oneOf:
+            - $ref: '#/components/schemas/ResourceId'
+            - type: 'null'
+        kind:
+          type: string
+          enum: [attachment, image, patch, report, log, wiki, other]
+        filename: { type: string }
+        mime_type: { type: string }
+        size_bytes: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        retention_until: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+
+    Usage:
+      type: object
+      properties:
+        input_tokens: { type: integer, minimum: 0, default: 0 }
+        output_tokens: { type: integer, minimum: 0, default: 0 }
+        cache_read_tokens: { type: integer, minimum: 0, default: 0 }
+        cache_write_tokens: { type: integer, minimum: 0, default: 0 }
+        reasoning_tokens: { type: integer, minimum: 0, default: 0 }
+        provider_cost_usd: { type: number, minimum: 0, default: 0 }
+        run_seconds: { type: integer, minimum: 0, default: 0 }
+        event_bytes: { type: integer, minimum: 0, default: 0 }
+        artifact_bytes: { type: integer, minimum: 0, default: 0 }
+
+    AppendMessageRequest:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 100000 }
+        attachment_ids:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/ResourceId' }
+        agent_override: { $ref: '#/components/schemas/AgentSpec' }
+      additionalProperties: false
+
+    TaskControlRequest:
+      type: object
+      properties:
+        reason: { type: string, maxLength: 2000 }
+      additionalProperties: false
+
+    CommandReceipt:
+      type: object
+      required: [command_id, status, accepted_at]
+      properties:
+        command_id: { $ref: '#/components/schemas/ResourceId' }
+        status:
+          type: string
+          enum: [accepted, completed, rejected, failed]
+        accepted_at: { type: string, format: date-time }
+
+    Runner:
+      type: object
+      required:
+        - id
+        - organization_id
+        - pool_id
+        - name
+        - status
+        - capabilities
+        - max_concurrency
+        - active_runs
+        - version
+        - created_at
+        - updated_at
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        organization_id: { $ref: '#/components/schemas/ResourceId' }
+        pool_id: { $ref: '#/components/schemas/ResourceId' }
+        name: { type: string }
+        status: { $ref: '#/components/schemas/RunnerStatus' }
+        build_version: { type: [string, 'null'] }
+        platform: { type: [string, 'null'] }
+        architecture: { type: [string, 'null'] }
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        max_concurrency: { type: integer, minimum: 1 }
+        active_runs: { type: integer, minimum: 0 }
+        scheduling_enabled: { type: boolean }
+        last_heartbeat_at: { type: [string, 'null'], format: date-time }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateWebhookEndpointRequest:
+      type: object
+      required: [project_id, url, event_types]
+      properties:
+        project_id: { $ref: '#/components/schemas/ResourceId' }
+        url: { type: string, format: uri }
+        event_types:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string }
+        description: { type: string, maxLength: 500 }
+      additionalProperties: false
+
+    WebhookEndpoint:
+      type: object
+      required:
+        - id
+        - project_id
+        - url
+        - event_types
+        - enabled
+        - version
+        - created_at
+        - updated_at
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        project_id: { $ref: '#/components/schemas/ResourceId' }
+        url: { type: string, format: uri }
+        event_types:
+          type: array
+          items: { type: string }
+        enabled: { type: boolean }
+        description: { type: [string, 'null'] }
+        last_delivery_at: { type: [string, 'null'], format: date-time }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [type, code, message, request_id]
+          properties:
+            type:
+              type: string
+              enum: [authentication, authorization, validation, not_found, conflict, rate_limit, provider, internal]
+            code:
+              type: string
+              enum:
+                - authentication_required
+                - permission_denied
+                - resource_not_found
+                - validation_failed
+                - idempotency_mismatch
+                - version_conflict
+                - decision_already_resolved
+                - runner_unavailable
+                - runner_capability_missing
+                - quota_exceeded
+                - rate_limited
+                - provider_unavailable
+                - internal_error
+            message: { type: string }
+            request_id: { type: string }
+            details:
+              type: object
+              additionalProperties: true
