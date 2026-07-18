@@ -55,7 +55,7 @@
   margin-top: 4px;
   border-radius: 50%;
   background: var(--color-error);
-  box-shadow: 0 0 6px rgb(var(--color-error-rgb) / 0.65);
+  box-shadow: 0 0 6px rgba(var(--color-error-rgb), 0.65);
   animation: dotPulse 2s ease-in-out infinite;
 }
 
@@ -161,9 +161,9 @@
 
 @keyframes dotPulse {
   0%, 100% {
-    box-shadow: 0 0 4px rgb(var(--color-error-rgb) / 0.5);
+    box-shadow: 0 0 4px rgba(var(--color-error-rgb), 0.5);
   }
   50% {
-    box-shadow: 0 0 10px rgb(var(--color-error-rgb) / 0.85);
+    box-shadow: 0 0 10px rgba(var(--color-error-rgb), 0.85);
   }
 }

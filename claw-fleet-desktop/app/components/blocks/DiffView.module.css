@@ -41,12 +41,12 @@
 }
 
 .tag_new {
-  background: rgb(var(--color-success-rgb) / 0.15);
+  background: rgba(var(--color-success-rgb), 0.15);
   color: var(--color-success);
 }
 
 .tag_baseline_missing {
-  background: rgb(var(--color-warning-rgb) / 0.15);
+  background: rgba(var(--color-warning-rgb), 0.15);
   color: var(--color-warning);
 }
 
@@ -92,7 +92,7 @@
 }
 
 .row_add {
-  background: rgb(var(--color-success-rgb) / 0.10);
+  background: rgba(var(--color-success-rgb), 0.10);
 }
 
 .row_add .sign {
@@ -100,7 +100,7 @@
 }
 
 .row_del {
-  background: rgb(var(--color-error-rgb) / 0.12);
+  background: rgba(var(--color-error-rgb), 0.12);
 }
 
 .row_del .sign {

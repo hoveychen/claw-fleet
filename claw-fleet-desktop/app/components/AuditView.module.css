@@ -541,7 +541,7 @@
 }
 
 .read_btn:hover {
-  background: rgb(var(--color-success-rgb) / 0.18);
+  background: rgba(var(--color-success-rgb), 0.18);
   color: var(--color-success);
   border-color: var(--color-success);
 }
@@ -735,7 +735,7 @@
 }
 
 .read_detail_btn:hover {
-  background: rgb(var(--color-success-rgb) / 0.18);
+  background: rgba(var(--color-success-rgb), 0.18);
 }
 
 /* ── Toggle switch ────────────────────────────────────────────────────────── */
@@ -827,7 +827,7 @@
 }
 
 .delete_btn:hover {
-  background: rgb(var(--color-error-rgb) / 0.1);
+  background: rgba(var(--color-error-rgb), 0.1);
 }
 
 /* ── Suggest view ─────────────────────────────────────────────────────────── */

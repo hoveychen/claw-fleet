@@ -178,17 +178,17 @@
 
 .sync_shared {
   color: var(--color-success);
-  background: rgb(var(--color-success-rgb) / 0.12);
+  background: rgba(var(--color-success-rgb), 0.12);
 }
 
 .sync_partial {
   color: var(--color-accent);
-  background: rgb(var(--color-accent-rgb) / 0.12);
+  background: rgba(var(--color-accent-rgb), 0.12);
 }
 
 .sync_conflict {
   color: var(--color-error);
-  background: rgb(var(--color-error-rgb) / 0.12);
+  background: rgba(var(--color-error-rgb), 0.12);
 }
 
 .sync_unmanaged {

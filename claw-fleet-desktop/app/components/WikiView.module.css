@@ -539,7 +539,7 @@
 
 .action_danger:hover {
   color: var(--color-error);
-  border-color: rgb(var(--color-error-rgb) / 0.5);
+  border-color: rgba(var(--color-error-rgb), 0.5);
 }
 
 /* ── Content ────────────────────────────────────────────────────────────── */
