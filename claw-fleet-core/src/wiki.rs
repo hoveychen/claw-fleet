@@ -295,13 +295,12 @@ pub fn resolve_workspace_path(workspace: &Path) -> String {
         .to_string()
 }
 
-/// Last path component of a workspace path, falling back to the whole string.
+/// Human-facing name for a workspace path. Delegates to the shared session
+/// helper so a doc published from a `<repo>/.worktrees/<task-id>` checkout is
+/// chipped with the repo name (and the chat workspace is renamed) — identical
+/// to the session list.
 pub fn workspace_name_of(workspace_path: &str) -> String {
-    Path::new(workspace_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(workspace_path)
-        .to_string()
+    crate::session::workspace_name(workspace_path)
 }
 
 /// True when a doc tagged with `doc_workspace` belongs to the workspace the
@@ -1911,6 +1910,17 @@ mod tests {
 
         assert_eq!(resolve_workspace_path(ws.path()), doc.workspace_path);
         assert_eq!(workspace_name_of(&doc.workspace_path), doc.workspace_name);
+    }
+
+    #[test]
+    fn workspace_name_of_worktree_uses_repo_name() {
+        // A doc published from a `<repo>/.worktrees/<task-id>` checkout must be
+        // chipped with the repo name, matching session::workspace_name — not the
+        // task-id leaf. Buggy behaviour took only `Path::file_name()`.
+        assert_eq!(
+            workspace_name_of("/Users/x/claude-fleet/.worktrees/some-plan"),
+            "claude-fleet"
+        );
     }
 
     #[test]

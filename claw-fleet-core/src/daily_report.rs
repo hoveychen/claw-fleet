@@ -1309,11 +1309,9 @@ pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
         let stripped = encoded_name.trim_start_matches('-');
         let parts: Vec<&str> = stripped.split('-').collect();
         let workspace_path = decode_workspace_path_with_parts(&parts);
-        let workspace_name = workspace_path
-            .rsplit('/')
-            .find(|s| !s.is_empty())
-            .unwrap_or(&workspace_path)
-            .to_string();
+        // Shared helper: collapse `.worktrees/<task-id>` to the repo so a repo's
+        // worktree sessions group under one project, matching the session list.
+        let workspace_name = crate::session::workspace_name(&workspace_path);
 
         // Scan JSONL files in this workspace directory (main-agent sessions)
         let Ok(entries) = std::fs::read_dir(&ws_path) else {
