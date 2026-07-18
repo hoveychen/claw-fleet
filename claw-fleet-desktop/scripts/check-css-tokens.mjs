@@ -19,6 +19,9 @@
  *   [error] rgb(var(--x-rgb) / alpha) → exit 1. This app's *-rgb tokens use
  *           comma-separated channels, so the slash-alpha form becomes invalid
  *           after var() substitution. Use rgba(var(--x-rgb), alpha) instead.
+ *   [error] a bare global `button` selector that removes the outline → exit 1.
+ *           Component-level resets silently erase keyboard focus across the app;
+ *           use a shared :focus-visible baseline instead.
  *   [warn]  bare hardcoded color literals in a .module.css outside a var()
  *           fallback → printed, does NOT fail the build (semantic colors and
  *           deliberate fixed canvases are legitimate; this is advisory only).
@@ -86,13 +89,24 @@ for (const f of files) {
 const undefinedRefs = []; // {file, line, token}
 const deprecatedRefs = []; // {file, line, token, replacement}
 const invalidRgbAlphaRefs = []; // {file, line, token}
+const suppressedButtonOutlines = []; // {file, line, selector}
 const bareColors = []; // {file, line, snippet}
 const offLadderRadii = []; // {file, line, value}
 
 for (const f of files) {
   const rel = relative(".", f);
   const isTokenSource = rel.endsWith("App.css"); // where the aliases are declared
-  const lines = readFileSync(f, "utf8").split("\n");
+  const source = readFileSync(f, "utf8");
+  const lines = source.split("\n");
+  const blockRe = /([^{}]+)\{([^{}]*)\}/g;
+  let block;
+  while ((block = blockRe.exec(source))) {
+    const selectors = block[1].split(",").map((selector) => selector.trim());
+    if (selectors.includes("button") && /\boutline\s*:\s*(?:none|0)\s*;/.test(block[2])) {
+      const line = source.slice(0, block.index).split("\n").length;
+      suppressedButtonOutlines.push({ file: rel, line, selector: block[1].trim() });
+    }
+  }
   lines.forEach((line, i) => {
     // undefined / deprecated var references
     let m;
@@ -157,6 +171,15 @@ if (invalidRgbAlphaRefs.length) {
     console.error(`   ${r.file}:${r.line}  ${r.token} uses comma-separated channels`);
   }
   console.error("\n   Fix: use rgba(var(--*-rgb), alpha) with this app's comma-separated RGB tokens.\n");
+  process.exit(1);
+}
+
+if (suppressedButtonOutlines.length) {
+  console.error(`\n✖  ${suppressedButtonOutlines.length} global button outline reset(s) hide keyboard focus:`);
+  for (const r of suppressedButtonOutlines) {
+    console.error(`   ${r.file}:${r.line}  ${r.selector} { outline: none; }`);
+  }
+  console.error("\n   Fix: keep the native outline or define a shared button:focus-visible indicator.\n");
   process.exit(1);
 }
 
