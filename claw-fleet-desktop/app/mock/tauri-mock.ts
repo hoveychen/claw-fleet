@@ -8,6 +8,7 @@
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import type { SessionInfo } from "../types";
+import type { PromoScene } from "./promo-scene";
 import {
   MOCK_SESSIONS,
   MOCK_MESSAGES,
@@ -699,4 +700,28 @@ export function installMocks() {
 
   console.log("[mock] Tauri mock layer installed — running in demo mode");
   console.log("[mock] Trigger decisions via __mock_guard() / __mock_elicitation() in DevTools");
+}
+
+/** Fire a promo scene through the event bus installed during this exact boot. */
+export function triggerPromoScene(scene: PromoScene): void {
+  if (scene === "base") return;
+  if (scene === "guard") {
+    const id = `promo-guard-${Date.now()}`;
+    emit("guard-request", {
+      id,
+      sessionId: "sess-api-main",
+      workspaceName: "api-server",
+      aiTitle: "Wants to deploy the database migration",
+      toolName: "Bash",
+      command: "npx prisma migrate deploy",
+      commandSummary: "Apply pending migrations to production",
+      riskTags: ["database", "production"],
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const driver = (window as unknown as { __mock_fleet_ask?: () => string }).__mock_fleet_ask;
+  if (!driver) throw new Error("promo ask driver was not installed");
+  driver();
 }
