@@ -286,6 +286,11 @@ pub trait Backend: Send + Sync {
         workspace_path: String,
         text: String,
     ) -> Result<(), String>;
+    /// Cancel a single queued follow-up by chip position (`index` 0-based, in the
+    /// order [`enqueue_message`] queued them). Used by the "×" on a queued chip.
+    /// Out-of-range/missing-queue is a no-op success — the queue can shrink under
+    /// a concurrent drain between the user seeing the chip and the click landing.
+    fn cancel_pending_message(&self, session_id: String, index: usize) -> Result<(), String>;
     /// Start a brand-new headless Claude Code session: spawns
     /// `claude -p "<prompt>" --session-id <uuid> [--model <m>] [--effort <e>]
     /// [--permission-mode <pm>]` detached in `workspace_path`. The session is
