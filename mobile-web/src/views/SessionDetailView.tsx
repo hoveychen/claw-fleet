@@ -992,6 +992,11 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
 
   const rows = useMemo(() => (messages ?? []).filter(isRenderableRow), [messages]);
 
+  // tool_detail reads the Claude jsonl by tool_use_id; a codex rollout has no
+  // toolUseResult and its folded format defeats the scan — leave codex tool
+  // lines non-expandable (digest chips never arrive for codex either).
+  const detailPath = session.agentSource === "codex" ? undefined : session.jsonlPath;
+
   // Text of every real user row, to tell which optimistic echoes have landed.
   const realUserTexts = useMemo(() => {
     const set = new Set<string>();
@@ -1136,7 +1141,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
                   live={live}
                   toolMeta={toolMetaMap}
                   client={client}
-                  jsonlPath={session.jsonlPath}
+                  jsonlPath={detailPath}
                 />
               );
             }
@@ -1162,7 +1167,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
                 toolMeta={metaForMsg(unit.msg)}
                 turnUsage={turnUsage.get(unit.startLocal)}
                 client={client}
-                jsonlPath={session.jsonlPath}
+                jsonlPath={detailPath}
               />
             );
           });
