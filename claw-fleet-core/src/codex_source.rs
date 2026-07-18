@@ -1643,6 +1643,33 @@ fn build_session_from_sqlite(
     })
 }
 
+/// FSEvents starvation fallback for the desktop watcher. macOS FSEvents does
+/// not deliver modify events for a file that a process keeps appending to
+/// through a long-held fd — events fire only on create and on close
+/// (isolation-tested 2026-07-18: 8 held-fd appends with flush produced zero
+/// events; the close delivered one). Codex holds its rollout fd open for the
+/// whole turn, so an event-driven watcher sees nothing for the duration of a
+/// long turn and the session snapshot freezes. This returns the `codex://`
+/// URIs of sessions whose on-disk rollout mtime is newer than the scanned
+/// snapshot's `last_activity_ms` — i.e. sessions the watcher has starved and
+/// must rescan.
+pub fn codex_stale_rollout_paths(sessions: &[crate::session::SessionInfo]) -> Vec<String> {
+    sessions
+        .iter()
+        .filter(|s| s.agent_source == "codex")
+        .filter_map(|s| {
+            let path = resolve_uri(&s.jsonl_path)?;
+            let mtime_ms = fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()?
+                .duration_since(UNIX_EPOCH)
+                .ok()?
+                .as_millis() as u64;
+            (mtime_ms > s.last_activity_ms).then(|| s.jsonl_path.clone())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1659,6 +1686,50 @@ mod tests {
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
+
+    /// FSEvents starvation fallback: a codex session whose on-disk rollout
+    /// mtime is newer than the snapshot's `last_activity_ms` must be reported
+    /// as stale so the watcher can force a rescan. Claude sessions, fresh
+    /// codex sessions, and codex sessions whose rollout is gone must not be.
+    #[test]
+    fn stale_rollout_paths_flags_held_fd_appends_only() {
+        use std::io::Write as _;
+
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(f, "{{\"probe\":1}}").unwrap();
+        f.flush().unwrap();
+        let mtime_ms = f
+            .path()
+            .metadata()
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let uri = format!("codex://{}", f.path().display());
+
+        // Snapshot scanned before the latest append → stale, must be flagged.
+        let mut starved = crate::session::SessionInfo::default();
+        starved.agent_source = "codex".to_string();
+        starved.jsonl_path = uri.clone();
+        starved.last_activity_ms = mtime_ms - 5_000;
+
+        // Snapshot as fresh as the file → nothing to do.
+        let mut fresh = starved.clone();
+        fresh.last_activity_ms = mtime_ms;
+
+        // Claude session pointing at an equally stale file → not codex's business.
+        let mut claude = starved.clone();
+        claude.agent_source = "claude-code".to_string();
+
+        // Codex session whose rollout no longer exists → skipped, not flagged.
+        let mut gone = starved.clone();
+        gone.jsonl_path = "codex:///nonexistent/rollout.jsonl".to_string();
+
+        let stale = super::codex_stale_rollout_paths(&[starved, fresh, claude, gone]);
+        assert_eq!(stale, vec![uri]);
+    }
 
     #[test]
     fn derive_codex_title_summarizes_fleet_handoff_prompt() {
