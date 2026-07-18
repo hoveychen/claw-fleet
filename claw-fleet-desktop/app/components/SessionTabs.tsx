@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSessionsStore } from "../store";
+import { isKeyboardActivationKey } from "../keyboard";
 import { preferredSessionTitle, rowBarColor, type SessionInfo } from "../types";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionTabs.module.css";
@@ -119,6 +120,7 @@ export function SessionTabs({
             ref={isActive ? activeRef : undefined}
             role="tab"
             aria-selected={isActive}
+            tabIndex={isActive ? 0 : -1}
             className={`${styles.tab} ${isActive ? styles.tab_active : ""} ${
               tab.id === dragId ? styles.tab_dragging : ""
             }`}
@@ -144,6 +146,28 @@ export function SessionTabs({
             }}
             onDragEnd={() => setDragId(null)}
             onClick={() => onActivate(tab.id)}
+            onKeyDown={(e) => {
+              // The nested close button owns its own keyboard events.
+              if (e.target !== e.currentTarget) return;
+              if (isKeyboardActivationKey(e.key)) {
+                e.preventDefault();
+                onActivate(tab.id);
+                return;
+              }
+              let nextIdx: number | null = null;
+              const idx = tabs.findIndex((candidate) => candidate.id === tab.id);
+              if (e.key === "ArrowRight") nextIdx = (idx + 1) % tabs.length;
+              if (e.key === "ArrowLeft") nextIdx = (idx - 1 + tabs.length) % tabs.length;
+              if (e.key === "Home") nextIdx = 0;
+              if (e.key === "End") nextIdx = tabs.length - 1;
+              if (nextIdx == null) return;
+              e.preventDefault();
+              onActivate(tabs[nextIdx].id);
+              const tabEls = e.currentTarget.parentElement?.querySelectorAll<HTMLElement>(
+                '[role="tab"]',
+              );
+              tabEls?.[nextIdx]?.focus();
+            }}
             onContextMenu={(e) => {
               setMenuTabId(tab.id);
               menu.open(e);

@@ -59,6 +59,11 @@
   background: none;
   font: inherit;
   color: inherit;
+  border-radius: var(--radius-xs);
+}
+
+.badge_inline:hover {
+  background: var(--color-bg-hover);
 }
 
 .badge_inline .cost {

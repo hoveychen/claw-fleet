@@ -16,6 +16,11 @@
   cursor: pointer;
   color: inherit;
   text-align: left;
+  border-radius: var(--radius-xs);
+}
+
+.header:hover {
+  background: var(--color-bg-hover);
 }
 
 .title_row {

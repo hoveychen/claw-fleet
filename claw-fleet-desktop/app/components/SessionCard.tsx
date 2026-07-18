@@ -7,6 +7,7 @@ import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import { HandoffChainRow } from "./HandoffChainRow";
 import styles from "./SessionCard.module.css";
 import { BG_TASK_KINDS } from "../bgTaskKinds";
+import { isKeyboardActivationKey } from "../keyboard";
 
 // ── Rate-limit countdown ──────────────────────────────────────────────────────
 
@@ -401,7 +402,11 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
       onClick={onClick}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => e.key === "Enter" && onClick()}
+      onKeyDown={(e) => {
+        if (!isKeyboardActivationKey(e.key)) return;
+        e.preventDefault();
+        onClick();
+      }}
     >
       {/* Header row — group-main uses the compact Linear-style strip, default keeps the workspace/badge layout */}
       {variant === "group-main" ? (
@@ -562,7 +567,11 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
               role="button"
               tabIndex={0}
               onClick={openTasks}
-              onKeyDown={(e) => e.key === "Enter" && openTasks(e)}
+              onKeyDown={(e) => {
+                if (!isKeyboardActivationKey(e.key)) return;
+                e.preventDefault();
+                openTasks(e);
+              }}
             >
               <div className={styles.taskplan_head}>
                 <span className={styles.taskplan_icon} aria-hidden>📋</span>

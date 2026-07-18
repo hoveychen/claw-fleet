@@ -44,6 +44,11 @@
   font-weight: 500;
 }
 
+.metric_toggle button:not(.active):hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
 .month_labels {
   display: flex;
   font-size: 10px;
