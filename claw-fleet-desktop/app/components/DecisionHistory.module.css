@@ -28,6 +28,18 @@
   gap: 8px;
   cursor: pointer;
   user-select: none;
+  border-radius: var(--radius-xs);
+  width: 100%;
+  border: none;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.header:hover {
+  background: var(--color-bg-hover);
 }
 
 .title {
