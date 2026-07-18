@@ -337,6 +337,22 @@ UI appends one). It is a superset of a plain question card and also supports \
 `html` previews, `images`, and `formFields` — reach for those only when a \
 rich preview or structured input is genuinely the better answer.\n\
 \n\
+## Session title\n\
+\n\
+Once the conversation has a stable topic, call `fleet__set_session_title` to \
+give the current session a concise, descriptive title. Do this once per \
+session as soon as the topic is clear enough to name; do not merely copy the \
+user's first message. Keep the title specific (name the concrete task or \
+question), avoid generic labels such as \"Help\" or \"Coding task\", and do \
+not ask {title} to supply a title. If the conversation's topic materially \
+changes, call it again with the new title; otherwise do not rename on every \
+turn.\n\
+\n\
+Like other Fleet MCP tools, Codex may defer it from the upfront tool list; \
+call it directly as `mcp__fleet__fleet__set_session_title`. This tool is \
+non-blocking. If it is unavailable or returns an error, continue the task \
+without retrying or interrupting {title}.\n\
+\n\
 ### Deferred-tool wait invariant\n\
 \n\
 Codex may execute this deferred MCP call inside its outer code-mode `exec`. \
@@ -921,6 +937,15 @@ mod tests {
         assert!(
             !g.contains("git worktree add"),
             "interaction block must not contain PRD/worktree content"
+        );
+        assert!(
+            g.contains("fleet__set_session_title")
+                && g.contains("mcp__fleet__fleet__set_session_title"),
+            "must require Codex to name the current session through Fleet MCP"
+        );
+        assert!(
+            g.contains("stable topic") && g.contains("materially changes"),
+            "must define when the initial title is set and when it may be updated"
         );
     }
 

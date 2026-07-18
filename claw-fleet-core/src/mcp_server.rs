@@ -1,4 +1,4 @@
-//! Minimal MCP (Model Context Protocol) stdio server exposing `fleet__ask`.
+//! Minimal MCP (Model Context Protocol) stdio server exposing Fleet tools.
 //!
 //! Implements JSON-RPC 2.0 over stdin/stdout (line-delimited JSON).
 //! Methods: `initialize`, `notifications/initialized`, `tools/list`, `tools/call`.
@@ -98,7 +98,12 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
             },
         })),
         "tools/list" => Ok(json!({
-            "tools": [fleet_ask_tool_def(), a2ui_render_tool_def(), permission_prompt_tool_def()]
+            "tools": [
+                fleet_ask_tool_def(),
+                a2ui_render_tool_def(),
+                set_session_title_tool_def(),
+                permission_prompt_tool_def()
+            ]
         })),
         "tools/call" => handle_tool_call(params),
         other => Err(JsonRpcError {
@@ -132,6 +137,24 @@ fn a2ui_render_tool_def() -> Value {
     })
 }
 
+fn set_session_title_tool_def() -> Value {
+    json!({
+        "name": "fleet__set_session_title",
+        "description": "Set a concise, descriptive title for the current Fleet session after its topic is clear. The current session is resolved automatically; do not include a session id. Call again only if the conversation's topic materially changes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "A concise title that names the concrete task or topic."
+                }
+            },
+            "required": ["title"],
+            "additionalProperties": false
+        }
+    })
+}
+
 /// Default deadline for waiting on a user response — matches the
 /// `decision_panel_config` `wait_seconds` default so `fleet__ask` and the
 /// elicitation bridge time out on the same clock.
@@ -150,12 +173,64 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
     match name {
         "fleet__ask" => handle_fleet_ask_call(params),
         "fleet__render_a2ui" => handle_a2ui_render_call(params),
+        "fleet__set_session_title" => handle_set_session_title_call(params),
         "fleet__permission_prompt" => handle_permission_prompt_call(params),
         other => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", other),
         }),
     }
+}
+
+fn handle_set_session_title_call(params: &Value) -> Result<Value, JsonRpcError> {
+    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let title = args
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .ok_or_else(|| JsonRpcError {
+            code: -32602,
+            message: "Missing or blank `title` argument".into(),
+        })?;
+    let session_id = current_session_id();
+    if session_id.is_empty() {
+        return Ok(tool_error(
+            "Fleet could not resolve the current session id; continue without setting a title."
+                .into(),
+        ));
+    }
+    let workspace_path = std::env::current_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let outcome = match crate::session_title::set_agent_title(
+        &session_id,
+        &workspace_path,
+        title.to_string(),
+    ) {
+        Ok(outcome) => outcome,
+        Err(error) => return Ok(tool_error(format!("Failed to set Fleet session title: {error}"))),
+    };
+
+    if outcome == crate::session_title::AgentTitleOutcome::ManualTitlePreserved {
+        return Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": "Session already has a manual title; kept the user's title unchanged.",
+            }],
+            "structuredContent": { "updated": false, "reason": "manual_title" },
+            "isError": false,
+        }));
+    }
+
+    Ok(json!({
+        "content": [{
+            "type": "text",
+            "text": format!("Session title set to: {title}"),
+        }],
+        "structuredContent": { "title": title, "updated": true },
+        "isError": false,
+    }))
 }
 
 /// The session id of the agent that invoked this MCP tool, across agent sources.
@@ -641,11 +716,7 @@ mod tests {
         let resp = call(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#)
             .expect("response");
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(
-            tools.len(),
-            3,
-            "expected fleet__ask + fleet__render_a2ui + fleet__permission_prompt"
-        );
+        assert_eq!(tools.len(), 4, "expected all Fleet MCP tools");
         let names: Vec<&str> = tools
             .iter()
             .map(|t| t["name"].as_str().unwrap())
@@ -673,6 +744,83 @@ mod tests {
             .find(|t| t["name"] == "fleet__render_a2ui")
             .unwrap();
         assert_eq!(a2ui["inputSchema"]["required"][0], "messageTree");
+
+        let set_title = tools
+            .iter()
+            .find(|t| t["name"] == "fleet__set_session_title")
+            .expect("session-title tool must be advertised");
+        assert_eq!(set_title["inputSchema"]["required"][0], "title");
+        assert_eq!(
+            set_title["inputSchema"]["properties"]["title"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn set_session_title_call_persists_for_current_session() {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-mcp-session-title-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let previous_home = std::env::var_os("FLEET_HOME");
+        let previous_session = std::env::var_os("CLAUDE_CODE_SESSION_ID");
+        unsafe {
+            std::env::set_var("FLEET_HOME", &tmp);
+            std::env::set_var("CLAUDE_CODE_SESSION_ID", "session-title-test");
+        }
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__set_session_title",
+                "arguments": { "title": "  MCP 自动命名会话  " }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+        assert!(resp.get("error").is_none(), "expected ok envelope, got {resp}");
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(
+            crate::session_title::read("session-title-test").as_deref(),
+            Some("MCP 自动命名会话")
+        );
+
+        unsafe {
+            match previous_home {
+                Some(value) => std::env::set_var("FLEET_HOME", value),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+            match previous_session {
+                Some(value) => std::env::set_var("CLAUDE_CODE_SESSION_ID", value),
+                None => std::env::remove_var("CLAUDE_CODE_SESSION_ID"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn set_session_title_rejects_blank_title() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__set_session_title",
+                "arguments": { "title": "   " }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+        assert_eq!(resp["error"]["code"], -32602);
+        assert!(
+            resp["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("blank")
+        );
     }
 
     #[test]
