@@ -155,14 +155,21 @@ pub fn resolve_launch_token(token: &str) -> Option<String> {
     (!id.is_empty()).then_some(id)
 }
 
-/// Pure precedence between the two env-carried session ids: `FLEET_SESSION_ID`
-/// (Fleet-stamped) wins over `CLAUDE_CODE_SESSION_ID` (Claude Code's own), and
-/// an empty value never counts. Split out so it can be tested without touching
-/// the real environment. See [`resolve_fleet_session_id_from_env`].
-fn fleet_or_claude_session_id(fleet: Option<String>, claude: Option<String>) -> Option<String> {
-    fleet
+/// Pure precedence between the two env-carried session ids. `CLAUDE_CODE_SESSION_ID`
+/// (Claude Code injects it into the MCP/hook children it launches, so it is
+/// authoritative when present) wins over `FLEET_SESSION_ID`; an empty value
+/// never counts. Split out so it can be tested without touching the real
+/// environment. See [`resolve_fleet_session_id_from_env`].
+///
+/// Claude-first is safe across sources because codex spawn/resume strips
+/// `CLAUDE_CODE_SESSION_ID` from its children (see [`apply_codex_launch_env`]),
+/// so a genuine codex process never carries one — only a leaked one would, and
+/// a leaked `FLEET_SESSION_ID` on a Claude process is exactly what this order
+/// must ignore (the decision-card cross-attribution bug).
+fn env_session_id_precedence(claude: Option<String>, fleet: Option<String>) -> Option<String> {
+    claude
         .filter(|s| !s.is_empty())
-        .or_else(|| claude.filter(|s| !s.is_empty()))
+        .or_else(|| fleet.filter(|s| !s.is_empty()))
 }
 
 /// Resolve the current process's Fleet session id from the environment, across
@@ -170,17 +177,22 @@ fn fleet_or_claude_session_id(fleet: Option<String>, claude: Option<String>) -> 
 /// server ([`crate::mcp_server`]) and the `fleet` CLI (`read_fleet_session_id`),
 /// so a decision card or a `fleet plan` call attributes to the right session
 /// whether it came from Claude or Codex:
-///   1. `FLEET_SESSION_ID`        — Fleet-stamped (Codex resume + explicit)
-///   2. `CLAUDE_CODE_SESSION_ID`  — Claude Code exposes this to MCP/hooks
+///   1. `CLAUDE_CODE_SESSION_ID`  — Claude Code injects this into the MCP/hook
+///      children it launches, so it authoritatively identifies a Claude session
+///      and must win over any inherited `FLEET_SESSION_ID` (which a Claude
+///      process only carries when it leaked in from a codex ancestor's env)
+///   2. `FLEET_SESSION_ID`        — Fleet-stamped (Codex resume + explicit); a
+///      genuine codex process has no `CLAUDE_CODE_SESSION_ID` because
+///      [`apply_codex_launch_env`] strips it, so this is reached for codex
 ///   3. `FLEET_CODEX_LAUNCH_TOKEN` → thread id via [`resolve_launch_token`]
 ///      (a new Codex spawn, whose thread id isn't minted until after launch, so
 ///      Fleet injects a token up front and writes the token→id note later)
 ///
 /// Returns `None` when none resolve to a non-empty id.
 pub fn resolve_fleet_session_id_from_env() -> Option<String> {
-    if let Some(id) = fleet_or_claude_session_id(
-        std::env::var("FLEET_SESSION_ID").ok(),
+    if let Some(id) = env_session_id_precedence(
         std::env::var("CLAUDE_CODE_SESSION_ID").ok(),
+        std::env::var("FLEET_SESSION_ID").ok(),
     ) {
         return Some(id);
     }
@@ -1319,24 +1331,26 @@ mod tests {
     }
 
     #[test]
-    fn fleet_session_id_precedence_fleet_over_claude() {
-        // FLEET_SESSION_ID wins over CLAUDE_CODE_SESSION_ID; empty never counts;
-        // Claude is the fallback. Mirrors the CLI's read_fleet_session_id order
-        // so a card/plan call attributes identically across both crates.
+    fn env_session_id_precedence_claude_over_fleet() {
+        // CLAUDE_CODE_SESSION_ID wins over FLEET_SESSION_ID (Claude Code injects
+        // it authoritatively, so a leaked FLEET_SESSION_ID on a Claude process
+        // must not shadow it); empty never counts; FLEET_SESSION_ID is the
+        // fallback (the codex path, where CLAUDE_CODE_SESSION_ID is absent).
+        // Args are (claude, fleet).
         assert_eq!(
-            fleet_or_claude_session_id(Some("fleet".into()), Some("claude".into())),
-            Some("fleet".into())
-        );
-        assert_eq!(
-            fleet_or_claude_session_id(Some(String::new()), Some("claude".into())),
-            Some("claude".into()),
-            "empty FLEET_SESSION_ID falls back to Claude"
-        );
-        assert_eq!(
-            fleet_or_claude_session_id(None, Some("claude".into())),
+            env_session_id_precedence(Some("claude".into()), Some("fleet".into())),
             Some("claude".into())
         );
-        assert_eq!(fleet_or_claude_session_id(None, None), None);
+        assert_eq!(
+            env_session_id_precedence(Some(String::new()), Some("fleet".into())),
+            Some("fleet".into()),
+            "empty CLAUDE_CODE_SESSION_ID falls back to FLEET_SESSION_ID"
+        );
+        assert_eq!(
+            env_session_id_precedence(None, Some("fleet".into())),
+            Some("fleet".into())
+        );
+        assert_eq!(env_session_id_precedence(None, None), None);
     }
 
     #[test]
@@ -1383,6 +1397,51 @@ mod tests {
                 None => std::env::remove_var(FLEET_CODEX_LAUNCH_TOKEN_ENV),
             }
         }
+    }
+
+    #[test]
+    fn resolve_prefers_claude_code_session_id_over_leaked_fleet_session_id() {
+        // Regression: a genuine Claude session's MCP/hook process carries the
+        // authoritative CLAUDE_CODE_SESSION_ID (Claude Code injects it into the
+        // children it launches), but may ALSO inherit a stale FLEET_SESSION_ID
+        // leaked from a codex session's environment (e.g. a `claude` launched
+        // inside a codex session's process tree). The resolver must return the
+        // Claude id — not the leaked codex one — otherwise this session's
+        // decision cards / `fleet plan` / `fleet handoff` misattribute to the
+        // wrong (codex) session. Safe because codex spawn/resume strips
+        // CLAUDE_CODE_SESSION_ID from its children (apply_codex_launch_env), so a
+        // real codex process never carries one to be preferred.
+        let _home = TmpHome::new("resolve-claude-wins");
+        let prev_fleet = std::env::var_os("FLEET_SESSION_ID");
+        let prev_claude = std::env::var_os("CLAUDE_CODE_SESSION_ID");
+        let prev_token = std::env::var_os(FLEET_CODEX_LAUNCH_TOKEN_ENV);
+        unsafe {
+            std::env::remove_var(FLEET_CODEX_LAUNCH_TOKEN_ENV);
+            std::env::set_var("FLEET_SESSION_ID", "leaked-codex-019f7047");
+            std::env::set_var("CLAUDE_CODE_SESSION_ID", "real-claude-8e55f30b");
+        }
+        let got = resolve_fleet_session_id_from_env();
+        // Restore prior env before asserting so a failure never leaks state.
+        unsafe {
+            match prev_fleet {
+                Some(v) => std::env::set_var("FLEET_SESSION_ID", v),
+                None => std::env::remove_var("FLEET_SESSION_ID"),
+            }
+            match prev_claude {
+                Some(v) => std::env::set_var("CLAUDE_CODE_SESSION_ID", v),
+                None => std::env::remove_var("CLAUDE_CODE_SESSION_ID"),
+            }
+            match prev_token {
+                Some(v) => std::env::set_var(FLEET_CODEX_LAUNCH_TOKEN_ENV, v),
+                None => std::env::remove_var(FLEET_CODEX_LAUNCH_TOKEN_ENV),
+            }
+        }
+        assert_eq!(
+            got.as_deref(),
+            Some("real-claude-8e55f30b"),
+            "CLAUDE_CODE_SESSION_ID (authoritative for a Claude session) must win \
+             over a leaked FLEET_SESSION_ID"
+        );
     }
 
     #[test]
