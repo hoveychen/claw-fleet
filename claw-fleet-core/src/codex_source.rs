@@ -581,7 +581,7 @@ fn extract_last_text(lines: &[Value]) -> Option<String> {
 
 /// Determine session status from the last JSONL lines and file age.
 fn determine_status(last_lines: &[Value], file_age_secs: f64) -> SessionStatus {
-    // Look for the last turn_complete, turn_started, or approval request event.
+    // Look for the last turn boundary or approval request event.
     let last_turn_event = last_lines.iter().rev().find(|v| {
         v.get("type").and_then(|t| t.as_str()) == Some("event_msg")
             && matches!(
@@ -590,6 +590,7 @@ fn determine_status(last_lines: &[Value], file_age_secs: f64) -> SessionStatus {
                     .and_then(|t| t.as_str()),
                 Some("turn_complete")
                     | Some("task_complete")
+                    | Some("task_started")
                     | Some("turn_started")
                     | Some("exec_approval_request")
                     | Some("apply_patch_approval_request")
@@ -1934,6 +1935,25 @@ mod tests {
             determine_status(&done, 45.0),
             S::WaitingInput,
             "a task_complete after task_started means the turn is over — WaitingInput"
+        );
+    }
+
+    #[test]
+    fn determine_status_previous_complete_does_not_mask_new_task() {
+        // Regression: a resumed Codex session keeps every turn boundary in one
+        // rollout. While the new turn is actively writing, the previous turn's
+        // task_complete must not win merely because the file itself is fresh.
+        let resumed = vec![
+            json!({"type":"event_msg","payload":{"type":"task_started"}}),
+            json!({"type":"event_msg","payload":{"type":"task_complete"}}),
+            json!({"type":"event_msg","payload":{"type":"task_started"}}),
+            json!({"type":"response_item","payload":{"type":"reasoning"}}),
+        ];
+
+        assert_eq!(
+            determine_status(&resumed, 2.0),
+            S::Thinking,
+            "a fresh new task_started must override the previous task_complete"
         );
     }
 
