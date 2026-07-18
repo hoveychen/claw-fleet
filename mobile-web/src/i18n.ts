@@ -232,6 +232,10 @@ const DICT: Record<string, string> = {
   思考: "Thinking",
   "正在思考…": "Thinking…",
   暂无可显示的消息: "No messages to show",
+  "新建 {0}": "Creating {0}",
+  "编辑 {0}": "Editing {0}",
+  "删除 {0}": "Deleting {0}",
+  "编辑 {0} 个文件": "Patching {0} files",
 
   // ── SessionDetailTabs ──
   问题请示: "Question",
