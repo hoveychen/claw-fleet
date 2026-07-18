@@ -23,6 +23,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}), emit: vi.fn() }));
 
 import "../i18n";
+import { invoke } from "@tauri-apps/api/core";
 import { MessageList } from "./MessageList";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -79,6 +80,7 @@ describe("MessageList image refetch wiring", () => {
     // Expand ONLY the Read card (its header shows the basename "x.png").
     const readHeader = [...container!.querySelectorAll("button")].find((b) => (b.textContent || "").includes("x.png"));
     expect(readHeader, "Read card header not found").toBeTruthy();
+    expect(container!.querySelectorAll("img")).toHaveLength(0);
     await act(async () => {
       readHeader!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -87,6 +89,10 @@ describe("MessageList image refetch wiring", () => {
     });
 
     const imgs = [...container!.querySelectorAll("img")].map((i) => i.getAttribute("src"));
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("get_tool_result_full", {
+      jsonlPath: "/fake.jsonl",
+      toolUseId: "tool-img",
+    });
     expect(imgs).toContain(`data:image/png;base64,${IMG}`);
   });
 
