@@ -1010,6 +1010,11 @@
   transition: background 0.15s, border-color 0.15s;
 }
 
+.elicitation_dot:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
 .elicitation_dot_active {
   border-color: var(--color-accent);
   background: var(--color-accent);
