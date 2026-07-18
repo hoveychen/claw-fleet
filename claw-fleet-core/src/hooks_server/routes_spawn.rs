@@ -102,6 +102,42 @@ pub(crate) fn route_enqueue_message(
     }
 }
 
+pub(crate) fn route_cancel_pending_message(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    _query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    match serde_json::from_str::<crate::pending_message::CancelMessageRequest>(&buf) {
+        Ok(req) => match crate::pending_message::remove_at(&req.session_id, req.index) {
+            Ok(()) => {
+                let _ = request.respond(
+                    tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+                );
+            }
+            Err(e) => {
+                let body = serde_json::json!({ "error": e }).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = serde_json::json!({ "error": e.to_string() }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
 pub(crate) fn route_chat_workspace(
     ctx: &ServeCtx,
     request: tiny_http::Request,
