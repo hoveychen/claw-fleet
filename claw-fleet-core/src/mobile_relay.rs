@@ -640,6 +640,27 @@ const DECISION_ASSET_MIN_DIM: u32 = 320;
 /// Anything that fails to decode (unknown/vector format) is returned untouched
 /// so the caller's frame guard still applies.
 fn downscale_decision_asset(bytes: Vec<u8>, mime: &str) -> (Vec<u8>, String) {
+    downscale_image(
+        bytes,
+        mime,
+        DECISION_ASSET_TARGET_BYTES,
+        DECISION_ASSET_HARD_CAP_BYTES,
+        DECISION_ASSET_MIN_DIM,
+    )
+}
+
+/// The shared shrink loop behind [`downscale_decision_asset`] and the
+/// transcript thumbnails: step JPEG quality high→low at the current
+/// resolution, shrink the longest edge ~20% when even the lowest quality
+/// overshoots `target`, and never return over `hard_cap` while `min_dim`
+/// still allows shrinking. Undecodable input is returned untouched.
+fn downscale_image(
+    bytes: Vec<u8>,
+    mime: &str,
+    target: usize,
+    hard_cap: usize,
+    min_dim: u32,
+) -> (Vec<u8>, String) {
     let Ok(img) = image::load_from_memory(&bytes) else {
         // Undecodable (e.g. a vector/unknown format) — nothing to re-encode; hand
         // the original back and let the caller's frame guard decide.
@@ -655,19 +676,17 @@ fn downscale_decision_asset(bytes: Vec<u8>, mime: &str) -> (Vec<u8>, String) {
             if best.as_ref().map_or(true, |b| encoded.len() < b.len()) {
                 best = Some(encoded.clone());
             }
-            if encoded.len() <= DECISION_ASSET_TARGET_BYTES {
+            if encoded.len() <= target {
                 return (encoded, "image/jpeg".to_string());
             }
         }
         // Even the lowest quality overshot the target at this resolution. Stop
         // once we're below the min dimension *and* under the hard cap; but if a
         // pathological image is still over the hard cap, keep shrinking past the
-        // floor until it fits, so the 100 KB guarantee always holds.
+        // floor until it fits, so the cap guarantee always holds.
         let longest = work.width().max(work.height());
-        let under_cap = best
-            .as_ref()
-            .map_or(false, |b| b.len() <= DECISION_ASSET_HARD_CAP_BYTES);
-        if (longest <= DECISION_ASSET_MIN_DIM && under_cap) || longest <= 1 {
+        let under_cap = best.as_ref().map_or(false, |b| b.len() <= hard_cap);
+        if (longest <= min_dim && under_cap) || longest <= 1 {
             break;
         }
         let nw = (work.width() * 4 / 5).max(1);
@@ -779,20 +798,205 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
 
 /// Top-level record fields the mobile `RawMessage` declares. `uuid` is
 /// load-bearing beyond rendering — `appendUnique` dedups tailed lines by it.
-const TAIL_MSG_FIELDS: [&str; 5] =
-    ["type", "uuid", "timestamp", "isSidechain", "isCompactSummary"];
+/// `isMeta`/`sourceToolUseID` drive the client's MetaFoldCard grouping.
+const TAIL_MSG_FIELDS: [&str; 7] = [
+    "type",
+    "uuid",
+    "timestamp",
+    "isSidechain",
+    "isCompactSummary",
+    "isMeta",
+    "sourceToolUseID",
+];
 /// Content-block fields the mobile `ContentBlock` declares and renders.
-const TAIL_BLOCK_FIELDS: [&str; 5] = ["text", "thinking", "name", "id", "tool_use_id"];
+/// `is_error` feeds the tool chip's error badge; result bodies stay stripped.
+const TAIL_BLOCK_FIELDS: [&str; 6] = ["text", "thinking", "name", "id", "tool_use_id", "is_error"];
+/// The only `message.usage` counters the UI renders (one `↑in ↓out` line per
+/// turn); cache bookkeeping counters stay stripped.
+const TAIL_USAGE_FIELDS: [&str; 2] = ["input_tokens", "output_tokens"];
+
+/// Transcript-thumbnail budget. Much tighter than a decision asset: thumbs ride
+/// inline in the skeleton stream (which is otherwise ~KB-scale) and render at
+/// list width, so a ~256px JPEG is plenty. Tap-to-view fetches the original on
+/// demand instead.
+const TAIL_THUMB_TARGET_BYTES: usize = 12 * 1024;
+const TAIL_THUMB_HARD_CAP_BYTES: usize = 20 * 1024;
+const TAIL_THUMB_MIN_DIM: u32 = 256;
+/// Result payloads can carry several screenshots; cap how many thumb up so one
+/// record can't stack unbounded thumbnails into the stream.
+const TAIL_THUMB_MAX_PER_RESULT: usize = 3;
+
+/// Thumbnail one base64 image for the skeleton stream, returning the JPEG as
+/// base64. `None` means "not worth shipping" (undecodable, or the re-encode
+/// couldn't get under the hard cap) — the block then slims to its old
+/// type-only form.
+///
+/// Re-encoding runs inside every `tail` reply, and pagination re-requests the
+/// full window, so results are memoised by a hash of the source base64. The
+/// cache is process-wide and bounded: on overflow it is simply cleared (a
+/// transcript window holds far fewer distinct images than the bound, so a
+/// clear-and-refill is rare and cheap). Failures are cached too — a corrupt
+/// blob shouldn't be re-decoded on every poll.
+fn tail_thumb_from_base64(media_type: &str, data: &str) -> Option<String> {
+    use base64::Engine as _;
+    use std::collections::HashMap;
+    use std::hash::{Hash, Hasher};
+    use std::sync::Mutex;
+
+    const CACHE_MAX: usize = 64;
+    static CACHE: Mutex<Option<HashMap<u64, Option<String>>>> = Mutex::new(None);
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    data.hash(&mut hasher);
+    let key = hasher.finish();
+
+    if let Some(cached) = CACHE
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().and_then(|m| m.get(&key).cloned()))
+    {
+        return cached;
+    }
+
+    let thumb = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .ok()
+        .and_then(|bytes| {
+            let (out, mime) = downscale_image(
+                bytes,
+                media_type,
+                TAIL_THUMB_TARGET_BYTES,
+                TAIL_THUMB_HARD_CAP_BYTES,
+                TAIL_THUMB_MIN_DIM,
+            );
+            // `downscale_image` echoes undecodable input back unchanged — only a
+            // real JPEG re-encode under the cap is worth putting on the wire.
+            (mime == "image/jpeg" && out.len() <= TAIL_THUMB_HARD_CAP_BYTES)
+                .then(|| base64::engine::general_purpose::STANDARD.encode(out))
+        });
+
+    if let Ok(mut guard) = CACHE.lock() {
+        let map = guard.get_or_insert_with(HashMap::new);
+        if map.len() >= CACHE_MAX {
+            map.clear();
+        }
+        map.insert(key, thumb.clone());
+    }
+    thumb
+}
+
+/// Extract a base64 image `source` from a content block, if present.
+fn base64_image_source(block: &Value) -> Option<(&str, &str)> {
+    let source = block.get("source")?;
+    if source.get("type").and_then(Value::as_str) != Some("base64") {
+        return None;
+    }
+    let media_type = source.get("media_type").and_then(Value::as_str).unwrap_or("image/png");
+    let data = source.get("data").and_then(Value::as_str)?;
+    Some((media_type, data))
+}
 /// The only `tool_use.input` keys the UI reads — `toolSummary` shows exactly one
 /// of these on the tool chip; everything else in `input` is dead weight (a Write
 /// tool's whole file body lives there).
 const TAIL_TOOL_INPUT_FIELDS: [&str; 7] =
     ["command", "file_path", "pattern", "path", "query", "url", "skill"];
 
+/// Digest a record's `toolUseResult` into a flat, few-dozen-byte stat object
+/// for the tool chip's header (diff ± counts, match counts, subagent totals…),
+/// so the phone can show the desktop's stat chips without downloading result
+/// bodies. Field names mirror the shapes catalogued in the desktop's
+/// `toolResults.ts`; `toolUseResult` is an internal Claude Code payload whose
+/// keys differ per tool, so every probe is shape-based and optional. Errored
+/// calls degrade `toolUseResult` to a bare string — no digest, the block's
+/// `is_error` bit already tells the story.
+fn tool_result_digest(meta: &Value) -> Option<Value> {
+    let obj = meta.as_object()?;
+    let mut d = Map::new();
+    // Edit / Write: unified-diff hunks → ±line counts.
+    if let Some(hunks) = obj.get("structuredPatch").and_then(Value::as_array) {
+        let (mut added, mut removed) = (0u64, 0u64);
+        for lines in hunks.iter().filter_map(|h| h.get("lines").and_then(Value::as_array)) {
+            for line in lines.iter().filter_map(Value::as_str) {
+                match line.as_bytes().first() {
+                    Some(b'+') => added += 1,
+                    Some(b'-') => removed += 1,
+                    _ => {}
+                }
+            }
+        }
+        d.insert("added".into(), added.into());
+        d.insert("removed".into(), removed.into());
+    }
+    // Bash: stdout/stderr line counts + interrupted flag (no exit code exists).
+    if let (Some(stdout), Some(stderr)) = (
+        obj.get("stdout").and_then(Value::as_str),
+        obj.get("stderr").and_then(Value::as_str),
+    ) {
+        let count = |s: &str| s.lines().filter(|l| !l.trim().is_empty()).count() as u64;
+        d.insert("stdoutLines".into(), count(stdout).into());
+        d.insert("stderrLines".into(), count(stderr).into());
+        if obj.get("interrupted") == Some(&Value::Bool(true)) {
+            d.insert("interrupted".into(), true.into());
+        }
+    }
+    // Agent subagent run totals.
+    if let Some(status) = obj.get("status").and_then(Value::as_str) {
+        d.insert("agentStatus".into(), status.into());
+        for (src, dst) in [
+            ("totalDurationMs", "durationMs"),
+            ("totalTokens", "tokens"),
+            ("totalToolUseCount", "toolUses"),
+        ] {
+            if let Some(v) = obj.get(src).filter(|v| v.is_number()) {
+                d.insert(dst.into(), v.clone());
+            }
+        }
+    }
+    // Grep / Glob search stats.
+    if let Some(files) = obj.get("numFiles").filter(|v| v.is_number()) {
+        d.insert("files".into(), files.clone());
+        if let Some(m) = obj
+            .get("numMatches")
+            .or_else(|| obj.get("totalMatches"))
+            .filter(|v| v.is_number())
+        {
+            d.insert("matches".into(), m.clone());
+        }
+        if obj.get("truncated") == Some(&Value::Bool(true)) {
+            d.insert("truncated".into(), true.into());
+        }
+    }
+    // WebSearch: result-link count.
+    if let Some(links) = obj.get("links").and_then(Value::as_array) {
+        d.insert("links".into(), (links.len() as u64).into());
+    }
+    // WebFetch: HTTP status + payload size.
+    if obj.get("url").is_some() {
+        if let Some(code) = obj.get("code").filter(|v| v.is_number()) {
+            d.insert("httpCode".into(), code.clone());
+        }
+        if let Some(bytes) = obj.get("bytes").filter(|v| v.is_number()) {
+            d.insert("bytes".into(), bytes.clone());
+        }
+    }
+    // TodoWrite: done/total of the new checklist.
+    if let Some(todos) = obj.get("newTodos").and_then(Value::as_array) {
+        let done = todos
+            .iter()
+            .filter(|t| t.get("status").and_then(Value::as_str) == Some("completed"))
+            .count() as u64;
+        d.insert("todoDone".into(), done.into());
+        d.insert("todoTotal".into(), (todos.len() as u64).into());
+    }
+    if d.is_empty() { None } else { Some(Value::Object(d)) }
+}
+
 /// Slim one content block to the fields the mobile renders. An `image` block
-/// keeps only its `type` — the client prints "[图片]" and never reads the
-/// base64 `source`, which is both the biggest and the least compressible part
-/// of a transcript.
+/// sheds its original base64 `source` — the biggest and least compressible part
+/// of a transcript — and carries a server-side ~256px JPEG thumbnail instead
+/// (`_thumb: true`); an undecodable image keeps only its `type` and renders as
+/// the "[图片]" placeholder. A `tool_result` block's body stays stripped, but
+/// any images inside it surface as a capped `_thumbs` list.
 fn slim_tail_block(block: &Value) -> Value {
     let Some(obj) = block.as_object() else {
         return block.clone();
@@ -817,6 +1021,36 @@ fn slim_tail_block(block: &Value) -> Value {
             out.insert("input".into(), Value::Object(slim_input));
         }
     }
+    match obj.get("type").and_then(Value::as_str) {
+        Some("image") => {
+            if let Some(thumb) = base64_image_source(block)
+                .and_then(|(media_type, data)| tail_thumb_from_base64(media_type, data))
+            {
+                out.insert(
+                    "source".into(),
+                    json!({ "type": "base64", "media_type": "image/jpeg", "data": thumb }),
+                );
+                out.insert("_thumb".into(), true.into());
+            }
+        }
+        Some("tool_result") => {
+            let thumbs: Vec<Value> = obj
+                .get("content")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|b| b.get("type").and_then(Value::as_str) == Some("image"))
+                .filter_map(base64_image_source)
+                .filter_map(|(media_type, data)| tail_thumb_from_base64(media_type, data))
+                .take(TAIL_THUMB_MAX_PER_RESULT)
+                .map(Value::from)
+                .collect();
+            if !thumbs.is_empty() {
+                out.insert("_thumbs".into(), Value::Array(thumbs));
+            }
+        }
+        _ => {}
+    }
     Value::Object(out)
 }
 
@@ -839,13 +1073,42 @@ fn slim_tail_message(msg: &Value) -> Value {
         if let Some(role) = message.get("role") {
             slim_msg.insert("role".into(), role.clone());
         }
+        // Turn metadata for the per-turn usage line and run-termination checks.
+        for key in ["model", "stop_reason"] {
+            if let Some(v) = message.get(key) {
+                slim_msg.insert(key.into(), v.clone());
+            }
+        }
+        if let Some(usage) = message.get("usage").and_then(Value::as_object) {
+            let mut slim_usage = Map::new();
+            for key in TAIL_USAGE_FIELDS {
+                if let Some(v) = usage.get(key) {
+                    slim_usage.insert(key.into(), v.clone());
+                }
+            }
+            if !slim_usage.is_empty() {
+                slim_msg.insert("usage".into(), Value::Object(slim_usage));
+            }
+        }
         match message.get("content") {
-            // Block list: slim each block.
+            // Block list: slim each block. The record-level `toolUseResult`
+            // (stripped as a whole) is digested into a tiny `_digest` stat
+            // object on the record's `tool_result` block, keyed client-side by
+            // `tool_use_id` for the matching tool chip's header.
             Some(Value::Array(blocks)) => {
-                slim_msg.insert(
-                    "content".into(),
-                    Value::Array(blocks.iter().map(slim_tail_block).collect()),
-                );
+                let digest = obj.get("toolUseResult").and_then(tool_result_digest);
+                let slimmed = blocks.iter().map(|b| {
+                    let mut slim = slim_tail_block(b);
+                    if let (Some(d), Some("tool_result")) =
+                        (&digest, b.get("type").and_then(Value::as_str))
+                    {
+                        if let Some(o) = slim.as_object_mut() {
+                            o.insert("_digest".into(), d.clone());
+                        }
+                    }
+                    slim
+                });
+                slim_msg.insert("content".into(), Value::Array(slimmed.collect()));
             }
             // Plain string content is rendered verbatim.
             Some(other) => {
@@ -1247,6 +1510,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "decision_asset" => serve_decision_asset(params),
         "tail" => serve_tail(params),
         "tail_delta" => serve_tail_delta(params),
+        "tool_detail" => serve_tool_detail(params),
         "live_thinking" => serve_live_thinking(params),
         "handoff_chain" => serve_handoff_chain(params),
         "workflow_trees" => serve_workflow_trees(params),
@@ -1435,6 +1699,96 @@ fn serve_tail_delta(params: &Value) -> Result<Value, String> {
     // nothing), returning messages the client dedups by their stable `uuid`.
     let (lines, new_offset) = source.tail_incremental(path, offset)?;
     Ok(json!({ "lines": slim_tail_messages(lines), "newOffset": new_offset }))
+}
+
+/// Screenshots surfaced in one `tool_detail` reply are capped so a
+/// screenshot-heavy result can't stack megabytes into a single frame; each is
+/// re-encoded at the decision-asset budget (≤100 KB guaranteed).
+const TOOL_DETAIL_MAX_IMAGES: usize = 6;
+
+/// On-demand expansion for one tool call — the mobile counterpart of the
+/// desktop's `get_tool_result_full`. The skeleton stream ships only summaries
+/// and digests (see `slim_tail_messages`); when the reader taps a tool chip
+/// open, this returns the full `tool_use.input`, the `tool_result` content and
+/// the structured `toolUseResult` for that `tool_use_id`.
+///
+/// Large string leaves are truncated to transport previews unless `full` is
+/// set (`truncated: true` marks a reply the client can re-request with
+/// `full`), mirroring the desktop's two-stage expand. Embedded screenshots are
+/// never shipped raw: they are pulled out of `content` into an `images` list
+/// re-encoded at the decision-asset budget, `full` or not.
+///
+/// Reads the transcript where the relay host runs, like `serve_tail` — no
+/// Backend-trait hop is involved on the mobile path.
+fn serve_tool_detail(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+
+    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let tool_use_id =
+        params.get("tool_use_id").and_then(Value::as_str).ok_or("missing tool_use_id")?;
+    let full = params.get("full").and_then(Value::as_bool).unwrap_or(false);
+
+    let sources = crate::agent_source::build_sources();
+    let source = crate::agent_source::find_source_for_path(&sources, path)
+        .ok_or_else(|| format!("no agent source for path: {path}"))?;
+    let resolved = source
+        .resolve_file_path(path)
+        .ok_or_else(|| format!("cannot resolve path: {path}"))?;
+
+    let mut detail = crate::message_trim::extract_full_tool_result(&resolved, tool_use_id)?;
+    let obj = detail.as_object_mut().expect("extract_full_tool_result returns an object");
+
+    // Pull screenshots out of the result content before any truncation: a
+    // base64 leaf would otherwise be cut into a useless 1 KB preview. The raw
+    // source is stripped from the block either way.
+    let mut images: Vec<Value> = Vec::new();
+    if let Some(blocks) = obj.get_mut("content").and_then(Value::as_array_mut) {
+        for block in blocks.iter_mut() {
+            if block.get("type").and_then(Value::as_str) != Some("image") {
+                continue;
+            }
+            let source_pair = base64_image_source(block)
+                .map(|(media_type, data)| (media_type.to_string(), data.to_string()));
+            if let Some((media_type, data)) = source_pair {
+                if images.len() < TOOL_DETAIL_MAX_IMAGES {
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
+                        let (out, mime) = downscale_image(
+                            bytes,
+                            &media_type,
+                            DECISION_ASSET_TARGET_BYTES,
+                            DECISION_ASSET_HARD_CAP_BYTES,
+                            DECISION_ASSET_MIN_DIM,
+                        );
+                        if out.len() <= DECISION_ASSET_HARD_CAP_BYTES {
+                            images.push(json!({
+                                "media_type": mime,
+                                "data": base64::engine::general_purpose::STANDARD.encode(out),
+                            }));
+                        }
+                    }
+                }
+            }
+            if let Some(b) = block.as_object_mut() {
+                b.remove("source");
+            }
+        }
+    }
+    if !images.is_empty() {
+        obj.insert("images".into(), Value::Array(images));
+    }
+
+    if !full {
+        let mut truncated = false;
+        for key in ["content", "toolUseResult", "input"] {
+            if let Some(v) = obj.get_mut(key) {
+                truncated |= crate::message_trim::truncate_value_for_transport(v);
+            }
+        }
+        if truncated {
+            obj.insert("truncated".into(), true.into());
+        }
+    }
+    Ok(detail)
 }
 
 // Serializes to `null` when there's no live sidecar for this session.
@@ -2863,7 +3217,8 @@ mod tests {
             assert!(m.get("cwd").is_none(), "cwd must be stripped");
             assert!(m.get("sessionId").is_none(), "sessionId must be stripped");
             assert!(m.get("parentUuid").is_none(), "parentUuid must be stripped");
-            assert!(m["message"].get("usage").is_none(), "usage must be stripped");
+            // usage survives trimmed to the two rendered counters (per-turn line).
+            assert_eq!(m["message"]["usage"], json!({"input_tokens": 1, "output_tokens": 2}));
 
             // Kept: the RawMessage field set the UI actually reads.
             assert_eq!(m["type"], "user");
@@ -4297,5 +4652,326 @@ mod tests {
             serve_repo_pull(&params).is_err(),
             "repo_pull handler must propagate the core Err, not a wrapped Ok",
         );
+    }
+
+    // ── transcript slimming keeps the fields the redesigned detail view reads ──
+
+    /// Regression: `isMeta`/`sourceToolUseID` were missing from `TAIL_MSG_FIELDS`,
+    /// so the phone's `isMetaRow` (which requires `msg.isMeta`) never matched over
+    /// the relay — SKILL.md injections rendered as full-length user bubbles
+    /// instead of folding into a MetaFoldCard.
+    #[test]
+    fn slim_tail_keeps_meta_flags() {
+        let msgs = vec![json!({
+            "type": "user",
+            "uuid": "u1",
+            "isMeta": true,
+            "sourceToolUseID": "toolu_abc",
+            "cwd": "/somewhere",
+            "message": { "role": "user", "content": "injected SKILL.md body" }
+        })];
+        let slim = slim_tail_messages(msgs);
+        assert_eq!(slim[0]["isMeta"], json!(true), "isMeta must survive slimming");
+        assert_eq!(
+            slim[0]["sourceToolUseID"],
+            json!("toolu_abc"),
+            "sourceToolUseID must survive slimming"
+        );
+        assert!(slim[0].get("cwd").is_none(), "bookkeeping fields stay stripped");
+    }
+
+    /// The redesigned view shows one `↑in ↓out · model` line per turn and uses
+    /// `stop_reason` to tell whether a work run terminated. Only the two token
+    /// counters survive from `usage` — cache bookkeeping stays stripped.
+    #[test]
+    fn slim_tail_keeps_turn_usage_fields() {
+        let msgs = vec![json!({
+            "type": "assistant",
+            "uuid": "a1",
+            "message": {
+                "role": "assistant",
+                "model": "claude-opus-4-8",
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 1200,
+                    "output_tokens": 340,
+                    "cache_read_input_tokens": 99999,
+                    "cache_creation_input_tokens": 5
+                },
+                "content": [{ "type": "text", "text": "done" }]
+            }
+        })];
+        let slim = slim_tail_messages(msgs);
+        let m = &slim[0]["message"];
+        assert_eq!(m["model"], json!("claude-opus-4-8"));
+        assert_eq!(m["stop_reason"], json!("end_turn"));
+        assert_eq!(m["usage"]["input_tokens"], json!(1200));
+        assert_eq!(m["usage"]["output_tokens"], json!(340));
+        assert!(
+            m["usage"].get("cache_read_input_tokens").is_none(),
+            "cache counters are not rendered and must stay stripped"
+        );
+    }
+
+    /// Error badges on tool chips need the `tool_result` block's `is_error` bit;
+    /// the result `content` itself stays stripped (fetched on demand instead).
+    #[test]
+    fn slim_tail_keeps_tool_result_error_bit() {
+        let msgs = vec![json!({
+            "type": "user",
+            "uuid": "u2",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_x",
+                    "is_error": true,
+                    "content": [{ "type": "text", "text": "boom stack trace ..." }]
+                }]
+            }
+        })];
+        let slim = slim_tail_messages(msgs);
+        let block = &slim[0]["message"]["content"][0];
+        assert_eq!(block["tool_use_id"], json!("toolu_x"));
+        assert_eq!(block["is_error"], json!(true), "is_error must survive slimming");
+        assert!(
+            block.get("content").is_none(),
+            "tool_result bodies stay stripped from the skeleton stream"
+        );
+    }
+
+    /// `toolUseResult` is stripped as a whole, but its stats survive as a tiny
+    /// `_digest` on the record's `tool_result` block — the phone's stat chips
+    /// without the bodies.
+    #[test]
+    fn slim_tail_digests_tool_result_stats() {
+        let record = |tool_use_result: Value| {
+            json!({
+                "type": "user",
+                "uuid": "u3",
+                "message": { "role": "user", "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_d", "content": "big blob" }
+                ]},
+                "toolUseResult": tool_use_result
+            })
+        };
+
+        // Edit/Write → ± line counts from structuredPatch.
+        let slim = slim_tail_messages(vec![record(json!({
+            "filePath": "/a/b.rs",
+            "originalFile": "fn main() {}\n",
+            "structuredPatch": [
+                { "oldStart": 1, "oldLines": 2, "newStart": 1, "newLines": 3,
+                  "lines": [" ctx", "+new line", "+another", "-old line"] }
+            ]
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["added"], json!(2));
+        assert_eq!(d["removed"], json!(1));
+        assert!(
+            slim[0].get("toolUseResult").is_none(),
+            "raw toolUseResult still stripped"
+        );
+
+        // Bash → stdout/stderr line counts.
+        let slim = slim_tail_messages(vec![record(json!({
+            "stdout": "one\ntwo\n\n", "stderr": "", "interrupted": false
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["stdoutLines"], json!(2));
+        assert_eq!(d["stderrLines"], json!(0));
+        assert!(d.get("interrupted").is_none(), "false flags stay omitted");
+
+        // Agent → status + totals.
+        let slim = slim_tail_messages(vec![record(json!({
+            "status": "completed", "totalDurationMs": 120000,
+            "totalTokens": 45000, "totalToolUseCount": 12, "prompt": "long ..."
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["agentStatus"], json!("completed"));
+        assert_eq!(d["durationMs"], json!(120000));
+        assert_eq!(d["tokens"], json!(45000));
+        assert_eq!(d["toolUses"], json!(12));
+
+        // Grep → files/matches; TodoWrite → done/total.
+        let slim = slim_tail_messages(vec![record(json!({
+            "numFiles": 3, "numMatches": 17, "truncated": true, "filenames": ["a", "b", "c"]
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["files"], json!(3));
+        assert_eq!(d["matches"], json!(17));
+        assert_eq!(d["truncated"], json!(true));
+
+        let slim = slim_tail_messages(vec![record(json!({
+            "oldTodos": [], "newTodos": [
+                { "content": "x", "status": "completed" },
+                { "content": "y", "status": "pending" }
+            ]
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["todoDone"], json!(1));
+        assert_eq!(d["todoTotal"], json!(2));
+
+        // Errored call: toolUseResult degrades to a bare string → no digest.
+        let slim = slim_tail_messages(vec![record(json!("Error: something broke"))]);
+        assert!(
+            slim[0]["message"]["content"][0].get("_digest").is_none(),
+            "string toolUseResult yields no digest"
+        );
+    }
+
+    /// Image blocks ship a server-side JPEG thumbnail instead of the original
+    /// base64 (or nothing renderable when the source doesn't decode), and
+    /// tool_result-embedded screenshots surface as a capped `_thumbs` list
+    /// while the result body stays stripped.
+    #[test]
+    fn slim_tail_thumbnails_images() {
+        use base64::Engine as _;
+        // A decodable ~600×400 gradient PNG standing in for a screenshot.
+        let mut buf = image::RgbImage::new(600, 400);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            *px = image::Rgb([(x / 4) as u8, (y / 2) as u8, ((x + y) / 8) as u8]);
+        }
+        let png_b64 = base64::engine::general_purpose::STANDARD.encode(png_of(buf));
+        let img_block = |data: &str| {
+            json!({ "type": "image",
+                    "source": { "type": "base64", "media_type": "image/png", "data": data } })
+        };
+
+        // Top-level image block → jpeg thumb under the hard cap, marked _thumb.
+        let slim = slim_tail_messages(vec![json!({
+            "type": "user", "uuid": "img1",
+            "message": { "role": "user", "content": [img_block(&png_b64)] }
+        })]);
+        let block = &slim[0]["message"]["content"][0];
+        assert_eq!(block["_thumb"], json!(true));
+        assert_eq!(block["source"]["media_type"], json!("image/jpeg"));
+        let thumb_bytes = base64::engine::general_purpose::STANDARD
+            .decode(block["source"]["data"].as_str().expect("thumb data"))
+            .expect("thumb decodes");
+        assert!(
+            thumb_bytes.len() <= TAIL_THUMB_HARD_CAP_BYTES,
+            "thumb ({}B) must respect the hard cap",
+            thumb_bytes.len()
+        );
+        image::load_from_memory(&thumb_bytes).expect("thumb is a valid image");
+
+        // Undecodable source → old type-only slim form, no source shipped.
+        let slim = slim_tail_messages(vec![json!({
+            "type": "user", "uuid": "img2",
+            "message": { "role": "user", "content": [img_block("AAAAAAAA")] }
+        })]);
+        let block = &slim[0]["message"]["content"][0];
+        assert!(block.get("source").is_none(), "junk image ships no source");
+        assert!(block.get("_thumb").is_none());
+
+        // tool_result screenshots → capped `_thumbs`, body still stripped.
+        let many: Vec<Value> = (0..5).map(|_| img_block(&png_b64)).collect();
+        let slim = slim_tail_messages(vec![json!({
+            "type": "user", "uuid": "img3",
+            "message": { "role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "toolu_img",
+                "content": many
+            }] }
+        })]);
+        let block = &slim[0]["message"]["content"][0];
+        assert!(block.get("content").is_none(), "result body stays stripped");
+        let thumbs = block["_thumbs"].as_array().expect("thumbs present");
+        assert_eq!(thumbs.len(), TAIL_THUMB_MAX_PER_RESULT, "thumb count capped");
+    }
+
+    /// `tool_detail` is the tap-to-expand counterpart of the slim stream: full
+    /// input + result for one tool_use_id, previews truncated unless `full`,
+    /// screenshots re-encoded into `images` instead of raw base64.
+    #[test]
+    fn request_tool_detail_expands_one_tool_call() {
+        with_temp_home(|| {
+            let big_stdout = "y".repeat(10_000);
+            let path = write_jsonl(
+                "detail.jsonl",
+                &[
+                    json!({
+                        "type": "assistant", "uuid": "a1",
+                        "message": { "role": "assistant", "content": [
+                            { "type": "tool_use", "id": "toolu_det", "name": "Bash",
+                              "input": { "command": "make", "description": "build it" } }
+                        ]}
+                    }),
+                    json!({
+                        "type": "user", "uuid": "u1",
+                        "message": { "role": "user", "content": [
+                            { "type": "tool_result", "tool_use_id": "toolu_det",
+                              "content": big_stdout }
+                        ]},
+                        "toolUseResult": { "stdout": big_stdout, "stderr": "", "interrupted": false }
+                    }),
+                ],
+            );
+
+            // Default: truncated previews + flag.
+            let d = request_ok("tool_detail", json!({ "path": path, "tool_use_id": "toolu_det" }));
+            assert_eq!(d["name"], json!("Bash"));
+            assert_eq!(d["input"]["command"], json!("make"), "full input comes back");
+            assert_eq!(d["truncated"], json!(true));
+            let preview = d["content"].as_str().expect("content preview");
+            assert!(preview.len() < 3000, "content must be a preview, got {}B", preview.len());
+            assert!(preview.contains("Fleet truncated"));
+
+            // full=true returns the whole body.
+            let d = request_ok(
+                "tool_detail",
+                json!({ "path": path, "tool_use_id": "toolu_det", "full": true }),
+            );
+            assert!(d.get("truncated").is_none());
+            assert_eq!(d["content"].as_str().unwrap().len(), 10_000);
+            assert_eq!(d["toolUseResult"]["stdout"].as_str().unwrap().len(), 10_000);
+
+            // Unknown id is a protocol error, not an empty reply.
+            assert!(serve_tool_detail(
+                &json!({ "path": path, "tool_use_id": "toolu_missing" })
+            )
+            .is_err());
+        });
+    }
+
+    /// Screenshots inside a tool_result come back as re-encoded `images`, never
+    /// as raw base64 in `content` — and never cut to a useless text preview.
+    #[test]
+    fn request_tool_detail_reencodes_result_images() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let mut buf = image::RgbImage::new(600, 400);
+            for (x, y, px) in buf.enumerate_pixels_mut() {
+                *px = image::Rgb([(x / 4) as u8, (y / 2) as u8, 0]);
+            }
+            let png_b64 = base64::engine::general_purpose::STANDARD.encode(png_of(buf));
+            let path = write_jsonl(
+                "detail-img.jsonl",
+                &[json!({
+                    "type": "user", "uuid": "u1",
+                    "message": { "role": "user", "content": [
+                        { "type": "tool_result", "tool_use_id": "toolu_shot", "content": [
+                            { "type": "text", "text": "screenshot taken" },
+                            { "type": "image",
+                              "source": { "type": "base64", "media_type": "image/png",
+                                          "data": png_b64 } }
+                        ]}
+                    ]}
+                })],
+            );
+
+            let d = request_ok("tool_detail", json!({ "path": path, "tool_use_id": "toolu_shot" }));
+            let images = d["images"].as_array().expect("images list");
+            assert_eq!(images.len(), 1);
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(images[0]["data"].as_str().unwrap())
+                .expect("image decodes");
+            assert!(bytes.len() <= DECISION_ASSET_HARD_CAP_BYTES);
+            image::load_from_memory(&bytes).expect("valid image");
+            // The raw base64 is gone from the content blocks.
+            let blocks = d["content"].as_array().expect("content blocks");
+            assert_eq!(blocks[0]["text"], json!("screenshot taken"));
+            assert!(blocks[1].get("source").is_none(), "raw base64 stripped");
+        });
     }
 }

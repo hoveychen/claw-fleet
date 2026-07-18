@@ -172,6 +172,37 @@ export interface ContentBlock {
   /** true when a tool_result is an error (e.g. a failed/cancelled ask card that
    *  the user never actually answered). */
   is_error?: boolean;
+  /** Server-side stat digest of the stripped toolUseResult on a tool_result
+   *  block — feeds the tool chip's header stats (see mobile_relay.rs). */
+  _digest?: ToolDigest;
+  /** Base64 JPEG thumbnails of screenshots embedded in a tool_result body. */
+  _thumbs?: string[];
+  /** Image block whose `source` is a server-side JPEG thumbnail, not the
+   *  original (the relay never ships original base64 in the skeleton stream). */
+  _thumb?: boolean;
+  source?: { type?: string; media_type?: string; data?: string };
+}
+
+/** Flat stat digest the relay computes from a stripped `toolUseResult`.
+ *  Every field is optional — which ones exist depends on the tool. */
+export interface ToolDigest {
+  added?: number;
+  removed?: number;
+  stdoutLines?: number;
+  stderrLines?: number;
+  interrupted?: boolean;
+  agentStatus?: string;
+  durationMs?: number;
+  tokens?: number;
+  toolUses?: number;
+  files?: number;
+  matches?: number;
+  truncated?: boolean;
+  links?: number;
+  httpCode?: number;
+  bytes?: number;
+  todoDone?: number;
+  todoTotal?: number;
 }
 
 export interface RawMessage {
@@ -187,6 +218,10 @@ export interface RawMessage {
   message?: {
     role?: string;
     content?: string | ContentBlock[];
+    /** Turn metadata the slim tail keeps for the per-turn usage line. */
+    model?: string;
+    stop_reason?: string | null;
+    usage?: { input_tokens?: number; output_tokens?: number };
   };
 }
 
