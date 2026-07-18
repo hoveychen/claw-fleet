@@ -305,6 +305,26 @@ mod tests {
     }
 
     #[test]
+    fn preview_marker_prefix_is_pinned_for_frontend_self_heal() {
+        // The desktop frontend recognizes a transport-trimmed image by finding
+        // this exact substring inside the base64 (`imageData.ts`,
+        // FLEET_TRUNCATED_MARKER = "[Fleet truncated "). Rewording the marker
+        // here would silently kill that self-heal — change both together.
+        let mut msgs = vec![json!({
+            "type": "user",
+            "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": big(10_000)}
+            ]}
+        })];
+        trim_messages_with_threshold(&mut msgs, 4096);
+        let c = msgs[0]["message"]["content"][0]["content"].as_str().unwrap();
+        assert!(
+            c.contains("[Fleet truncated "),
+            "marker prefix must stay in sync with the frontend detector"
+        );
+    }
+
+    #[test]
     fn image_result_is_flagged_for_transport_and_extracted_in_full() {
         let dir = std::env::temp_dir();
         let path = dir.join(format!(
