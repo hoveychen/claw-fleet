@@ -28,9 +28,9 @@ const voiceEnvelope = (frame: number, cue: VoiceCue, fps: number) => {
   return Math.min(clamp01((frame - (start - 8)) / 8), clamp01(((end + 10) - frame) / 10));
 };
 
-const bgmVolume = (frame: number, cues: VoiceCue[], fps: number) => {
+const bgmVolume = (frame: number, cues: VoiceCue[], fps: number, idle = 0.34, ducked = 0.14) => {
   const duck = cues.reduce((level, cue) => Math.max(level, voiceEnvelope(frame, cue, fps)), 0);
-  return lerp(0.34, 0.14, duck);
+  return lerp(idle, ducked, duck);
 };
 
 const VoiceTracks: React.FC<{ cues: VoiceCue[] }> = ({ cues }) => (
@@ -304,7 +304,7 @@ export const ClawFleetVertical: React.FC<{ topic: VerticalTopic }> = ({ topic })
   const voice = VERTICAL_VOICE[topic.id];
   return (
     <>
-      <Audio src={staticFile("audio/bgm.mp3")} volume={() => bgmVolume(frame, [voice], fps)} />
+      <Audio src={staticFile("audio/bgm.mp3")} volume={() => bgmVolume(frame, [voice], fps, 0.72, 0.14)} />
       <VoiceTracks cues={[voice]} />
       <SoundCue file="whoosh" frame={52} volume={0.42} />
       {(topic.id === "guard" || topic.id === "mobile") && <SoundCue file="alert" frame={280} volume={0.5} />}
