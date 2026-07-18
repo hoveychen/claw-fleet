@@ -72,7 +72,23 @@ export function ResumeComposer({
   const setPermissionMode = (v: string) => patch({ permissionMode: v });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cancellingIndex, setCancellingIndex] = useState<number | null>(null);
   const composerRef = useRef<ChatComposerHandle | null>(null);
+
+  // Drop one queued follow-up by its chip position. The backend re-emits the
+  // sessions snapshot on success, so the chip disappears without local state.
+  const handleCancelQueued = async (index: number) => {
+    if (cancellingIndex !== null) return;
+    setCancellingIndex(index);
+    setError(null);
+    try {
+      await invoke("cancel_session_pending_message", { sessionId, index });
+    } catch (e) {
+      setError(String((e as { message?: string })?.message ?? e));
+    } finally {
+      setCancellingIndex(null);
+    }
+  };
 
   useEffect(() => {
     setTimeout(() => composerRef.current?.focus(), 50);
@@ -155,7 +171,17 @@ export function ResumeComposer({
           </div>
           {pendingMessages.map((m, i) => (
             <div key={i} className={styles.queued_chip}>
-              {m}
+              <span className={styles.queued_text}>{m}</span>
+              <button
+                type="button"
+                className={styles.queued_cancel}
+                onClick={() => handleCancelQueued(i)}
+                disabled={cancellingIndex !== null}
+                title={t("history.enqueue_cancel", "取消这条排队消息")}
+                aria-label={t("history.enqueue_cancel", "取消这条排队消息")}
+              >
+                ×
+              </button>
             </div>
           ))}
         </div>

@@ -59,6 +59,21 @@ pub(crate) fn enqueue_session_message(
         .enqueue_message(session_id, workspace_path, text)
 }
 
+/// Cancel one queued follow-up by chip position (`index` 0-based). Backs the "×"
+/// on a queued-message chip. A stale index is a no-op success on the core side.
+#[tauri::command(async)]
+pub(crate) fn cancel_session_pending_message(
+    session_id: String,
+    index: usize,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .backend
+        .write()
+        .unwrap()
+        .cancel_pending_message(session_id, index)
+}
+
 /// Async so the spawn never blocks the UI thread. The codex path
 /// (`spawn_new_codex_session`) synchronously waits up to 30s for the child's
 /// `thread.started` line to learn its thread id before returning — on the main

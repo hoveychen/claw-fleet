@@ -43,6 +43,7 @@ pub const MANAGED_LESSONS: &str = "/managed_lessons";
 pub const MANAGED_LESSON_REMOVE: &str = "/managed_lessons/remove";
 pub const DECISION_ASSET: &str = "/decision_asset";
 pub const ENQUEUE_MESSAGE: &str = "/enqueue_message";
+pub const CANCEL_PENDING_MESSAGE: &str = "/cancel_pending_message";
 pub const ELICITATION_PENDING: &str = "/elicitation/pending";
 pub const ELICITATION_RESPOND: &str = "/elicitation/respond";
 pub const ELICITATION_UPLOAD: &str = "/elicitation/upload";

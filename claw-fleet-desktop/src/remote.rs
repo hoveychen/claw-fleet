@@ -422,6 +422,12 @@ impl crate::backend::Backend for RemoteBackend {
             .post_json_ok(claw_fleet_core::routes::ENQUEUE_MESSAGE, &req)
     }
 
+    fn cancel_pending_message(&self, session_id: String, index: usize) -> Result<(), String> {
+        let req = claw_fleet_core::pending_message::CancelMessageRequest { session_id, index };
+        self.probe
+            .post_json_ok(claw_fleet_core::routes::CANCEL_PENDING_MESSAGE, &req)
+    }
+
     fn spawn_new_session(
         &self,
         workspace_path: String,
