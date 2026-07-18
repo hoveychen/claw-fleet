@@ -33,6 +33,14 @@ use crate::session::{SessionInfo, SessionStatus, compute_context_percent};
 /// URI prefix for Codex session identifiers.
 const CODEX_URI_PREFIX: &str = "codex://";
 
+/// How many trailing normalized messages `tail_incremental` re-sends on each
+/// growth of a Codex rollout. Kept at/below the clients' dedup window (mobile
+/// `appendUnique` checks the last 50 held messages) so the re-sent overlap is
+/// always deduped rather than duplicated. A single poll rarely appends more
+/// than a handful of messages, so this window comfortably covers a burst; a
+/// pathological >N-message gap self-heals on the next full `tail` (reopen).
+const CODEX_TAIL_FOLLOW_WINDOW: usize = 40;
+
 pub struct CodexSource {
     /// `None` timestamp = never scanned, force refresh on first read.
     /// Avoids `Instant::now() - 999s` which panics on Windows runners
@@ -3116,6 +3124,56 @@ mod tests {
         assert_eq!(tail100.len(), 10, "tail(100) should return every message");
     }
 
+    /// The live-follow path: `tail_incremental` must return *normalized* codex
+    /// messages (each with the stable `uuid`) when the rollout grows, and an
+    /// empty batch when it hasn't. This is what makes a mobile/desktop reply to
+    /// a codex session actually appear (the raw byte-offset default would emit
+    /// un-renderable `response_item` records — the bug this fixes).
+    #[test]
+    fn codex_tail_incremental_returns_normalized_messages_on_growth() {
+        use super::CodexSource;
+        use crate::agent_source::AgentSource;
+        use std::io::Write as _;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(f, r#"{{"type":"session_meta","payload":{{"id":"t1","originator":"fleet","source":"exec"}}}}"#).unwrap();
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"hi"}}]}}}}"#).unwrap();
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"first reply"}}]}}}}"#).unwrap();
+        f.flush().unwrap();
+        let uri = format!("codex://{}", f.path().display());
+        let src = CodexSource::new();
+
+        // Grown from offset 0: normalized messages come back, each with a uuid,
+        // and new_offset lands at the current file size.
+        let (lines, off1) = src.tail_incremental(&uri, 0).unwrap();
+        assert!(
+            lines.iter().all(|m| m.get("uuid").and_then(|u| u.as_str()).is_some()),
+            "every normalized codex tail message must carry a uuid"
+        );
+        assert!(
+            lines.iter().any(|m| {
+                m.get("type").and_then(|t| t.as_str()) == Some("assistant")
+                    && m.to_string().contains("first reply")
+            }),
+            "the assistant reply must be present as a normalized message"
+        );
+        assert!(off1 > 0, "new_offset advances to EOF");
+
+        // No growth: empty batch, offset unchanged.
+        let (empty, off2) = src.tail_incremental(&uri, off1).unwrap();
+        assert!(empty.is_empty(), "no growth => no messages");
+        assert_eq!(off2, off1, "offset stays at EOF when nothing changed");
+
+        // A new reply lands: the re-normalized window surfaces it.
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"second reply"}}]}}}}"#).unwrap();
+        f.flush().unwrap();
+        let (lines2, off3) = src.tail_incremental(&uri, off1).unwrap();
+        assert!(off3 > off1, "offset advances past the appended reply");
+        assert!(
+            lines2.iter().any(|m| m.to_string().contains("second reply")),
+            "the freshly-appended reply must appear on the next poll"
+        );
+    }
+
     fn window(used_percent: i32, window_mins: i64, resets_at_secs: i64) -> CodexRateLimitWindow {
         CodexRateLimitWindow {
             used_percent,
@@ -4940,8 +4998,9 @@ impl AgentSource for CodexSource {
     }
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
-        let file_path =
-            resolve_uri(path).ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let file_path = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
 
         let content = read_session_content(&file_path)?;
 
@@ -4955,8 +5014,9 @@ impl AgentSource for CodexSource {
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
-        let file_path =
-            resolve_uri(path).ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let file_path = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
         let name = file_path
             .file_name()
             .and_then(|s| s.to_str())
@@ -5012,7 +5072,40 @@ impl AgentSource for CodexSource {
     }
 
     fn resolve_file_path(&self, path: &str) -> Option<PathBuf> {
-        resolve_uri(path)
+        // Clients address Codex sessions by `codex://` URI. The desktop
+        // filesystem watcher, however, works in resolved real-path space (the
+        // fs event and the stored watch path are the real rollout file), so
+        // also accept a bare absolute path here — `tail_incremental` is driven
+        // by the watcher on the desktop and by the URI on mobile.
+        resolve_uri(path).or_else(|| {
+            let p = PathBuf::from(path);
+            p.is_absolute().then_some(p)
+        })
+    }
+
+    /// Codex rollouts are folded (see `normalize_messages`): a reply spans an
+    /// `event_msg` mirror plus a canonical `response_item`, and normalization
+    /// dedups them using whole-file context. A raw byte slice from `offset` is
+    /// therefore not a renderable message — the default byte-offset tail would
+    /// hand the clients un-normalized `response_item`/`event_msg` records that
+    /// render as nothing (the "sent OK but no reply shows" bug). So on any
+    /// growth we re-normalize the last window and return those messages; the
+    /// stable per-message `uuid` (see `assign_stable_uuids`) lets the client
+    /// dedup the overlap with what it already holds and the live→persisted swap.
+    /// `new_offset = size` means "caught up to EOF"; the next poll re-runs only
+    /// when the file grows again, so a quiet session costs one `stat`.
+    fn tail_incremental(&self, path: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
+        let real = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let size = std::fs::metadata(&real).map_err(|e| e.to_string())?.len();
+        // No new bytes → nothing to re-render (also the initial "follow from
+        // here" call, where the watcher seeds `offset` with the current size).
+        if offset >= size {
+            return Ok((Vec::new(), size));
+        }
+        let messages = self.get_messages_tail(path, CODEX_TAIL_FOLLOW_WINDOW)?;
+        Ok((messages, size))
     }
 
     fn watch_strategy(&self) -> WatchStrategy {
