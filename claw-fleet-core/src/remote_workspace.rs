@@ -197,6 +197,17 @@ fn resolve_rca_binary(entry: &RemoteWorkspace, cfg: &RemoteWorkspacesConfig) -> 
     })
 }
 
+/// Create the local mirror directory when `path` is (under) a registered
+/// remote workspace — for callers whose `is_dir` spawn gate runs before the
+/// launch is wrapped. No-op for local workspaces.
+pub fn ensure_local_mirror(path: &str) -> Result<(), String> {
+    if find_for_path(path).is_some() {
+        fs::create_dir_all(path)
+            .map_err(|e| format!("create local mirror directory {path}: {e}"))?;
+    }
+    Ok(())
+}
+
 /// If `workspace_path` is (under) a registered remote workspace, rewrite the
 /// agent launch `program args…` into an rca run-mode launch and ensure the
 /// local mirror directory exists. `Ok(None)` for plain local workspaces —
