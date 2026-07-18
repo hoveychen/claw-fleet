@@ -407,3 +407,22 @@ export type PendingDecision =
   | A2uiRenderDecision
   | PlanApprovalDecision
   | PermissionPromptDecision;
+
+/** One registered rca-routed remote workspace (`~/.fleet/remote-workspaces.json`). */
+export interface RemoteWorkspace {
+  /** Absolute workspace path — identical on this machine and the remote. */
+  path: string;
+  /** The `rca1.…` pairing code printed by `rca serve` on the remote host. */
+  pairingCode: string;
+  /** Display label (e.g. the remote host's name). */
+  label?: string;
+  /** Per-workspace override of the rca binary path. */
+  rcaPath?: string;
+}
+
+/** The remote-workspace registry, as returned by the backend. */
+export interface RemoteWorkspacesConfig {
+  /** Global rca binary path override. */
+  rcaPath?: string;
+  workspaces: RemoteWorkspace[];
+}

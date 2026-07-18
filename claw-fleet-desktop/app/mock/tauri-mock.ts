@@ -109,6 +109,12 @@ function guardAnalysisFor(command: string): string {
 
 let spawnCounter = 0;
 
+// Remote-workspace registry (rca), in-memory so the settings section's
+// add/remove flow is exercisable in ?mock screenshots.
+let mockRemoteWorkspaces: { path: string; pairingCode: string; label?: string }[] = [
+  { path: "/Users/dev/remote-api", pairingCode: "rca1.JgAkCAESIPuTmockmockmock", label: "gpu-box" },
+];
+
 function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
   switch (cmd) {
     case "list_sessions":
@@ -297,6 +303,28 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return MOCK_MEMORY_HISTORY;
     case "get_sources_config":
       return MOCK_SOURCES_CONFIG;
+
+    case "list_remote_workspaces":
+      return { workspaces: mockRemoteWorkspaces };
+    case "upsert_remote_workspace": {
+      const entry = args.entry as { path: string; pairingCode: string; label?: string };
+      if (!entry.pairingCode.startsWith("rca1.") || entry.pairingCode.length <= 5) {
+        throw new Error(
+          "pairing code must be the 'rca1.…' string printed by `rca serve` on the remote host",
+        );
+      }
+      mockRemoteWorkspaces = [
+        ...mockRemoteWorkspaces.filter((w) => w.path !== entry.path),
+        entry,
+      ];
+      return { workspaces: mockRemoteWorkspaces };
+    }
+    case "remove_remote_workspace": {
+      mockRemoteWorkspaces = mockRemoteWorkspaces.filter(
+        (w) => w.path !== (args.path as string),
+      );
+      return { workspaces: mockRemoteWorkspaces };
+    }
     case "check_setup_status": {
       // Harness override: seed `mock-setup-status` with a JSON object to merge
       // over the default (e.g. {"cli_installed":false}) for onboarding-branch
