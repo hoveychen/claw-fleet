@@ -106,13 +106,17 @@ export function FilesView() {
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const procs = useProcStore((s) => s.procs);
   const fileNav = useUIStore((s) => s.fileNav);
+  const { selectedWorkspace: selected, extraPaths } = useUIStore(
+    (s) => s.mainViewState.files,
+  );
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setSelected = (selectedWorkspace: string | null) =>
+    updateMainViewState("files", { selectedWorkspace });
   const { connection } = useConnectionStore();
   const isRemote = connection?.type === "remote";
-  const [selected, setSelected] = useState<string | null>(null);
   // Directories the user browsed to by hand this session. They have no sessions
   // of their own, so they'd never surface from the session-derived list — we
   // keep them here (most-recent first) and merge them in as zero-count cards.
-  const [extraPaths, setExtraPaths] = useState<string[]>([]);
   // Remote-only: the backend-driven directory picker, since the native dialog
   // would browse *this* desktop rather than the probe (mirrors NewSessionForm).
   const [pickingDir, setPickingDir] = useState(false);
@@ -181,7 +185,9 @@ export function FilesView() {
   }, [workspaces, selected]);
 
   const addPath = (path: string) => {
-    setExtraPaths((prev) => (prev.includes(path) ? prev : [path, ...prev]));
+    updateMainViewState("files", {
+      extraPaths: extraPaths.includes(path) ? extraPaths : [path, ...extraPaths],
+    });
     setSelected(path);
   };
 
@@ -283,12 +289,18 @@ function WorkspaceExplorer({
 }) {
   const { t } = useTranslation();
   const clearFileNav = useUIStore((s) => s.clearFileNav);
+  const { showIgnored, tab, activeFilePath } = useUIStore(
+    (s) => s.mainViewState.files,
+  );
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setShowIgnored = (value: boolean) =>
+    updateMainViewState("files", { showIgnored: value });
+  const setTab = (value: "files" | "procs") =>
+    updateMainViewState("files", { tab: value });
   const procs = useProcStore((s) => s.procs);
   const [roots, setRoots] = useState<ExplorerRoot[] | null>(null);
   const [rootsError, setRootsError] = useState<string | null>(null);
   const [activeRoot, setActiveRoot] = useState<ExplorerRoot | null>(null);
-  const [showIgnored, setShowIgnored] = useState(false);
-  const [tab, setTab] = useState<"files" | "procs">("files");
   const {
     width: treeWidth,
     isDragging: treeDragging,
@@ -312,13 +324,21 @@ function WorkspaceExplorer({
     invoke<ExplorerRoot[]>("list_explorer_roots", { workspace })
       .then((r) => {
         setRoots(r);
-        setActiveRoot(r[0] ?? null);
+        const savedRoot = useUIStore.getState().mainViewState.files.activeRootPath;
+        const nextRoot = r.find((root) => root.path === savedRoot) ?? r[0] ?? null;
+        setActiveRoot(nextRoot);
+        updateMainViewState("files", {
+          activeRootPath: nextRoot?.path ?? null,
+          activeFilePath: nextRoot?.path === savedRoot
+            ? useUIStore.getState().mainViewState.files.activeFilePath
+            : null,
+        });
       })
       .catch((e) => {
         setRoots([]);
         setRootsError(String(e));
       });
-  }, [workspace]);
+  }, [workspace, updateMainViewState]);
 
   const loadDir = useCallback(
     async (rel: string): Promise<ExplorerEntry[] | null> => {
@@ -371,13 +391,14 @@ function WorkspaceExplorer({
     }
     if (owner.path !== activeRoot.path) {
       setActiveRoot(owner); // this effect retries once the new root is active
+      updateMainViewState("files", { activeRootPath: owner.path, activeFilePath: null });
       return;
     }
 
     const prefix = owner.path.endsWith("/") ? owner.path : `${owner.path}/`;
     const rel = nav.absPath.slice(prefix.length).replace(/\/$/, "");
     setReveal({ relPath: rel, nonce: nav.nonce });
-  }, [nav, roots, activeRoot, clearFileNav]);
+  }, [nav, roots, activeRoot, clearFileNav, updateMainViewState]);
 
   // Reveal a file the user clicked in the source-control panel. Its path is
   // already relative to the active root (git reports work-dir-relative paths,
@@ -390,6 +411,25 @@ function WorkspaceExplorer({
     clickNonce.current -= 1;
     setReveal({ relPath, nonce: clickNonce.current });
   }, []);
+
+  // Rehydrate the selected file object from its stable root-relative path after
+  // this explorer remounts. FileTree owns directory loading, so its reveal path
+  // is the single source of truth for reconstructing the entry.
+  useEffect(() => {
+    if (!activeRoot || !activeFilePath || nav) return;
+    clickNonce.current -= 1;
+    setReveal({ relPath: activeFilePath, nonce: clickNonce.current });
+  }, [activeRoot, activeFilePath, nav, loadDir]);
+
+  const selectRoot = (root: ExplorerRoot) => {
+    setActiveRoot(root);
+    updateMainViewState("files", { activeRootPath: root.path, activeFilePath: null });
+  };
+
+  const selectFile = (entry: ExplorerEntry) => {
+    setActiveFile(entry);
+    updateMainViewState("files", { activeFilePath: entry.relativePath });
+  };
 
   return (
     <>
@@ -450,7 +490,7 @@ function WorkspaceExplorer({
                 <button
                   key={root.path}
                   className={`${fileStyles.root_pill} ${activeRoot?.path === root.path ? fileStyles.root_pill_active : ""}`}
-                  onClick={() => setActiveRoot(root)}
+                  onClick={() => selectRoot(root)}
                   title={root.path}
                 >
                   {root.isWorktree && <GitBranch size={11} strokeWidth={1.5} />}
@@ -481,7 +521,7 @@ function WorkspaceExplorer({
                 <FileTree
                   loadDir={loadDir}
                   activeFile={activeFile}
-                  onPick={setActiveFile}
+                  onPick={selectFile}
                   reveal={reveal}
                   onRevealed={clearFileNav}
                 />

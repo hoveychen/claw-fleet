@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "./PageShell";
+import { useUIStore } from "../store";
 import styles from "./MobileView.module.css";
 
 interface MobileRelayConfig {
@@ -69,8 +70,11 @@ export function MobileView() {
   const [config, setConfig] = useState<MobileRelayConfig | null>(null);
   const [status, setStatus] = useState<MobileRelayStatus | null>(null);
   const [qrSvg, setQrSvg] = useState<string | null>(null);
-  const [urlDraft, setUrlDraft] = useState("");
-  const [editingUrl, setEditingUrl] = useState(false);
+  const { urlDraft, editingUrl } = useUIStore((s) => s.mainViewState.mobile);
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setUrlDraft = (value: string) => updateMainViewState("mobile", { urlDraft: value });
+  const setEditingUrl = (value: boolean) =>
+    updateMainViewState("mobile", { editingUrl: value });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // The desktop's own build commit, compared against each phone's appCommit to
@@ -96,7 +100,9 @@ export function MobileView() {
     try {
       const cfg = await invoke<MobileRelayConfig>("get_mobile_relay_config");
       setConfig(cfg);
-      setUrlDraft(cfg.relayUrl);
+      if (!useUIStore.getState().mainViewState.mobile.editingUrl) {
+        useUIStore.getState().updateMainViewState("mobile", { urlDraft: cfg.relayUrl });
+      }
       await refreshQr(cfg.enabled && !!cfg.secret);
     } catch (e) {
       setError(String(e));

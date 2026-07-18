@@ -43,14 +43,13 @@ import { WikiView } from "./WikiView";
 
 function NavigationHarness() {
   const [page, setPage] = useState<"wiki" | "other">("wiki");
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
 
   return (
     <>
       <button onClick={() => setPage("wiki")}>Wiki page</button>
       <button onClick={() => setPage("other")}>Other page</button>
       {page === "wiki" ? (
-        <WikiView selectedSlug={selectedSlug} onSelectedSlugChange={setSelectedSlug} />
+        <WikiView />
       ) : (
         <div>Other content</div>
       )}

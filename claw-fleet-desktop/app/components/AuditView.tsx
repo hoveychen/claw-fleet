@@ -127,7 +127,9 @@ type AuditTab = "events" | "rules";
 
 export function AuditView() {
   const { t, i18n } = useTranslation();
-  const [tab, setTab] = useState<AuditTab>("events");
+  const tab = useUIStore((s) => s.mainViewState.audit.tab);
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setTab = (value: AuditTab) => updateMainViewState("audit", { tab: value });
 
   // Each tab renders its own PageShell — their sub-bar and body genuinely differ,
   // and both declare view="audit", so the collapsed flag and the rail width are
@@ -164,24 +166,44 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   const [summary, setSummary] = useState<AuditSummary | null>(null);
   const [rules, setRules] = useState<AuditRuleInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<AuditRiskLevel | "all">("all");
+  const {
+    filter,
+    unreadOnly,
+    category: catFilter,
+    workspace: workspaceFilter,
+    selectedEventKey,
+  } = useUIStore((s) => s.mainViewState.audit);
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setFilter = (value: AuditRiskLevel | "all") =>
+    updateMainViewState("audit", { filter: value });
+  const setUnreadOnly = (value: boolean) =>
+    updateMainViewState("audit", { unreadOnly: value });
+  const setCatFilter = (value: string | null) =>
+    updateMainViewState("audit", { category: value });
+  const setWorkspaceFilter = (value: string) =>
+    updateMainViewState("audit", { workspace: value });
   // "Unread only" is orthogonal to the risk-level filter but presented as one
   // mutually-exclusive chip group with All/CRIT/HIGH/MED: picking any risk chip
   // turns it off, picking the unread chip turns it back on and resets to "all".
   // Default on so the view opens straight on the events that need attention.
-  const [unreadOnly, setUnreadOnly] = useState(true);
   // Set when we auto-fell-back to "all" because there was nothing unread — drives
   // a one-line hint so an empty unread view never looks broken. Cleared the moment
   // the user picks any chip themselves.
   const [autoRevealed, setAutoRevealed] = useState(false);
-  const [catFilter, setCatFilter] = useState<string | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
-  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
   const { sessions } = useSessionsStore();
   const { open } = useDetailStore();
   const { setViewMode } = useUIStore();
   const { isRead, markAsRead, getEventKey, setCriticalEvents, markAllCriticalAsRead, unreadCriticalCount } =
     useAuditStore();
+
+  const selectedEvent = useMemo(
+    () => (summary?.events ?? []).find((event) => getEventKey(event) === selectedEventKey) ?? null,
+    [summary, selectedEventKey, getEventKey],
+  );
+  const setSelectedEvent = (event: AuditEvent | null) =>
+    updateMainViewState("audit", {
+      selectedEventKey: event ? getEventKey(event) : null,
+    });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -543,9 +565,19 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
   const { t } = useTranslation();
   const [rules, setRules] = useState<AuditRuleInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedRule, setSelectedRule] = useState<AuditRuleInfo | null>(null);
+  const { selectedRuleId, rulesQuery: query } = useUIStore(
+    (s) => s.mainViewState.audit,
+  );
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const selectedRule = useMemo(
+    () => rules.find((rule) => rule.id === selectedRuleId) ?? null,
+    [rules, selectedRuleId],
+  );
+  const setSelectedRule = (rule: AuditRuleInfo | null) =>
+    updateMainViewState("audit", { selectedRuleId: rule?.id ?? null });
+  const setQuery = (value: string) =>
+    updateMainViewState("audit", { rulesQuery: value });
   const [showSuggest, setShowSuggest] = useState(false);
-  const [query, setQuery] = useState("");
 
   const loadRules = useCallback(async () => {
     setLoading(true);
@@ -594,9 +626,6 @@ function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
     try {
       await invoke("set_audit_rule_enabled", { id: rule.id, enabled: !rule.enabled });
       setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: !r.enabled } : r));
-      if (selectedRule?.id === rule.id) {
-        setSelectedRule({ ...rule, enabled: !rule.enabled });
-      }
     } catch (e) {
       console.error("Failed to toggle rule:", e);
     }
@@ -762,7 +791,10 @@ function GuardAllowRulesSection() {
   const { t, i18n } = useTranslation();
   const [rules, setRules] = useState<GuardAllowRule[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(false);
+  const expanded = useUIStore((s) => s.mainViewState.audit.allowRulesExpanded);
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setExpanded = (value: boolean) =>
+    updateMainViewState("audit", { allowRulesExpanded: value });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -805,7 +837,7 @@ function GuardAllowRulesSection() {
       <button
         type="button"
         className={styles.allow_rules_header}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
       >
         <span className={styles.allow_rules_chevron}>{expanded ? "▾" : "▸"}</span>

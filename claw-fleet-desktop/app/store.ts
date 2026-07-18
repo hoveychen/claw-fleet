@@ -50,6 +50,116 @@ export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
 /** 启动台's segmented mark filter. "all" shows every bucket. */
 export type MarkFilter = "all" | "pending" | "done";
 
+export interface MainViewState {
+  gallery: { query: string; showAll: boolean; idleExpanded: boolean };
+  audit: {
+    tab: "events" | "rules";
+    filter: "all" | "critical" | "high" | "medium";
+    unreadOnly: boolean;
+    category: string | null;
+    workspace: string;
+    selectedEventKey: string | null;
+    selectedRuleId: string | null;
+    rulesQuery: string;
+    allowRulesExpanded: boolean;
+  };
+  memory: {
+    query: string;
+    filterType: string;
+    sourceFilter: "all" | "claude-code" | "codex";
+    workspaceFilter: string;
+    expandedKeys: string[];
+    selectedKey: string | null;
+    detailTab: "content" | "history";
+  };
+  wiki: {
+    query: string;
+    workspaceFilter: string;
+    sortKey: "recent" | "title" | "size" | "workspace";
+    selectedFolder: string | null;
+    selectedSlug: string | null;
+    collapsedFolders: string[];
+    versionBySlug: Record<string, string>;
+  };
+  skills: {
+    query: string;
+    sourceFilter: "all" | "claude-code" | "codex";
+    selectedPath: string | null;
+    activeFilePath: string | null;
+    collapsedPaths: string[];
+    fileQuery: string;
+  };
+  plugins: {
+    query: string;
+    selectedPluginId: string | null;
+    expanded: Record<"enabled" | "downloaded" | "catalog", boolean>;
+  };
+  files: {
+    selectedWorkspace: string | null;
+    extraPaths: string[];
+    activeRootPath: string | null;
+    showIgnored: boolean;
+    tab: "files" | "procs";
+    activeFilePath: string | null;
+  };
+  mobile: { urlDraft: string; editingUrl: boolean };
+}
+
+const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
+  gallery: { query: "", showAll: false, idleExpanded: false },
+  audit: {
+    tab: "events",
+    filter: "all",
+    unreadOnly: true,
+    category: null,
+    workspace: "all",
+    selectedEventKey: null,
+    selectedRuleId: null,
+    rulesQuery: "",
+    allowRulesExpanded: false,
+  },
+  memory: {
+    query: "",
+    filterType: "all",
+    sourceFilter: "all",
+    workspaceFilter: "all",
+    expandedKeys: [],
+    selectedKey: null,
+    detailTab: "content",
+  },
+  wiki: {
+    query: "",
+    workspaceFilter: "all",
+    sortKey: "recent",
+    selectedFolder: null,
+    selectedSlug: null,
+    collapsedFolders: [],
+    versionBySlug: {},
+  },
+  skills: {
+    query: "",
+    sourceFilter: "all",
+    selectedPath: null,
+    activeFilePath: null,
+    collapsedPaths: [],
+    fileQuery: "",
+  },
+  plugins: {
+    query: "",
+    selectedPluginId: null,
+    expanded: { enabled: true, downloaded: true, catalog: false },
+  },
+  files: {
+    selectedWorkspace: null,
+    extraPaths: [],
+    activeRootPath: null,
+    showIgnored: false,
+    tab: "files",
+    activeFilePath: null,
+  },
+  mobile: { urlDraft: "", editingUrl: false },
+};
+
 interface UIState {
   theme: Theme;
   viewMode: ViewMode;
@@ -76,6 +186,11 @@ interface UIState {
   historyWorkspaceFilter: string;
   historyActiveOnly: boolean;
   historyQuery: string;
+  mainViewState: MainViewState;
+  updateMainViewState: <K extends keyof MainViewState>(
+    view: K,
+    patch: Partial<MainViewState[K]>,
+  ) => void;
   setHistoryMarkFilter: (f: MarkFilter) => void;
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryActiveOnly: (on: boolean) => void;
@@ -166,6 +281,14 @@ export const useUIStore = create<UIState>((set) => ({
   historyWorkspaceFilter: getItem("history-workspace-filter") ?? "all",
   historyActiveOnly: getItem("history-active-only") === "true",
   historyQuery: "",
+  mainViewState: DEFAULT_MAIN_VIEW_STATE,
+  updateMainViewState: (view, patch) =>
+    set((state) => ({
+      mainViewState: {
+        ...state.mainViewState,
+        [view]: { ...state.mainViewState[view], ...patch },
+      },
+    })),
   setHistoryMarkFilter: (f) => {
     setItem("history-mark-filter", f);
     set({ historyMarkFilter: f });
