@@ -12,6 +12,7 @@ import { DiffView } from "./DiffView";
 import { fileExtIcon } from "./Rail";
 import { ExpandableText } from "./ExpandableText";
 import { ImageThumb } from "./ImageThumb";
+import { resultHasTrimmedImage } from "../../imageData";
 import { TextBlock } from "./TextBlock";
 import { AgentInput, ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
 import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
@@ -920,9 +921,14 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // exactly the empty expanded card shape: use the transcript path to recover
   // the result lazily, just as we do for an explicitly truncated result.
   const missingReadResult = block.name === "Read" && !resultProp && !isPartial;
+  // Self-heal: the trimmed base64 itself carries the trim marker, so a card
+  // whose image data is a transport preview refetches on expand even when the
+  // message-level `_fleetTruncated` flag was lost along the way. Without this,
+  // a dropped flag feeds the undecodable preview straight to the <img>.
+  const trimmedImageResult = resultHasTrimmedImage(resultProp);
   const { full, loadingFull, error: refetchError } = useFullToolResult(
     open,
-    wasTruncated || missingReadResult,
+    wasTruncated || missingReadResult || trimmedImageResult,
     toolFetch,
     block.id,
   );

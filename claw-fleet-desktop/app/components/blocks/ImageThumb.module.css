@@ -21,3 +21,30 @@
   max-height: 260px;
   object-fit: contain;
 }
+
+/* Visible stand-ins for an image that cannot render: a transport-trimmed
+   preview (recoverable on expand) or a payload that failed to load. Same
+   footprint idea as a chip — small, labeled, never silently absent. */
+.fallback,
+.fallback_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 5px 9px;
+  border: 1px dashed var(--color-border);
+  border-radius: 5px;
+  background: none;
+  color: var(--color-text-secondary, #888);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.fallback_btn {
+  cursor: pointer;
+}
+
+.fallback_btn:hover {
+  border-color: var(--color-accent, #60a5fa);
+  color: var(--color-text, inherit);
+}
