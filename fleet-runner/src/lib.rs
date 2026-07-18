@@ -1,5 +1,6 @@
 //! Customer-hosted Fleet Runner protocol boundary.
 
+pub mod core_adapter;
 pub mod protocol;
 pub mod spool;
 

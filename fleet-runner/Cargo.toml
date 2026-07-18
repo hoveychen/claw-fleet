@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+claw-fleet-core = { path = "../claw-fleet-core" }
 chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
