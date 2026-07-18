@@ -40,6 +40,8 @@ export interface FleetCloudClientConfig {
   organizationId: string;
   projectId: string;
   accessToken?: string;
+  embedToken?: string;
+  reconnectDelayMs?: number;
 }
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -94,32 +96,53 @@ export class HttpFleetCloudClient implements FleetCloudClient {
     onEvent: (event: TaskEvent) => void,
     signal: AbortSignal,
   ): Promise<void> {
-    const response = await this.fetcher(
-      this.url(`/v1/tasks/${encodeURIComponent(taskId)}/events?after=${Math.max(0, after)}`),
-      { headers: this.headers(), signal },
-    );
-    await this.ensureOk(response);
-    if (!response.body) throw new FleetCloudError("event stream has no response body", 502, "empty_stream");
+    let cursor = Math.max(0, after);
+    while (!signal.aborted) {
+      try {
+        const response = await this.fetcher(
+          this.url(`/v1/tasks/${encodeURIComponent(taskId)}/events?after=${cursor}`),
+          { headers: this.headers(), signal },
+        );
+        await this.ensureOk(response);
+        if (!response.body) {
+          throw new FleetCloudError("event stream has no response body", 502, "empty_stream");
+        }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
-      let boundary = buffer.indexOf("\n\n");
-      while (boundary >= 0) {
-        const frame = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        const data = frame
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trimStart())
-          .join("\n");
-        if (data) onEvent(JSON.parse(data) as TaskEvent);
-        boundary = buffer.indexOf("\n\n");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!signal.aborted) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary >= 0) {
+            const frame = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const data = frame
+              .split("\n")
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart())
+              .join("\n");
+            if (data) {
+              const event = JSON.parse(data) as TaskEvent;
+              if (event.sequence > cursor) {
+                cursor = event.sequence;
+                onEvent(event);
+              }
+            }
+            boundary = buffer.indexOf("\n\n");
+          }
+          if (done) break;
+        }
+      } catch (error) {
+        if (signal.aborted) return;
+        if (error instanceof FleetCloudError && error.status >= 400 && error.status < 500) {
+          throw error;
+        }
       }
-      if (done) break;
+      if (!signal.aborted) {
+        await waitForReconnect(this.config.reconnectDelayMs ?? 750, signal);
+      }
     }
   }
 
@@ -177,7 +200,11 @@ export class HttpFleetCloudClient implements FleetCloudClient {
       "x-fleet-organization-id": this.config.organizationId,
       "x-fleet-project-id": this.config.projectId,
     });
-    if (this.config.accessToken) headers.set("authorization", `Bearer ${this.config.accessToken}`);
+    if (this.config.embedToken) {
+      headers.set("authorization", `Embed ${this.config.embedToken}`);
+    } else if (this.config.accessToken) {
+      headers.set("authorization", `Bearer ${this.config.accessToken}`);
+    }
     if (idempotencyKey) headers.set("idempotency-key", idempotencyKey);
     return headers;
   }
@@ -202,4 +229,19 @@ export class HttpFleetCloudClient implements FleetCloudClient {
     const detail = (problem.detail ?? problem.title ?? response.statusText) || "request failed";
     throw new FleetCloudError(`${code}: ${detail}`, response.status, code);
   }
+}
+
+function waitForReconnect(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (delayMs <= 0 || signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = globalThis.setTimeout(resolve, delayMs);
+    signal.addEventListener(
+      "abort",
+      () => {
+        globalThis.clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
