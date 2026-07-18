@@ -229,7 +229,7 @@
 }
 
 .retry:hover {
-  background: rgb(var(--color-error-rgb) / 0.1);
+  background: rgba(var(--color-error-rgb), 0.1);
 }
 
 .footer {

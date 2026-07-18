@@ -257,8 +257,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: rgb(var(--color-error-rgb) / 0.08);
-  border: 1px solid rgb(var(--color-error-rgb) / 0.25);
+  background: rgba(var(--color-error-rgb), 0.08);
+  border: 1px solid rgba(var(--color-error-rgb), 0.25);
   border-radius: var(--radius-sm);
 }
 
@@ -272,7 +272,7 @@
 }
 
 .retry {
-  background: rgb(var(--color-error-rgb) / 0.15);
+  background: rgba(var(--color-error-rgb), 0.15);
   border: none;
   color: var(--color-error);
   border-radius: var(--radius-xs);
@@ -284,7 +284,7 @@
 }
 
 .retry:hover {
-  background: rgb(var(--color-error-rgb) / 0.25);
+  background: rgba(var(--color-error-rgb), 0.25);
 }
 
 /* Entry point that opens the 24h occupancy history modal */

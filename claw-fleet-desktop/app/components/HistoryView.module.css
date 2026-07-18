@@ -127,7 +127,7 @@
 .active_toggle_on {
   color: var(--color-text);
   border-color: var(--color-success);
-  background: rgb(var(--color-success-rgb) / 0.12);
+  background: rgba(var(--color-success-rgb), 0.12);
 }
 
 .active_toggle_dot {
