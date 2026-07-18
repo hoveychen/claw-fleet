@@ -16,7 +16,38 @@ const PENDING_STATE_COMMANDS = new Set([
   "add_marketplace",
   "remove_marketplace",
   "export_wiki_doc",
+  "plugin:dialog|save",
 ]);
+
+export const MOCK_QA_PLUGINS = [
+  {
+    name: "Interaction Inspector",
+    description: "Mock catalog item used to inspect pending and disabled controls.",
+    author: "Claw Fleet",
+    version: "1.0.0",
+    homepage: null,
+    marketplace: "fleet-qa",
+    sourceKind: "catalog",
+    pluginId: "fleet-qa/interaction-inspector",
+    enabled: false,
+    installCount: 128,
+    rootPath: "",
+    manifestPath: "",
+    contributes: { commands: 1, agents: 0, skills: 1, hooks: false, mcp: false },
+    isDownloaded: false,
+  },
+];
+
+export const MOCK_QA_MARKETPLACES = [
+  {
+    name: "fleet-qa",
+    source: "github:claw-fleet/qa-plugins",
+    repo: "claw-fleet/qa-plugins",
+    url: null,
+    path: null,
+    installLocation: null,
+  },
+];
 
 export function shouldDelayMockQaCommand(command: string): boolean {
   return PENDING_STATE_COMMANDS.has(command);

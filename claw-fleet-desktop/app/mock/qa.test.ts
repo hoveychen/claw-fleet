@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   MOCK_QA_DELAY_MS,
+  MOCK_QA_MARKETPLACES,
+  MOCK_QA_PLUGINS,
   mockQaDecisionHistory,
   mockQaElicitationRequest,
   shouldDelayMockQaCommand,
@@ -38,7 +40,18 @@ describe("mock visual-QA scenarios", () => {
     expect(shouldDelayMockQaCommand("install_plugin")).toBe(true);
     expect(shouldDelayMockQaCommand("add_marketplace")).toBe(true);
     expect(shouldDelayMockQaCommand("export_wiki_doc")).toBe(true);
+    expect(shouldDelayMockQaCommand("plugin:dialog|save")).toBe(true);
     expect(shouldDelayMockQaCommand("list_sessions")).toBe(false);
     expect(shouldDelayMockQaCommand("get_messages")).toBe(false);
+  });
+
+  it("provides one catalog plugin and marketplace for pending-state QA", () => {
+    expect(MOCK_QA_PLUGINS).toHaveLength(1);
+    expect(MOCK_QA_PLUGINS[0]).toMatchObject({
+      enabled: false,
+      isDownloaded: false,
+      sourceKind: "catalog",
+    });
+    expect(MOCK_QA_MARKETPLACES).toHaveLength(1);
   });
 });
