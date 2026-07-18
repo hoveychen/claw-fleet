@@ -4,6 +4,7 @@ import {
   CHAT_HIDDEN,
   CHAT_ONLY,
   matchesWorkspaceFilter,
+  sessionPaneStyle,
   sessionEq,
 } from "./HistoryView";
 import type { SessionInfo } from "../types";
@@ -214,5 +215,30 @@ describe("applyFrozenOrder", () => {
     const live = [row("a", 42)];
     const out = applyFrozenOrder(live, ["a"]);
     expect(out[0]).toBe(live[0]);
+  });
+});
+
+/**
+ * WebKit can leave a restored overflow scroller visually blank when an
+ * ancestor crosses `display: none` -> `flex`; the next physical scroll then
+ * repaints it. Hidden session tabs must therefore stay laid out while being
+ * invisible, so their scroll layer and ResizeObserver never collapse to zero.
+ */
+describe("sessionPaneStyle", () => {
+  it("keeps a hidden pane in layout without accepting input", () => {
+    expect(sessionPaneStyle(false)).toEqual({
+      visibility: "hidden",
+      position: "absolute",
+      inset: 0,
+      pointerEvents: "none",
+    });
+  });
+
+  it("lets the active pane participate in the detail flex row", () => {
+    expect(sessionPaneStyle(true)).toEqual({
+      visibility: "visible",
+      position: "relative",
+      pointerEvents: "auto",
+    });
   });
 });
