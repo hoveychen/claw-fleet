@@ -182,6 +182,24 @@ impl Backend for NullBackend {
         Err("backend not ready".into())
     }
 
+    fn list_remote_workspaces(&self) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
+        claw_fleet_core::remote_workspace::RemoteWorkspacesConfig::default()
+    }
+
+    fn upsert_remote_workspace(
+        &self,
+        _: claw_fleet_core::remote_workspace::RemoteWorkspace,
+    ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+        Err("backend not ready".into())
+    }
+
+    fn remove_remote_workspace(
+        &self,
+        _: String,
+    ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+        Err("backend not ready".into())
+    }
+
     fn spawn_new_session(
         &self,
         _: String,

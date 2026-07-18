@@ -327,6 +327,21 @@ pub trait Backend: Send + Sync {
         &self,
         path: Option<String>,
     ) -> Result<crate::workspace_browse::BrowseDirResponse, String>;
+    /// The remote-workspace registry (workspaces executed through rca; see
+    /// [`crate::remote_workspace`]). Lives on the backend host — that is where
+    /// sessions spawn, so that is whose `~/.fleet/remote-workspaces.json`
+    /// governs the wrap.
+    fn list_remote_workspaces(&self) -> crate::remote_workspace::RemoteWorkspacesConfig;
+    /// Register or update a remote workspace; returns the updated registry.
+    fn upsert_remote_workspace(
+        &self,
+        entry: crate::remote_workspace::RemoteWorkspace,
+    ) -> Result<crate::remote_workspace::RemoteWorkspacesConfig, String>;
+    /// Remove a remote workspace by path; returns the updated registry.
+    fn remove_remote_workspace(
+        &self,
+        path: String,
+    ) -> Result<crate::remote_workspace::RemoteWorkspacesConfig, String>;
     /// Read the auto-resume scheduler config.
     fn get_auto_resume_config(&self) -> crate::auto_resume::AutoResumeConfig;
     /// Persist the auto-resume scheduler config.
