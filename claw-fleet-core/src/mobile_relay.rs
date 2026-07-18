@@ -779,10 +779,22 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
 
 /// Top-level record fields the mobile `RawMessage` declares. `uuid` is
 /// load-bearing beyond rendering — `appendUnique` dedups tailed lines by it.
-const TAIL_MSG_FIELDS: [&str; 5] =
-    ["type", "uuid", "timestamp", "isSidechain", "isCompactSummary"];
+/// `isMeta`/`sourceToolUseID` drive the client's MetaFoldCard grouping.
+const TAIL_MSG_FIELDS: [&str; 7] = [
+    "type",
+    "uuid",
+    "timestamp",
+    "isSidechain",
+    "isCompactSummary",
+    "isMeta",
+    "sourceToolUseID",
+];
 /// Content-block fields the mobile `ContentBlock` declares and renders.
-const TAIL_BLOCK_FIELDS: [&str; 5] = ["text", "thinking", "name", "id", "tool_use_id"];
+/// `is_error` feeds the tool chip's error badge; result bodies stay stripped.
+const TAIL_BLOCK_FIELDS: [&str; 6] = ["text", "thinking", "name", "id", "tool_use_id", "is_error"];
+/// The only `message.usage` counters the UI renders (one `↑in ↓out` line per
+/// turn); cache bookkeeping counters stay stripped.
+const TAIL_USAGE_FIELDS: [&str; 2] = ["input_tokens", "output_tokens"];
 /// The only `tool_use.input` keys the UI reads — `toolSummary` shows exactly one
 /// of these on the tool chip; everything else in `input` is dead weight (a Write
 /// tool's whole file body lives there).
@@ -838,6 +850,23 @@ fn slim_tail_message(msg: &Value) -> Value {
         let mut slim_msg = Map::new();
         if let Some(role) = message.get("role") {
             slim_msg.insert("role".into(), role.clone());
+        }
+        // Turn metadata for the per-turn usage line and run-termination checks.
+        for key in ["model", "stop_reason"] {
+            if let Some(v) = message.get(key) {
+                slim_msg.insert(key.into(), v.clone());
+            }
+        }
+        if let Some(usage) = message.get("usage").and_then(Value::as_object) {
+            let mut slim_usage = Map::new();
+            for key in TAIL_USAGE_FIELDS {
+                if let Some(v) = usage.get(key) {
+                    slim_usage.insert(key.into(), v.clone());
+                }
+            }
+            if !slim_usage.is_empty() {
+                slim_msg.insert("usage".into(), Value::Object(slim_usage));
+            }
         }
         match message.get("content") {
             // Block list: slim each block.
@@ -2863,7 +2892,8 @@ mod tests {
             assert!(m.get("cwd").is_none(), "cwd must be stripped");
             assert!(m.get("sessionId").is_none(), "sessionId must be stripped");
             assert!(m.get("parentUuid").is_none(), "parentUuid must be stripped");
-            assert!(m["message"].get("usage").is_none(), "usage must be stripped");
+            // usage survives trimmed to the two rendered counters (per-turn line).
+            assert_eq!(m["message"]["usage"], json!({"input_tokens": 1, "output_tokens": 2}));
 
             // Kept: the RawMessage field set the UI actually reads.
             assert_eq!(m["type"], "user");
@@ -4296,6 +4326,92 @@ mod tests {
         assert!(
             serve_repo_pull(&params).is_err(),
             "repo_pull handler must propagate the core Err, not a wrapped Ok",
+        );
+    }
+
+    // ── transcript slimming keeps the fields the redesigned detail view reads ──
+
+    /// Regression: `isMeta`/`sourceToolUseID` were missing from `TAIL_MSG_FIELDS`,
+    /// so the phone's `isMetaRow` (which requires `msg.isMeta`) never matched over
+    /// the relay — SKILL.md injections rendered as full-length user bubbles
+    /// instead of folding into a MetaFoldCard.
+    #[test]
+    fn slim_tail_keeps_meta_flags() {
+        let msgs = vec![json!({
+            "type": "user",
+            "uuid": "u1",
+            "isMeta": true,
+            "sourceToolUseID": "toolu_abc",
+            "cwd": "/somewhere",
+            "message": { "role": "user", "content": "injected SKILL.md body" }
+        })];
+        let slim = slim_tail_messages(msgs);
+        assert_eq!(slim[0]["isMeta"], json!(true), "isMeta must survive slimming");
+        assert_eq!(
+            slim[0]["sourceToolUseID"],
+            json!("toolu_abc"),
+            "sourceToolUseID must survive slimming"
+        );
+        assert!(slim[0].get("cwd").is_none(), "bookkeeping fields stay stripped");
+    }
+
+    /// The redesigned view shows one `↑in ↓out · model` line per turn and uses
+    /// `stop_reason` to tell whether a work run terminated. Only the two token
+    /// counters survive from `usage` — cache bookkeeping stays stripped.
+    #[test]
+    fn slim_tail_keeps_turn_usage_fields() {
+        let msgs = vec![json!({
+            "type": "assistant",
+            "uuid": "a1",
+            "message": {
+                "role": "assistant",
+                "model": "claude-opus-4-8",
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 1200,
+                    "output_tokens": 340,
+                    "cache_read_input_tokens": 99999,
+                    "cache_creation_input_tokens": 5
+                },
+                "content": [{ "type": "text", "text": "done" }]
+            }
+        })];
+        let slim = slim_tail_messages(msgs);
+        let m = &slim[0]["message"];
+        assert_eq!(m["model"], json!("claude-opus-4-8"));
+        assert_eq!(m["stop_reason"], json!("end_turn"));
+        assert_eq!(m["usage"]["input_tokens"], json!(1200));
+        assert_eq!(m["usage"]["output_tokens"], json!(340));
+        assert!(
+            m["usage"].get("cache_read_input_tokens").is_none(),
+            "cache counters are not rendered and must stay stripped"
+        );
+    }
+
+    /// Error badges on tool chips need the `tool_result` block's `is_error` bit;
+    /// the result `content` itself stays stripped (fetched on demand instead).
+    #[test]
+    fn slim_tail_keeps_tool_result_error_bit() {
+        let msgs = vec![json!({
+            "type": "user",
+            "uuid": "u2",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_x",
+                    "is_error": true,
+                    "content": [{ "type": "text", "text": "boom stack trace ..." }]
+                }]
+            }
+        })];
+        let slim = slim_tail_messages(msgs);
+        let block = &slim[0]["message"]["content"][0];
+        assert_eq!(block["tool_use_id"], json!("toolu_x"));
+        assert_eq!(block["is_error"], json!(true), "is_error must survive slimming");
+        assert!(
+            block.get("content").is_none(),
+            "tool_result bodies stay stripped from the skeleton stream"
         );
     }
 }
