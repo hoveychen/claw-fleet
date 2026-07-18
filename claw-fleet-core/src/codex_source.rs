@@ -33,6 +33,14 @@ use crate::session::{SessionInfo, SessionStatus, compute_context_percent};
 /// URI prefix for Codex session identifiers.
 const CODEX_URI_PREFIX: &str = "codex://";
 
+/// How many trailing normalized messages `tail_incremental` re-sends on each
+/// growth of a Codex rollout. Kept at/below the clients' dedup window (mobile
+/// `appendUnique` checks the last 50 held messages) so the re-sent overlap is
+/// always deduped rather than duplicated. A single poll rarely appends more
+/// than a handful of messages, so this window comfortably covers a burst; a
+/// pathological >N-message gap self-heals on the next full `tail` (reopen).
+const CODEX_TAIL_FOLLOW_WINDOW: usize = 40;
+
 pub struct CodexSource {
     /// `None` timestamp = never scanned, force refresh on first read.
     /// Avoids `Instant::now() - 999s` which panics on Windows runners
@@ -2036,6 +2044,59 @@ mod tests {
         assert_eq!(assistant_texts, vec!["partial reply".to_string()]);
     }
 
+    /// The incremental tail path re-normalizes a growing window each poll, and
+    /// during a live turn a reply first appears as an `agent_message` event and
+    /// is later replaced by its `response_item` copy. Both must normalize to the
+    /// SAME `uuid` (content-derived, timestamp-excluded) so the client dedups the
+    /// transition instead of rendering the reply twice. This is the core of the
+    /// codex mobile/desktop live-tail fix.
+    #[test]
+    fn normalize_messages_uuid_is_stable_across_event_to_response_item_swap() {
+        let uuid_of = |lines: Vec<serde_json::Value>| -> String {
+            let out = normalize_messages(lines);
+            let m = out
+                .iter()
+                .find(|m| m.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+                .expect("an assistant message");
+            m.get("uuid")
+                .and_then(|u| u.as_str())
+                .expect("normalized messages carry a uuid")
+                .to_string()
+        };
+
+        // Poll 1: only the live event copy has landed (different timestamp).
+        let live = uuid_of(vec![json!({
+            "type":"event_msg",
+            "payload":{"type":"agent_message","message":"the reply"},
+            "timestamp":"t-live"
+        })]);
+        // Poll 2: the canonical response_item copy landed; normalize suppresses
+        // the event and emits the response_item — different timestamp, same text.
+        let persisted = uuid_of(vec![
+            json!({"type":"event_msg","payload":{"type":"agent_message","message":"the reply"},"timestamp":"t-live"}),
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the reply"}]},"timestamp":"t-persisted"}),
+        ]);
+
+        assert_eq!(live, persisted, "same reply must keep one stable uuid across the live→persisted swap");
+    }
+
+    /// A turn that genuinely repeats the identical text must NOT collapse to one
+    /// message: the per-hash occurrence counter keeps their uuids distinct.
+    #[test]
+    fn normalize_messages_uuid_disambiguates_repeated_identical_text() {
+        let out = normalize_messages(vec![
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]},"timestamp":"t1"}),
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]},"timestamp":"t2"}),
+        ]);
+        let uuids: Vec<&str> = out
+            .iter()
+            .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+            .filter_map(|m| m.get("uuid").and_then(|u| u.as_str()))
+            .collect();
+        assert_eq!(uuids.len(), 2, "two replies expected");
+        assert_ne!(uuids[0], uuids[1], "repeated identical text must get distinct uuids");
+    }
+
     #[test]
     fn normalize_messages_joins_all_reasoning_summary_segments() {
         let lines = vec![json!({
@@ -3126,6 +3187,56 @@ mod tests {
         // `< tail` this correctly signals "fully loaded".
         let tail100 = src.get_messages_tail(&uri, 100).unwrap();
         assert_eq!(tail100.len(), 10, "tail(100) should return every message");
+    }
+
+    /// The live-follow path: `tail_incremental` must return *normalized* codex
+    /// messages (each with the stable `uuid`) when the rollout grows, and an
+    /// empty batch when it hasn't. This is what makes a mobile/desktop reply to
+    /// a codex session actually appear (the raw byte-offset default would emit
+    /// un-renderable `response_item` records — the bug this fixes).
+    #[test]
+    fn codex_tail_incremental_returns_normalized_messages_on_growth() {
+        use super::CodexSource;
+        use crate::agent_source::AgentSource;
+        use std::io::Write as _;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(f, r#"{{"type":"session_meta","payload":{{"id":"t1","originator":"fleet","source":"exec"}}}}"#).unwrap();
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"hi"}}]}}}}"#).unwrap();
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"first reply"}}]}}}}"#).unwrap();
+        f.flush().unwrap();
+        let uri = format!("codex://{}", f.path().display());
+        let src = CodexSource::new();
+
+        // Grown from offset 0: normalized messages come back, each with a uuid,
+        // and new_offset lands at the current file size.
+        let (lines, off1) = src.tail_incremental(&uri, 0).unwrap();
+        assert!(
+            lines.iter().all(|m| m.get("uuid").and_then(|u| u.as_str()).is_some()),
+            "every normalized codex tail message must carry a uuid"
+        );
+        assert!(
+            lines.iter().any(|m| {
+                m.get("type").and_then(|t| t.as_str()) == Some("assistant")
+                    && m.to_string().contains("first reply")
+            }),
+            "the assistant reply must be present as a normalized message"
+        );
+        assert!(off1 > 0, "new_offset advances to EOF");
+
+        // No growth: empty batch, offset unchanged.
+        let (empty, off2) = src.tail_incremental(&uri, off1).unwrap();
+        assert!(empty.is_empty(), "no growth => no messages");
+        assert_eq!(off2, off1, "offset stays at EOF when nothing changed");
+
+        // A new reply lands: the re-normalized window surfaces it.
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"second reply"}}]}}}}"#).unwrap();
+        f.flush().unwrap();
+        let (lines2, off3) = src.tail_incremental(&uri, off1).unwrap();
+        assert!(off3 > off1, "offset advances past the appended reply");
+        assert!(
+            lines2.iter().any(|m| m.to_string().contains("second reply")),
+            "the freshly-appended reply must appear on the next poll"
+        );
     }
 
     fn window(used_percent: i32, window_mins: i64, resets_at_secs: i64) -> CodexRateLimitWindow {
@@ -4836,7 +4947,81 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
         }
     }
 
+    assign_stable_uuids(&mut messages);
     messages
+}
+
+/// Stamp each normalized Codex message with a stable, position-independent
+/// `uuid` derived from its content, so the incremental tail path (which
+/// re-normalizes a growing window each poll — see `CodexSource::tail_incremental`)
+/// and the initial full tail agree on message identity. Both the mobile
+/// `appendUnique` and the desktop message store dedup on `uuid`.
+///
+/// Why content-derived and *not* timestamp/position-derived: Codex persists
+/// every finalized reply twice — first an `event_msg/agent_message` mirror
+/// (kept live while the turn is in flight), then the canonical
+/// `response_item/message` copy that `normalize_messages` swaps in and suppresses
+/// the event for. The two copies carry *different* timestamps and land at
+/// different rollout offsets, but normalize to the *same* text. Hashing only
+/// `type` + the `message` body (timestamp is a sibling field, excluded) gives
+/// both copies the same uuid, so the live→persisted transition dedups on the
+/// client instead of rendering the reply twice — the exact double-display this
+/// fix exists to avoid. A per-hash occurrence counter disambiguates a turn that
+/// genuinely repeats identical text, so those are not collapsed into one.
+fn assign_stable_uuids(messages: &mut [Value]) {
+    use std::hash::{Hash, Hasher};
+    let mut seen: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
+    for m in messages.iter_mut() {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        message_identity(m).hash(&mut h);
+        let base = h.finish();
+        let occ = seen.entry(base).or_insert(0);
+        let uuid = format!("codex-{base:016x}-{occ}");
+        *occ += 1;
+        if let Some(obj) = m.as_object_mut() {
+            obj.insert("uuid".to_string(), json!(uuid));
+        }
+    }
+}
+
+/// A canonical identity string for a normalized message: its `type`, role, and
+/// the salient content (visible text, reasoning, tool name/id) — deliberately
+/// excluding volatile decorations that differ between the two rollout copies of
+/// one reply. The `agent_message` event copy always stamps `stop_reason` and the
+/// `response_item` copy only does so when `end_turn` is set; the response_item
+/// copy may also carry a `message.id`. Hashing the whole message body would make
+/// those two copies diverge, defeating the dedup. So we hash only what makes a
+/// message *the same message* to a reader.
+fn message_identity(m: &Value) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(m.get("type").and_then(Value::as_str).unwrap_or("").to_string());
+    // tool_result identity lives at the top level, not under `message`.
+    if let Some(tid) = m.get("tool_use_id").and_then(Value::as_str) {
+        parts.push(format!("tuid={tid}"));
+    }
+    if let Some(msg) = m.get("message") {
+        if let Some(role) = msg.get("role").and_then(Value::as_str) {
+            parts.push(format!("role={role}"));
+        }
+        if let Some(blocks) = msg.get("content").and_then(Value::as_array) {
+            for b in blocks {
+                let bt = b.get("type").and_then(Value::as_str).unwrap_or("");
+                parts.push(format!("b={bt}"));
+                for key in ["text", "thinking", "name", "id", "tool_use_id"] {
+                    if let Some(v) = b.get(key).and_then(Value::as_str) {
+                        parts.push(format!("{key}={v}"));
+                    }
+                }
+                // tool_use input identifies the call beyond its name.
+                if let Some(input) = b.get("input") {
+                    parts.push(format!("input={input}"));
+                }
+            }
+        } else if let Some(s) = msg.get("content").and_then(Value::as_str) {
+            parts.push(format!("content={s}"));
+        }
+    }
+    parts.join("\u{1f}")
 }
 
 // ── AgentSource implementation ──────────────────────────────────────────────
@@ -4876,8 +5061,9 @@ impl AgentSource for CodexSource {
     }
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
-        let file_path =
-            resolve_uri(path).ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let file_path = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
 
         let content = read_session_content(&file_path)?;
 
@@ -4891,8 +5077,9 @@ impl AgentSource for CodexSource {
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
-        let file_path =
-            resolve_uri(path).ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let file_path = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
         let name = file_path
             .file_name()
             .and_then(|s| s.to_str())
@@ -4948,7 +5135,40 @@ impl AgentSource for CodexSource {
     }
 
     fn resolve_file_path(&self, path: &str) -> Option<PathBuf> {
-        resolve_uri(path)
+        // Clients address Codex sessions by `codex://` URI. The desktop
+        // filesystem watcher, however, works in resolved real-path space (the
+        // fs event and the stored watch path are the real rollout file), so
+        // also accept a bare absolute path here — `tail_incremental` is driven
+        // by the watcher on the desktop and by the URI on mobile.
+        resolve_uri(path).or_else(|| {
+            let p = PathBuf::from(path);
+            p.is_absolute().then_some(p)
+        })
+    }
+
+    /// Codex rollouts are folded (see `normalize_messages`): a reply spans an
+    /// `event_msg` mirror plus a canonical `response_item`, and normalization
+    /// dedups them using whole-file context. A raw byte slice from `offset` is
+    /// therefore not a renderable message — the default byte-offset tail would
+    /// hand the clients un-normalized `response_item`/`event_msg` records that
+    /// render as nothing (the "sent OK but no reply shows" bug). So on any
+    /// growth we re-normalize the last window and return those messages; the
+    /// stable per-message `uuid` (see `assign_stable_uuids`) lets the client
+    /// dedup the overlap with what it already holds and the live→persisted swap.
+    /// `new_offset = size` means "caught up to EOF"; the next poll re-runs only
+    /// when the file grows again, so a quiet session costs one `stat`.
+    fn tail_incremental(&self, path: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
+        let real = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let size = std::fs::metadata(&real).map_err(|e| e.to_string())?.len();
+        // No new bytes → nothing to re-render (also the initial "follow from
+        // here" call, where the watcher seeds `offset` with the current size).
+        if offset >= size {
+            return Ok((Vec::new(), size));
+        }
+        let messages = self.get_messages_tail(path, CODEX_TAIL_FOLLOW_WINDOW)?;
+        Ok((messages, size))
     }
 
     fn watch_strategy(&self) -> WatchStrategy {

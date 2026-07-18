@@ -449,42 +449,29 @@ pub(crate) fn route_tail(
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
 
-                let resolved = find_source_for_path(sources, &uri)
-                    .and_then(|s| s.resolve_file_path(&uri));
-                let resolved = match resolved {
-                    Some(p) => p,
-                    None => {
-                        let _ = request.respond(tiny_http::Response::empty(404));
-                        return;
-                    }
+                let Some(source) = find_source_for_path(sources, &uri) else {
+                    let _ = request.respond(tiny_http::Response::empty(404));
+                    return;
                 };
 
-                match std::fs::File::open(&resolved) {
-                    Ok(mut file) => {
-                        let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
-                        if file_size <= offset {
-                            let body = format!(r#"{{"lines":[],"newOffset":{}}}"#, offset);
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body).with_header(json_header),
-                            );
-                        } else {
-                            let _ = file.seek(SeekFrom::Start(offset));
-                            let mut buf = String::new();
-                            let _ = file.read_to_string(&mut buf);
-                            let lines: Vec<serde_json::Value> = buf
-                                .lines()
-                                .filter(|l| !l.trim().is_empty())
-                                .filter_map(|l| serde_json::from_str(l).ok())
-                                .collect();
-                            let body = serde_json::json!({
-                                "lines": lines,
-                                "newOffset": file_size
-                            })
-                            .to_string();
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body).with_header(json_header),
-                            );
-                        }
+                // Source-aware incremental follow (the RemoteBackend live-tail
+                // surface, mirroring the mobile relay `serve_tail_delta` and the
+                // desktop `emit_tail_lines`): Claude gets the byte-offset raw
+                // tail; Codex re-normalizes its folded rollout so the emitted
+                // `session-tail` rows are renderable messages the desktop dedups
+                // by their stable `uuid`. A raw byte slice of a Codex rollout is
+                // not a message — the old code here emitted un-renderable
+                // `response_item` records (the "reply never shows" bug).
+                match source.tail_incremental(&uri, offset) {
+                    Ok((lines, new_offset)) => {
+                        let body = serde_json::json!({
+                            "lines": lines,
+                            "newOffset": new_offset
+                        })
+                        .to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
                     }
                     Err(_) => {
                         let _ = request.respond(tiny_http::Response::empty(404));
