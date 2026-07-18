@@ -469,6 +469,16 @@ impl LocalBackend {
             let mut codex_probe_tail_miss: u64 = 0;
             let mut codex_probe_flushes: u64 = 0;
 
+            // FSEvents starvation fallback: macOS delivers no modify events for
+            // a file appended through a long-held fd — only create and close
+            // fire — and Codex holds its rollout fd open for the whole turn, so
+            // during a long turn the event path above stays silent and the
+            // codex snapshot freezes at the last event. Every 10s, stat the
+            // snapshot's rollout paths and mark the codex source dirty when the
+            // disk is fresher (codex_source::codex_stale_rollout_paths).
+            let codex_mtime_probe_interval = Duration::from_secs(10);
+            let mut last_codex_mtime_probe = Instant::now();
+
             loop {
                 // Wait for events; use a short timeout when a rescan is pending
                 // so we flush it promptly after the coalescing window.
@@ -494,6 +504,17 @@ impl LocalBackend {
                         .min(remaining_skills)
                 } else {
                     Duration::from_secs(60)
+                };
+                // Never sleep past the next codex mtime probe — with zero fs
+                // events (the starved case) the 60s idle timeout would
+                // otherwise delay the fallback by up to a minute.
+                let timeout = if codex_source_idx.is_some() {
+                    timeout.min(
+                        codex_mtime_probe_interval
+                            .saturating_sub(last_codex_mtime_probe.elapsed()),
+                    )
+                } else {
+                    timeout
                 };
 
                 match rx.recv_timeout(timeout) {
@@ -569,6 +590,28 @@ impl LocalBackend {
                     Ok(Err(_)) => {} // watch error, ignore
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+
+                // Run the codex mtime probe (see declaration above). Placed
+                // before the flush so a stale hit rescans in this iteration.
+                if codex_source_idx.is_some()
+                    && last_codex_mtime_probe.elapsed() >= codex_mtime_probe_interval
+                {
+                    let stale = {
+                        let snapshot = sess2.lock().unwrap();
+                        claw_fleet_core::codex_source::codex_stale_rollout_paths(&snapshot)
+                    };
+                    if !stale.is_empty() {
+                        if let Some(idx) = codex_source_idx {
+                            dirty_sources.insert(idx);
+                        }
+                        log_debug(&format!(
+                            "[CODEX-WATCH] mtime-probe stale={} first={}",
+                            stale.len(),
+                            stale.first().map(String::as_str).unwrap_or(""),
+                        ));
+                    }
+                    last_codex_mtime_probe = Instant::now();
                 }
 
                 // Flush the batched session rescan once the coalescing window has elapsed.
