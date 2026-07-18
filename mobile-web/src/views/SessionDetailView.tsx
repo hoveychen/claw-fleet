@@ -57,6 +57,9 @@ import { parseSkillInjection } from "../skillInjection";
 import { groupMetaRuns } from "./metaGrouping";
 import { countSteps, groupWorkRuns, isDecisionTool, workRunTitle } from "./workRuns";
 import { toolSummary } from "./toolSummary";
+import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
+import { ToolDetailPanel } from "./ToolDetailPanel";
+import type { ToolDigest } from "../types";
 import styles from "./SessionDetailView.module.css";
 
 const TAIL_POLL_MS = 2500;
@@ -119,9 +122,49 @@ function userText(msg: RawMessage): string {
   const parts: string[] = [];
   for (const b of blocksOf(msg)) {
     if (b.type === "text" && b.text) parts.push(b.text);
-    else if (b.type === "image") parts.push(t("[图片]"));
+    // A block that ships a thumbnail renders as an inline image instead of the
+    // "[图片]" placeholder — only thumb-less images still degrade to text.
+    else if (b.type === "image" && !thumbSrc(b)) parts.push(t("[图片]"));
   }
   return parts.join("\n\n").trim();
+}
+
+/** data: URI for a block's server-side thumbnail, if the relay shipped one. */
+function thumbSrc(b: ContentBlock): string | null {
+  if (!b._thumb || !b.source?.data) return null;
+  return `data:${b.source.media_type ?? "image/jpeg"};base64,${b.source.data}`;
+}
+
+function imageThumbs(msg: RawMessage): string[] {
+  return blocksOf(msg)
+    .map(thumbSrc)
+    .filter((s): s is string => !!s);
+}
+
+/** Per-tool metadata harvested from the (non-renderable) tool_result rows:
+ *  the relay's `_digest` stats, the error bit and result-screenshot thumbs,
+ *  keyed by tool_use_id for the matching tool chip. */
+interface ToolMeta {
+  digest?: ToolDigest;
+  isError?: boolean;
+  thumbs?: string[];
+}
+
+function collectToolMeta(messages: RawMessage[]): Map<string, ToolMeta> {
+  const map = new Map<string, ToolMeta>();
+  for (const msg of messages) {
+    for (const b of blocksOf(msg)) {
+      if (b.type !== "tool_result" || !b.tool_use_id) continue;
+      const meta: ToolMeta = {};
+      if (b._digest) meta.digest = b._digest;
+      if (b.is_error) meta.isError = true;
+      if (b._thumbs?.length) {
+        meta.thumbs = b._thumbs.map((d) => `data:image/jpeg;base64,${d}`);
+      }
+      if (meta.digest || meta.isError || meta.thumbs) map.set(b.tool_use_id, meta);
+    }
+  }
+  return map;
 }
 
 /** A follow-up the user just submitted, echoed as a user bubble while
@@ -380,6 +423,117 @@ function ClampedThinking({
   );
 }
 
+/** Compact header stats for a tool chip, rendered from the relay's `_digest` —
+ *  the mobile counterpart of the desktop toolPresenters `headerStats`. */
+function DigestChips({ meta }: { meta: ToolMeta }) {
+  const d = meta.digest;
+  const chips: ReactNode[] = [];
+  if (meta.isError) {
+    chips.push(
+      <span key="err" className={`${styles.chip} ${styles.chipError}`}>
+        {t("错误")}
+      </span>,
+    );
+  }
+  if (d) {
+    if (d.added !== undefined || d.removed !== undefined) {
+      chips.push(
+        <span key="diff" className={styles.chip}>
+          <span className={styles.chipAdd}>+{d.added ?? 0}</span>{" "}
+          <span className={styles.chipDel}>−{d.removed ?? 0}</span>
+        </span>,
+      );
+    }
+    if (d.interrupted) {
+      chips.push(
+        <span key="int" className={`${styles.chip} ${styles.chipError}`}>
+          {t("已中断")}
+        </span>,
+      );
+    }
+    if (d.matches !== undefined) {
+      chips.push(<span key="m" className={styles.chip}>{t("{0} 匹配", d.matches)}</span>);
+    } else if (d.files !== undefined) {
+      chips.push(<span key="f" className={styles.chip}>{t("{0} 文件", d.files)}</span>);
+    }
+    if (d.agentStatus) {
+      chips.push(
+        <span key="a" className={styles.chip}>
+          {d.agentStatus}
+          {d.tokens !== undefined ? ` · ↓${fmtTokens(d.tokens)}` : ""}
+        </span>,
+      );
+    }
+    if (d.links !== undefined) {
+      chips.push(<span key="l" className={styles.chip}>{t("{0} 结果", d.links)}</span>);
+    }
+    if (d.httpCode !== undefined) {
+      chips.push(<span key="h" className={styles.chip}>{d.httpCode}</span>);
+    }
+    if (d.todoTotal !== undefined) {
+      chips.push(
+        <span key="t" className={styles.chip}>{`${d.todoDone ?? 0}/${d.todoTotal}`}</span>,
+      );
+    }
+  }
+  if (chips.length === 0) return null;
+  return <span className={styles.chipRow}>{chips}</span>;
+}
+
+/** A row of tappable thumbnails (result screenshots / pasted images). */
+function ThumbRow({ srcs }: { srcs: string[] }) {
+  return (
+    <div className={styles.thumbRow}>
+      {srcs.map((src, i) => (
+        <img key={i} src={src} className={styles.thumbImg} alt="" loading="lazy" />
+      ))}
+    </div>
+  );
+}
+
+/** One tool call on the rail: summary line + digest chips, tap to expand the
+ *  full body (fetched on demand through the relay `tool_detail` method).
+ *  Expansion state is local so it survives the parent's poll re-renders. */
+function ToolStep({
+  b,
+  client,
+  jsonlPath,
+  meta,
+}: {
+  b: ContentBlock;
+  client: RelayClient | null;
+  jsonlPath?: string;
+  meta?: ToolMeta;
+}) {
+  const [open, setOpen] = useState(false);
+  const name = b.name ?? "";
+  const summary = toolSummary(b);
+  const expandable = !!b.id && !!client && !!jsonlPath;
+  return (
+    <RailStep icon={railToolIcon(name)}>
+      <div
+        className={styles.toolLineRow}
+        onClick={expandable ? () => setOpen((o) => !o) : undefined}
+        role={expandable ? "button" : undefined}
+      >
+        <div className={styles.toolLine} title={name}>
+          {summary || name}
+        </div>
+        {meta && <DigestChips meta={meta} />}
+      </div>
+      {meta?.thumbs && <ThumbRow srcs={meta.thumbs} />}
+      {open && expandable && (
+        <ToolDetailPanel
+          client={client}
+          jsonlPath={jsonlPath!}
+          toolUseId={b.id!}
+          isError={meta?.isError}
+        />
+      )}
+    </RailStep>
+  );
+}
+
 /** One assistant record's blocks in the rail language: thinking and tool calls
  *  as icon-guttered steps, prose flush and full width — same convention as the
  *  desktop transcript. */
@@ -388,11 +542,17 @@ function AssistantBlocks({
   index,
   expandedThinking,
   onToggleThinking,
+  toolMeta,
+  client,
+  jsonlPath,
 }: {
   blocks: ContentBlock[];
   index: number;
   expandedThinking: Set<number>;
   onToggleThinking: (key: number) => void;
+  toolMeta?: Map<string, ToolMeta>;
+  client?: RelayClient | null;
+  jsonlPath?: string;
 }) {
   return (
     <>
@@ -412,15 +572,19 @@ function AssistantBlocks({
         if (b.type === "text" && b.text?.trim()) {
           return <LazyMarkdown key={j} text={b.text} />;
         }
+        if (b.type === "image") {
+          const src = thumbSrc(b);
+          return src ? <ThumbRow key={j} srcs={[src]} /> : null;
+        }
         if (b.type === "tool_use") {
-          const name = (b as { name?: string }).name ?? "";
-          const summary = toolSummary(b);
           return (
-            <RailStep key={j} icon={railToolIcon(name)}>
-              <div className={styles.toolLine} title={name}>
-                {summary || name}
-              </div>
-            </RailStep>
+            <ToolStep
+              key={j}
+              b={b}
+              client={client ?? null}
+              jsonlPath={jsonlPath}
+              meta={b.id ? toolMeta?.get(b.id) : undefined}
+            />
           );
         }
         return null;
@@ -452,25 +616,36 @@ function WorkRunBand({
   expandedThinking,
   onToggleThinking,
   live,
+  toolMeta,
+  client,
+  jsonlPath,
 }: {
   msgs: RawMessage[];
   baseIndex: number;
   expandedThinking: Set<number>;
   onToggleThinking: (key: number) => void;
   live: boolean;
+  toolMeta?: Map<string, ToolMeta>;
+  client?: RelayClient | null;
+  jsonlPath?: string;
 }) {
-  const [open, setOpen] = useState(live);
-  useEffect(() => setOpen(live), [live]);
   const last = msgs[msgs.length - 1];
-  // The relay's slim tail strips `stop_reason`, so mobile can't see whether the
-  // last record has terminated — `live` (working session + tail run) is the
-  // approximation: the band streams while live and closes with Done after.
+  // Streaming = the run's final record hasn't recorded a stop_reason yet. An
+  // old relay that still strips the field (undefined) falls back to the
+  // session-status approximation the band used before.
+  const lastStop = last?.message && "stop_reason" in last.message
+    ? last.message.stop_reason
+    : undefined;
+  const streaming = lastStop === undefined ? live : live && lastStop === null;
+  const [open, setOpen] = useState(streaming);
+  useEffect(() => setOpen(streaming), [streaming]);
   const title = workRunTitle(msgs) ?? t("处理任务");
+  const bandTokens = msgs.reduce((sum, m) => sum + (m.message?.usage?.output_tokens ?? 0), 0);
   return (
     <div className={styles.assistantRow}>
       <button className={styles.bandHeader} onClick={() => setOpen((o) => !o)}>
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        <span className={`${styles.bandTitle}${live ? ` ${styles.shimmer}` : ""}`}>
+        <span className={`${styles.bandTitle}${streaming ? ` ${styles.shimmer}` : ""}`}>
           {/* The headline is thinking-derived and often carries markdown emphasis
               (`**Planning store test additions**`); render it inline (p unwrapped
               to a fragment) so markers become bold/italic/code, not literal
@@ -483,7 +658,10 @@ function WorkRunBand({
             {title}
           </ReactMarkdown>
         </span>
-        <span className={styles.bandSteps}>{t("{0} 步", countSteps(msgs))}</span>
+        <span className={styles.bandSteps}>
+          {t("{0} 步", countSteps(msgs))}
+          {bandTokens > 0 && ` · ↓${fmtTokens(bandTokens)}`}
+        </span>
       </button>
       {open && (
         <div className={styles.bandBody}>
@@ -494,9 +672,12 @@ function WorkRunBand({
               index={baseIndex + i}
               expandedThinking={expandedThinking}
               onToggleThinking={onToggleThinking}
+              toolMeta={toolMeta}
+              client={client}
+              jsonlPath={jsonlPath}
             />
           ))}
-          {!live && (
+          {!streaming && (
             <div className={`${styles.railStep} ${styles.doneStep}`}>
               <span className={`${styles.railIcon} ${styles.doneIcon}`} aria-hidden>
                 <CircleCheck />
@@ -519,6 +700,28 @@ interface MessageRowProps {
    *  it only changes on a user toggle, when re-rendering every row is fine. */
   expandedThinking: Set<number>;
   onToggleThinking: (key: number) => void;
+  /** This row's tool metadata (digest chips / error bits / result thumbs).
+   *  Rebuilt every poll, so the memo comparator diffs it by content. */
+  toolMeta?: Map<string, ToolMeta>;
+  /** Aggregated usage when this row closes an assistant turn. */
+  turnUsage?: { inputTokens: number; outputTokens: number; model?: string };
+  /** For the tap-to-expand tool_detail fetch; both are stable per session. */
+  client?: RelayClient | null;
+  jsonlPath?: string;
+}
+
+/** Content equality for the per-row tool metadata — reference equality would
+ *  defeat the row memo on every poll (the maps are rebuilt each tick even when
+ *  nothing about this row changed). The payloads are tiny digests, so a JSON
+ *  compare is cheap and exact. */
+function toolMetaEqual(a?: Map<string, ToolMeta>, b?: Map<string, ToolMeta>): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const [k, v] of a) {
+    const other = b.get(k);
+    if (!other || JSON.stringify(v) !== JSON.stringify(other)) return false;
+  }
+  return true;
 }
 
 /** One conversation row. Memoized so appending new tailed lines every 2.5s
@@ -529,10 +732,15 @@ const MessageRow = memo(function MessageRow({
   index,
   expandedThinking,
   onToggleThinking,
+  toolMeta,
+  turnUsage,
+  client,
+  jsonlPath,
 }: MessageRowProps) {
   if (msg.type === "user") {
     const text = userText(msg);
-    if (!text) return null;
+    const thumbs = imageThumbs(msg);
+    if (!text && thumbs.length === 0) return null;
     // Every synthetic `isMeta` user turn — a SKILL.md body a `Skill` load
     // injects, or codex's developer-role boilerplate — is harness/runtime
     // content, not a user turn. Fold them all into one card that self-labels
@@ -557,9 +765,12 @@ const MessageRow = memo(function MessageRow({
     }
     return (
       <div className={styles.userRow}>
-        <div className={styles.userBubble}>{text}</div>
+        <div className={styles.userBubble}>
+          {thumbs.length > 0 && <ThumbRow srcs={thumbs} />}
+          {text}
+        </div>
         <div className={styles.rowTime}>
-          <CopyButton text={text} />
+          {text && <CopyButton text={text} />}
           {fmtTime(msg.timestamp)}
         </div>
       </div>
@@ -579,14 +790,33 @@ const MessageRow = memo(function MessageRow({
         index={index}
         expandedThinking={expandedThinking}
         onToggleThinking={onToggleThinking}
+        toolMeta={toolMeta}
+        client={client}
+        jsonlPath={jsonlPath}
       />
       <div className={styles.rowTime}>
         {assistantText && <CopyButton text={assistantText} />}
+        {turnUsage && (
+          <span className={styles.usageLine}>
+            ↑{fmtTokens(turnUsage.inputTokens)} ↓{fmtTokens(turnUsage.outputTokens)}
+            {turnUsage.model ? ` · ${shortModelName(turnUsage.model)}` : ""}
+            {" · "}
+          </span>
+        )}
         {fmtTime(msg.timestamp)}
       </div>
     </div>
   );
-});
+},
+(prev, next) =>
+  prev.msg === next.msg &&
+  prev.index === next.index &&
+  prev.expandedThinking === next.expandedThinking &&
+  prev.onToggleThinking === next.onToggleThinking &&
+  prev.client === next.client &&
+  prev.jsonlPath === next.jsonlPath &&
+  toolMetaEqual(prev.toolMeta, next.toolMeta) &&
+  JSON.stringify(prev.turnUsage ?? null) === JSON.stringify(next.turnUsage ?? null));
 
 export function SessionDetailView({ session, client, onBack, onDwellRead }: Props) {
   const [tab, setTab] = useState<DetailTab>("messages");
@@ -762,6 +992,11 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
 
   const rows = useMemo(() => (messages ?? []).filter(isRenderableRow), [messages]);
 
+  // tool_detail reads the Claude jsonl by tool_use_id; a codex rollout has no
+  // toolUseResult and its folded format defeats the scan — leave codex tool
+  // lines non-expandable (digest chips never arrive for codex either).
+  const detailPath = session.agentSource === "codex" ? undefined : session.jsonlPath;
+
   // Text of every real user row, to tell which optimistic echoes have landed.
   const realUserTexts = useMemo(() => {
     const set = new Set<string>();
@@ -799,6 +1034,27 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
     if (pendingOptimistic.length === 0) return base;
     return [...base, ...pendingOptimistic.map(optimisticToMessage)];
   }, [rows, pendingOptimistic]);
+
+  // Tool metadata lives on the tool_result rows the renderable filter drops —
+  // harvest it from the unfiltered list, keyed by tool_use_id.
+  const toolMetaMap = useMemo(() => collectToolMeta(messages ?? []), [messages]);
+  const turnUsage = useMemo(() => turnUsageByIndex(mainRows), [mainRows]);
+
+  // Per-row subset so the row memo can diff by content instead of re-rendering
+  // every row each poll (the full map is rebuilt every tick).
+  const metaForMsg = useCallback(
+    (msg: RawMessage): Map<string, ToolMeta> | undefined => {
+      let m: Map<string, ToolMeta> | undefined;
+      for (const b of blocksOf(msg)) {
+        if (b.type === "tool_use" && b.id) {
+          const meta = toolMetaMap.get(b.id);
+          if (meta) (m ??= new Map()).set(b.id, meta);
+        }
+      }
+      return m;
+    },
+    [toolMetaMap],
+  );
 
   return (
     <div className={styles.page}>
@@ -883,6 +1139,9 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
                   expandedThinking={expandedThinking}
                   onToggleThinking={toggleThinking}
                   live={live}
+                  toolMeta={toolMetaMap}
+                  client={client}
+                  jsonlPath={detailPath}
                 />
               );
             }
@@ -905,6 +1164,10 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
                 index={unit.startLocal}
                 expandedThinking={expandedThinking}
                 onToggleThinking={toggleThinking}
+                toolMeta={metaForMsg(unit.msg)}
+                turnUsage={turnUsage.get(unit.startLocal)}
+                client={client}
+                jsonlPath={detailPath}
               />
             );
           });
