@@ -240,6 +240,8 @@ const DICT: Record<string, string> = {
   "{0} 结果": "{0} results",
   "{0} 步": "{0} steps",
   处理任务: "Working",
+  "（无输出）": "(no output)",
+  加载完整输出: "Load full output",
   "新建 {0}": "Creating {0}",
   "编辑 {0}": "Editing {0}",
   "删除 {0}": "Deleting {0}",
