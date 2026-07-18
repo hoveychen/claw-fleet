@@ -326,6 +326,17 @@ pub fn spawn_claude_detached_with_envs(
     live_thinking: bool,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<u32, String> {
+    // Registered remote workspace? Rewrite the launch through rca — program
+    // swap + verbatim argv + `--code` — and create the identity-mapped local
+    // mirror dir (which is why this runs before the is_dir gate). Doing it at
+    // this chokepoint covers every claude spawn path: new session, auto-resume,
+    // handoff, loop, chat relaunch.
+    let rca_wrap = crate::remote_workspace::wrap_launch(workspace_path, claude_path, args)
+        .map_err(|e| format!("remote workspace {workspace_path}: {e}"))?;
+    let (claude_path, args): (&str, &[String]) = match &rca_wrap {
+        Some(w) => (&w.program, &w.args),
+        None => (claude_path, args),
+    };
     if !Path::new(workspace_path).is_dir() {
         return Err(format!("Workspace directory not found: {}", workspace_path));
     }
@@ -421,6 +432,13 @@ pub fn spawn_claude_detached_with_envs(
     // apply_codex_launch_env). Done before the extra_envs loop so an explicit
     // caller override still wins.
     strip_inherited_agent_env(&mut cmd);
+    // rca run-mode env (RCC_LOCAL_BINS): set before extra_envs so an explicit
+    // caller override still wins.
+    if let Some(w) = &rca_wrap {
+        for (k, v) in &w.envs {
+            cmd.env(k, v);
+        }
+    }
     for (k, v) in extra_envs {
         cmd.env(k, v);
     }
@@ -1095,5 +1113,102 @@ mod path_tests {
             entries.iter().any(|p| p == &PathBuf::from("/usr/local/bin")),
             "injected dirs must each be a separate entry, got {joined:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod remote_workspace_spawn_tests {
+    use std::path::PathBuf;
+
+    /// End-to-end through the chokepoint: a spawn whose workspace is registered
+    /// remote must exec the rca binary — with the claude path as its first arg,
+    /// the original argv verbatim, `--code` appended — and carry
+    /// `RCC_LOCAL_BINS` so the fleet MCP binary stays local. This is the wiring
+    /// every claude path (new session, auto-resume, handoff, loop) rides on.
+    #[cfg(unix)]
+    #[test]
+    fn remote_workspace_spawn_runs_through_rca() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let lock = crate::session::fleet_home_lock();
+        let home = std::env::temp_dir().join(format!(
+            "fleet-rcaspawn-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized on the process-wide FLEET_HOME lock.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+
+        let ws = home.join("remote-repo");
+        let argv_out = home.join("argv.txt");
+        let env_out = home.join("env.txt");
+        let fake_rca = home.join("fake-rca");
+        std::fs::write(
+            &fake_rca,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nprintf '%s' \"${{RCC_LOCAL_BINS:-EMPTY}}\" > {}\n",
+                argv_out.display(),
+                env_out.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_rca, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        crate::remote_workspace::upsert(crate::remote_workspace::RemoteWorkspace {
+            path: ws.to_string_lossy().into_owned(),
+            pairing_code: "rca1.TESTCODE".to_string(),
+            label: None,
+            rca_path: Some(fake_rca.to_string_lossy().into_owned()),
+        })
+        .unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stderr_log = home.join("stderr.log");
+        super::spawn_claude_detached_with_envs(
+            "/fake/claude",
+            &["-p".to_string(), "hi".to_string(), "--session-id".to_string(), "s1".to_string()],
+            ws.to_str().unwrap(),
+            &stderr_log,
+            "rca-test",
+            "session=s1",
+            &[],
+            false,
+            move |ok| {
+                let _ = tx.send(ok);
+            },
+        )
+        .expect("spawn through rca wrapper");
+        let ok = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("fake rca must exit");
+        assert!(ok, "fake rca exited non-zero; stderr: {stderr_log:?}");
+
+        let argv = std::fs::read_to_string(&argv_out).unwrap();
+        assert_eq!(
+            argv.lines().collect::<Vec<_>>(),
+            vec!["/fake/claude", "-p", "hi", "--session-id", "s1", "--code", "rca1.TESTCODE"],
+        );
+        let local_bins = std::fs::read_to_string(&env_out).unwrap();
+        assert!(
+            local_bins.contains("MacOS/fleet"),
+            "RCC_LOCAL_BINS must pin the fleet MCP binary local, got: {local_bins}"
+        );
+        // The mirror dir was created by the wrapper (it did not exist before).
+        assert!(ws.is_dir());
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        drop(lock);
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = PathBuf::new(); // keep the unused-import lint honest if imports shrink
     }
 }
