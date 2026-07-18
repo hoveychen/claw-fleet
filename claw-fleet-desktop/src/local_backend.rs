@@ -552,7 +552,7 @@ impl LocalBackend {
                                 }
                                 if let Some(ref vpath) = watch2.current_path() {
                                     if vpath == path_str.as_ref() {
-                                        emit_tail_lines(path, &app2, &watch2);
+                                        emit_tail_lines(sources2.as_slice(), path, &app2, &watch2);
                                         if is_codex_path {
                                             codex_probe_tail_match += 1;
                                         }
@@ -1542,22 +1542,37 @@ fn path_is_codex_memory_db(path: &std::path::Path) -> bool {
 /// to EOF instead would skip its bytes, and when the rest lands the read starts
 /// mid-record — the block (often the first thinking/tool_use of a resumed
 /// turn's write burst) is then malformed forever and lost.
-fn read_tail_at_offset(path: &std::path::Path, cur: u64) -> Option<(Vec<Value>, u64)> {
-    let mut file = fs::File::open(path).ok()?;
-    let size = file.metadata().ok()?.len();
-    if size <= cur {
-        return None;
-    }
-    file.seek(SeekFrom::Start(cur)).ok()?;
-    let mut buf = String::new();
-    file.read_to_string(&mut buf).ok()?;
-    let (lines, consumed) = claw_fleet_core::jsonl_tail::parse_incremental_tail(&buf);
-    Some((lines, cur + consumed as u64))
+/// The source that owns a resolved real filesystem `path`, matched by watch
+/// directory. The fs watcher works in real-path space (the URI has already been
+/// resolved), so `find_source_for_path` — which routes by `codex://`-style URI
+/// prefix — would misroute a real Codex rollout path to the bare-path (Claude)
+/// source. Matching on `watch_paths()` keeps `emit_tail_lines` routing Codex
+/// rollouts to the Codex source (whose `tail_incremental` re-normalizes) and
+/// Claude jsonl to the Claude source (raw byte-offset tail).
+fn source_for_real_path<'a>(
+    sources: &'a [Box<dyn AgentSource>],
+    path: &std::path::Path,
+) -> Option<&'a dyn AgentSource> {
+    sources
+        .iter()
+        .find(|s| s.watch_paths().iter().any(|d| path.starts_with(d)))
+        .map(|s| s.as_ref())
 }
 
-fn emit_tail_lines(path: &std::path::Path, app: &AppHandle, watch: &crate::WatchState) {
+fn emit_tail_lines(
+    sources: &[Box<dyn AgentSource>],
+    path: &std::path::Path,
+    app: &AppHandle,
+    watch: &crate::WatchState,
+) {
+    let Some(source) = source_for_real_path(sources, path) else { return };
+    let path_str = path.to_string_lossy();
     let mut guard = watch.offset.lock().unwrap();
-    let Some((lines, new_offset)) = read_tail_at_offset(path, *guard) else { return };
+    // Source-aware incremental follow: Claude uses the default byte-offset raw
+    // tail (each line is a self-contained message); Codex re-normalizes its
+    // folded rollout so the emitted `session-tail` rows are renderable messages
+    // (the desktop store dedups them by their stable `uuid`).
+    let Ok((lines, new_offset)) = source.tail_incremental(&path_str, *guard) else { return };
     *guard = new_offset;
     if !lines.is_empty() {
         let _ = app.emit("session-tail", &lines);
@@ -3803,9 +3818,17 @@ mod tests {
     // burst is caught mid-flush, so the first read sees a complete line plus a
     // half-written record; the rest lands on the next read. The half-written
     // record — the resumed turn's first block — must survive exactly once.
+    //
+    // Drives the real production reader: `emit_tail_lines` now routes through
+    // `AgentSource::tail_incremental`, and Claude uses its default (byte-offset)
+    // impl — so exercising `ClaudeCodeSource::tail_incremental` mirrors the
+    // watcher's Claude path exactly.
     #[test]
     fn resumed_turn_first_block_survives_midflush_watch() {
+        use claw_fleet_core::agent_source::AgentSource;
+        use claw_fleet_core::claude_source::ClaudeCodeSource;
         use std::io::Write as _;
+        let source = ClaudeCodeSource::new();
         let path = std::env::temp_dir().join(format!(
             "fleet-emit-tail-repro-{}-{}.jsonl",
             std::process::id(),
@@ -3820,9 +3843,10 @@ mod tests {
         fs::write(&path, base.as_bytes()).unwrap();
         let mut offset = base.len() as u64;
 
+        let path_str = path.to_string_lossy().into_owned();
         let mut seen: Vec<Value> = Vec::new();
         let mut pump = |offset: &mut u64, seen: &mut Vec<Value>| {
-            if let Some((lines, new_off)) = read_tail_at_offset(&path, *offset) {
+            if let Ok((lines, new_off)) = source.tail_incremental(&path_str, *offset) {
                 seen.extend(lines);
                 *offset = new_off; // exactly what emit_tail_lines saves to the guard
             }

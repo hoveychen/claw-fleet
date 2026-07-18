@@ -93,6 +93,40 @@ pub trait AgentSource: Send + Sync {
         Ok(all[start..].to_vec())
     }
 
+    /// Incrementally follow a session's transcript for the live detail view,
+    /// returning `(messages, new_offset)` for the growth since byte `offset`.
+    ///
+    /// The default is the byte-offset raw tail every jsonl source used before
+    /// this method existed: seek to `offset`, parse the complete lines appended
+    /// since, advance the offset past them. It is correct for sources whose
+    /// on-disk records are already self-contained, renderable messages one per
+    /// line (Claude Code) — the client appends the returned lines verbatim.
+    ///
+    /// Sources whose rollout format is *folded* (a message reconstructed from
+    /// several lines with whole-file context — Codex) MUST override this: a raw
+    /// byte slice of such a rollout is not a message, so appending it renders
+    /// nothing. The override returns freshly *normalized* messages carrying the
+    /// stable per-message `uuid` the clients dedup on.
+    fn tail_incremental(&self, path: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
+        use std::io::{Read as _, Seek as _};
+        let real = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("cannot resolve path: {path}"))?;
+        let size = std::fs::metadata(&real).map_err(|e| e.to_string())?.len();
+        // Truncated/rotated file (offset past EOF) or no growth: resync, no lines.
+        if offset >= size {
+            return Ok((Vec::new(), size));
+        }
+        let mut file = std::fs::File::open(&real).map_err(|e| e.to_string())?;
+        file.seek(std::io::SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
+        let mut buf = String::new();
+        file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
+        // Advance only past complete (newline-terminated) lines; a half-written
+        // trailing record stays unconsumed so the next poll re-reads its bytes.
+        let (lines, consumed) = crate::jsonl_tail::parse_incremental_tail(&buf);
+        Ok((lines, offset + consumed as u64))
+    }
+
     /// How this source should be watched for changes.
     fn watch_strategy(&self) -> WatchStrategy;
 
