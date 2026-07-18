@@ -1,6 +1,5 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useDetailStore, useSessionsStore } from "../store";
+import { useDetailStore, useSessionsStore, useUIStore } from "../store";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import type { SessionInfo, SessionStatus } from "../types";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -72,11 +71,12 @@ interface RowProps {
   main: SessionInfo;
   subagents: SessionInfo[];
   onSelect: (s: SessionInfo) => void;
+  idleExpanded: boolean;
+  onToggleIdle: () => void;
 }
 
-function GalleryRow({ main, subagents, onSelect }: RowProps) {
+function GalleryRow({ main, subagents, onSelect, idleExpanded, onToggleIdle }: RowProps) {
   const { t } = useTranslation();
-  const [idleExpanded, setIdleExpanded] = useState(false);
 
   // Stable sort by jsonlPath for consistent indices regardless of status changes
   const sortedSubs = [...subagents].sort((a, b) => a.jsonlPath.localeCompare(b.jsonlPath));
@@ -121,7 +121,7 @@ function GalleryRow({ main, subagents, onSelect }: RowProps) {
         <div className={styles.idle_section}>
           <button
             className={styles.idle_toggle}
-            onClick={() => setIdleExpanded((v) => !v)}
+            onClick={onToggleIdle}
           >
             <span className={`${styles.idle_chevron} ${idleExpanded ? styles.idle_chevron_open : ""}`} />
             {t("gallery.idle_subs", { n: idleSubagents.length })}
@@ -147,6 +147,8 @@ function buildRows(
   mains: SessionInfo[],
   allSessions: SessionInfo[],
   onSelect: (s: SessionInfo) => void,
+  idleExpanded: boolean,
+  onToggleIdle: () => void,
 ) {
   // Build subagent map from ALL sessions so idle subs of active mains are included.
   // Workflow fan-out agents (jsonlPath under subagents/workflows/) are kept in the
@@ -175,6 +177,8 @@ function buildRows(
           main={main}
           subagents={subByParent.get(main.id) ?? []}
           onSelect={onSelect}
+          idleExpanded={idleExpanded}
+          onToggleIdle={onToggleIdle}
         />
       ))}
     </>
@@ -188,8 +192,14 @@ export function GalleryView() {
   const sessions = useSessionsStore((s) => s.sessions);
   const scanReady = useSessionsStore((s) => s.scanReady);
   const { open, close, session: openSession } = useDetailStore();
-  const [filter, setFilter] = useState("");
-  const [showAll, setShowAll] = useState(false);
+  const { query: filter, showAll, idleExpanded } = useUIStore(
+    (s) => s.mainViewState.gallery,
+  );
+  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const setFilter = (query: string) => updateMainViewState("gallery", { query });
+  const toggleShowAll = () => updateMainViewState("gallery", { showAll: !showAll });
+  const toggleIdle = () =>
+    updateMainViewState("gallery", { idleExpanded: !idleExpanded });
   const gridCls = `${styles.rows_grid}${openSession ? ` ${styles.compact}` : ""}`;
 
   // Close detail drawer when clicking on empty gallery space
@@ -241,7 +251,7 @@ export function GalleryView() {
       activeCount={activeSessions.filter((s) => !s.isSubagent).length}
       totalCount={sessions.length}
       showAll={showAll}
-      onToggleShowAll={() => setShowAll((v) => !v)}
+      onToggleShowAll={toggleShowAll}
       ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
       searching={searching}
     >
@@ -252,7 +262,13 @@ export function GalleryView() {
               <div className={styles.section}>
                 <div className={styles.section_label}>{t("active")}</div>
                 <div className={gridCls} onClick={handleGridClick}>
-                  {buildRows(filteredActiveMains, sessions, handleSelect)}
+                  {buildRows(
+                    filteredActiveMains,
+                    sessions,
+                    handleSelect,
+                    idleExpanded,
+                    toggleIdle,
+                  )}
                 </div>
               </div>
             )}
@@ -260,7 +276,13 @@ export function GalleryView() {
               <div className={styles.section}>
                 <div className={styles.section_label}>{t("recent")}</div>
                 <div className={gridCls} onClick={handleGridClick}>
-                  {buildRows(filteredRecentMains, sessions, handleSelect)}
+                  {buildRows(
+                    filteredRecentMains,
+                    sessions,
+                    handleSelect,
+                    idleExpanded,
+                    toggleIdle,
+                  )}
                 </div>
               </div>
             )}
@@ -271,7 +293,13 @@ export function GalleryView() {
         ) : (
           <>
             <div className={gridCls} onClick={handleGridClick}>
-              {buildRows(filteredActiveMains, sessions, handleSelect)}
+              {buildRows(
+                filteredActiveMains,
+                sessions,
+                handleSelect,
+                idleExpanded,
+                toggleIdle,
+              )}
             </div>
             {filteredActiveMains.length === 0 && (
               <SessionEmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
