@@ -383,6 +383,65 @@ fn strip_trailing_context_files(text: &str) -> &str {
     }
 }
 
+/// Derive Fleet's display title from a raw Codex first prompt.
+///
+/// Codex has no semantic session title: its SQLite `title` is the complete
+/// opening prompt. A Fleet handoff prompt contains the predecessor UUID and the
+/// full relay note, which can be thousands of characters long. Recognise only
+/// the exact template emitted by [`crate::handoff::compose_successor_prompt`]
+/// and use the note's first sentence as the title. The independent `handoff`
+/// metadata already renders the `接力 n/N` chip, so repeating that preamble in
+/// the title adds noise rather than context.
+///
+/// Non-handoff prompts remain byte-for-byte unchanged after the pre-existing
+/// system-reminder / attachment cleanup. A partial or hand-authored lookalike
+/// is deliberately left alone: both Fleet-owned delimiters must be present.
+fn derive_codex_title(text: &str) -> Option<String> {
+    const HANDOFF_PREFIX: &str = "你是一次接力开发的第 ";
+    const NOTE_OPEN: &str = "\n\n上一棒留下的交接信息：\n\n---\n";
+    const NOTE_CLOSE: &str = "\n---\n";
+    const MAX_TITLE_CHARS: usize = 48;
+
+    let cleaned = strip_trailing_context_files(strip_leading_system_reminder(text));
+    if cleaned.is_empty() {
+        return None;
+    }
+    if !cleaned.starts_with(HANDOFF_PREFIX) {
+        return Some(cleaned.to_string());
+    }
+
+    let Some(note_start) = cleaned.find(NOTE_OPEN).map(|i| i + NOTE_OPEN.len()) else {
+        return Some(cleaned.to_string());
+    };
+    let note_tail = &cleaned[note_start..];
+    let Some(note_end) = note_tail.find(NOTE_CLOSE) else {
+        return Some(cleaned.to_string());
+    };
+    let normalized = note_tail[..note_end]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        return Some(cleaned.to_string());
+    }
+
+    let sentence_end = normalized.char_indices().find_map(|(idx, ch)| {
+        matches!(ch, '。' | '！' | '？' | '.' | '!' | '?').then_some(idx + ch.len_utf8())
+    });
+    let sentence = sentence_end
+        .map(|end| &normalized[..end])
+        .unwrap_or(&normalized);
+    let mut chars = sentence.chars();
+    let prefix: String = chars.by_ref().take(MAX_TITLE_CHARS).collect();
+    if chars.next().is_some() {
+        let mut truncated: String = prefix.chars().take(MAX_TITLE_CHARS - 1).collect();
+        truncated.push('…');
+        Some(truncated)
+    } else {
+        Some(prefix)
+    }
+}
+
 /// True when a codex message is runtime-injected boilerplate rather than an
 /// authored user prompt: any `developer`-role message, or a `user`-role message
 /// that is one of codex's own preamble blocks — `<recommended_plugins>`,
@@ -462,9 +521,8 @@ fn extract_first_user_prompt(lines: &[Value]) -> Option<String> {
         if role != "user" || text.is_empty() || is_injected_codex_context(role, &text) {
             continue;
         }
-        let stripped = strip_trailing_context_files(strip_leading_system_reminder(&text));
-        if !stripped.is_empty() {
-            return Some(stripped.to_string());
+        if let Some(title) = derive_codex_title(&text) {
+            return Some(title);
         }
     }
     None
@@ -1448,19 +1506,9 @@ fn build_session_from_sqlite(
             // which for Fleet-launched sessions opens with the prepended
             // `<system-reminder>` block — strip it so the card preview shows the
             // real prompt (see `strip_leading_system_reminder`).
-            let cleaned_first = strip_leading_system_reminder(&thread.first_user_message);
-            let preview = if !cleaned_first.is_empty() {
-                Some(cleaned_first.chars().take(200).collect())
-            } else if !thread.title.is_empty() {
-                Some(
-                    strip_leading_system_reminder(&thread.title)
-                        .chars()
-                        .take(200)
-                        .collect(),
-                )
-            } else {
-                None
-            };
+            let preview = derive_codex_title(&thread.first_user_message)
+                .or_else(|| derive_codex_title(&thread.title))
+                .map(|title| title.chars().take(200).collect());
             (
                 determine_status_from_age(age_secs),
                 0.0,
@@ -1504,9 +1552,8 @@ fn build_session_from_sqlite(
             // `<system-reminder>` block. Strip it so the header/card title shows
             // the real prompt, not the plan dump (see
             // `strip_leading_system_reminder`).
-            let cleaned = strip_trailing_context_files(strip_leading_system_reminder(&thread.title));
-            if !cleaned.is_empty() {
-                return Some(cleaned.to_string());
+            if let Some(title) = derive_codex_title(&thread.title) {
+                return Some(title);
             }
             // `thread.title` is empty: codex only flushes it to SQLite at a turn
             // boundary, so during an in-flight first turn it hasn't landed yet.
@@ -1524,12 +1571,7 @@ fn build_session_from_sqlite(
             }
             // Last resort: codex's own `first_user_message` column (also the raw
             // prompt), stripped the same way.
-            let cleaned_first = strip_leading_system_reminder(&thread.first_user_message);
-            if !cleaned_first.is_empty() {
-                Some(cleaned_first.to_string())
-            } else {
-                None
-            }
+            derive_codex_title(&thread.first_user_message)
         });
 
     let agent_type = source_info
@@ -1630,6 +1672,20 @@ mod tests {
     fn derive_codex_title_does_not_shorten_regular_long_prompt() {
         let prompt = "这是一条很长但完全正常的用户需求，不是 Fleet 接力模板。".repeat(8);
         assert_eq!(derive_codex_title(&prompt), Some(prompt));
+    }
+
+    #[test]
+    fn derive_codex_title_normalizes_and_caps_handoff_note() {
+        let prompt = format!(
+            "你是一次接力开发的第 3 棒，接替上一个 session（abc）继续未完成的工作。\n\n\
+             上一棒留下的交接信息：\n\n---\n  {}\n  还有下一行\n---\n\n继续工作。",
+            "很长的交接标题没有句号并且包含多余空白".repeat(5)
+        );
+        let title = derive_codex_title(&prompt).expect("handoff title");
+        assert_eq!(title.chars().count(), 48);
+        assert!(title.ends_with('…'));
+        assert!(!title.contains('\n'));
+        assert!(!title.contains("  "));
     }
 
     #[test]
