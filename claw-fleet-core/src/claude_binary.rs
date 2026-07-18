@@ -215,17 +215,7 @@ fn parse_version(s: &str) -> Option<Vec<u32>> {
 }
 
 fn which_claude() -> Option<String> {
-    #[cfg(unix)]
-    let cmd = "which";
-    #[cfg(not(unix))]
-    let cmd = "where";
-    let output = crate::process_util::command(cmd).arg("claude").output().ok()?;
-    if !output.status.success() { return None }
-    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    // `where` on Windows can list multiple matches separated by newlines —
-    // take only the first.
-    let first = s.lines().next()?.trim().to_string();
-    if first.is_empty() { None } else { Some(first) }
+    crate::process_util::which("claude")
 }
 
 #[cfg(test)]
