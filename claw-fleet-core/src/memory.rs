@@ -748,12 +748,9 @@ pub fn trace_memory_history(memory_path: &str) -> Vec<MemoryHistoryEntry> {
     }
 
     let project_dir = projects_dir.join(&project_key);
-    let workspace_name = decode_project_key(&project_key)
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .last()
-        .unwrap_or_default()
-        .to_string();
+    // Shared helper (worktree collapse + chat-workspace rename), matching the
+    // sibling scan path in this module and the session list.
+    let workspace_name = crate::session::workspace_name(&decode_project_key(&project_key));
 
     // Scan all JSONL files in this project directory
     let mut history = Vec::new();
