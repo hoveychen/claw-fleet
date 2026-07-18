@@ -33,6 +33,14 @@ use crate::session::{SessionInfo, SessionStatus, compute_context_percent};
 /// URI prefix for Codex session identifiers.
 const CODEX_URI_PREFIX: &str = "codex://";
 
+/// How many trailing normalized messages `tail_incremental` re-sends on each
+/// growth of a Codex rollout. Kept at/below the clients' dedup window (mobile
+/// `appendUnique` checks the last 50 held messages) so the re-sent overlap is
+/// always deduped rather than duplicated. A single poll rarely appends more
+/// than a handful of messages, so this window comfortably covers a burst; a
+/// pathological >N-message gap self-heals on the next full `tail` (reopen).
+const CODEX_TAIL_FOLLOW_WINDOW: usize = 40;
+
 pub struct CodexSource {
     /// `None` timestamp = never scanned, force refresh on first read.
     /// Avoids `Instant::now() - 999s` which panics on Windows runners
@@ -383,6 +391,65 @@ fn strip_trailing_context_files(text: &str) -> &str {
     }
 }
 
+/// Derive Fleet's display title from a raw Codex first prompt.
+///
+/// Codex has no semantic session title: its SQLite `title` is the complete
+/// opening prompt. A Fleet handoff prompt contains the predecessor UUID and the
+/// full relay note, which can be thousands of characters long. Recognise only
+/// the exact template emitted by [`crate::handoff::compose_successor_prompt`]
+/// and use the note's first sentence as the title. The independent `handoff`
+/// metadata already renders the `接力 n/N` chip, so repeating that preamble in
+/// the title adds noise rather than context.
+///
+/// Non-handoff prompts remain byte-for-byte unchanged after the pre-existing
+/// system-reminder / attachment cleanup. A partial or hand-authored lookalike
+/// is deliberately left alone: both Fleet-owned delimiters must be present.
+fn derive_codex_title(text: &str) -> Option<String> {
+    const HANDOFF_PREFIX: &str = "你是一次接力开发的第 ";
+    const NOTE_OPEN: &str = "\n\n上一棒留下的交接信息：\n\n---\n";
+    const NOTE_CLOSE: &str = "\n---\n";
+    const MAX_TITLE_CHARS: usize = 48;
+
+    let cleaned = strip_trailing_context_files(strip_leading_system_reminder(text));
+    if cleaned.is_empty() {
+        return None;
+    }
+    if !cleaned.starts_with(HANDOFF_PREFIX) {
+        return Some(cleaned.to_string());
+    }
+
+    let Some(note_start) = cleaned.find(NOTE_OPEN).map(|i| i + NOTE_OPEN.len()) else {
+        return Some(cleaned.to_string());
+    };
+    let note_tail = &cleaned[note_start..];
+    let Some(note_end) = note_tail.find(NOTE_CLOSE) else {
+        return Some(cleaned.to_string());
+    };
+    let normalized = note_tail[..note_end]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        return Some(cleaned.to_string());
+    }
+
+    let sentence_end = normalized.char_indices().find_map(|(idx, ch)| {
+        matches!(ch, '。' | '！' | '？' | '.' | '!' | '?').then_some(idx + ch.len_utf8())
+    });
+    let sentence = sentence_end
+        .map(|end| &normalized[..end])
+        .unwrap_or(&normalized);
+    let mut chars = sentence.chars();
+    let prefix: String = chars.by_ref().take(MAX_TITLE_CHARS).collect();
+    if chars.next().is_some() {
+        let mut truncated: String = prefix.chars().take(MAX_TITLE_CHARS - 1).collect();
+        truncated.push('…');
+        Some(truncated)
+    } else {
+        Some(prefix)
+    }
+}
+
 /// True when a codex message is runtime-injected boilerplate rather than an
 /// authored user prompt: any `developer`-role message, or a `user`-role message
 /// that is one of codex's own preamble blocks — `<recommended_plugins>`,
@@ -462,9 +529,8 @@ fn extract_first_user_prompt(lines: &[Value]) -> Option<String> {
         if role != "user" || text.is_empty() || is_injected_codex_context(role, &text) {
             continue;
         }
-        let stripped = strip_trailing_context_files(strip_leading_system_reminder(&text));
-        if !stripped.is_empty() {
-            return Some(stripped.to_string());
+        if let Some(title) = derive_codex_title(&text) {
+            return Some(title);
         }
     }
     None
@@ -1448,19 +1514,9 @@ fn build_session_from_sqlite(
             // which for Fleet-launched sessions opens with the prepended
             // `<system-reminder>` block — strip it so the card preview shows the
             // real prompt (see `strip_leading_system_reminder`).
-            let cleaned_first = strip_leading_system_reminder(&thread.first_user_message);
-            let preview = if !cleaned_first.is_empty() {
-                Some(cleaned_first.chars().take(200).collect())
-            } else if !thread.title.is_empty() {
-                Some(
-                    strip_leading_system_reminder(&thread.title)
-                        .chars()
-                        .take(200)
-                        .collect(),
-                )
-            } else {
-                None
-            };
+            let preview = derive_codex_title(&thread.first_user_message)
+                .or_else(|| derive_codex_title(&thread.title))
+                .map(|title| title.chars().take(200).collect());
             (
                 determine_status_from_age(age_secs),
                 0.0,
@@ -1476,11 +1532,10 @@ fn build_session_from_sqlite(
             )
         };
 
-    let workspace_name = PathBuf::from(&thread.cwd)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("codex")
-        .to_string();
+    // Reuse the shared helper so codex sessions collapse `.worktrees/<task-id>`
+    // to the repo name (and get the chat-workspace rename) identically to the
+    // Claude path — see session::workspace_name.
+    let workspace_name = crate::session::workspace_name(&thread.cwd);
 
     // Parse the source field (may be plain string or JSON for subagents).
     let source_info = parse_source(&thread.source);
@@ -1504,9 +1559,8 @@ fn build_session_from_sqlite(
             // `<system-reminder>` block. Strip it so the header/card title shows
             // the real prompt, not the plan dump (see
             // `strip_leading_system_reminder`).
-            let cleaned = strip_trailing_context_files(strip_leading_system_reminder(&thread.title));
-            if !cleaned.is_empty() {
-                return Some(cleaned.to_string());
+            if let Some(title) = derive_codex_title(&thread.title) {
+                return Some(title);
             }
             // `thread.title` is empty: codex only flushes it to SQLite at a turn
             // boundary, so during an in-flight first turn it hasn't landed yet.
@@ -1524,12 +1578,7 @@ fn build_session_from_sqlite(
             }
             // Last resort: codex's own `first_user_message` column (also the raw
             // prompt), stripped the same way.
-            let cleaned_first = strip_leading_system_reminder(&thread.first_user_message);
-            if !cleaned_first.is_empty() {
-                Some(cleaned_first.to_string())
-            } else {
-                None
-            }
+            derive_codex_title(&thread.first_user_message)
         });
 
     let agent_type = source_info
@@ -1602,6 +1651,7 @@ mod tests {
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
         codex_token_breakdown_from_lines, compute_token_stats, determine_status,
         exec_note_from_script, parse_codex_session,
+        derive_codex_title,
         extract_context_percent, extract_first_user_prompt, last_rollout_rate_limits,
         latest_total_token_usage, normalize_messages, strip_leading_system_reminder,
         strip_trailing_context_files, read_rollout_originator, CodexProcess,
@@ -1609,6 +1659,52 @@ mod tests {
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
+
+    #[test]
+    fn derive_codex_title_summarizes_fleet_handoff_prompt() {
+        let prompt = "<system-reminder>\nactive plans\n</system-reminder>\n\n\
+            你是一次接力开发的第 2 棒，接替上一个 session（019f7047-24a8-7343-8afa-a8cc853f3818）继续未完成的工作。\n\n\
+            上一棒留下的交接信息：\n\n---\n\
+            marco-visible P1 完成交班，P2（测先行）开工。老板立案背景：后续细节不应进入标题。\n\
+            第二行也是交接正文。\n---\n\n\
+            本次接力属于 TASKS.md plan `marco-visible`，直接从 P2 继续执行。";
+
+        assert_eq!(
+            derive_codex_title(prompt),
+            Some("marco-visible P1 完成交班，P2（测先行）开工。".to_string())
+        );
+    }
+
+    #[test]
+    fn derive_codex_title_does_not_shorten_regular_long_prompt() {
+        let prompt = "这是一条很长但完全正常的用户需求，不是 Fleet 接力模板。".repeat(8);
+        assert_eq!(derive_codex_title(&prompt), Some(prompt));
+    }
+
+    #[test]
+    fn derive_codex_title_normalizes_and_caps_handoff_note() {
+        let prompt = format!(
+            "你是一次接力开发的第 3 棒，接替上一个 session（abc）继续未完成的工作。\n\n\
+             上一棒留下的交接信息：\n\n---\n  {}\n  还有下一行\n---\n\n继续工作。",
+            "很长的交接标题没有句号并且包含多余空白".repeat(5)
+        );
+        let title = derive_codex_title(&prompt).expect("handoff title");
+        assert_eq!(title.chars().count(), 48);
+        assert!(title.ends_with('…'));
+        assert!(!title.contains('\n'));
+        assert!(!title.contains("  "));
+    }
+
+    #[test]
+    fn derive_codex_title_leaves_malformed_handoff_template_untouched() {
+        let prompt = "你是一次接力开发的第 2 棒，接替上一个 session（abc）继续未完成的工作。\n\n\
+            上一棒留下的交接信息：\n\n缺少 Fleet 生成的分隔线，不能猜测边界。";
+        assert_eq!(
+            derive_codex_title(prompt),
+            Some(prompt.to_string()),
+            "only the complete Fleet-owned template may be summarized"
+        );
+    }
 
     #[test]
     fn extract_first_user_prompt_skips_injected_and_strips_reminder() {
@@ -1818,6 +1914,72 @@ mod tests {
     }
 
     #[test]
+    fn parse_codex_session_worktree_cwd_uses_repo_name() {
+        // Fleet develops plans inside `<repo>/.worktrees/<task-id>`. A codex
+        // session whose cwd is such a checkout belongs to the repo, so its
+        // workspace_name must be the repo (`claude-fleet`), NOT the task-id
+        // leaf (`fix-codex-worktree-repo-name`) — matching the Claude path
+        // that goes through `session::workspace_name`. Buggy behaviour took
+        // only `PathBuf::file_name()` and displayed the branch/plan name.
+        use std::io::Write as _;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-07-18T13:00:00.000Z","type":"session_meta","payload":{{"id":"t-worktree","cwd":"/Users/hoveychen/workspace/claude-fleet/.worktrees/fix-codex-worktree-repo-name","originator":"fleet","source":"exec"}}}}"#
+        )
+        .unwrap();
+        f.flush().unwrap();
+
+        let info = parse_codex_session(f.path(), &[]).expect("rollout must parse");
+        assert_eq!(
+            info.workspace_name, "claude-fleet",
+            "a codex worktree checkout must be named after the repo, not the task-id leaf"
+        );
+    }
+
+    #[test]
+    fn sqlite_worktree_cwd_uses_repo_name() {
+        // Same worktree-stripping contract for the SQLite-backed path
+        // (build_session_from_sqlite) that feeds the thread listing.
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let dir = std::env::temp_dir()
+            .join(format!("codex_worktree_name_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rollout = dir.join("rollout-worktree.jsonl");
+        std::fs::write(
+            &rollout,
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"hi\"},\"timestamp\":\"t0\"}\n",
+        )
+        .unwrap();
+
+        let thread = SqliteThread {
+            id: "019f-worktree".to_string(),
+            rollout_path: rollout.to_string_lossy().to_string(),
+            created_at: now_secs - 60,
+            updated_at: now_secs - 30,
+            source: "codex".to_string(),
+            cwd: "/Users/hoveychen/workspace/claude-fleet/.worktrees/fix-codex-worktree-repo-name"
+                .to_string(),
+            title: String::new(),
+            model: None,
+            tokens_used: 0,
+            agent_nickname: None,
+            agent_role: None,
+            archived: false,
+            first_user_message: "hi".to_string(),
+        };
+
+        let info = build_session_from_sqlite(&thread, &[]).expect("should build a SessionInfo");
+        assert_eq!(
+            info.workspace_name, "claude-fleet",
+            "a codex worktree checkout must be named after the repo, not the task-id leaf"
+        );
+    }
+
+    #[test]
     fn live_codex_session_status_is_untouched() {
         // While a process is alive the status is authoritative — never clamp.
         assert_eq!(clamp_dead_session_status(S::Active, true), S::Active);
@@ -1969,6 +2131,59 @@ mod tests {
             .collect();
 
         assert_eq!(assistant_texts, vec!["partial reply".to_string()]);
+    }
+
+    /// The incremental tail path re-normalizes a growing window each poll, and
+    /// during a live turn a reply first appears as an `agent_message` event and
+    /// is later replaced by its `response_item` copy. Both must normalize to the
+    /// SAME `uuid` (content-derived, timestamp-excluded) so the client dedups the
+    /// transition instead of rendering the reply twice. This is the core of the
+    /// codex mobile/desktop live-tail fix.
+    #[test]
+    fn normalize_messages_uuid_is_stable_across_event_to_response_item_swap() {
+        let uuid_of = |lines: Vec<serde_json::Value>| -> String {
+            let out = normalize_messages(lines);
+            let m = out
+                .iter()
+                .find(|m| m.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+                .expect("an assistant message");
+            m.get("uuid")
+                .and_then(|u| u.as_str())
+                .expect("normalized messages carry a uuid")
+                .to_string()
+        };
+
+        // Poll 1: only the live event copy has landed (different timestamp).
+        let live = uuid_of(vec![json!({
+            "type":"event_msg",
+            "payload":{"type":"agent_message","message":"the reply"},
+            "timestamp":"t-live"
+        })]);
+        // Poll 2: the canonical response_item copy landed; normalize suppresses
+        // the event and emits the response_item — different timestamp, same text.
+        let persisted = uuid_of(vec![
+            json!({"type":"event_msg","payload":{"type":"agent_message","message":"the reply"},"timestamp":"t-live"}),
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the reply"}]},"timestamp":"t-persisted"}),
+        ]);
+
+        assert_eq!(live, persisted, "same reply must keep one stable uuid across the live→persisted swap");
+    }
+
+    /// A turn that genuinely repeats the identical text must NOT collapse to one
+    /// message: the per-hash occurrence counter keeps their uuids distinct.
+    #[test]
+    fn normalize_messages_uuid_disambiguates_repeated_identical_text() {
+        let out = normalize_messages(vec![
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]},"timestamp":"t1"}),
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]},"timestamp":"t2"}),
+        ]);
+        let uuids: Vec<&str> = out
+            .iter()
+            .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+            .filter_map(|m| m.get("uuid").and_then(|u| u.as_str()))
+            .collect();
+        assert_eq!(uuids.len(), 2, "two replies expected");
+        assert_ne!(uuids[0], uuids[1], "repeated identical text must get distinct uuids");
     }
 
     #[test]
@@ -2966,6 +3181,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// A freshly spawned Codex turn has no thread id in argv, but Fleet records
+    /// its pid as soon as Codex reports the minted thread id. That note must
+    /// make Stop target the one session even when a sibling Codex shares cwd.
+    #[test]
+    fn codex_resolve_pid_recognises_running_spawn_via_pid_note() {
+        use super::{resolve_pid, CodexProcess};
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-resolve-spawnpid-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &tmp);
+
+        crate::codex_launch::record_spawn_pid("t-new", 4242);
+        let running = vec![
+            CodexProcess { pid: 3131, cwd: "/ws".into(), thread_id: None },
+            CodexProcess { pid: 4242, cwd: "/ws".into(), thread_id: None },
+        ];
+
+        assert_eq!(
+            resolve_pid(&running, "t-new", "/ws"),
+            (Some(4242), true),
+            "the live recorded spawn pid must be precise despite a sibling in cwd"
+        );
+
+        match prev {
+            Some(p) => std::env::set_var("FLEET_HOME", p),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn read_rollout_originator_none_without_meta_or_field() {
         use std::io::Write;
@@ -3023,6 +3276,56 @@ mod tests {
         // `< tail` this correctly signals "fully loaded".
         let tail100 = src.get_messages_tail(&uri, 100).unwrap();
         assert_eq!(tail100.len(), 10, "tail(100) should return every message");
+    }
+
+    /// The live-follow path: `tail_incremental` must return *normalized* codex
+    /// messages (each with the stable `uuid`) when the rollout grows, and an
+    /// empty batch when it hasn't. This is what makes a mobile/desktop reply to
+    /// a codex session actually appear (the raw byte-offset default would emit
+    /// un-renderable `response_item` records — the bug this fixes).
+    #[test]
+    fn codex_tail_incremental_returns_normalized_messages_on_growth() {
+        use super::CodexSource;
+        use crate::agent_source::AgentSource;
+        use std::io::Write as _;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(f, r#"{{"type":"session_meta","payload":{{"id":"t1","originator":"fleet","source":"exec"}}}}"#).unwrap();
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"hi"}}]}}}}"#).unwrap();
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"first reply"}}]}}}}"#).unwrap();
+        f.flush().unwrap();
+        let uri = format!("codex://{}", f.path().display());
+        let src = CodexSource::new();
+
+        // Grown from offset 0: normalized messages come back, each with a uuid,
+        // and new_offset lands at the current file size.
+        let (lines, off1) = src.tail_incremental(&uri, 0).unwrap();
+        assert!(
+            lines.iter().all(|m| m.get("uuid").and_then(|u| u.as_str()).is_some()),
+            "every normalized codex tail message must carry a uuid"
+        );
+        assert!(
+            lines.iter().any(|m| {
+                m.get("type").and_then(|t| t.as_str()) == Some("assistant")
+                    && m.to_string().contains("first reply")
+            }),
+            "the assistant reply must be present as a normalized message"
+        );
+        assert!(off1 > 0, "new_offset advances to EOF");
+
+        // No growth: empty batch, offset unchanged.
+        let (empty, off2) = src.tail_incremental(&uri, off1).unwrap();
+        assert!(empty.is_empty(), "no growth => no messages");
+        assert_eq!(off2, off1, "offset stays at EOF when nothing changed");
+
+        // A new reply lands: the re-normalized window surfaces it.
+        writeln!(f, r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"second reply"}}]}}}}"#).unwrap();
+        f.flush().unwrap();
+        let (lines2, off3) = src.tail_incremental(&uri, off1).unwrap();
+        assert!(off3 > off1, "offset advances past the appended reply");
+        assert!(
+            lines2.iter().any(|m| m.to_string().contains("second reply")),
+            "the freshly-appended reply must appear on the next poll"
+        );
     }
 
     fn window(used_percent: i32, window_mins: i64, resets_at_secs: i64) -> CodexRateLimitWindow {
@@ -3641,7 +3944,16 @@ fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Optio
             }
         }
     }
-    // Second: cwd match. Precise only if exactly one process matches.
+    // Second: a fresh `codex exec` has no thread id in argv because Codex mints
+    // it after launch. Fleet records the minted thread id -> spawn pid once it
+    // appears in stdout; accept that note only while the pid is still a live
+    // Codex process, matching the liveness safety check in `codex_proc_alive`.
+    if let Some(pid) = crate::codex_launch::resolve_spawn_pid(thread_id) {
+        if processes.iter().any(|p| p.pid == pid) {
+            return (Some(pid), true);
+        }
+    }
+    // Third: cwd match. Precise only if exactly one process matches.
     let cwd_matches: Vec<_> = processes.iter().filter(|p| p.cwd == cwd).collect();
     match cwd_matches.len() {
         1 => (Some(cwd_matches[0].pid), true),
@@ -3719,11 +4031,9 @@ fn parse_codex_session(
         .map(|s| s.to_string())
         .unwrap_or_else(|| "codex".to_string());
 
-    let workspace_name = PathBuf::from(&workspace_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("codex")
-        .to_string();
+    // Reuse the shared helper (worktree-stripping + chat-workspace rename),
+    // matching the Claude path — see session::workspace_name.
+    let workspace_name = crate::session::workspace_name(&workspace_path);
 
     let agent_nickname = meta
         .and_then(|m| m.get("agent_nickname").and_then(|n| n.as_str()))
@@ -4726,7 +5036,81 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
         }
     }
 
+    assign_stable_uuids(&mut messages);
     messages
+}
+
+/// Stamp each normalized Codex message with a stable, position-independent
+/// `uuid` derived from its content, so the incremental tail path (which
+/// re-normalizes a growing window each poll — see `CodexSource::tail_incremental`)
+/// and the initial full tail agree on message identity. Both the mobile
+/// `appendUnique` and the desktop message store dedup on `uuid`.
+///
+/// Why content-derived and *not* timestamp/position-derived: Codex persists
+/// every finalized reply twice — first an `event_msg/agent_message` mirror
+/// (kept live while the turn is in flight), then the canonical
+/// `response_item/message` copy that `normalize_messages` swaps in and suppresses
+/// the event for. The two copies carry *different* timestamps and land at
+/// different rollout offsets, but normalize to the *same* text. Hashing only
+/// `type` + the `message` body (timestamp is a sibling field, excluded) gives
+/// both copies the same uuid, so the live→persisted transition dedups on the
+/// client instead of rendering the reply twice — the exact double-display this
+/// fix exists to avoid. A per-hash occurrence counter disambiguates a turn that
+/// genuinely repeats identical text, so those are not collapsed into one.
+fn assign_stable_uuids(messages: &mut [Value]) {
+    use std::hash::{Hash, Hasher};
+    let mut seen: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
+    for m in messages.iter_mut() {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        message_identity(m).hash(&mut h);
+        let base = h.finish();
+        let occ = seen.entry(base).or_insert(0);
+        let uuid = format!("codex-{base:016x}-{occ}");
+        *occ += 1;
+        if let Some(obj) = m.as_object_mut() {
+            obj.insert("uuid".to_string(), json!(uuid));
+        }
+    }
+}
+
+/// A canonical identity string for a normalized message: its `type`, role, and
+/// the salient content (visible text, reasoning, tool name/id) — deliberately
+/// excluding volatile decorations that differ between the two rollout copies of
+/// one reply. The `agent_message` event copy always stamps `stop_reason` and the
+/// `response_item` copy only does so when `end_turn` is set; the response_item
+/// copy may also carry a `message.id`. Hashing the whole message body would make
+/// those two copies diverge, defeating the dedup. So we hash only what makes a
+/// message *the same message* to a reader.
+fn message_identity(m: &Value) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(m.get("type").and_then(Value::as_str).unwrap_or("").to_string());
+    // tool_result identity lives at the top level, not under `message`.
+    if let Some(tid) = m.get("tool_use_id").and_then(Value::as_str) {
+        parts.push(format!("tuid={tid}"));
+    }
+    if let Some(msg) = m.get("message") {
+        if let Some(role) = msg.get("role").and_then(Value::as_str) {
+            parts.push(format!("role={role}"));
+        }
+        if let Some(blocks) = msg.get("content").and_then(Value::as_array) {
+            for b in blocks {
+                let bt = b.get("type").and_then(Value::as_str).unwrap_or("");
+                parts.push(format!("b={bt}"));
+                for key in ["text", "thinking", "name", "id", "tool_use_id"] {
+                    if let Some(v) = b.get(key).and_then(Value::as_str) {
+                        parts.push(format!("{key}={v}"));
+                    }
+                }
+                // tool_use input identifies the call beyond its name.
+                if let Some(input) = b.get("input") {
+                    parts.push(format!("input={input}"));
+                }
+            }
+        } else if let Some(s) = msg.get("content").and_then(Value::as_str) {
+            parts.push(format!("content={s}"));
+        }
+    }
+    parts.join("\u{1f}")
 }
 
 // ── AgentSource implementation ──────────────────────────────────────────────
@@ -4766,8 +5150,9 @@ impl AgentSource for CodexSource {
     }
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
-        let file_path =
-            resolve_uri(path).ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let file_path = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
 
         let content = read_session_content(&file_path)?;
 
@@ -4781,8 +5166,9 @@ impl AgentSource for CodexSource {
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
-        let file_path =
-            resolve_uri(path).ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let file_path = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
         let name = file_path
             .file_name()
             .and_then(|s| s.to_str())
@@ -4838,7 +5224,40 @@ impl AgentSource for CodexSource {
     }
 
     fn resolve_file_path(&self, path: &str) -> Option<PathBuf> {
-        resolve_uri(path)
+        // Clients address Codex sessions by `codex://` URI. The desktop
+        // filesystem watcher, however, works in resolved real-path space (the
+        // fs event and the stored watch path are the real rollout file), so
+        // also accept a bare absolute path here — `tail_incremental` is driven
+        // by the watcher on the desktop and by the URI on mobile.
+        resolve_uri(path).or_else(|| {
+            let p = PathBuf::from(path);
+            p.is_absolute().then_some(p)
+        })
+    }
+
+    /// Codex rollouts are folded (see `normalize_messages`): a reply spans an
+    /// `event_msg` mirror plus a canonical `response_item`, and normalization
+    /// dedups them using whole-file context. A raw byte slice from `offset` is
+    /// therefore not a renderable message — the default byte-offset tail would
+    /// hand the clients un-normalized `response_item`/`event_msg` records that
+    /// render as nothing (the "sent OK but no reply shows" bug). So on any
+    /// growth we re-normalize the last window and return those messages; the
+    /// stable per-message `uuid` (see `assign_stable_uuids`) lets the client
+    /// dedup the overlap with what it already holds and the live→persisted swap.
+    /// `new_offset = size` means "caught up to EOF"; the next poll re-runs only
+    /// when the file grows again, so a quiet session costs one `stat`.
+    fn tail_incremental(&self, path: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
+        let real = self
+            .resolve_file_path(path)
+            .ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let size = std::fs::metadata(&real).map_err(|e| e.to_string())?.len();
+        // No new bytes → nothing to re-render (also the initial "follow from
+        // here" call, where the watcher seeds `offset` with the current size).
+        if offset >= size {
+            return Ok((Vec::new(), size));
+        }
+        let messages = self.get_messages_tail(path, CODEX_TAIL_FOLLOW_WINDOW)?;
+        Ok((messages, size))
     }
 
     fn watch_strategy(&self) -> WatchStrategy {

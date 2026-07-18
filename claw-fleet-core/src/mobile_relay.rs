@@ -1414,31 +1414,25 @@ fn serve_tail(params: &Value) -> Result<Value, String> {
 // appended since. Omitting `offset` locates the current end without
 // reading the body — the cheap "start following from here" call.
 fn serve_tail_delta(params: &Value) -> Result<Value, String> {
-    use std::io::{Read as _, Seek as _};
     let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
     let sources = crate::agent_source::build_sources();
-    let resolved = crate::agent_source::find_source_for_path(&sources, path)
-        .and_then(|s| s.resolve_file_path(path))
+    let source = crate::agent_source::find_source_for_path(&sources, path)
+        .ok_or_else(|| format!("no agent source for path: {path}"))?;
+    let resolved = source
+        .resolve_file_path(path)
         .ok_or_else(|| format!("cannot resolve path: {path}"))?;
     let size = std::fs::metadata(&resolved).map_err(|e| e.to_string())?.len();
     let offset = params.get("offset").and_then(Value::as_u64);
     let Some(offset) = offset else {
+        // Bootstrap: locate the current end so the client follows from here.
         return Ok(json!({ "lines": [], "newOffset": size }));
     };
-    // Truncated/rotated file (offset past EOF): resync without lines.
-    if offset >= size {
-        return Ok(json!({ "lines": [], "newOffset": size }));
-    }
-    let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
-    file.seek(std::io::SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
-    let mut buf = String::new();
-    file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
-    // Return `newOffset` only past complete (newline-terminated) lines. A
-    // half-written trailing record stays unconsumed so the client polls its
-    // bytes again next tick — advancing to EOF here would skip it and lose the
-    // record forever (same hazard as the local watcher; see parse_incremental_tail).
-    let (lines, consumed) = crate::jsonl_tail::parse_incremental_tail(&buf);
-    Ok(json!({ "lines": slim_tail_messages(lines), "newOffset": offset + consumed as u64 }))
+    // Source-aware incremental follow: Claude gets the byte-offset raw tail
+    // (each jsonl line is a self-contained message); Codex re-normalizes the
+    // trailing window (its rollout is folded — a raw byte slice renders as
+    // nothing), returning messages the client dedups by their stable `uuid`.
+    let (lines, new_offset) = source.tail_incremental(path, offset)?;
+    Ok(json!({ "lines": slim_tail_messages(lines), "newOffset": new_offset }))
 }
 
 // Serializes to `null` when there's no live sidecar for this session.
