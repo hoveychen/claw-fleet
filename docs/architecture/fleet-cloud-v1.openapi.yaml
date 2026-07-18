@@ -1,0 +1,665 @@
+openapi: 3.1.0
+info:
+  title: Fleet Cloud API
+  version: 0.1.0-spike
+  description: >-
+    Task-oriented API for dispatching Fleet harness work, observing durable
+    events, answering decisions, and creating scoped Hosted UX sessions.
+servers:
+  - url: https://api.fleet.example.com
+security:
+  - oauth2ClientCredentials: ['tasks:read', 'tasks:write']
+tags:
+  - name: Tasks
+  - name: Decisions
+  - name: Embed
+paths:
+  /v1/tasks:
+    post:
+      tags: [Tasks]
+      operationId: createTask
+      summary: Create a durable Fleet task
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Task created
+          headers:
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '200':
+          description: Existing task returned for an identical idempotent request
+          headers:
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        default:
+          $ref: '#/components/responses/Error'
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: List tasks visible to the current project
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/PageCursor'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TaskStatus'
+        - name: external_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, has_more]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Task'
+                  next_cursor:
+                    type: [string, 'null']
+                  has_more:
+                    type: boolean
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/tasks/{task_id}:
+    get:
+      tags: [Tasks]
+      operationId: getTask
+      summary: Get the current task projection
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Current task projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/tasks/{task_id}/events:
+    get:
+      tags: [Tasks]
+      operationId: streamTaskEvents
+      summary: Replay and follow a task event stream
+      description: >-
+        Returns Server-Sent Events ordered by task sequence. `after` is exclusive.
+        Each SSE `id` equals the decimal event sequence. Clients reconnect with
+        `Last-Event-ID`; when both are present, the larger cursor wins. The server
+        sends a comment heartbeat at least every 15 seconds.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - name: after
+          in: query
+          description: Last fully processed event sequence
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        '200':
+          description: Replay followed by live events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE frames whose data field is a serialized Event
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Requested cursor is older than the project's retained event range
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/tasks/{task_id}/messages:
+    post:
+      tags: [Tasks]
+      operationId: createTaskMessage
+      summary: Send or enqueue a message to a task
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 100000
+                delivery:
+                  type: string
+                  enum: [auto, enqueue, resume]
+                  default: auto
+      responses:
+        '202':
+          description: Message command accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '409':
+          $ref: '#/components/responses/StateConflict'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/tasks/{task_id}/cancel:
+    post:
+      tags: [Tasks]
+      operationId: cancelTask
+      summary: Request terminal cancellation
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 1000
+      responses:
+        '202':
+          description: Cancellation command accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '409':
+          $ref: '#/components/responses/StateConflict'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/tasks/{task_id}/retry:
+    post:
+      tags: [Tasks]
+      operationId: retryTask
+      summary: Requeue a failed task as a new attempt
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Retry command accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '409':
+          $ref: '#/components/responses/StateConflict'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/decisions/{decision_id}:
+    get:
+      tags: [Decisions]
+      operationId: getDecision
+      summary: Get one decision
+      security:
+        - oauth2ClientCredentials: ['decisions:read']
+      parameters:
+        - $ref: '#/components/parameters/DecisionId'
+      responses:
+        '200':
+          description: Decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Decision'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/decisions/{decision_id}/responses:
+    post:
+      tags: [Decisions]
+      operationId: respondToDecision
+      summary: Resolve an open decision
+      security:
+        - oauth2ClientCredentials: ['decisions:write']
+      parameters:
+        - $ref: '#/components/parameters/DecisionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [answer, decline]
+                answers:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Resolved decision, or prior result for an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Decision'
+        '409':
+          description: Decision was already resolved with a conflicting response
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/embed-sessions:
+    post:
+      tags: [Embed]
+      operationId: createEmbedSession
+      summary: Create a short-lived Hosted UX session
+      security:
+        - oauth2ClientCredentials: ['embed:write']
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resource, capabilities, expires_in]
+              properties:
+                resource:
+                  type: object
+                  required: [type, id]
+                  properties:
+                    type:
+                      type: string
+                      enum: [project, task, decision]
+                    id:
+                      type: string
+                capabilities:
+                  type: array
+                  uniqueItems: true
+                  items:
+                    type: string
+                    enum: [task.read, task.message, task.cancel, decision.read, decision.respond]
+                expires_in:
+                  type: integer
+                  minimum: 60
+                  maximum: 3600
+                return_url:
+                  type: [string, 'null']
+                  format: uri
+      responses:
+        '201':
+          description: Scoped embed URL and expiry
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, url, expires_at]
+                properties:
+                  id:
+                    type: string
+                  url:
+                    type: string
+                    format: uri
+                  expires_at:
+                    type: string
+                    format: date-time
+        default:
+          $ref: '#/components/responses/Error'
+webhooks:
+  taskEvent:
+    post:
+      summary: Signed notification for selected task event types
+      description: >-
+        Fleet signs the exact request body with HMAC-SHA256. Headers include
+        Fleet-Webhook-Id, Fleet-Webhook-Timestamp, and Fleet-Webhook-Signature.
+        Receivers must deduplicate by webhook ID and reject timestamps older
+        than five minutes before signature verification.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delivery_id, event]
+              properties:
+                delivery_id:
+                  type: string
+                event:
+                  $ref: '#/components/schemas/Event'
+      responses:
+        '200':
+          description: Delivery accepted
+        '202':
+          description: Delivery accepted asynchronously
+        default:
+          description: Delivery failed and will be retried with exponential backoff
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.fleet.example.com/oauth/token
+          scopes:
+            tasks:read: Read tasks and task events
+            tasks:write: Create and control tasks
+            decisions:read: Read decision presentation data
+            decisions:write: Answer decisions
+            embed:write: Create scoped Hosted UX sessions
+  parameters:
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DecisionId:
+      name: decision_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >-
+        Caller-generated key, unique per project and operation for 24 hours.
+        Reuse with a different canonical request body returns 409.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 255
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+    PageCursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+  headers:
+    IdempotencyReplayed:
+      schema:
+        type: boolean
+      description: True when a prior response was replayed
+  responses:
+    Error:
+      description: Error response
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Resource is absent or outside the caller's tenant scope
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    StateConflict:
+      description: Command is not valid in the current resource state
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    IdempotencyConflict:
+      description: The key was reused with a different request fingerprint
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    CreateTaskRequest:
+      type: object
+      required: [prompt, workspace_selector, agent_profile]
+      properties:
+        external_id:
+          type: [string, 'null']
+          maxLength: 255
+        title:
+          type: [string, 'null']
+          maxLength: 500
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 200000
+        workspace_selector:
+          type: object
+          properties:
+            workspace_id:
+              type: [string, 'null']
+              format: uuid
+            labels:
+              type: object
+              additionalProperties:
+                type: string
+        agent_profile:
+          $ref: '#/components/schemas/AgentProfile'
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    AgentProfile:
+      type: object
+      required: [tool]
+      properties:
+        tool:
+          type: string
+          enum: [claude, codex]
+        model:
+          type: [string, 'null']
+        effort:
+          type: [string, 'null']
+        permission_policy:
+          type: [string, 'null']
+        required_capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+    TaskStatus:
+      type: string
+      enum: [queued, assigned, running, waiting_for_input, paused, rate_limited, succeeded, failed, cancelled]
+    Task:
+      type: object
+      required: [id, organization_id, project_id, prompt, status, waiting_decision_count, event_cursor, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        external_id:
+          type: [string, 'null']
+        title:
+          type: [string, 'null']
+        prompt:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        current_attempt_id:
+          type: [string, 'null']
+          format: uuid
+        waiting_decision_count:
+          type: integer
+          minimum: 0
+        event_cursor:
+          type: integer
+          format: int64
+          minimum: 0
+        version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Decision:
+      type: object
+      required: [id, task_id, attempt_id, kind, blocking, schema_version, presentation, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        attempt_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [guard, elicitation, fleet_ask, plan_approval, permission_prompt, a2ui]
+        blocking:
+          type: boolean
+        schema_version:
+          type: string
+        presentation:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum: [open, answered, declined, expired, cancelled]
+        response:
+          type: [object, 'null']
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: [string, 'null']
+          format: date-time
+    Event:
+      type: object
+      required: [id, organization_id, project_id, task_id, sequence, type, occurred_at, recorded_at, producer, schema_version, data]
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        attempt_id:
+          type: [string, 'null']
+          format: uuid
+        sequence:
+          type: integer
+          format: int64
+          minimum: 1
+        type:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        recorded_at:
+          type: string
+          format: date-time
+        producer:
+          type: object
+          required: [type, id]
+          properties:
+            type:
+              type: string
+              enum: [control_plane, runner, user, api_client]
+            id:
+              type: string
+        schema_version:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+    CommandReceipt:
+      type: object
+      required: [command_id, status, accepted_at]
+      properties:
+        command_id:
+          type: string
+        status:
+          type: string
+          enum: [accepted, already_applied]
+        accepted_at:
+          type: string
+          format: date-time
+    Problem:
+      type: object
+      required: [type, title, status, code, request_id]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        request_id:
+          type: string
+        retryable:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: object
+            required: [path, code, message]
+            properties:
+              path:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
