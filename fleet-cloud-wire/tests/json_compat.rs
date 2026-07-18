@@ -1,6 +1,9 @@
 use chrono::{TimeZone, Utc};
 use fleet_cloud_wire::event::RunnerEvent;
-use fleet_cloud_wire::runner::{ClientHello, RunnerCapability, RunnerFrame};
+use fleet_cloud_wire::runner::{
+    ClientHello, CloudCommand, CommandAck, CommandAckStatus, RunnerCapability, RunnerFrame,
+    ServerFrame, ServerHello,
+};
 use fleet_cloud_wire::RUNNER_PROTOCOL_VERSION;
 use serde_json::json;
 
@@ -28,6 +31,76 @@ fn client_hello_has_stable_tagged_json() {
     assert_eq!(
         serde_json::from_value::<RunnerFrame>(value).expect("deserialize hello"),
         frame
+    );
+}
+
+#[test]
+fn every_runner_frame_matches_fixed_json_and_ignores_unknown_fields() {
+    let fixtures = [
+        r#"{"type":"heartbeat","payload":{"active_runs":1,"future":true}}"#,
+        r#"{"type":"command_ack","payload":{"command_id":"cmd_01JZ0A","assignment_sequence":9,"status":"completed","occurred_at":"2026-07-18T12:00:00Z","result":{"ok":true},"error_code":null}}"#,
+    ];
+    for fixture in fixtures {
+        let frame: RunnerFrame = serde_json::from_str(fixture).expect("known Runner frame");
+        let encoded = serde_json::to_value(frame).expect("re-encode Runner frame");
+        assert!(encoded.get("type").is_some());
+    }
+    assert!(
+        serde_json::from_str::<RunnerFrame>(r#"{"type":"future_frame","payload":{}}"#).is_err()
+    );
+}
+
+#[test]
+fn every_server_frame_matches_fixed_json() {
+    let hello = ServerFrame::ServerHello(ServerHello {
+        protocol_version: 1,
+        heartbeat_interval_seconds: 15,
+        config_version: 3,
+        replay_commands_after: Some(8),
+        request_outbox_from_sequence: Some(41),
+    });
+    assert_eq!(
+        serde_json::to_string(&hello).unwrap(),
+        r#"{"type":"server_hello","payload":{"protocol_version":1,"heartbeat_interval_seconds":15,"config_version":3,"replay_commands_after":8,"request_outbox_from_sequence":41}}"#
+    );
+    let command = ServerFrame::Command(CloudCommand {
+        command_id: "cmd_01JZ0A".into(),
+        assignment_sequence: 9,
+        command_type: "start_run".into(),
+        task_id: Some("task_01JZ0A".into()),
+        run_id: Some("run_01JZ0A".into()),
+        deadline: Utc
+            .with_ymd_and_hms(2026, 7, 18, 12, 5, 0)
+            .single()
+            .unwrap(),
+        expected_version: Some(1),
+        required_capability: Some(RunnerCapability {
+            name: "claude_code".into(),
+            version: 1,
+        }),
+        payload: json!({"goal":"fix"}),
+    });
+    assert_eq!(
+        serde_json::from_str::<ServerFrame>(&serde_json::to_string(&command).unwrap()).unwrap(),
+        command
+    );
+    let ack = RunnerFrame::CommandAck(CommandAck {
+        command_id: "cmd_01JZ0A".into(),
+        assignment_sequence: 9,
+        status: CommandAckStatus::Accepted,
+        occurred_at: Utc
+            .with_ymd_and_hms(2026, 7, 18, 12, 0, 1)
+            .single()
+            .unwrap(),
+        result: None,
+        error_code: None,
+    });
+    assert_eq!(
+        serde_json::from_str::<RunnerFrame>(&serde_json::to_string(&ack).unwrap()).unwrap(),
+        ack
+    );
+    assert!(
+        serde_json::from_str::<ServerFrame>(r#"{"type":"future_frame","payload":{}}"#).is_err()
     );
 }
 
