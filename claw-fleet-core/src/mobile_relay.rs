@@ -1510,6 +1510,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "decision_asset" => serve_decision_asset(params),
         "tail" => serve_tail(params),
         "tail_delta" => serve_tail_delta(params),
+        "tool_detail" => serve_tool_detail(params),
         "live_thinking" => serve_live_thinking(params),
         "handoff_chain" => serve_handoff_chain(params),
         "workflow_trees" => serve_workflow_trees(params),
@@ -1698,6 +1699,96 @@ fn serve_tail_delta(params: &Value) -> Result<Value, String> {
     // nothing), returning messages the client dedups by their stable `uuid`.
     let (lines, new_offset) = source.tail_incremental(path, offset)?;
     Ok(json!({ "lines": slim_tail_messages(lines), "newOffset": new_offset }))
+}
+
+/// Screenshots surfaced in one `tool_detail` reply are capped so a
+/// screenshot-heavy result can't stack megabytes into a single frame; each is
+/// re-encoded at the decision-asset budget (≤100 KB guaranteed).
+const TOOL_DETAIL_MAX_IMAGES: usize = 6;
+
+/// On-demand expansion for one tool call — the mobile counterpart of the
+/// desktop's `get_tool_result_full`. The skeleton stream ships only summaries
+/// and digests (see `slim_tail_messages`); when the reader taps a tool chip
+/// open, this returns the full `tool_use.input`, the `tool_result` content and
+/// the structured `toolUseResult` for that `tool_use_id`.
+///
+/// Large string leaves are truncated to transport previews unless `full` is
+/// set (`truncated: true` marks a reply the client can re-request with
+/// `full`), mirroring the desktop's two-stage expand. Embedded screenshots are
+/// never shipped raw: they are pulled out of `content` into an `images` list
+/// re-encoded at the decision-asset budget, `full` or not.
+///
+/// Reads the transcript where the relay host runs, like `serve_tail` — no
+/// Backend-trait hop is involved on the mobile path.
+fn serve_tool_detail(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+
+    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let tool_use_id =
+        params.get("tool_use_id").and_then(Value::as_str).ok_or("missing tool_use_id")?;
+    let full = params.get("full").and_then(Value::as_bool).unwrap_or(false);
+
+    let sources = crate::agent_source::build_sources();
+    let source = crate::agent_source::find_source_for_path(&sources, path)
+        .ok_or_else(|| format!("no agent source for path: {path}"))?;
+    let resolved = source
+        .resolve_file_path(path)
+        .ok_or_else(|| format!("cannot resolve path: {path}"))?;
+
+    let mut detail = crate::message_trim::extract_full_tool_result(&resolved, tool_use_id)?;
+    let obj = detail.as_object_mut().expect("extract_full_tool_result returns an object");
+
+    // Pull screenshots out of the result content before any truncation: a
+    // base64 leaf would otherwise be cut into a useless 1 KB preview. The raw
+    // source is stripped from the block either way.
+    let mut images: Vec<Value> = Vec::new();
+    if let Some(blocks) = obj.get_mut("content").and_then(Value::as_array_mut) {
+        for block in blocks.iter_mut() {
+            if block.get("type").and_then(Value::as_str) != Some("image") {
+                continue;
+            }
+            let source_pair = base64_image_source(block)
+                .map(|(media_type, data)| (media_type.to_string(), data.to_string()));
+            if let Some((media_type, data)) = source_pair {
+                if images.len() < TOOL_DETAIL_MAX_IMAGES {
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
+                        let (out, mime) = downscale_image(
+                            bytes,
+                            &media_type,
+                            DECISION_ASSET_TARGET_BYTES,
+                            DECISION_ASSET_HARD_CAP_BYTES,
+                            DECISION_ASSET_MIN_DIM,
+                        );
+                        if out.len() <= DECISION_ASSET_HARD_CAP_BYTES {
+                            images.push(json!({
+                                "media_type": mime,
+                                "data": base64::engine::general_purpose::STANDARD.encode(out),
+                            }));
+                        }
+                    }
+                }
+            }
+            if let Some(b) = block.as_object_mut() {
+                b.remove("source");
+            }
+        }
+    }
+    if !images.is_empty() {
+        obj.insert("images".into(), Value::Array(images));
+    }
+
+    if !full {
+        let mut truncated = false;
+        for key in ["content", "toolUseResult", "input"] {
+            if let Some(v) = obj.get_mut(key) {
+                truncated |= crate::message_trim::truncate_value_for_transport(v);
+            }
+        }
+        if truncated {
+            obj.insert("truncated".into(), true.into());
+        }
+    }
+    Ok(detail)
 }
 
 // Serializes to `null` when there's no live sidecar for this session.
@@ -4787,5 +4878,100 @@ mod tests {
         assert!(block.get("content").is_none(), "result body stays stripped");
         let thumbs = block["_thumbs"].as_array().expect("thumbs present");
         assert_eq!(thumbs.len(), TAIL_THUMB_MAX_PER_RESULT, "thumb count capped");
+    }
+
+    /// `tool_detail` is the tap-to-expand counterpart of the slim stream: full
+    /// input + result for one tool_use_id, previews truncated unless `full`,
+    /// screenshots re-encoded into `images` instead of raw base64.
+    #[test]
+    fn request_tool_detail_expands_one_tool_call() {
+        with_temp_home(|| {
+            let big_stdout = "y".repeat(10_000);
+            let path = write_jsonl(
+                "detail.jsonl",
+                &[
+                    json!({
+                        "type": "assistant", "uuid": "a1",
+                        "message": { "role": "assistant", "content": [
+                            { "type": "tool_use", "id": "toolu_det", "name": "Bash",
+                              "input": { "command": "make", "description": "build it" } }
+                        ]}
+                    }),
+                    json!({
+                        "type": "user", "uuid": "u1",
+                        "message": { "role": "user", "content": [
+                            { "type": "tool_result", "tool_use_id": "toolu_det",
+                              "content": big_stdout }
+                        ]},
+                        "toolUseResult": { "stdout": big_stdout, "stderr": "", "interrupted": false }
+                    }),
+                ],
+            );
+
+            // Default: truncated previews + flag.
+            let d = request_ok("tool_detail", json!({ "path": path, "tool_use_id": "toolu_det" }));
+            assert_eq!(d["name"], json!("Bash"));
+            assert_eq!(d["input"]["command"], json!("make"), "full input comes back");
+            assert_eq!(d["truncated"], json!(true));
+            let preview = d["content"].as_str().expect("content preview");
+            assert!(preview.len() < 3000, "content must be a preview, got {}B", preview.len());
+            assert!(preview.contains("Fleet truncated"));
+
+            // full=true returns the whole body.
+            let d = request_ok(
+                "tool_detail",
+                json!({ "path": path, "tool_use_id": "toolu_det", "full": true }),
+            );
+            assert!(d.get("truncated").is_none());
+            assert_eq!(d["content"].as_str().unwrap().len(), 10_000);
+            assert_eq!(d["toolUseResult"]["stdout"].as_str().unwrap().len(), 10_000);
+
+            // Unknown id is a protocol error, not an empty reply.
+            assert!(serve_tool_detail(
+                &json!({ "path": path, "tool_use_id": "toolu_missing" })
+            )
+            .is_err());
+        });
+    }
+
+    /// Screenshots inside a tool_result come back as re-encoded `images`, never
+    /// as raw base64 in `content` — and never cut to a useless text preview.
+    #[test]
+    fn request_tool_detail_reencodes_result_images() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let mut buf = image::RgbImage::new(600, 400);
+            for (x, y, px) in buf.enumerate_pixels_mut() {
+                *px = image::Rgb([(x / 4) as u8, (y / 2) as u8, 0]);
+            }
+            let png_b64 = base64::engine::general_purpose::STANDARD.encode(png_of(buf));
+            let path = write_jsonl(
+                "detail-img.jsonl",
+                &[json!({
+                    "type": "user", "uuid": "u1",
+                    "message": { "role": "user", "content": [
+                        { "type": "tool_result", "tool_use_id": "toolu_shot", "content": [
+                            { "type": "text", "text": "screenshot taken" },
+                            { "type": "image",
+                              "source": { "type": "base64", "media_type": "image/png",
+                                          "data": png_b64 } }
+                        ]}
+                    ]}
+                })],
+            );
+
+            let d = request_ok("tool_detail", json!({ "path": path, "tool_use_id": "toolu_shot" }));
+            let images = d["images"].as_array().expect("images list");
+            assert_eq!(images.len(), 1);
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(images[0]["data"].as_str().unwrap())
+                .expect("image decodes");
+            assert!(bytes.len() <= DECISION_ASSET_HARD_CAP_BYTES);
+            image::load_from_memory(&bytes).expect("valid image");
+            // The raw base64 is gone from the content blocks.
+            let blocks = d["content"].as_array().expect("content blocks");
+            assert_eq!(blocks[0]["text"], json!("screenshot taken"));
+            assert!(blocks[1].get("source").is_none(), "raw base64 stripped");
+        });
     }
 }
