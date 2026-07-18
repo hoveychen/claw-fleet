@@ -640,6 +640,27 @@ const DECISION_ASSET_MIN_DIM: u32 = 320;
 /// Anything that fails to decode (unknown/vector format) is returned untouched
 /// so the caller's frame guard still applies.
 fn downscale_decision_asset(bytes: Vec<u8>, mime: &str) -> (Vec<u8>, String) {
+    downscale_image(
+        bytes,
+        mime,
+        DECISION_ASSET_TARGET_BYTES,
+        DECISION_ASSET_HARD_CAP_BYTES,
+        DECISION_ASSET_MIN_DIM,
+    )
+}
+
+/// The shared shrink loop behind [`downscale_decision_asset`] and the
+/// transcript thumbnails: step JPEG quality high→low at the current
+/// resolution, shrink the longest edge ~20% when even the lowest quality
+/// overshoots `target`, and never return over `hard_cap` while `min_dim`
+/// still allows shrinking. Undecodable input is returned untouched.
+fn downscale_image(
+    bytes: Vec<u8>,
+    mime: &str,
+    target: usize,
+    hard_cap: usize,
+    min_dim: u32,
+) -> (Vec<u8>, String) {
     let Ok(img) = image::load_from_memory(&bytes) else {
         // Undecodable (e.g. a vector/unknown format) — nothing to re-encode; hand
         // the original back and let the caller's frame guard decide.
@@ -655,19 +676,17 @@ fn downscale_decision_asset(bytes: Vec<u8>, mime: &str) -> (Vec<u8>, String) {
             if best.as_ref().map_or(true, |b| encoded.len() < b.len()) {
                 best = Some(encoded.clone());
             }
-            if encoded.len() <= DECISION_ASSET_TARGET_BYTES {
+            if encoded.len() <= target {
                 return (encoded, "image/jpeg".to_string());
             }
         }
         // Even the lowest quality overshot the target at this resolution. Stop
         // once we're below the min dimension *and* under the hard cap; but if a
         // pathological image is still over the hard cap, keep shrinking past the
-        // floor until it fits, so the 100 KB guarantee always holds.
+        // floor until it fits, so the cap guarantee always holds.
         let longest = work.width().max(work.height());
-        let under_cap = best
-            .as_ref()
-            .map_or(false, |b| b.len() <= DECISION_ASSET_HARD_CAP_BYTES);
-        if (longest <= DECISION_ASSET_MIN_DIM && under_cap) || longest <= 1 {
+        let under_cap = best.as_ref().map_or(false, |b| b.len() <= hard_cap);
+        if (longest <= min_dim && under_cap) || longest <= 1 {
             break;
         }
         let nw = (work.width() * 4 / 5).max(1);
@@ -795,16 +814,189 @@ const TAIL_BLOCK_FIELDS: [&str; 6] = ["text", "thinking", "name", "id", "tool_us
 /// The only `message.usage` counters the UI renders (one `↑in ↓out` line per
 /// turn); cache bookkeeping counters stay stripped.
 const TAIL_USAGE_FIELDS: [&str; 2] = ["input_tokens", "output_tokens"];
+
+/// Transcript-thumbnail budget. Much tighter than a decision asset: thumbs ride
+/// inline in the skeleton stream (which is otherwise ~KB-scale) and render at
+/// list width, so a ~256px JPEG is plenty. Tap-to-view fetches the original on
+/// demand instead.
+const TAIL_THUMB_TARGET_BYTES: usize = 12 * 1024;
+const TAIL_THUMB_HARD_CAP_BYTES: usize = 20 * 1024;
+const TAIL_THUMB_MIN_DIM: u32 = 256;
+/// Result payloads can carry several screenshots; cap how many thumb up so one
+/// record can't stack unbounded thumbnails into the stream.
+const TAIL_THUMB_MAX_PER_RESULT: usize = 3;
+
+/// Thumbnail one base64 image for the skeleton stream, returning the JPEG as
+/// base64. `None` means "not worth shipping" (undecodable, or the re-encode
+/// couldn't get under the hard cap) — the block then slims to its old
+/// type-only form.
+///
+/// Re-encoding runs inside every `tail` reply, and pagination re-requests the
+/// full window, so results are memoised by a hash of the source base64. The
+/// cache is process-wide and bounded: on overflow it is simply cleared (a
+/// transcript window holds far fewer distinct images than the bound, so a
+/// clear-and-refill is rare and cheap). Failures are cached too — a corrupt
+/// blob shouldn't be re-decoded on every poll.
+fn tail_thumb_from_base64(media_type: &str, data: &str) -> Option<String> {
+    use base64::Engine as _;
+    use std::collections::HashMap;
+    use std::hash::{Hash, Hasher};
+    use std::sync::Mutex;
+
+    const CACHE_MAX: usize = 64;
+    static CACHE: Mutex<Option<HashMap<u64, Option<String>>>> = Mutex::new(None);
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    data.hash(&mut hasher);
+    let key = hasher.finish();
+
+    if let Some(cached) = CACHE
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().and_then(|m| m.get(&key).cloned()))
+    {
+        return cached;
+    }
+
+    let thumb = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .ok()
+        .and_then(|bytes| {
+            let (out, mime) = downscale_image(
+                bytes,
+                media_type,
+                TAIL_THUMB_TARGET_BYTES,
+                TAIL_THUMB_HARD_CAP_BYTES,
+                TAIL_THUMB_MIN_DIM,
+            );
+            // `downscale_image` echoes undecodable input back unchanged — only a
+            // real JPEG re-encode under the cap is worth putting on the wire.
+            (mime == "image/jpeg" && out.len() <= TAIL_THUMB_HARD_CAP_BYTES)
+                .then(|| base64::engine::general_purpose::STANDARD.encode(out))
+        });
+
+    if let Ok(mut guard) = CACHE.lock() {
+        let map = guard.get_or_insert_with(HashMap::new);
+        if map.len() >= CACHE_MAX {
+            map.clear();
+        }
+        map.insert(key, thumb.clone());
+    }
+    thumb
+}
+
+/// Extract a base64 image `source` from a content block, if present.
+fn base64_image_source(block: &Value) -> Option<(&str, &str)> {
+    let source = block.get("source")?;
+    if source.get("type").and_then(Value::as_str) != Some("base64") {
+        return None;
+    }
+    let media_type = source.get("media_type").and_then(Value::as_str).unwrap_or("image/png");
+    let data = source.get("data").and_then(Value::as_str)?;
+    Some((media_type, data))
+}
 /// The only `tool_use.input` keys the UI reads — `toolSummary` shows exactly one
 /// of these on the tool chip; everything else in `input` is dead weight (a Write
 /// tool's whole file body lives there).
 const TAIL_TOOL_INPUT_FIELDS: [&str; 7] =
     ["command", "file_path", "pattern", "path", "query", "url", "skill"];
 
+/// Digest a record's `toolUseResult` into a flat, few-dozen-byte stat object
+/// for the tool chip's header (diff ± counts, match counts, subagent totals…),
+/// so the phone can show the desktop's stat chips without downloading result
+/// bodies. Field names mirror the shapes catalogued in the desktop's
+/// `toolResults.ts`; `toolUseResult` is an internal Claude Code payload whose
+/// keys differ per tool, so every probe is shape-based and optional. Errored
+/// calls degrade `toolUseResult` to a bare string — no digest, the block's
+/// `is_error` bit already tells the story.
+fn tool_result_digest(meta: &Value) -> Option<Value> {
+    let obj = meta.as_object()?;
+    let mut d = Map::new();
+    // Edit / Write: unified-diff hunks → ±line counts.
+    if let Some(hunks) = obj.get("structuredPatch").and_then(Value::as_array) {
+        let (mut added, mut removed) = (0u64, 0u64);
+        for lines in hunks.iter().filter_map(|h| h.get("lines").and_then(Value::as_array)) {
+            for line in lines.iter().filter_map(Value::as_str) {
+                match line.as_bytes().first() {
+                    Some(b'+') => added += 1,
+                    Some(b'-') => removed += 1,
+                    _ => {}
+                }
+            }
+        }
+        d.insert("added".into(), added.into());
+        d.insert("removed".into(), removed.into());
+    }
+    // Bash: stdout/stderr line counts + interrupted flag (no exit code exists).
+    if let (Some(stdout), Some(stderr)) = (
+        obj.get("stdout").and_then(Value::as_str),
+        obj.get("stderr").and_then(Value::as_str),
+    ) {
+        let count = |s: &str| s.lines().filter(|l| !l.trim().is_empty()).count() as u64;
+        d.insert("stdoutLines".into(), count(stdout).into());
+        d.insert("stderrLines".into(), count(stderr).into());
+        if obj.get("interrupted") == Some(&Value::Bool(true)) {
+            d.insert("interrupted".into(), true.into());
+        }
+    }
+    // Agent subagent run totals.
+    if let Some(status) = obj.get("status").and_then(Value::as_str) {
+        d.insert("agentStatus".into(), status.into());
+        for (src, dst) in [
+            ("totalDurationMs", "durationMs"),
+            ("totalTokens", "tokens"),
+            ("totalToolUseCount", "toolUses"),
+        ] {
+            if let Some(v) = obj.get(src).filter(|v| v.is_number()) {
+                d.insert(dst.into(), v.clone());
+            }
+        }
+    }
+    // Grep / Glob search stats.
+    if let Some(files) = obj.get("numFiles").filter(|v| v.is_number()) {
+        d.insert("files".into(), files.clone());
+        if let Some(m) = obj
+            .get("numMatches")
+            .or_else(|| obj.get("totalMatches"))
+            .filter(|v| v.is_number())
+        {
+            d.insert("matches".into(), m.clone());
+        }
+        if obj.get("truncated") == Some(&Value::Bool(true)) {
+            d.insert("truncated".into(), true.into());
+        }
+    }
+    // WebSearch: result-link count.
+    if let Some(links) = obj.get("links").and_then(Value::as_array) {
+        d.insert("links".into(), (links.len() as u64).into());
+    }
+    // WebFetch: HTTP status + payload size.
+    if obj.get("url").is_some() {
+        if let Some(code) = obj.get("code").filter(|v| v.is_number()) {
+            d.insert("httpCode".into(), code.clone());
+        }
+        if let Some(bytes) = obj.get("bytes").filter(|v| v.is_number()) {
+            d.insert("bytes".into(), bytes.clone());
+        }
+    }
+    // TodoWrite: done/total of the new checklist.
+    if let Some(todos) = obj.get("newTodos").and_then(Value::as_array) {
+        let done = todos
+            .iter()
+            .filter(|t| t.get("status").and_then(Value::as_str) == Some("completed"))
+            .count() as u64;
+        d.insert("todoDone".into(), done.into());
+        d.insert("todoTotal".into(), (todos.len() as u64).into());
+    }
+    if d.is_empty() { None } else { Some(Value::Object(d)) }
+}
+
 /// Slim one content block to the fields the mobile renders. An `image` block
-/// keeps only its `type` — the client prints "[图片]" and never reads the
-/// base64 `source`, which is both the biggest and the least compressible part
-/// of a transcript.
+/// sheds its original base64 `source` — the biggest and least compressible part
+/// of a transcript — and carries a server-side ~256px JPEG thumbnail instead
+/// (`_thumb: true`); an undecodable image keeps only its `type` and renders as
+/// the "[图片]" placeholder. A `tool_result` block's body stays stripped, but
+/// any images inside it surface as a capped `_thumbs` list.
 fn slim_tail_block(block: &Value) -> Value {
     let Some(obj) = block.as_object() else {
         return block.clone();
@@ -828,6 +1020,36 @@ fn slim_tail_block(block: &Value) -> Value {
         if !slim_input.is_empty() {
             out.insert("input".into(), Value::Object(slim_input));
         }
+    }
+    match obj.get("type").and_then(Value::as_str) {
+        Some("image") => {
+            if let Some(thumb) = base64_image_source(block)
+                .and_then(|(media_type, data)| tail_thumb_from_base64(media_type, data))
+            {
+                out.insert(
+                    "source".into(),
+                    json!({ "type": "base64", "media_type": "image/jpeg", "data": thumb }),
+                );
+                out.insert("_thumb".into(), true.into());
+            }
+        }
+        Some("tool_result") => {
+            let thumbs: Vec<Value> = obj
+                .get("content")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|b| b.get("type").and_then(Value::as_str) == Some("image"))
+                .filter_map(base64_image_source)
+                .filter_map(|(media_type, data)| tail_thumb_from_base64(media_type, data))
+                .take(TAIL_THUMB_MAX_PER_RESULT)
+                .map(Value::from)
+                .collect();
+            if !thumbs.is_empty() {
+                out.insert("_thumbs".into(), Value::Array(thumbs));
+            }
+        }
+        _ => {}
     }
     Value::Object(out)
 }
@@ -869,12 +1091,24 @@ fn slim_tail_message(msg: &Value) -> Value {
             }
         }
         match message.get("content") {
-            // Block list: slim each block.
+            // Block list: slim each block. The record-level `toolUseResult`
+            // (stripped as a whole) is digested into a tiny `_digest` stat
+            // object on the record's `tool_result` block, keyed client-side by
+            // `tool_use_id` for the matching tool chip's header.
             Some(Value::Array(blocks)) => {
-                slim_msg.insert(
-                    "content".into(),
-                    Value::Array(blocks.iter().map(slim_tail_block).collect()),
-                );
+                let digest = obj.get("toolUseResult").and_then(tool_result_digest);
+                let slimmed = blocks.iter().map(|b| {
+                    let mut slim = slim_tail_block(b);
+                    if let (Some(d), Some("tool_result")) =
+                        (&digest, b.get("type").and_then(Value::as_str))
+                    {
+                        if let Some(o) = slim.as_object_mut() {
+                            o.insert("_digest".into(), d.clone());
+                        }
+                    }
+                    slim
+                });
+                slim_msg.insert("content".into(), Value::Array(slimmed.collect()));
             }
             // Plain string content is rendered verbatim.
             Some(other) => {
@@ -4413,5 +4647,145 @@ mod tests {
             block.get("content").is_none(),
             "tool_result bodies stay stripped from the skeleton stream"
         );
+    }
+
+    /// `toolUseResult` is stripped as a whole, but its stats survive as a tiny
+    /// `_digest` on the record's `tool_result` block — the phone's stat chips
+    /// without the bodies.
+    #[test]
+    fn slim_tail_digests_tool_result_stats() {
+        let record = |tool_use_result: Value| {
+            json!({
+                "type": "user",
+                "uuid": "u3",
+                "message": { "role": "user", "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_d", "content": "big blob" }
+                ]},
+                "toolUseResult": tool_use_result
+            })
+        };
+
+        // Edit/Write → ± line counts from structuredPatch.
+        let slim = slim_tail_messages(vec![record(json!({
+            "filePath": "/a/b.rs",
+            "originalFile": "fn main() {}\n",
+            "structuredPatch": [
+                { "oldStart": 1, "oldLines": 2, "newStart": 1, "newLines": 3,
+                  "lines": [" ctx", "+new line", "+another", "-old line"] }
+            ]
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["added"], json!(2));
+        assert_eq!(d["removed"], json!(1));
+        assert!(
+            slim[0].get("toolUseResult").is_none(),
+            "raw toolUseResult still stripped"
+        );
+
+        // Bash → stdout/stderr line counts.
+        let slim = slim_tail_messages(vec![record(json!({
+            "stdout": "one\ntwo\n\n", "stderr": "", "interrupted": false
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["stdoutLines"], json!(2));
+        assert_eq!(d["stderrLines"], json!(0));
+        assert!(d.get("interrupted").is_none(), "false flags stay omitted");
+
+        // Agent → status + totals.
+        let slim = slim_tail_messages(vec![record(json!({
+            "status": "completed", "totalDurationMs": 120000,
+            "totalTokens": 45000, "totalToolUseCount": 12, "prompt": "long ..."
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["agentStatus"], json!("completed"));
+        assert_eq!(d["durationMs"], json!(120000));
+        assert_eq!(d["tokens"], json!(45000));
+        assert_eq!(d["toolUses"], json!(12));
+
+        // Grep → files/matches; TodoWrite → done/total.
+        let slim = slim_tail_messages(vec![record(json!({
+            "numFiles": 3, "numMatches": 17, "truncated": true, "filenames": ["a", "b", "c"]
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["files"], json!(3));
+        assert_eq!(d["matches"], json!(17));
+        assert_eq!(d["truncated"], json!(true));
+
+        let slim = slim_tail_messages(vec![record(json!({
+            "oldTodos": [], "newTodos": [
+                { "content": "x", "status": "completed" },
+                { "content": "y", "status": "pending" }
+            ]
+        }))]);
+        let d = &slim[0]["message"]["content"][0]["_digest"];
+        assert_eq!(d["todoDone"], json!(1));
+        assert_eq!(d["todoTotal"], json!(2));
+
+        // Errored call: toolUseResult degrades to a bare string → no digest.
+        let slim = slim_tail_messages(vec![record(json!("Error: something broke"))]);
+        assert!(
+            slim[0]["message"]["content"][0].get("_digest").is_none(),
+            "string toolUseResult yields no digest"
+        );
+    }
+
+    /// Image blocks ship a server-side JPEG thumbnail instead of the original
+    /// base64 (or nothing renderable when the source doesn't decode), and
+    /// tool_result-embedded screenshots surface as a capped `_thumbs` list
+    /// while the result body stays stripped.
+    #[test]
+    fn slim_tail_thumbnails_images() {
+        use base64::Engine as _;
+        // A decodable ~600×400 gradient PNG standing in for a screenshot.
+        let mut buf = image::RgbImage::new(600, 400);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            *px = image::Rgb([(x / 4) as u8, (y / 2) as u8, ((x + y) / 8) as u8]);
+        }
+        let png_b64 = base64::engine::general_purpose::STANDARD.encode(png_of(buf));
+        let img_block = |data: &str| {
+            json!({ "type": "image",
+                    "source": { "type": "base64", "media_type": "image/png", "data": data } })
+        };
+
+        // Top-level image block → jpeg thumb under the hard cap, marked _thumb.
+        let slim = slim_tail_messages(vec![json!({
+            "type": "user", "uuid": "img1",
+            "message": { "role": "user", "content": [img_block(&png_b64)] }
+        })]);
+        let block = &slim[0]["message"]["content"][0];
+        assert_eq!(block["_thumb"], json!(true));
+        assert_eq!(block["source"]["media_type"], json!("image/jpeg"));
+        let thumb_bytes = base64::engine::general_purpose::STANDARD
+            .decode(block["source"]["data"].as_str().expect("thumb data"))
+            .expect("thumb decodes");
+        assert!(
+            thumb_bytes.len() <= TAIL_THUMB_HARD_CAP_BYTES,
+            "thumb ({}B) must respect the hard cap",
+            thumb_bytes.len()
+        );
+        image::load_from_memory(&thumb_bytes).expect("thumb is a valid image");
+
+        // Undecodable source → old type-only slim form, no source shipped.
+        let slim = slim_tail_messages(vec![json!({
+            "type": "user", "uuid": "img2",
+            "message": { "role": "user", "content": [img_block("AAAAAAAA")] }
+        })]);
+        let block = &slim[0]["message"]["content"][0];
+        assert!(block.get("source").is_none(), "junk image ships no source");
+        assert!(block.get("_thumb").is_none());
+
+        // tool_result screenshots → capped `_thumbs`, body still stripped.
+        let many: Vec<Value> = (0..5).map(|_| img_block(&png_b64)).collect();
+        let slim = slim_tail_messages(vec![json!({
+            "type": "user", "uuid": "img3",
+            "message": { "role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "toolu_img",
+                "content": many
+            }] }
+        })]);
+        let block = &slim[0]["message"]["content"][0];
+        assert!(block.get("content").is_none(), "result body stays stripped");
+        let thumbs = block["_thumbs"].as_array().expect("thumbs present");
+        assert_eq!(thumbs.len(), TAIL_THUMB_MAX_PER_RESULT, "thumb count capped");
     }
 }
