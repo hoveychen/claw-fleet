@@ -1,0 +1,18 @@
+h-intro	Nine terminals? Meet Claw Fleet.
+h-board	Every agent, subagent, token, and dollar. One live board.
+h-usage	Your burn rate should be visible before the bill becomes the plot twist.
+h-decisions	Risky command? Fleet explains the risk, then gives you a real choice.
+h-dispatch	Launch the next agent here. Terminal number ten can stay closed.
+h-handoff	Context ends. Handoff keeps the mission moving.
+h-mobile	Step away from your desk. The same live decision card fits in your pocket.
+h-report	Fleet turns the day into a report, and the lesson into memory.
+h-outro	Run the fleet. Keep your mind. Claw Fleet is free and open source.
+v-board	Nine agents, one place to look. Status, subagents, speed, and cost, live.
+v-usage	The bill should not be the plot twist. See the burn rate before the window resets.
+v-guard	It asked to run what, exactly? Fleet explains the risk before the command runs.
+v-decide	Stop answering in the terminal. Review the context, tap a choice, and keep moving.
+v-dispatch	Another task does not need another terminal. Launch the next agent from one composer.
+v-handoff	Context full, mission unfinished. Pass the plan, next step, and gotchas forward.
+v-mobile	Lunch break, agent still waiting? Approve the live decision from your phone.
+v-report	Standup in ten? Fleet turns the day into a useful, readable report.
+v-wiki	Solved once, remembered forever. Reports become linked, searchable knowledge.
