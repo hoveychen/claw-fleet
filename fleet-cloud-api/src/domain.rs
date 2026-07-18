@@ -71,6 +71,14 @@ pub struct Task {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskDetail {
+    #[serde(flatten)]
+    pub task: Task,
+    pub attempts: Vec<Value>,
+    pub decisions: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceSelector {
     #[serde(default)]
     pub workspace_id: Option<Uuid>,

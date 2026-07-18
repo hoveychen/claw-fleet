@@ -12,6 +12,7 @@ use futures_util::stream;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::str::FromStr;
 use std::{convert::Infallible, sync::Arc};
 use uuid::Uuid;
 
@@ -148,10 +149,56 @@ pub async fn get_task(
 ) -> Result<impl IntoResponse, ApiError> {
     let task = state
         .store
-        .get_task(scope_from_headers(&headers)?, task_id)
+        .get_task_detail(scope_from_headers(&headers)?, task_id)
         .await
         .map_err(ApiError::from_store)?;
     Ok(Json(task))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListTasksQuery {
+    status: Option<String>,
+    cursor: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TaskPage {
+    data: Vec<crate::domain::Task>,
+    next_cursor: Option<String>,
+    has_more: bool,
+}
+
+pub async fn list_tasks(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ListTasksQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let status = query
+        .status
+        .as_deref()
+        .map(crate::domain::TaskStatus::from_str)
+        .transpose()
+        .map_err(|detail| ApiError::bad_request("invalid_status", detail))?;
+    let offset = query
+        .cursor
+        .as_deref()
+        .unwrap_or("0")
+        .parse::<usize>()
+        .map_err(|_| ApiError::bad_request("invalid_cursor", "cursor is not valid"))?;
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let mut tasks = state
+        .store
+        .list_tasks(scope_from_headers(&headers)?, status, offset, limit + 1)
+        .await
+        .map_err(ApiError::from_store)?;
+    let has_more = tasks.len() > limit;
+    tasks.truncate(limit);
+    Ok(Json(TaskPage {
+        next_cursor: has_more.then(|| (offset + tasks.len()).to_string()),
+        has_more,
+        data: tasks,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
