@@ -10,6 +10,14 @@ import { emit } from "@tauri-apps/api/event";
 import type { SessionInfo } from "../types";
 import type { PromoScene } from "./promo-scene";
 import {
+  MOCK_QA_DELAY_MS,
+  MOCK_QA_MARKETPLACES,
+  MOCK_QA_PLUGINS,
+  mockQaDecisionHistory,
+  mockQaElicitationRequest,
+  shouldDelayMockQaCommand,
+} from "./qa";
+import {
   MOCK_SESSIONS,
   MOCK_MESSAGES,
   MOCK_CHAT_WORKSPACE,
@@ -109,7 +117,11 @@ function guardAnalysisFor(command: string): string {
 
 let spawnCounter = 0;
 
-function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
+function handleIPC(
+  cmd: string,
+  args: Record<string, unknown> = {},
+  qaMode = false,
+): unknown {
   switch (cmd) {
     case "list_sessions":
       return currentSessions;
@@ -243,9 +255,9 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return MOCK_WIKI_BODIES[(args.slug as string) ?? ""]
         ?? "# Not published\n\nThis document has no mock body.";
     case "list_plugins":
-      return [];
+      return qaMode ? MOCK_QA_PLUGINS : [];
     case "list_marketplaces":
-      return [];
+      return qaMode ? MOCK_QA_MARKETPLACES : [];
     case "list_workspace_procs":
       return [];
     case "clear_workspace_procs":
@@ -272,7 +284,9 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "get_workflow_trees":
       return [];
     case "list_session_decisions":
-      return [];
+      return qaMode
+        ? mockQaDecisionHistory(String(args.sessionId ?? ""))
+        : [];
     case "get_task_plans":
       return [];
     case "get_platform":
@@ -290,7 +304,12 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return null;
     }
     case "list_memories":
-      return MOCK_MEMORIES;
+      return qaMode
+        ? MOCK_MEMORIES.map((workspace) => ({
+            ...workspace,
+            source: "claude-code",
+          }))
+        : MOCK_MEMORIES;
     case "get_memory_content":
       return MOCK_MEMORY_CONTENT;
     case "get_memory_history":
@@ -603,12 +622,17 @@ function installScreenplayDriver() {
 
 // ── Install ─────────────────────────────────────────────────────────────────
 
-export function installMocks() {
+export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
   // Must call mockWindows first to set up __TAURI_INTERNALS__.metadata
   mockWindows("main");
 
   // Install IPC handler with event mocking enabled
-  mockIPC((cmd, args) => handleIPC(cmd, (args ?? {}) as Record<string, unknown>), {
+  mockIPC(async (cmd, args) => {
+    if (qaMode && shouldDelayMockQaCommand(cmd)) {
+      await delay(MOCK_QA_DELAY_MS);
+    }
+    return handleIPC(cmd, (args ?? {}) as Record<string, unknown>, qaMode);
+  }, {
     shouldMockEvents: true,
   });
 
@@ -719,8 +743,21 @@ export function installMocks() {
     return id;
   };
 
+  (window as any).__mock_qa_elicitation = () => {
+    const request = mockQaElicitationRequest();
+    emit("elicitation-request", request);
+    return request.id;
+  };
+
   console.log("[mock] Tauri mock layer installed — running in demo mode");
   console.log("[mock] Trigger decisions via __mock_guard() / __mock_elicitation() in DevTools");
+}
+
+export function triggerMockQaScenario(): void {
+  const driver = (window as unknown as { __mock_qa_elicitation?: () => string })
+    .__mock_qa_elicitation;
+  if (!driver) throw new Error("mock QA driver was not installed");
+  driver();
 }
 
 /** Fire a promo scene through the event bus installed during this exact boot. */
