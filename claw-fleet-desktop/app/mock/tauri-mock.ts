@@ -304,6 +304,31 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "get_sources_config":
       return MOCK_SOURCES_CONFIG;
 
+    // The settings panel dereferences these on render (`llmProviders.find`),
+    // so the default `return null` crashed the whole settings page in mock
+    // mode. Minimal truthy shapes keep it renderable for screenshots.
+    case "get_auto_resume_config":
+      return { enabled: true, maxWaitHours: 12 };
+
+    case "list_llm_providers":
+      return [
+        {
+          name: "claude",
+          displayName: "Claude Code",
+          available: true,
+          models: [],
+          defaultFastModel: "haiku",
+          defaultStandardModel: "sonnet",
+        },
+      ];
+    case "get_llm_config":
+      return {
+        provider: "claude",
+        fastModel: "haiku",
+        standardModel: "sonnet",
+        dailyReportPreference: "claude",
+      };
+
     case "list_remote_workspaces":
       return { workspaces: mockRemoteWorkspaces };
     case "upsert_remote_workspace": {
