@@ -16,6 +16,9 @@
  *           (App.css keeps them as aliases until every consumer is migrated), so
  *           nothing else would ever catch a fresh reference — it would just quietly
  *           re-open the split the alias was created to close.
+ *   [error] rgb(var(--x-rgb) / alpha) → exit 1. This app's *-rgb tokens use
+ *           comma-separated channels, so the slash-alpha form becomes invalid
+ *           after var() substitution. Use rgba(var(--x-rgb), alpha) instead.
  *   [warn]  bare hardcoded color literals in a .module.css outside a var()
  *           fallback → printed, does NOT fail the build (semantic colors and
  *           deliberate fixed canvases are legitimate; this is advisory only).
@@ -63,6 +66,7 @@ const RADIUS_RE = /border-radius:\s*(\d+(?:\.\d+)?px)\s*;/;
 
 const DEF_RE = /(--[A-Za-z0-9-]+)\s*:/g; // `--x:` — only ever a definition
 const USE_RE = /var\(\s*(--[A-Za-z0-9-]+)/g; // `var(--x` — a reference
+const INVALID_RGB_ALPHA_RE = /rgb\(\s*var\(\s*(--[A-Za-z0-9-]+-rgb)\s*\)\s*\//g;
 
 // Bare color literals for the advisory warning. Deliberately excludes anything
 // inside var(...) (handled by stripping var() first) and pure-black overlays
@@ -81,6 +85,7 @@ for (const f of files) {
 
 const undefinedRefs = []; // {file, line, token}
 const deprecatedRefs = []; // {file, line, token, replacement}
+const invalidRgbAlphaRefs = []; // {file, line, token}
 const bareColors = []; // {file, line, snippet}
 const offLadderRadii = []; // {file, line, value}
 
@@ -99,6 +104,10 @@ for (const f of files) {
       if (DEPRECATED.has(m[1]) && !isTokenSource) {
         deprecatedRefs.push({ file: rel, line: i + 1, token: m[1], replacement: DEPRECATED.get(m[1]) });
       }
+    }
+    INVALID_RGB_ALPHA_RE.lastIndex = 0;
+    while ((m = INVALID_RGB_ALPHA_RE.exec(line))) {
+      invalidRgbAlphaRefs.push({ file: rel, line: i + 1, token: m[1] });
     }
     // advisory: a border-radius that isn't on the ladder
     const rr = RADIUS_RE.exec(line);
@@ -139,6 +148,15 @@ if (deprecatedRefs.length) {
   console.error(`\n✖  ${deprecatedRefs.length} reference(s) to RETIRED CSS variables (removed from App.css — they resolve to nothing):`);
   for (const d of deprecatedRefs) console.error(`   ${d.file}:${d.line}  var(${d.token}) → use ${d.replacement}`);
   console.error("");
+  process.exit(1);
+}
+
+if (invalidRgbAlphaRefs.length) {
+  console.error(`\n✖  ${invalidRgbAlphaRefs.length} invalid rgb(var(--*-rgb) / alpha) declaration(s):`);
+  for (const r of invalidRgbAlphaRefs) {
+    console.error(`   ${r.file}:${r.line}  ${r.token} uses comma-separated channels`);
+  }
+  console.error("\n   Fix: use rgba(var(--*-rgb), alpha) with this app's comma-separated RGB tokens.\n");
   process.exit(1);
 }
 
