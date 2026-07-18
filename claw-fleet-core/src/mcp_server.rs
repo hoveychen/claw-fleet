@@ -176,6 +176,19 @@ fn current_session_id() -> String {
     crate::codex_launch::resolve_fleet_session_id_from_env().unwrap_or_default()
 }
 
+/// Workspace-name chip for the agent's `CLAUDE_PROJECT_DIR`. Empty when unset.
+fn project_dir_workspace_name() -> String {
+    workspace_name_from_project_dir(std::env::var("CLAUDE_PROJECT_DIR").ok().as_deref())
+}
+
+/// Pure core of [`project_dir_workspace_name`]: route the project dir through
+/// the shared helper so `.worktrees/<task-id>` collapses to the repo name (and
+/// the chat workspace is renamed) — matching the session list, not the raw
+/// basename. Split out so it is testable without mutating process env.
+fn workspace_name_from_project_dir(dir: Option<&str>) -> String {
+    dir.map(crate::session::workspace_name).unwrap_or_default()
+}
+
 fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     let questions: Vec<crate::mcp_ipc::FleetAskQuestion> =
@@ -217,14 +230,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 
     let request_id = crate::guard::new_request_id();
-    let workspace_name = std::env::var("CLAUDE_PROJECT_DIR")
-        .ok()
-        .and_then(|p| {
-            std::path::PathBuf::from(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-        })
-        .unwrap_or_default();
+    let workspace_name = project_dir_workspace_name();
 
     let mut req = crate::mcp_ipc::FleetAskRequest {
         id: request_id.clone(),
@@ -390,14 +396,7 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 
     let request_id = crate::guard::new_request_id();
-    let workspace_name = std::env::var("CLAUDE_PROJECT_DIR")
-        .ok()
-        .and_then(|p| {
-            std::path::PathBuf::from(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-        })
-        .unwrap_or_default();
+    let workspace_name = project_dir_workspace_name();
 
     let req = crate::mcp_a2ui_ipc::A2uiRenderRequest {
         id: request_id.clone(),
@@ -518,14 +517,7 @@ fn handle_permission_prompt_call(params: &Value) -> Result<Value, JsonRpcError> 
     let req = crate::permission_prompt_ipc::PermissionPromptRequest {
         id: request_id.clone(),
         session_id: current_session_id(),
-        workspace_name: std::env::var("CLAUDE_PROJECT_DIR")
-            .ok()
-            .and_then(|p| {
-                std::path::PathBuf::from(p)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-            })
-            .unwrap_or_default(),
+        workspace_name: project_dir_workspace_name(),
         ai_title: None,
         timestamp: chrono::Utc::now().to_rfc3339(),
         tool_name: tool_name.to_string(),
@@ -613,6 +605,25 @@ mod tests {
     fn call(line: &str) -> Option<Value> {
         let raw = handle_line(line)?;
         serde_json::from_str(&raw).ok()
+    }
+
+    #[test]
+    fn project_dir_workspace_name_collapses_worktree_to_repo() {
+        // A worktree CLAUDE_PROJECT_DIR must chip the decision/permission card
+        // with the repo name, not the task-id leaf — same contract as the
+        // session list. Buggy behaviour took only PathBuf::file_name().
+        assert_eq!(
+            workspace_name_from_project_dir(Some(
+                "/Users/x/claude-fleet/.worktrees/some-plan"
+            )),
+            "claude-fleet"
+        );
+        // Non-worktree path still yields its basename; unset stays empty.
+        assert_eq!(
+            workspace_name_from_project_dir(Some("/Users/x/claude-fleet")),
+            "claude-fleet"
+        );
+        assert_eq!(workspace_name_from_project_dir(None), "");
     }
 
     #[test]
