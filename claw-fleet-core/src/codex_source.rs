@@ -1476,11 +1476,10 @@ fn build_session_from_sqlite(
             )
         };
 
-    let workspace_name = PathBuf::from(&thread.cwd)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("codex")
-        .to_string();
+    // Reuse the shared helper so codex sessions collapse `.worktrees/<task-id>`
+    // to the repo name (and get the chat-workspace rename) identically to the
+    // Claude path — see session::workspace_name.
+    let workspace_name = crate::session::workspace_name(&thread.cwd);
 
     // Parse the source field (may be plain string or JSON for subagents).
     let source_info = parse_source(&thread.source);
@@ -1814,6 +1813,72 @@ mod tests {
             info.status,
             S::WaitingInput,
             "an in-flight turn whose task_started scrolled past the tail window must not read as Idle"
+        );
+    }
+
+    #[test]
+    fn parse_codex_session_worktree_cwd_uses_repo_name() {
+        // Fleet develops plans inside `<repo>/.worktrees/<task-id>`. A codex
+        // session whose cwd is such a checkout belongs to the repo, so its
+        // workspace_name must be the repo (`claude-fleet`), NOT the task-id
+        // leaf (`fix-codex-worktree-repo-name`) — matching the Claude path
+        // that goes through `session::workspace_name`. Buggy behaviour took
+        // only `PathBuf::file_name()` and displayed the branch/plan name.
+        use std::io::Write as _;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-07-18T13:00:00.000Z","type":"session_meta","payload":{{"id":"t-worktree","cwd":"/Users/hoveychen/workspace/claude-fleet/.worktrees/fix-codex-worktree-repo-name","originator":"fleet","source":"exec"}}}}"#
+        )
+        .unwrap();
+        f.flush().unwrap();
+
+        let info = parse_codex_session(f.path(), &[]).expect("rollout must parse");
+        assert_eq!(
+            info.workspace_name, "claude-fleet",
+            "a codex worktree checkout must be named after the repo, not the task-id leaf"
+        );
+    }
+
+    #[test]
+    fn sqlite_worktree_cwd_uses_repo_name() {
+        // Same worktree-stripping contract for the SQLite-backed path
+        // (build_session_from_sqlite) that feeds the thread listing.
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let dir = std::env::temp_dir()
+            .join(format!("codex_worktree_name_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rollout = dir.join("rollout-worktree.jsonl");
+        std::fs::write(
+            &rollout,
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"hi\"},\"timestamp\":\"t0\"}\n",
+        )
+        .unwrap();
+
+        let thread = SqliteThread {
+            id: "019f-worktree".to_string(),
+            rollout_path: rollout.to_string_lossy().to_string(),
+            created_at: now_secs - 60,
+            updated_at: now_secs - 30,
+            source: "codex".to_string(),
+            cwd: "/Users/hoveychen/workspace/claude-fleet/.worktrees/fix-codex-worktree-repo-name"
+                .to_string(),
+            title: String::new(),
+            model: None,
+            tokens_used: 0,
+            agent_nickname: None,
+            agent_role: None,
+            archived: false,
+            first_user_message: "hi".to_string(),
+        };
+
+        let info = build_session_from_sqlite(&thread, &[]).expect("should build a SessionInfo");
+        assert_eq!(
+            info.workspace_name, "claude-fleet",
+            "a codex worktree checkout must be named after the repo, not the task-id leaf"
         );
     }
 
@@ -3766,11 +3831,9 @@ fn parse_codex_session(
         .map(|s| s.to_string())
         .unwrap_or_else(|| "codex".to_string());
 
-    let workspace_name = PathBuf::from(&workspace_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("codex")
-        .to_string();
+    // Reuse the shared helper (worktree-stripping + chat-workspace rename),
+    // matching the Claude path — see session::workspace_name.
+    let workspace_name = crate::session::workspace_name(&workspace_path);
 
     let agent_nickname = meta
         .and_then(|m| m.get("agent_nickname").and_then(|n| n.as_str()))
