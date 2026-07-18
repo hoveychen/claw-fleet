@@ -10,7 +10,7 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { canResumeSession, canEnqueueSession, shouldFollowSession, LIVE_STATUSES } from "../types";
+import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
 import { AgentNavProvider } from "./AgentNavContext";
@@ -283,6 +283,7 @@ export function SessionDetail({
     if (!session) return null;
     return sessions.find((s) => s.id === session.id) ?? session;
   }, [session, sessions]);
+  const preferredTitle = liveSession ? preferredSessionTitle(liveSession) : null;
   const pendingDecisions = useDecisionStore((s) => s.decisions);
   const inlineFleetAsk = useMemo(
     () => inlineCodexFleetAsk(liveSession, pendingDecisions),
@@ -698,9 +699,9 @@ export function SessionDetail({
             <div className={styles.header_row}>
               <div
                 className={styles.header_title}
-                title={liveSession.aiTitle || liveSession.workspacePath}
+                title={preferredTitle || liveSession.workspacePath}
               >
-                {liveSession.aiTitle || liveSession.workspaceName}
+                {preferredTitle || liveSession.workspaceName}
               </div>
               <SessionHeaderMenu
                 sessionId={liveSession.id}
@@ -716,7 +717,7 @@ export function SessionDetail({
             </div>
             <div className={styles.meta_row}>
               {/* Only when the title line isn't already the workspace name. */}
-              {liveSession.aiTitle && (
+              {preferredTitle && preferredTitle !== liveSession.workspaceName && (
                 <span
                   className={styles.workspace_chip}
                   title={liveSession.workspacePath}
