@@ -396,7 +396,22 @@ body {
 
 input, button {
   font-family: inherit;
-  outline: none;
+}
+
+/* Never erase keyboard focus globally. Most controls use quiet borders and
+   transparent backgrounds, so the platform's default ring is too inconsistent
+   across WebKit/WebView2. Keep one visible, theme-aware baseline for native
+   controls and the ARIA widgets that intentionally behave like buttons/tabs. */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="option"]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* Drag region + Windows caption / resize chrome live inside
