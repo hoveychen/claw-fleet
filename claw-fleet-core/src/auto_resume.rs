@@ -100,7 +100,9 @@ fn metric_for_limit(limit_type: crate::rate_limit_parser::RateLimitType) -> Opti
 ///   utilization says nothing about recovery — this guard is what makes a
 ///   cache-only, no-extra-request check safe even when the sampler is stale.
 /// - the metric matching this limit type has dropped below
-///   [`RECOVERED_UTILIZATION`].
+///   [`RECOVERED_UTILIZATION`] — or is absent from a snapshot whose other
+///   metrics are populated (the usage API omits zero-usage windows, so
+///   absence on a successful sample means the window is empty).
 ///
 /// This covers both a plain window reset and a foxy-switcher account swap:
 /// either way the *live* account's utilization for that metric is now low.
@@ -119,7 +121,21 @@ pub fn limit_recovered(
         "seven_day_sonnet" => snap.seven_day_sonnet,
         _ => None,
     };
-    matches!(util, Some(u) if u < RECOVERED_UTILIZATION)
+    match util {
+        Some(u) => u < RECOVERED_UTILIZATION,
+        // The usage API omits a window with zero usage in it, so a fresh
+        // snapshot whose other metrics are populated but whose target metric
+        // is absent means this window is *empty* — the strongest recovery
+        // signal (a just-swapped-in account has no five_hour entry at all;
+        // observed 2026-07-18, where this gate stayed shut for 12 minutes
+        // until another session burned usage into the window). A fully-empty
+        // snapshot proves nothing — could be a failed sample — and stays inert.
+        None => {
+            [snap.five_hour, snap.seven_day, snap.seven_day_sonnet]
+                .iter()
+                .any(|m| m.is_some())
+        }
+    }
 }
 
 /// Decide whether a rate-limited session is eligible for auto-resume *right now*.
@@ -580,6 +596,33 @@ mod tests {
     fn limit_recovered_false_when_metric_still_high() {
         let rl = mk_rl(60, 5);
         let snap = usage(Utc::now().timestamp_millis(), Some(0.97));
+        assert!(!limit_recovered(&rl, Some(&snap)));
+    }
+
+    #[test]
+    fn limit_recovered_true_when_target_metric_absent_but_snapshot_populated() {
+        // The usage API omits a window that has zero usage: right after an
+        // account swap the fresh account's response carries seven_day but no
+        // five_hour at all (observed 2026-07-18 20:35–20:47, where the gate
+        // stayed shut for 12 minutes). An absent target metric on an
+        // otherwise-populated fresh snapshot means the window is empty — the
+        // strongest recovery signal, not a missing one.
+        let rl = mk_rl(60, 5); // SessionLimit → five_hour metric
+        let snap = crate::account::UsageHistoryPoint {
+            ts: Utc::now().timestamp_millis(),
+            five_hour: None,
+            seven_day: Some(0.59),
+            ..Default::default()
+        };
+        assert!(limit_recovered(&rl, Some(&snap)));
+    }
+
+    #[test]
+    fn limit_recovered_false_when_snapshot_fully_empty() {
+        // A snapshot with no metrics at all proves nothing about the account
+        // (failed or degenerate sample) — it must NOT be read as recovery.
+        let rl = mk_rl(60, 5);
+        let snap = usage(Utc::now().timestamp_millis(), None);
         assert!(!limit_recovered(&rl, Some(&snap)));
     }
 
