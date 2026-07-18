@@ -1,8 +1,54 @@
 use axum::{routing::get, Json, Router};
 use serde_json::{json, Value};
+use sqlx::PgPool;
 
-pub fn router() -> Router {
-    Router::new().route("/health/live", get(live))
+use crate::routes;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub pool: PgPool,
+    pub api_key_pepper: Vec<u8>,
+}
+
+impl AppState {
+    pub fn new(pool: PgPool, api_key_pepper: Vec<u8>) -> Self {
+        Self {
+            pool,
+            api_key_pepper,
+        }
+    }
+}
+
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/health/live", get(live))
+        .route(
+            "/tasks",
+            get(routes::tasks::list_tasks).post(routes::tasks::create_task),
+        )
+        .route("/tasks/{task_id}", get(routes::tasks::get_task))
+        .route(
+            "/tasks/{task_id}/messages",
+            axum::routing::post(routes::tasks::append_message),
+        )
+        .route(
+            "/tasks/{task_id}/cancel",
+            axum::routing::post(routes::tasks::cancel_task),
+        )
+        .route(
+            "/tasks/{task_id}/pause",
+            axum::routing::post(routes::tasks::pause_task),
+        )
+        .route(
+            "/tasks/{task_id}/resume",
+            axum::routing::post(routes::tasks::resume_task),
+        )
+        .route(
+            "/tasks/{task_id}/events",
+            get(routes::tasks::list_task_events),
+        )
+        .route("/events/stream", get(routes::events::stream_events))
+        .with_state(state)
 }
 
 async fn live() -> Json<Value> {
@@ -13,11 +59,15 @@ async fn live() -> Json<Value> {
 mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
+    use sqlx::postgres::PgPoolOptions;
     use tower::ServiceExt;
 
     #[tokio::test]
-    async fn live_route_returns_ok() {
-        let response = super::router()
+    async fn live_route_returns_ok_without_touching_database() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://fleet:unused@127.0.0.1:1/fleet")
+            .unwrap();
+        let response = super::router(super::AppState::new(pool, vec![b'x'; 32]))
             .oneshot(Request::get("/health/live").body(Body::empty()).unwrap())
             .await
             .unwrap();
