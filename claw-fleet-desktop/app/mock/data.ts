@@ -1285,6 +1285,55 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         usage: { input_tokens: 4200, output_tokens: 180 },
       },
     },
+    // A Read of an image whose tool_result was trimmed for transport — the
+    // real shape the Rust `message_trim` ships for a big screenshot: base64
+    // rewritten to a preview + marker, message flagged `_fleetTruncated`. The
+    // card must show a truncation placeholder collapsed and recover the real
+    // image via `get_tool_result_full` on expand (handled in tauri-mock).
+    {
+      type: "assistant",
+      uuid: "msg-11c",
+      timestamp: new Date(NOW - 6 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-img-trimmed",
+            name: "Read",
+            input: { file_path: "/Users/demo/workspace/claw-fleet/docs/screenshot.png" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 5000, output_tokens: 60 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-11d",
+      _fleetTruncated: true,
+      timestamp: new Date(NOW - 6 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-img-trimmed",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/png",
+                  data: "iVBORw0KGgoAAAANSUhEUg\n\n…[Fleet truncated 196608 bytes — expand to load full output]",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
     // A live tail run: two adjacent work records whose last record hasn't
     // terminated. With the session in a working status this is the last render
     // unit, so the band opens itself, the headline shimmers, the unfinished

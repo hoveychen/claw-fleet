@@ -125,6 +125,27 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       const all = getMessagesForSession(session?.id ?? "");
       return all.slice(Math.max(0, all.length - tail));
     }
+    case "get_tool_result_full": {
+      // Pairs with the trimmed image Read in mock data (tool-img-trimmed):
+      // return the untrimmed payload the way the Rust extractor would.
+      if (args.toolUseId === "tool-img-trimmed") {
+        return {
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQklEQVR4nO3OQQ0AIAwAsUlEIhKRgAuOR5MK6Kx9vjL5QEhISKgeCAkJCdUDISEhoXogJCQkVA+EhISE6oGQkNBjF+yE4PHth+9DAAAAAElFTkSuQmCC",
+              },
+            },
+          ],
+          toolUseResult: null,
+        };
+      }
+      throw new Error(`tool_use_id ${args.toolUseId as string} not found`);
+    }
+
     case "start_watching_session":
     case "stop_watching_session":
     case "set_locale":
