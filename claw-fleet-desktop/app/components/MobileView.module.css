@@ -110,7 +110,7 @@
 
 .devicePush[data-on="yes"] {
   color: var(--color-success);
-  background: rgb(var(--color-success-rgb) / 0.12);
+  background: rgba(var(--color-success-rgb), 0.12);
 }
 
 .deviceCommit {
@@ -127,7 +127,7 @@
   padding: 2px 7px;
   border-radius: var(--radius-pill);
   color: var(--color-warning);
-  background: rgb(var(--color-warning-rgb) / 0.14);
+  background: rgba(var(--color-warning-rgb), 0.14);
   cursor: help;
 }
 
@@ -239,7 +239,7 @@
 }
 
 .dangerButton {
-  border: 1px solid rgb(var(--color-error-rgb) / 0.4);
+  border: 1px solid rgba(var(--color-error-rgb), 0.4);
   color: var(--color-error);
   border-radius: var(--radius-md);
   padding: 7px 14px;
@@ -249,7 +249,7 @@
 }
 
 .dangerButton:hover {
-  background: rgb(var(--color-error-rgb) / 0.08);
+  background: rgba(var(--color-error-rgb), 0.08);
 }
 
 .dangerHint {

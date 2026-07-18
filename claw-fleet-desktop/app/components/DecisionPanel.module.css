@@ -860,7 +860,7 @@
 }
 
 .btn_block:hover {
-  background: rgb(var(--color-error-rgb) / 0.08);
+  background: rgba(var(--color-error-rgb), 0.08);
   color: var(--color-error);
   border-color: var(--color-error);
 }
