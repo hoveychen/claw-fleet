@@ -1971,6 +1971,59 @@ mod tests {
         assert_eq!(assistant_texts, vec!["partial reply".to_string()]);
     }
 
+    /// The incremental tail path re-normalizes a growing window each poll, and
+    /// during a live turn a reply first appears as an `agent_message` event and
+    /// is later replaced by its `response_item` copy. Both must normalize to the
+    /// SAME `uuid` (content-derived, timestamp-excluded) so the client dedups the
+    /// transition instead of rendering the reply twice. This is the core of the
+    /// codex mobile/desktop live-tail fix.
+    #[test]
+    fn normalize_messages_uuid_is_stable_across_event_to_response_item_swap() {
+        let uuid_of = |lines: Vec<serde_json::Value>| -> String {
+            let out = normalize_messages(lines);
+            let m = out
+                .iter()
+                .find(|m| m.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+                .expect("an assistant message");
+            m.get("uuid")
+                .and_then(|u| u.as_str())
+                .expect("normalized messages carry a uuid")
+                .to_string()
+        };
+
+        // Poll 1: only the live event copy has landed (different timestamp).
+        let live = uuid_of(vec![json!({
+            "type":"event_msg",
+            "payload":{"type":"agent_message","message":"the reply"},
+            "timestamp":"t-live"
+        })]);
+        // Poll 2: the canonical response_item copy landed; normalize suppresses
+        // the event and emits the response_item — different timestamp, same text.
+        let persisted = uuid_of(vec![
+            json!({"type":"event_msg","payload":{"type":"agent_message","message":"the reply"},"timestamp":"t-live"}),
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the reply"}]},"timestamp":"t-persisted"}),
+        ]);
+
+        assert_eq!(live, persisted, "same reply must keep one stable uuid across the live→persisted swap");
+    }
+
+    /// A turn that genuinely repeats the identical text must NOT collapse to one
+    /// message: the per-hash occurrence counter keeps their uuids distinct.
+    #[test]
+    fn normalize_messages_uuid_disambiguates_repeated_identical_text() {
+        let out = normalize_messages(vec![
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]},"timestamp":"t1"}),
+            json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]},"timestamp":"t2"}),
+        ]);
+        let uuids: Vec<&str> = out
+            .iter()
+            .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+            .filter_map(|m| m.get("uuid").and_then(|u| u.as_str()))
+            .collect();
+        assert_eq!(uuids.len(), 2, "two replies expected");
+        assert_ne!(uuids[0], uuids[1], "repeated identical text must get distinct uuids");
+    }
+
     #[test]
     fn normalize_messages_joins_all_reasoning_summary_segments() {
         let lines = vec![json!({
@@ -4773,7 +4826,81 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
         }
     }
 
+    assign_stable_uuids(&mut messages);
     messages
+}
+
+/// Stamp each normalized Codex message with a stable, position-independent
+/// `uuid` derived from its content, so the incremental tail path (which
+/// re-normalizes a growing window each poll — see `CodexSource::tail_incremental`)
+/// and the initial full tail agree on message identity. Both the mobile
+/// `appendUnique` and the desktop message store dedup on `uuid`.
+///
+/// Why content-derived and *not* timestamp/position-derived: Codex persists
+/// every finalized reply twice — first an `event_msg/agent_message` mirror
+/// (kept live while the turn is in flight), then the canonical
+/// `response_item/message` copy that `normalize_messages` swaps in and suppresses
+/// the event for. The two copies carry *different* timestamps and land at
+/// different rollout offsets, but normalize to the *same* text. Hashing only
+/// `type` + the `message` body (timestamp is a sibling field, excluded) gives
+/// both copies the same uuid, so the live→persisted transition dedups on the
+/// client instead of rendering the reply twice — the exact double-display this
+/// fix exists to avoid. A per-hash occurrence counter disambiguates a turn that
+/// genuinely repeats identical text, so those are not collapsed into one.
+fn assign_stable_uuids(messages: &mut [Value]) {
+    use std::hash::{Hash, Hasher};
+    let mut seen: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
+    for m in messages.iter_mut() {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        message_identity(m).hash(&mut h);
+        let base = h.finish();
+        let occ = seen.entry(base).or_insert(0);
+        let uuid = format!("codex-{base:016x}-{occ}");
+        *occ += 1;
+        if let Some(obj) = m.as_object_mut() {
+            obj.insert("uuid".to_string(), json!(uuid));
+        }
+    }
+}
+
+/// A canonical identity string for a normalized message: its `type`, role, and
+/// the salient content (visible text, reasoning, tool name/id) — deliberately
+/// excluding volatile decorations that differ between the two rollout copies of
+/// one reply. The `agent_message` event copy always stamps `stop_reason` and the
+/// `response_item` copy only does so when `end_turn` is set; the response_item
+/// copy may also carry a `message.id`. Hashing the whole message body would make
+/// those two copies diverge, defeating the dedup. So we hash only what makes a
+/// message *the same message* to a reader.
+fn message_identity(m: &Value) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(m.get("type").and_then(Value::as_str).unwrap_or("").to_string());
+    // tool_result identity lives at the top level, not under `message`.
+    if let Some(tid) = m.get("tool_use_id").and_then(Value::as_str) {
+        parts.push(format!("tuid={tid}"));
+    }
+    if let Some(msg) = m.get("message") {
+        if let Some(role) = msg.get("role").and_then(Value::as_str) {
+            parts.push(format!("role={role}"));
+        }
+        if let Some(blocks) = msg.get("content").and_then(Value::as_array) {
+            for b in blocks {
+                let bt = b.get("type").and_then(Value::as_str).unwrap_or("");
+                parts.push(format!("b={bt}"));
+                for key in ["text", "thinking", "name", "id", "tool_use_id"] {
+                    if let Some(v) = b.get(key).and_then(Value::as_str) {
+                        parts.push(format!("{key}={v}"));
+                    }
+                }
+                // tool_use input identifies the call beyond its name.
+                if let Some(input) = b.get("input") {
+                    parts.push(format!("input={input}"));
+                }
+            }
+        } else if let Some(s) = msg.get("content").and_then(Value::as_str) {
+            parts.push(format!("content={s}"));
+        }
+    }
+    parts.join("\u{1f}")
 }
 
 // ── AgentSource implementation ──────────────────────────────────────────────
