@@ -131,6 +131,7 @@ export class MockRelayClient extends RelayClient {
       case "interrupt":
       case "resume_session":
       case "enqueue_message":
+      case "cancel_pending_message":
       case "spawn_session":
         return { ok: true };
       // session_search / wiki_search / usage_history / repo_* — no fixture.
