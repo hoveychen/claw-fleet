@@ -545,12 +545,12 @@
 }
 
 .history_tool_write {
-  background: rgb(var(--color-success-rgb) / 0.15);
+  background: rgba(var(--color-success-rgb), 0.15);
   color: var(--color-success);
 }
 
 .history_tool_edit {
-  background: rgb(var(--color-warning-rgb) / 0.15);
+  background: rgba(var(--color-warning-rgb), 0.15);
   color: var(--color-warning);
 }
 
@@ -579,7 +579,7 @@
 }
 
 .diff_old {
-  background: rgb(var(--color-error-rgb) / 0.1);
+  background: rgba(var(--color-error-rgb), 0.1);
   color: var(--color-error);
   display: block;
   padding: 2px 4px;
@@ -588,7 +588,7 @@
 }
 
 .diff_new {
-  background: rgb(var(--color-success-rgb) / 0.1);
+  background: rgba(var(--color-success-rgb), 0.1);
   color: var(--color-success);
   display: block;
   padding: 2px 4px;
@@ -705,8 +705,8 @@
 
 .lesson_remove:hover:not(:disabled) {
   color: var(--color-error);
-  border-color: rgb(var(--color-error-rgb) / 0.5);
-  background: rgb(var(--color-error-rgb) / 0.08);
+  border-color: rgba(var(--color-error-rgb), 0.5);
+  background: rgba(var(--color-error-rgb), 0.08);
 }
 
 .lesson_remove:disabled {
