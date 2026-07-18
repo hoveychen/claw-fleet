@@ -1,6 +1,7 @@
 //! Customer-hosted Fleet Runner protocol boundary.
 
 pub mod protocol;
+pub mod spool;
 
 pub const RUNNER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
