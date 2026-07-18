@@ -125,6 +125,32 @@ pub(crate) fn browse_dir(
     state.backend.read().unwrap().browse_dir(path)
 }
 
+/// Remote-workspace registry (rca-routed workspaces) — list / upsert / remove.
+/// All three delegate through the backend: the registry lives on the host
+/// where sessions spawn (the probe host under a remote connection).
+#[tauri::command(async)]
+pub(crate) fn list_remote_workspaces(
+    state: tauri::State<'_, AppState>,
+) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
+    state.backend.read().unwrap().list_remote_workspaces()
+}
+
+#[tauri::command(async)]
+pub(crate) fn upsert_remote_workspace(
+    state: tauri::State<'_, AppState>,
+    entry: claw_fleet_core::remote_workspace::RemoteWorkspace,
+) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+    state.backend.read().unwrap().upsert_remote_workspace(entry)
+}
+
+#[tauri::command(async)]
+pub(crate) fn remove_remote_workspace(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+    state.backend.read().unwrap().remove_remote_workspace(path)
+}
+
 #[tauri::command(async)]
 pub(crate) fn get_auto_resume_config(
     state: tauri::State<'_, AppState>,

@@ -710,6 +710,13 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // the session appears via the scanner once its JSONL exists.
             crate::routes::SPAWN_SESSION if request.method() == &tiny_http::Method::Post => route_spawn_session(ctx, request, &query, json_header, path),
 
+            // Remote-workspace registry (rca): list / upsert / remove.
+            crate::routes::REMOTE_WORKSPACES => route_remote_workspaces(ctx, request, &query, json_header, path),
+
+            crate::routes::REMOTE_WORKSPACES_UPSERT if request.method() == &tiny_http::Method::Post => route_remote_workspaces_upsert(ctx, request, &query, json_header, path),
+
+            crate::routes::REMOTE_WORKSPACES_REMOVE if request.method() == &tiny_http::Method::Post => route_remote_workspaces_remove(ctx, request, &query, json_header, path),
+
             crate::routes::SKILL_HISTORY => route_skill_history(ctx, request, &query, json_header, path),
 
             crate::routes::WORKFLOW_TREES => route_workflow_trees(ctx, request, &query, json_header, path),

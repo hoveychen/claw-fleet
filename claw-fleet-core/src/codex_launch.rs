@@ -39,7 +39,7 @@
 //! pipe from filling (which would block the child).
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -879,6 +879,9 @@ pub fn spawn_new_codex_session(
         return Err("prompt is required".to_string());
     }
     let workspace_path = normalize_workspace_path(workspace_path)?;
+    // A registered remote workspace's local mirror may not exist yet — create
+    // it before the is_dir gate (identity path mapping; see remote_workspace).
+    crate::remote_workspace::ensure_local_mirror(&workspace_path)?;
     if !Path::new(&workspace_path).is_dir() {
         return Err(format!("Workspace directory not found: {workspace_path}"));
     }
@@ -953,7 +956,8 @@ pub fn spawn_new_codex_session(
     // the launch token — the thread id isn't minted yet.
     let (stdout_sink, sink_path) = open_codex_stdout_sink(&launch_token)?;
 
-    let mut cmd = crate::process_util::command(&codex);
+    let (program, args, rca_envs) = wrap_codex_launch(codex, args, &workspace_path)?;
+    let mut cmd = crate::process_util::command(&program);
     cmd.args(&args)
         .current_dir(&workspace_path)
         // MUST be null: `codex exec` otherwise blocks reading stdin forever.
@@ -968,6 +972,10 @@ pub fn spawn_new_codex_session(
     // this covers the signal — see process_util docs).
     crate::process_util::detach_process_group(&mut cmd);
     apply_codex_launch_env(&mut cmd);
+    // rca run-mode env (RCC_LOCAL_BINS); empty for local workspaces.
+    for (k, v) in &rca_envs {
+        cmd.env(k, v);
+    }
     cmd.env(FLEET_CODEX_LAUNCH_TOKEN_ENV, &launch_token);
 
     let mut child = cmd
@@ -1108,6 +1116,23 @@ pub fn build_codex_resume_args(
     args
 }
 
+/// Registered remote workspace? Rewrite the codex launch through rca —
+/// program swap + verbatim argv + `--code` (see [`crate::remote_workspace`]).
+/// Returns `(program, args, rca_envs)`; local workspaces pass through
+/// unchanged with no extra env.
+fn wrap_codex_launch(
+    codex: PathBuf,
+    args: Vec<String>,
+    workspace_path: &str,
+) -> Result<(PathBuf, Vec<String>, Vec<(String, String)>), String> {
+    match crate::remote_workspace::wrap_launch(workspace_path, &codex.to_string_lossy(), &args)
+        .map_err(|e| format!("remote workspace {workspace_path}: {e}"))?
+    {
+        Some(w) => Ok((PathBuf::from(w.program), w.args, w.envs)),
+        None => Ok((codex, args, Vec::new())),
+    }
+}
+
 /// Headlessly resume an existing Codex thread: spawns
 /// `codex exec resume <thread-id> --json … -- "<prompt>"` detached in
 /// `workspace_path`, then returns once the child is launched. The Codex
@@ -1134,6 +1159,8 @@ pub fn resume_codex_session(
     let prompt = prompt.trim();
     let prompt = if prompt.is_empty() { "continue" } else { prompt };
     let workspace_path = normalize_workspace_path(workspace_path)?;
+    // Same remote-workspace mirror guarantee as the new-session path above.
+    crate::remote_workspace::ensure_local_mirror(&workspace_path)?;
     if !Path::new(&workspace_path).is_dir() {
         return Err(format!("Workspace directory not found: {workspace_path}"));
     }
@@ -1206,7 +1233,8 @@ pub fn resume_codex_session(
     // Keyed by the thread id (known up front on resume).
     let (stdout_sink, sink_path) = open_codex_stdout_sink(session_id)?;
 
-    let mut cmd = crate::process_util::command(&codex);
+    let (program, args, rca_envs) = wrap_codex_launch(codex, args, &workspace_path)?;
+    let mut cmd = crate::process_util::command(&program);
     cmd.args(&args)
         .current_dir(&workspace_path)
         // MUST be null: `codex exec` otherwise blocks reading stdin forever.
@@ -1218,6 +1246,10 @@ pub fn resume_codex_session(
     // Own process group — same rationale as the spawn path above.
     crate::process_util::detach_process_group(&mut cmd);
     apply_codex_launch_env(&mut cmd);
+    // rca run-mode env (RCC_LOCAL_BINS); empty for local workspaces.
+    for (k, v) in &rca_envs {
+        cmd.env(k, v);
+    }
     // Resume knows the thread id up front (it *is* the one being resumed), so
     // stamp it directly — no launch-token indirection needed. The child's
     // `read_fleet_session_id` reads this as its session id.
@@ -2229,5 +2261,75 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&rotated);
+    }
+}
+
+#[cfg(test)]
+mod remote_workspace_wrap_tests {
+    use std::path::PathBuf;
+
+    /// Local workspaces must pass through wrap_codex_launch untouched — same
+    /// binary, same argv, no rca env.
+    #[test]
+    fn local_workspace_passes_through_unchanged() {
+        let lock = crate::session::fleet_home_lock();
+        let home = std::env::temp_dir().join(format!(
+            "fleet-codexwrap-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized on the process-wide FLEET_HOME lock.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+
+        let ws = home.join("local-repo");
+        std::fs::create_dir_all(&ws).unwrap();
+        let args = vec!["exec".to_string(), "--json".to_string()];
+        let (program, out_args, envs) = super::wrap_codex_launch(
+            PathBuf::from("/opt/codex"),
+            args.clone(),
+            ws.to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(program, PathBuf::from("/opt/codex"));
+        assert_eq!(out_args, args);
+        assert!(envs.is_empty());
+
+        // And a registered remote workspace swaps the program and appends --code.
+        let rws = home.join("remote-repo");
+        let fake_rca = home.join("fake-rca");
+        std::fs::write(&fake_rca, "").unwrap();
+        crate::remote_workspace::upsert(crate::remote_workspace::RemoteWorkspace {
+            path: rws.to_string_lossy().into_owned(),
+            pairing_code: "rca1.CODEX".to_string(),
+            label: None,
+            rca_path: Some(fake_rca.to_string_lossy().into_owned()),
+        })
+        .unwrap();
+        let (program, out_args, envs) = super::wrap_codex_launch(
+            PathBuf::from("/opt/codex"),
+            args.clone(),
+            rws.to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(program, fake_rca);
+        assert_eq!(
+            out_args,
+            ["/opt/codex", "exec", "--json", "--code", "rca1.CODEX"].map(String::from).to_vec()
+        );
+        assert!(envs.iter().any(|(k, _)| k == "RCC_LOCAL_BINS"));
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        drop(lock);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

@@ -131,7 +131,8 @@
     "error_workspace_required": "请先选择工作目录。",
     "error_prompt_required": "初始提示词不能为空。",
     "starting": "正在启动会话…",
-    "start_timeout": "启动较慢，可再等等，或从左侧列表里查看"
+    "start_timeout": "启动较慢，可再等等，或从左侧列表里查看",
+    "remote_badge": "rca 远端执行"
   },
   "launcher": {
     "add_files": "文件…",
@@ -1596,7 +1597,15 @@
     "llm_standard_model_desc": "用于日报摘要和经验提取",
     "llm_disabled_warning": "会话状态分析、吉祥物台词、日报 AI 摘要和经验提取功能将被禁用。",
     "usage": "LLM 用量",
-    "usage_desc": "统计 Fleet 自身调用 LLM 产生的 token 与费用（命令拦截、审计规则建议、日报、会话状态分析、吉祥物台词），不包含 agent 会话本身的流量。"
+    "usage_desc": "统计 Fleet 自身调用 LLM 产生的 token 与费用（命令拦截、审计规则建议、日报、会话状态分析、吉祥物台词），不包含 agent 会话本身的流量。",
+    "remote_workspaces": "远端 Workspace（rca）",
+    "remote_workspaces_desc": "会话的 repo 在另一台机器上：agent CLI 仍在本机运行，rca 把它的文件读写和命令路由到远端 `rca serve` 执行器。workspace 路径必须两台机器完全一致。",
+    "remote_ws_empty": "尚未注册远端 workspace。",
+    "remote_ws_path_placeholder": "/两台机器一致的绝对路径",
+    "remote_ws_code_placeholder": "远端 `rca serve` 打印的 rca1.… 配对码",
+    "remote_ws_label_placeholder": "标签（可选）",
+    "remote_ws_add": "添加",
+    "remote_ws_remove": "移除"
   },
   "usage": {
     "total_tokens": "Token 总数",

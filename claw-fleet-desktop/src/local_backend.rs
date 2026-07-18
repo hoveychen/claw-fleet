@@ -2255,6 +2255,24 @@ impl Backend for LocalBackend {
         claw_fleet_core::workspace_browse::browse_dir(path.as_deref(), &self.known_workspaces())
     }
 
+    fn list_remote_workspaces(&self) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
+        claw_fleet_core::remote_workspace::load()
+    }
+
+    fn upsert_remote_workspace(
+        &self,
+        entry: claw_fleet_core::remote_workspace::RemoteWorkspace,
+    ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+        claw_fleet_core::remote_workspace::upsert(entry)
+    }
+
+    fn remove_remote_workspace(
+        &self,
+        path: String,
+    ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+        claw_fleet_core::remote_workspace::remove(&path)
+    }
+
     fn spawn_new_session(
         &self,
         workspace_path: String,

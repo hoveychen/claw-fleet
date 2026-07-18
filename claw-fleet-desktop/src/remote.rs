@@ -484,6 +484,35 @@ impl crate::backend::Backend for RemoteBackend {
             .map_err(|e| format!("probe /browse_dir failed: {e}"))
     }
 
+    fn list_remote_workspaces(
+        &self,
+    ) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
+        // The registry lives on the probe host — sessions spawn there, so its
+        // ~/.fleet/remote-workspaces.json governs the rca wrap. An older probe
+        // without the endpoint reads as an empty registry.
+        self.probe
+            .get(claw_fleet_core::routes::REMOTE_WORKSPACES)
+            .unwrap_or_default()
+    }
+
+    fn upsert_remote_workspace(
+        &self,
+        entry: claw_fleet_core::remote_workspace::RemoteWorkspace,
+    ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+        self.probe
+            .post_json(claw_fleet_core::routes::REMOTE_WORKSPACES_UPSERT, &entry)
+    }
+
+    fn remove_remote_workspace(
+        &self,
+        path: String,
+    ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::REMOTE_WORKSPACES_REMOVE,
+            &serde_json::json!({ "path": path }),
+        )
+    }
+
     // Auto-resume config is a desktop-local preference: the scheduler that
     // consumes it (`maybe_fire_auto_resume`) runs inside the desktop's own
     // scan threads and reads `AutoResumeConfig::load()` from this host's

@@ -32,6 +32,27 @@ pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
+/// Locate `bin` on the caller's PATH via the platform lookup command
+/// (`which` on Unix, `where` on Windows). Returns the first match only —
+/// `where` on Windows can list several, one per line.
+pub fn which(bin: &str) -> Option<String> {
+    #[cfg(unix)]
+    let lookup = "which";
+    #[cfg(not(unix))]
+    let lookup = "where";
+    let output = command(lookup).arg(bin).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let first = stdout.lines().next()?.trim().to_string();
+    if first.is_empty() {
+        None
+    } else {
+        Some(first)
+    }
+}
+
 /// Put the child in its own process group (Unix), no-op on Windows.
 ///
 /// For long-lived agent children only (claude / codex sessions). A child left
