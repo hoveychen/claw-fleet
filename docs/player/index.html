@@ -5,10 +5,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Claw Fleet Promo — Player</title>
   <style>
-    body { margin: 0; background: #f1efea; display: grid; place-items: center; min-height: 100vh; }
-    #root { width: min(1120px, 96vw); aspect-ratio: 16 / 9; }
+    :root { color: #f4f1e8; background: #111314; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; min-height: 100vh; background: #111314; }
+    button { font: inherit; }
+    .shell { width: min(1380px, calc(100vw - 40px)); margin: 0 auto; padding: 28px 0 42px; }
+    .masthead { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+    .brand-lockup { display: flex; align-items: center; gap: 14px; }
+    .brand-lockup img { width: 48px; height: 48px; border-radius: 13px; }
+    .brand-lockup strong { display: block; font-family: Georgia, serif; font-size: 25px; letter-spacing: -.02em; }
+    .brand-lockup span { display: block; margin-top: 3px; color: #8f908d; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .format-switch { display: flex; border-bottom: 1px solid #3b3c3b; }
+    .format-switch button { border: 0; border-bottom: 3px solid transparent; background: transparent; color: #858783; padding: 10px 14px 9px; cursor: pointer; }
+    .format-switch button.active { color: #f4f1e8; border-bottom-color: #e26445; }
+    .stage { overflow: hidden; background: #090a0b; box-shadow: 0 28px 90px rgba(0,0,0,.38); }
+    .shell--horizontal .stage { width: 100%; aspect-ratio: 16 / 9; }
+    .shell--vertical .stage { width: min(470px, 100%); aspect-ratio: 9 / 16; margin: 0 auto; }
+    .episode-rail { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); margin-top: 20px; border-top: 1px solid #383a38; }
+    .episode-rail button { min-width: 0; border: 0; border-top: 3px solid transparent; background: transparent; color: #898b87; padding: 13px 6px 10px; font-size: 11px; text-transform: uppercase; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .episode-rail button span { display: block; margin-bottom: 5px; color: #e26445; font-size: 9px; }
+    .episode-rail button.active { border-top-color: #e26445; color: #f4f1e8; background: #191b1c; }
+    @media (max-width: 720px) {
+      .shell { width: min(100% - 24px, 470px); padding-top: 16px; }
+      .masthead { align-items: flex-start; flex-direction: column; }
+      .format-switch { width: 100%; }
+      .format-switch button { flex: 1; }
+      .episode-rail { grid-template-columns: repeat(3, 1fr); }
+    }
   </style>
-  <script type="module" crossorigin src="./assets/index-C1POKN1l.js"></script>
+  <script type="module" crossorigin src="./assets/index-BrDcuoL4.js"></script>
 </head>
 <body>
   <div id="root"></div>

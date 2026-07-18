@@ -262,21 +262,24 @@ export const ClawFleetVertical: React.FC<{ topic: VerticalTopic }> = ({ topic })
   const benefitIn = enter(frame, fps, 454);
   const cta = clamp01((frame - 548) / 16);
   return (
-    <Paper dark>
-      <div style={{ position: "absolute", top: 92, left: 72, right: 150, opacity: hookIn, transform: `translateY(${lerp(40, 0, hookIn)}px)` }}>
-        <Eyebrow dark>{topic.eyebrow}</Eyebrow>
-        <div style={{ marginTop: 26, whiteSpace: "pre-line", fontFamily: FONT.display, fontSize: 86, lineHeight: 1.02, fontWeight: 650, letterSpacing: "-.025em" }}>{topic.hook}</div>
-      </div>
-      <div style={{ position: "absolute", left: 60, right: 130, top: 430, height: 910, borderRadius: 32, overflow: "hidden", border: "2px solid rgba(255,255,255,.18)", background: topic.mobile ? T.paper : "#1c1d20", boxShadow: "0 30px 100px #000", opacity: footageIn, transform: `translateY(${lerp(65, 0, footageIn)}px)` }}>
-        <Loop durationInFrames={topic.loopFrames}>
-          <OffthreadVideo muted src={staticFile(topic.src)} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: topic.position }} />
-        </Loop>
-      </div>
-      <div style={{ position: "absolute", left: 78, right: 155, top: 1390, borderLeft: `8px solid ${T.coralNight}`, padding: "10px 0 10px 28px", fontSize: 39, lineHeight: 1.28, fontWeight: 650, opacity: benefitIn, transform: `translateX(${lerp(-35, 0, benefitIn)}px)` }}>{topic.benefit}</div>
-      <div style={{ position: "absolute", left: 75, right: 155, bottom: 220, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: cta }}>
-        <Brand compact />
-        <div style={{ fontFamily: FONT.mono, fontSize: 24, color: T.coralNight }}>free · open source</div>
-      </div>
-    </Paper>
+    <>
+      <Audio src={staticFile("audio/bgm.mp3")} volume={0.42} />
+      <Paper dark>
+        <div style={{ position: "absolute", top: 92, left: 72, right: 150, opacity: hookIn, transform: `translateY(${lerp(40, 0, hookIn)}px)` }}>
+          <Eyebrow dark>{topic.eyebrow}</Eyebrow>
+          <div style={{ marginTop: 26, whiteSpace: "pre-line", fontFamily: FONT.display, fontSize: 86, lineHeight: 1.02, fontWeight: 650, letterSpacing: "-.025em" }}>{topic.hook}</div>
+        </div>
+        <div style={{ position: "absolute", left: 60, right: 130, top: 430, height: 910, borderRadius: 32, overflow: "hidden", border: "2px solid rgba(255,255,255,.18)", background: topic.mobile ? T.paper : "#1c1d20", boxShadow: "0 30px 100px #000", opacity: footageIn, transform: `translateY(${lerp(65, 0, footageIn)}px)` }}>
+          <Loop durationInFrames={topic.loopFrames}>
+            <OffthreadVideo muted src={staticFile(topic.src)} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: topic.position }} />
+          </Loop>
+        </div>
+        <div style={{ position: "absolute", left: 78, right: 155, top: 1390, borderLeft: `8px solid ${T.coralNight}`, padding: "10px 0 10px 28px", fontSize: 39, lineHeight: 1.28, fontWeight: 650, opacity: benefitIn, transform: `translateX(${lerp(-35, 0, benefitIn)}px)` }}>{topic.benefit}</div>
+        <div style={{ position: "absolute", left: 75, right: 155, bottom: 220, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: cta }}>
+          <Brand compact />
+          <div style={{ fontFamily: FONT.mono, fontSize: 24, color: T.coralNight }}>free · open source</div>
+        </div>
+      </Paper>
+    </>
   );
 };
