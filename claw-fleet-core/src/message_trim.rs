@@ -55,6 +55,15 @@ pub fn trim_messages_with_threshold(msgs: &mut [Value], threshold: usize) -> usi
     trimmed
 }
 
+/// Truncate every large string leaf of one free-standing value at the default
+/// transport threshold — the same preview+marker rewrite the transcript trim
+/// applies, for callers (the mobile `tool_detail` reply) that assemble their
+/// own payload instead of shipping whole messages. Returns true if anything
+/// was truncated.
+pub(crate) fn truncate_value_for_transport(v: &mut Value) -> bool {
+    truncate_large_strings(v, DEFAULT_STRING_THRESHOLD)
+}
+
 /// Returns true when anything in this message was truncated.
 fn trim_one_message(msg: &mut Value, threshold: usize) -> bool {
     let Some(obj) = msg.as_object_mut() else {
@@ -144,11 +153,16 @@ fn preview_of(s: &str) -> String {
 ///
 /// Scans `jsonl_path` for the (unique) message whose `message.content` holds a
 /// `tool_result` block with `tool_use_id == id`, and returns
-/// `{ "content": <that block's content>, "toolUseResult": <sibling or null> }`.
-/// Reads the whole file, which is cheap (~18 ms on a 50 MB transcript) and only
-/// happens once per card expand.
+/// `{ "content": <that block's content>, "toolUseResult": <sibling or null>,
+///   "name": <tool name or null>, "input": <full tool_use.input or null> }`.
+/// The `name`/`input` pair comes from the matching `tool_use` block on the
+/// (earlier) assistant record, captured in the same single pass. Reads the
+/// whole file, which is cheap (~18 ms on a 50 MB transcript) and only happens
+/// once per card expand.
 pub fn extract_full_tool_result(jsonl_path: &Path, tool_use_id: &str) -> Result<Value, String> {
     let content = std::fs::read_to_string(jsonl_path).map_err(|e| e.to_string())?;
+    let mut name = Value::Null;
+    let mut input = Value::Null;
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -165,16 +179,27 @@ pub fn extract_full_tool_result(jsonl_path: &Path, tool_use_id: &str) -> Result<
             continue;
         };
         for block in blocks {
-            if block.get("type").and_then(|t| t.as_str()) != Some("tool_result") {
+            let matches_id =
+                block.get("tool_use_id").or_else(|| block.get("id")).and_then(|i| i.as_str())
+                    == Some(tool_use_id);
+            if !matches_id {
                 continue;
             }
-            if block.get("tool_use_id").and_then(|i| i.as_str()) != Some(tool_use_id) {
-                continue;
+            match block.get("type").and_then(|t| t.as_str()) {
+                Some("tool_use") => {
+                    name = block.get("name").cloned().unwrap_or(Value::Null);
+                    input = block.get("input").cloned().unwrap_or(Value::Null);
+                }
+                Some("tool_result") => {
+                    return Ok(json!({
+                        "content": block.get("content").cloned().unwrap_or(Value::Null),
+                        "toolUseResult": msg.get("toolUseResult").cloned().unwrap_or(Value::Null),
+                        "name": name,
+                        "input": input,
+                    }));
+                }
+                _ => {}
             }
-            return Ok(json!({
-                "content": block.get("content").cloned().unwrap_or(Value::Null),
-                "toolUseResult": msg.get("toolUseResult").cloned().unwrap_or(Value::Null),
-            }));
         }
     }
     Err(format!("tool_use_id {tool_use_id} not found"))
