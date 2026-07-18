@@ -1342,6 +1342,8 @@
     "user_image": "Attached image",
     "attachments": "Attachments",
     "result_image": "Image returned by the tool",
+    "image_broken": "Image failed to display — click to retry",
+    "image_truncated": "Image trimmed for transport; expand the card to load it",
     "result_expand": "Show {{count}} more characters",
     "result_collapse": "Collapse",
     "result_capped": "Too long to render; the last {{count}} characters are omitted (copy to get all)",

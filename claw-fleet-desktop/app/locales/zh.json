@@ -1339,6 +1339,8 @@
     "user_image": "附带的图片",
     "attachments": "附件",
     "result_image": "工具返回的图片",
+    "image_broken": "图片未能显示——点击重试",
+    "image_truncated": "图片在传输中被截断，展开卡片可加载",
     "result_expand": "展开剩余 {{count}} 个字符",
     "result_collapse": "收起",
     "result_capped": "内容过长，末尾 {{count}} 个字符未渲染（可复制获取全部）",
