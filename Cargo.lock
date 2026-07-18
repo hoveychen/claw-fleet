@@ -2183,6 +2183,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fleet-cloud-api"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "uuid",
+]
+
+[[package]]
 name = "fleet-hooks-server"
 version = "0.0.0"
 dependencies = [
@@ -2213,6 +2225,16 @@ dependencies = [
  "tokio-tungstenite 0.24.0",
  "tower-http",
  "web-push",
+]
+
+[[package]]
+name = "fleet-runner"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

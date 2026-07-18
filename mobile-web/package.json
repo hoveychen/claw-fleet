@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:cloud": "tsc --noEmit && vite build --mode cloud",
     "preview": "vite preview",
     "test": "vitest run"
   },
