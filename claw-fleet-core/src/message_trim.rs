@@ -303,4 +303,53 @@ mod tests {
         assert!(extract_full_tool_result(&path, "missing").is_err());
         std::fs::remove_file(path).ok();
     }
+
+    #[test]
+    fn image_result_is_flagged_for_transport_and_extracted_in_full() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "message_trim_image_test_{}_{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let data = big(8_192);
+        let line = json!({
+            "type": "user",
+            "message": {"content": [{
+                "type": "tool_result",
+                "tool_use_id": "image-call",
+                "content": [{
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": data
+                    }
+                }]
+            }]}
+        });
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+
+        let mut transported = vec![line];
+        assert_eq!(trim_messages_for_transport(&mut transported), 1);
+        assert_eq!(transported[0][TRUNCATED_FLAG], true);
+        assert_eq!(
+            transported[0]["message"]["content"][0]["tool_use_id"],
+            "image-call"
+        );
+
+        let full = extract_full_tool_result(&path, "image-call").unwrap();
+        assert_eq!(
+            full["content"][0]["source"]["data"]
+                .as_str()
+                .unwrap()
+                .len(),
+            8_192
+        );
+        assert_eq!(full["content"][0]["source"]["media_type"], "image/png");
+        std::fs::remove_file(path).ok();
+    }
 }

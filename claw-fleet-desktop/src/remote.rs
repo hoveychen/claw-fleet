@@ -2973,6 +2973,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn remote_live_tail_image_result_uses_transport_trimming_contract() {
+        let fx = boot();
+        let path = fx.home.path().join("remote-live-image.jsonl");
+        let tool_use_id = "toolu_remote_live_image";
+        let line = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": [{
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "A".repeat(8_192)
+                        }
+                    }]
+                }]
+            }
+        });
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+
+        let endpoint = format!(
+            "{}?path={}&offset=0",
+            claw_fleet_core::routes::TAIL,
+            super::encode_path(path.to_str().unwrap())
+        );
+        let body = fx.probe.get_value(&endpoint).unwrap();
+        let message = &body["lines"][0];
+
+        assert_eq!(message["_fleetTruncated"], true);
+        assert_eq!(
+            message["message"]["content"][0]["tool_use_id"],
+            tool_use_id
+        );
+        let data = message["message"]["content"][0]["content"][0]["source"]["data"]
+            .as_str()
+            .expect("trimmed base64 preview");
+        assert!(data.len() < 8_192);
+        assert!(data.contains("Fleet truncated"));
+    }
+
     // ── /wiki_move ──────────────────────────────────────────────────────────
 
     #[test]

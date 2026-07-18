@@ -463,7 +463,13 @@ pub(crate) fn route_tail(
                 // not a message — the old code here emitted un-renderable
                 // `response_item` records (the "reply never shows" bug).
                 match source.tail_incremental(&uri, offset) {
-                    Ok((lines, new_offset)) => {
+                    Ok((mut lines, new_offset)) => {
+                        // Collapse oversized tool output (e.g. a Claude `Read` of
+                        // an image → huge base64) to a marked preview before it
+                        // crosses the wire, matching `/messages?tail=N` and the
+                        // desktop watcher; the full payload is recovered via
+                        // `get_tool_result_full` only when the row is expanded.
+                        crate::message_trim::trim_messages_for_transport(&mut lines);
                         let body = serde_json::json!({
                             "lines": lines,
                             "newOffset": new_offset

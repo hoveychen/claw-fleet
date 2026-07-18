@@ -1572,8 +1572,13 @@ fn emit_tail_lines(
     // tail (each line is a self-contained message); Codex re-normalizes its
     // folded rollout so the emitted `session-tail` rows are renderable messages
     // (the desktop store dedups them by their stable `uuid`).
-    let Ok((lines, new_offset)) = source.tail_incremental(&path_str, *guard) else { return };
+    let Ok((mut lines, new_offset)) = source.tail_incremental(&path_str, *guard) else { return };
     *guard = new_offset;
+    // Collapse oversized tool output (e.g. a Claude `Read` of an image → huge
+    // base64) to a marked preview before it reaches the webview, matching the
+    // remote `/tail` and `/messages?tail=N` surfaces; the full payload is
+    // recovered via `get_tool_result_full` only when the row is expanded.
+    claw_fleet_core::message_trim::trim_messages_for_transport(&mut lines);
     if !lines.is_empty() {
         let _ = app.emit("session-tail", &lines);
     }
@@ -3885,6 +3890,64 @@ mod tests {
             seen.iter().any(|v| v.get("i").and_then(|i| i.as_i64()) == Some(3)),
             "record following the recovered block must also arrive, got {seen:?}"
         );
+    }
+
+    #[test]
+    fn live_tail_image_result_uses_transport_trimming_contract() {
+        let path = std::env::temp_dir().join(format!(
+            "fleet-live-tail-image-{}-{}.jsonl",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let tool_use_id = "toolu_live_image";
+        let line = json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": [{
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "A".repeat(8_192)
+                        }
+                    }]
+                }]
+            }
+        });
+        let encoded = format!("{line}\n");
+        fs::write(&path, encoded.as_bytes()).unwrap();
+
+        // Mirror `emit_tail_lines` exactly: source-aware incremental read, then
+        // the shared transport trim it applies before emitting to the webview.
+        use claw_fleet_core::agent_source::AgentSource;
+        use claw_fleet_core::claude_source::ClaudeCodeSource;
+        let source = ClaudeCodeSource::new();
+        let path_str = path.to_string_lossy().into_owned();
+        let (mut lines, offset) = source
+            .tail_incremental(&path_str, 0)
+            .expect("one complete line");
+        claw_fleet_core::message_trim::trim_messages_for_transport(&mut lines);
+        fs::remove_file(&path).ok();
+
+        assert_eq!(offset, encoded.len() as u64);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["_fleetTruncated"], true);
+        assert_eq!(
+            lines[0]["message"]["content"][0]["tool_use_id"],
+            tool_use_id
+        );
+        let data = lines[0]["message"]["content"][0]["content"][0]["source"]["data"]
+            .as_str()
+            .expect("trimmed base64 preview");
+        assert!(data.len() < 8_192);
+        assert!(data.contains("Fleet truncated"));
     }
 
     fn mk_session(id: &str, source: &str) -> crate::session::SessionInfo {
