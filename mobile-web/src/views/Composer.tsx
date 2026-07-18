@@ -662,10 +662,33 @@ export function ResumeComposer({
   const [permissionMode, setPermissionMode] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  // Optimistically hide a cancelled chip until the next sessions snapshot drops
+  // it for real; keyed by index+content so a stale key never hides the wrong row
+  // after the list re-indexes.
+  const [cancelledKeys, setCancelledKeys] = useState<Set<string>>(new Set());
   const { attachments, uploading, addFiles, remove, reset } = useAttachments(
     client,
     `resume:${session.id}:attachments`,
   );
+
+  const cancelQueued = async (index: number, text: string) => {
+    if (!client) return;
+    const key = `${index}:${text}`;
+    setCancelledKeys((prev) => new Set(prev).add(key));
+    try {
+      await client.request("cancel_pending_message", {
+        sessionId: session.id,
+        index,
+      });
+    } catch {
+      // Failed — un-hide so the user sees it's still queued and can retry.
+      setCancelledKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
 
   const submit = async () => {
     if (!client || busy || uploading) return;
@@ -738,11 +761,21 @@ export function ResumeComposer({
       {pendingMessages.length > 0 && (
         <div className={styles.queuedList}>
           <div className={styles.queuedLabel}>{t("已排队，本轮结束后自动发送")}</div>
-          {pendingMessages.map((m, i) => (
-            <div key={i} className={styles.queuedChip}>
-              {m}
-            </div>
-          ))}
+          {pendingMessages.map((m, i) =>
+            cancelledKeys.has(`${i}:${m}`) ? null : (
+              <div key={i} className={styles.queuedChip}>
+                <span className={styles.queuedText}>{m}</span>
+                <button
+                  type="button"
+                  className={styles.queuedCancel}
+                  onClick={() => cancelQueued(i, m)}
+                  aria-label={t("取消这条排队消息")}
+                >
+                  ×
+                </button>
+              </div>
+            ),
+          )}
         </div>
       )}
       <textarea

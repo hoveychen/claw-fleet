@@ -2236,6 +2236,14 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
+    fn cancel_pending_message(&self, session_id: String, index: usize) -> Result<(), String> {
+        claw_fleet_core::pending_message::remove_at(&session_id, index)?;
+        // Re-enrich + emit so the cancelled chip disappears immediately, matching
+        // the enqueue path's instant feedback.
+        self.restamp_marks_and_emit();
+        Ok(())
+    }
+
     fn chat_workspace(&self) -> Result<String, String> {
         claw_fleet_core::chat_workspace::ensure_chat_workspace()
     }

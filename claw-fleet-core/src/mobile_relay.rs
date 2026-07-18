@@ -1048,6 +1048,7 @@ fn is_ackable_method(method: &str) -> bool {
         "spawn_session"
             | "resume_session"
             | "enqueue_message"
+            | "cancel_pending_message"
             | "interrupt"
             | "stop"
             | "stop_workspace"
@@ -1268,6 +1269,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "spawn_session" => serve_spawn_session(params),
         "resume_session" => serve_resume_session(params),
         "enqueue_message" => serve_enqueue_message(params),
+        "cancel_pending_message" => serve_cancel_pending_message(params),
         "interrupt" => serve_interrupt(params),
         "stop" => serve_stop(params),
         "stop_workspace" => serve_stop_workspace(params),
@@ -1754,6 +1756,13 @@ fn serve_enqueue_message(params: &Value) -> Result<Value, String> {
     Ok(json!({ "ok": true }))
 }
 
+fn serve_cancel_pending_message(params: &Value) -> Result<Value, String> {
+    let req: crate::pending_message::CancelMessageRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad cancel_pending_message params: {e}"))?;
+    crate::pending_message::remove_at(&req.session_id, req.index)?;
+    Ok(json!({ "ok": true }))
+}
+
 // pid 0 would signal the desktop's own process group — reject before
 // it ever reaches kill() (same guard as the `/interrupt` endpoint).
 fn serve_interrupt(params: &Value) -> Result<Value, String> {
@@ -2226,6 +2235,7 @@ mod tests {
             "spawn_session",
             "resume_session",
             "enqueue_message",
+            "cancel_pending_message",
             "interrupt",
             "stop",
             "stop_workspace",

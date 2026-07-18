@@ -221,10 +221,37 @@
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   color: var(--color-text);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.queuedText {
+  flex: 1;
+  min-width: 0;
   white-space: pre-wrap;
   word-break: break-word;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
+}
+
+.queuedCancel {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.queuedCancel:active {
+  background: var(--color-border);
+  color: var(--color-text);
 }

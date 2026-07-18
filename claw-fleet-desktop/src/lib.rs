@@ -168,6 +168,9 @@ impl Backend for NullBackend {
     fn enqueue_message(&self, _: String, _: String, _: String) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn cancel_pending_message(&self, _: String, _: usize) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn chat_workspace(&self) -> Result<String, String> {
         Err("backend not ready".into())
     }
