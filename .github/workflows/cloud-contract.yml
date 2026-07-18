@@ -1,0 +1,64 @@
+name: Cloud Contract
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'docs/fleet-cloud-api-v1.openapi.yaml'
+      - 'mobile-web/src/generated/cloud-api.ts'
+      - 'fleet-cloud-wire/**'
+      - 'fleet-cloud-control-plane/**'
+      - 'fleet-cloud-runner/**'
+      - 'scripts/check-openapi.sh'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/cloud-contract.yml'
+  pull_request:
+    paths:
+      - 'docs/fleet-cloud-api-v1.openapi.yaml'
+      - 'mobile-web/src/generated/cloud-api.ts'
+      - 'fleet-cloud-wire/**'
+      - 'fleet-cloud-control-plane/**'
+      - 'fleet-cloud-runner/**'
+      - 'scripts/check-openapi.sh'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/cloud-contract.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: cloud-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: OpenAPI and Rust wire compatibility
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate OpenAPI and generated TypeScript
+        run: bash scripts/check-openapi.sh
+
+      - name: Check Cloud crate formatting
+        run: cargo fmt -p fleet-cloud-wire -p fleet-cloud-control-plane -p fleet-cloud-runner -- --check
+
+      - name: Check Cloud crates
+        run: cargo check -p fleet-cloud-wire -p fleet-cloud-control-plane -p fleet-cloud-runner
+
+      - name: Test wire JSON compatibility
+        run: cargo test -p fleet-cloud-wire --test json_compat
