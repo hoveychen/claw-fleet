@@ -269,7 +269,7 @@ export const ClawFleetVertical: React.FC<{ topic: VerticalTopic }> = ({ topic })
       </div>
       <div style={{ position: "absolute", left: 60, right: 130, top: 430, height: 910, borderRadius: 32, overflow: "hidden", border: "2px solid rgba(255,255,255,.18)", background: topic.mobile ? T.paper : "#1c1d20", boxShadow: "0 30px 100px #000", opacity: footageIn, transform: `translateY(${lerp(65, 0, footageIn)}px)` }}>
         <Loop durationInFrames={topic.loopFrames}>
-          <OffthreadVideo muted src={staticFile(topic.src)} style={{ width: "100%", height: "100%", objectFit: topic.mobile ? "contain" : "cover", objectPosition: topic.position }} />
+          <OffthreadVideo muted src={staticFile(topic.src)} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: topic.position }} />
         </Loop>
       </div>
       <div style={{ position: "absolute", left: 78, right: 155, top: 1390, borderLeft: `8px solid ${T.coralNight}`, padding: "10px 0 10px 28px", fontSize: 39, lineHeight: 1.28, fontWeight: 650, opacity: benefitIn, transform: `translateX(${lerp(-35, 0, benefitIn)}px)` }}>{topic.benefit}</div>
