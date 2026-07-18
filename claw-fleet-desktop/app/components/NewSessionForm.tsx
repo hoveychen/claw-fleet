@@ -18,6 +18,7 @@ import { agentToolsForSources, type SourceInfo } from "../modelChoices";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
+import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
 import styles from "./NewSessionForm.module.css";
 
 export interface NewSessionCreated {
@@ -292,6 +293,23 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
 
   const isChat = !!chatPath && workspace === chatPath;
 
+  // Registered rca-routed remote workspaces: badge them in the picker, and
+  // offer the ones with no sessions yet (they can't appear in recents).
+  const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspace[]>([]);
+  useEffect(() => {
+    invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
+      .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
+      .catch(() => {});
+  }, []);
+  const remotePaths = useMemo(
+    () => new Set(remoteWorkspaces.map((w) => w.path)),
+    [remoteWorkspaces],
+  );
+  const unseenRemoteWorkspaces = useMemo(
+    () => remoteWorkspaces.filter((w) => !recentWorkspaces.some((r) => r.path === w.path)),
+    [remoteWorkspaces, recentWorkspaces],
+  );
+
   // Seed the workspace once, on mount, to the repo the user last launched in
   // (when still available) — else the first option. The form is remounted each
   // time the user re-enters "new session" mode, so a plain mount effect stands in
@@ -452,7 +470,18 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
         ...recentWorkspaces.map((w) => ({
           id: w.path,
           label: w.name,
-          sub: w.path,
+          sub: remotePaths.has(w.path)
+            ? `${w.path} · ${t("new_session.remote_badge")}`
+            : w.path,
+          checked: w.path === workspace,
+          onSelect: () => setWorkspace(w.path),
+        })),
+        // Remote workspaces with no sessions yet — offer them here or they
+        // would be unreachable except by typing the path.
+        ...unseenRemoteWorkspaces.map((w) => ({
+          id: w.path,
+          label: w.label || basename(w.path),
+          sub: `${w.path} · ${t("new_session.remote_badge")}`,
           checked: w.path === workspace,
           onSelect: () => setWorkspace(w.path),
         })),

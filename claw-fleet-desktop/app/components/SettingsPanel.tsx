@@ -12,6 +12,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { AgentSourceIcon } from "./SessionCard";
 import { UsageTrendPanel } from "./UsageTrendPanel";
 import styles from "./SettingsPanel.module.css";
+import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
 
 interface HookSetupPlan {
   toAdd: string[];
@@ -175,6 +176,51 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       setClaudeBinaryNeedRestart(true);
     } catch {
       // ignore
+    }
+  }, []);
+
+  // ── Remote workspaces (rca) ──────────────────────────────────────────────
+  const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspace[]>([]);
+  const [rwPath, setRwPath] = useState("");
+  const [rwCode, setRwCode] = useState("");
+  const [rwLabel, setRwLabel] = useState("");
+  const [rwError, setRwError] = useState("");
+  const [rwBusy, setRwBusy] = useState(false);
+
+  useEffect(() => {
+    invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
+      .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
+      .catch(() => {});
+  }, []);
+
+  const handleAddRemoteWorkspace = useCallback(async () => {
+    const path = rwPath.trim();
+    const pairingCode = rwCode.trim();
+    if (!path || !pairingCode) return;
+    setRwBusy(true);
+    setRwError("");
+    try {
+      const cfg = await invoke<RemoteWorkspacesConfig>("upsert_remote_workspace", {
+        entry: { path, pairingCode, label: rwLabel.trim() || undefined },
+      });
+      setRemoteWorkspaces(cfg.workspaces ?? []);
+      setRwPath("");
+      setRwCode("");
+      setRwLabel("");
+    } catch (e) {
+      setRwError(String(e));
+    } finally {
+      setRwBusy(false);
+    }
+  }, [rwPath, rwCode, rwLabel]);
+
+  const handleRemoveRemoteWorkspace = useCallback(async (path: string) => {
+    setRwError("");
+    try {
+      const cfg = await invoke<RemoteWorkspacesConfig>("remove_remote_workspace", { path });
+      setRemoteWorkspaces(cfg.workspaces ?? []);
+    } catch (e) {
+      setRwError(String(e));
     }
   }, []);
 
@@ -1385,6 +1431,73 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       {t("settings.sources_restart_btn")}
                     </button>
                   </div>
+                )}
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.remote_workspaces")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.remote_workspaces_desc")}
+                  </span>
+                </div>
+                {remoteWorkspaces.length === 0 && (
+                  <div className={styles.row}>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                      {t("settings.remote_ws_empty")}
+                    </span>
+                  </div>
+                )}
+                {remoteWorkspaces.map((w) => (
+                  <div className={styles.row} key={w.path}>
+                    <span className={styles.row_label} style={{ minWidth: 0 }}>
+                      {w.label ? `${w.label} — ` : ""}
+                      <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}>{w.path}</span>
+                      <span style={{ display: "block", fontSize: 10, color: "var(--color-text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 360 }}>
+                        {w.pairingCode}
+                      </span>
+                    </span>
+                    <button
+                      className={styles.sources_restart_btn}
+                      onClick={() => handleRemoveRemoteWorkspace(w.path)}
+                    >
+                      {t("settings.remote_ws_remove")}
+                    </button>
+                  </div>
+                ))}
+                <div className={styles.row} style={{ flexWrap: "wrap", gap: 6 }}>
+                  <input
+                    className={styles.select}
+                    style={{ flex: "1 1 180px" }}
+                    value={rwPath}
+                    onChange={(e) => setRwPath(e.target.value)}
+                    placeholder={t("settings.remote_ws_path_placeholder")}
+                    spellCheck={false}
+                  />
+                  <input
+                    className={styles.select}
+                    style={{ flex: "2 1 220px" }}
+                    value={rwCode}
+                    onChange={(e) => setRwCode(e.target.value)}
+                    placeholder={t("settings.remote_ws_code_placeholder")}
+                    spellCheck={false}
+                  />
+                  <input
+                    className={styles.select}
+                    style={{ flex: "0 1 120px" }}
+                    value={rwLabel}
+                    onChange={(e) => setRwLabel(e.target.value)}
+                    placeholder={t("settings.remote_ws_label_placeholder")}
+                    spellCheck={false}
+                  />
+                  <button
+                    className={styles.sources_restart_btn}
+                    onClick={handleAddRemoteWorkspace}
+                    disabled={rwBusy || !rwPath.trim() || !rwCode.trim()}
+                  >
+                    {rwBusy ? t("account.loading") : t("settings.remote_ws_add")}
+                  </button>
+                </div>
+                {rwError && (
+                  <p className={styles.hooks_error}>{rwError}</p>
                 )}
               </div>
             )}

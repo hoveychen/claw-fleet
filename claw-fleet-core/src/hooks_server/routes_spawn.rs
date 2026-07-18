@@ -256,3 +256,94 @@ pub(crate) fn route_spawn_session(
                     }
                 }
             }
+
+/// GET the remote-workspace registry (`~/.fleet/remote-workspaces.json`).
+pub(crate) fn route_remote_workspaces(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let cfg = crate::remote_workspace::load();
+    let body = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
+/// POST a [`crate::remote_workspace::RemoteWorkspace`] to register/update it.
+/// Responds with the full updated registry.
+pub(crate) fn route_remote_workspaces_upsert(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    match serde_json::from_str::<crate::remote_workspace::RemoteWorkspace>(&buf) {
+        Ok(entry) => match crate::remote_workspace::upsert(entry) {
+            Ok(cfg) => {
+                let body = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
+                let _ = request
+                    .respond(tiny_http::Response::from_string(body).with_header(json_header));
+            }
+            Err(e) => {
+                let body = serde_json::json!({"error": e}).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        Err(e) => {
+            let body = serde_json::json!({"error": e.to_string()}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
+/// POST `{"path": "..."}` to remove a remote workspace. Responds with the
+/// full updated registry.
+pub(crate) fn route_remote_workspaces_remove(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let ws_path = serde_json::from_str::<serde_json::Value>(&buf)
+        .ok()
+        .and_then(|v| v.get("path").and_then(|s| s.as_str()).map(|s| s.to_string()));
+    match ws_path {
+        Some(ws_path) => match crate::remote_workspace::remove(&ws_path) {
+            Ok(cfg) => {
+                let body = serde_json::to_string(&cfg).unwrap_or_else(|_| "{}".to_string());
+                let _ = request
+                    .respond(tiny_http::Response::from_string(body).with_header(json_header));
+            }
+            Err(e) => {
+                let body = serde_json::json!({"error": e}).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(500)
+                        .with_header(json_header),
+                );
+            }
+        },
+        None => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(r#"{"error":"missing path"}"#)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}

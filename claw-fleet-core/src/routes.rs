@@ -98,6 +98,10 @@ pub const PROC_OUTPUT: &str = "/proc_output";
 pub const PROC_RESIZE: &str = "/proc_resize";
 pub const PROC_RUN: &str = "/proc_run";
 pub const PROCS: &str = "/procs";
+/// Remote-workspace registry (rca): list / upsert / remove.
+pub const REMOTE_WORKSPACES: &str = "/remote_workspaces";
+pub const REMOTE_WORKSPACES_UPSERT: &str = "/remote_workspaces/upsert";
+pub const REMOTE_WORKSPACES_REMOVE: &str = "/remote_workspaces/remove";
 pub const REMOVE_ELICITATION_HOOK: &str = "/remove_elicitation_hook";
 pub const REMOVE_GUARD_HOOK: &str = "/remove_guard_hook";
 pub const REMOVE_HOOKS: &str = "/remove_hooks";
