@@ -4,7 +4,9 @@ mod postgres;
 pub use in_memory::InMemoryTaskStore;
 pub use postgres::PgTaskStore;
 
-use crate::domain::{CreateTaskRequest, RequestScope, Task, TaskDetail, TaskEvent, TaskStatus};
+use crate::domain::{
+    CreateTaskRequest, Decision, RequestScope, Task, TaskDetail, TaskEvent, TaskStatus,
+};
 use async_trait::async_trait;
 use std::fmt;
 use uuid::Uuid;
@@ -47,6 +49,22 @@ pub struct CreateTaskOutcome {
     pub replayed: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct RespondDecisionCommand {
+    pub scope: RequestScope,
+    pub decision_id: Uuid,
+    pub idempotency_key: String,
+    pub request_fingerprint: [u8; 32],
+    pub action: String,
+    pub answers: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RespondDecisionOutcome {
+    pub decision: Decision,
+    pub replayed: bool,
+}
+
 #[async_trait]
 pub trait TaskStore: Send + Sync {
     async fn create_task(
@@ -75,6 +93,17 @@ pub trait TaskStore: Send + Sync {
             decisions: Vec::new(),
         })
     }
+
+    async fn get_decision(
+        &self,
+        scope: RequestScope,
+        decision_id: Uuid,
+    ) -> Result<Decision, StoreError>;
+
+    async fn respond_decision(
+        &self,
+        command: RespondDecisionCommand,
+    ) -> Result<RespondDecisionOutcome, StoreError>;
 
     async fn list_events(
         &self,

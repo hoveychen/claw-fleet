@@ -38,6 +38,7 @@ function defaultClient(): FleetCloudClient {
     organizationId: import.meta.env.VITE_FLEET_CLOUD_ORGANIZATION_ID || "11111111-1111-4111-8111-111111111111",
     projectId: import.meta.env.VITE_FLEET_CLOUD_PROJECT_ID || "22222222-2222-4222-8222-222222222222",
     accessToken: import.meta.env.VITE_FLEET_CLOUD_ACCESS_TOKEN || undefined,
+    embedToken: import.meta.env.VITE_FLEET_CLOUD_EMBED_TOKEN || undefined,
   });
 }
 
@@ -64,10 +65,11 @@ interface CloudAppProps {
 
 export function CloudApp({ client: suppliedClient }: CloudAppProps) {
   const client = useMemo(() => suppliedClient ?? defaultClient(), [suppliedClient]);
+  const embedTaskId = suppliedClient ? null : import.meta.env.VITE_FLEET_CLOUD_EMBED_TASK_ID || null;
   const [tab, setTab] = useState<CloudTab>("tasks");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [details, setDetails] = useState<Record<string, TaskDetail>>({});
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(embedTaskId);
   const [detailState, setDetailState] = useState<CloudTaskState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +80,13 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
     setError(null);
     setSyncState("syncing");
     try {
+      if (embedTaskId) {
+        const detail = await client.getTask(embedTaskId);
+        setTasks([detail]);
+        setDetails({ [detail.id]: detail });
+        setSyncState("online");
+        return;
+      }
       const page = await client.listTasks({ limit: 100 });
       setTasks(page.data);
       const loaded = await Promise.all(page.data.map((task) => client.getTask(task.id)));
@@ -89,7 +98,7 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
     } finally {
       setLoading(false);
     }
-  }, [client]);
+  }, [client, embedTaskId]);
 
   useEffect(() => {
     void refresh();
@@ -109,6 +118,7 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
         if (!active) return;
         const seed = initialCloudTaskState({ ...detail, event_cursor: 0 });
         setDetailState(seed);
+        setSyncState("online");
         await client.streamTaskEvents(
           selectedId,
           0,
@@ -139,16 +149,50 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
     [details],
   );
 
+  const handleDecisionResolved = useCallback((resolved: Decision) => {
+    setDetails((current) => {
+      const detail = current[resolved.task_id];
+      if (!detail) return current;
+      return {
+        ...current,
+        [resolved.task_id]: {
+          ...detail,
+          waiting_decision_count: Math.max(0, detail.waiting_decision_count - 1),
+          decisions: detail.decisions.map((decision) =>
+            decision.id === resolved.id ? resolved : decision,
+          ),
+        },
+      };
+    });
+    setDetailState((current) =>
+      current
+        ? {
+            ...current,
+            task: {
+              ...current.task,
+              waiting_decision_count: Math.max(0, current.task.waiting_decision_count - 1),
+            },
+            decisions: current.decisions.map((decision) =>
+              decision.id === resolved.id ? resolved : decision,
+            ),
+          }
+        : current,
+    );
+  }, []);
+
   if (selectedId) {
     return (
       <CloudDetail
+        client={client}
         state={detailState}
         error={error}
         syncState={syncState}
         onBack={() => {
+          if (embedTaskId) return;
           setSelectedId(null);
           setError(null);
         }}
+        onDecisionResolved={handleDecisionResolved}
       />
     );
   }
@@ -193,7 +237,13 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
           ) : tab === "tasks" ? (
             <TaskList tasks={tasks} onOpen={setSelectedId} />
           ) : (
-            <DecisionList decisions={openDecisions} details={details} onOpenTask={setSelectedId} />
+            <DecisionList
+              client={client}
+              decisions={openDecisions}
+              details={details}
+              onOpenTask={setSelectedId}
+              onResolved={handleDecisionResolved}
+            />
           )}
         </section>
       </main>
@@ -225,27 +275,30 @@ function TaskList({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: string) => vo
   );
 }
 
-function DecisionList({ decisions, details, onOpenTask }: { decisions: Decision[]; details: Record<string, TaskDetail>; onOpenTask: (id: string) => void }) {
+function DecisionList({ client, decisions, details, onOpenTask, onResolved }: { client: FleetCloudClient; decisions: Decision[]; details: Record<string, TaskDetail>; onOpenTask: (id: string) => void; onResolved: (decision: Decision) => void }) {
   if (decisions.length === 0) {
     return <EmptyState icon={CheckCircle2} title="没有待处理的决策" description="Agent 请求人工输入时，会连同所属 Attempt 出现在这里。" />;
   }
   return (
     <div className={styles.decisionList}>
       {decisions.map((decision) => (
-        <button key={decision.id} className={styles.decisionRow} onClick={() => onOpenTask(decision.task_id)}>
-          <CircleAlert size={17} />
-          <span>
-            <strong>{decisionQuestion(decision)}</strong>
-            <small>{taskTitle(details[decision.task_id] ?? ({ title: null, prompt: "Cloud task" } as Task))} · {decision.kind.replaceAll("_", " ")}</small>
-          </span>
-          <ChevronRight size={16} />
-        </button>
+        <div key={decision.id} className={styles.decisionCard}>
+          <button className={styles.decisionRow} onClick={() => onOpenTask(decision.task_id)}>
+            <CircleAlert size={17} />
+            <span>
+              <strong>{decisionQuestion(decision)}</strong>
+              <small>{taskTitle(details[decision.task_id] ?? ({ title: null, prompt: "Cloud task" } as Task))} · {decision.kind.replaceAll("_", " ")}</small>
+            </span>
+            <ChevronRight size={16} />
+          </button>
+          <DecisionResponder client={client} decision={decision} onResolved={onResolved} />
+        </div>
       ))}
     </div>
   );
 }
 
-function CloudDetail({ state, error, syncState, onBack }: { state: CloudTaskState | null; error: string | null; syncState: "online" | "syncing" | "offline"; onBack: () => void }) {
+function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolved }: { client: FleetCloudClient; state: CloudTaskState | null; error: string | null; syncState: "online" | "syncing" | "offline"; onBack: () => void; onDecisionResolved: (decision: Decision) => void }) {
   const detail = state?.task;
   return (
     <div className={appStyles.app}>
@@ -293,8 +346,11 @@ function CloudDetail({ state, error, syncState, onBack }: { state: CloudTaskStat
                   </div>
                 ))}
                 {state.decisions.filter((decision) => decision.status === "open").map((decision) => (
-                  <div key={decision.id} className={styles.openDecision}>
-                    <CircleAlert size={15} /><span><strong>{decisionQuestion(decision)}</strong><small>{decision.kind.replaceAll("_", " ")}</small></span>
+                  <div key={decision.id} className={styles.openDecisionBlock}>
+                    <div className={styles.openDecision}>
+                      <CircleAlert size={15} /><span><strong>{decisionQuestion(decision)}</strong><small>{decision.kind.replaceAll("_", " ")}</small></span>
+                    </div>
+                    <DecisionResponder client={client} decision={decision} onResolved={onDecisionResolved} compact />
                   </div>
                 ))}
               </aside>
@@ -308,4 +364,63 @@ function CloudDetail({ state, error, syncState, onBack }: { state: CloudTaskStat
 
 function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return <div className={styles.errorBanner} role="alert"><CircleAlert size={16} /><span>{message}</span>{onRetry && <button onClick={onRetry}>重试</button>}</div>;
+}
+
+function DecisionResponder({ client, decision, onResolved, compact = false }: { client: FleetCloudClient; decision: Decision; onResolved: (decision: Decision) => void; compact?: boolean }) {
+  const presentation = decision.presentation;
+  const questions = Array.isArray(presentation.questions) ? presentation.questions : [];
+  const firstQuestion = (questions[0] ?? presentation) as Record<string, unknown>;
+  const rawOptions = Array.isArray(firstQuestion.options) ? firstQuestion.options : [];
+  const options = rawOptions
+    .map((option) => {
+      if (typeof option === "string") return { label: option, value: option };
+      if (!option || typeof option !== "object") return null;
+      const record = option as Record<string, unknown>;
+      const label = record.label ?? record.title ?? record.value;
+      if (typeof label !== "string") return null;
+      return { label, value: typeof record.value === "string" ? record.value : label };
+    })
+    .filter((option): option is { label: string; value: string } => option !== null);
+  const questionId = typeof firstQuestion.id === "string" ? firstQuestion.id : "answer";
+  const [answer, setAnswer] = useState(options[0]?.value ?? "");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const submit = async (action: "answer" | "decline") => {
+    if (action === "answer" && !answer.trim()) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `decision-${Date.now()}-${Math.random()}`;
+      const resolved = await client.respondToDecision(
+        decision.id,
+        action === "answer" ? { action, answers: { [questionId]: answer } } : { action },
+        idempotencyKey,
+      );
+      onResolved(resolved);
+    } catch (caught) {
+      setSubmitError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className={styles.responder} data-compact={compact}>
+      {options.length > 0 ? (
+        <div className={styles.optionRow}>
+          {options.map((option) => (
+            <button key={option.value} data-active={answer === option.value} onClick={() => setAnswer(option.value)}>{option.label}</button>
+          ))}
+        </div>
+      ) : (
+        <input value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="输入答复" aria-label="决策答复" />
+      )}
+      <div className={styles.responseActions}>
+        <button onClick={() => void submit("decline")} disabled={submitting}>拒绝</button>
+        <button data-primary onClick={() => void submit("answer")} disabled={submitting || !answer.trim()}>{submitting ? "提交中…" : "提交答复"}</button>
+      </div>
+      {submitError && <small className={styles.submitError}>{submitError}</small>}
+    </div>
+  );
 }

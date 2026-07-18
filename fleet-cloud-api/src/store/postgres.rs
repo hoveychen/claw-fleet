@@ -1,5 +1,8 @@
-use super::{CreateTaskCommand, CreateTaskOutcome, StoreError, TaskStore};
-use crate::domain::{RequestScope, Task, TaskEvent, TaskStatus};
+use super::{
+    CreateTaskCommand, CreateTaskOutcome, RespondDecisionCommand, RespondDecisionOutcome,
+    StoreError, TaskStore,
+};
+use crate::domain::{Attempt, Decision, RequestScope, Task, TaskDetail, TaskEvent, TaskStatus};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
@@ -113,7 +116,74 @@ impl TryFrom<EventRow> for TaskEvent {
     }
 }
 
+#[derive(sqlx::FromRow)]
+struct AttemptRow {
+    id: Uuid,
+    task_id: Uuid,
+    runner_id: Option<Uuid>,
+    workspace_id: Option<Uuid>,
+    agent_source: String,
+    agent_session_id: Option<String>,
+    ordinal: i32,
+    reason: String,
+    status: String,
+    started_at: DateTime<Utc>,
+    ended_at: Option<DateTime<Utc>>,
+}
+
+impl From<AttemptRow> for Attempt {
+    fn from(row: AttemptRow) -> Self {
+        Self {
+            id: row.id,
+            task_id: row.task_id,
+            runner_id: row.runner_id,
+            workspace_id: row.workspace_id,
+            agent_source: row.agent_source,
+            agent_session_id: row.agent_session_id,
+            ordinal: row.ordinal,
+            reason: row.reason,
+            status: row.status,
+            started_at: row.started_at,
+            ended_at: row.ended_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct DecisionRow {
+    id: Uuid,
+    task_id: Uuid,
+    attempt_id: Uuid,
+    kind: String,
+    blocking: bool,
+    schema_version: String,
+    presentation: Value,
+    status: String,
+    response: Option<Value>,
+    created_at: DateTime<Utc>,
+    resolved_at: Option<DateTime<Utc>>,
+}
+
+impl From<DecisionRow> for Decision {
+    fn from(row: DecisionRow) -> Self {
+        Self {
+            id: row.id,
+            task_id: row.task_id,
+            attempt_id: row.attempt_id,
+            kind: row.kind,
+            blocking: row.blocking,
+            schema_version: row.schema_version,
+            presentation: row.presentation,
+            status: row.status,
+            response: row.response,
+            created_at: row.created_at,
+            resolved_at: row.resolved_at,
+        }
+    }
+}
+
 const TASK_COLUMNS: &str = "id, organization_id, project_id, external_id, title, prompt, status, current_attempt_id, waiting_decision_count, event_cursor, version, created_at, updated_at";
+const DECISION_COLUMNS: &str = "id, task_id, attempt_id, kind, blocking, schema_version, presentation, status, response, created_at, resolved_at";
 
 #[async_trait]
 impl TaskStore for PgTaskStore {
@@ -304,6 +374,42 @@ impl TaskStore for PgTaskStore {
         rows.into_iter().map(TryInto::try_into).collect()
     }
 
+    async fn get_task_detail(
+        &self,
+        scope: RequestScope,
+        task_id: Uuid,
+    ) -> Result<TaskDetail, StoreError> {
+        let task = self.get_task(scope, task_id).await?;
+        let attempt_rows = sqlx::query_as::<_, AttemptRow>(
+            "SELECT id, task_id, runner_id, workspace_id, agent_source, agent_session_id,
+                    ordinal, reason, status, started_at, ended_at
+             FROM attempts
+             WHERE organization_id = $1 AND project_id = $2 AND task_id = $3
+             ORDER BY ordinal ASC",
+        )
+        .bind(scope.organization_id)
+        .bind(scope.project_id)
+        .bind(task_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let decision_query = format!(
+            "SELECT {DECISION_COLUMNS} FROM decisions
+             WHERE organization_id = $1 AND project_id = $2 AND task_id = $3
+             ORDER BY created_at ASC, id ASC"
+        );
+        let decision_rows = sqlx::query_as::<_, DecisionRow>(&decision_query)
+            .bind(scope.organization_id)
+            .bind(scope.project_id)
+            .bind(task_id)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(TaskDetail {
+            task,
+            attempts: attempt_rows.into_iter().map(Into::into).collect(),
+            decisions: decision_rows.into_iter().map(Into::into).collect(),
+        })
+    }
+
     async fn list_events(
         &self,
         scope: RequestScope,
@@ -331,6 +437,224 @@ impl TaskStore for PgTaskStore {
             self.get_task(scope, task_id).await?;
         }
         rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    async fn get_decision(
+        &self,
+        scope: RequestScope,
+        decision_id: Uuid,
+    ) -> Result<Decision, StoreError> {
+        let query = format!(
+            "SELECT d.{columns} FROM decisions d
+             JOIN tasks t ON t.id = d.task_id
+             WHERE d.id = $1 AND d.organization_id = $2 AND d.project_id = $3
+               AND t.organization_id = $2 AND t.project_id = $3",
+            columns = DECISION_COLUMNS.replace(", ", ", d.")
+        );
+        let row = sqlx::query_as::<_, DecisionRow>(&query)
+            .bind(decision_id)
+            .bind(scope.organization_id)
+            .bind(scope.project_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(StoreError::NotFound)?;
+        Ok(row.into())
+    }
+
+    async fn respond_decision(
+        &self,
+        command: RespondDecisionCommand,
+    ) -> Result<RespondDecisionOutcome, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let operation = format!("respond_decision:{}", command.decision_id);
+        let inserted = sqlx::query(
+            "INSERT INTO idempotency_keys
+             (project_id, operation, idempotency_key, request_fingerprint, expires_at)
+             VALUES ($1, $2, $3, $4, now() + interval '24 hours')
+             ON CONFLICT (project_id, operation, idempotency_key) DO NOTHING",
+        )
+        .bind(command.scope.project_id)
+        .bind(&operation)
+        .bind(&command.idempotency_key)
+        .bind(command.request_fingerprint.as_slice())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            == 1;
+
+        if !inserted {
+            let existing: (Vec<u8>, Option<Uuid>) = sqlx::query_as(
+                "SELECT request_fingerprint, resource_id FROM idempotency_keys
+                 WHERE project_id = $1 AND operation = $2 AND idempotency_key = $3",
+            )
+            .bind(command.scope.project_id)
+            .bind(&operation)
+            .bind(&command.idempotency_key)
+            .fetch_one(&mut *tx)
+            .await?;
+            if existing.0.as_slice() != command.request_fingerprint {
+                return Err(StoreError::Conflict {
+                    code: "idempotency_key_reused",
+                    detail: "idempotency key was reused with a different request".into(),
+                });
+            }
+            let resource_id = existing
+                .1
+                .ok_or_else(|| StoreError::Internal("idempotency resource missing".into()))?;
+            let query = format!(
+                "SELECT {DECISION_COLUMNS} FROM decisions
+                 WHERE id = $1 AND organization_id = $2 AND project_id = $3"
+            );
+            let row = sqlx::query_as::<_, DecisionRow>(&query)
+                .bind(resource_id)
+                .bind(command.scope.organization_id)
+                .bind(command.scope.project_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or(StoreError::NotFound)?;
+            tx.commit().await?;
+            return Ok(RespondDecisionOutcome {
+                decision: row.into(),
+                replayed: true,
+            });
+        }
+
+        let now = Utc::now();
+        let status = if command.action == "decline" {
+            "declined"
+        } else {
+            "answered"
+        };
+        let response = command.answers.map(|answers| json!({ "answers": answers }));
+        let update_query = format!(
+            "UPDATE decisions SET status = $1, response = $2,
+                    responded_by = $3, resolved_at = $4
+             WHERE id = $5 AND organization_id = $6 AND project_id = $7 AND status = 'open'
+             RETURNING {DECISION_COLUMNS}"
+        );
+        let row = sqlx::query_as::<_, DecisionRow>(&update_query)
+            .bind(status)
+            .bind(&response)
+            .bind(json!({ "type": "api_user", "id": "authenticated-user" }))
+            .bind(now)
+            .bind(command.decision_id)
+            .bind(command.scope.organization_id)
+            .bind(command.scope.project_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let Some(row) = row else {
+            let exists: Option<String> = sqlx::query_scalar(
+                "SELECT d.status FROM decisions d JOIN tasks t ON t.id = d.task_id
+                 WHERE d.id = $1 AND d.organization_id = $2 AND d.project_id = $3
+                   AND t.organization_id = $2 AND t.project_id = $3",
+            )
+            .bind(command.decision_id)
+            .bind(command.scope.organization_id)
+            .bind(command.scope.project_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            return match exists {
+                Some(_) => Err(StoreError::Conflict {
+                    code: "decision_already_resolved",
+                    detail: "decision is no longer open".into(),
+                }),
+                None => Err(StoreError::NotFound),
+            };
+        };
+        let decision: Decision = row.into();
+        let sequence: i64 = sqlx::query_scalar(
+            "UPDATE tasks SET
+                waiting_decision_count = GREATEST(waiting_decision_count - 1, 0),
+                status = CASE
+                    WHEN waiting_decision_count <= 1 AND status = 'waiting_for_input' THEN 'running'
+                    ELSE status
+                END,
+                event_cursor = event_cursor + 1,
+                version = version + 1,
+                updated_at = $1
+             WHERE id = $2 AND organization_id = $3 AND project_id = $4
+             RETURNING event_cursor",
+        )
+        .bind(now)
+        .bind(decision.task_id)
+        .bind(command.scope.organization_id)
+        .bind(command.scope.project_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let event_id = Uuid::new_v4();
+        let event_data = json!({ "decision": &decision });
+        sqlx::query(
+            "INSERT INTO task_events
+             (id, organization_id, project_id, task_id, attempt_id, sequence, event_type,
+              occurred_at, recorded_at, producer, schema_version, data)
+             VALUES ($1, $2, $3, $4, $5, $6, 'decision.resolved', $7, $7, $8, '1.0', $9)",
+        )
+        .bind(event_id)
+        .bind(command.scope.organization_id)
+        .bind(command.scope.project_id)
+        .bind(decision.task_id)
+        .bind(decision.attempt_id)
+        .bind(sequence)
+        .bind(now)
+        .bind(json!({ "type": "user", "id": "authenticated-user" }))
+        .bind(&event_data)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO outbox
+             (id, organization_id, project_id, topic, aggregate_id, payload)
+             VALUES ($1, $2, $3, 'task.event', $4, $5)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(command.scope.organization_id)
+        .bind(command.scope.project_id)
+        .bind(decision.task_id)
+        .bind(json!({
+            "event_id": event_id,
+            "task_id": decision.task_id,
+            "sequence": sequence,
+            "type": "decision.resolved"
+        }))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO outbox
+             (id, organization_id, project_id, topic, aggregate_id, payload)
+             VALUES ($1, $2, $3, 'runner.command', $4, $5)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(command.scope.organization_id)
+        .bind(command.scope.project_id)
+        .bind(decision.attempt_id)
+        .bind(json!({
+            "type": "decision.response",
+            "task_id": decision.task_id,
+            "attempt_id": decision.attempt_id,
+            "decision_id": decision.id,
+            "action": command.action,
+            "response": decision.response
+        }))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE idempotency_keys SET resource_id = $1, response = $2
+             WHERE project_id = $3 AND operation = $4 AND idempotency_key = $5",
+        )
+        .bind(decision.id)
+        .bind(
+            serde_json::to_value(&decision)
+                .map_err(|error| StoreError::Internal(error.to_string()))?,
+        )
+        .bind(command.scope.project_id)
+        .bind(&operation)
+        .bind(&command.idempotency_key)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(RespondDecisionOutcome {
+            decision,
+            replayed: false,
+        })
     }
 }
 

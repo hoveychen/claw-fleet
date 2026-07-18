@@ -1,6 +1,7 @@
 use crate::{
     domain::{CreateTaskRequest, RequestScope},
-    store::{CreateTaskCommand, StoreError, TaskStore},
+    embed::EmbedTokenVerifier,
+    store::{CreateTaskCommand, RespondDecisionCommand, StoreError, TaskStore},
 };
 use axum::{
     extract::{Path, Query, State},
@@ -19,6 +20,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<dyn TaskStore>,
+    pub embed: Option<Arc<EmbedTokenVerifier>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +49,16 @@ impl ApiError {
             status: StatusCode::BAD_REQUEST,
             code,
             title: "Invalid request",
+            detail: detail.into(),
+            retryable: false,
+        }
+    }
+
+    fn forbidden(code: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code,
+            title: "Forbidden",
             detail: detail.into(),
             retryable: false,
         }
@@ -107,7 +119,14 @@ pub async fn create_task(
     request
         .validate()
         .map_err(|detail| ApiError::bad_request("invalid_task", detail))?;
-    let scope = scope_from_headers(&headers)?;
+    let authorized = authorized_scope(&headers, state.embed.as_deref())?;
+    if authorized.is_embed {
+        return Err(ApiError::forbidden(
+            "embed_scope_denied",
+            "embed tokens cannot create tasks",
+        ));
+    }
+    let scope = authorized.scope;
     let idempotency_key = required_header(&headers, "idempotency-key")?;
     if !(8..=255).contains(&idempotency_key.len()) {
         return Err(ApiError::bad_request(
@@ -147,12 +166,90 @@ pub async fn get_task(
     headers: HeaderMap,
     Path(task_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let authorized = authorized_scope(&headers, state.embed.as_deref())?;
+    authorized.ensure_task(task_id)?;
     let task = state
         .store
-        .get_task_detail(scope_from_headers(&headers)?, task_id)
+        .get_task_detail(authorized.scope, task_id)
         .await
         .map_err(ApiError::from_store)?;
     Ok(Json(task))
+}
+
+pub async fn get_decision(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(decision_id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let authorized = authorized_scope(&headers, state.embed.as_deref())?;
+    let decision = state
+        .store
+        .get_decision(authorized.scope, decision_id)
+        .await
+        .map_err(ApiError::from_store)?;
+    authorized.ensure_task(decision.task_id)?;
+    Ok(Json(decision))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DecisionResponseRequest {
+    action: String,
+    #[serde(default)]
+    answers: Option<serde_json::Value>,
+}
+
+pub async fn respond_to_decision(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(decision_id): Path<Uuid>,
+    Json(request): Json<DecisionResponseRequest>,
+) -> Result<Response, ApiError> {
+    if request.action != "answer" && request.action != "decline" {
+        return Err(ApiError::bad_request(
+            "invalid_decision_action",
+            "action must be answer or decline",
+        ));
+    }
+    if request.action == "answer" && request.answers.is_none() {
+        return Err(ApiError::bad_request(
+            "missing_answers",
+            "answers are required for answer action",
+        ));
+    }
+    let idempotency_key = required_header(&headers, "idempotency-key")?;
+    if !(8..=255).contains(&idempotency_key.len()) {
+        return Err(ApiError::bad_request(
+            "invalid_idempotency_key",
+            "Idempotency-Key must be 8 to 255 bytes",
+        ));
+    }
+    let canonical = serde_json::to_vec(&request)
+        .map_err(|error| ApiError::bad_request("invalid_json", error.to_string()))?;
+    let authorized = authorized_scope(&headers, state.embed.as_deref())?;
+    let existing = state
+        .store
+        .get_decision(authorized.scope, decision_id)
+        .await
+        .map_err(ApiError::from_store)?;
+    authorized.ensure_task(existing.task_id)?;
+    let outcome = state
+        .store
+        .respond_decision(RespondDecisionCommand {
+            scope: authorized.scope,
+            decision_id,
+            idempotency_key,
+            request_fingerprint: Sha256::digest(canonical).into(),
+            action: request.action,
+            answers: request.answers,
+        })
+        .await
+        .map_err(ApiError::from_store)?;
+    let mut response = (StatusCode::OK, Json(outcome.decision)).into_response();
+    response.headers_mut().insert(
+        HeaderName::from_static("idempotency-replayed"),
+        HeaderValue::from_static(if outcome.replayed { "true" } else { "false" }),
+    );
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,9 +284,16 @@ pub async fn list_tasks(
         .parse::<usize>()
         .map_err(|_| ApiError::bad_request("invalid_cursor", "cursor is not valid"))?;
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let authorized = authorized_scope(&headers, state.embed.as_deref())?;
+    if authorized.task_id.is_some() {
+        return Err(ApiError::forbidden(
+            "embed_scope_denied",
+            "task-scoped embeds cannot list project tasks",
+        ));
+    }
     let mut tasks = state
         .store
-        .list_tasks(scope_from_headers(&headers)?, status, offset, limit + 1)
+        .list_tasks(authorized.scope, status, offset, limit + 1)
         .await
         .map_err(ApiError::from_store)?;
     let has_more = tasks.len() > limit;
@@ -219,9 +323,11 @@ pub async fn stream_task_events(
         .and_then(|value| value.parse::<i64>().ok())
         .unwrap_or(0);
     let after = query.after.unwrap_or(0).max(last_event_id).max(0);
+    let authorized = authorized_scope(&headers, state.embed.as_deref())?;
+    authorized.ensure_task(task_id)?;
     let events = state
         .store
-        .list_events(scope_from_headers(&headers)?, task_id, after)
+        .list_events(authorized.scope, task_id, after)
         .await
         .map_err(ApiError::from_store)?;
     let frames = events.into_iter().map(|task_event| {
@@ -239,12 +345,57 @@ pub async fn stream_task_events(
     ))
 }
 
-fn scope_from_headers(headers: &HeaderMap) -> Result<RequestScope, ApiError> {
-    let organization_id = parse_uuid_header(headers, "x-fleet-organization-id")?;
-    let project_id = parse_uuid_header(headers, "x-fleet-project-id")?;
-    Ok(RequestScope {
-        organization_id,
-        project_id,
+#[derive(Debug, Clone, Copy)]
+struct AuthorizedScope {
+    scope: RequestScope,
+    task_id: Option<Uuid>,
+    is_embed: bool,
+}
+
+impl AuthorizedScope {
+    fn ensure_task(self, task_id: Uuid) -> Result<(), ApiError> {
+        if self.task_id.is_none_or(|allowed| allowed == task_id) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(
+                "embed_scope_denied",
+                "resource is outside the embed task scope",
+            ))
+        }
+    }
+}
+
+fn authorized_scope(
+    headers: &HeaderMap,
+    verifier: Option<&EmbedTokenVerifier>,
+) -> Result<AuthorizedScope, ApiError> {
+    if let Some(token) = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Embed "))
+    {
+        let verifier = verifier
+            .ok_or_else(|| ApiError::forbidden("embed_disabled", "embed tokens are not enabled"))?;
+        let origin = required_header(headers, "origin")?;
+        let claims = verifier
+            .verify(token, &origin, chrono::Utc::now().timestamp())
+            .map_err(|error| ApiError::forbidden("invalid_embed_token", error.to_string()))?;
+        return Ok(AuthorizedScope {
+            scope: RequestScope {
+                organization_id: claims.organization_id,
+                project_id: claims.project_id,
+            },
+            task_id: claims.task_id,
+            is_embed: true,
+        });
+    }
+    Ok(AuthorizedScope {
+        scope: RequestScope {
+            organization_id: parse_uuid_header(headers, "x-fleet-organization-id")?,
+            project_id: parse_uuid_header(headers, "x-fleet-project-id")?,
+        },
+        task_id: None,
+        is_embed: false,
     })
 }
 

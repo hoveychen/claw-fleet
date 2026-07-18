@@ -74,8 +74,38 @@ pub struct Task {
 pub struct TaskDetail {
     #[serde(flatten)]
     pub task: Task,
-    pub attempts: Vec<Value>,
-    pub decisions: Vec<Value>,
+    pub attempts: Vec<Attempt>,
+    pub decisions: Vec<Decision>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Attempt {
+    pub id: Uuid,
+    pub task_id: Uuid,
+    pub runner_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
+    pub agent_source: String,
+    pub agent_session_id: Option<String>,
+    pub ordinal: i32,
+    pub reason: String,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Decision {
+    pub id: Uuid,
+    pub task_id: Uuid,
+    pub attempt_id: Uuid,
+    pub kind: String,
+    pub blocking: bool,
+    pub schema_version: String,
+    pub presentation: Value,
+    pub status: String,
+    pub response: Option<Value>,
+    pub created_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

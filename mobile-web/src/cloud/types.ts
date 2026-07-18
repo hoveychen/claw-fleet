@@ -28,8 +28,8 @@ export interface Task {
 export interface Attempt {
   id: string;
   task_id: string;
-  runner_id: string;
-  workspace_id: string;
+  runner_id: string | null;
+  workspace_id: string | null;
   agent_source: "claude" | "codex";
   agent_session_id: string | null;
   ordinal: number;
