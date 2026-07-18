@@ -296,6 +296,21 @@ pub fn spawn_claude_detached(
 /// [`spawn_claude_detached`] plus extra environment variables for the child —
 /// e.g. `CLAUDE_CODE_ENTRYPOINT` so the CLI stamps the launch identity into
 /// the session's JSONL.
+/// Strip codex/Fleet-origin session-identity vars from a Claude child's
+/// environment. Claude Code injects the authoritative `CLAUDE_CODE_SESSION_ID`
+/// itself; a `FLEET_SESSION_ID` / `FLEET_AGENT_SOURCE` / `FLEET_CODEX_LAUNCH_TOKEN`
+/// on a Claude process could only have leaked in from a codex ancestor's env,
+/// and would then shadow the real id in
+/// [`crate::codex_launch::resolve_fleet_session_id_from_env`] (mis-attributing
+/// the session's decision cards / `fleet plan` / `fleet handoff`) or mis-tag the
+/// agent source. Mirror of the codex side's env-stripping in
+/// [`crate::codex_launch::apply_codex_launch_env`].
+fn strip_inherited_agent_env(cmd: &mut std::process::Command) {
+    cmd.env_remove("FLEET_SESSION_ID");
+    cmd.env_remove("FLEET_AGENT_SOURCE");
+    cmd.env_remove(crate::codex_launch::FLEET_CODEX_LAUNCH_TOKEN_ENV);
+}
+
 pub fn spawn_claude_detached_with_envs(
     claude_path: &str,
     args: &[String],
@@ -401,6 +416,11 @@ pub fn spawn_claude_detached_with_envs(
     // (bg_guard stopped blocking on them for the same reason; see its module
     // docs for the isolation experiment). `extra_envs` below can still override.
     cmd.env("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0");
+    // A Fleet-launched Claude session must never inherit a codex/Fleet session
+    // id from the spawner's environment (mirror of the codex side's
+    // apply_codex_launch_env). Done before the extra_envs loop so an explicit
+    // caller override still wins.
+    strip_inherited_agent_env(&mut cmd);
     for (k, v) in extra_envs {
         cmd.env(k, v);
     }
@@ -666,6 +686,39 @@ pub(crate) fn spawn_new_session_impl(
 mod tests {
     use super::normalize_workspace_path_with_home;
     use std::path::Path;
+
+    /// Regression: a Fleet-launched Claude session must NOT inherit a codex /
+    /// Fleet session-identity var from the spawner's environment. If it did,
+    /// `resolve_fleet_session_id_from_env` would resolve the Claude session's
+    /// decision cards / `fleet plan` / `fleet handoff` to the leaked (codex) id —
+    /// the card meta showing a different session than the question came from.
+    /// Simulates inheritance by setting the vars explicitly on the Command before
+    /// the strip, then runs a child echoing them: a clean child prints EMPTY for
+    /// all three. (No global env mutation, so this is parallel-safe.)
+    #[cfg(unix)]
+    #[test]
+    fn claude_spawn_strips_inherited_agent_env() {
+        let mut cmd = crate::process_util::command(Path::new("/bin/sh"));
+        cmd.arg("-c").arg(
+            "printf '%s|%s|%s' \
+             \"${FLEET_SESSION_ID:-EMPTY}\" \
+             \"${FLEET_AGENT_SOURCE:-EMPTY}\" \
+             \"${FLEET_CODEX_LAUNCH_TOKEN:-EMPTY}\"",
+        );
+        // Simulate the leaked, inherited ids a codex ancestor's process tree
+        // carries (FLEET_AGENT_SOURCE=codex is the smoking gun of a whole-block
+        // leak, e.g. a `claude` launched inside a codex session).
+        cmd.env("FLEET_SESSION_ID", "leaked-019f7047");
+        cmd.env("FLEET_AGENT_SOURCE", "codex");
+        cmd.env("FLEET_CODEX_LAUNCH_TOKEN", "leaked-token");
+        super::strip_inherited_agent_env(&mut cmd);
+        let out = cmd.output().expect("run /bin/sh");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            stdout, "EMPTY|EMPTY|EMPTY",
+            "Claude spawn leaked an inherited agent-identity var to the child: {stdout}"
+        );
+    }
 
     /// The spawned agent CLI must live in its own process group. When it
     /// inherits the spawner's group, any group-wide signal aimed at the Fleet

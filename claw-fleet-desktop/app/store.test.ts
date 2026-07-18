@@ -68,3 +68,130 @@ describe("启动台 rail filters", () => {
     expect(getItem("history-query")).toBeNull();
   });
 });
+
+describe("主导航页面浏览上下文", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("keeps all page navigation state outside component lifetimes", async () => {
+    const { useUIStore } = await import("./store");
+    const { updateMainViewState } = useUIStore.getState();
+
+    updateMainViewState("gallery", { query: "worker", showAll: true, idleExpanded: true });
+    updateMainViewState("audit", {
+      tab: "rules",
+      filter: "high",
+      unreadOnly: false,
+      category: "network",
+      workspace: "/repo",
+      selectedEventKey: "session:timestamp:Bash",
+      selectedRuleId: "unsafe-shell",
+      rulesQuery: "curl",
+      allowRulesExpanded: true,
+    });
+    updateMainViewState("memory", {
+      query: "lesson",
+      filterType: "feedback",
+      sourceFilter: "codex",
+      workspaceFilter: "repo",
+      expandedKeys: ["repo"],
+      selectedKey: "file:repo:MEMORY.md",
+      detailTab: "history",
+    });
+    updateMainViewState("wiki", {
+      query: "transport",
+      workspaceFilter: "/repo",
+      sortKey: "title",
+      selectedFolder: "arch",
+      selectedSlug: "arch/overview",
+      collapsedFolders: ["reference"],
+      versionBySlug: { "arch/overview": "v2" },
+    });
+    updateMainViewState("skills", {
+      query: "review",
+      sourceFilter: "claude-code",
+      selectedPath: "/skills/review",
+      activeFilePath: "references/checklist.md",
+      collapsedPaths: ["references"],
+      fileQuery: "checklist",
+    });
+    updateMainViewState("plugins", {
+      query: "github",
+      selectedPluginId: "github@official",
+      expanded: { enabled: true, downloaded: false, catalog: true },
+    });
+    updateMainViewState("files", {
+      selectedWorkspace: "/repo",
+      extraPaths: ["/tmp/demo"],
+      activeRootPath: "/repo/.worktrees/feature",
+      showIgnored: true,
+      tab: "procs",
+      activeFilePath: "src/main.rs",
+    });
+    updateMainViewState("mobile", { editingUrl: true, urlDraft: "wss://relay.example" });
+
+    const state = useUIStore.getState().mainViewState;
+    expect(state.gallery).toMatchObject({ query: "worker", showAll: true, idleExpanded: true });
+    expect(state.audit).toEqual({
+      tab: "rules",
+      filter: "high",
+      unreadOnly: false,
+      category: "network",
+      workspace: "/repo",
+      selectedEventKey: "session:timestamp:Bash",
+      selectedRuleId: "unsafe-shell",
+      rulesQuery: "curl",
+      allowRulesExpanded: true,
+    });
+    expect(state.memory).toEqual({
+      query: "lesson",
+      filterType: "feedback",
+      sourceFilter: "codex",
+      workspaceFilter: "repo",
+      expandedKeys: ["repo"],
+      selectedKey: "file:repo:MEMORY.md",
+      detailTab: "history",
+    });
+    expect(state.wiki).toEqual({
+      query: "transport",
+      workspaceFilter: "/repo",
+      sortKey: "title",
+      selectedFolder: "arch",
+      selectedSlug: "arch/overview",
+      collapsedFolders: ["reference"],
+      versionBySlug: { "arch/overview": "v2" },
+    });
+    expect(state.skills).toEqual({
+      query: "review",
+      sourceFilter: "claude-code",
+      selectedPath: "/skills/review",
+      activeFilePath: "references/checklist.md",
+      collapsedPaths: ["references"],
+      fileQuery: "checklist",
+    });
+    expect(state.plugins).toEqual({
+      query: "github",
+      selectedPluginId: "github@official",
+      expanded: { enabled: true, downloaded: false, catalog: true },
+    });
+    expect(state.files).toEqual({
+      selectedWorkspace: "/repo",
+      extraPaths: ["/tmp/demo"],
+      activeRootPath: "/repo/.worktrees/feature",
+      showIgnored: true,
+      tab: "procs",
+      activeFilePath: "src/main.rs",
+    });
+    expect(state.mobile).toMatchObject({ editingUrl: true, urlDraft: "wss://relay.example" });
+  });
+
+  it("does not persist page browsing context across app restarts", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+
+    useUIStore.getState().updateMainViewState("wiki", { query: "temporary search" });
+
+    expect(getItem("main-view-state")).toBeNull();
+  });
+});
