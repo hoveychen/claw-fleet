@@ -498,6 +498,13 @@ mod tests {
             .unwrap();
         assert!(context.contains("FIRST line"));
         assert!(context.contains("// "));
+        assert_eq!(parsed["systemMessage"], context);
+        assert!(
+            parsed["hookSpecificOutput"]
+                .get("permissionDecision")
+                .is_none(),
+            "context-only Codex PreToolUse output must not include permissionDecision"
+        );
 
         assert!(
             missing_exec_note_reminder_output_in(&transcript, "session-A", &markers).is_none(),
@@ -663,6 +670,24 @@ fn build_context_reminder_output(context: &str) -> String {
     .to_string()
 }
 
+/// Codex's context-only `PreToolUse` shape. `permissionDecision: "allow"` is
+/// valid only when paired with `updatedInput`; without a rewrite Codex marks
+/// the hook run as failed and discards the context. `systemMessage` asks native
+/// Codex surfaces to show a warning; `additionalContext` sends the correction
+/// to the model and persists it as a developer message in the rollout, which
+/// Fleet renders in its system-context fold. Keep this separate from Claude's
+/// builder above.
+fn build_codex_context_reminder_output(context: &str) -> String {
+    serde_json::json!({
+        "systemMessage": context,
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": context,
+        }
+    })
+    .to_string()
+}
+
 fn build_reminder_output() -> String {
     build_context_reminder_output(MISSING_DESCRIPTION_REMINDER)
 }
@@ -768,7 +793,9 @@ fn missing_exec_note_reminder_output_in(
     {
         return None;
     }
-    Some(build_context_reminder_output(MISSING_EXEC_NOTE_REMINDER))
+    Some(build_codex_context_reminder_output(
+        MISSING_EXEC_NOTE_REMINDER,
+    ))
 }
 
 /// Return the one-time Rule 7 correction for the latest missing-note Codex
