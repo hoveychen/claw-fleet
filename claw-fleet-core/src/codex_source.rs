@@ -1602,6 +1602,7 @@ mod tests {
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
         codex_token_breakdown_from_lines, compute_token_stats, determine_status,
         exec_note_from_script, parse_codex_session,
+        derive_codex_title,
         extract_context_percent, extract_first_user_prompt, last_rollout_rate_limits,
         latest_total_token_usage, normalize_messages, strip_leading_system_reminder,
         strip_trailing_context_files, read_rollout_originator, CodexProcess,
@@ -1609,6 +1610,38 @@ mod tests {
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
+
+    #[test]
+    fn derive_codex_title_summarizes_fleet_handoff_prompt() {
+        let prompt = "<system-reminder>\nactive plans\n</system-reminder>\n\n\
+            你是一次接力开发的第 2 棒，接替上一个 session（019f7047-24a8-7343-8afa-a8cc853f3818）继续未完成的工作。\n\n\
+            上一棒留下的交接信息：\n\n---\n\
+            marco-visible P1 完成交班，P2（测先行）开工。老板立案背景：后续细节不应进入标题。\n\
+            第二行也是交接正文。\n---\n\n\
+            本次接力属于 TASKS.md plan `marco-visible`，直接从 P2 继续执行。";
+
+        assert_eq!(
+            derive_codex_title(prompt),
+            Some("marco-visible P1 完成交班，P2（测先行）开工。".to_string())
+        );
+    }
+
+    #[test]
+    fn derive_codex_title_does_not_shorten_regular_long_prompt() {
+        let prompt = "这是一条很长但完全正常的用户需求，不是 Fleet 接力模板。".repeat(8);
+        assert_eq!(derive_codex_title(&prompt), Some(prompt));
+    }
+
+    #[test]
+    fn derive_codex_title_leaves_malformed_handoff_template_untouched() {
+        let prompt = "你是一次接力开发的第 2 棒，接替上一个 session（abc）继续未完成的工作。\n\n\
+            上一棒留下的交接信息：\n\n缺少 Fleet 生成的分隔线，不能猜测边界。";
+        assert_eq!(
+            derive_codex_title(prompt),
+            Some(prompt.to_string()),
+            "only the complete Fleet-owned template may be summarized"
+        );
+    }
 
     #[test]
     fn extract_first_user_prompt_skips_injected_and_strips_reminder() {
