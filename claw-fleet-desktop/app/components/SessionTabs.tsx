@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSessionsStore } from "../store";
-import { rowBarColor, type SessionInfo } from "../types";
+import { preferredSessionTitle, rowBarColor, type SessionInfo } from "../types";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionTabs.module.css";
 
@@ -21,7 +21,7 @@ import styles from "./SessionTabs.module.css";
  *  reads the same in the list and in the strip. Falls back down to a short id
  *  for sessions the scanner hasn't titled yet. */
 function tabLabel(s: SessionInfo): string {
-  return s.aiTitle || s.slug || s.workspaceName || s.id.slice(0, 8);
+  return preferredSessionTitle(s) || s.slug || s.workspaceName || s.id.slice(0, 8);
 }
 
 /** One entry in the strip. `session` is the live session behind the tab, or

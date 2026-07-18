@@ -37,6 +37,12 @@ export const HANDOFF_ENTRYPOINT = "claw-fleet-handoff";
  *  carry `originator === "fleet"` — mirrors codex_launch::CODEX_FLEET_ORIGINATOR. */
 export const CODEX_FLEET_ORIGINATOR = "fleet";
 
+/** The user/agent-selected title wins over the scanner's inferred title.
+ *  Callers keep control of their own untitled-session fallback. */
+export function preferredSessionTitle(s: SessionInfo): string | null {
+  return s.titleOverride ?? s.aiTitle ?? null;
+}
+
 /** True for sessions Fleet itself launched (the "新会话" button, the handoff
  *  relay, or a Fleet-spawned Codex session). These are the sessions the 启动台
  *  lists and that the detail view can resume; other entrypoints/originators
