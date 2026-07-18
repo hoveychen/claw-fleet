@@ -504,6 +504,18 @@ pub fn on_codex_turn_exit(session_id: &str) {
 /// spawn and resume go through here, so self-spawned and self-resumed Codex
 /// sessions are marked identically.
 fn apply_codex_launch_env(cmd: &mut std::process::Command) {
+    // A Fleet-launched Codex process must never inherit a session id from the
+    // spawner's environment. A new spawn's identity comes solely from its
+    // `FLEET_CODEX_LAUNCH_TOKEN`; a resume stamps `FLEET_SESSION_ID` explicitly
+    // right after this call. Left un-cleared, an inherited `FLEET_SESSION_ID`
+    // (e.g. a resumed session — whose process env carries its own id — spawning
+    // a fresh session in its tree) would win in
+    // `resolve_fleet_session_id_from_env` (it outranks the launch token) and
+    // silently misattribute the new session's `fleet handoff` / `fleet plan` /
+    // decision cards to the wrong session. Clear both id vars so the token (or
+    // the resume's explicit stamp) is the only identity source.
+    cmd.env_remove("FLEET_SESSION_ID");
+    cmd.env_remove("CLAUDE_CODE_SESSION_ID");
     if let Some(home) = crate::session::real_home_dir() {
         cmd.env("HOME", home);
     }
@@ -1962,6 +1974,34 @@ mod tests {
             args[1].contains("\"session\"") && args[1].contains("\"codex-notify\""),
             "notify must route to `fleet session codex-notify`: {}",
             args[1]
+        );
+    }
+
+    /// A brand-new codex spawn must NOT let an inherited `FLEET_SESSION_ID`
+    /// (or `CLAUDE_CODE_SESSION_ID`) reach the child — its identity comes solely
+    /// from the launch token. When 019f7047 (a resumed session whose process env
+    /// carries `FLEET_SESSION_ID=019f7047`) spawns a fresh session in its tree,
+    /// the leaked id would otherwise win in `resolve_fleet_session_id_from_env`
+    /// and misattribute the new session's `fleet handoff` / decision cards.
+    ///
+    /// Simulates inheritance by setting the vars explicitly on the Command
+    /// before `apply_codex_launch_env`, then runs a child that echoes them: a
+    /// clean child prints EMPTY for both. (No global env mutation, so this is
+    /// parallel-safe.)
+    #[test]
+    fn apply_codex_launch_env_clears_inherited_session_ids() {
+        let mut cmd = crate::process_util::command(std::path::Path::new("/bin/sh"));
+        cmd.arg("-c")
+            .arg("printf '%s|%s' \"${FLEET_SESSION_ID:-EMPTY}\" \"${CLAUDE_CODE_SESSION_ID:-EMPTY}\"");
+        // Simulate the leaked, inherited ids the spawner's process tree carries.
+        cmd.env("FLEET_SESSION_ID", "leaked-019f7047");
+        cmd.env("CLAUDE_CODE_SESSION_ID", "leaked-claude");
+        apply_codex_launch_env(&mut cmd);
+        let out = cmd.output().expect("run /bin/sh");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            stdout, "EMPTY|EMPTY",
+            "new codex spawn leaked an inherited session id to the child: {stdout}"
         );
     }
 
