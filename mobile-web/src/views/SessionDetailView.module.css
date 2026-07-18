@@ -146,11 +146,12 @@
   gap: 2px;
 }
 
+/* Desktop-aligned user bubble: quiet tinted surface, no border, tail at the
+   bottom-right — roles are told apart by layout, not chrome. */
 .userBubble {
-  max-width: 85%;
-  background: var(--color-accent-soft);
-  border: 1px solid rgba(217, 119, 87, 0.3);
-  border-radius: 14px 14px 4px 14px;
+  max-width: 78%;
+  background: var(--color-bg-user);
+  border-radius: 8px 8px 2px 8px;
   padding: 8px 12px;
   font-size: 13px;
   line-height: 1.5;
@@ -173,14 +174,12 @@
   color: var(--color-text-dim);
 }
 
+/* Assistant prose is flush and full width — no bubble chrome (desktop
+   TextBlock convention since the 2026-07 layout redesign). */
 .markdown {
   max-width: 100%;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: 14px 14px 14px 4px;
-  padding: 8px 12px;
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.6;
   word-break: break-word;
   overflow-wrap: anywhere;
 }
@@ -193,8 +192,10 @@
   margin-bottom: 0;
 }
 
+/* Now that prose sits on the page background, code blocks need their own
+   sunken surface to stand out (was --color-bg against the old card bubble). */
 .markdown :global(pre) {
-  background: var(--color-bg);
+  background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 8px;
@@ -375,6 +376,67 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.toolLineRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.toolLineRow .toolLine {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* ── Digest stat chips (server-computed toolUseResult stats) ───────────────── */
+.chipRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chip {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.chipError {
+  background: rgba(220, 91, 91, 0.14);
+  color: var(--color-error);
+}
+
+.chipAdd { color: var(--color-success); }
+.chipDel { color: var(--color-error); }
+
+/* ── Inline thumbnails (server-side re-encoded screenshots) ───────────────── */
+.thumbRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.thumbImg {
+  max-width: 160px;
+  max-height: 120px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  object-fit: cover;
+}
+
+/* One `↑in ↓out · model` line per assistant turn, desktop-style. */
+.usageLine {
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
 }
 
 /* Thinking as muted prose, clamped behind a bottom fade until tapped. The
