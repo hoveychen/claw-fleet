@@ -79,10 +79,19 @@ pub struct WrappedLaunch {
 /// remote-routed cwd. Fleet's own binary must stay local: claude spawns it
 /// directly as the `fleet` MCP server (`~/.claude.json` mcpServers), and
 /// routed remote it would not exist — every decision card / permission prompt
-/// would break. `sh -c` hook commands are NOT covered (the spawned binary is
-/// `sh`, matched by cwd): they route remote and no-op behind their own `-x`
-/// guards — a documented v1 degradation.
+/// would break.
 const LOCAL_BIN_MARKS: &[&str] = &["Claw Fleet.app/Contents/MacOS/fleet", ".fleet/bin/fleet"];
+
+/// Substrings (':'-joined into `RCC_LOCAL_ARGV_MARKS`) rca matches against
+/// every argv token to force a spawn LOCAL. Fleet's hooks arrive as
+/// `sh -c '… "/Applications/Claw Fleet.app/…/fleet" …'` — the same `/bin/sh`
+/// a routed user command uses, so `RCC_LOCAL_BINS` (binary path) cannot tell
+/// them apart; the hook *script text* can. Covers the guard / idle /
+/// prd-context hooks (they name the app bundle path) and the hooks.jsonl
+/// observability append. Marks are deliberately long and harness-specific so
+/// real user commands never contain them.
+const LOCAL_ARGV_MARKS: &[&str] =
+    &["Claw Fleet.app/Contents/MacOS/fleet", ".fleet/bin/fleet", ".fleet/hooks.jsonl"];
 
 /// The pairing-code prefix (`internal/paircode/paircode.go` `Prefix`).
 const PAIRING_CODE_PREFIX: &str = "rca1.";
@@ -237,7 +246,10 @@ pub fn wrap_launch(
     Ok(Some(WrappedLaunch {
         program: rca,
         args: wrapped,
-        envs: vec![("RCC_LOCAL_BINS".to_string(), LOCAL_BIN_MARKS.join(":"))],
+        envs: vec![
+            ("RCC_LOCAL_BINS".to_string(), LOCAL_BIN_MARKS.join(":")),
+            ("RCC_LOCAL_ARGV_MARKS".to_string(), LOCAL_ARGV_MARKS.join(":")),
+        ],
     }))
 }
 
@@ -387,6 +399,14 @@ mod tests {
         assert!(
             got.envs.iter().any(|(k, v)| k == "RCC_LOCAL_BINS" && v.contains("MacOS/fleet")),
             "must pin the fleet binary local for the MCP decision-card bridge"
+        );
+        assert!(
+            got.envs.iter().any(|(k, v)| {
+                k == "RCC_LOCAL_ARGV_MARKS"
+                    && v.contains("MacOS/fleet")
+                    && v.contains(".fleet/hooks.jsonl")
+            }),
+            "must pin the sh -c hook commands local by argv marks"
         );
     }
 
