@@ -18,6 +18,10 @@ import type {
 } from "../types";
 
 const NOW = Date.now();
+
+/** 240×150 gradient PNG standing in for a relay-side thumbnail (the real
+ *  relay re-encodes screenshots to ~256px JPEG; any data URI works here). */
+const MOCK_THUMB = "iVBORw0KGgoAAAANSUhEUgAAAPAAAACWCAIAAABvmpKCAAAC8klEQVR42u3ChZYQBABE0fkmE1vAbkWM7e7u7t7Z7k4DMLFbFPW3/I85756rBwpMxtSDBSZj6qFCkzH1cKHJmHqkyGRMPVpkMqauFJuMqceKTcbU4yUmY+qJEpMx9WSpyZh6qtRkTD1dZjKmnikzGVPPlpuMqavlJmPqWoXJmLpeYTKmnqs0GVPPV5qMqReqTMbUi1UmY+qlapMx9XK1yZh6pcZkTL1aYzKmXqs1GVOv15qMqTfqTMbUm3UmY+qtepMx9Xa9yZh6p8FkTN1oMBlT7zaajKmbjSZj6r0mkzH1fpPJmPqg2WRMfdhsMqYKWkzGVGGLyZgqajUZU8WtJmOqpM1kTJW2mYypsnaTMVXebjKmKjpMxlRlh8mYquo0GVPVnSZjqqbLZEzVdpmMqbpukzFV320yphp6TMZUY4/JmGrqNRlTzb0mY6qlz2RMtfaZjKm2fpMx1d5vMqY6BkzGVOeAyZjqGjQZU92DJmOqZ8hkTPUOmYypvmGTMdU/bDKmBkZMxtTgiMmYGho1GVPDoyZjamTMZEyNjpmMqbFxkzE1Pm4ypiYmTMbU5ITJmJqaNBlT05MmY2pmymRMzU6ZjKm5aZMxNT9tMqYWZkzG1OKMyZjyrMmYWpo1GVPLcyZjamXOZEytzpuMqbV5kzG1vmAypjYWTMbU5qLJmNpaNBlT2zYZUzs2GVO7SyZjam/JZEztL5uMqYNlkzF1uGIypo5WTMbU8arJmDpZNRlTp2smY+pszWRMna+bjKmLdZMxdblhMqY+2jAZUx9vmoypTzZNxtSnWyZj6taWyZi6vW0ypu5sm4ypz3ZMxtTnOyZj6otdkzH15a7JmPpqz2RMfb1nMqbu7puMqW/2TcbUtwcmY+q7A5Mx9f2hyZj64dBkTP14ZDKmfjoyGVM/H5uMqV+OTcbUrycmY+q3E5Mx9fupyZj649RkTP15ZjKm7p2ZjKm/zk3G1N/nJmPq/oXJmPrnwmRM/XtpMqb+uzQZ839CdhtKFcdvEgAAAABJRU5ErkJggg==";
 const MIN = 60_000;
 const HOUR = 3_600_000;
 
@@ -263,7 +267,15 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       type: "user",
       uuid: "am1",
       timestamp: new Date(NOW - 30 * MIN).toISOString(),
-      message: { role: "user", content: "JWT validation rejects valid tokens after the update — investigate and fix." },
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "JWT validation rejects valid tokens after the update — investigate and fix. Screenshot of the failing request attached." },
+          // A pasted screenshot as the relay ships it: thumbnail in the standard
+          // image-block shape, marked _thumb.
+          { type: "image", _thumb: true, source: { type: "base64", media_type: "image/png", data: MOCK_THUMB } },
+        ],
+      },
     },
     {
       type: "assistant",
@@ -271,6 +283,9 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       timestamp: new Date(NOW - 29 * MIN).toISOString(),
       message: {
         role: "assistant",
+        model: "claude-opus-4-8",
+        stop_reason: "tool_use",
+        usage: { input_tokens: 12400, output_tokens: 210 },
         content: [
           {
             type: "thinking",
@@ -287,6 +302,9 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       timestamp: new Date(NOW - 28 * MIN).toISOString(),
       message: {
         role: "assistant",
+        model: "claude-opus-4-8",
+        stop_reason: "tool_use",
+        usage: { input_tokens: 12800, output_tokens: 160 },
         content: [
           { type: "tool_use", id: "at2", name: "Grep", input: { pattern: "api-server-v2", path: "src" } },
           { type: "tool_use", id: "at3", name: "Bash", input: { command: "npm test -- auth", description: "Run the auth middleware suite" } },
@@ -299,6 +317,9 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       timestamp: new Date(NOW - 26 * MIN).toISOString(),
       message: {
         role: "assistant",
+        model: "claude-opus-4-8",
+        stop_reason: "tool_use",
+        usage: { input_tokens: 13100, output_tokens: 95 },
         content: [
           {
             type: "text",
@@ -313,6 +334,9 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       timestamp: new Date(NOW - 25 * MIN).toISOString(),
       message: {
         role: "assistant",
+        model: "claude-opus-4-8",
+        stop_reason: "tool_use",
+        usage: { input_tokens: 13400, output_tokens: 120 },
         content: [
           { type: "tool_use", id: "at4", name: "Edit", input: { file_path: "/Users/demo/workspace/api-server/src/middleware/auth.ts" } },
           { type: "tool_use", id: "at5", name: "Bash", input: { command: "npm test -- auth", description: "Re-run the suite against the dual-issuer patch" } },
@@ -325,6 +349,9 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       timestamp: new Date(NOW - 24 * MIN).toISOString(),
       message: {
         role: "assistant",
+        model: "claude-opus-4-8",
+        stop_reason: "tool_use",
+        usage: { input_tokens: 13800, output_tokens: 84 },
         content: [
           { type: "thinking", thinking: "Suite is green with both issuers accepted. Wrapping up with a summary." },
           { type: "tool_use", id: "at6", name: "TodoWrite", input: {} },
@@ -337,8 +364,30 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       timestamp: new Date(NOW - 23 * MIN).toISOString(),
       message: {
         role: "assistant",
+        model: "claude-opus-4-8",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 14100, output_tokens: 178 },
         content: [
           { type: "text", text: "Patch applied and the auth suite is green. Old tokens stay valid through the migration window; I'll drop the legacy issuer once the max TTL passes." },
+        ],
+      },
+    },
+    // Tool results as the relay ships them: a user record the renderable filter
+    // hides, carrying the per-tool `_digest` stats (and result thumbnails) that
+    // feed the chips on the matching tool lines above.
+    {
+      type: "user",
+      uuid: "amr1",
+      timestamp: new Date(NOW - 23 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "at1", _thumbs: [MOCK_THUMB] },
+          { type: "tool_result", tool_use_id: "at2", _digest: { files: 4, matches: 17 } },
+          { type: "tool_result", tool_use_id: "at3", _digest: { stdoutLines: 42, stderrLines: 0 } },
+          { type: "tool_result", tool_use_id: "at4", _digest: { added: 3, removed: 1 } },
+          { type: "tool_result", tool_use_id: "at5", _digest: { stdoutLines: 87, stderrLines: 0 } },
+          { type: "tool_result", tool_use_id: "at6", _digest: { todoDone: 2, todoTotal: 3 } },
         ],
       },
     },
@@ -358,6 +407,9 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       timestamp: new Date(NOW - 2 * MIN).toISOString(),
       message: {
         role: "assistant",
+        model: "claude-sonnet-5",
+        stop_reason: "tool_use",
+        usage: { input_tokens: 8200, output_tokens: 96 },
         content: [
           { type: "thinking", thinking: "Flipping the flag first, then replaying yesterday's ledger sample against both read paths to diff the outputs before letting the cutover stick." },
           { type: "tool_use", id: "bt1", name: "Edit", input: { file_path: "/Users/demo/workspace/billing-service/src/flags.ts" } },
@@ -370,6 +422,11 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       timestamp: new Date(NOW - 1 * MIN).toISOString(),
       message: {
         role: "assistant",
+        model: "claude-sonnet-5",
+        // Still streaming — no stop_reason yet; with the session `executing`
+        // this keeps the tail band live (auto-open + shimmer, no Done row).
+        stop_reason: null,
+        usage: { input_tokens: 8600, output_tokens: 41 },
         content: [
           { type: "tool_use", id: "bt2", name: "Bash", input: { command: "npm run replay -- --sample yesterday", description: "Replay ledger sample against both read paths" } },
         ],
@@ -418,6 +475,69 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       },
     },
   ],
+};
+
+/** `tool_detail` replies keyed by tool_use_id — what tapping a tool line
+ *  fetches. Shapes mirror serve_tool_detail (mobile_relay.rs). */
+export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
+  at3: {
+    name: "Bash",
+    input: { command: "npm test -- auth", description: "Run the auth middleware suite" },
+    toolUseResult: {
+      stdout:
+        "> api-server@2.4.0 test\n> vitest run --filter auth\n\n ❯ src/middleware/auth.test.ts (12 tests | 3 failed)\n   × rejects expired tokens\n   × accepts freshly issued tokens\n   × accepts tokens issued before deploy\n\n Test Files  1 failed (1)\n      Tests  3 failed | 9 passed (12)",
+      stderr: "",
+      interrupted: false,
+    },
+  },
+  at4: {
+    name: "Edit",
+    input: { file_path: "/Users/demo/workspace/api-server/src/middleware/auth.ts" },
+    toolUseResult: {
+      filePath: "/Users/demo/workspace/api-server/src/middleware/auth.ts",
+      structuredPatch: [
+        {
+          oldStart: 41,
+          oldLines: 4,
+          newStart: 41,
+          newLines: 5,
+          lines: [
+            " const verifyOptions = {",
+            "-  issuer: 'api-server',",
+            "+  // migration window: accept both issuers until max token TTL passes",
+            "+  issuer: ['api-server', 'api-server-v2'],",
+            "   audience: 'api',",
+            " };",
+          ],
+        },
+      ],
+    },
+  },
+  at5: {
+    name: "Bash",
+    input: { command: "npm test -- auth" },
+    content:
+      "> api-server@2.4.0 test\n> vitest run --filter auth\n\n ✓ src/middleware/auth.test.ts (12 tests)\n\n Test Files  1 passed (1)\n      Tests  12 passed (12)\n\n…[Fleet truncated 3210 bytes — expand to load full output]",
+    truncated: true,
+    // What the `full: true` re-request returns (the real relay re-reads the
+    // transcript; the mock keeps a canned untruncated body under this key).
+    _full: {
+      name: "Bash",
+      input: { command: "npm test -- auth" },
+      content:
+        "> api-server@2.4.0 test\n> vitest run --filter auth\n\n ✓ src/middleware/auth.test.ts (12 tests) 812ms\n   ✓ rejects expired tokens\n   ✓ rejects tampered signatures\n   ✓ accepts freshly issued tokens\n   ✓ accepts tokens issued before deploy\n   ✓ accepts both issuers during the migration window\n   ✓ rejects unknown issuers\n   ✓ propagates audience mismatches\n   ✓ caches JWKS for 10 minutes\n   ✓ refreshes JWKS on kid miss\n   ✓ rejects alg none\n   ✓ rejects empty bearer\n   ✓ passes claims through to req.auth\n\n Test Files  1 passed (1)\n      Tests  12 passed (12)\n   Duration  812ms",
+    },
+  },
+  at6: {
+    name: "TodoWrite",
+    toolUseResult: {
+      newTodos: [
+        { content: "Patch issuer list for the migration window", status: "completed" },
+        { content: "Re-run the auth suite", status: "completed" },
+        { content: "Schedule legacy-issuer removal after max TTL", status: "pending" },
+      ],
+    },
+  },
 };
 
 export const MOCK_WIKI_DOCS: WikiDoc[] = [

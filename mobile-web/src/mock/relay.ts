@@ -22,6 +22,7 @@ import {
   MOCK_MESSAGES,
   MOCK_SESSIONS,
   MOCK_TODAY_USAGE,
+  MOCK_TOOL_DETAILS,
   MOCK_WIKI_DOCS,
 } from "./data";
 
@@ -112,6 +113,21 @@ export class MockRelayClient extends RelayClient {
         return MOCK_MESSAGES[String(params?.path ?? "")] ?? [];
       case "tail_delta":
         return { lines: [], newOffset: 0 };
+      case "tool_detail": {
+        const detail = MOCK_TOOL_DETAILS[String(params?.tool_use_id ?? "")];
+        if (!detail) throw new Error("tool_use_id not found");
+        // `full: true` returns the canned untruncated body (the real relay
+        // re-reads the transcript with truncation off).
+        if (params?.full && typeof detail === "object" && detail !== null) {
+          const { truncated: _truncated, _full, ...rest } = detail as Record<string, unknown>;
+          return _full ?? rest;
+        }
+        if (typeof detail === "object" && detail !== null && "_full" in detail) {
+          const { _full, ...rest } = detail as Record<string, unknown>;
+          return rest;
+        }
+        return detail;
+      }
       case "live_thinking":
         return null;
       case "wiki_list":
