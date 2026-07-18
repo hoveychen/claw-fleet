@@ -193,7 +193,7 @@ P1 ──> P2 ──> P3 ──> P4 ──> P5 ──> P6 ──> P10
 - [ ] 创建 runner crate，依赖 core、wire crate、`tokio-tungstenite`、`rustls`、`rusqlite`、`tracing`。
 - [ ] 在两个 binary 的 `main` 仅解析配置、初始化 tracing、调用 `run()`；业务逻辑不写入 main。
 - [ ] 创建 `scripts/check-openapi.sh`，顺序执行 Redocly lint、Rust/YAML `$ref` 完整性检查、生成 client 后的 clean-diff 检查。
-- [ ] 运行 `cargo fmt --all -- --check`，预期退出码 0。
+- [ ] 运行 `cargo fmt -p fleet-cloud-wire -p fleet-cloud-control-plane -p fleet-cloud-runner -- --check`，预期退出码 0；既有 crate 不纳入本 P 的格式重写。
 - [ ] 运行 `cargo check -p fleet-cloud-wire -p fleet-cloud-control-plane -p fleet-cloud-runner`，预期三个 crate 全部完成。
 - [ ] 运行 `bash scripts/check-openapi.sh`，预期包含 `Woohoo! Your API description is valid.` 且退出码 0。
 - [ ] 新建契约 CI job，仅在 OpenAPI、wire、cloud crates 变化时执行上述命令。
