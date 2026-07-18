@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useSessionsStore } from "../store";
 import type { HandoffChain, SessionInfo } from "../types";
 import styles from "./HandoffChainRow.module.css";
+import { isKeyboardActivationKey } from "../keyboard";
 
 /**
  * Chip ("接力 n/N") + click-to-expand panel listing the full relay chain:
@@ -59,7 +60,11 @@ export function HandoffChainRow({ session }: { session: SessionInfo }) {
         tabIndex={0}
         title={t("card.tip_handoff", { hop: info.hop, len: info.chainLen })}
         onClick={toggle}
-        onKeyDown={(e) => e.key === "Enter" && toggle(e)}
+        onKeyDown={(e) => {
+          if (!isKeyboardActivationKey(e.key)) return;
+          e.preventDefault();
+          void toggle(e);
+        }}
       >
         🔗 {t("card.handoff_chip", { hop: info.hop, len: info.chainLen })}
       </span>

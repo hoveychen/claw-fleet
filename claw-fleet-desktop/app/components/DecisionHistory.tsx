@@ -349,11 +349,16 @@ export function DecisionHistory({ records, mode = "inline" }: Props) {
   return (
     <div className={`${styles.root} ${isTab ? styles.root_tab : ""}`}>
       {!isTab && (
-        <div className={styles.header} onClick={() => setExpanded((v) => !v)}>
+        <button
+          type="button"
+          className={styles.header}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
           <span className={styles.title}>{t("decision_history.title")}</span>
           <span className={styles.count}>{records.length}</span>
           <span className={styles.chevron}>{expanded ? "▾" : "▸"}</span>
-        </div>
+        </button>
       )}
       {isTab && records.length === 0 && (
         <EmptyState

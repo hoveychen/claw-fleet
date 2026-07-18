@@ -156,14 +156,19 @@ function CopyableCommand({ cmd }: { cmd: string }) {
   };
 
   return (
-    <div className={styles.code_block} onClick={copy} title={t("onboarding.copy_hint")}>
+    <button
+      type="button"
+      className={styles.code_block}
+      onClick={copy}
+      title={t("onboarding.copy_hint")}
+    >
       <span className={styles.code_text}>{cmd}</span>
       {copied ? (
         <span className={styles.copied}>Copied!</span>
       ) : (
         <span className={styles.copy_icon}>&#x2398;</span>
       )}
-    </div>
+    </button>
   );
 }
 
