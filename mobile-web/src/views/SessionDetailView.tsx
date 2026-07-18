@@ -58,6 +58,7 @@ import { groupMetaRuns } from "./metaGrouping";
 import { countSteps, groupWorkRuns, isDecisionTool, workRunTitle } from "./workRuns";
 import { toolSummary } from "./toolSummary";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
+import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { ToolDigest } from "../types";
 import styles from "./SessionDetailView.module.css";
 
@@ -490,6 +491,49 @@ function ThumbRow({ srcs }: { srcs: string[] }) {
   );
 }
 
+/** One tool call on the rail: summary line + digest chips, tap to expand the
+ *  full body (fetched on demand through the relay `tool_detail` method).
+ *  Expansion state is local so it survives the parent's poll re-renders. */
+function ToolStep({
+  b,
+  client,
+  jsonlPath,
+  meta,
+}: {
+  b: ContentBlock;
+  client: RelayClient | null;
+  jsonlPath?: string;
+  meta?: ToolMeta;
+}) {
+  const [open, setOpen] = useState(false);
+  const name = b.name ?? "";
+  const summary = toolSummary(b);
+  const expandable = !!b.id && !!client && !!jsonlPath;
+  return (
+    <RailStep icon={railToolIcon(name)}>
+      <div
+        className={styles.toolLineRow}
+        onClick={expandable ? () => setOpen((o) => !o) : undefined}
+        role={expandable ? "button" : undefined}
+      >
+        <div className={styles.toolLine} title={name}>
+          {summary || name}
+        </div>
+        {meta && <DigestChips meta={meta} />}
+      </div>
+      {meta?.thumbs && <ThumbRow srcs={meta.thumbs} />}
+      {open && expandable && (
+        <ToolDetailPanel
+          client={client}
+          jsonlPath={jsonlPath!}
+          toolUseId={b.id!}
+          isError={meta?.isError}
+        />
+      )}
+    </RailStep>
+  );
+}
+
 /** One assistant record's blocks in the rail language: thinking and tool calls
  *  as icon-guttered steps, prose flush and full width — same convention as the
  *  desktop transcript. */
@@ -499,12 +543,16 @@ function AssistantBlocks({
   expandedThinking,
   onToggleThinking,
   toolMeta,
+  client,
+  jsonlPath,
 }: {
   blocks: ContentBlock[];
   index: number;
   expandedThinking: Set<number>;
   onToggleThinking: (key: number) => void;
   toolMeta?: Map<string, ToolMeta>;
+  client?: RelayClient | null;
+  jsonlPath?: string;
 }) {
   return (
     <>
@@ -529,19 +577,14 @@ function AssistantBlocks({
           return src ? <ThumbRow key={j} srcs={[src]} /> : null;
         }
         if (b.type === "tool_use") {
-          const name = (b as { name?: string }).name ?? "";
-          const summary = toolSummary(b);
-          const meta = b.id ? toolMeta?.get(b.id) : undefined;
           return (
-            <RailStep key={j} icon={railToolIcon(name)}>
-              <div className={styles.toolLineRow}>
-                <div className={styles.toolLine} title={name}>
-                  {summary || name}
-                </div>
-                {meta && <DigestChips meta={meta} />}
-              </div>
-              {meta?.thumbs && <ThumbRow srcs={meta.thumbs} />}
-            </RailStep>
+            <ToolStep
+              key={j}
+              b={b}
+              client={client ?? null}
+              jsonlPath={jsonlPath}
+              meta={b.id ? toolMeta?.get(b.id) : undefined}
+            />
           );
         }
         return null;
@@ -574,6 +617,8 @@ function WorkRunBand({
   onToggleThinking,
   live,
   toolMeta,
+  client,
+  jsonlPath,
 }: {
   msgs: RawMessage[];
   baseIndex: number;
@@ -581,6 +626,8 @@ function WorkRunBand({
   onToggleThinking: (key: number) => void;
   live: boolean;
   toolMeta?: Map<string, ToolMeta>;
+  client?: RelayClient | null;
+  jsonlPath?: string;
 }) {
   const last = msgs[msgs.length - 1];
   // Streaming = the run's final record hasn't recorded a stop_reason yet. An
@@ -626,6 +673,8 @@ function WorkRunBand({
               expandedThinking={expandedThinking}
               onToggleThinking={onToggleThinking}
               toolMeta={toolMeta}
+              client={client}
+              jsonlPath={jsonlPath}
             />
           ))}
           {!streaming && (
@@ -656,6 +705,9 @@ interface MessageRowProps {
   toolMeta?: Map<string, ToolMeta>;
   /** Aggregated usage when this row closes an assistant turn. */
   turnUsage?: { inputTokens: number; outputTokens: number; model?: string };
+  /** For the tap-to-expand tool_detail fetch; both are stable per session. */
+  client?: RelayClient | null;
+  jsonlPath?: string;
 }
 
 /** Content equality for the per-row tool metadata — reference equality would
@@ -682,6 +734,8 @@ const MessageRow = memo(function MessageRow({
   onToggleThinking,
   toolMeta,
   turnUsage,
+  client,
+  jsonlPath,
 }: MessageRowProps) {
   if (msg.type === "user") {
     const text = userText(msg);
@@ -737,6 +791,8 @@ const MessageRow = memo(function MessageRow({
         expandedThinking={expandedThinking}
         onToggleThinking={onToggleThinking}
         toolMeta={toolMeta}
+        client={client}
+        jsonlPath={jsonlPath}
       />
       <div className={styles.rowTime}>
         {assistantText && <CopyButton text={assistantText} />}
@@ -757,6 +813,8 @@ const MessageRow = memo(function MessageRow({
   prev.index === next.index &&
   prev.expandedThinking === next.expandedThinking &&
   prev.onToggleThinking === next.onToggleThinking &&
+  prev.client === next.client &&
+  prev.jsonlPath === next.jsonlPath &&
   toolMetaEqual(prev.toolMeta, next.toolMeta) &&
   JSON.stringify(prev.turnUsage ?? null) === JSON.stringify(next.turnUsage ?? null));
 
@@ -1077,6 +1135,8 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
                   onToggleThinking={toggleThinking}
                   live={live}
                   toolMeta={toolMetaMap}
+                  client={client}
+                  jsonlPath={session.jsonlPath}
                 />
               );
             }
@@ -1101,6 +1161,8 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
                 onToggleThinking={toggleThinking}
                 toolMeta={metaForMsg(unit.msg)}
                 turnUsage={turnUsage.get(unit.startLocal)}
+                client={client}
+                jsonlPath={session.jsonlPath}
               />
             );
           });
