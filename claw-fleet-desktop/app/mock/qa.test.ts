@@ -31,8 +31,8 @@ describe("mock visual-QA scenarios", () => {
 
   it("delays only commands whose pending state drives disabled controls", () => {
     expect(MOCK_QA_DELAY_MS).toBeGreaterThanOrEqual(1_000);
-    expect(shouldDelayMockQaCommand("set_mobile_config")).toBe(true);
-    expect(shouldDelayMockQaCommand("rotate_mobile_secret")).toBe(true);
+    expect(shouldDelayMockQaCommand("set_mobile_relay_config")).toBe(true);
+    expect(shouldDelayMockQaCommand("rotate_mobile_relay_secret")).toBe(true);
     expect(shouldDelayMockQaCommand("promote_memory")).toBe(true);
     expect(shouldDelayMockQaCommand("remove_managed_lesson")).toBe(true);
     expect(shouldDelayMockQaCommand("install_plugin")).toBe(true);

@@ -6,6 +6,7 @@ import { primePromoStorage, promoSceneFromSearch } from "./mock/promo-scene";
 const params = new URLSearchParams(window.location.search);
 const isMockMode = params.has("mock") || import.meta.env.VITE_MOCK === "true";
 const forceLite = params.has("lite");
+const mockQaMode = params.has("qa");
 const promoScene = promoSceneFromSearch(window.location.search);
 
 if (isMockMode && promoScene) {
@@ -16,12 +17,14 @@ stampHostClasses();
 
 async function boot() {
   let triggerPromoScene: ((scene: NonNullable<typeof promoScene>) => void) | null = null;
+  let triggerMockQaScenario: (() => void) | null = null;
   // In mock mode, install the Tauri API fakes BEFORE anything else loads.
   if (isMockMode) {
     const mocks = await import("./mock/tauri-mock");
     const { installMocks } = mocks;
-    installMocks();
+    installMocks({ qaMode: mockQaMode });
     triggerPromoScene = mocks.triggerPromoScene;
+    triggerMockQaScenario = mocks.triggerMockQaScenario;
   }
 
   const { initStorage, setItem } = await import("./storage");
@@ -79,6 +82,9 @@ async function boot() {
 
   if (promoScene && triggerPromoScene) {
     window.setTimeout(() => triggerPromoScene?.(promoScene), 900);
+  }
+  if (mockQaMode && triggerMockQaScenario) {
+    window.setTimeout(() => triggerMockQaScenario?.(), 900);
   }
 }
 
