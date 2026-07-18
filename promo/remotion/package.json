@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "scripts": {
     "studio": "remotion studio",
-    "render": "remotion render ClawFleetPromo out/promo.mp4"
+    "render": "remotion render ClawFleetPromo2026 out/promo-2026-horizontal.mp4",
+    "render:vertical": "remotion render ClawFleetVertical-mobile out/promo-2026-mobile-vertical.mp4"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.246",
