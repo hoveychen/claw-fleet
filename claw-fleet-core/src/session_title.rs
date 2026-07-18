@@ -1,5 +1,5 @@
-//! Per-session **manual title override** — "I, the human, want this session to
-//! read as *this* in the task list, regardless of what the AI/slug derived".
+//! Per-session title override. Human renames and agent-generated semantic
+//! titles share this display layer, but a human rename always wins.
 //!
 //! The displayed session title is normally auto-derived
 //! (`ai_title ?? slug ?? last_message_preview`). This side-channel lets the
@@ -41,6 +41,24 @@ pub struct SessionTitleRecord {
     pub workspace_path: String,
     /// Epoch milliseconds of the update.
     pub updated: u64,
+    /// Who last selected this title. Records written before this field existed
+    /// deserialize as `Manual`, preserving the user's override by default.
+    #[serde(default)]
+    pub source: SessionTitleSource,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionTitleSource {
+    #[default]
+    Manual,
+    Agent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentTitleOutcome {
+    Updated,
+    ManualTitlePreserved,
 }
 
 /// HTTP request body for setting a title over the `fleet serve` boundary
@@ -75,6 +93,18 @@ pub fn set_title(
 ) -> Result<(), String> {
     let dir = title_dir().ok_or("cannot determine home dir")?;
     set_title_in(&dir, session_id, workspace_path, title)
+}
+
+/// Set an agent-generated semantic title unless the user has manually named
+/// this session. This lets the MCP auto-title improve Codex's raw-prompt title
+/// without later clobbering an explicit rename from the UI.
+pub fn set_agent_title(
+    session_id: &str,
+    workspace_path: &str,
+    title: String,
+) -> Result<AgentTitleOutcome, String> {
+    let dir = title_dir().ok_or("cannot determine home dir")?;
+    set_agent_title_in(&dir, session_id, workspace_path, title)
 }
 
 /// Read a session's title override, if any.
@@ -117,6 +147,41 @@ pub(crate) fn set_title_in(
     workspace_path: &str,
     title: Option<String>,
 ) -> Result<(), String> {
+    write_title_in(
+        dir,
+        session_id,
+        workspace_path,
+        title,
+        SessionTitleSource::Manual,
+    )
+}
+
+fn set_agent_title_in(
+    dir: &std::path::Path,
+    session_id: &str,
+    workspace_path: &str,
+    title: String,
+) -> Result<AgentTitleOutcome, String> {
+    if read_in(dir, session_id).is_some_and(|record| record.source == SessionTitleSource::Manual) {
+        return Ok(AgentTitleOutcome::ManualTitlePreserved);
+    }
+    write_title_in(
+        dir,
+        session_id,
+        workspace_path,
+        Some(title),
+        SessionTitleSource::Agent,
+    )?;
+    Ok(AgentTitleOutcome::Updated)
+}
+
+fn write_title_in(
+    dir: &std::path::Path,
+    session_id: &str,
+    workspace_path: &str,
+    title: Option<String>,
+    source: SessionTitleSource,
+) -> Result<(), String> {
     let path = dir.join(format!("{session_id}.json"));
     let trimmed = title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     match trimmed {
@@ -130,6 +195,7 @@ pub(crate) fn set_title_in(
                 title,
                 workspace_path: workspace_path.to_string(),
                 updated: now_ms(),
+                source,
             };
             let json = serde_json::to_string(&rec).map_err(|e| format!("serialize: {e}"))?;
             fs::write(&path, json).map_err(|e| format!("write session-title: {e}"))
@@ -174,12 +240,42 @@ mod tests {
             title: "My renamed session".to_string(),
             workspace_path: "/ws".to_string(),
             updated: 123,
+            source: SessionTitleSource::Manual,
         };
         let json = serde_json::to_string(&rec).unwrap();
         assert!(json.contains("\"workspacePath\""));
         assert!(json.contains("\"title\":\"My renamed session\""));
         let back: SessionTitleRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(back, rec);
+    }
+
+    #[test]
+    fn agent_title_updates_itself_but_never_overwrites_manual_title() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            set_agent_title_in(dir.path(), "sess-a", "/ws", "Agent one".into()).unwrap(),
+            AgentTitleOutcome::Updated
+        );
+        assert_eq!(read_in(dir.path(), "sess-a").unwrap().source, SessionTitleSource::Agent);
+        assert_eq!(
+            set_agent_title_in(dir.path(), "sess-a", "/ws", "Agent two".into()).unwrap(),
+            AgentTitleOutcome::Updated
+        );
+        assert_eq!(read_in(dir.path(), "sess-a").unwrap().title, "Agent two");
+
+        set_title_in(dir.path(), "sess-a", "/ws", Some("Human choice".into())).unwrap();
+        assert_eq!(
+            set_agent_title_in(dir.path(), "sess-a", "/ws", "Agent three".into()).unwrap(),
+            AgentTitleOutcome::ManualTitlePreserved
+        );
+        assert_eq!(read_in(dir.path(), "sess-a").unwrap().title, "Human choice");
+    }
+
+    #[test]
+    fn legacy_record_without_source_is_treated_as_manual() {
+        let json = r#"{"title":"Legacy rename","workspacePath":"/ws","updated":123}"#;
+        let record: SessionTitleRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(record.source, SessionTitleSource::Manual);
     }
 
     #[test]
