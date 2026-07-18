@@ -11,6 +11,8 @@ import type { SessionInfo } from "../types";
 import type { PromoScene } from "./promo-scene";
 import {
   MOCK_QA_DELAY_MS,
+  MOCK_QA_MARKETPLACES,
+  MOCK_QA_PLUGINS,
   mockQaDecisionHistory,
   mockQaElicitationRequest,
   shouldDelayMockQaCommand,
@@ -253,9 +255,9 @@ function handleIPC(
       return MOCK_WIKI_BODIES[(args.slug as string) ?? ""]
         ?? "# Not published\n\nThis document has no mock body.";
     case "list_plugins":
-      return [];
+      return qaMode ? MOCK_QA_PLUGINS : [];
     case "list_marketplaces":
-      return [];
+      return qaMode ? MOCK_QA_MARKETPLACES : [];
     case "list_workspace_procs":
       return [];
     case "clear_workspace_procs":
@@ -302,7 +304,12 @@ function handleIPC(
       return null;
     }
     case "list_memories":
-      return MOCK_MEMORIES;
+      return qaMode
+        ? MOCK_MEMORIES.map((workspace) => ({
+            ...workspace,
+            source: "claude-code",
+          }))
+        : MOCK_MEMORIES;
     case "get_memory_content":
       return MOCK_MEMORY_CONTENT;
     case "get_memory_history":
