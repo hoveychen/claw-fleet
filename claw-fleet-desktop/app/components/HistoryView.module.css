@@ -497,16 +497,19 @@
   flex: 1;
   min-height: 0;
   display: flex;
+  position: relative;
+  overflow: hidden;
 }
 
 /* One open tab's SessionDetail. Every tab stays *mounted* and is hidden with
- * display:none rather than unmounted, so its messages, scroll position and
- * view-tab survive a switch away and back — that is the whole point of the tab
- * strip. Hidden panes are handed `paused`, which freezes their pollers. */
+ * visibility:hidden rather than display:none/unmounting, so its WebKit scroll
+ * layer, messages, scroll position and view-tab survive a switch away and back.
+ * Hidden panes are handed `paused`, which freezes their pollers. */
 .pane {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  display: flex;
 }
 
 .detail_empty {
