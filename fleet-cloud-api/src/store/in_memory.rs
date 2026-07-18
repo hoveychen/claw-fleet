@@ -111,6 +111,33 @@ impl TaskStore for InMemoryTaskStore {
             .ok_or(StoreError::NotFound)
     }
 
+    async fn list_tasks(
+        &self,
+        scope: RequestScope,
+        status: Option<TaskStatus>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Task>, StoreError> {
+        let mut tasks: Vec<_> = self
+            .lock()?
+            .tasks
+            .values()
+            .filter(|task| {
+                task.organization_id == scope.organization_id
+                    && task.project_id == scope.project_id
+                    && status.is_none_or(|expected| task.status == expected)
+            })
+            .cloned()
+            .collect();
+        tasks.sort_by(|left, right| {
+            right
+                .updated_at
+                .cmp(&left.updated_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        Ok(tasks.into_iter().skip(offset).take(limit).collect())
+    }
+
     async fn list_events(
         &self,
         scope: RequestScope,

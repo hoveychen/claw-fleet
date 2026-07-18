@@ -5,12 +5,7 @@ pub mod domain;
 pub mod store;
 
 use api::AppState;
-use axum::{
-    http::StatusCode,
-    response::IntoResponse,
-    routing::{get, post},
-    Json, Router,
-};
+use axum::{http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -39,7 +34,7 @@ pub fn app() -> Router {
 pub fn app_with_store(store: Arc<dyn store::TaskStore>) -> Router {
     Router::new()
         .route("/healthz", get(health))
-        .route("/v1/tasks", post(api::create_task))
+        .route("/v1/tasks", get(api::list_tasks).post(api::create_task))
         .route("/v1/tasks/{task_id}", get(api::get_task))
         .route("/v1/tasks/{task_id}/events", get(api::stream_task_events))
         .with_state(AppState { store })
@@ -217,5 +212,52 @@ mod tests {
             .unwrap();
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
         assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_tasks_filters_status_and_detail_is_browser_ready() {
+        let app = app();
+        let first = app
+            .clone()
+            .oneshot(create_request("create-key-list-1", "first task"))
+            .await
+            .unwrap();
+        let body = to_bytes(first.into_body(), 64 * 1024).await.unwrap();
+        let created: Value = serde_json::from_slice(&body).unwrap();
+        let task_id = created["id"].as_str().unwrap();
+        app.clone()
+            .oneshot(create_request("create-key-list-2", "second task"))
+            .await
+            .unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(scoped_request(
+                "GET",
+                "/v1/tasks?status=queued&limit=1",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        let page: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(page["data"].as_array().unwrap().len(), 1);
+        assert_eq!(page["has_more"], true);
+        assert!(page["next_cursor"].is_string());
+
+        let response = app
+            .oneshot(scoped_request(
+                "GET",
+                &format!("/v1/tasks/{task_id}"),
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        let detail: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(detail["id"], task_id);
+        assert_eq!(detail["attempts"], json!([]));
+        assert_eq!(detail["decisions"], json!([]));
     }
 }

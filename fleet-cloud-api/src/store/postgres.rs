@@ -278,6 +278,32 @@ impl TaskStore for PgTaskStore {
         row.try_into()
     }
 
+    async fn list_tasks(
+        &self,
+        scope: RequestScope,
+        status: Option<TaskStatus>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Task>, StoreError> {
+        let query = format!(
+            "SELECT {TASK_COLUMNS} FROM tasks
+             WHERE organization_id = $1 AND project_id = $2
+               AND ($3::text IS NULL OR status = $3)
+             ORDER BY updated_at DESC, id DESC
+             OFFSET $4 LIMIT $5"
+        );
+        let status = status.map(TaskStatus::as_str);
+        let rows = sqlx::query_as::<_, TaskRow>(&query)
+            .bind(scope.organization_id)
+            .bind(scope.project_id)
+            .bind(status)
+            .bind(offset as i64)
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
     async fn list_events(
         &self,
         scope: RequestScope,

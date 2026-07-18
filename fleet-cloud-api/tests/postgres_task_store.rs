@@ -144,4 +144,20 @@ async fn postgres_create_task_is_atomic_and_idempotent() {
         .await
         .unwrap()
         .is_empty());
+
+    let listed = store
+        .list_tasks(
+            scope,
+            Some(fleet_cloud_api::domain::TaskStatus::Queued),
+            0,
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, first.task.id);
+    let detail = store.get_task_detail(scope, first.task.id).await.unwrap();
+    assert_eq!(detail.task.id, first.task.id);
+    assert!(detail.attempts.is_empty());
+    assert!(detail.decisions.is_empty());
 }

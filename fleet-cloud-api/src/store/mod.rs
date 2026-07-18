@@ -4,7 +4,7 @@ mod postgres;
 pub use in_memory::InMemoryTaskStore;
 pub use postgres::PgTaskStore;
 
-use crate::domain::{CreateTaskRequest, RequestScope, Task, TaskEvent};
+use crate::domain::{CreateTaskRequest, RequestScope, Task, TaskDetail, TaskEvent, TaskStatus};
 use async_trait::async_trait;
 use std::fmt;
 use uuid::Uuid;
@@ -55,6 +55,26 @@ pub trait TaskStore: Send + Sync {
     ) -> Result<CreateTaskOutcome, StoreError>;
 
     async fn get_task(&self, scope: RequestScope, task_id: Uuid) -> Result<Task, StoreError>;
+
+    async fn list_tasks(
+        &self,
+        scope: RequestScope,
+        status: Option<TaskStatus>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Task>, StoreError>;
+
+    async fn get_task_detail(
+        &self,
+        scope: RequestScope,
+        task_id: Uuid,
+    ) -> Result<TaskDetail, StoreError> {
+        Ok(TaskDetail {
+            task: self.get_task(scope, task_id).await?,
+            attempts: Vec::new(),
+            decisions: Vec::new(),
+        })
+    }
 
     async fn list_events(
         &self,
