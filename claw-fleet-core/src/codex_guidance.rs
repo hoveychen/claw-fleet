@@ -349,8 +349,12 @@ changes, call it again with the new title; otherwise do not rename on every \
 turn.\n\
 \n\
 Like other Fleet MCP tools, Codex may defer it from the upfront tool list; \
-call it directly as `mcp__fleet__fleet__set_session_title`. This tool is \
-non-blocking. If it is unavailable or returns an error, continue the task \
+invoke it inside the outer `exec` with the exact direct-call shape \
+`await tools.mcp__fleet__fleet__set_session_title({{ title: \"<concise title>\" }});`. \
+**Do not inspect `ALL_TOOLS`, search tool lists, gate the call on apparent \
+availability, or use dynamic lookup:** deferred MCP tools are absent from \
+those lists even when they are callable. This tool is non-blocking. If the \
+direct call returns a not-registered / unknown-tool error, continue the task \
 without retrying or interrupting {title}.\n\
 \n\
 ### Deferred-tool wait invariant\n\
@@ -946,6 +950,11 @@ mod tests {
         assert!(
             g.contains("stable topic") && g.contains("materially changes"),
             "must define when the initial title is set and when it may be updated"
+        );
+        assert!(
+            g.contains("tools.mcp__fleet__fleet__set_session_title")
+                && g.contains("Do not inspect `ALL_TOOLS`"),
+            "must give the exact direct-call shape and forbid the deferred-tool list trap"
         );
     }
 
