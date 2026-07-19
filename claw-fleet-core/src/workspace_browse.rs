@@ -106,7 +106,10 @@ fn browse_dir_in(
 
     let mut entries = Vec::new();
     let mut truncated = false;
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+    // `guarded_read_dir` logs a backtrace if this read is TCC-denied — the user
+    // may navigate the picker into ~/Documents et al., and a deliberate "Don't
+    // Allow" should leave a breadcrumb rather than a silent empty listing.
+    for entry in crate::tcc::guarded_read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
         let child = entry.path();
         // Resolve dir-ness from the readdir `d_type`, NOT `child.is_dir()`: the
         // latter `stat`s every entry, which fires a macOS TCC dialog the moment
