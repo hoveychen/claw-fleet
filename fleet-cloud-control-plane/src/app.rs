@@ -1,4 +1,4 @@
-use axum::{extract::DefaultBodyLimit, routing::get, Json, Router};
+use axum::{extract::DefaultBodyLimit, middleware, routing::get, Json, Router};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -37,8 +37,9 @@ impl AppState {
 }
 
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let app = Router::new()
         .route("/health/live", get(live))
+        .route("/health/ready", get(routes::governance::ready))
         .route(
             "/tasks",
             get(routes::tasks::list_tasks).post(routes::tasks::create_task),
@@ -72,6 +73,28 @@ pub fn router(state: AppState) -> Router {
             get(routes::artifacts::list_task).post(routes::artifacts::upload),
         )
         .route("/events/stream", get(routes::events::stream_events))
+        .route(
+            "/webhook-endpoints",
+            get(routes::webhooks::list).post(routes::webhooks::create),
+        )
+        .route(
+            "/webhook-endpoints/{webhook_endpoint_id}",
+            axum::routing::patch(routes::webhooks::update).delete(routes::webhooks::delete),
+        )
+        .route(
+            "/webhook-endpoints/{webhook_endpoint_id}/rotate-secret",
+            axum::routing::post(routes::webhooks::rotate_secret),
+        )
+        .route(
+            "/webhook-deliveries/{delivery_id}/replay",
+            axum::routing::post(routes::webhooks::replay),
+        )
+        .route(
+            "/webhook-deliveries",
+            get(routes::webhooks::list_deliveries),
+        )
+        .route("/operations", get(routes::governance::operations))
+        .route("/metrics", get(routes::governance::metrics))
         .route("/embed-tokens", axum::routing::post(routes::embeds::create))
         .route("/runs/{run_id}", get(routes::runs::get))
         .route("/runs/{run_id}/messages", get(routes::runs::list_messages))
@@ -112,7 +135,11 @@ pub fn router(state: AppState) -> Router {
         )
         .layer(DefaultBodyLimit::max(18 * 1024 * 1024))
         .layer(cloud_cors())
-        .with_state(state)
+        .with_state(state.clone());
+    app.layer(middleware::from_fn_with_state(
+        state,
+        crate::services::governance::observe_and_audit,
+    ))
 }
 
 fn cloud_cors() -> CorsLayer {
@@ -123,7 +150,7 @@ fn cloud_cors() -> CorsLayer {
             HeaderValue::from_static("http://localhost:5173"),
             HeaderValue::from_static("http://127.0.0.1:4173"),
         ])
-        .allow_methods([Method::GET, Method::POST, Method::DELETE])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers([
             header::AUTHORIZATION,
             header::CONTENT_TYPE,

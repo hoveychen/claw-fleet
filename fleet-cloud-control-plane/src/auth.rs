@@ -70,6 +70,7 @@ impl FromRequestParts<AppState> for ProjectPrincipal {
                     .bind(&principal.api_key_id)
                     .execute(&pool)
                     .await?;
+                crate::services::governance::enforce_rate_limit(&pool, &principal).await?;
                 return Ok(principal);
             }
 
@@ -104,11 +105,13 @@ impl FromRequestParts<AppState> for ProjectPrincipal {
             )
             .await?;
 
-            Ok(ProjectPrincipal {
+            let principal = ProjectPrincipal {
                 organization_id: embed.0,
                 project_id: embed.1,
                 api_key_id: embed.2,
-            })
+            };
+            crate::services::governance::enforce_rate_limit(&pool, &principal).await?;
+            Ok(principal)
         }
     }
 }

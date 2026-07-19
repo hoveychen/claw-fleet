@@ -61,6 +61,15 @@ async fn registration_token_is_single_use(pool: sqlx::PgPool) {
             .unwrap(),
         1
     );
+    let audit: (String, serde_json::Value) = sqlx::query_as(
+        "SELECT principal_type,details FROM audit_records WHERE action='POST /runner-registrations/claim'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit.0, "runner_registration");
+    assert!(audit.1["before_hash"].as_str().is_some());
+    assert!(audit.1["after_hash"].as_str().is_some());
 }
 
 #[sqlx::test(migrations = "./migrations")]

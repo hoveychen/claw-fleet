@@ -71,10 +71,12 @@ describe("CloudApiClient", () => {
     await client.listRunMessages("run_1", "41");
     await client.getRun("run_1");
     await client.getRunUsage("run_1");
+    await client.getOperations();
     expect(String(fetcher.mock.calls[0][0])).toBe("https://cloud.example/api/v1/tasks?project_id=proj_1&status=running&cursor=cur_1");
     expect(String(fetcher.mock.calls[1][0])).toBe("https://cloud.example/api/v1/runs/run_1/messages?after=41");
     expect(String(fetcher.mock.calls[2][0])).toBe("https://cloud.example/api/v1/runs/run_1");
     expect(String(fetcher.mock.calls[3][0])).toBe("https://cloud.example/api/v1/runs/run_1/usage");
+    expect(String(fetcher.mock.calls[4][0])).toBe("https://cloud.example/api/v1/operations");
     expect(fetcher.mock.calls.flat().join(" ")).not.toContain("super-secret");
   });
 });

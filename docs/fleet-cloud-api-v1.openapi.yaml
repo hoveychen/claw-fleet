@@ -35,10 +35,77 @@ tags:
     description: At-least-once Event delivery endpoints and signing-secret management.
   - name: Embed
     description: Short-lived credentials for embedding Fleet Web views in a business UI.
+  - name: Operations
+    description: Control-plane readiness, telemetry, and operator failure queues.
 security:
   - ProjectApiKey: []
 
 paths:
+  /health/live:
+    get:
+      tags: [Operations]
+      operationId: getLiveness
+      summary: Process liveness probe
+      security: []
+      responses:
+        '200':
+          description: Process is live
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthStatus' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /health/ready:
+    get:
+      tags: [Operations]
+      operationId: getReadiness
+      summary: PostgreSQL, object storage, and KMS readiness
+      security: []
+      responses:
+        '200':
+          description: Required control-plane dependencies are ready
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthStatus' }
+        '503':
+          description: One or more required dependencies are unavailable
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /metrics:
+    get:
+      tags: [Operations]
+      operationId: getProjectMetrics
+      summary: Read the project telemetry snapshot
+      responses:
+        '200':
+          description: API, Runner, command, Event, and webhook telemetry
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+
+  /operations:
+    get:
+      tags: [Operations]
+      operationId: getOperationsSnapshot
+      summary: Read actionable control-plane failure queues
+      responses:
+        '200':
+          description: Failed webhooks, offline Runners, stale commands, and retention failures
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [failed_webhooks, offline_runners, stale_commands, retention_failures]
+                properties:
+                  failed_webhooks: { type: array, items: { type: object, additionalProperties: true } }
+                  offline_runners: { type: array, items: { type: object, additionalProperties: true } }
+                  stale_commands: { type: array, items: { type: object, additionalProperties: true } }
+                  retention_failures: { type: array, items: { type: object, additionalProperties: true } }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+
   /tasks:
     post:
       tags: [Tasks]
@@ -821,6 +888,48 @@ paths:
                   previous_valid_until: { type: string, format: date-time }
         '404': { $ref: '#/components/responses/NotFoundError' }
 
+  /webhook-deliveries:
+    get:
+      tags: [Webhooks]
+      operationId: listWebhookDeliveries
+      summary: List recent delivery attempts without signing secrets
+      parameters:
+        - name: endpoint_id
+          in: query
+          schema: { $ref: '#/components/schemas/ResourceId' }
+      responses:
+        '200':
+          description: Delivery log
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/WebhookDelivery' }
+        '401': { $ref: '#/components/responses/AuthenticationError' }
+
+  /webhook-deliveries/{delivery_id}/replay:
+    post:
+      tags: [Webhooks]
+      operationId: replayWebhookDelivery
+      summary: Create a new delivery attempt for the same Event
+      parameters:
+        - name: delivery_id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/ResourceId' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Replay delivery created with a new delivery ID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookDelivery' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+
   /embed-tokens:
     post:
       tags: [Embed]
@@ -1484,6 +1593,36 @@ components:
         version: { type: integer, minimum: 1 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    WebhookDelivery:
+      type: object
+      required: [id, event_id, status]
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        endpoint_id: { $ref: '#/components/schemas/ResourceId' }
+        event_id: { $ref: '#/components/schemas/ResourceId' }
+        status: { type: string, enum: [pending, delivered, failed] }
+        attempt_count: { type: integer, minimum: 0 }
+        next_attempt_at: { type: string, format: date-time }
+        deadline_at: { type: string, format: date-time }
+        last_status_code: { type: [integer, 'null'] }
+        last_error: { type: [string, 'null'] }
+        delivered_at: { type: [string, 'null'], format: date-time }
+        replay_of_id:
+          oneOf:
+            - $ref: '#/components/schemas/ResourceId'
+            - type: 'null'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+        components:
+          type: object
+          additionalProperties: { type: string }
 
     ErrorEnvelope:
       type: object

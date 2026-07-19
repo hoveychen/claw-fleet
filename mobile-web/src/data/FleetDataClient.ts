@@ -38,6 +38,26 @@ export interface DecisionResponse {
   command: CommandReceipt;
 }
 
+export interface OperationsIssue {
+  id?: string;
+  name?: string;
+  job?: string;
+  event_id?: string;
+  status?: string;
+  error?: string | null;
+  attempt_count?: number;
+  created_at?: string;
+  updated_at?: string;
+  last_heartbeat_at?: string | null;
+}
+
+export interface OperationsSnapshot {
+  failed_webhooks: OperationsIssue[];
+  offline_runners: OperationsIssue[];
+  stale_commands: OperationsIssue[];
+  retention_failures: OperationsIssue[];
+}
+
 export interface StreamEventsInput {
   projectId?: string;
   taskId?: string;
@@ -78,5 +98,6 @@ export interface FleetDataClient {
   listRunMessages(runId: string, after?: string): Promise<Page<TranscriptRecord>>;
   getRun(runId: string): Promise<Run>;
   getRunUsage(runId: string): Promise<Usage>;
+  getOperations?(): Promise<OperationsSnapshot>;
   streamEvents(input: StreamEventsInput): EventSubscription;
 }

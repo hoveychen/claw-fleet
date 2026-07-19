@@ -31,6 +31,10 @@ pub enum ApiError {
     RunnerUnavailable,
     #[error("object storage is temporarily unavailable")]
     StorageUnavailable,
+    #[error("project quota exceeded")]
+    QuotaExceeded,
+    #[error("project rate limit exceeded")]
+    RateLimited,
     #[error("database error")]
     Database(#[from] sqlx::Error),
     #[error("internal error")]
@@ -79,6 +83,12 @@ impl ApiError {
                 "storage",
                 "storage_unavailable",
             ),
+            Self::QuotaExceeded => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit",
+                "quota_exceeded",
+            ),
+            Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "rate_limit", "rate_limited"),
             Self::Database(_) | Self::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal",
@@ -97,7 +107,7 @@ impl IntoResponse for ApiError {
             self.to_string()
         };
         let request_id = format!("req_{}", Uuid::now_v7().simple());
-        (
+        let mut response = (
             status,
             Json(json!({
                 "error": {
@@ -108,6 +118,13 @@ impl IntoResponse for ApiError {
                 }
             })),
         )
-            .into_response()
+            .into_response();
+        if matches!(self, Self::QuotaExceeded | Self::RateLimited) {
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from_static("60"),
+            );
+        }
+        response
     }
 }

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Decision, FleetDataClient, Task, TranscriptRecord, Usage } from "../data/FleetDataClient";
+import type { Decision, FleetDataClient, OperationsIssue, OperationsSnapshot, Task, TranscriptRecord, Usage } from "../data/FleetDataClient";
 import styles from "./CloudWorkspace.module.css";
 
-export type CloudView = "tasks" | "task_detail" | "decision_inbox" | "decision_card" | "usage";
+export type CloudView = "tasks" | "task_detail" | "decision_inbox" | "decision_card" | "usage" | "operations";
 
 interface Props {
   client: FleetDataClient;
@@ -32,15 +32,40 @@ export function CloudWorkspace({ client, projectId, initialTaskId, initialView =
     {!embedded && <header className={styles.header}><div><b>Fleet Cloud</b><span>Hosted Console</span></div><nav>
       <button data-active={view === "tasks"} onClick={() => navigate()}>Tasks</button>
       <button data-active={view === "decision_inbox"} onClick={() => navigate(undefined, "decision_inbox")}>Decisions</button>
+      <button data-active={view === "operations"} onClick={() => navigate(undefined, "operations")}>Operations</button>
     </nav></header>}
     {error && <div className={styles.error} role="alert">{error}</div>}
     <main className={styles.main}>
       {view === "tasks" && <TaskList tasks={tasks} onOpen={(id) => navigate(id)} />}
       {view === "decision_inbox" && <DecisionInbox client={client} projectId={projectId} taskId={taskId} />}
       {view === "decision_card" && <DecisionInbox client={client} projectId={projectId} taskId={taskId} single />}
+      {view === "operations" && <OperationsView client={client} />}
       {(view === "task_detail" || view === "usage") && taskId && <TaskDetail client={client} taskId={taskId} usageOnly={view === "usage"} onBack={() => navigate()} />}
     </main>
   </div>;
+}
+
+function OperationsView({ client }: { client: FleetDataClient }) {
+  const [snapshot, setSnapshot] = useState<OperationsSnapshot>();
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    if (!client.getOperations) { setError("Operations are unavailable for this connection."); return; }
+    void client.getOperations().then((value) => { setSnapshot(value); setError(null); }, (value) => setError(message(value)));
+  }, [client]);
+  useEffect(() => { load(); const timer = window.setInterval(load, 15_000); return () => window.clearInterval(timer); }, [load]);
+  const sections: Array<[string, string, OperationsIssue[]]> = snapshot ? [
+    ["Webhook delivery", "FAILED", snapshot.failed_webhooks],
+    ["Runner heartbeat", "OFFLINE", snapshot.offline_runners],
+    ["Command queue", "STALE", snapshot.stale_commands],
+    ["Retention", "FAILED", snapshot.retention_failures],
+  ] : [];
+  const total = sections.reduce((sum, section) => sum + section[2].length, 0);
+  return <section><div className={styles.sectionHead}><div><p className={styles.eyebrow}>CONTROL PLANE / LIVE</p><h1>Operations</h1></div><span>{snapshot ? `${total} open signals` : "loading"}</span></div>
+    {error && <div className={styles.error}>{error}</div>}
+    <div className={styles.opsLedger}>{sections.map(([title, state, issues]) => <section key={title} className={styles.opsSection}><header><h2>{title}</h2><span>{issues.length}</span></header>
+      {issues.length === 0 ? <p className={styles.opsClear}>CLEAR</p> : issues.map((issue, index) => <div className={styles.opsRow} key={issue.id || issue.job || index}><b>{issue.name || issue.job || issue.id}</b><code>{issue.event_id || issue.status || issue.error || "requires attention"}</code><time>{relative(issue.updated_at || issue.created_at || issue.last_heartbeat_at || new Date().toISOString())}</time><span>{state}</span></div>)}
+    </section>)}</div>
+  </section>;
 }
 
 function TaskList({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: string) => void }) {

@@ -147,8 +147,18 @@ pub async fn upload(
     .bind(task_id)
     .fetch_one(&mut *tx)
     .await?;
-    if used.saturating_add(bytes.len() as i64) > MAX_TASK_ARTIFACT_BYTES {
-        return Err(ApiError::Validation("Task Artifact quota exceeded".into()));
+    let project_limit =
+        crate::services::governance::artifact_byte_limit(&mut tx, principal).await?;
+    let project_used = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(SUM(size_bytes),0)::bigint FROM artifacts WHERE project_id=$1 AND status='active'",
+    )
+    .bind(&principal.project_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if used.saturating_add(bytes.len() as i64) > MAX_TASK_ARTIFACT_BYTES
+        || project_used.saturating_add(bytes.len() as i64) > project_limit
+    {
+        return Err(ApiError::QuotaExceeded);
     }
 
     let artifact_id = new_id("art");
