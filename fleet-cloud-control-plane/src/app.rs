@@ -71,6 +71,7 @@ pub fn router(state: AppState) -> Router {
             get(routes::artifacts::list_task).post(routes::artifacts::upload),
         )
         .route("/events/stream", get(routes::events::stream_events))
+        .route("/embed-tokens", axum::routing::post(routes::embeds::create))
         .route("/runs/{run_id}/messages", get(routes::runs::list_messages))
         .route("/decisions", get(routes::decisions::list))
         .route("/decisions/{decision_id}", get(routes::decisions::get))
