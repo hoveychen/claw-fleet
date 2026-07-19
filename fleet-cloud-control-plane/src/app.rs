@@ -59,6 +59,12 @@ pub fn router(state: AppState) -> Router {
             get(routes::tasks::list_task_events),
         )
         .route("/events/stream", get(routes::events::stream_events))
+        .route("/decisions", get(routes::decisions::list))
+        .route("/decisions/{decision_id}", get(routes::decisions::get))
+        .route(
+            "/decisions/{decision_id}/responses",
+            axum::routing::post(routes::decisions::respond),
+        )
         .route(
             "/runner-registrations",
             axum::routing::post(routes::runners::create_registration),

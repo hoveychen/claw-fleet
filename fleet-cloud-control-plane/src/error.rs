@@ -19,6 +19,12 @@ pub enum ApiError {
     StateConflict,
     #[error("If-Match does not match the current resource version")]
     VersionConflict,
+    #[error("If-Match is required")]
+    PreconditionRequired,
+    #[error("decision has already been resolved")]
+    DecisionAlreadyResolved,
+    #[error("decision deadline has expired")]
+    DecisionExpired,
     #[error("runner does not advertise the required capability")]
     RunnerCapabilityMissing,
     #[error("runner is unavailable for assignment")]
@@ -50,6 +56,21 @@ impl ApiError {
                 StatusCode::PRECONDITION_FAILED,
                 "conflict",
                 "version_conflict",
+            ),
+            Self::PreconditionRequired => (
+                StatusCode::PRECONDITION_REQUIRED,
+                "precondition",
+                "if_match_required",
+            ),
+            Self::DecisionAlreadyResolved => (
+                StatusCode::CONFLICT,
+                "conflict",
+                "decision_already_resolved",
+            ),
+            Self::DecisionExpired => (
+                StatusCode::CONFLICT,
+                "conflict",
+                "decision_expired",
             ),
             Self::RunnerCapabilityMissing => {
                 (StatusCode::CONFLICT, "runner", "runner_capability_missing")
