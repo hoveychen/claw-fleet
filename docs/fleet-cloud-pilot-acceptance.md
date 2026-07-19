@@ -19,7 +19,7 @@
 | Runner Compose 配置展开 | PASS | 2026-07-19：补齐 `FLEET_CLOUD_RUNNER_URL` 与 `FLEET_RUNNER_ID` 后 `docker compose ... config --quiet` 通过 |
 | 全 workspace Rust 测试 | PASS | 2026-07-19：`cargo test --workspace` 零失败；真实外部/超时用例按测试声明 ignored |
 | staging `cloud-e2e.sh` | NOT RUN | 尚无已部署 staging、Project Key、Runner 身份和 webhook receiver |
-| 100 个真实 Issues | NOT RUN | 2026-07-19 `gh issue list` 返回空数组；仅有 GitHub 默认 9 个 label |
+| 100 个真实 Issues | PASS | 2026-07-19 创建并反向核对 #3–#102；`docs/fleet-cloud-pilot-backlog.{json,csv}` 含 100 行唯一 FCP marker、Issue number/URL、源码证据；创建时未加 `fleet-task`，待 staging 在线后触发 |
 | Muvee 资源 | NOT RUN | 2026-07-19 复核：无 Fleet Cloud project；secret store 无 Fleet Cloud/GitHub App secrets |
 
 ## RFC §18 十项上线门
@@ -56,7 +56,8 @@
 4. Runner claim 生成的证书是短期验收身份，正式 Runner 身份必须写入 VM secret store，不得提交 `deploy/cloud/identity/`。
 5. 当前 Runner gateway 是独立 `8091` 端到端 mTLS；Muvee 标准项目只暴露 HTTP `8080` 并终止 TLS。staging 前必须确认 TCP/TLS passthrough 或提供保留客户端证书的第二入口，不能把它当作普通反代 WebSocket。
 6. Boss 于 2026-07-19 选择 TLS passthrough；但冻结基线让 API 与 Runner 共用 `fleet-cloud.muveeai.com:443`，普通 L4 passthrough 无法在同一 SNI/端口同时转发 Muvee TLS 终止的 HTTP 与控制面端到端 mTLS。必须增加 Runner 专用 hostname/port，或实现可区分的 ALPN/L4 多路复用后再烟测。
-7. 冻结基线要求 GitHub App 以 `fleet-task` label 创建 Task 并回写评论/状态 label；2026-07-19 全仓检索确认该适配器尚未实现。创建 100 Issues 前必须先交付并验证 webhook→公开 Task API→Issue 回写闭环，避免制造无法消费的试点工单。
+7. GitHub App 适配器已在提交 `6c33417`、`37d931e`、`e383364` 实现并通过目标测试与 workspace 全测：验签后以 GitHub delivery ID 调用公开 `POST /tasks`，轮询公开 Task API，通过 installation token 幂等回写 `fleet:*` label 与带隐藏 marker 的状态评论。真实 App 安装、secret 注入和 staging webhook 仍未执行。
+8. 100 个真实 backlog Issues 已创建为 #3–#102，并由 `scripts/fleet-cloud-pilot-backlog.mjs` 生成/恢复/反向对账；当前只带 `fleet-backlog`、`quality`、`test-coverage`，不会在接收器离线时丢失 `fleet-task` 触发事件。
 
 ## 100 Task 记录模板
 
@@ -67,4 +68,4 @@
 
 ## 结论
 
-`BLOCKED: P10 真实试点与故障演练尚未执行 — needed: 100 个真实 GitHub Issues、香港 Runner VM、已部署 Muvee staging、可保留 Runner mTLS 的公网入口、GitHub App/Project Key/Runner TLS/webhook receiver secrets，以及 Boss 对 push/部署的当前授权。`
+`BLOCKED: P10 真实 Task 与故障演练尚未执行 — needed: 香港 Runner VM、已部署 Muvee staging、可保留 Runner mTLS 的公网入口、GitHub App/Project Key/Runner TLS/webhook receiver secrets，以及 Boss 对 push/部署的当前授权。100 个 Issues 已备好但尚未加 fleet-task 触发。`

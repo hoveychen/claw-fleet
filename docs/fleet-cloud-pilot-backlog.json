@@ -1,0 +1,1508 @@
+{
+  "generated_at": "2026-07-19T07:11:58.076Z",
+  "source_commit": "e38336468cc135adaf177a9de3b12d82dcc73dd1",
+  "repository": "hoveychen/claw-fleet",
+  "methodology": "86 production Rust modules >=70 lines without colocated #[cfg(test)] plus all 14 executable #[ignore] tests",
+  "items": [
+    {
+      "id": "FCP-001",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/mod.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/mod.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-001 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/mod.rs` currently has 1930 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/mod.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 3,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/3"
+    },
+    {
+      "id": "FCP-002",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-runner/src/supervisor.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-runner/src/supervisor.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-002 -->\n## Evidence\n\n`fleet-cloud-runner/src/supervisor.rs` currently has 1099 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-runner/src/supervisor.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 4,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/4"
+    },
+    {
+      "id": "FCP-003",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/mod.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/mod.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-003 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/mod.rs` currently has 933 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/mod.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 5,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/5"
+    },
+    {
+      "id": "FCP-004",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/proc_runner.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/proc_runner.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-004 -->\n## Evidence\n\n`claw-fleet-core/src/proc_runner.rs` currently has 917 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/proc_runner.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 6,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/6"
+    },
+    {
+      "id": "FCP-005",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/services/artifacts.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/services/artifacts.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-005 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/services/artifacts.rs` currently has 854 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/services/artifacts.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 7,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/7"
+    },
+    {
+      "id": "FCP-006",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/services/tasks.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/services/tasks.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-006 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/services/tasks.rs` currently has 780 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/services/tasks.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 8,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/8"
+    },
+    {
+      "id": "FCP-007",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/main.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/main.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-007 -->\n## Evidence\n\n`fleet-cli/src/main.rs` currently has 766 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/main.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 9,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/9"
+    },
+    {
+      "id": "FCP-008",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/lib.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/lib.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-008 -->\n## Evidence\n\n`claw-fleet-desktop/src/lib.rs` currently has 733 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/lib.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 10,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/10"
+    },
+    {
+      "id": "FCP-009",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/session/detect.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/session/detect.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-009 -->\n## Evidence\n\n`claw-fleet-core/src/session/detect.rs` currently has 649 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/session/detect.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 11,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/11"
+    },
+    {
+      "id": "FCP-010",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/services/webhooks.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/services/webhooks.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-010 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/services/webhooks.rs` currently has 587 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/services/webhooks.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 12,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/12"
+    },
+    {
+      "id": "FCP-011",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_core.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_core.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-011 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_core.rs` currently has 579 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_core.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 13,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/13"
+    },
+    {
+      "id": "FCP-012",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_skills.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_skills.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-012 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_skills.rs` currently has 472 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_skills.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 14,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/14"
+    },
+    {
+      "id": "FCP-013",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/runner_gateway/registry.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/runner_gateway/registry.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-013 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/runner_gateway/registry.rs` currently has 464 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/runner_gateway/registry.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 15,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/15"
+    },
+    {
+      "id": "FCP-014",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/agents.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/agents.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-014 -->\n## Evidence\n\n`fleet-cli/src/commands/agents.rs` currently has 436 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/agents.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 16,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/16"
+    },
+    {
+      "id": "FCP-015",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-runner/src/redaction.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-runner/src/redaction.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-015 -->\n## Evidence\n\n`fleet-cloud-runner/src/redaction.rs` currently has 421 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-runner/src/redaction.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 17,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/17"
+    },
+    {
+      "id": "FCP-016",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/services/governance.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/services/governance.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-016 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/services/governance.rs` currently has 394 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/services/governance.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 18,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/18"
+    },
+    {
+      "id": "FCP-017",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_interaction.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_interaction.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-017 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_interaction.rs` currently has 392 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_interaction.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 19,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/19"
+    },
+    {
+      "id": "FCP-018",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/tts.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/tts.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-018 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/tts.rs` currently has 379 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/tts.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 20,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/20"
+    },
+    {
+      "id": "FCP-019",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/wiki.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/wiki.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-019 -->\n## Evidence\n\n`fleet-cli/src/commands/wiki.rs` currently has 321 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/wiki.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 21,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/21"
+    },
+    {
+      "id": "FCP-020",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_audit.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_audit.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-020 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_audit.rs` currently has 316 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_audit.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 22,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/22"
+    },
+    {
+      "id": "FCP-021",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_elicitation.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_elicitation.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-021 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_elicitation.rs` currently has 293 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_elicitation.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 23,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/23"
+    },
+    {
+      "id": "FCP-022",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_daily_report.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_daily_report.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-022 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_daily_report.rs` currently has 279 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_daily_report.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 24,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/24"
+    },
+    {
+      "id": "FCP-023",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/elicitation.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/elicitation.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-023 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/elicitation.rs` currently has 267 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/elicitation.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 25,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/25"
+    },
+    {
+      "id": "FCP-024",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_guard.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_guard.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-024 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_guard.rs` currently has 265 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_guard.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 26,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/26"
+    },
+    {
+      "id": "FCP-025",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_wiki.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_wiki.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-025 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_wiki.rs` currently has 265 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_wiki.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 27,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/27"
+    },
+    {
+      "id": "FCP-026",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_decision.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_decision.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-026 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_decision.rs` currently has 264 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_decision.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 28,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/28"
+    },
+    {
+      "id": "FCP-027",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_proc.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_proc.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-027 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_proc.rs` currently has 262 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_proc.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 29,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/29"
+    },
+    {
+      "id": "FCP-028",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_spawn.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_spawn.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-028 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_spawn.rs` currently has 259 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_spawn.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 30,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/30"
+    },
+    {
+      "id": "FCP-029",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/routes/tasks.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/routes/tasks.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-029 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/routes/tasks.rs` currently has 253 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/routes/tasks.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 31,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/31"
+    },
+    {
+      "id": "FCP-030",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/services/decisions.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/services/decisions.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-030 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/services/decisions.rs` currently has 252 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/services/decisions.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 32,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/32"
+    },
+    {
+      "id": "FCP-031",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/keep_awake.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/keep_awake.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-031 -->\n## Evidence\n\n`claw-fleet-desktop/src/keep_awake.rs` currently has 245 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/keep_awake.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 33,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/33"
+    },
+    {
+      "id": "FCP-032",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/routes/runners.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/routes/runners.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-032 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/routes/runners.rs` currently has 229 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/routes/runners.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 34,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/34"
+    },
+    {
+      "id": "FCP-033",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/plan.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/plan.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-033 -->\n## Evidence\n\n`fleet-cli/src/commands/plan.rs` currently has 226 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/plan.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 35,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/35"
+    },
+    {
+      "id": "FCP-034",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/report.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/report.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-034 -->\n## Evidence\n\n`fleet-cli/src/commands/report.rs` currently has 213 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/report.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 36,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/36"
+    },
+    {
+      "id": "FCP-035",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/process.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/process.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-035 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/process.rs` currently has 211 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/process.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 37,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/37"
+    },
+    {
+      "id": "FCP-036",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_explorer.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_explorer.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-036 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_explorer.rs` currently has 207 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_explorer.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 38,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/38"
+    },
+    {
+      "id": "FCP-037",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/auth.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/auth.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-037 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/auth.rs` currently has 207 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/auth.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 39,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/39"
+    },
+    {
+      "id": "FCP-038",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/pattern_update.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/pattern_update.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-038 -->\n## Evidence\n\n`claw-fleet-core/src/pattern_update.rs` currently has 202 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/pattern_update.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 40,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/40"
+    },
+    {
+      "id": "FCP-039",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_llm.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_llm.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-039 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_llm.rs` currently has 192 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_llm.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 41,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/41"
+    },
+    {
+      "id": "FCP-040",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/main.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/main.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-040 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/main.rs` currently has 188 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/main.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 42,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/42"
+    },
+    {
+      "id": "FCP-041",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_hooks.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_hooks.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-041 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_hooks.rs` currently has 187 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_hooks.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 43,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/43"
+    },
+    {
+      "id": "FCP-042",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/remote.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/remote.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-042 -->\n## Evidence\n\n`fleet-cli/src/commands/remote.rs` currently has 184 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/remote.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 44,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/44"
+    },
+    {
+      "id": "FCP-043",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/services/embeds.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/services/embeds.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-043 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/services/embeds.rs` currently has 179 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/services/embeds.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 45,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/45"
+    },
+    {
+      "id": "FCP-044",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/loop_cmd.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/loop_cmd.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-044 -->\n## Evidence\n\n`fleet-cli/src/commands/loop_cmd.rs` currently has 176 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/loop_cmd.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 46,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/46"
+    },
+    {
+      "id": "FCP-045",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-runner/src/transport.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-runner/src/transport.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-045 -->\n## Evidence\n\n`fleet-cloud-runner/src/transport.rs` currently has 176 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-runner/src/transport.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 47,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/47"
+    },
+    {
+      "id": "FCP-046",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/notification.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/notification.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-046 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/notification.rs` currently has 173 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/notification.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 48,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/48"
+    },
+    {
+      "id": "FCP-047",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/fmt.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/fmt.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-047 -->\n## Evidence\n\n`fleet-cli/src/fmt.rs` currently has 173 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/fmt.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 49,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/49"
+    },
+    {
+      "id": "FCP-048",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/routes/artifacts.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/routes/artifacts.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-048 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/routes/artifacts.rs` currently has 173 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/routes/artifacts.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 50,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/50"
+    },
+    {
+      "id": "FCP-049",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-relay/src/ws.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-relay/src/ws.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-049 -->\n## Evidence\n\n`fleet-relay/src/ws.rs` currently has 163 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-relay/src/ws.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 51,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/51"
+    },
+    {
+      "id": "FCP-050",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/claude_source.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/claude_source.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-050 -->\n## Evidence\n\n`claw-fleet-core/src/claude_source.rs` currently has 162 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/claude_source.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 52,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/52"
+    },
+    {
+      "id": "FCP-051",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/audit.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/audit.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-051 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/audit.rs` currently has 159 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/audit.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 53,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/53"
+    },
+    {
+      "id": "FCP-052",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/routes.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/routes.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-052 -->\n## Evidence\n\n`claw-fleet-core/src/routes.rs` currently has 157 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/routes.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 54,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/54"
+    },
+    {
+      "id": "FCP-053",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/session.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/session.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-053 -->\n## Evidence\n\n`fleet-cli/src/commands/session.rs` currently has 157 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/session.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 55,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/55"
+    },
+    {
+      "id": "FCP-054",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/skill.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/skill.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-054 -->\n## Evidence\n\n`fleet-cli/src/commands/skill.rs` currently has 157 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/skill.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 56,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/56"
+    },
+    {
+      "id": "FCP-055",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/version_check.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/version_check.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-055 -->\n## Evidence\n\n`claw-fleet-desktop/src/version_check.rs` currently has 155 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/version_check.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 57,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/57"
+    },
+    {
+      "id": "FCP-056",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_plan_approval.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_plan_approval.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-056 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_plan_approval.rs` currently has 151 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_plan_approval.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 58,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/58"
+    },
+    {
+      "id": "FCP-057",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/plan_approval.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/plan_approval.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-057 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/plan_approval.rs` currently has 149 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/plan_approval.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 59,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/59"
+    },
+    {
+      "id": "FCP-058",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/handoff.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/handoff.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-058 -->\n## Evidence\n\n`fleet-cli/src/commands/handoff.rs` currently has 149 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/handoff.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 60,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/60"
+    },
+    {
+      "id": "FCP-059",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/memory.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/memory.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-059 -->\n## Evidence\n\n`fleet-cli/src/commands/memory.rs` currently has 148 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/memory.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 61,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/61"
+    },
+    {
+      "id": "FCP-060",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/runner_gateway/connection.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/runner_gateway/connection.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-060 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/runner_gateway/connection.rs` currently has 145 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/runner_gateway/connection.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 62,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/62"
+    },
+    {
+      "id": "FCP-061",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_session_state.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_session_state.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-061 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_session_state.rs` currently has 141 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_session_state.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 63,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/63"
+    },
+    {
+      "id": "FCP-062",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/routes/webhooks.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/routes/webhooks.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-062 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/routes/webhooks.rs` currently has 133 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/routes/webhooks.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 64,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/64"
+    },
+    {
+      "id": "FCP-063",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/sessions.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/sessions.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-063 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/sessions.rs` currently has 130 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/sessions.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 65,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/65"
+    },
+    {
+      "id": "FCP-064",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/error.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/error.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-064 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/error.rs` currently has 130 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/error.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 66,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/66"
+    },
+    {
+      "id": "FCP-065",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/audit.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/audit.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-065 -->\n## Evidence\n\n`fleet-cli/src/commands/audit.rs` currently has 120 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/audit.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 67,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/67"
+    },
+    {
+      "id": "FCP-066",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-runner/src/journal.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-runner/src/journal.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-066 -->\n## Evidence\n\n`fleet-cloud-runner/src/journal.rs` currently has 118 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-runner/src/journal.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 68,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/68"
+    },
+    {
+      "id": "FCP-067",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/skill_history.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/skill_history.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-067 -->\n## Evidence\n\n`claw-fleet-core/src/skill_history.rs` currently has 108 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/skill_history.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 69,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/69"
+    },
+    {
+      "id": "FCP-068",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_mobile.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_mobile.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-068 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_mobile.rs` currently has 107 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_mobile.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 70,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/70"
+    },
+    {
+      "id": "FCP-069",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/routes_memory.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/routes_memory.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-069 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/routes_memory.rs` currently has 101 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/routes_memory.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 71,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/71"
+    },
+    {
+      "id": "FCP-070",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/wiki.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/wiki.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-070 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/wiki.rs` currently has 101 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/wiki.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 72,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/72"
+    },
+    {
+      "id": "FCP-071",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/services/transcripts.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/services/transcripts.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-071 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/services/transcripts.rs` currently has 101 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/services/transcripts.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 73,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/73"
+    },
+    {
+      "id": "FCP-072",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/setup.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/setup.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-072 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/setup.rs` currently has 96 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/setup.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 74,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/74"
+    },
+    {
+      "id": "FCP-073",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/config.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/config.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-073 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/config.rs` currently has 93 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/config.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 75,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/75"
+    },
+    {
+      "id": "FCP-074",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-runner/src/outbox.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-runner/src/outbox.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-074 -->\n## Evidence\n\n`fleet-cloud-runner/src/outbox.rs` currently has 93 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-runner/src/outbox.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 76,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/76"
+    },
+    {
+      "id": "FCP-075",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/routes/runs.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/routes/runs.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-075 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/routes/runs.rs` currently has 91 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/routes/runs.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 77,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/77"
+    },
+    {
+      "id": "FCP-076",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-relay/src/frames.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-relay/src/frames.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-076 -->\n## Evidence\n\n`fleet-relay/src/frames.rs` currently has 91 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-relay/src/frames.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 78,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/78"
+    },
+    {
+      "id": "FCP-077",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-core/src/hooks_server/sse.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-core/src/hooks_server/sse.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-077 -->\n## Evidence\n\n`claw-fleet-core/src/hooks_server/sse.rs` currently has 88 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-core/src/hooks_server/sse.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 79,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/79"
+    },
+    {
+      "id": "FCP-078",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/routes/decisions.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/routes/decisions.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-078 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/routes/decisions.rs` currently has 88 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/routes/decisions.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 80,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/80"
+    },
+    {
+      "id": "FCP-079",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-wire/src/runner.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-wire/src/runner.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-079 -->\n## Evidence\n\n`fleet-cloud-wire/src/runner.rs` currently has 88 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-wire/src/runner.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 81,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/81"
+    },
+    {
+      "id": "FCP-080",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/traffic_lights.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/traffic_lights.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-080 -->\n## Evidence\n\n`claw-fleet-desktop/src/traffic_lights.rs` currently has 87 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/traffic_lights.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 82,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/82"
+    },
+    {
+      "id": "FCP-081",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/idempotency.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/idempotency.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-081 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/idempotency.rs` currently has 83 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/idempotency.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 83,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/83"
+    },
+    {
+      "id": "FCP-082",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/build.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/build.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-082 -->\n## Evidence\n\n`claw-fleet-desktop/build.rs` currently has 80 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/build.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 84,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/84"
+    },
+    {
+      "id": "FCP-083",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/account.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/account.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-083 -->\n## Evidence\n\n`fleet-cli/src/commands/account.rs` currently has 77 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/account.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 85,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/85"
+    },
+    {
+      "id": "FCP-084",
+      "category": "test-coverage-audit",
+      "evidence_path": "claw-fleet-desktop/src/gui/skills.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for claw-fleet-desktop/src/gui/skills.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-084 -->\n## Evidence\n\n`claw-fleet-desktop/src/gui/skills.rs` currently has 76 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `claw-fleet-desktop/src/gui/skills.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 86,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/86"
+    },
+    {
+      "id": "FCP-085",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cloud-control-plane/src/routes/events.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cloud-control-plane/src/routes/events.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-085 -->\n## Evidence\n\n`fleet-cloud-control-plane/src/routes/events.rs` currently has 76 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cloud-control-plane/src/routes/events.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 87,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/87"
+    },
+    {
+      "id": "FCP-086",
+      "category": "test-coverage-audit",
+      "evidence_path": "fleet-cli/src/commands/search.rs",
+      "evidence_line": 1,
+      "title": "[Pilot backlog] Audit focused test coverage for fleet-cli/src/commands/search.rs",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-086 -->\n## Evidence\n\n`fleet-cli/src/commands/search.rs` currently has 75 lines and no colocated `#[cfg(test)]` module. This is a static, repository-verifiable coverage signal; it does not claim the file has zero integration coverage.\n\n## Scope\n\nMap the module's existing unit/integration coverage, identify risk-bearing branches that are not directly exercised, and add deterministic tests where a real gap exists.\n\n## Acceptance\n\n- Existing coverage for `fleet-cli/src/commands/search.rs` is documented with exact test names.\n- Missing success, failure, and boundary cases receive deterministic tests, or the issue is closed with concrete evidence that existing integration tests are sufficient.\n- The relevant package tests pass without enabling network-dependent fixtures.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 88,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/88"
+    },
+    {
+      "id": "FCP-087",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/auto_resume.rs",
+      "evidence_line": 1094,
+      "title": "[Pilot backlog] Automate ignored test live_codex_manual_resume_via_dispatcher_continues",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-087 -->\n## Evidence\n\n`claw-fleet-core/src/auto_resume.rs:1094` marks `live_codex_manual_resume_via_dispatcher_continues` ignored: spawns + resumes a real codex session; run manually with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 89,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/89"
+    },
+    {
+      "id": "FCP-088",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/auto_resume.rs",
+      "evidence_line": 1147,
+      "title": "[Pilot backlog] Automate ignored test live_codex_auto_resume_selects_and_fires",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-088 -->\n## Evidence\n\n`claw-fleet-core/src/auto_resume.rs:1147` marks `live_codex_auto_resume_selects_and_fires` ignored: spawns + resumes a real codex session; run manually with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 90,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/90"
+    },
+    {
+      "id": "FCP-089",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/codex_launch.rs",
+      "evidence_line": 1660,
+      "title": "[Pilot backlog] Automate ignored test live_spawn_returns_a_thread_id",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-089 -->\n## Evidence\n\n`claw-fleet-core/src/codex_launch.rs:1660` marks `live_spawn_returns_a_thread_id` ignored: spawns a real codex session; run manually with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 91,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/91"
+    },
+    {
+      "id": "FCP-090",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/codex_launch.rs",
+      "evidence_line": 1689,
+      "title": "[Pilot backlog] Automate ignored test live_fleet_session_id_resolves_from_launch_token",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-090 -->\n## Evidence\n\n`claw-fleet-core/src/codex_launch.rs:1689` marks `live_fleet_session_id_resolves_from_launch_token` ignored: spawns a real codex session; run manually with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 92,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/92"
+    },
+    {
+      "id": "FCP-091",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/codex_launch.rs",
+      "evidence_line": 1729,
+      "title": "[Pilot backlog] Automate ignored test live_kill_tears_down_codex_process",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-091 -->\n## Evidence\n\n`claw-fleet-core/src/codex_launch.rs:1729` marks `live_kill_tears_down_codex_process` ignored: spawns a real codex session; run manually with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 93,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/93"
+    },
+    {
+      "id": "FCP-092",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/codex_launch.rs",
+      "evidence_line": 1753,
+      "title": "[Pilot backlog] Automate ignored test live_dispatch_spawn_appears_as_codex_in_scan",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-092 -->\n## Evidence\n\n`claw-fleet-core/src/codex_launch.rs:1753` marks `live_dispatch_spawn_appears_as_codex_in_scan` ignored: spawns a real codex session; run manually with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 94,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/94"
+    },
+    {
+      "id": "FCP-093",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/codex_launch.rs",
+      "evidence_line": 1857,
+      "title": "[Pilot backlog] Automate ignored test live_resume_continues_and_exits_ok",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-093 -->\n## Evidence\n\n`claw-fleet-core/src/codex_launch.rs:1857` marks `live_resume_continues_and_exits_ok` ignored: spawns + resumes a real codex session; run manually with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 95,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/95"
+    },
+    {
+      "id": "FCP-094",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/codex_launch.rs",
+      "evidence_line": 1912,
+      "title": "[Pilot backlog] Automate ignored test live_decision_card_reaches_fleet_ask",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-094 -->\n## Evidence\n\n`claw-fleet-core/src/codex_launch.rs:1912` marks `live_decision_card_reaches_fleet_ask` ignored: spawns real codex + needs a decision consumer; run manually.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 96,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/96"
+    },
+    {
+      "id": "FCP-095",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/handoff.rs",
+      "evidence_line": 663,
+      "title": "[Pilot backlog] Automate ignored test live_codex_handoff_relays_to_codex_successor",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-095 -->\n## Evidence\n\n`claw-fleet-core/src/handoff.rs:663` marks `live_codex_handoff_relays_to_codex_successor` ignored: spawns a real codex session; run manually with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 97,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/97"
+    },
+    {
+      "id": "FCP-096",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/llm_provider.rs",
+      "evidence_line": 900,
+      "title": "[Pilot backlog] Automate ignored test codex_complete_isolated_from_global_agents_md",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-096 -->\n## Evidence\n\n`claw-fleet-core/src/llm_provider.rs:900` marks `codex_complete_isolated_from_global_agents_md` ignored: no reason recorded.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 98,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/98"
+    },
+    {
+      "id": "FCP-097",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/mobile_relay.rs",
+      "evidence_line": 4349,
+      "title": "[Pilot backlog] Automate ignored test usage_history_reply_stays_small_on_real_data",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-097 -->\n## Evidence\n\n`claw-fleet-core/src/mobile_relay.rs:4349` marks `usage_history_reply_stays_small_on_real_data` ignored: reads the real ~/.fleet history file.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 99,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/99"
+    },
+    {
+      "id": "FCP-098",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/src/mobile_relay.rs",
+      "evidence_line": 4365,
+      "title": "[Pilot backlog] Automate ignored test account_usage_runs_under_spawn_blocking",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-098 -->\n## Evidence\n\n`claw-fleet-core/src/mobile_relay.rs:4365` marks `account_usage_runs_under_spawn_blocking` ignored: network + keychain.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 100,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/100"
+    },
+    {
+      "id": "FCP-099",
+      "category": "ignored-test-automation",
+      "evidence_path": "claw-fleet-core/tests/server_error_live.rs",
+      "evidence_line": 20,
+      "title": "[Pilot backlog] Automate ignored test real_transcript_terminal_server_error_is_detected",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-099 -->\n## Evidence\n\n`claw-fleet-core/tests/server_error_live.rs:20` marks `real_transcript_terminal_server_error_is_detected` ignored: reads a transcript from $SE_JSONL; run manually with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 101,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/101"
+    },
+    {
+      "id": "FCP-100",
+      "category": "ignored-test-automation",
+      "evidence_path": "fleet-cli/tests/parked_decision_e2e.rs",
+      "evidence_line": 108,
+      "title": "[Pilot backlog] Automate ignored test timed_out_fleet_ask_parks_the_card_interrupts_the_turn_and_resumes_with_the_answer",
+      "body": "<!-- fleet-pilot-backlog-id: FCP-100 -->\n## Evidence\n\n`fleet-cli/tests/parked_decision_e2e.rs:108` marks `timed_out_fleet_ask_parks_the_card_interrupts_the_turn_and_resumes_with_the_answer` ignored: waits out the real 60s decision-panel timeout; run with --ignored.\n\n## Scope\n\nReplace the manual-only dependency with a deterministic fixture or add a documented, scheduled integration lane that executes the test and retains its result.\n\n## Acceptance\n\n- The test runs in an identified CI or scheduled validation lane, or is replaced by an equivalent deterministic test.\n- Required credentials, network access, timing, and cleanup behavior are documented without committing secrets.\n- A failing assertion makes the validation lane fail visibly.",
+      "labels": [
+        "fleet-backlog",
+        "quality",
+        "test-coverage"
+      ],
+      "issue_number": 102,
+      "issue_url": "https://github.com/hoveychen/claw-fleet/issues/102"
+    }
+  ]
+}
