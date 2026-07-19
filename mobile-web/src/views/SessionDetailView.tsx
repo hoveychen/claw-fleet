@@ -1064,7 +1064,9 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
           {t("返回")}
         </button>
         <div className={styles.headerText}>
-          <div className={styles.headerTitle}>{session.aiTitle || session.slug || t("会话")}</div>
+          <div className={styles.headerTitle}>
+            {session.titleOverride || session.aiTitle || session.slug || t("会话")}
+          </div>
           <div className={styles.headerSub}>{session.workspaceName}</div>
         </div>
         <span className={styles.statusDot} data-working={working} />

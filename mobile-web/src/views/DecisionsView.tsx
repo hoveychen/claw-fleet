@@ -161,7 +161,10 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered, onOpenSession
   const req = decision.request;
   const session = workspaceOf(req.sessionId);
   const workspace = req.workspaceName || session?.workspaceName || "Fleet";
-  const aiTitle = req.aiTitle || session?.aiTitle;
+  // req.aiTitle already prefers the override (resolved server-side); the
+  // session fallback must too, else a Codex card with no resolved req title
+  // drops back to the raw first-prompt ai_title.
+  const aiTitle = req.aiTitle || session?.titleOverride || session?.aiTitle;
 
   const submit = useCallback(
     (fields: Record<string, unknown>) => {
