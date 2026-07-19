@@ -417,15 +417,12 @@ pub(crate) fn read_level_dirs(parent: &str) -> std::collections::HashMap<String,
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        let is_dir = match entry.file_type() {
-            Ok(ft) if ft.is_dir() => true,
-            Ok(ft) if ft.is_symlink() => {
-                let target = entry.path();
-                !crate::tcc::is_tcc_protected(&target) && target.is_dir()
-            }
-            _ => false,
-        };
-        if !is_dir {
+        // Follow symlinks only when their target isn't TCC-protected — resolve
+        // the target with `read_link` (not `canonicalize`, which stats through)
+        // so listing `~` never stats into `~/Documents` et al.
+        if !crate::tcc::readdir_is_followable_dir(entry.file_type(), &entry.path(), &|p| {
+            crate::tcc::is_tcc_protected(p)
+        }) {
             continue;
         }
         let key = encode_path_segment(&name);
