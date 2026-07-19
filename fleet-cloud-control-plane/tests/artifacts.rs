@@ -1,9 +1,17 @@
 mod common;
 
 use axum::body::{to_bytes, Body};
-use axum::http::{Request, StatusCode};
-use fleet_cloud_control_plane::services::artifacts::{self, DeleteFault};
+use axum::extract::{Path, State};
+use axum::http::{Method, Request, StatusCode};
+use axum::response::IntoResponse;
+use axum::routing::any;
+use axum::Router;
+use fleet_cloud_control_plane::services::artifacts::{
+    self, ArtifactObjectStore, DeleteFault, S3ObjectStore,
+};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 
 async fn create_task(pool: &sqlx::PgPool) -> serde_json::Value {
@@ -37,8 +45,27 @@ async fn upload(
     mime: &str,
     bytes: &[u8],
 ) -> (StatusCode, serde_json::Value) {
+    upload_on(
+        common::router(pool.clone()),
+        task_id,
+        key,
+        filename,
+        mime,
+        bytes,
+    )
+    .await
+}
+
+async fn upload_on(
+    app: Router,
+    task_id: &str,
+    key: &str,
+    filename: &str,
+    mime: &str,
+    bytes: &[u8],
+) -> (StatusCode, serde_json::Value) {
     let (content_type, body) = multipart(filename, mime, bytes);
-    let response = common::router(pool.clone())
+    let response = app
         .oneshot(
             Request::post(format!("/tasks/{task_id}/artifacts"))
                 .header("authorization", format!("Bearer {key}"))
@@ -54,6 +81,61 @@ async fn upload(
         .await
         .unwrap();
     (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+#[derive(Clone, Default)]
+struct FakeS3 {
+    objects: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+}
+
+async fn fake_s3_request(
+    State(state): State<FakeS3>,
+    method: Method,
+    Path(path): Path<String>,
+    body: Body,
+) -> impl IntoResponse {
+    match method {
+        Method::PUT => {
+            let bytes = to_bytes(body, artifacts::MAX_ARTIFACT_BYTES + 1024)
+                .await
+                .unwrap();
+            state.objects.lock().unwrap().insert(path, bytes.to_vec());
+            StatusCode::OK.into_response()
+        }
+        Method::GET => state
+            .objects
+            .lock()
+            .unwrap()
+            .get(&path)
+            .cloned()
+            .map(Body::from)
+            .map(IntoResponse::into_response)
+            .unwrap_or_else(|| StatusCode::NOT_FOUND.into_response()),
+        Method::DELETE => {
+            state.objects.lock().unwrap().remove(&path);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        _ => StatusCode::METHOD_NOT_ALLOWED.into_response(),
+    }
+}
+
+async fn fake_s3() -> (FakeS3, S3ObjectStore) {
+    let state = FakeS3::default();
+    let app = Router::new()
+        .route("/{*path}", any(fake_s3_request))
+        .with_state(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let store = S3ObjectStore::new(
+        endpoint,
+        "fleet-artifacts".into(),
+        "us-east-1".into(),
+        "minio-access".into(),
+        "minio-secret".into(),
+    )
+    .unwrap();
+    (state, store)
 }
 
 async fn seed_other_tenant(pool: &sqlx::PgPool) -> &'static str {
@@ -187,6 +269,113 @@ async fn artifact_is_encrypted_hashed_and_download_url_is_principal_scoped(pool:
     )
     .await;
     assert_eq!(missing.status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn minio_backend_uploads_ciphertext_downloads_and_deletes_objects(pool: sqlx::PgPool) {
+    common::seed(&pool).await;
+    let created = create_task(&pool).await;
+    let task_id = created["task"]["id"].as_str().unwrap();
+    let plaintext = b"encrypted outside postgres";
+    let (fake, s3) = fake_s3().await;
+    let store = ArtifactObjectStore::S3(s3);
+    let app = common::router_with_artifact_store(pool.clone(), store.clone());
+
+    let (status, artifact) = upload_on(
+        app,
+        task_id,
+        common::VALID_KEY,
+        "report.txt",
+        "text/plain",
+        plaintext,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let artifact_id = artifact["id"].as_str().unwrap();
+    let metadata = sqlx::query_as::<_, (String, Option<Vec<u8>>)>(
+        "SELECT storage_backend,ciphertext FROM artifact_objects WHERE artifact_id=$1",
+    )
+    .bind(artifact_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(metadata.0, "s3");
+    assert!(metadata.1.is_none());
+    let object_path = format!("fleet-artifacts/org_test/{task_id}/{artifact_id}");
+    let ciphertext = fake.objects.lock().unwrap().get(&object_path).cloned().unwrap();
+    assert!(!ciphertext.windows(plaintext.len()).any(|window| window == plaintext));
+
+    let signed = common::request_json(
+        common::router_with_artifact_store(pool.clone(), store.clone()),
+        Method::POST,
+        &format!("/artifacts/{artifact_id}/download-url"),
+        common::VALID_KEY,
+        &[],
+        Some(serde_json::json!({"expires_in_seconds":300})),
+    )
+    .await;
+    let response = common::router_with_artifact_store(pool.clone(), store.clone())
+        .oneshot(
+            Request::get(signed.body["url"].as_str().unwrap())
+                .header("authorization", format!("Bearer {}", common::VALID_KEY))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(&to_bytes(response.into_body(), 1024).await.unwrap()[..], plaintext);
+
+    let deleted = common::request_json(
+        common::router_with_artifact_store(pool.clone(), store),
+        Method::DELETE,
+        &format!("/artifacts/{artifact_id}"),
+        common::VALID_KEY,
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(deleted.status, StatusCode::ACCEPTED);
+    assert!(!fake.objects.lock().unwrap().contains_key(&object_path));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn minio_retention_deletes_expired_object_before_metadata(pool: sqlx::PgPool) {
+    common::seed(&pool).await;
+    let created = create_task(&pool).await;
+    let task_id = created["task"]["id"].as_str().unwrap();
+    let (fake, s3) = fake_s3().await;
+    let store = ArtifactObjectStore::S3(s3);
+    let (_, artifact) = upload_on(
+        common::router_with_artifact_store(pool.clone(), store.clone()),
+        task_id,
+        common::VALID_KEY,
+        "old.log",
+        "text/plain",
+        b"expired object",
+    )
+    .await;
+    let artifact_id = artifact["id"].as_str().unwrap();
+    let object_path = format!("fleet-artifacts/org_test/{task_id}/{artifact_id}");
+    sqlx::query("UPDATE artifacts SET retention_until=now()-interval '1 day' WHERE id=$1")
+        .bind(artifact_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let result = artifacts::run_retention(&pool, &store, "minio-retention")
+        .await
+        .unwrap();
+    assert_eq!(result.artifacts_deleted, 1);
+    assert!(!fake.objects.lock().unwrap().contains_key(&object_path));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM artifact_objects WHERE artifact_id=$1")
+            .bind(artifact_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 #[sqlx::test(migrations = "./migrations")]

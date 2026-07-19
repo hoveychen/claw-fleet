@@ -5,6 +5,7 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use fleet_cloud_control_plane::app::{self, AppState};
 use fleet_cloud_control_plane::auth;
+use fleet_cloud_control_plane::services::artifacts::ArtifactObjectStore;
 use sqlx::PgPool;
 use tower::ServiceExt;
 
@@ -64,6 +65,10 @@ pub async fn seed(pool: &PgPool) -> Seed {
 
 pub fn router(pool: PgPool) -> Router {
     app::router(AppState::new(pool, PEPPER.to_vec()))
+}
+
+pub fn router_with_artifact_store(pool: PgPool, store: ArtifactObjectStore) -> Router {
+    app::router(AppState::new(pool, PEPPER.to_vec()).with_artifact_store(store))
 }
 
 pub async fn get_tasks(app: Router, bearer: Option<&str>) -> StatusCode {
