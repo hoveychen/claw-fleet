@@ -373,9 +373,22 @@ export function SessionList() {
 
         {/* Footer profile card */}
         <div className={styles.footer} data-wizard="settings-footer">
-          <button
+          {/* role=button, not <button>: this card nests the Lite/theme icon
+              buttons below, and a <button> inside a <button> is invalid HTML
+              (React hydration error). A div carries no interactive-content
+              restriction, so the nesting is valid; keyboard a11y is restored
+              via tabIndex + onKeyDown. */}
+          <div
             className={styles.footer_card}
+            role="button"
+            tabIndex={0}
             onClick={openSettingsWindow}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                openSettingsWindow();
+              }
+            }}
             title={t("settings.title")}
           >
             <div className={styles.footer_avatar}>
@@ -416,7 +429,7 @@ export function SessionList() {
               </>
             )}
             <span className={styles.footer_gear}>⚙</span>
-          </button>
+          </div>
         </div>
 
         {/* Resize handle — hidden when collapsed */}
