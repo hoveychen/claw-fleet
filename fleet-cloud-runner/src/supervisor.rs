@@ -41,6 +41,20 @@ pub trait Harness: Send + Sync {
     fn terminate(&self, pid: u32) -> Result<(), String>;
     fn enqueue(&self, session_id: &str, workspace: &str, text: &str) -> Result<(), String>;
     fn snapshot(&self, session_id: &str) -> Result<Option<HarnessSnapshot>, String>;
+    fn pending_decisions(&self) -> Result<Vec<PendingDecision>, String> {
+        Ok(Vec::new())
+    }
+    fn respond_decision(&self, _kind: &str, _id: &str, _response: &Value) -> Result<(), String> {
+        Err("decision responses are not supported by this harness".into())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingDecision {
+    pub id: String,
+    pub session_id: String,
+    pub kind: String,
+    pub request: Value,
 }
 
 #[derive(Default)]
@@ -85,6 +99,102 @@ impl Harness for CoreHarness {
             output_tokens: session.total_output_tokens,
             cost_usd: session.total_cost_usd,
         }))
+    }
+
+    fn pending_decisions(&self) -> Result<Vec<PendingDecision>, String> {
+        let mut decisions = Vec::new();
+        macro_rules! collect {
+            ($kind:literal, $module:path) => {
+                for id in $module::list_pending_requests() {
+                    if let Some(request) = $module::read_request(&id) {
+                        let value = serde_json::to_value(&request).map_err(|e| e.to_string())?;
+                        decisions.push(PendingDecision {
+                            id,
+                            session_id: value["sessionId"].as_str().unwrap_or_default().into(),
+                            kind: $kind.into(),
+                            request: value,
+                        });
+                    }
+                }
+            };
+        }
+        collect!("guard", claw_fleet_core::guard);
+        collect!("elicitation", claw_fleet_core::elicitation);
+        collect!("fleet-ask", claw_fleet_core::mcp_ipc);
+        collect!("plan-approval", claw_fleet_core::plan_approval);
+        collect!("a2ui-render", claw_fleet_core::mcp_a2ui_ipc);
+        collect!(
+            "permission-prompt",
+            claw_fleet_core::permission_prompt_ipc
+        );
+        Ok(decisions)
+    }
+
+    fn respond_decision(&self, kind: &str, id: &str, response: &Value) -> Result<(), String> {
+        match kind {
+            "guard" => claw_fleet_core::guard::write_response(
+                &claw_fleet_core::guard::GuardResponse {
+                    id: id.into(),
+                    decision: if response["allow"].as_bool().unwrap_or(false) {
+                        claw_fleet_core::guard::GuardDecision::Allow
+                    } else {
+                        claw_fleet_core::guard::GuardDecision::Block
+                    },
+                    reason: response["reason"].as_str().map(str::to_owned),
+                },
+            ),
+            "elicitation" => claw_fleet_core::elicitation::write_response(
+                &claw_fleet_core::elicitation::ElicitationResponse {
+                    id: id.into(),
+                    declined: response["declined"].as_bool().unwrap_or(false),
+                    answers: serde_json::from_value(
+                        response.get("answers").cloned().unwrap_or_default(),
+                    )
+                    .map_err(|e| e.to_string())?,
+                },
+            ),
+            "fleet-ask" => claw_fleet_core::mcp_ipc::write_response(
+                &claw_fleet_core::mcp_ipc::FleetAskResponse {
+                    id: id.into(),
+                    answers: serde_json::from_value(
+                        response.get("answers").cloned().unwrap_or_default(),
+                    )
+                    .map_err(|e| e.to_string())?,
+                    cancelled: response["cancelled"].as_bool().unwrap_or(false),
+                },
+            ),
+            "plan-approval" => claw_fleet_core::plan_approval::write_response(
+                &claw_fleet_core::plan_approval::PlanApprovalResponse {
+                    id: id.into(),
+                    decision: response["decision"].as_str().unwrap_or("reject").into(),
+                    edited_plan: response["editedPlan"].as_str().map(str::to_owned),
+                    feedback: response["feedback"].as_str().map(str::to_owned),
+                },
+            ),
+            "a2ui-render" => claw_fleet_core::mcp_a2ui_ipc::write_response(
+                &claw_fleet_core::mcp_a2ui_ipc::A2uiRenderResponse {
+                    id: id.into(),
+                    action_name: response["actionName"].as_str().map(str::to_owned),
+                    action_context: serde_json::from_value(
+                        response.get("actionContext").cloned().unwrap_or_default(),
+                    )
+                    .map_err(|e| e.to_string())?,
+                    cancelled: response["cancelled"].as_bool().unwrap_or(false),
+                },
+            ),
+            "permission-prompt" => claw_fleet_core::permission_prompt_ipc::write_response(
+                &claw_fleet_core::permission_prompt_ipc::PermissionPromptResponse {
+                    id: id.into(),
+                    decision: if response["allow"].as_bool().unwrap_or(false) {
+                        claw_fleet_core::permission_prompt_ipc::PermissionPromptDecision::Allow
+                    } else {
+                        claw_fleet_core::permission_prompt_ipc::PermissionPromptDecision::Deny
+                    },
+                    reason: response["reason"].as_str().map(str::to_owned),
+                },
+            ),
+            _ => Err(format!("unsupported decision kind {kind}")),
+        }
     }
 }
 
@@ -134,6 +244,12 @@ impl Supervisor {
              );
              CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value INTEGER NOT NULL);",
         )?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS decisions(
+                decision_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, kind TEXT NOT NULL,
+                request_json TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0
+             );",
+        )?;
         let (event_tx, event_rx) = mpsc::channel();
         claw_fleet_core::backend::set_harness_event_sink(Arc::new(ChannelSink(event_tx)));
         Ok(Self {
@@ -163,6 +279,7 @@ impl Supervisor {
             "cancel_task" | "cancel_run" => self.cancel(command),
             "pause_task" | "pause_runner" => self.pause(command),
             "resume_task" => self.resume(command),
+            "resolve_decision" => self.resolve_decision(command),
             other => Err((
                 "unsupported_command",
                 format!("unsupported command {other}"),
@@ -191,7 +308,88 @@ impl Supervisor {
             self.apply_harness_event(event)?;
         }
         self.drain_event_log()?;
+        self.sync_pending_decisions()?;
         Ok(())
+    }
+
+    fn sync_pending_decisions(&mut self) -> anyhow::Result<()> {
+        for decision in self.harness.pending_decisions().map_err(anyhow::Error::msg)? {
+            let run: Option<(String, String)> = self
+                .connection
+                .query_row(
+                    "SELECT run_id,task_id FROM runs WHERE session_id=?1 ORDER BY rowid DESC LIMIT 1",
+                    [&decision.session_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            let Some((run_id, task_id)) = run else {
+                continue;
+            };
+            let inserted = self.connection.execute(
+                "INSERT OR IGNORE INTO decisions(decision_id,run_id,kind,request_json) VALUES(?1,?2,?3,?4)",
+                params![decision.id,run_id,decision.kind,decision.request.to_string()],
+            )?;
+            if inserted == 0 {
+                continue;
+            }
+            self.emit(
+                &format!("{}:opened", decision.id),
+                "decision.opened",
+                &task_id,
+                Some(&run_id),
+                json!({
+                    "task_id":task_id,"run_id":run_id,"decision_id":decision.id,
+                    "kind":decision.kind,"request":decision.request
+                }),
+            )?;
+            self.emit(
+                &format!("{task_id}:waiting:{}", decision.id),
+                "task.status_changed",
+                &task_id,
+                Some(&run_id),
+                json!({"task_id":task_id,"run_id":run_id,"status":"waiting_input"}),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn resolve_decision(
+        &mut self,
+        command: &CloudCommand,
+    ) -> Result<Value, (&'static str, String)> {
+        let task_id = required_task(command)?;
+        let id = command.payload["decision_id"]
+            .as_str()
+            .ok_or(("invalid_command", "resolve_decision requires decision_id".into()))?;
+        let row: Option<(String, String, i64)> = self
+            .connection
+            .query_row(
+                "SELECT d.kind,d.run_id,d.resolved FROM decisions d JOIN runs r ON r.run_id=d.run_id WHERE d.decision_id=?1 AND r.task_id=?2",
+                params![id,task_id],
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+            )
+            .optional()
+            .map_err(db_error)?;
+        let Some((kind, run_id, resolved)) = row else {
+            return Err(("decision_not_found", "decision is not pending on this Runner".into()));
+        };
+        if resolved == 0 {
+            self.harness
+                .respond_decision(&kind, id, &command.payload["response"])
+                .map_err(harness_error)?;
+            self.connection
+                .execute("UPDATE decisions SET resolved=1 WHERE decision_id=?1", [id])
+                .map_err(db_error)?;
+            self.emit(
+                &format!("{id}:resolved"),
+                "decision.resolved",
+                task_id,
+                Some(&run_id),
+                json!({"task_id":task_id,"run_id":run_id,"decision_id":id,"kind":kind}),
+            )
+            .map_err(outbox_error)?;
+        }
+        Ok(json!({"decision_id":id,"status":"resolved"}))
     }
 
     fn start_run(

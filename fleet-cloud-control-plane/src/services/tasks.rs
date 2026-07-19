@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::auth::ProjectPrincipal;
@@ -237,8 +238,11 @@ pub async fn list_tasks(
     let next_cursor = has_more
         .then(|| rows.last().map(|row| row.id.clone()))
         .flatten();
+    let mut data: Vec<TaskView> = rows.into_iter().map(Into::into).collect();
+    attach_waiting_decisions(pool, &principal.organization_id, &principal.project_id, &mut data)
+        .await?;
     Ok(TaskPage {
-        data: rows.into_iter().map(Into::into).collect(),
+        data,
         next_cursor,
         has_more,
     })
@@ -249,10 +253,43 @@ pub async fn get_task(
     principal: &ProjectPrincipal,
     task_id: &str,
 ) -> Result<TaskView, ApiError> {
-    sqlx::query_as::<_, TaskRow>(
+    let row = sqlx::query_as::<_, TaskRow>(
         "SELECT id, project_id, external_id, title, goal, status, active_run_id, metadata, version, created_by_type, created_by_id, created_at, updated_at
          FROM tasks WHERE organization_id=$1 AND project_id=$2 AND id=$3")
-        .bind(&principal.organization_id).bind(&principal.project_id).bind(task_id).fetch_optional(pool).await?.map(Into::into).ok_or(ApiError::NotFound)
+        .bind(&principal.organization_id).bind(&principal.project_id).bind(task_id).fetch_optional(pool).await?.ok_or(ApiError::NotFound)?;
+    let mut views = vec![row.into()];
+    attach_waiting_decisions(pool, &principal.organization_id, &principal.project_id, &mut views)
+        .await?;
+    Ok(views.remove(0))
+}
+
+async fn attach_waiting_decisions(
+    pool: &PgPool,
+    organization_id: &str,
+    project_id: &str,
+    tasks: &mut [TaskView],
+) -> Result<(), ApiError> {
+    if tasks.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<&str> = tasks.iter().map(|task| task.id.as_str()).collect();
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT task_id,id FROM decisions WHERE organization_id=$1 AND project_id=$2
+         AND task_id=ANY($3) AND status IN ('pending','answer_queued') ORDER BY created_at,id",
+    )
+    .bind(organization_id)
+    .bind(project_id)
+    .bind(&ids)
+    .fetch_all(pool)
+    .await?;
+    let mut grouped: HashMap<String, Vec<String>> = HashMap::new();
+    for (task_id, decision_id) in rows {
+        grouped.entry(task_id).or_default().push(decision_id);
+    }
+    for task in tasks {
+        task.waiting_decision_ids = grouped.remove(&task.id).unwrap_or_default();
+    }
+    Ok(())
 }
 
 pub async fn create_task(
