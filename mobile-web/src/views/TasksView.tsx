@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
   Circle,
@@ -22,6 +22,18 @@ import { useDraft } from "../draft";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import styles from "./TasksView.module.css";
+
+/** 文档级滚动条被所有 tab 共享，任务页又会随 tab 卸载重挂（见 App 里按 `tab` 的条件
+ *  渲染），加上 iOS PWA 前后台切换、重连时推来的全量快照，都可能把 window.scrollY
+ *  打回 0。这里记住用户停留的位置，重挂或意外回顶后恢复它，且绝不和正在滚动的用户较劲。
+ *  位置存模块级变量：切 tab 重挂时 JS 未重载、位置还在；整页刷新时自然归零——一次全新
+ *  加载理应从顶端开始。 */
+let savedTasksScrollY = 0;
+
+/** 页面当前的最大可滚动距离；<= 4px 视作「短到不必滚动」，此时既不记录也不恢复。 */
+function maxScroll(): number {
+  return document.documentElement.scrollHeight - window.innerHeight;
+}
 
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
 const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimited", "serverErrored"];
@@ -288,6 +300,55 @@ export function TasksView({
     },
     [client, busyOp],
   );
+
+  // ——— 滚动位置稳定化（详见文件顶部 savedTasksScrollY 的注释）———
+  const restore = useCallback(() => {
+    // 只在「已经意外回到顶部、但记忆位置在下方、且页面够长能容纳」时纠回，这样
+    // 主动滚到顶的用户不会被硬拽下去，内容没坍缩的正常刷新（scrollY 不为 0）也不受扰。
+    if (window.scrollY < 4 && savedTasksScrollY > 4 && maxScroll() >= savedTasksScrollY - 4) {
+      window.scrollTo(0, savedTasksScrollY);
+    }
+  }, []);
+
+  // 滚动停歇 150ms 后才记录「用户真正停留的位置」。若某个外部事件把 scrollY 瞬间
+  // 夹到 0，下面的恢复会在停歇前把它纠回，所以那个瞬时 0 永远不会被记下来。
+  useEffect(() => {
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = () => {
+      if (idle) clearTimeout(idle);
+      idle = setTimeout(() => {
+        if (maxScroll() > 4) savedTasksScrollY = window.scrollY;
+      }, 150);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (idle) clearTimeout(idle);
+    };
+  }, []);
+
+  // 挂载时（切 tab 回到任务页）无条件恢复到上次停留处——此刻 window.scrollY 属于刚
+  // 离开的那个 tab，并非任务页意图。列表在 all.length>0 时已同步渲染出完整高度，故
+  // useLayoutEffect 里能立即定位、绘制前完成，无闪烁。
+  useLayoutEffect(() => {
+    if (savedTasksScrollY > 4 && maxScroll() >= savedTasksScrollY - 4) {
+      window.scrollTo(0, savedTasksScrollY);
+    }
+  }, []);
+
+  // 每次数据刷新后，若 scrollY 被外部事件意外打回顶部就纠回（guard 保证只在真回顶时动）。
+  useLayoutEffect(() => {
+    restore();
+  }, [sessions, restore]);
+
+  // PWA 从后台回到前台时同样纠一次——iOS 常在恢复前台时重置文档滚动。
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") restore();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [restore]);
 
   // Distinguish the reasons the list can be empty, so a blank screen never
   // leaves 老板 guessing "是错了还是在加载". Order matters: connectivity first
