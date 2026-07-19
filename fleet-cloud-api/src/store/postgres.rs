@@ -2,7 +2,10 @@ use super::{
     CreateTaskCommand, CreateTaskOutcome, RespondDecisionCommand, RespondDecisionOutcome,
     StoreError, TaskStore,
 };
-use crate::domain::{Attempt, Decision, RequestScope, Task, TaskDetail, TaskEvent, TaskStatus};
+use crate::domain::{
+    Attempt, Decision, IngestEventsOutcome, RequestScope, RunnerEventInput, Task, TaskDetail,
+    TaskEvent, TaskStatus,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
@@ -617,22 +620,24 @@ impl TaskStore for PgTaskStore {
         }))
         .execute(&mut *tx)
         .await?;
+        let runner_command_id = Uuid::new_v4();
+        let native_payload = native_decision_payload(&decision, &command.action);
         sqlx::query(
             "INSERT INTO outbox
              (id, organization_id, project_id, topic, aggregate_id, payload)
              VALUES ($1, $2, $3, 'runner.command', $4, $5)",
         )
-        .bind(Uuid::new_v4())
+        .bind(runner_command_id)
         .bind(command.scope.organization_id)
         .bind(command.scope.project_id)
         .bind(decision.attempt_id)
         .bind(json!({
             "type": "decision.response",
-            "task_id": decision.task_id,
-            "attempt_id": decision.attempt_id,
-            "decision_id": decision.id,
-            "action": command.action,
-            "response": decision.response
+            "commandId": runner_command_id,
+            "taskId": decision.task_id,
+            "attemptId": decision.attempt_id,
+            "decisionId": decision.id,
+            "nativePayload": native_payload
         }))
         .execute(&mut *tx)
         .await?;
@@ -656,6 +661,246 @@ impl TaskStore for PgTaskStore {
             replayed: false,
         })
     }
+
+    async fn record_audit_denial(
+        &self,
+        scope: RequestScope,
+        resource_type: &str,
+        resource_id: Uuid,
+        reason: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO audit_denials
+             (id, requested_organization_id, requested_project_id, resource_type, resource_id, reason)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(scope.organization_id)
+        .bind(scope.project_id)
+        .bind(resource_type)
+        .bind(resource_id)
+        .bind(reason)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn ingest_runner_events(
+        &self,
+        scope: RequestScope,
+        runner_id: Uuid,
+        mut events: Vec<RunnerEventInput>,
+    ) -> Result<IngestEventsOutcome, StoreError> {
+        events.sort_by_key(|event| event.local_sequence);
+        let accepted_through_local_sequence = events
+            .last()
+            .map(|event| event.local_sequence)
+            .unwrap_or_default();
+        let mut tx = self.pool.begin().await?;
+        let mut accepted = 0;
+        let mut duplicates = 0;
+        for event in events {
+            let duplicate: Option<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM task_events WHERE runner_id = $1 AND dedupe_key = $2",
+            )
+            .bind(runner_id)
+            .bind(&event.dedupe_key)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if duplicate.is_some() {
+                duplicates += 1;
+                continue;
+            }
+            let current_cursor: Option<i64> = sqlx::query_scalar(
+                "SELECT event_cursor FROM tasks
+                 WHERE id = $1 AND organization_id = $2 AND project_id = $3
+                 FOR UPDATE",
+            )
+            .bind(event.task_id)
+            .bind(scope.organization_id)
+            .bind(scope.project_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let sequence = current_cursor.ok_or(StoreError::NotFound)? + 1;
+
+            if event.event_type == "attempt.started" {
+                let attempt_id = event.attempt_id.ok_or_else(|| {
+                    StoreError::Internal("attempt.started missing attempt_id".into())
+                })?;
+                let workspace_id = event
+                    .data
+                    .get("workspaceId")
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok());
+                sqlx::query(
+                    "INSERT INTO attempts
+                     (id, organization_id, project_id, task_id, runner_id, workspace_id,
+                      agent_source, agent_session_id, ordinal, reason, status, started_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'running', $11)
+                     ON CONFLICT (id) DO NOTHING",
+                )
+                .bind(attempt_id)
+                .bind(scope.organization_id)
+                .bind(scope.project_id)
+                .bind(event.task_id)
+                .bind(runner_id)
+                .bind(workspace_id)
+                .bind(
+                    event
+                        .data
+                        .get("agentSource")
+                        .and_then(Value::as_str)
+                        .unwrap_or("codex"),
+                )
+                .bind(event.data.get("agentSessionId").and_then(Value::as_str))
+                .bind(
+                    event
+                        .data
+                        .get("ordinal")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(1) as i32,
+                )
+                .bind(
+                    event
+                        .data
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .unwrap_or("initial"),
+                )
+                .bind(event.occurred_at)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    "UPDATE tasks SET current_attempt_id = $1, status = 'running'
+                     WHERE id = $2",
+                )
+                .bind(attempt_id)
+                .bind(event.task_id)
+                .execute(&mut *tx)
+                .await?;
+            } else if event.event_type == "attempt.ended" {
+                if let Some(attempt_id) = event.attempt_id {
+                    sqlx::query(
+                        "UPDATE attempts SET status = 'ended', ended_at = $1
+                         WHERE id = $2 AND organization_id = $3 AND project_id = $4",
+                    )
+                    .bind(event.occurred_at)
+                    .bind(attempt_id)
+                    .bind(scope.organization_id)
+                    .bind(scope.project_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            } else if event.event_type == "decision.opened" {
+                let decision: Decision =
+                    serde_json::from_value(event.data.get("decision").cloned().ok_or_else(
+                        || StoreError::Internal("decision.opened missing decision".into()),
+                    )?)
+                    .map_err(|error| StoreError::Internal(error.to_string()))?;
+                sqlx::query(
+                    "INSERT INTO decisions
+                     (id, organization_id, project_id, task_id, attempt_id, kind, blocking,
+                      schema_version, presentation, status, response, created_at, resolved_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                     ON CONFLICT (id) DO NOTHING",
+                )
+                .bind(decision.id)
+                .bind(scope.organization_id)
+                .bind(scope.project_id)
+                .bind(decision.task_id)
+                .bind(decision.attempt_id)
+                .bind(&decision.kind)
+                .bind(decision.blocking)
+                .bind(&decision.schema_version)
+                .bind(&decision.presentation)
+                .bind(&decision.status)
+                .bind(&decision.response)
+                .bind(decision.created_at)
+                .bind(decision.resolved_at)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    "UPDATE tasks SET waiting_decision_count = waiting_decision_count + 1,
+                            status = CASE WHEN $1 THEN 'waiting_for_input' ELSE status END
+                     WHERE id = $2",
+                )
+                .bind(decision.blocking)
+                .bind(event.task_id)
+                .execute(&mut *tx)
+                .await?;
+            } else if event.event_type == "task.status_changed" {
+                let status = event
+                    .data
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        StoreError::Internal("task.status_changed missing status".into())
+                    })?;
+                TaskStatus::from_str(status).map_err(StoreError::Internal)?;
+                sqlx::query("UPDATE tasks SET status = $1 WHERE id = $2")
+                    .bind(status)
+                    .bind(event.task_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+
+            let cloud_event_id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO task_events
+                 (id, organization_id, project_id, task_id, attempt_id, sequence, event_type,
+                  occurred_at, producer, runner_id, dedupe_key, schema_version, data)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+            )
+            .bind(cloud_event_id)
+            .bind(scope.organization_id)
+            .bind(scope.project_id)
+            .bind(event.task_id)
+            .bind(event.attempt_id)
+            .bind(sequence)
+            .bind(&event.event_type)
+            .bind(event.occurred_at)
+            .bind(json!({ "type": "runner", "id": runner_id }))
+            .bind(runner_id)
+            .bind(&event.dedupe_key)
+            .bind(&event.schema_version)
+            .bind(&event.data)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE tasks SET event_cursor = $1, version = version + 1, updated_at = $2
+                 WHERE id = $3",
+            )
+            .bind(sequence)
+            .bind(event.occurred_at)
+            .bind(event.task_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO outbox
+                 (id, organization_id, project_id, topic, aggregate_id, payload)
+                 VALUES ($1, $2, $3, 'task.event', $4, $5)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(scope.organization_id)
+            .bind(scope.project_id)
+            .bind(event.task_id)
+            .bind(json!({
+                "event_id": cloud_event_id,
+                "task_id": event.task_id,
+                "sequence": sequence,
+                "type": event.event_type
+            }))
+            .execute(&mut *tx)
+            .await?;
+            accepted += 1;
+        }
+        tx.commit().await?;
+        Ok(IngestEventsOutcome {
+            accepted,
+            duplicates,
+            accepted_through_local_sequence,
+        })
+    }
 }
 
 fn map_write_error(error: sqlx::Error) -> StoreError {
@@ -668,4 +913,50 @@ fn map_write_error(error: sqlx::Error) -> StoreError {
         }
     }
     StoreError::Internal(error.to_string())
+}
+
+fn native_decision_payload(decision: &Decision, action: &str) -> Value {
+    let kind = match decision.kind.as_str() {
+        "fleet_ask" => "fleet-ask",
+        "plan_approval" => "plan-approval",
+        "permission_prompt" => "permission-prompt",
+        "a2ui" => "a2ui-render",
+        other => other,
+    };
+    let id = decision
+        .presentation
+        .get("sourceDecisionId")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| decision.id.to_string());
+    let answers = decision
+        .response
+        .as_ref()
+        .and_then(|response| response.get("answers"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    match kind {
+        "guard" => json!({ "kind": kind, "id": id, "allow": action == "answer" }),
+        "elicitation" => json!({
+            "kind": kind, "id": id, "declined": action == "decline", "answers": answers
+        }),
+        "fleet-ask" => json!({
+            "kind": kind, "id": id, "cancelled": action == "decline", "answers": answers
+        }),
+        "plan-approval" => json!({
+            "kind": kind,
+            "id": id,
+            "decision": if action == "answer" { "approve" } else { "reject" }
+        }),
+        "permission-prompt" => json!({
+            "kind": kind, "id": id, "allow": action == "answer"
+        }),
+        "a2ui-render" => json!({
+            "kind": kind,
+            "id": id,
+            "cancelled": action == "decline",
+            "actionContext": answers
+        }),
+        _ => json!({ "kind": kind, "id": id, "answers": answers }),
+    }
 }

@@ -12,6 +12,7 @@ export interface CloudTaskState {
   attempts: Attempt[];
   decisions: Decision[];
   messages: CloudTranscriptMessage[];
+  refetchAfterGap: { expected: number; received: number } | null;
 }
 
 export function initialCloudTaskState(detail: TaskDetail): CloudTaskState {
@@ -20,6 +21,7 @@ export function initialCloudTaskState(detail: TaskDetail): CloudTaskState {
     attempts: [...detail.attempts],
     decisions: [...detail.decisions],
     messages: [],
+    refetchAfterGap: null,
   };
 }
 
@@ -31,6 +33,15 @@ function upsert<T extends { id: string }>(items: T[], item: T): T[] {
 
 export function applyTaskEvent(state: CloudTaskState, event: TaskEvent): CloudTaskState {
   if (event.task_id !== state.task.id || event.sequence <= state.task.event_cursor) return state;
+  if (event.sequence !== state.task.event_cursor + 1) {
+    return {
+      ...state,
+      refetchAfterGap: {
+        expected: state.task.event_cursor + 1,
+        received: event.sequence,
+      },
+    };
+  }
 
   let task: TaskDetail = { ...state.task, event_cursor: event.sequence, updated_at: event.occurred_at };
   let attempts = state.attempts;
@@ -77,5 +88,5 @@ export function applyTaskEvent(state: CloudTaskState, event: TaskEvent): CloudTa
     ];
   }
 
-  return { task, attempts, decisions, messages };
+  return { task, attempts, decisions, messages, refetchAfterGap: null };
 }

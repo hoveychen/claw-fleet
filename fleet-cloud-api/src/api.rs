@@ -168,11 +168,8 @@ pub async fn get_task(
 ) -> Result<impl IntoResponse, ApiError> {
     let authorized = authorized_scope(&headers, state.embed.as_deref())?;
     authorized.ensure_task(task_id)?;
-    let task = state
-        .store
-        .get_task_detail(authorized.scope, task_id)
-        .await
-        .map_err(ApiError::from_store)?;
+    let result = state.store.get_task_detail(authorized.scope, task_id).await;
+    let task = audited_result(&state, authorized.scope, "task", task_id, result).await?;
     Ok(Json(task))
 }
 
@@ -182,11 +179,12 @@ pub async fn get_decision(
     Path(decision_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
     let authorized = authorized_scope(&headers, state.embed.as_deref())?;
-    let decision = state
+    let result = state
         .store
         .get_decision(authorized.scope, decision_id)
-        .await
-        .map_err(ApiError::from_store)?;
+        .await;
+    let decision =
+        audited_result(&state, authorized.scope, "decision", decision_id, result).await?;
     authorized.ensure_task(decision.task_id)?;
     Ok(Json(decision))
 }
@@ -226,11 +224,18 @@ pub async fn respond_to_decision(
     let canonical = serde_json::to_vec(&request)
         .map_err(|error| ApiError::bad_request("invalid_json", error.to_string()))?;
     let authorized = authorized_scope(&headers, state.embed.as_deref())?;
-    let existing = state
+    let existing_result = state
         .store
         .get_decision(authorized.scope, decision_id)
-        .await
-        .map_err(ApiError::from_store)?;
+        .await;
+    let existing = audited_result(
+        &state,
+        authorized.scope,
+        "decision",
+        decision_id,
+        existing_result,
+    )
+    .await?;
     authorized.ensure_task(existing.task_id)?;
     let outcome = state
         .store
@@ -325,11 +330,11 @@ pub async fn stream_task_events(
     let after = query.after.unwrap_or(0).max(last_event_id).max(0);
     let authorized = authorized_scope(&headers, state.embed.as_deref())?;
     authorized.ensure_task(task_id)?;
-    let events = state
+    let result = state
         .store
         .list_events(authorized.scope, task_id, after)
-        .await
-        .map_err(ApiError::from_store)?;
+        .await;
+    let events = audited_result(&state, authorized.scope, "task", task_id, result).await?;
     let frames = events.into_iter().map(|task_event| {
         let frame = Event::default()
             .id(task_event.sequence.to_string())
@@ -343,6 +348,38 @@ pub async fn stream_task_events(
             .interval(std::time::Duration::from_secs(15))
             .text("heartbeat"),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunnerEventBatchRequest {
+    events: Vec<crate::domain::RunnerEventInput>,
+}
+
+pub async fn ingest_runner_events(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(runner_id): Path<Uuid>,
+    Json(request): Json<RunnerEventBatchRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let authorized = authorized_scope(&headers, state.embed.as_deref())?;
+    if authorized.is_embed {
+        return Err(ApiError::forbidden(
+            "embed_scope_denied",
+            "embed tokens cannot submit Runner events",
+        ));
+    }
+    if request.events.len() > 1_000 {
+        return Err(ApiError::bad_request(
+            "event_batch_too_large",
+            "Runner event batches are limited to 1000 events",
+        ));
+    }
+    let outcome = state
+        .store
+        .ingest_runner_events(authorized.scope, runner_id, request.events)
+        .await
+        .map_err(ApiError::from_store)?;
+    Ok(Json(outcome))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -411,6 +448,26 @@ fn required_header(headers: &HeaderMap, name: &'static str) -> Result<String, Ap
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned)
         .ok_or_else(|| ApiError::bad_request("missing_header", format!("missing {name}")))
+}
+
+async fn audited_result<T>(
+    state: &AppState,
+    scope: RequestScope,
+    resource_type: &str,
+    resource_id: Uuid,
+    result: Result<T, StoreError>,
+) -> Result<T, ApiError> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(StoreError::NotFound) => {
+            let _ = state
+                .store
+                .record_audit_denial(scope, resource_type, resource_id, "foreign_or_missing")
+                .await;
+            Err(ApiError::from_store(StoreError::NotFound))
+        }
+        Err(error) => Err(ApiError::from_store(error)),
+    }
 }
 
 pub fn example_create_task() -> serde_json::Value {

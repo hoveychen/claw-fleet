@@ -33,6 +33,16 @@ pub struct LaunchResult {
     pub agent_session_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliverDecisionResponse {
+    pub command_id: Uuid,
+    pub task_id: Uuid,
+    pub attempt_id: Uuid,
+    pub decision_id: Uuid,
+    pub native_payload: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandoffSuccessor {
     pub session_id: String,
@@ -42,6 +52,7 @@ pub struct HandoffSuccessor {
 pub trait FleetCore: Send + Sync {
     fn spawn(&self, task: &LaunchTask) -> Result<LaunchResult, String>;
     fn handoff_successor(&self, session_id: &str) -> Option<HandoffSuccessor>;
+    fn deliver_decision_answer(&self, payload: &serde_json::Value) -> Result<(), String>;
 }
 
 pub struct RealFleetCore;
@@ -77,6 +88,10 @@ impl FleetCore for RealFleetCore {
                 note: link.note.clone(),
             })
     }
+
+    fn deliver_decision_answer(&self, payload: &serde_json::Value) -> Result<(), String> {
+        claw_fleet_core::mobile_relay::deliver_decision_answer(payload)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -85,6 +100,8 @@ pub enum AdapterError {
     Spool(#[from] SpoolError),
     #[error("Fleet core launch failed: {0}")]
     Launch(String),
+    #[error("Fleet decision delivery failed: {0}")]
+    Decision(String),
 }
 
 pub struct CoreAdapter<C: FleetCore> {
@@ -203,6 +220,52 @@ impl<C: FleetCore> CoreAdapter<C> {
         )?;
         Ok(Some(successor))
     }
+
+    pub fn deliver_decision_response(
+        &self,
+        command: &DeliverDecisionResponse,
+    ) -> Result<CommandAck, AdapterError> {
+        let payload = serde_json::to_value(command)
+            .expect("DeliverDecisionResponse serialization cannot fail");
+        match self.spool.claim_command(command.command_id, &payload)? {
+            CommandClaim::AlreadyApplied { result } => Ok(CommandAck {
+                command_id: command.command_id,
+                state: CommandAckState::AlreadyApplied,
+                result: Some(result),
+                error: None,
+            }),
+            CommandClaim::Rejected { error } => Ok(CommandAck {
+                command_id: command.command_id,
+                state: CommandAckState::Rejected,
+                result: None,
+                error: Some(error),
+            }),
+            CommandClaim::InProgress => Ok(CommandAck {
+                command_id: command.command_id,
+                state: CommandAckState::Accepted,
+                result: None,
+                error: None,
+            }),
+            CommandClaim::New => {
+                if let Err(error) = self.core.deliver_decision_answer(&command.native_payload) {
+                    self.spool.reject_command(command.command_id, &error)?;
+                    return Err(AdapterError::Decision(error));
+                }
+                let result = json!({
+                    "decisionId": command.decision_id,
+                    "attemptId": command.attempt_id,
+                    "delivered": true
+                });
+                self.spool.complete_command(command.command_id, &result)?;
+                Ok(CommandAck {
+                    command_id: command.command_id,
+                    state: CommandAckState::Accepted,
+                    result: Some(result),
+                    error: None,
+                })
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -213,6 +276,7 @@ mod tests {
 
     struct FakeCore {
         launches: AtomicUsize,
+        answers: AtomicUsize,
         successor: Option<HandoffSuccessor>,
     }
 
@@ -227,6 +291,11 @@ mod tests {
 
         fn handoff_successor(&self, _session_id: &str) -> Option<HandoffSuccessor> {
             self.successor.clone()
+        }
+
+        fn deliver_decision_answer(&self, _payload: &serde_json::Value) -> Result<(), String> {
+            self.answers.fetch_add(1, Ordering::SeqCst);
+            Ok(())
         }
     }
 
@@ -252,6 +321,7 @@ mod tests {
         let spool = Arc::new(Spool::open(dir.path().join("runner.db")).unwrap());
         let core = Arc::new(FakeCore {
             launches: AtomicUsize::new(0),
+            answers: AtomicUsize::new(0),
             successor: None,
         });
         let adapter = CoreAdapter::new(core.clone(), spool.clone());
@@ -277,6 +347,7 @@ mod tests {
         let spool = Arc::new(Spool::open(dir.path().join("runner.db")).unwrap());
         let core = Arc::new(FakeCore {
             launches: AtomicUsize::new(0),
+            answers: AtomicUsize::new(0),
             successor: Some(HandoffSuccessor {
                 session_id: "session-next".into(),
                 note: "P4 complete, continue P5".into(),
@@ -300,5 +371,89 @@ mod tests {
         assert_eq!(events[1].attempt_id, Some(to_attempt));
         assert_eq!(events[1].event_type, "attempt.started");
         assert!(events[0].local_sequence < events[1].local_sequence);
+    }
+
+    #[test]
+    fn duplicate_decision_response_unblocks_core_once() {
+        let dir = tempdir().unwrap();
+        let spool = Arc::new(Spool::open(dir.path().join("runner.db")).unwrap());
+        let core = Arc::new(FakeCore {
+            launches: AtomicUsize::new(0),
+            answers: AtomicUsize::new(0),
+            successor: None,
+        });
+        let adapter = CoreAdapter::new(core.clone(), spool);
+        let command = DeliverDecisionResponse {
+            command_id: Uuid::new_v4(),
+            task_id: Uuid::new_v4(),
+            attempt_id: Uuid::new_v4(),
+            decision_id: Uuid::new_v4(),
+            native_payload: json!({
+                "kind": "fleet-ask",
+                "id": "native-decision-1",
+                "answers": { "ship": "yes" },
+                "cancelled": false
+            }),
+        };
+        let first = adapter.deliver_decision_response(&command).unwrap();
+        assert_eq!(first.state, CommandAckState::Accepted);
+        for _ in 0..19 {
+            let replay = adapter.deliver_decision_response(&command).unwrap();
+            assert_eq!(replay.state, CommandAckState::AlreadyApplied);
+        }
+        assert_eq!(core.answers.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn five_minute_partition_replays_without_duplicate_attempt_or_event_loss() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("runner.db");
+        let core = Arc::new(FakeCore {
+            launches: AtomicUsize::new(0),
+            answers: AtomicUsize::new(0),
+            successor: None,
+        });
+        let task = launch_task();
+        {
+            let spool = Arc::new(Spool::open(&path).unwrap());
+            let adapter = CoreAdapter::new(core.clone(), spool.clone());
+            adapter.launch(&task).unwrap();
+            spool
+                .append_event(
+                    "partition:decision.opened",
+                    task.task_id,
+                    Some(task.attempt_id),
+                    "decision.opened",
+                    "1.0",
+                    &json!({ "decisionId": Uuid::new_v4() }),
+                )
+                .unwrap();
+            spool
+                .append_event(
+                    "partition:transcript",
+                    task.task_id,
+                    Some(task.attempt_id),
+                    "transcript.message",
+                    "1.0",
+                    &json!({ "role": "assistant", "text": "still working offline" }),
+                )
+                .unwrap();
+        }
+
+        let simulated_partition_seconds = 300;
+        assert_eq!(simulated_partition_seconds, 5 * 60);
+        let reopened = Arc::new(Spool::open(&path).unwrap());
+        let recovered = CoreAdapter::new(core.clone(), reopened.clone());
+        let replay = recovered.launch(&task).unwrap();
+        assert_eq!(replay.state, CommandAckState::AlreadyApplied);
+        assert_eq!(core.launches.load(Ordering::SeqCst), 1);
+        let pending = reopened.pending_events(100).unwrap();
+        assert_eq!(pending.len(), 3);
+        assert_eq!(pending[0].event_type, "attempt.started");
+        assert_eq!(pending[1].event_type, "decision.opened");
+        assert_eq!(pending[2].event_type, "transcript.message");
+        assert!(pending
+            .windows(2)
+            .all(|pair| pair[0].local_sequence < pair[1].local_sequence));
     }
 }

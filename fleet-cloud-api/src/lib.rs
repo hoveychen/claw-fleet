@@ -58,6 +58,10 @@ fn app_with_store_and_optional_embed(
         .route("/v1/tasks", get(api::list_tasks).post(api::create_task))
         .route("/v1/tasks/{task_id}", get(api::get_task))
         .route("/v1/tasks/{task_id}/events", get(api::stream_task_events))
+        .route(
+            "/v1/runners/{runner_id}/events",
+            post(api::ingest_runner_events),
+        )
         .route("/v1/decisions/{decision_id}", get(api::get_decision))
         .route(
             "/v1/decisions/{decision_id}/responses",
@@ -176,7 +180,8 @@ mod tests {
 
     #[tokio::test]
     async fn foreign_scope_get_returns_not_found() {
-        let app = app();
+        let store = Arc::new(store::InMemoryTaskStore::default());
+        let app = app_with_store(store.clone());
         let created = app
             .clone()
             .oneshot(create_request("create-key-002", "scope test"))
@@ -195,6 +200,7 @@ mod tests {
         );
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(store.audit_denial_count(), 1);
     }
 
     #[tokio::test]

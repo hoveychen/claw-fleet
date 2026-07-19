@@ -5,7 +5,8 @@ pub use in_memory::InMemoryTaskStore;
 pub use postgres::PgTaskStore;
 
 use crate::domain::{
-    CreateTaskRequest, Decision, RequestScope, Task, TaskDetail, TaskEvent, TaskStatus,
+    CreateTaskRequest, Decision, IngestEventsOutcome, RequestScope, RunnerEventInput, Task,
+    TaskDetail, TaskEvent, TaskStatus,
 };
 use async_trait::async_trait;
 use std::fmt;
@@ -104,6 +105,21 @@ pub trait TaskStore: Send + Sync {
         &self,
         command: RespondDecisionCommand,
     ) -> Result<RespondDecisionOutcome, StoreError>;
+
+    async fn record_audit_denial(
+        &self,
+        scope: RequestScope,
+        resource_type: &str,
+        resource_id: Uuid,
+        reason: &str,
+    ) -> Result<(), StoreError>;
+
+    async fn ingest_runner_events(
+        &self,
+        scope: RequestScope,
+        runner_id: Uuid,
+        events: Vec<RunnerEventInput>,
+    ) -> Result<IngestEventsOutcome, StoreError>;
 
     async fn list_events(
         &self,
