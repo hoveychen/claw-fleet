@@ -43,7 +43,11 @@ COPY fleet-relay/ fleet-relay/
 # (ws_e2e_tests.rs), which a release build never compiles, but cargo would still
 # try to read its manifest during dependency resolution — and that crate isn't
 # COPYed into this image. Stripping the line keeps the "boring" single-crate build.
-RUN sed -i 's/^members = .*/members = ["fleet-relay"]/' Cargo.toml \
+# `members` is a multi-line array (the workspace has several crates), so collapse
+# the whole `members = [ ... ]` range to a single fleet-relay-only entry — a
+# single-line sed on just the `members = [` line would orphan the remaining array
+# elements and produce invalid TOML.
+RUN sed -i '/^members = \[/,/^\]/c\members = ["fleet-relay"]' Cargo.toml \
     && sed -i '/^claw-fleet-core = /d' fleet-relay/Cargo.toml \
     && cargo build --release -p fleet-relay
 
