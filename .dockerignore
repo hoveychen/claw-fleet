@@ -1,8 +1,10 @@
-# fleet-relay image build context (repo root) — keep host artifacts out.
-target/
-node_modules/
-**/node_modules/
-**/dist/
-.worktrees/
-.git/
-.playwright-cli/
+.git
+.worktrees
+.playwright-cli
+target
+target-*
+**/node_modules
+**/dist
+promo/video/output
+deploy/cloud/identity
+*.log

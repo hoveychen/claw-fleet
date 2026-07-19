@@ -613,3 +613,7 @@ Event 表按时间或 Organization 分区。先保留 90 天细粒度 Event，�
 批准阶段 A。首个里程碑不是“把所有 Tauri 命令改成 HTTP”，而是让一个真实业务只依赖公开 Task API，完整经历创建、事件、决策、接力、完成和产物读取，并通过断线与幂等验收。
 
 只有 Task/Event/Decision 契约经过试点稳定后，才扩大为多租户 Beta 或投入完全托管沙箱。
+
+### 18.1 验收执行状态（2026-07-19）
+
+P10 的可执行脚本、容器资产与证据矩阵已准备；真实 staging、100 个连续 GitHub Issues 及故障演练尚未执行，当前状态为 **BLOCKED / NOT RUN**。验收结果以 [[cloud/fleet-cloud-pilot-acceptance]] 为唯一记录，任何单测或 mock 均不得替代本节十项真实证据。

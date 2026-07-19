@@ -1,0 +1,24 @@
+services:
+  runner:
+    build:
+      context: ../..
+      dockerfile: deploy/cloud/Dockerfile.runner
+    restart: unless-stopped
+    environment:
+      FLEET_CLOUD_RUNNER_URL: ${FLEET_CLOUD_RUNNER_URL:?wss Runner gateway URL required}
+      FLEET_RUNNER_ID: ${FLEET_RUNNER_ID:?Runner ID required}
+      FLEET_RUNNER_CA_CERT: /identity/ca.pem
+      FLEET_RUNNER_TLS_CERT: /identity/client.pem
+      FLEET_RUNNER_TLS_KEY: /identity/client-key.pem
+      FLEET_RUNNER_MAX_CONCURRENCY: 2
+      FLEET_RUNNER_CAPABILITIES: claude_code,codex
+    volumes:
+      - fleet_cloud_runner_state:/state
+      - fleet_cloud_runner_workspace:/workspace
+      - ./identity:/identity:ro
+    network_mode: bridge
+
+volumes:
+  fleet_cloud_runner_state:
+  fleet_cloud_runner_workspace:
+
