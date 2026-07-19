@@ -47,6 +47,61 @@ async fn create_task(pool: &sqlx::PgPool, key: &str, external: &str) -> serde_js
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn online_runner_claims_pending_commands_for_its_pool_and_capability(pool: sqlx::PgPool) {
+    let fingerprint = vec![0x54; 32];
+    seed_runner(&pool, &fingerprint).await;
+    registry::connect(&pool, &hello(), &fingerprint)
+        .await
+        .unwrap();
+
+    let mut matching = common::create_task_body("proj_test", "matching");
+    matching["runner_pool_id"] = serde_json::json!("pool_test");
+    common::post_json(
+        common::router(pool.clone()),
+        "/tasks",
+        common::VALID_KEY,
+        Some("runner-auto-claim-001"),
+        matching,
+    )
+    .await;
+    let mut wrong_capability = common::create_task_body("proj_test", "wrong capability");
+    wrong_capability["external_id"] = serde_json::json!("runner-auto-claim-codex");
+    wrong_capability["runner_pool_id"] = serde_json::json!("pool_test");
+    wrong_capability["agent"]["provider"] = serde_json::json!("codex");
+    common::post_json(
+        common::router(pool.clone()),
+        "/tasks",
+        common::VALID_KEY,
+        Some("runner-auto-claim-002"),
+        wrong_capability,
+    )
+    .await;
+
+    let claimed = registry::claim_available_commands(&pool, "runner_test")
+        .await
+        .unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(
+        claimed[0].required_capability.as_ref().unwrap().name,
+        "claude_code"
+    );
+    assert_eq!(claimed[0].assignment_sequence, 1);
+    assert!(registry::claim_available_commands(&pool, "runner_test")
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM commands WHERE runner_id IS NULL AND status='pending'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn reconnect_replays_commands_and_deduplicates_one_hundred_events(pool: sqlx::PgPool) {
     let fingerprint = vec![0x55; 32];
     seed_runner(&pool, &fingerprint).await;

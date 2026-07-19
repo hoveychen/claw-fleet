@@ -68,6 +68,7 @@ async fn accept_connection(
     let runner_id = hello.runner_id.clone();
     let server_hello = registry::connect(&pool, &hello, &fingerprint).await?;
     send_frame(&mut socket, &ServerFrame::ServerHello(server_hello)).await?;
+    registry::claim_available_commands(&pool, &runner_id).await?;
     for command in registry::pending_commands(&pool, &runner_id).await? {
         send_frame(&mut socket, &ServerFrame::Command(command)).await?;
     }
@@ -85,7 +86,10 @@ async fn run_loop(
     loop {
         match next_frame(socket).await? {
             RunnerFrame::Heartbeat { active_runs } => {
-                registry::heartbeat(pool, runner_id, active_runs).await?
+                registry::heartbeat(pool, runner_id, active_runs).await?;
+                for command in registry::claim_available_commands(pool, runner_id).await? {
+                    send_frame(socket, &ServerFrame::Command(command)).await?;
+                }
             }
             RunnerFrame::EventBatch { events, .. } => {
                 let through = registry::ingest_events(pool, runner_id, events).await?;

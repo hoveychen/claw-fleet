@@ -43,6 +43,8 @@ pub struct CreateTaskRequest {
     pub goal: String,
     pub workspace: WorkspaceSpec,
     pub agent: AgentSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_pool_id: Option<String>,
     #[serde(default)]
     pub metadata: Value,
 }
@@ -336,6 +338,21 @@ pub async fn create_task(
         });
     }
     crate::services::governance::enforce_run_quota(&mut tx, principal).await?;
+    if let Some(runner_pool_id) = request.runner_pool_id.as_deref() {
+        let belongs_to_project = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM runner_pools WHERE id=$1 AND organization_id=$2 AND project_id=$3)",
+        )
+        .bind(runner_pool_id)
+        .bind(&principal.organization_id)
+        .bind(&principal.project_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !belongs_to_project {
+            return Err(ApiError::Validation(
+                "runner_pool_id is not available to this project".into(),
+            ));
+        }
+    }
 
     let task_id = new_id("task");
     let run_id = new_id("run");
@@ -407,8 +424,8 @@ pub async fn create_task(
     sqlx::query(
         "INSERT INTO commands(
             id, organization_id, project_id, task_id, run_id, command_type,
-            payload, expected_version
-         ) VALUES ($1, $2, $3, $4, $5, 'start_run', $6, 1)",
+            payload, expected_version, runner_pool_id
+         ) VALUES ($1, $2, $3, $4, $5, 'start_run', $6, 1, $7)",
     )
     .bind(&command_id)
     .bind(&principal.organization_id)
@@ -420,6 +437,7 @@ pub async fn create_task(
         "agent": request.agent,
         "goal": request.goal
     }))
+    .bind(&request.runner_pool_id)
     .execute(&mut *tx)
     .await?;
 
