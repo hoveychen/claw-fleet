@@ -108,19 +108,13 @@ fn browse_dir_in(
     let mut truncated = false;
     for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
         let child = entry.path();
-        // Resolve dir-ness from the readdir `d_type` (`entry.file_type()`), NOT
-        // `child.is_dir()`: the latter `stat`s every entry, which fires a macOS
-        // TCC dialog the moment we list a home dir containing ~/Documents,
-        // ~/Desktop, ~/Downloads. A symlink still gets followed (a symlinked repo
-        // is a legitimate pick) — but only when its target is not TCC-protected,
-        // so following it can't stat into a protected folder either. Same guard
-        // shape as `session::paths::read_level_dirs`.
-        let is_dir = match entry.file_type() {
-            Ok(ft) if ft.is_dir() => true,
-            Ok(ft) if ft.is_symlink() => !is_protected(&child) && child.is_dir(),
-            _ => false,
-        };
-        if !is_dir {
+        // Resolve dir-ness from the readdir `d_type`, NOT `child.is_dir()`: the
+        // latter `stat`s every entry, which fires a macOS TCC dialog the moment
+        // we list a home dir containing ~/Documents, ~/Desktop, ~/Downloads. The
+        // helper follows symlinks only when their target isn't TCC-protected, so
+        // it can't stat into a protected folder either. Shared verbatim with
+        // `session::paths::read_level_dirs`.
+        if !crate::tcc::readdir_is_followable_dir(entry.file_type(), &child, is_protected) {
             continue;
         }
         let Some(name) = child.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
@@ -332,6 +326,36 @@ mod tests {
         assert!(!doc.is_git_repo, "protected dir must not be git-probed (would fire TCC)");
         // The ordinary repo is still badged, proving the guard is scoped.
         assert!(r.entries.iter().find(|e| e.name == "proj").unwrap().is_git_repo);
+    }
+
+    /// TCC guard, symlink case: a home-root symlink pointing INTO a protected
+    /// dir must not be followed. Following it (`child.is_dir()`) stats the
+    /// protected target and fires a macOS TCC dialog — so the entry is dropped.
+    /// A symlink to an ordinary dir is still followed (a symlinked repo is a
+    /// legitimate pick).
+    #[cfg(unix)]
+    #[test]
+    fn symlink_into_protected_dir_is_not_followed() {
+        use std::os::unix::fs::symlink;
+        let (_tmp, home, _) = fixture();
+        let protected = home.join("Protected");
+        fs::create_dir_all(&protected).unwrap();
+        symlink(&protected, home.join("plink")).unwrap();
+        symlink(home.join("notes"), home.join("nlink")).unwrap();
+        let roots = vec![home.clone()];
+        let prot = protected.clone();
+        let is_protected = move |p: &Path| p == prot;
+
+        let r = browse_dir_in(None, &home, &roots, &is_protected).unwrap();
+        let names: Vec<&str> = r.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(
+            !names.contains(&"plink"),
+            "symlink into a protected dir must not be followed/listed, got {names:?}"
+        );
+        assert!(
+            names.contains(&"nlink"),
+            "symlink to an ordinary dir must still be followed, got {names:?}"
+        );
     }
 
     #[test]
