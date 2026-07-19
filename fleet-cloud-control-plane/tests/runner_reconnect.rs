@@ -212,3 +212,98 @@ async fn drain_prevents_new_assignment(pool: sqlx::PgPool) {
         .unwrap_err();
     assert!(matches!(error, ApiError::RunnerUnavailable));
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn harness_events_project_runs_and_handoff_without_finishing_task_early(pool: sqlx::PgPool) {
+    let fingerprint = vec![0x77; 32];
+    seed_runner(&pool, &fingerprint).await;
+    let created = create_task(&pool, "projection-task-001", "projection-ticket").await;
+    let task_id = created["task"]["id"].as_str().unwrap();
+    let first_run = created["run"]["id"].as_str().unwrap();
+    let second_run = "run_handoff_projection";
+    let facts = vec![
+        (
+            "run.started",
+            first_run,
+            serde_json::json!({"status":"running"}),
+        ),
+        (
+            "run.assigned",
+            second_run,
+            serde_json::json!({"predecessor_run_id":first_run,"provider":"claude_code"}),
+        ),
+        (
+            "run.finished",
+            first_run,
+            serde_json::json!({"status":"succeeded"}),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (event_type, run_id, mut data))| {
+        data["task_id"] = serde_json::json!(task_id);
+        data["run_id"] = serde_json::json!(run_id);
+        RunnerEvent {
+            source_event_id: format!("projection-{}", index + 1),
+            sequence: (index + 1) as u64,
+            event_type: event_type.into(),
+            occurred_at: Utc::now(),
+            data,
+            schema_version: 1,
+        }
+    })
+    .collect();
+    assert_eq!(
+        registry::ingest_events(&pool, "runner_test", facts)
+            .await
+            .unwrap(),
+        3
+    );
+    let task: (String, Option<String>) =
+        sqlx::query_as("SELECT status,active_run_id FROM tasks WHERE id=$1")
+            .bind(task_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(task.0, "running");
+    assert_eq!(task.1.as_deref(), Some(second_run));
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT status FROM runs WHERE id=$1")
+            .bind(first_run)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        "succeeded"
+    );
+
+    let terminal = [
+        ("run.started", "running"),
+        ("run.finished", "succeeded"),
+        ("task.completed", "succeeded"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (event_type, status))| RunnerEvent {
+        source_event_id: format!("projection-{}", index + 4),
+        sequence: (index + 4) as u64,
+        event_type: event_type.into(),
+        occurred_at: Utc::now(),
+        data: serde_json::json!({"task_id":task_id,"run_id":second_run,"status":status}),
+        schema_version: 1,
+    })
+    .collect();
+    assert_eq!(
+        registry::ingest_events(&pool, "runner_test", terminal)
+            .await
+            .unwrap(),
+        6
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT status FROM tasks WHERE id=$1")
+            .bind(task_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        "succeeded"
+    );
+}

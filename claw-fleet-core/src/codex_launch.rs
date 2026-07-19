@@ -874,6 +874,16 @@ pub fn spawn_new_codex_session(
     model: Option<&str>,
     effort: Option<&str>,
 ) -> Result<SpawnSessionResponse, String> {
+    spawn_new_codex_session_with_environment(workspace_path, prompt, model, effort, &[])
+}
+
+pub fn spawn_new_codex_session_with_environment(
+    workspace_path: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    environment: &[(String, String)],
+) -> Result<SpawnSessionResponse, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
@@ -969,6 +979,12 @@ pub fn spawn_new_codex_session(
     crate::process_util::detach_process_group(&mut cmd);
     apply_codex_launch_env(&mut cmd);
     cmd.env(FLEET_CODEX_LAUNCH_TOKEN_ENV, &launch_token);
+    for (key, value) in environment {
+        cmd.env(key, value);
+    }
+
+    let task_id = environment.iter().find(|(key, _)| key == "FLEET_CLOUD_TASK_ID").map(|(_, value)| value.clone());
+    let run_id = environment.iter().find(|(key, _)| key == "FLEET_CLOUD_RUN_ID").map(|(_, value)| value.clone());
 
     let mut child = cmd
         .spawn()
@@ -983,6 +999,8 @@ pub fn spawn_new_codex_session(
     let (tx, rx) = mpsc::channel::<String>();
     let stderr_log_owned = stderr_log.clone();
     let sink_path_owned = sink_path.clone();
+    let exit_task_id = task_id.clone();
+    let exit_run_id = run_id.clone();
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + THREAD_STARTED_TIMEOUT;
         // Thread id captured from `thread.started`, kept so we can drop its
@@ -1022,6 +1040,12 @@ pub fn spawn_new_codex_session(
             match result {
                 Ok(status) => {
                     let healthy = codex_turn_succeeded(&status, terminal);
+                    crate::backend::emit_harness_event(crate::backend::HarnessEvent {
+                        event_type: "run.process_exited".into(),
+                        task_id: exit_task_id.clone(), run_id: exit_run_id.clone(),
+                        provider_session_ref: spawned_thread.clone(),
+                        data: serde_json::json!({"provider":"codex","success":healthy}),
+                    });
                     let _ = writeln!(
                         f,
                         "[{}] new_codex_session exit code={:?} process_success={} terminal={terminal:?} healthy={healthy}",
@@ -1031,6 +1055,12 @@ pub fn spawn_new_codex_session(
                     );
                 }
                 Err(e) => {
+                    crate::backend::emit_harness_event(crate::backend::HarnessEvent {
+                        event_type: "run.process_exited".into(),
+                        task_id: exit_task_id, run_id: exit_run_id,
+                        provider_session_ref: spawned_thread.clone(),
+                        data: serde_json::json!({"provider":"codex","success":false}),
+                    });
                     let _ = writeln!(
                         f,
                         "[{}] new_codex_session wait_err err={e}",
@@ -1060,6 +1090,12 @@ pub fn spawn_new_codex_session(
             None
         }
     };
+
+    crate::backend::emit_harness_event(crate::backend::HarnessEvent {
+        event_type: "run.process_started".into(), task_id, run_id,
+        provider_session_ref: session_id.clone(),
+        data: serde_json::json!({"provider":"codex"}),
+    });
 
     Ok(SpawnSessionResponse { pid, session_id })
 }

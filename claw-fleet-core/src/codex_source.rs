@@ -5409,11 +5409,12 @@ impl AgentSource for CodexSource {
         // Codex mints its own thread id (no --session-id) and has no entrypoint
         // env; session_id/entrypoint on the spec are ignored here. The
         // permission_mode → sandbox/approval mapping is a later milestone.
-        crate::codex_launch::spawn_new_codex_session(
+        crate::codex_launch::spawn_new_codex_session_with_environment(
             &spec.workspace_path,
             &spec.prompt,
             spec.model.as_deref(),
             spec.effort.as_deref(),
+            &spec.environment,
         )
     }
 

@@ -2075,6 +2075,7 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
         permission_mode: req.permission_mode.clone(),
         session_id: req.session_id.clone(),
         entrypoint: String::new(),
+        environment: Vec::new(),
     };
     let resp =
         crate::agent_source::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;

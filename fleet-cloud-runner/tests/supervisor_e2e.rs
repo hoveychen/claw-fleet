@@ -1,0 +1,280 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use chrono::{Duration, Utc};
+use claw_fleet_core::agent_source::SpawnSpec;
+use claw_fleet_core::backend::HarnessEvent;
+use fleet_cloud_runner::outbox::EventOutbox;
+use fleet_cloud_runner::supervisor::{Harness, HarnessSnapshot, Supervisor};
+use fleet_cloud_wire::runner::{CloudCommand, CommandAckStatus};
+use serde_json::{json, Value};
+
+#[derive(Default)]
+struct FakeHarness {
+    launches: Mutex<Vec<(String, SpawnSpec)>>,
+    terminated: Mutex<Vec<u32>>,
+    queued: Mutex<Vec<(String, String)>>,
+    snapshots: Mutex<HashMap<String, HarnessSnapshot>>,
+}
+
+impl Harness for FakeHarness {
+    fn spawn(
+        &self,
+        provider: &str,
+        spec: &SpawnSpec,
+    ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
+        let mut launches = self.launches.lock().unwrap();
+        let number = launches.len() + 1;
+        let session_id = format!("fixture-{provider}-{number}");
+        launches.push((provider.into(), spec.clone()));
+        self.snapshots.lock().unwrap().insert(
+            session_id.clone(),
+            HarnessSnapshot {
+                messages: vec![
+                    json!({"type":"user","cwd":"/private/customer/repo","message":{"content":"fix it"}}),
+                    json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Read","input":{"file":"safe.txt"}}]}}),
+                    json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"ok"}]}}),
+                ],
+                input_tokens: 120,
+                output_tokens: 40,
+                cost_usd: 0.25,
+            },
+        );
+        Ok(claw_fleet_core::session_launch::SpawnSessionResponse {
+            pid: 10_000 + number as u32,
+            session_id: Some(session_id),
+        })
+    }
+
+    fn terminate(&self, pid: u32) -> Result<(), String> {
+        self.terminated.lock().unwrap().push(pid);
+        Ok(())
+    }
+
+    fn enqueue(&self, session_id: &str, _workspace: &str, text: &str) -> Result<(), String> {
+        self.queued
+            .lock()
+            .unwrap()
+            .push((session_id.into(), text.into()));
+        Ok(())
+    }
+
+    fn snapshot(&self, session_id: &str) -> Result<Option<HarnessSnapshot>, String> {
+        Ok(self.snapshots.lock().unwrap().get(session_id).cloned())
+    }
+}
+
+fn command(
+    sequence: u64,
+    command_type: &str,
+    task_id: &str,
+    run_id: Option<&str>,
+    payload: Value,
+) -> CloudCommand {
+    CloudCommand {
+        command_id: format!("cmd-{sequence}"),
+        assignment_sequence: sequence,
+        command_type: command_type.into(),
+        task_id: Some(task_id.into()),
+        run_id: run_id.map(str::to_owned),
+        deadline: Utc::now() + Duration::minutes(5),
+        expected_version: None,
+        required_capability: None,
+        payload,
+    }
+}
+
+fn start_payload(repository: &str, provider: &str) -> Value {
+    json!({
+        "workspace":{"repository":repository,"ref":"main"},
+        "agent":{"provider":provider,"model":"test-model","effort":"high","permission_policy_id":"policy-safe"},
+        "goal":"implement the requested change"
+    })
+}
+
+fn exit_event(task_id: &str, run_id: &str, session_id: &str, provider: &str) -> HarnessEvent {
+    HarnessEvent {
+        event_type: "run.process_exited".into(),
+        task_id: Some(task_id.into()),
+        run_id: Some(run_id.into()),
+        provider_session_ref: Some(session_id.into()),
+        data: json!({"provider":provider,"success":true}),
+    }
+}
+
+#[test]
+fn supervisor_bridges_providers_handoff_controls_and_safe_cloud_events() {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = directory.path().join("repo");
+    std::fs::create_dir_all(&repository).unwrap();
+    std::fs::write(repository.join("README.md"), "fixture").unwrap();
+    let state = directory.path().join("state");
+    let outbox = Arc::new(EventOutbox::open(&directory.path().join("outbox.sqlite")).unwrap());
+    let harness = Arc::new(FakeHarness::default());
+    let mut supervisor =
+        Supervisor::open_with_harness(&state, outbox.clone(), harness.clone()).unwrap();
+    let repository = repository.to_string_lossy();
+
+    for (sequence, provider) in [(1, "claude_code"), (2, "codex")] {
+        let task_id = format!("task-{provider}");
+        let run_id = format!("run-{provider}");
+        let result = supervisor.execute(&command(
+            sequence,
+            "start_run",
+            &task_id,
+            Some(&run_id),
+            start_payload(&repository, provider),
+        ));
+        assert_eq!(result.status, CommandAckStatus::Completed, "{result:?}");
+    }
+    let launches = harness.launches.lock().unwrap().clone();
+    assert_eq!(launches.len(), 2);
+    assert_eq!(launches[0].0, "claude_code");
+    assert_eq!(launches[1].0, "codex");
+    for (_, spec) in &launches {
+        assert!(spec.workspace_path.starts_with(state.to_str().unwrap()));
+        assert!(spec
+            .environment
+            .iter()
+            .any(|(key, _)| key == "FLEET_CLOUD_TASK_ID"));
+        assert!(spec
+            .environment
+            .iter()
+            .any(|(key, _)| key == "FLEET_CLOUD_RUN_ID"));
+    }
+
+    claw_fleet_core::backend::emit_harness_event(exit_event(
+        "task-claude_code",
+        "run-claude_code",
+        "fixture-claude_code-1",
+        "claude_code",
+    ));
+    claw_fleet_core::backend::emit_harness_event(exit_event(
+        "task-codex",
+        "run-codex",
+        "fixture-codex-2",
+        "codex",
+    ));
+    supervisor.reconcile().unwrap();
+
+    let handoff_start = supervisor.execute(&command(
+        3,
+        "start_run",
+        "task-handoff",
+        Some("run-handoff-1"),
+        start_payload(&repository, "claude_code"),
+    ));
+    assert_eq!(handoff_start.status, CommandAckStatus::Completed);
+    claw_fleet_core::backend::emit_harness_event(HarnessEvent {
+        event_type: "run.handoff_created".into(),
+        task_id: Some("task-handoff".into()),
+        run_id: Some("run-handoff-2".into()),
+        provider_session_ref: None,
+        data: json!({"predecessor_run_id":"run-handoff-1","provider":"claude_code"}),
+    });
+    claw_fleet_core::backend::emit_harness_event(exit_event(
+        "task-handoff",
+        "run-handoff-1",
+        "fixture-claude_code-3",
+        "claude_code",
+    ));
+    supervisor.reconcile().unwrap();
+    let before_successor = outbox.batch_after(0, 500).unwrap();
+    assert!(!before_successor.iter().any(|event| {
+        event.event_type == "task.completed" && event.data["task_id"] == "task-handoff"
+    }));
+    claw_fleet_core::backend::emit_harness_event(exit_event(
+        "task-handoff",
+        "run-handoff-2",
+        "fixture-successor",
+        "claude_code",
+    ));
+    supervisor.reconcile().unwrap();
+
+    let control_start = supervisor.execute(&command(
+        4,
+        "start_run",
+        "task-control",
+        Some("run-control-1"),
+        start_payload(&repository, "claude_code"),
+    ));
+    assert_eq!(control_start.status, CommandAckStatus::Completed);
+    assert_eq!(
+        supervisor
+            .execute(&command(
+                5,
+                "pause_task",
+                "task-control",
+                Some("run-control-1"),
+                json!({})
+            ))
+            .status,
+        CommandAckStatus::Completed
+    );
+    let paused_append = supervisor.execute(&command(
+        6,
+        "append_message",
+        "task-control",
+        Some("run-control-1"),
+        json!({"text":"queued while paused"}),
+    ));
+    assert_eq!(paused_append.result.unwrap()["reason"], "paused");
+    assert!(harness.queued.lock().unwrap().is_empty());
+    let resumed = supervisor.execute(&command(
+        7,
+        "resume_task",
+        "task-control",
+        Some("run-control-1"),
+        json!({"message":"resume now"}),
+    ));
+    assert_eq!(resumed.status, CommandAckStatus::Completed);
+    let resumed_run = resumed.result.unwrap()["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(resumed_run, "run-control-1");
+    let resumed_spec = harness.launches.lock().unwrap().last().unwrap().1.clone();
+    assert_eq!(resumed_spec.model.as_deref(), Some("test-model"));
+    assert_eq!(resumed_spec.effort.as_deref(), Some("high"));
+    let running_append = supervisor.execute(&command(
+        8,
+        "append_message",
+        "task-control",
+        Some(&resumed_run),
+        json!({"text":"next message"}),
+    ));
+    assert_eq!(running_append.result.unwrap()["reason"], "running");
+    assert_eq!(harness.queued.lock().unwrap().len(), 1);
+    let cancelled = supervisor.execute(&command(
+        9,
+        "cancel_task",
+        "task-control",
+        Some(&resumed_run),
+        json!({}),
+    ));
+    assert_eq!(cancelled.status, CommandAckStatus::Completed);
+    assert_eq!(harness.terminated.lock().unwrap().len(), 1);
+
+    let events = outbox.batch_after(0, 500).unwrap();
+    for required in [
+        "run.started",
+        "message.created",
+        "tool.started",
+        "tool.finished",
+        "usage.updated",
+        "run.finished",
+        "task.completed",
+        "run.assigned",
+    ] {
+        assert!(
+            events.iter().any(|event| event.event_type == required),
+            "missing {required}"
+        );
+    }
+    let encoded = serde_json::to_string(&events).unwrap();
+    assert!(!encoded.contains("\"pid\""));
+    assert!(!encoded.contains("jsonl_path"));
+    assert!(!encoded.contains("workspace_path"));
+    assert!(!encoded.contains("/private/customer/repo"));
+    assert!(!encoded.contains(state.to_str().unwrap()));
+}

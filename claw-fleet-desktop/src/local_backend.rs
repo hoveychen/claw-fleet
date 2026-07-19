@@ -2275,6 +2275,7 @@ impl Backend for LocalBackend {
             permission_mode,
             session_id: None,
             entrypoint: String::new(),
+            environment: Vec::new(),
         };
         let resp = claw_fleet_core::agent_source::spawn_session(&tool, &spec)?;
         // Trigger a rescan after a delay so the freshly created JSONL shows up

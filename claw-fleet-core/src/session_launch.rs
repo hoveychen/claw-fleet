@@ -609,6 +609,28 @@ pub(crate) fn spawn_new_session_impl(
     session_id: Option<&str>,
     entrypoint: &str,
 ) -> Result<SpawnSessionResponse, String> {
+    spawn_new_session_impl_with_environment(
+        workspace_path,
+        prompt,
+        model,
+        effort,
+        permission_mode,
+        session_id,
+        entrypoint,
+        &[],
+    )
+}
+
+pub(crate) fn spawn_new_session_impl_with_environment(
+    workspace_path: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
+    session_id: Option<&str>,
+    entrypoint: &str,
+    environment: &[(String, String)],
+) -> Result<SpawnSessionResponse, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
@@ -661,6 +683,11 @@ pub(crate) fn spawn_new_session_impl(
     // suffixes), and Fleet has no reason to guess at a flag it chose itself —
     // `resolve_session_model_spec` reads this back for handoff / parked / resume.
     crate::launch_spec::record(&session_id, model, effort);
+    let mut child_environment = vec![("CLAUDE_CODE_ENTRYPOINT", entrypoint)];
+    child_environment.extend(environment.iter().map(|(key, value)| (key.as_str(), value.as_str())));
+    let task_id = environment.iter().find(|(key, _)| key == "FLEET_CLOUD_TASK_ID").map(|(_, value)| value.clone());
+    let run_id = environment.iter().find(|(key, _)| key == "FLEET_CLOUD_RUN_ID").map(|(_, value)| value.clone());
+    let exit_session_id = session_id.clone();
     let pid = spawn_claude_detached_with_envs(
         &claude,
         &args,
@@ -668,10 +695,23 @@ pub(crate) fn spawn_new_session_impl(
         &stderr_log,
         "new_session",
         "",
-        &[("CLAUDE_CODE_ENTRYPOINT", entrypoint)],
+        &child_environment,
         true, // tee stdout to a live-thinking sidecar
-        |_success| {},
+        {
+            let task_id = task_id.clone();
+            let run_id = run_id.clone();
+            move |success| crate::backend::emit_harness_event(crate::backend::HarnessEvent {
+                event_type: "run.process_exited".into(), task_id, run_id,
+                provider_session_ref: Some(exit_session_id),
+                data: serde_json::json!({"provider":"claude_code","success":success}),
+            })
+        },
     )?;
+    crate::backend::emit_harness_event(crate::backend::HarnessEvent {
+        event_type: "run.process_started".into(), task_id, run_id,
+        provider_session_ref: Some(session_id.clone()),
+        data: serde_json::json!({"provider":"claude_code"}),
+    });
     crate::log_debug(&format!(
         "new_session: spawned pid {} session {} in {}",
         pid, session_id, workspace_path

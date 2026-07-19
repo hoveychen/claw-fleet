@@ -7,15 +7,38 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 use tokio_tungstenite::{connect_async_tls_with_config, Connector};
 
-use crate::journal::CommandJournal;
+use crate::journal::{CommandJournal, PersistResult};
 use crate::outbox::EventOutbox;
+use crate::supervisor::Supervisor;
 
 pub async fn run_once(
+    url: &str,
+    tls: Arc<rustls::ClientConfig>,
+    hello: ClientHello,
+    journal: &mut CommandJournal,
+    outbox: &EventOutbox,
+) -> anyhow::Result<()> {
+    run_once_inner(url, tls, hello, journal, outbox, None).await
+}
+
+pub async fn run_once_supervised(
+    url: &str,
+    tls: Arc<rustls::ClientConfig>,
+    hello: ClientHello,
+    journal: &mut CommandJournal,
+    outbox: &EventOutbox,
+    supervisor: &mut Supervisor,
+) -> anyhow::Result<()> {
+    run_once_inner(url, tls, hello, journal, outbox, Some(supervisor)).await
+}
+
+async fn run_once_inner(
     url: &str,
     tls: Arc<rustls::ClientConfig>,
     mut hello: ClientHello,
     journal: &mut CommandJournal,
     outbox: &EventOutbox,
+    mut supervisor: Option<&mut Supervisor>,
 ) -> anyhow::Result<()> {
     let range = outbox.range()?;
     hello.outbox_first_sequence = range.0;
@@ -41,19 +64,33 @@ pub async fn run_once(
                 let frame=decode_server(message)?;
                 match frame {
                     ServerFrame::Command(command)=>{
-                        journal.persist(&command)?;
+                        let persisted=journal.persist(&command)?;
                         let ack=CommandAck{
                             command_id:command.command_id.clone(),assignment_sequence:command.assignment_sequence,
                             status:journal.ack_status(&command.command_id)?,occurred_at:Utc::now(),result:None,error_code:None,
                         };
                         send_runner(&mut socket,&RunnerFrame::CommandAck(ack)).await?;
+                        if persisted == PersistResult::Inserted {
+                            if let Some(supervisor) = supervisor.as_deref_mut() {
+                                let outcome=supervisor.execute(&command);
+                                journal.mark_terminal(&command.command_id,outcome.status,outcome.result.as_ref())?;
+                                send_runner(&mut socket,&RunnerFrame::CommandAck(CommandAck{
+                                    command_id:command.command_id.clone(),assignment_sequence:command.assignment_sequence,
+                                    status:outcome.status,occurred_at:Utc::now(),result:outcome.result,error_code:outcome.error_code,
+                                })).await?;
+                            }
+                        }
                     }
                     ServerFrame::BatchAck{through_sequence}=>{outbox.acknowledge_through(through_sequence)?;}
                     ServerFrame::ServerHello(_)=>anyhow::bail!("duplicate server_hello"),
                 }
             }
             _ = heartbeat.tick() => {
-                send_runner(&mut socket,&RunnerFrame::Heartbeat{active_runs:0}).await?;
+                let active_runs=if let Some(supervisor)=supervisor.as_deref_mut(){
+                    supervisor.reconcile()?;
+                    supervisor.active_runs()
+                }else{0};
+                send_runner(&mut socket,&RunnerFrame::Heartbeat{active_runs}).await?;
                 let after=outbox.range()?.0.unwrap_or(1).saturating_sub(1);
                 send_outbox(&mut socket,outbox,after).await?;
             }
@@ -67,10 +104,13 @@ pub async fn run_forever(
     hello: ClientHello,
     journal: &mut CommandJournal,
     outbox: &EventOutbox,
+    supervisor: &mut Supervisor,
 ) -> ! {
     let mut delay = Duration::from_secs(1);
     loop {
-        if let Err(error) = run_once(url, tls.clone(), hello.clone(), journal, outbox).await {
+        if let Err(error) =
+            run_once_supervised(url, tls.clone(), hello.clone(), journal, outbox, supervisor).await
+        {
             tracing::warn!(%error,"Runner transport reconnecting");
         }
         tokio::time::sleep(delay).await;

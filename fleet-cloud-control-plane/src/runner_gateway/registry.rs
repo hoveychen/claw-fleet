@@ -210,10 +210,31 @@ pub async fn ingest_events(
             .and_then(|value| value.as_str())
             .map(str::to_owned);
         let task_sequence = if let Some(task_id) = task_id.as_deref() {
+            let owned = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=$1 AND organization_id=$2 AND project_id=$3)",
+            )
+            .bind(task_id)
+            .bind(&runner.0)
+            .bind(&runner.1)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !owned {
+                return Err(ApiError::PermissionDenied);
+            }
             Some(next_task_sequence(&mut tx, task_id).await?)
         } else {
             None
         };
+        project_harness_event(
+            &mut tx,
+            runner_id,
+            task_id.as_deref(),
+            run_id.as_deref(),
+            &event.event_type,
+            &event.data,
+            event.occurred_at,
+        )
+        .await?;
         let cursor = sqlx::query_scalar::<_,i64>(
             "INSERT INTO events(id,organization_id,project_id,task_id,run_id,event_type,task_sequence,occurred_at,data,schema_version)
              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING cursor",
@@ -225,6 +246,104 @@ pub async fn ingest_events(
     }
     tx.commit().await?;
     Ok(through)
+}
+
+async fn project_harness_event(
+    tx: &mut Transaction<'_, Postgres>,
+    runner_id: &str,
+    task_id: Option<&str>,
+    run_id: Option<&str>,
+    event_type: &str,
+    data: &serde_json::Value,
+    occurred_at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), ApiError> {
+    let Some(task_id) = task_id else {
+        return Ok(());
+    };
+    match event_type {
+        "run.assigned" => {
+            let run_id =
+                run_id.ok_or(ApiError::Validation("run.assigned requires run_id".into()))?;
+            let predecessor = data
+                .get("predecessor_run_id")
+                .and_then(|value| value.as_str());
+            let provider = data
+                .get("provider")
+                .and_then(|value| value.as_str())
+                .unwrap_or("claude_code");
+            if !matches!(provider, "claude_code" | "codex") {
+                return Err(ApiError::Validation("invalid Run provider".into()));
+            }
+            sqlx::query(
+                "INSERT INTO runs(id,organization_id,project_id,task_id,attempt,predecessor_run_id,runner_id,status,provider,model,effort,permission_policy_id,created_at,updated_at)
+                 SELECT $1,t.organization_id,t.project_id,t.id,COALESCE((SELECT MAX(attempt)+1 FROM runs WHERE task_id=t.id),1),$2,$3,'assigned',$4,
+                        p.model,p.effort,p.permission_policy_id,$5,$5
+                 FROM tasks t LEFT JOIN runs p ON p.id=$2 WHERE t.id=$6
+                 ON CONFLICT(id) DO NOTHING",
+            )
+            .bind(run_id)
+            .bind(predecessor)
+            .bind(runner_id)
+            .bind(provider)
+            .bind(occurred_at)
+            .bind(task_id)
+            .execute(&mut **tx)
+            .await?;
+            sqlx::query("UPDATE tasks SET active_run_id=$1,status='running',version=version+1,updated_at=$2 WHERE id=$3")
+                .bind(run_id).bind(occurred_at).bind(task_id).execute(&mut **tx).await?;
+        }
+        "run.started" => {
+            let run_id =
+                run_id.ok_or(ApiError::Validation("run.started requires run_id".into()))?;
+            let changed = sqlx::query(
+                "UPDATE runs SET runner_id=$1,status='running',started_at=COALESCE(started_at,$2),version=version+1,updated_at=$2
+                 WHERE id=$3 AND task_id=$4 AND status IN ('assigned','starting','running')",
+            )
+            .bind(runner_id).bind(occurred_at).bind(run_id).bind(task_id).execute(&mut **tx).await?;
+            if changed.rows_affected() == 0 {
+                return Err(ApiError::StateConflict);
+            }
+            sqlx::query("UPDATE tasks SET status='running',active_run_id=$1,version=version+1,updated_at=$2 WHERE id=$3 AND status IN ('queued','running','waiting_input')")
+                .bind(run_id).bind(occurred_at).bind(task_id).execute(&mut **tx).await?;
+        }
+        "run.finished" => {
+            let run_id =
+                run_id.ok_or(ApiError::Validation("run.finished requires run_id".into()))?;
+            let status = data
+                .get("status")
+                .and_then(|value| value.as_str())
+                .unwrap_or("failed");
+            if !matches!(status, "succeeded" | "failed" | "cancelled") {
+                return Err(ApiError::Validation("invalid terminal Run status".into()));
+            }
+            sqlx::query("UPDATE runs SET status=$1,finished_at=$2,version=version+1,updated_at=$2 WHERE id=$3 AND task_id=$4")
+                .bind(status).bind(occurred_at).bind(run_id).bind(task_id).execute(&mut **tx).await?;
+        }
+        "task.status_changed" => {
+            let status = data
+                .get("status")
+                .and_then(|value| value.as_str())
+                .unwrap_or("running");
+            if !matches!(status, "running" | "waiting_input" | "paused") {
+                return Err(ApiError::Validation("invalid Task status".into()));
+            }
+            sqlx::query("UPDATE tasks SET status=$1,version=version+1,updated_at=$2 WHERE id=$3 AND status NOT IN ('succeeded','failed','cancelled')")
+                .bind(status).bind(occurred_at).bind(task_id).execute(&mut **tx).await?;
+        }
+        "task.completed" => {
+            let status = data
+                .get("status")
+                .and_then(|value| value.as_str())
+                .unwrap_or("failed");
+            if !matches!(status, "succeeded" | "failed" | "cancelled") {
+                return Err(ApiError::Validation("invalid terminal Task status".into()));
+            }
+            sqlx::query("UPDATE tasks SET status=$1,version=version+1,updated_at=$2 WHERE id=$3 AND active_run_id=$4")
+                .bind(status).bind(occurred_at).bind(task_id).bind(run_id).execute(&mut **tx).await?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 async fn next_task_sequence(

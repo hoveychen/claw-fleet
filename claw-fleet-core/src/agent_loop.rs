@@ -487,6 +487,7 @@ pub fn fire_once(id: &str, generation: u64) -> Result<LoopRecord, ClaimError> {
                 permission_mode: perm.map(str::to_string),
                 session_id: None,
                 entrypoint: ep.to_string(),
+                environment: Vec::new(),
             },
         )
     })
