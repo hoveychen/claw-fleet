@@ -9,6 +9,17 @@ docker build -f deploy/cloud/Dockerfile.runner -t fleet-cloud-runner:pilot .
 docker build -f deploy/cloud/Dockerfile.github-adapter -t fleet-cloud-github-adapter:pilot .
 ```
 
+The Muvee staging topology is `deploy/cloud/staging.compose.yaml`. It consumes immutable GHCR tags
+for control-plane, Hosted Web, GitHub adapter, and the external Runner VM; publish all four with the
+same `FLEET_CLOUD_IMAGE_TAG` before deploying. Create the Muvee compose project with
+`hosted-web:8080` as its HTTP exposure. PostgreSQL and MinIO use named volumes inside the pinned
+compose project.
+
+The compose host maps the Runner mTLS passthrough to host TCP `8443` by default. The external L4
+load balancer for `fleet-runner.muveeai.com:443` must forward unchanged TCP to that host/port. The
+Muvee HTTP router must not handle this hostname. Override `FLEET_RUNNER_HOST_PORT` only when the
+allocated deploy host reserves a different port.
+
 Control-plane required secrets:
 
 ```text
@@ -23,6 +34,10 @@ FLEET_CLOUD_ARTIFACT_S3_BUCKET   # pre-created private bucket
 FLEET_CLOUD_ARTIFACT_S3_REGION   # MinIO signing region, normally us-east-1
 FLEET_CLOUD_ARTIFACT_S3_ACCESS_KEY
 FLEET_CLOUD_ARTIFACT_S3_SECRET_KEY
+FLEET_CLOUD_POSTGRES_PASSWORD
+FLEET_CLOUD_MINIO_ACCESS_KEY
+FLEET_CLOUD_MINIO_SECRET_KEY
+FLEET_CLOUD_PROJECT_API_KEY
 ```
 
 Expose HTTP `8080` at `https://fleet-cloud.muveeai.com/api/v1`. The Hosted Web image listens on `8080` and expects `/api/v1` on the same public origin.
