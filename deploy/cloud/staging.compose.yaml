@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: ${FLEET_CLOUD_POSTGRES_PASSWORD:?PostgreSQL password required}
+      POSTGRES_DB: fleet_cloud
+    volumes:
+      - fleet_cloud_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleet -d fleet_cloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${FLEET_CLOUD_MINIO_ACCESS_KEY:?MinIO access key required}
+      MINIO_ROOT_PASSWORD: ${FLEET_CLOUD_MINIO_SECRET_KEY:?MinIO secret key required}
+    volumes:
+      - fleet_cloud_minio:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until mc alias set fleet http://minio:9000 "$${FLEET_CLOUD_MINIO_ACCESS_KEY}" "$${FLEET_CLOUD_MINIO_SECRET_KEY}"; do sleep 2; done;
+        mc mb --ignore-existing fleet/fleet-cloud-artifacts
+    environment:
+      FLEET_CLOUD_MINIO_ACCESS_KEY: ${FLEET_CLOUD_MINIO_ACCESS_KEY:?MinIO access key required}
+      FLEET_CLOUD_MINIO_SECRET_KEY: ${FLEET_CLOUD_MINIO_SECRET_KEY:?MinIO secret key required}
+
+  control-plane:
+    image: ghcr.io/hoveychen/fleet-cloud-control-plane:${FLEET_CLOUD_IMAGE_TAG:?image tag required}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://fleet:${FLEET_CLOUD_POSTGRES_PASSWORD}@postgres:5432/fleet_cloud
+      FLEET_CLOUD_API_KEY_PEPPER: ${FLEET_CLOUD_API_KEY_PEPPER:?API key pepper required}
+      FLEET_CLOUD_ARTIFACT_S3_ENDPOINT: http://minio:9000
+      FLEET_CLOUD_ARTIFACT_S3_BUCKET: fleet-cloud-artifacts
+      FLEET_CLOUD_ARTIFACT_S3_REGION: us-east-1
+      FLEET_CLOUD_ARTIFACT_S3_ACCESS_KEY: ${FLEET_CLOUD_MINIO_ACCESS_KEY}
+      FLEET_CLOUD_ARTIFACT_S3_SECRET_KEY: ${FLEET_CLOUD_MINIO_SECRET_KEY}
+      FLEET_CLOUD_RUNNER_TLS_CERT: /identity/server.pem
+      FLEET_CLOUD_RUNNER_TLS_KEY: /identity/server-key.pem
+      FLEET_CLOUD_RUNNER_CLIENT_CA: /identity/ca.pem
+      FLEET_CLOUD_RUNNER_CLIENT_CA_KEY: /identity/ca-key.pem
+    volumes:
+      - ./identity/server:/identity:ro
+
+  github-adapter:
+    image: ghcr.io/hoveychen/fleet-cloud-github-adapter:${FLEET_CLOUD_IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      - control-plane
+    environment:
+      FLEET_CLOUD_API_URL: http://control-plane:8080
+      FLEET_CLOUD_CONSOLE_URL: https://fleet-cloud.muveeai.com
+      FLEET_CLOUD_PROJECT_ID: proj_fleet_cloud_pilot
+      FLEET_CLOUD_PROJECT_API_KEY: ${FLEET_CLOUD_PROJECT_API_KEY:?Project API key required}
+      FLEET_GITHUB_REPOSITORY: hoveychen/claw-fleet
+      FLEET_GITHUB_APP_ID: ${FLEET_GITHUB_APP_ID:?GitHub App ID required}
+      FLEET_GITHUB_INSTALLATION_ID: ${FLEET_GITHUB_INSTALLATION_ID:?GitHub installation ID required}
+      FLEET_GITHUB_PRIVATE_KEY: ${FLEET_GITHUB_PRIVATE_KEY:?GitHub private key required}
+      FLEET_GITHUB_WEBHOOK_SECRET: ${FLEET_GITHUB_WEBHOOK_SECRET:?GitHub webhook secret required}
+
+  hosted-web:
+    image: ghcr.io/hoveychen/fleet-cloud-web:${FLEET_CLOUD_IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      - control-plane
+      - github-adapter
+
+  runner-tls-passthrough:
+    image: haproxy:3.2-alpine
+    restart: unless-stopped
+    depends_on:
+      - control-plane
+    environment:
+      FLEET_CONTROL_PLANE_HOST: control-plane
+      FLEET_CONTROL_PLANE_RUNNER_PORT: 8091
+    ports:
+      - "${FLEET_RUNNER_HOST_PORT:-8443}:443"
+    volumes:
+      - ./haproxy-runner.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    read_only: true
+    tmpfs:
+      - /var/lib/haproxy
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  fleet_cloud_postgres:
+  fleet_cloud_minio:

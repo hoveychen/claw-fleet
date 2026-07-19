@@ -1,8 +1,6 @@
 services:
   runner:
-    build:
-      context: ../..
-      dockerfile: deploy/cloud/Dockerfile.runner
+    image: ghcr.io/hoveychen/fleet-cloud-runner:${FLEET_CLOUD_IMAGE_TAG:?image tag required}
     restart: unless-stopped
     environment:
       FLEET_CLOUD_RUNNER_URL: ${FLEET_CLOUD_RUNNER_URL:?wss Runner gateway URL required}
@@ -21,4 +19,3 @@ services:
 volumes:
   fleet_cloud_runner_state:
   fleet_cloud_runner_workspace:
-
