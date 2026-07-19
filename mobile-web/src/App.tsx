@@ -14,6 +14,7 @@ import { getClientId } from "./clientId";
 import { RelayClient, gzipSupported, binarySupported } from "./relay";
 import { computeCongestion, RECONNECT_WINDOW_MS, type Congestion } from "./connQuality";
 import { reconcileDecisions } from "./decisionReconcile";
+import { reconcilePlan } from "./reconcilePlan";
 import { MockRelayClient, isMockMode } from "./mock/relay";
 import type {
   DecisionKind,
@@ -47,13 +48,6 @@ import { WikiView } from "./views/WikiView";
 import { WikiDocView } from "./views/WikiDocView";
 
 const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
-
-/** How often to re-pull the pending-decision snapshot while cards are open and
- *  the tab is foregrounded — the fallback for a missed `decision_resolved`
- *  broadcast (see the reconcile effect in `App`). Kept short so a card answered
- *  elsewhere clears promptly, but only ticks while decisions are actually
- *  pending. */
-const DECISION_RECONCILE_INTERVAL_MS = 3_000;
 
 /** Compact token count: 1.2M / 34.5K / 780. */
 function fmtTokens(n: number): string {
@@ -365,19 +359,20 @@ export function App() {
     };
   }, [refreshPending]);
 
-  // Foreground fallback reconcile for pending decisions. `decision_resolved`
-  // is a best-effort agent→client WS broadcast with no ack, no Web Push
-  // fallback, and no retry (unlike `decision_created`). If a card is answered
-  // on the desktop (or another device) and that single frame is missed or not
-  // acted on, the card would otherwise strand here forever. The
-  // visibilitychange handler above already re-pulls the authoritative snapshot
-  // on background→foreground; this covers the case where the tab stays in the
-  // foreground the whole time (both ends open, WS connected) — an answered-
-  // elsewhere card then clears within one interval instead of never. Only runs
-  // while cards are actually pending and the tab is visible, so it costs
-  // nothing in the common idle case.
+  // Foreground fallback reconcile for pending decisions. Both `decision_created`
+  // and `decision_resolved` are best-effort agent→client WS broadcasts with no
+  // ack and no retry; the relay drops them if the phone's socket is down (a weak
+  // link / network switch — the only way to miss a frame over TCP). The one-shot
+  // `refreshPending` on (re)connect / foreground is meant to catch up, but on a
+  // weak link that single pull can time out and is swallowed, with no retry — so
+  // a missed card would strand forever. This loop is the durable backstop: it
+  // keeps re-pulling the authoritative snapshot while the desktop is online and
+  // the tab is visible, fast (3s) while cards are open so an answered-elsewhere
+  // card clears promptly, slow (15s) when idle so a card missed during a drop is
+  // recovered on the next tick. Interval and enablement come from reconcilePlan.
   useEffect(() => {
-    if (!agentOnline || decisions.length === 0) return;
+    const plan = reconcilePlan(agentOnline, decisions.length > 0);
+    if (!plan.poll) return;
     let cancelled = false;
     let timer: number | undefined;
     const tick = async () => {
@@ -385,9 +380,9 @@ export function App() {
       if (client?.isAuthed && document.visibilityState === "visible") {
         await refreshPending(client);
       }
-      if (!cancelled) timer = window.setTimeout(tick, DECISION_RECONCILE_INTERVAL_MS);
+      if (!cancelled) timer = window.setTimeout(tick, plan.intervalMs);
     };
-    timer = window.setTimeout(tick, DECISION_RECONCILE_INTERVAL_MS);
+    timer = window.setTimeout(tick, plan.intervalMs);
     return () => {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
