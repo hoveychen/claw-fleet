@@ -588,6 +588,11 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "workspaceName",
     "aiTitle",
     "slug",
+    // Human rename / agent-set semantic title. Load-bearing for Codex sessions:
+    // they have no local ai_title, so `fleet__set_session_title` writes here and
+    // this is the only real title the phone can render. Without it the phone
+    // falls back to the raw first-prompt slug.
+    "titleOverride",
     "status",
     "isSubagent",
     "lastMessagePreview",
@@ -3934,6 +3939,7 @@ mod tests {
                 "id": "old", "isSubagent": false, "lastActivityMs": 100,
                 "workspaceName": "w", "tokenSpeed": 42.0, "rateLimit": {"until": 1},
                 "lastMessagePreview": "短预览", "userMark": "done", "aiTitle": null,
+                "titleOverride": "手动重命名",
                 "entrypoint": NEW_SESSION_ENTRYPOINT
             },
             {
@@ -3961,6 +3967,11 @@ mod tests {
         assert!(list[1].get("tokenSpeed").is_none());
         assert!(list[1].get("rateLimit").is_none());
         assert!(list[1].get("aiTitle").is_none());
+        // A human/agent title override must survive slimming — for Codex
+        // sessions (no local ai_title) it's the *only* real title the phone
+        // can show. Regression guard for the mobile "override title missing"
+        // bug where titleOverride was absent from SNAPSHOT_FIELDS.
+        assert_eq!(list[1]["titleOverride"], "手动重命名");
         assert_eq!(list[1]["userMark"], "done");
         assert_eq!(list[1]["lastMessagePreview"], "短预览");
         // Long previews are truncated with an ellipsis.
