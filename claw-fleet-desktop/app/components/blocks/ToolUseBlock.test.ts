@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  claudeToolSummary,
   codexToolSummary,
   parseExecCommand,
   parsePatchFiles,
   readRange,
   searchFlags,
-  skillToolSummary,
   timeoutMsToSecs,
   waitTimeoutSecs,
 } from "./ToolUseBlock";
@@ -155,20 +155,39 @@ describe("codexToolSummary", () => {
   });
 });
 
-describe("skillToolSummary", () => {
+describe("claudeToolSummary", () => {
   it("Skill → named key carrying the slug (not the raw { skill, args } JSON)", () => {
-    expect(skillToolSummary("Skill", { skill: "game-pilot", args: "run it" }, t)).toBe(
+    expect(claudeToolSummary("Skill", { skill: "game-pilot", args: "run it" }, t)).toBe(
       'detail.tool_skill_named|{"slug":"game-pilot"}',
     );
   });
 
   it("Skill without a slug → bare key", () => {
-    expect(skillToolSummary("Skill", { args: "run it" }, t)).toBe("detail.tool_skill");
+    expect(claudeToolSummary("Skill", { args: "run it" }, t)).toBe("detail.tool_skill");
+  });
+
+  it("ExitPlanMode → its own key (the plan itself renders in the expanded body)", () => {
+    expect(claudeToolSummary("ExitPlanMode", { plan: "# Step 1\n..." }, t)).toBe(
+      "detail.tool_exit_plan",
+    );
+  });
+
+  it("TodoWrite → count of todos, or a bare key when the list is absent", () => {
+    expect(claudeToolSummary("TodoWrite", { todos: [1, 2, 3] }, t)).toBe(
+      'detail.tool_todo_count|{"count":3}',
+    );
+    expect(claudeToolSummary("TodoWrite", {}, t)).toBe("detail.tool_todo");
+  });
+
+  it("BashOutput / KillShell / KillBash → their own keys", () => {
+    expect(claudeToolSummary("BashOutput", { bash_id: "abc" }, t)).toBe("detail.tool_bash_output");
+    expect(claudeToolSummary("KillShell", { shell_id: "abc" }, t)).toBe("detail.tool_kill_shell");
+    expect(claudeToolSummary("KillBash", { bash_id: "abc" }, t)).toBe("detail.tool_kill_shell");
   });
 
   it("returns null for any other tool (falls back to formatInput)", () => {
-    expect(skillToolSummary("Bash", { command: "ls" }, t)).toBeNull();
-    expect(skillToolSummary("Read", { file_path: "a.ts" }, t)).toBeNull();
+    expect(claudeToolSummary("Bash", { command: "ls" }, t)).toBeNull();
+    expect(claudeToolSummary("Read", { file_path: "a.ts" }, t)).toBeNull();
   });
 });
 

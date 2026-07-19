@@ -91,11 +91,18 @@ function formatInput(input: Record<string, unknown>, name?: string): string {
   // ({cmd, workdir, yield_time_ms, max_output_tokens}) dumps as raw JSON.
   if ("cmd" in input) return String(input.cmd);
   if ("file_path" in input) return basename(String(input.file_path));
+  // NotebookEdit names its target `notebook_path`, not `file_path` — surface it
+  // the same way so it reads as a filename instead of a raw args dump.
+  if ("notebook_path" in input) return basename(String(input.notebook_path));
   if ("pattern" in input) return String(input.pattern);
   if ("path" in input) return basename(String(input.path));
   if ("query" in input) return String(input.query);
   if ("url" in input) return String(input.url);
-  return JSON.stringify(input, null, 2);
+  // Last resort (unhandled MCP tools, etc.): a compact single-line object, not a
+  // multi-line pretty-print — the collapsed row is a one-line flex cell, so
+  // indentation just renders as a ragged blob. The expanded body (ParamsBody)
+  // still shows the full labeled key/value list.
+  return JSON.stringify(input);
 }
 
 /**
@@ -277,21 +284,48 @@ export function codexToolSummary(
 }
 
 /**
- * Collapsed one-liner for Claude Code's `Skill` tool. Its input is
- * `{ skill: "game-pilot", args: "…" }`; without this it fell through to
- * `formatInput`'s `JSON.stringify` and dumped the raw object into the row (the
- * blob 老板 flagged). Note the SKILL.md body itself is a *separate* meta turn
- * (MetaFoldBlock's "已加载 SKILL" card) — this only names what was invoked.
- * Returns null for every other tool so the summary chain can fall through.
+ * Collapsed one-liner for Claude Code built-in tools whose input carries none
+ * of formatInput's recognised keys (command/cmd/file_path/pattern/path/query/
+ * url) and so would otherwise dump their raw `{ … }` object into the row (the
+ * blob 老板 flagged for `Skill`). Sits between codexToolSummary and formatInput
+ * in the summary chain; returns null for anything it doesn't handle so control
+ * falls through.
+ *
+ * Note some of these tools already have a dedicated *expanded* body
+ * (ExitPlanMode → PlanModeInput, Skill → SkillInput) — this only fixes the
+ * *collapsed* row, which was never wired up. The SKILL.md body itself is a
+ * separate meta turn (MetaFoldBlock's "已加载 SKILL" card), not this call.
  */
-export function skillToolSummary(
+export function claudeToolSummary(
   name: string,
   input: Record<string, unknown>,
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string | null {
-  if (name !== "Skill") return null;
-  const slug = typeof input.skill === "string" ? input.skill.trim() : "";
-  return slug ? t("detail.tool_skill_named", { slug }) : t("detail.tool_skill");
+  switch (name) {
+    // { skill: "game-pilot", args?: "…" }
+    case "Skill": {
+      const slug = typeof input.skill === "string" ? input.skill.trim() : "";
+      return slug ? t("detail.tool_skill_named", { slug }) : t("detail.tool_skill");
+    }
+    // { plan: "<markdown>" } — the plan renders in the expanded PlanModeInput.
+    case "ExitPlanMode":
+      return t("detail.tool_exit_plan");
+    // { todos: [...] }. Standalone calls reach here; grouped runs get their own
+    // "Updated the plan" label from GroupedToolUseBlocks.
+    case "TodoWrite": {
+      const todos = Array.isArray(input.todos) ? input.todos : null;
+      return todos ? t("detail.tool_todo_count", { count: todos.length }) : t("detail.tool_todo");
+    }
+    // { bash_id, filter? } — polls a background shell's output.
+    case "BashOutput":
+      return t("detail.tool_bash_output");
+    // { shell_id | bash_id } — kills a background shell (KillBash is the older name).
+    case "KillShell":
+    case "KillBash":
+      return t("detail.tool_kill_shell");
+    default:
+      return null;
+  }
 }
 
 /** True when an Agent call has a description or prompt worth rendering as
@@ -1008,7 +1042,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // args object; everything else falls back to the generic formatter.
   const summary =
     codexToolSummary(block.name, block.input, t) ??
-    skillToolSummary(block.name, block.input, t) ??
+    claudeToolSummary(block.name, block.input, t) ??
     formatInput(block.input, block.name);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
