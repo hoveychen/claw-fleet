@@ -15,6 +15,7 @@ fleet-cloud-wire = { path = "../fleet-cloud-wire" }
 futures-util = "0.3"
 hex = "0.4"
 hmac = "0.12"
+jsonwebtoken = "9"
 rand = "0.8"
 rcgen = { version = "0.13", features = ["x509-parser"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
