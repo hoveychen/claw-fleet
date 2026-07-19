@@ -115,6 +115,96 @@ pub async fn assign_command(
     Ok(sequence as u64)
 }
 
+pub async fn claim_available_commands(
+    pool: &PgPool,
+    runner_id: &str,
+) -> Result<Vec<CloudCommand>, ApiError> {
+    let mut tx = pool.begin().await?;
+    let runner = sqlx::query_as::<
+        _,
+        (String, String, String, String, bool, i32, serde_json::Value),
+    >(
+        "SELECT organization_id,project_id,pool_id,status,scheduling_enabled,max_concurrency,capabilities
+         FROM runners WHERE id=$1 AND revoked_at IS NULL FOR UPDATE",
+    )
+    .bind(runner_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(ApiError::RunnerUnavailable)?;
+    if runner.3 != "online" || !runner.4 {
+        tx.commit().await?;
+        return Ok(Vec::new());
+    }
+    let capabilities: Vec<RunnerCapability> =
+        serde_json::from_value(runner.6).map_err(|_| ApiError::Internal)?;
+    let capability_names: Vec<String> = capabilities
+        .iter()
+        .map(|capability| capability.name.clone())
+        .collect();
+    if capability_names.is_empty() {
+        tx.commit().await?;
+        return Ok(Vec::new());
+    }
+    let occupied = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM commands WHERE runner_id=$1 AND status IN ('pending','accepted')",
+    )
+    .bind(runner_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let available = i64::from(runner.5).saturating_sub(occupied);
+    if available == 0 {
+        tx.commit().await?;
+        return Ok(Vec::new());
+    }
+    let candidates = sqlx::query_as::<_, (String, String)>(
+        "SELECT id,payload->'agent'->>'provider' FROM commands
+         WHERE organization_id=$1 AND project_id=$2 AND runner_id IS NULL
+           AND status='pending' AND deadline>now()
+           AND (runner_pool_id IS NULL OR runner_pool_id=$3)
+           AND payload->'agent'->>'provider'=ANY($4)
+         ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $5",
+    )
+    .bind(&runner.0)
+    .bind(&runner.1)
+    .bind(&runner.2)
+    .bind(&capability_names)
+    .bind(available)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut sequence = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(assignment_sequence),0) FROM commands WHERE runner_id=$1",
+    )
+    .bind(runner_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let mut claimed_ids = Vec::with_capacity(candidates.len());
+    for (command_id, provider) in candidates {
+        sequence += 1;
+        let required = RunnerCapability {
+            name: provider,
+            version: 1,
+        };
+        sqlx::query(
+            "UPDATE commands SET runner_id=$1,assignment_sequence=$2,required_capability=$3
+             WHERE id=$4 AND runner_id IS NULL",
+        )
+        .bind(runner_id)
+        .bind(sequence)
+        .bind(serde_json::to_value(&required).map_err(|_| ApiError::Internal)?)
+        .bind(&command_id)
+        .execute(&mut *tx)
+        .await?;
+        claimed_ids.push(command_id);
+    }
+    tx.commit().await?;
+    if claimed_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut commands = pending_commands(pool, runner_id).await?;
+    commands.retain(|command| claimed_ids.contains(&command.command_id));
+    Ok(commands)
+}
+
 pub async fn pending_commands(
     pool: &PgPool,
     runner_id: &str,

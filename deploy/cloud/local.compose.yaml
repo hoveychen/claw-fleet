@@ -1,0 +1,56 @@
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${FLEET_LOCAL_POSTGRES_PORT:-15432}:5432"
+
+  minio:
+    ports:
+      - "127.0.0.1:${FLEET_LOCAL_MINIO_PORT:-19000}:9000"
+
+  control-plane:
+    ports:
+      - "127.0.0.1:${FLEET_LOCAL_API_PORT:-18081}:8080"
+
+  github-api-stub:
+    image: node:22-alpine
+    command:
+      - node
+      - -e
+      - |
+        const http = require('http');
+        const comments = [];
+        http.createServer((req, res) => {
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', () => {
+            console.log(req.method + ' ' + req.url + ' ' + body);
+            res.setHeader('content-type', 'application/json');
+            if (req.method === 'POST' && req.url.includes('/access_tokens')) {
+              return res.end(JSON.stringify({token:'local-installation-token', expires_at:'2099-01-01T00:00:00Z'}));
+            }
+            if (req.method === 'GET' && req.url.includes('/comments')) {
+              return res.end(JSON.stringify(comments));
+            }
+            if (req.method === 'POST' && req.url.includes('/comments')) {
+              comments.push(JSON.parse(body || '{}'));
+              res.statusCode = 201;
+              return res.end(JSON.stringify({id:comments.length}));
+            }
+            if (req.method === 'DELETE') {
+              res.statusCode = 404;
+              return res.end('{}');
+            }
+            res.end('{}');
+          });
+        }).listen(3000, '0.0.0.0');
+
+  github-adapter:
+    depends_on:
+      - control-plane
+      - github-api-stub
+    environment:
+      FLEET_GITHUB_API_URL: http://github-api-stub:3000
+
+  hosted-web:
+    ports:
+      - "127.0.0.1:${FLEET_LOCAL_WEB_PORT:-18080}:8080"

@@ -137,6 +137,7 @@ pub fn parse_labeled_issue(
                 effort: Some("medium".into()),
                 permission_policy_id: Some("policy_pilot".into()),
             },
+            runner_pool_id: None,
             metadata: json!({
                 "source": "github_app",
                 "repository": repository,
