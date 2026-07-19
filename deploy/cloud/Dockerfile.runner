@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1
+FROM rust:1.90-slim-bookworm AS build
+WORKDIR /src
+COPY . .
+RUN cargo build --locked --release -p fleet-cloud-runner
+
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client && rm -rf /var/lib/apt/lists/* \
+    && npm install --global @openai/codex@0.144.5 @anthropic-ai/claude-code@2.1.206 \
+    && npm cache clean --force \
+    && useradd --uid 10001 --create-home runner && mkdir -p /state /workspace /identity \
+    && chown -R runner:runner /state /workspace /identity
+COPY --from=build /src/target/release/fleet-cloud-runner /usr/local/bin/
+USER runner
+ENV FLEET_RUNNER_STATE_DIR=/state FLEET_RUNNER_MAX_CONCURRENCY=2
+VOLUME ["/state", "/workspace", "/identity"]
+ENTRYPOINT ["fleet-cloud-runner"]

@@ -39,3 +39,6 @@ Cargo.toml.bak
 # Fleet PRD Discipline scratch state — agent-managed, not for version control
 TASKS.md
 .worktrees/
+
+# Fleet Cloud Runner mTLS identity is provisioned out-of-band.
+deploy/cloud/identity/
