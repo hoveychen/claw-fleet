@@ -1,6 +1,7 @@
 use axum::{routing::get, Json, Router};
 use serde_json::{json, Value};
 use sqlx::PgPool;
+use std::sync::Arc;
 
 use crate::routes;
 
@@ -8,6 +9,7 @@ use crate::routes;
 pub struct AppState {
     pub pool: PgPool,
     pub api_key_pepper: Vec<u8>,
+    pub runner_identity_issuer: Option<Arc<crate::runner_gateway::identity::RunnerIdentityIssuer>>,
 }
 
 impl AppState {
@@ -15,7 +17,16 @@ impl AppState {
         Self {
             pool,
             api_key_pepper,
+            runner_identity_issuer: None,
         }
+    }
+
+    pub fn with_runner_identity_issuer(
+        mut self,
+        issuer: crate::runner_gateway::identity::RunnerIdentityIssuer,
+    ) -> Self {
+        self.runner_identity_issuer = Some(Arc::new(issuer));
+        self
     }
 }
 

@@ -21,7 +21,26 @@ async fn main() -> anyhow::Result<()> {
         .run(&pool)
         .await
         .context("run database migrations")?;
-    let state = app::AppState::new(pool.clone(), config.api_key_pepper);
+    let mut state = app::AppState::new(pool.clone(), config.api_key_pepper);
+    if let Some(gateway) = config.runner_gateway.as_ref() {
+        let ca_pem =
+            std::fs::read_to_string(&gateway.client_ca_certificate).with_context(|| {
+                format!(
+                    "read Runner client CA {}",
+                    gateway.client_ca_certificate.display()
+                )
+            })?;
+        let ca_key_pem =
+            std::fs::read_to_string(&gateway.client_ca_private_key).with_context(|| {
+                format!(
+                    "read Runner client CA key {}",
+                    gateway.client_ca_private_key.display()
+                )
+            })?;
+        state = state.with_runner_identity_issuer(
+            runner_gateway::identity::RunnerIdentityIssuer::from_pem(&ca_pem, &ca_key_pem)?,
+        );
+    }
     let listener = tokio::net::TcpListener::bind(config.listen_addr)
         .await
         .with_context(|| format!("bind {}", config.listen_addr))?;

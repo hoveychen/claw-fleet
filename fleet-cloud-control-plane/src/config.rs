@@ -7,6 +7,7 @@ pub struct RunnerGatewayConfig {
     pub server_certificate: PathBuf,
     pub server_private_key: PathBuf,
     pub client_ca_certificate: PathBuf,
+    pub client_ca_private_key: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -36,17 +37,21 @@ impl Config {
             std::env::var_os("FLEET_CLOUD_RUNNER_TLS_CERT"),
             std::env::var_os("FLEET_CLOUD_RUNNER_TLS_KEY"),
             std::env::var_os("FLEET_CLOUD_RUNNER_CLIENT_CA"),
+            std::env::var_os("FLEET_CLOUD_RUNNER_CLIENT_CA_KEY"),
         ) {
-            (None, None, None) => None,
-            (Some(certificate), Some(key), Some(ca)) => Some(RunnerGatewayConfig {
+            (None, None, None, None) => None,
+            (Some(certificate), Some(key), Some(ca), Some(ca_key)) => Some(RunnerGatewayConfig {
                 listen_addr: std::env::var("FLEET_CLOUD_RUNNER_LISTEN_ADDR")
                     .unwrap_or_else(|_| "0.0.0.0:8091".into())
                     .parse()?,
                 server_certificate: certificate.into(),
                 server_private_key: key.into(),
                 client_ca_certificate: ca.into(),
+                client_ca_private_key: ca_key.into(),
             }),
-            _ => anyhow::bail!("Runner TLS cert, key, and client CA must be configured together"),
+            _ => anyhow::bail!(
+                "Runner TLS cert, key, client CA, and client CA key must be configured together"
+            ),
         };
         Ok(Self {
             listen_addr,
