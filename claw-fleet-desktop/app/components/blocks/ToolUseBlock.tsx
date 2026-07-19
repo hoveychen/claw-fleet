@@ -276,6 +276,24 @@ export function codexToolSummary(
   }
 }
 
+/**
+ * Collapsed one-liner for Claude Code's `Skill` tool. Its input is
+ * `{ skill: "game-pilot", args: "…" }`; without this it fell through to
+ * `formatInput`'s `JSON.stringify` and dumped the raw object into the row (the
+ * blob 老板 flagged). Note the SKILL.md body itself is a *separate* meta turn
+ * (MetaFoldBlock's "已加载 SKILL" card) — this only names what was invoked.
+ * Returns null for every other tool so the summary chain can fall through.
+ */
+export function skillToolSummary(
+  name: string,
+  input: Record<string, unknown>,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string | null {
+  if (name !== "Skill") return null;
+  const slug = typeof input.skill === "string" ? input.skill.trim() : "";
+  return slug ? t("detail.tool_skill_named", { slug }) : t("detail.tool_skill");
+}
+
 /** True when an Agent call has a description or prompt worth rendering as
  *  text; if neither is present we keep the raw-JSON fallback. */
 function hasAgentInput(block: ToolUseBlockType): boolean {
@@ -756,9 +774,48 @@ function PlanModeInput({ block, paths }: { block: ToolUseBlockType; paths?: Path
   return <TextBlock text={plan} paths={paths} />;
 }
 
+/** Expanded body for `Skill`: the skill slug as the headline with its optional
+ *  args rendered below (as Markdown when a string, else pretty JSON). The
+ *  injected SKILL.md body is a separate meta turn (MetaFoldBlock), so this card
+ *  only shows what was invoked, not the loaded instructions. */
+function SkillInput({ block, paths }: { block: ToolUseBlockType; paths?: PathLinkContext }) {
+  const slug = typeof block.input.skill === "string" ? block.input.skill : "";
+  const argsVal = block.input.args;
+  const argsText =
+    typeof argsVal === "string"
+      ? argsVal
+      : argsVal == null
+        ? ""
+        : JSON.stringify(argsVal, null, 2);
+  if (!slug && !argsText) return <ParamsBody block={block} />;
+  return (
+    <>
+      {slug && (
+        <div className={styles.target_head}>
+          <span className={styles.target_main}>{slug}</span>
+        </div>
+      )}
+      {argsText && (
+        <div className={styles.param_block}>
+          <span className={styles.section_label}>Args</span>
+          <TextBlock text={argsText} paths={paths} />
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Claude's read-only / plan tools that otherwise fall through to the generic
  *  param list. Each gets a headline + chips presenter instead. */
-const CLAUDE_TOOLS = new Set(["Read", "Grep", "Glob", "WebSearch", "WebFetch", "ExitPlanMode"]);
+const CLAUDE_TOOLS = new Set([
+  "Read",
+  "Grep",
+  "Glob",
+  "WebSearch",
+  "WebFetch",
+  "ExitPlanMode",
+  "Skill",
+]);
 
 /** Routes each Claude tool to its expanded-body presenter; unhandled names fall
  *  back to the generic param list. */
@@ -776,6 +833,8 @@ function ClaudeToolInput({ block, paths }: { block: ToolUseBlockType; paths?: Pa
       return <WebFetchInput block={block} paths={paths} />;
     case "ExitPlanMode":
       return <PlanModeInput block={block} paths={paths} />;
+    case "Skill":
+      return <SkillInput block={block} paths={paths} />;
     default:
       return <ParamsBody block={block} />;
   }
@@ -949,6 +1008,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
   // args object; everything else falls back to the generic formatter.
   const summary =
     codexToolSummary(block.name, block.input, t) ??
+    skillToolSummary(block.name, block.input, t) ??
     formatInput(block.input, block.name);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
