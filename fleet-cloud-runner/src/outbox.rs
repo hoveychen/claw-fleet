@@ -1,10 +1,11 @@
 use std::path::Path;
+use std::sync::Mutex;
 
 use fleet_cloud_wire::event::RunnerEvent;
 use rusqlite::{params, Connection};
 
 pub struct EventOutbox {
-    connection: Connection,
+    connection: Mutex<Connection>,
 }
 
 impl EventOutbox {
@@ -20,11 +21,17 @@ impl EventOutbox {
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
              );",
         )?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection: Mutex::new(connection),
+        })
     }
 
     pub fn append(&self, mut event: RunnerEvent) -> anyhow::Result<u64> {
-        let tx = self.connection.unchecked_transaction()?;
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow::anyhow!("outbox lock poisoned"))?;
+        let tx = connection.transaction()?;
         tx.execute(
             "INSERT OR IGNORE INTO outbox(source_event_id,event_json) VALUES(?1,'')",
             [&event.source_event_id],
@@ -44,7 +51,11 @@ impl EventOutbox {
     }
 
     pub fn batch_after(&self, sequence: u64, limit: usize) -> anyhow::Result<Vec<RunnerEvent>> {
-        let mut statement = self.connection.prepare(
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow::anyhow!("outbox lock poisoned"))?;
+        let mut statement = connection.prepare(
             "SELECT event_json FROM outbox WHERE sequence>?1 ORDER BY sequence LIMIT ?2",
         )?;
         let events = statement
@@ -59,11 +70,17 @@ impl EventOutbox {
     pub fn acknowledge_through(&self, sequence: u64) -> anyhow::Result<usize> {
         Ok(self
             .connection
+            .lock()
+            .map_err(|_| anyhow::anyhow!("outbox lock poisoned"))?
             .execute("DELETE FROM outbox WHERE sequence<=?1", [sequence as i64])?)
     }
 
     pub fn range(&self) -> anyhow::Result<(Option<u64>, Option<u64>)> {
-        let (first, last): (Option<i64>, Option<i64>) = self.connection.query_row(
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow::anyhow!("outbox lock poisoned"))?;
+        let (first, last): (Option<i64>, Option<i64>) = connection.query_row(
             "SELECT MIN(sequence),MAX(sequence) FROM outbox",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),

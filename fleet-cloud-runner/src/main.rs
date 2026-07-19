@@ -19,7 +19,11 @@ async fn main() -> anyhow::Result<()> {
         &std::fs::read(&config.client_private_key)?,
     )?;
     let mut journal = CommandJournal::open(&config.state_directory.join("commands.sqlite"))?;
-    let outbox = EventOutbox::open(&config.state_directory.join("outbox.sqlite"))?;
+    let outbox = std::sync::Arc::new(EventOutbox::open(
+        &config.state_directory.join("outbox.sqlite"),
+    )?);
+    let mut supervisor =
+        fleet_cloud_runner::supervisor::Supervisor::open(&config.state_directory, outbox.clone())?;
     let hello = ClientHello {
         protocol_version: fleet_cloud_wire::RUNNER_PROTOCOL_VERSION,
         runner_id: config.runner_id,
@@ -37,5 +41,13 @@ async fn main() -> anyhow::Result<()> {
         outbox_last_sequence: None,
     };
     tracing::info!(cloud_url=%config.cloud_url,"Fleet Cloud Runner starting outbound mTLS transport");
-    transport::run_forever(&config.cloud_url, tls, hello, &mut journal, &outbox).await
+    transport::run_forever(
+        &config.cloud_url,
+        tls,
+        hello,
+        &mut journal,
+        outbox.as_ref(),
+        &mut supervisor,
+    )
+    .await
 }

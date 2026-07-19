@@ -19,6 +19,7 @@ tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v7"] }
 
 [dev-dependencies]
 tempfile = "3"

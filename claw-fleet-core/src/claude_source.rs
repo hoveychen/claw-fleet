@@ -132,7 +132,7 @@ impl AgentSource for ClaudeCodeSource {
         } else {
             spec.entrypoint.as_str()
         };
-        crate::session_launch::spawn_new_session_impl(
+        crate::session_launch::spawn_new_session_impl_with_environment(
             &spec.workspace_path,
             &spec.prompt,
             spec.model.as_deref(),
@@ -140,6 +140,7 @@ impl AgentSource for ClaudeCodeSource {
             spec.permission_mode.as_deref(),
             spec.session_id.as_deref(),
             entrypoint,
+            &spec.environment,
         )
     }
 

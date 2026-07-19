@@ -5,6 +5,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,6 +20,54 @@ use crate::search_index::SearchHit;
 use crate::session::SessionInfo;
 use crate::skill_history::SkillInvocation;
 use crate::today_usage::TodayUsage;
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct HarnessEvent {
+    pub event_type: String,
+    pub task_id: Option<String>,
+    pub run_id: Option<String>,
+    pub provider_session_ref: Option<String>,
+    #[serde(default)]
+    pub data: Value,
+}
+
+pub trait HarnessEventSink: Send + Sync {
+    fn emit(&self, event: HarnessEvent);
+}
+
+#[derive(Default)]
+pub struct NoopHarnessEventSink;
+
+impl HarnessEventSink for NoopHarnessEventSink {
+    fn emit(&self, _event: HarnessEvent) {}
+}
+
+fn harness_sink() -> &'static RwLock<Arc<dyn HarnessEventSink>> {
+    static SINK: OnceLock<RwLock<Arc<dyn HarnessEventSink>>> = OnceLock::new();
+    SINK.get_or_init(|| RwLock::new(Arc::new(NoopHarnessEventSink)))
+}
+
+pub fn set_harness_event_sink(sink: Arc<dyn HarnessEventSink>) {
+    if let Ok(mut current) = harness_sink().write() {
+        *current = sink;
+    }
+}
+
+pub fn emit_harness_event(event: HarnessEvent) {
+    if let Ok(sink) = harness_sink().read() {
+        sink.emit(event.clone());
+    }
+    if let Some(path) = std::env::var_os("FLEET_CLOUD_EVENT_LOG") {
+        if let Ok(encoded) = serde_json::to_string(&event) {
+            use std::io::Write as _;
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .and_then(|mut file| writeln!(file, "{encoded}"));
+        }
+    }
+}
 use crate::skills::{SkillFileEntry, SkillItem};
 
 // ── Shared types ─────────────────────────────────────────────────────────────
@@ -962,8 +1011,24 @@ pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024; // 50 MiB
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use crate::account::{AccountInfo, UsageStats};
+    use serde_json::json;
+
+    #[test]
+    fn default_harness_sink_is_a_side_effect_free_noop() {
+        let session = mk_session("unchanged", "desktop", Some("Existing session"));
+        let before = serde_json::to_value(&session).unwrap();
+
+        NoopHarnessEventSink.emit(HarnessEvent {
+            event_type: "run.process_started".into(),
+            task_id: Some("task-cloud".into()),
+            run_id: Some("run-cloud".into()),
+            provider_session_ref: Some(session.id.clone()),
+            data: json!({"provider":"codex"}),
+        });
+
+        assert_eq!(serde_json::to_value(&session).unwrap(), before);
+    }
 
     // ── SourceUsageSummary::from_claude tests ───────────────────────────────
 

@@ -33,6 +33,8 @@ pub struct SpawnSpec {
     pub session_id: Option<String>,
     /// `CLAUDE_CODE_ENTRYPOINT` value (Claude only); empty → the source's default.
     pub entrypoint: String,
+    /// Extra environment applied only to the spawned child.
+    pub environment: Vec<(String, String)>,
 }
 
 /// Parameters for resuming an existing session, source-agnostic.

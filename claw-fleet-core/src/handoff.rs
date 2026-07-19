@@ -547,6 +547,30 @@ fn spawn_successor_by_source(
     permission_mode: Option<&str>,
     entrypoint: &str,
 ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+    let task_id = std::env::var("FLEET_CLOUD_TASK_ID").ok();
+    let predecessor_run_id = std::env::var("FLEET_CLOUD_RUN_ID").ok();
+    let successor_run_id = task_id
+        .as_ref()
+        .map(|_| format!("run_{}", uuid::Uuid::now_v7().simple()));
+    let mut environment = Vec::new();
+    if let Some(value) = task_id.as_ref() {
+        environment.push(("FLEET_CLOUD_TASK_ID".into(), value.clone()));
+    }
+    if let Some(value) = successor_run_id.as_ref() {
+        environment.push(("FLEET_CLOUD_RUN_ID".into(), value.clone()));
+    }
+    if let (Some(task_id), Some(run_id)) = (task_id.clone(), successor_run_id.clone()) {
+        crate::backend::emit_harness_event(crate::backend::HarnessEvent {
+            event_type: "run.handoff_created".into(),
+            task_id: Some(task_id),
+            run_id: Some(run_id),
+            provider_session_ref: None,
+            data: serde_json::json!({
+                "predecessor_run_id": predecessor_run_id,
+                "provider": agent_source
+            }),
+        });
+    }
     crate::agent_source::spawn_session(
         agent_source,
         &crate::agent_source::SpawnSpec {
@@ -557,6 +581,7 @@ fn spawn_successor_by_source(
             permission_mode: permission_mode.map(str::to_string),
             session_id: None,
             entrypoint: entrypoint.to_string(),
+            environment,
         },
     )
 }
