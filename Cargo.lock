@@ -2332,6 +2332,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hmac",
+ "jsonwebtoken",
  "rand 0.8.7",
  "rcgen",
  "reqwest 0.12.28",

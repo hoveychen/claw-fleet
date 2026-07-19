@@ -3,6 +3,7 @@ pub mod auth;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod github_adapter;
 pub mod idempotency;
 pub mod routes;
 pub mod runner_gateway;
