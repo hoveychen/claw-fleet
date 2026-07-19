@@ -4,6 +4,8 @@ export type Task = components["schemas"]["Task"];
 export type Decision = components["schemas"]["Decision"];
 export type Event = components["schemas"]["Event"];
 export type TranscriptRecord = components["schemas"]["TranscriptRecord"];
+export type Run = components["schemas"]["Run"];
+export type Usage = components["schemas"]["Usage"];
 export type CommandReceipt = components["schemas"]["CommandReceipt"];
 export type CreateTaskInput = components["schemas"]["CreateTaskRequest"];
 export type CreateTaskResponse = components["schemas"]["CreateTaskResponse"];
@@ -74,5 +76,7 @@ export interface FleetDataClient {
     idempotencyKey: string,
   ): Promise<DecisionResponse>;
   listRunMessages(runId: string, after?: string): Promise<Page<TranscriptRecord>>;
+  getRun(runId: string): Promise<Run>;
+  getRunUsage(runId: string): Promise<Usage>;
   streamEvents(input: StreamEventsInput): EventSubscription;
 }

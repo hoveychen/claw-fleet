@@ -1,5 +1,5 @@
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 
 use crate::app::AppState;
@@ -10,10 +10,27 @@ use crate::services::embeds::{self, CreateEmbedTokenRequest, CreateEmbedTokenRes
 pub async fn create(
     State(state): State<AppState>,
     principal: ProjectPrincipal,
+    headers: HeaderMap,
     Json(request): Json<CreateEmbedTokenRequest>,
 ) -> Result<(StatusCode, Json<CreateEmbedTokenResponse>), ApiError> {
     Ok((
         StatusCode::CREATED,
-        Json(embeds::create(&state.pool, &state.api_key_pepper, &principal, request).await?),
+        Json(
+            embeds::create_idempotent(
+                &state.pool,
+                &state.api_key_pepper,
+                &principal,
+                headers
+                    .get("idempotency-key")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::trim)
+                    .filter(|v| (8..=255).contains(&v.len()))
+                    .ok_or_else(|| {
+                        ApiError::Validation("valid Idempotency-Key is required".into())
+                    })?,
+                request,
+            )
+            .await?,
+        ),
     ))
 }

@@ -16,6 +16,8 @@ import type {
   StreamEventsInput,
   Task,
   TranscriptRecord,
+  Run,
+  Usage,
 } from "./FleetDataClient";
 
 interface RelaySnapshot {
@@ -154,6 +156,30 @@ export class RelayClientAdapter implements FleetDataClient {
           typeof record.timestamp === "string" ? record.timestamp : new Date().toISOString(),
       })),
       next_cursor: null,
+    };
+  }
+
+  async getRun(runId: string): Promise<Run> {
+    const session = this.snapshot().sessions.find((item) => item.id === runId);
+    if (!session) throw new Error(`Relay Run ${runId} is unavailable`);
+    const updated = new Date(session.lastActivityMs).toISOString();
+    return {
+      id: runId,
+      task_id: session.id,
+      attempt: 1,
+      status: session.procAlive ? "running" : "succeeded",
+      agent: { provider: session.agentSource === "codex" ? "codex" : "claude_code" },
+      version: 1,
+      created_at: updated,
+      updated_at: updated,
+    };
+  }
+
+  async getRunUsage(_runId: string): Promise<Usage> {
+    return {
+      input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
+      reasoning_tokens: 0, provider_cost_usd: 0, run_seconds: 0,
+      event_bytes: 0, artifact_bytes: 0,
     };
   }
 

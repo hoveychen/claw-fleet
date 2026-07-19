@@ -2,6 +2,7 @@ use axum::{extract::DefaultBodyLimit, routing::get, Json, Router};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::sync::Arc;
+use tower_http::cors::CorsLayer;
 
 use crate::routes;
 
@@ -72,7 +73,9 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/events/stream", get(routes::events::stream_events))
         .route("/embed-tokens", axum::routing::post(routes::embeds::create))
+        .route("/runs/{run_id}", get(routes::runs::get))
         .route("/runs/{run_id}/messages", get(routes::runs::list_messages))
+        .route("/runs/{run_id}/usage", get(routes::runs::usage))
         .route("/decisions", get(routes::decisions::list))
         .route("/decisions/{decision_id}", get(routes::decisions::get))
         .route(
@@ -108,7 +111,29 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(routes::runners::drain_runner),
         )
         .layer(DefaultBodyLimit::max(18 * 1024 * 1024))
+        .layer(cloud_cors())
         .with_state(state)
+}
+
+fn cloud_cors() -> CorsLayer {
+    use axum::http::{header, HeaderName, HeaderValue, Method};
+    CorsLayer::new()
+        .allow_origin([
+            HeaderValue::from_static("https://fleet-cloud.muveeai.com"),
+            HeaderValue::from_static("http://localhost:5173"),
+            HeaderValue::from_static("http://127.0.0.1:4173"),
+        ])
+        .allow_methods([Method::GET, Method::POST, Method::DELETE])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+            header::IF_MATCH,
+            HeaderName::from_static("idempotency-key"),
+            HeaderName::from_static("fleet-embed-parent-origin"),
+            HeaderName::from_static("last-event-id"),
+        ])
+        .expose_headers([header::ETAG, HeaderName::from_static("fleet-request-id")])
 }
 
 async fn live() -> Json<Value> {

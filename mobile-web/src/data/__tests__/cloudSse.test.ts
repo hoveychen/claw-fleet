@@ -41,6 +41,7 @@ describe("cloud SSE", () => {
       baseUrl: "https://cloud.example/api/v1",
       token: () => "memory-token",
       fetcher,
+      headers: { "fleet-embed-parent-origin": "https://fleet-pilot.muveeai.com" },
       input: { projectId: "proj_1", onEvent: (value) => received.push(value) },
       schedule: (fn, delay) => {
         scheduled.push({ fn, delay });
@@ -58,6 +59,9 @@ describe("cloud SSE", () => {
     expect(received.map((value) => value.cursor)).toEqual(["10", "11"]);
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("authorization")).toBe(
       "Bearer memory-token",
+    );
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("fleet-embed-parent-origin")).toBe(
+      "https://fleet-pilot.muveeai.com",
     );
     subscription.close();
   });

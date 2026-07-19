@@ -7,6 +7,7 @@ export interface CloudSseOptions {
   baseUrl: string;
   token: () => string | null;
   fetcher: FetchLike;
+  headers?: Record<string, string>;
   input: StreamEventsInput;
   schedule?: Schedule;
   cancelSchedule?: (id: number) => void;
@@ -61,6 +62,7 @@ class CloudEventSubscription implements EventSubscription {
       const response = await this.options.fetcher(url.toString(), {
         method: "GET",
         headers: {
+          ...this.options.headers,
           authorization: `Bearer ${token}`,
           accept: "text/event-stream",
         },

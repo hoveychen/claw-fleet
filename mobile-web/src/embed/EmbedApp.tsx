@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CloudApiClient } from "../data/CloudApiClient";
-import type { Task } from "../data/FleetDataClient";
+import { CloudWorkspace } from "../cloud/CloudWorkspace";
 import {
   EmbedAuthError,
   MemoryEmbedToken,
@@ -55,12 +55,7 @@ export function EmbedApp({ apiBaseUrl, taskId, view }: Props) {
   if (error) return <main role="alert">{error}</main>;
   if (!token) return <main aria-busy="true">Waiting for secure embed token…</main>;
   return (
-    <EmbeddedTask
-      apiBaseUrl={apiBaseUrl}
-      token={token}
-      taskId={taskId}
-      parentOrigin={parentOrigin}
-    />
+    <EmbeddedTask apiBaseUrl={apiBaseUrl} token={token} taskId={taskId} parentOrigin={parentOrigin} view={view} />
   );
 }
 
@@ -69,30 +64,18 @@ function EmbeddedTask({
   token,
   taskId,
   parentOrigin,
+  view,
 }: {
   apiBaseUrl: string;
   token: string;
   taskId?: string;
   parentOrigin: string;
+  view: EmbedView;
 }) {
-  const [task, setTask] = useState<Task | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!taskId) return;
-    const client = new CloudApiClient({
+  const client = useMemo(() => new CloudApiClient({
       baseUrl: apiBaseUrl,
       token: () => tokenMemory.get(),
       headers: { "fleet-embed-parent-origin": parentOrigin },
-    });
-    client.getTask(taskId).then(setTask, (value) => setError(value instanceof Error ? value.message : String(value)));
-  }, [apiBaseUrl, parentOrigin, taskId, token]);
-  if (error) return <main role="alert">{error}</main>;
-  if (!taskId) return <main>Decision inbox</main>;
-  if (!task) return <main aria-busy="true">Loading Task…</main>;
-  return (
-    <main>
-      <p>{task.status}</p>
-      <h1>{task.title || task.goal}</h1>
-    </main>
-  );
+    }), [apiBaseUrl, parentOrigin, token]);
+  return <CloudWorkspace client={client} initialTaskId={taskId} initialView={view} embedded />;
 }

@@ -122,3 +122,49 @@ async fn embed_token_rejects_unapproved_origin_at_issue_time(pool: sqlx::PgPool)
     .await;
     assert_eq!(issued.status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn embed_token_creation_is_idempotent_and_rejects_key_reuse(pool: sqlx::PgPool) {
+    common::seed(&pool).await;
+    let body = serde_json::json!({
+        "project_id":"proj_test",
+        "allowed_origins":["https://fleet-pilot.muveeai.com"],
+        "views":["decision_inbox"]
+    });
+    let first = common::request_json(
+        common::router(pool.clone()),
+        Method::POST,
+        "/embed-tokens",
+        common::VALID_KEY,
+        &[("idempotency-key", "embed-idempotent-001")],
+        Some(body.clone()),
+    )
+    .await;
+    let replay = common::request_json(
+        common::router(pool.clone()),
+        Method::POST,
+        "/embed-tokens",
+        common::VALID_KEY,
+        &[("idempotency-key", "embed-idempotent-001")],
+        Some(body),
+    )
+    .await;
+    assert_eq!(first.status, StatusCode::CREATED);
+    assert_eq!(replay.status, StatusCode::CREATED);
+    assert_eq!(first.body, replay.body);
+
+    let mismatch = common::request_json(
+        common::router(pool.clone()),
+        Method::POST,
+        "/embed-tokens",
+        common::VALID_KEY,
+        &[("idempotency-key", "embed-idempotent-001")],
+        Some(serde_json::json!({
+            "project_id":"proj_test",
+            "allowed_origins":["http://localhost:5173"],
+            "views":["decision_inbox"]
+        })),
+    )
+    .await;
+    assert_eq!(mismatch.status, StatusCode::CONFLICT);
+}
