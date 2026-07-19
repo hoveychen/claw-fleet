@@ -48,6 +48,22 @@ pub fn router(state: AppState) -> Router {
             get(routes::tasks::list_task_events),
         )
         .route("/events/stream", get(routes::events::stream_events))
+        .route(
+            "/runner-registrations",
+            axum::routing::post(routes::runners::create_registration),
+        )
+        .route(
+            "/runner-registrations/claim",
+            axum::routing::post(routes::runners::claim_registration),
+        )
+        .route(
+            "/runners/{runner_id}",
+            axum::routing::delete(routes::runners::revoke_runner),
+        )
+        .route(
+            "/runners/{runner_id}/drain",
+            axum::routing::post(routes::runners::drain_runner),
+        )
         .with_state(state)
 }
 

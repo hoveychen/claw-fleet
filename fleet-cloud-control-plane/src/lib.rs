@@ -5,4 +5,5 @@ pub mod db;
 pub mod error;
 pub mod idempotency;
 pub mod routes;
+pub mod runner_gateway;
 pub mod services;

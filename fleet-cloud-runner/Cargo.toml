@@ -6,14 +6,19 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+chrono = "0.4"
 claw-fleet-core = { path = "../claw-fleet-core" }
 fleet-cloud-wire = { path = "../fleet-cloud-wire" }
 futures-util = "0.3"
 rusqlite = { version = "0.31", features = ["bundled"] }
-rustls = "0.23"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+tempfile = "3"
