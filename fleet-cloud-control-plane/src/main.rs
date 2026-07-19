@@ -21,7 +21,21 @@ async fn main() -> anyhow::Result<()> {
         .run(&pool)
         .await
         .context("run database migrations")?;
+    let artifact_store = match config.artifact_s3.as_ref() {
+        Some(s3) => fleet_cloud_control_plane::services::artifacts::ArtifactObjectStore::S3(
+            fleet_cloud_control_plane::services::artifacts::S3ObjectStore::new(
+                s3.endpoint.clone(),
+                s3.bucket.clone(),
+                s3.region.clone(),
+                s3.access_key.clone(),
+                s3.secret_key.clone(),
+            )
+            .map_err(|error| anyhow::anyhow!(error))?,
+        ),
+        None => fleet_cloud_control_plane::services::artifacts::ArtifactObjectStore::Postgres,
+    };
     let retention_pool = pool.clone();
+    let retention_store = artifact_store.clone();
     let retention_owner = format!("control-plane-{}", uuid::Uuid::now_v7().simple());
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
@@ -29,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
             interval.tick().await;
             if let Err(error) = fleet_cloud_control_plane::services::artifacts::run_retention(
                 &retention_pool,
+                &retention_store,
                 &retention_owner,
             )
             .await
@@ -86,7 +101,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
-    let mut state = app::AppState::new(pool.clone(), config.api_key_pepper);
+    let mut state =
+        app::AppState::new(pool.clone(), config.api_key_pepper).with_artifact_store(artifact_store);
     if let Some(gateway) = config.runner_gateway.as_ref() {
         let ca_pem =
             std::fs::read_to_string(&gateway.client_ca_certificate).with_context(|| {

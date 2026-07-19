@@ -15,6 +15,194 @@ use crate::services::tasks::new_id;
 pub const MAX_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_TASK_ARTIFACT_BYTES: i64 = 256 * 1024 * 1024;
 
+#[derive(Debug, Clone)]
+pub struct S3ObjectStore {
+    endpoint: String,
+    bucket: String,
+    region: String,
+    access_key: String,
+    secret_key: String,
+    client: reqwest::Client,
+}
+
+#[derive(Debug, Clone)]
+pub enum ArtifactObjectStore {
+    Postgres,
+    S3(S3ObjectStore),
+}
+
+impl S3ObjectStore {
+    pub fn new(
+        endpoint: String,
+        bucket: String,
+        region: String,
+        access_key: String,
+        secret_key: String,
+    ) -> Result<Self, ApiError> {
+        let parsed = reqwest::Url::parse(&endpoint)
+            .map_err(|_| ApiError::Validation("invalid Artifact S3 endpoint".into()))?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err(ApiError::Validation(
+                "Artifact S3 endpoint must be an HTTP(S) origin".into(),
+            ));
+        }
+        if bucket.is_empty()
+            || bucket.contains('/')
+            || access_key.is_empty()
+            || secret_key.is_empty()
+        {
+            return Err(ApiError::Validation(
+                "invalid Artifact S3 bucket or credentials".into(),
+            ));
+        }
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| ApiError::Internal)?;
+        Ok(Self {
+            endpoint: endpoint.trim_end_matches('/').into(),
+            bucket,
+            region,
+            access_key,
+            secret_key,
+            client,
+        })
+    }
+
+    async fn put(&self, object_key: &str, bytes: Vec<u8>) -> Result<(), ApiError> {
+        self.request(reqwest::Method::PUT, object_key, bytes)
+            .await
+            .map(|_| ())
+    }
+
+    async fn get(&self, object_key: &str) -> Result<Vec<u8>, ApiError> {
+        self.request(reqwest::Method::GET, object_key, Vec::new())
+            .await
+    }
+
+    async fn delete(&self, object_key: &str) -> Result<(), ApiError> {
+        self.request(reqwest::Method::DELETE, object_key, Vec::new())
+            .await
+            .map(|_| ())
+    }
+
+    async fn request(
+        &self,
+        method: reqwest::Method,
+        object_key: &str,
+        body: Vec<u8>,
+    ) -> Result<Vec<u8>, ApiError> {
+        let url = reqwest::Url::parse(&format!(
+            "{}/{}/{}",
+            self.endpoint,
+            self.bucket,
+            object_key.trim_start_matches('/')
+        ))
+        .map_err(|_| ApiError::Internal)?;
+        let host = match (url.host_str(), url.port()) {
+            (Some(host), Some(port)) => format!("{host}:{port}"),
+            (Some(host), None) => host.to_owned(),
+            _ => return Err(ApiError::Internal),
+        };
+        let now = Utc::now();
+        let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+        let date = now.format("%Y%m%d").to_string();
+        let payload_hash = hex::encode(Sha256::digest(&body));
+        let canonical_headers =
+            format!("host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n");
+        let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+        let canonical_request = format!(
+            "{}\n{}\n\n{}\n{}\n{}",
+            method.as_str(),
+            url.path(),
+            canonical_headers,
+            signed_headers,
+            payload_hash
+        );
+        let scope = format!("{date}/{}/s3/aws4_request", self.region);
+        let string_to_sign = format!(
+            "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{}",
+            hex::encode(Sha256::digest(canonical_request.as_bytes()))
+        );
+        fn hmac(key: &[u8], value: &[u8]) -> Result<Vec<u8>, ApiError> {
+            let mut mac =
+                <Hmac<Sha256> as Mac>::new_from_slice(key).map_err(|_| ApiError::Internal)?;
+            mac.update(value);
+            Ok(mac.finalize().into_bytes().to_vec())
+        }
+        let date_key = hmac(
+            format!("AWS4{}", self.secret_key).as_bytes(),
+            date.as_bytes(),
+        )?;
+        let region_key = hmac(&date_key, self.region.as_bytes())?;
+        let service_key = hmac(&region_key, b"s3")?;
+        let signing_key = hmac(&service_key, b"aws4_request")?;
+        let signature = hex::encode(hmac(&signing_key, string_to_sign.as_bytes())?);
+        let authorization = format!(
+            "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
+            self.access_key
+        );
+        let response = self
+            .client
+            .request(method, url)
+            .header("x-amz-date", amz_date)
+            .header("x-amz-content-sha256", payload_hash)
+            .header(reqwest::header::AUTHORIZATION, authorization)
+            .body(body)
+            .send()
+            .await
+            .map_err(|_| ApiError::StorageUnavailable)?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(ApiError::NotFound);
+        }
+        if !response.status().is_success() {
+            return Err(ApiError::StorageUnavailable);
+        }
+        Ok(response
+            .bytes()
+            .await
+            .map_err(|_| ApiError::StorageUnavailable)?
+            .to_vec())
+    }
+}
+
+impl ArtifactObjectStore {
+    async fn put(&self, object_key: &str, ciphertext: Vec<u8>) -> Result<(), ApiError> {
+        match self {
+            Self::Postgres => Ok(()),
+            Self::S3(store) => store.put(object_key, ciphertext).await,
+        }
+    }
+
+    async fn get(
+        &self,
+        backend: &str,
+        object_key: &str,
+        postgres_ciphertext: Option<Vec<u8>>,
+    ) -> Result<Vec<u8>, ApiError> {
+        match (backend, self) {
+            ("postgres", _) => postgres_ciphertext.ok_or(ApiError::Internal),
+            ("s3", Self::S3(store)) => store.get(object_key).await,
+            _ => Err(ApiError::StorageUnavailable),
+        }
+    }
+
+    async fn delete(&self, backend: &str, object_key: &str) -> Result<(), ApiError> {
+        match (backend, self) {
+            ("postgres", _) => Ok(()),
+            ("s3", Self::S3(store)) => store.delete(object_key).await,
+            _ => Err(ApiError::StorageUnavailable),
+        }
+    }
+
+    fn backend(&self) -> &'static str {
+        match self {
+            Self::Postgres => "postgres",
+            Self::S3(_) => "s3",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeleteFault {
     None,
@@ -82,6 +270,7 @@ pub struct ArtifactUpload<'a> {
 pub async fn upload(
     pool: &PgPool,
     crypto: &ArtifactCrypto,
+    store: &ArtifactObjectStore,
     principal: &ProjectPrincipal,
     upload: ArtifactUpload<'_>,
 ) -> Result<ArtifactView, ApiError> {
@@ -209,20 +398,36 @@ pub async fn upload(
         .bind(digest)
         .fetch_one(&mut *tx)
         .await?;
-    sqlx::query(
-        "INSERT INTO artifact_objects(artifact_id,object_key,ciphertext,object_nonce,encrypted_data_key,data_key_nonce,kms_key_id)
-         VALUES($1,$2,$3,$4,$5,$6,$7)",
+    let object_key = format!("{}/{}/{}", principal.organization_id, task_id, artifact_id);
+    let backend = store.backend();
+    let postgres_ciphertext = if backend == "s3" {
+        store.put(&object_key, ciphertext).await?;
+        None
+    } else {
+        Some(ciphertext)
+    };
+    let inserted = sqlx::query(
+        "INSERT INTO artifact_objects(artifact_id,object_key,ciphertext,object_nonce,encrypted_data_key,data_key_nonce,kms_key_id,storage_backend)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
     )
     .bind(&artifact_id)
-    .bind(format!("{}/{}/{}", principal.organization_id, task_id, artifact_id))
-    .bind(ciphertext)
+    .bind(&object_key)
+    .bind(postgres_ciphertext)
     .bind(object_nonce.to_vec())
     .bind(encrypted_data_key)
     .bind(data_key_nonce.to_vec())
     .bind(&crypto.kms_key_id)
+    .bind(backend)
     .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
+    .await;
+    if let Err(error) = inserted {
+        let _ = store.delete(backend, &object_key).await;
+        return Err(error.into());
+    }
+    if let Err(error) = tx.commit().await {
+        let _ = store.delete(backend, &object_key).await;
+        return Err(error.into());
+    }
     Ok(artifact)
 }
 
@@ -311,23 +516,25 @@ pub fn verify_download_signature(
 pub async fn download(
     pool: &PgPool,
     crypto: &ArtifactCrypto,
+    store: &ArtifactObjectStore,
     principal: &ProjectPrincipal,
     artifact_id: &str,
 ) -> Result<(ArtifactView, Vec<u8>), ApiError> {
     let artifact = get(pool, principal, artifact_id).await?;
-    let row = sqlx::query_as::<_, (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, String)>(
-        "SELECT ciphertext,object_nonce,encrypted_data_key,data_key_nonce,kms_key_id FROM artifact_objects WHERE artifact_id=$1",
+    let row = sqlx::query_as::<_, (String, String, Option<Vec<u8>>, Vec<u8>, Vec<u8>, Vec<u8>, String)>(
+        "SELECT storage_backend,object_key,ciphertext,object_nonce,encrypted_data_key,data_key_nonce,kms_key_id FROM artifact_objects WHERE artifact_id=$1",
     )
     .bind(artifact_id).fetch_optional(pool).await?.ok_or(ApiError::NotFound)?;
-    if row.4 != crypto.kms_key_id || row.1.len() != 12 || row.3.len() != 12 {
+    if row.6 != crypto.kms_key_id || row.3.len() != 12 || row.5.len() != 12 {
         return Err(ApiError::Internal);
     }
+    let ciphertext = store.get(&row.0, &row.1, row.2).await?;
     let mut data_key = Aes256Gcm::new_from_slice(&crypto.master_key)
         .map_err(|_| ApiError::Internal)?
         .decrypt(
-            Nonce::from_slice(&row.3),
+            Nonce::from_slice(&row.5),
             Payload {
-                msg: &row.2,
+                msg: &row.4,
                 aad: artifact_id.as_bytes(),
             },
         )
@@ -335,9 +542,9 @@ pub async fn download(
     let plaintext = Aes256Gcm::new_from_slice(&data_key)
         .map_err(|_| ApiError::Internal)?
         .decrypt(
-            Nonce::from_slice(&row.1),
+            Nonce::from_slice(&row.3),
             Payload {
-                msg: &row.0,
+                msg: &ciphertext,
                 aad: artifact_id.as_bytes(),
             },
         )
@@ -367,6 +574,7 @@ fn allowed_mime(mime: &str) -> bool {
 
 pub async fn delete_task_content(
     pool: &PgPool,
+    store: &ArtifactObjectStore,
     principal: &ProjectPrincipal,
     task_id: &str,
     fault: DeleteFault,
@@ -464,6 +672,16 @@ pub async fn delete_task_content(
         return Err(ApiError::StorageUnavailable);
     }
 
+    let objects = sqlx::query_as::<_, (String, String)>(
+        "SELECT storage_backend,object_key FROM artifact_objects WHERE artifact_id IN (SELECT id FROM artifacts WHERE task_id=$1)",
+    )
+    .bind(task_id)
+    .fetch_all(pool)
+    .await?;
+    for (backend, object_key) in &objects {
+        store.delete(backend, object_key).await?;
+    }
+
     let mut cleanup = pool.begin().await?;
     sqlx::query(
         "DELETE FROM artifact_objects WHERE artifact_id IN (SELECT id FROM artifacts WHERE task_id=$1)",
@@ -502,30 +720,38 @@ pub async fn delete_task_content(
 
 pub async fn delete_artifact(
     pool: &PgPool,
+    store: &ArtifactObjectStore,
     principal: &ProjectPrincipal,
     artifact_id: &str,
 ) -> Result<(), ApiError> {
-    let mut tx = pool.begin().await?;
-    let changed = sqlx::query(
-        "UPDATE artifacts SET status='deleting' WHERE id=$1 AND organization_id=$2 AND project_id=$3 AND status='active'",
+    let mut prepare = pool.begin().await?;
+    let object = sqlx::query_as::<_, (String, String)>(
+        "SELECT o.storage_backend,o.object_key FROM artifact_objects o JOIN artifacts a ON a.id=o.artifact_id
+         WHERE a.id=$1 AND a.organization_id=$2 AND a.project_id=$3 AND a.status IN ('active','deleting') FOR UPDATE OF a",
     )
     .bind(artifact_id)
     .bind(&principal.organization_id)
     .bind(&principal.project_id)
-    .execute(&mut *tx)
+    .fetch_optional(&mut *prepare)
     .await?;
-    if changed.rows_affected() == 0 {
-        return Err(ApiError::NotFound);
-    }
+    let (backend, object_key) = object.ok_or(ApiError::NotFound)?;
+    sqlx::query("UPDATE artifacts SET status='deleting' WHERE id=$1")
+        .bind(artifact_id)
+        .execute(&mut *prepare)
+        .await?;
+    prepare.commit().await?;
+    store.delete(&backend, &object_key).await?;
+
+    let mut cleanup = pool.begin().await?;
     sqlx::query("DELETE FROM artifact_objects WHERE artifact_id=$1")
         .bind(artifact_id)
-        .execute(&mut *tx)
+        .execute(&mut *cleanup)
         .await?;
     sqlx::query("UPDATE artifacts SET status='deleted',deleted_at=now() WHERE id=$1")
         .bind(artifact_id)
-        .execute(&mut *tx)
+        .execute(&mut *cleanup)
         .await?;
-    tx.commit().await?;
+    cleanup.commit().await?;
     Ok(())
 }
 
@@ -563,7 +789,11 @@ pub async fn release_retention_lease(
     Ok(())
 }
 
-pub async fn run_retention(pool: &PgPool, owner: &str) -> Result<RetentionResult, ApiError> {
+pub async fn run_retention(
+    pool: &PgPool,
+    store: &ArtifactObjectStore,
+    owner: &str,
+) -> Result<RetentionResult, ApiError> {
     if !try_acquire_retention_lease(pool, owner).await? {
         return Ok(RetentionResult {
             acquired: false,
@@ -572,6 +802,14 @@ pub async fn run_retention(pool: &PgPool, owner: &str) -> Result<RetentionResult
         });
     }
     let result = async {
+        let objects = sqlx::query_as::<_, (String, String)>(
+            "SELECT o.storage_backend,o.object_key FROM artifact_objects o JOIN artifacts a ON a.id=o.artifact_id WHERE a.status='active' AND a.retention_until<=now() ORDER BY a.id",
+        )
+        .fetch_all(pool)
+        .await?;
+        for (backend, object_key) in &objects {
+            store.delete(backend, object_key).await?;
+        }
         let mut tx = pool.begin().await?;
         let artifacts_deleted = sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM artifacts WHERE status='active' AND retention_until<=now()",

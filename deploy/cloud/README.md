@@ -17,6 +17,11 @@ FLEET_CLOUD_RUNNER_TLS_CERT      # server PEM path
 FLEET_CLOUD_RUNNER_TLS_KEY       # server key PEM path
 FLEET_CLOUD_RUNNER_CLIENT_CA     # client CA PEM path
 FLEET_CLOUD_RUNNER_CLIENT_CA_KEY # client CA key PEM path
+FLEET_CLOUD_ARTIFACT_S3_ENDPOINT # MinIO origin, for example https://minio.internal
+FLEET_CLOUD_ARTIFACT_S3_BUCKET   # pre-created private bucket
+FLEET_CLOUD_ARTIFACT_S3_REGION   # MinIO signing region, normally us-east-1
+FLEET_CLOUD_ARTIFACT_S3_ACCESS_KEY
+FLEET_CLOUD_ARTIFACT_S3_SECRET_KEY
 ```
 
 Expose HTTP `8080` at `https://fleet-cloud.muveeai.com/api/v1`. The Hosted Web image listens on `8080` and expects `/api/v1` on the same public origin.
@@ -31,4 +36,4 @@ docker compose -f deploy/cloud/runner.compose.yaml up -d
 
 Provider credentials must be provisioned into dedicated Runner volumes or the VM secret store. Never put API keys, provider homes, or the generated `identity/` directory in Git. The image pins Codex CLI `0.144.5` and Claude Code `2.1.206`; version changes require rebuilding and rerunning P10 smoke tests.
 
-Known pilot deviation: Artifact ciphertext currently lives in PostgreSQL rather than MinIO. See `docs/fleet-cloud-pilot-acceptance.md` before deployment.
+Artifact ciphertext is stored in MinIO when all five S3 variables are configured; PostgreSQL retains only the object key and envelope-encryption metadata. Omitting all five variables selects the PostgreSQL compatibility backend for local development. Partial S3 configuration is rejected at startup.

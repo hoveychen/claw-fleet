@@ -53,6 +53,7 @@ pub async fn upload(
     let artifact = artifacts::upload(
         &state.pool,
         &state.artifact_crypto,
+        &state.artifact_store,
         &principal,
         artifacts::ArtifactUpload {
             task_id: &task_id,
@@ -82,7 +83,8 @@ pub async fn delete(
     principal: ProjectPrincipal,
     Path(artifact_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    artifacts::delete_artifact(&state.pool, &principal, &artifact_id).await?;
+    artifacts::delete_artifact(&state.pool, &state.artifact_store, &principal, &artifact_id)
+        .await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(json!({
@@ -152,6 +154,7 @@ pub async fn download(
     let (artifact, bytes) = artifacts::download(
         &state.pool,
         &state.artifact_crypto,
+        &state.artifact_store,
         &principal,
         &artifact_id,
     )

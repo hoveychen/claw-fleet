@@ -70,7 +70,14 @@ pub async fn delete_task(
     principal: ProjectPrincipal,
     Path(task_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    artifacts::delete_task_content(&state.pool, &principal, &task_id, DeleteFault::None).await?;
+    artifacts::delete_task_content(
+        &state.pool,
+        &state.artifact_store,
+        &principal,
+        &task_id,
+        DeleteFault::None,
+    )
+    .await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(serde_json::json!({

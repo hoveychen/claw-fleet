@@ -11,11 +11,21 @@ pub struct RunnerGatewayConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct ArtifactS3Config {
+    pub endpoint: String,
+    pub bucket: String,
+    pub region: String,
+    pub access_key: String,
+    pub secret_key: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub listen_addr: SocketAddr,
     pub database_url: String,
     pub api_key_pepper: Vec<u8>,
     pub runner_gateway: Option<RunnerGatewayConfig>,
+    pub artifact_s3: Option<ArtifactS3Config>,
 }
 
 impl Config {
@@ -53,11 +63,31 @@ impl Config {
                 "Runner TLS cert, key, client CA, and client CA key must be configured together"
             ),
         };
+        let artifact_s3 = match (
+            std::env::var("FLEET_CLOUD_ARTIFACT_S3_ENDPOINT").ok(),
+            std::env::var("FLEET_CLOUD_ARTIFACT_S3_BUCKET").ok(),
+            std::env::var("FLEET_CLOUD_ARTIFACT_S3_REGION").ok(),
+            std::env::var("FLEET_CLOUD_ARTIFACT_S3_ACCESS_KEY").ok(),
+            std::env::var("FLEET_CLOUD_ARTIFACT_S3_SECRET_KEY").ok(),
+        ) {
+            (None, None, None, None, None) => None,
+            (Some(endpoint), Some(bucket), Some(region), Some(access_key), Some(secret_key)) => {
+                Some(ArtifactS3Config {
+                    endpoint,
+                    bucket,
+                    region,
+                    access_key,
+                    secret_key,
+                })
+            }
+            _ => anyhow::bail!("Artifact S3 endpoint, bucket, region, access key, and secret key must be configured together"),
+        };
         Ok(Self {
             listen_addr,
             database_url,
             api_key_pepper,
             runner_gateway,
+            artifact_s3,
         })
     }
 }
