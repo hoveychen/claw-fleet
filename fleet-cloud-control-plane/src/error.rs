@@ -19,6 +19,10 @@ pub enum ApiError {
     StateConflict,
     #[error("If-Match does not match the current resource version")]
     VersionConflict,
+    #[error("runner does not advertise the required capability")]
+    RunnerCapabilityMissing,
+    #[error("runner is unavailable for assignment")]
+    RunnerUnavailable,
     #[error("database error")]
     Database(#[from] sqlx::Error),
     #[error("internal error")]
@@ -47,6 +51,10 @@ impl ApiError {
                 "conflict",
                 "version_conflict",
             ),
+            Self::RunnerCapabilityMissing => {
+                (StatusCode::CONFLICT, "runner", "runner_capability_missing")
+            }
+            Self::RunnerUnavailable => (StatusCode::CONFLICT, "runner", "runner_unavailable"),
             Self::Database(_) | Self::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal",
