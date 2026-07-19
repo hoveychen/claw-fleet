@@ -1,0 +1,96 @@
+name: Fleet Cloud Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'fleet-cloud-control-plane/**'
+      - 'fleet-cloud-runner/**'
+      - 'fleet-cloud-wire/**'
+      - 'mobile-web/**'
+      - 'deploy/cloud/Dockerfile.*'
+      - 'deploy/cloud/nginx.conf'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/cloud-images.yml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional shared immutable tag, for example pilot-50eaf4b'
+        required: false
+        type: string
+
+concurrency:
+  group: fleet-cloud-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-push:
+    name: Build ${{ matrix.name }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - name: control-plane
+            image: ghcr.io/hoveychen/fleet-cloud-control-plane
+            file: deploy/cloud/Dockerfile.control-plane
+          - name: runner
+            image: ghcr.io/hoveychen/fleet-cloud-runner
+            file: deploy/cloud/Dockerfile.runner
+          - name: web
+            image: ghcr.io/hoveychen/fleet-cloud-web
+            file: deploy/cloud/Dockerfile.web
+          - name: github-adapter
+            image: ghcr.io/hoveychen/fleet-cloud-github-adapter
+            file: deploy/cloud/Dockerfile.github-adapter
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate requested tag
+        if: inputs.tag != ''
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$REQUESTED_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+            echo "invalid OCI tag: $REQUESTED_TAG" >&2
+            exit 2
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=fleet-cloud-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=fleet-cloud-${{ matrix.name }}
