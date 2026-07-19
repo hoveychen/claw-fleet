@@ -2,7 +2,7 @@ name: Fleet Cloud Images
 
 on:
   push:
-    branches: [main]
+    branches: [main, prd/fleet-cloud-v1]
     paths:
       - 'fleet-cloud-control-plane/**'
       - 'fleet-cloud-runner/**'
@@ -81,6 +81,7 @@ jobs:
           images: ${{ matrix.image }}
           tags: |
             type=sha,format=long
+            type=raw,value=pilot-${{ github.sha }},enable=${{ github.ref == 'refs/heads/prd/fleet-cloud-v1' }}
             type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
 
       - name: Build and push
