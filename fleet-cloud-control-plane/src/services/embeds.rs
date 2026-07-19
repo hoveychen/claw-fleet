@@ -12,7 +12,7 @@ use crate::services::tasks::new_id;
 const PRODUCTION_ORIGIN: &str = "https://fleet-pilot.muveeai.com";
 const DEVELOPMENT_ORIGIN: &str = "http://localhost:5173";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CreateEmbedTokenRequest {
     pub project_id: String,
     pub task_id: Option<String>,
@@ -21,7 +21,7 @@ pub struct CreateEmbedTokenRequest {
     pub expires_in_seconds: Option<i64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateEmbedTokenResponse {
     pub token: String,
     pub embed_url: String,
@@ -138,6 +138,39 @@ pub async fn create(
         embed_url: format!("https://fleet-cloud.muveeai.com/embed/{target}"),
         expires_at,
     })
+}
+
+pub async fn create_idempotent(
+    pool: &PgPool,
+    pepper: &[u8],
+    principal: &ProjectPrincipal,
+    key: &str,
+    request: CreateEmbedTokenRequest,
+) -> Result<CreateEmbedTokenResponse, ApiError> {
+    let hash = crate::idempotency::request_hash(&request)?;
+    let mut tx = pool.begin().await?;
+    if let Some(stored) =
+        crate::idempotency::lock_and_find(&mut tx, principal, "POST /embed-tokens", key, &hash)
+            .await?
+    {
+        let response = serde_json::from_value(stored.body).map_err(|_| ApiError::Internal)?;
+        tx.commit().await?;
+        return Ok(response);
+    }
+    let response = create(pool, pepper, principal, request).await?;
+    let body = serde_json::to_value(&response).map_err(|_| ApiError::Internal)?;
+    crate::idempotency::store(
+        &mut tx,
+        principal,
+        "POST /embed-tokens",
+        key,
+        &hash,
+        201,
+        &body,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(response)
 }
 
 fn encode_json(value: &impl Serialize) -> Result<String, ApiError> {

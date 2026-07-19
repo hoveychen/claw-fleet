@@ -104,12 +104,22 @@ pub async fn list(
     principal: &ProjectPrincipal,
     status: Option<&str>,
 ) -> Result<DecisionPage, ApiError> {
+    list_for_task(pool, principal, status, None).await
+}
+
+pub async fn list_for_task(
+    pool: &PgPool,
+    principal: &ProjectPrincipal,
+    status: Option<&str>,
+    task_id: Option<&str>,
+) -> Result<DecisionPage, ApiError> {
     expire_pending(pool, &principal.project_id).await?;
-    let sql = format!("{SELECT_VIEW} WHERE organization_id=$1 AND project_id=$2 AND ($3::text IS NULL OR status=$3) ORDER BY created_at DESC,id DESC");
+    let sql = format!("{SELECT_VIEW} WHERE organization_id=$1 AND project_id=$2 AND ($3::text IS NULL OR status=$3) AND ($4::text IS NULL OR task_id=$4) ORDER BY created_at DESC,id DESC");
     let rows = sqlx::query_as::<_, DecisionRow>(&sql)
         .bind(&principal.organization_id)
         .bind(&principal.project_id)
         .bind(status)
+        .bind(task_id)
         .fetch_all(pool)
         .await?;
     Ok(DecisionPage {

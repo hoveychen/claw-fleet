@@ -12,6 +12,7 @@ use crate::services::decisions::{self, DecisionResponseRequest};
 pub struct ListQuery {
     status: Option<String>,
     project_id: Option<String>,
+    task_id: Option<String>,
 }
 
 pub async fn list(
@@ -27,7 +28,13 @@ pub async fn list(
         return Err(ApiError::PermissionDenied);
     }
     Ok(Json(
-        decisions::list(&state.pool, &principal, query.status.as_deref()).await?,
+        decisions::list_for_task(
+            &state.pool,
+            &principal,
+            query.status.as_deref(),
+            query.task_id.as_deref(),
+        )
+        .await?,
     ))
 }
 

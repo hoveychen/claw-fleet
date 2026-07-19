@@ -14,6 +14,8 @@ import type {
   Task,
   Decision,
   TranscriptRecord,
+  Run,
+  Usage,
 } from "./FleetDataClient";
 import { openCloudEventStream } from "./cloudSse";
 
@@ -58,7 +60,7 @@ export class CloudApiClient implements FleetDataClient {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.tokenSource =
       typeof options.token === "function" ? options.token : () => options.token as string;
-    this.fetcher = options.fetcher ?? fetch;
+    this.fetcher = options.fetcher ?? fetch.bind(globalThis);
     this.fixedHeaders = options.headers ?? {};
   }
 
@@ -147,11 +149,20 @@ export class CloudApiClient implements FleetDataClient {
     );
   }
 
+  getRun(runId: string): Promise<Run> {
+    return this.request("GET", `/runs/${encodeURIComponent(runId)}`);
+  }
+
+  getRunUsage(runId: string): Promise<Usage> {
+    return this.request("GET", `/runs/${encodeURIComponent(runId)}/usage`);
+  }
+
   streamEvents(input: StreamEventsInput): EventSubscription {
     return openCloudEventStream({
       baseUrl: this.baseUrl,
       token: () => this.token(),
       fetcher: this.fetcher,
+      headers: this.fixedHeaders,
       input,
     });
   }

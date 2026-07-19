@@ -10,6 +10,22 @@ function json(body: unknown, init: ResponseInit = {}) {
 }
 
 describe("CloudApiClient", () => {
+  it("binds the browser fetch implementation before storing it as an instance method", async () => {
+    const original = globalThis.fetch;
+    const receiver = vi.fn(function (this: unknown) {
+      if (this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(json({ data: [], next_cursor: null }));
+    }) as typeof fetch;
+    globalThis.fetch = receiver;
+    try {
+      const client = new CloudApiClient({ baseUrl: "https://cloud.example", token: "token" });
+      await client.listTasks({});
+      expect(receiver).toHaveBeenCalledOnce();
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it("injects bearer auth and mutation idempotency headers", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
@@ -53,8 +69,12 @@ describe("CloudApiClient", () => {
     const client = new CloudApiClient({ baseUrl: "https://cloud.example/api/v1/", token: "super-secret", fetcher });
     await client.listTasks({ projectId: "proj_1", status: "running", cursor: "cur_1" });
     await client.listRunMessages("run_1", "41");
+    await client.getRun("run_1");
+    await client.getRunUsage("run_1");
     expect(String(fetcher.mock.calls[0][0])).toBe("https://cloud.example/api/v1/tasks?project_id=proj_1&status=running&cursor=cur_1");
     expect(String(fetcher.mock.calls[1][0])).toBe("https://cloud.example/api/v1/runs/run_1/messages?after=41");
+    expect(String(fetcher.mock.calls[2][0])).toBe("https://cloud.example/api/v1/runs/run_1");
+    expect(String(fetcher.mock.calls[3][0])).toBe("https://cloud.example/api/v1/runs/run_1/usage");
     expect(fetcher.mock.calls.flat().join(" ")).not.toContain("super-secret");
   });
 });
