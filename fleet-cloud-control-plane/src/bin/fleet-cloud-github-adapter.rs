@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use fleet_cloud_control_plane::github_adapter::{
-    webhook_router, FleetApiClient, GithubApiClient, GithubWebhookState,
+    run_status_sync, webhook_router, FleetApiClient, GithubApiClient, GithubWebhookState,
 };
 
 #[tokio::main]
@@ -24,9 +24,8 @@ async fn main() -> anyhow::Result<()> {
     let webhook_secret = required("FLEET_GITHUB_WEBHOOK_SECRET")?.into_bytes();
     let fleet = FleetApiClient::new(fleet_base_url, project_id.clone(), fleet_api_key)
         .map_err(anyhow::Error::msg)?;
-    let _github = GithubApiClient::new(
-        std::env::var("FLEET_GITHUB_API_URL")
-            .unwrap_or_else(|_| "https://api.github.com".into()),
+    let github = GithubApiClient::new(
+        std::env::var("FLEET_GITHUB_API_URL").unwrap_or_else(|_| "https://api.github.com".into()),
         required("FLEET_GITHUB_APP_ID")?,
         required("FLEET_GITHUB_INSTALLATION_ID")?,
         &required("FLEET_GITHUB_PRIVATE_KEY")?,
@@ -36,13 +35,23 @@ async fn main() -> anyhow::Result<()> {
         webhook_secret: Arc::new(webhook_secret),
         repository: Arc::new(repository),
         project_id: Arc::new(project_id),
-        fleet,
+        fleet: fleet.clone(),
     };
     let listener = tokio::net::TcpListener::bind(listen_addr)
         .await
         .with_context(|| format!("bind GitHub adapter {listen_addr}"))?;
     tracing::info!(address=%listen_addr, "Fleet Cloud GitHub adapter listening");
-    axum::serve(listener, webhook_router(state)).await?;
+    let sync = tokio::spawn(run_status_sync(
+        fleet,
+        github,
+        state.repository.as_ref().clone(),
+        required("FLEET_CLOUD_CONSOLE_URL")?,
+        std::time::Duration::from_secs(5),
+    ));
+    tokio::select! {
+        result = axum::serve(listener, webhook_router(state)) => result?,
+        result = sync => result.context("GitHub status sync task stopped")?,
+    }
     Ok(())
 }
 

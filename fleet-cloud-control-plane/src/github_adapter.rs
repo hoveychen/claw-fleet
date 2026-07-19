@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -62,8 +63,8 @@ pub fn verify_github_signature(
         .strip_prefix("sha256=")
         .ok_or(AdapterError::InvalidSignature)?;
     let digest = hex::decode(digest).map_err(|_| AdapterError::InvalidSignature)?;
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret)
-        .map_err(|_| AdapterError::InvalidSignature)?;
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret).map_err(|_| AdapterError::InvalidSignature)?;
     mac.update(raw_body);
     mac.verify_slice(&digest)
         .map_err(|_| AdapterError::InvalidSignature)
@@ -115,9 +116,8 @@ pub fn parse_labeled_issue(
         .and_then(Value::as_str)
         .unwrap_or("No issue body was provided.");
     let external_id = format!("github:{repository}#{issue_number}");
-    let goal = format!(
-        "Handle GitHub Issue #{issue_number}: {title}\n\n{body}\n\nSource: {issue_url}"
-    );
+    let goal =
+        format!("Handle GitHub Issue #{issue_number}: {title}\n\n{body}\n\nSource: {issue_url}");
     Ok(Some(LabeledIssueAction {
         issue_number,
         external_id: external_id.clone(),
@@ -188,7 +188,11 @@ pub struct FleetApiClient {
 }
 
 impl FleetApiClient {
-    pub fn new(base_url: String, project_id: String, api_key: String) -> Result<Self, AdapterError> {
+    pub fn new(
+        base_url: String,
+        project_id: String,
+        api_key: String,
+    ) -> Result<Self, AdapterError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
             .build()
@@ -288,7 +292,7 @@ pub struct GithubApiClient {
     api_url: String,
     app_id: String,
     installation_id: String,
-    encoding_key: Arc<EncodingKey>,
+    encoding_key: Option<Arc<EncodingKey>>,
     token: Arc<Mutex<Option<InstallationToken>>>,
 }
 
@@ -312,7 +316,7 @@ impl GithubApiClient {
             api_url: api_url.trim_end_matches('/').to_owned(),
             app_id,
             installation_id,
-            encoding_key: Arc::new(encoding_key),
+            encoding_key: Some(Arc::new(encoding_key)),
             token: Arc::new(Mutex::new(None)),
         })
     }
@@ -325,6 +329,9 @@ impl GithubApiClient {
             }
         }
         let now = Utc::now().timestamp();
+        let encoding_key = self.encoding_key.as_ref().ok_or_else(|| {
+            AdapterError::InvalidConfig("GitHub App private key is missing".into())
+        })?;
         let jwt = jsonwebtoken::encode(
             &Header::new(Algorithm::RS256),
             &GithubAppClaims {
@@ -332,7 +339,7 @@ impl GithubApiClient {
                 exp: now + 9 * 60,
                 iss: &self.app_id,
             },
-            &self.encoding_key,
+            encoding_key,
         )
         .map_err(|error| AdapterError::GithubApi(error.to_string()))?;
         let response = self
@@ -365,6 +372,188 @@ impl GithubApiClient {
         });
         Ok(response.token)
     }
+
+    pub async fn sync_issue(
+        &self,
+        repository: &str,
+        issue_number: u64,
+        task: &FleetTask,
+        console_url: &str,
+    ) -> Result<(), AdapterError> {
+        let desired = status_label(&task.status).ok_or_else(|| {
+            AdapterError::InvalidPayload(format!("unknown task status {}", task.status))
+        })?;
+        let token = self.installation_token().await?;
+        for label in STATUS_LABELS {
+            if *label == desired {
+                continue;
+            }
+            let response = self
+                .github_request(
+                    reqwest::Method::DELETE,
+                    repository,
+                    &["issues", &issue_number.to_string(), "labels", label],
+                    &token,
+                )?
+                .send()
+                .await
+                .map_err(|error| AdapterError::GithubApi(error.to_string()))?;
+            if !response.status().is_success() && response.status() != StatusCode::NOT_FOUND {
+                return Err(AdapterError::GithubApi(format!(
+                    "remove label {label}: {}",
+                    response.status()
+                )));
+            }
+        }
+        let response = self
+            .github_request(
+                reqwest::Method::POST,
+                repository,
+                &["issues", &issue_number.to_string(), "labels"],
+                &token,
+            )?
+            .json(&json!({"labels":[desired]}))
+            .send()
+            .await
+            .map_err(|error| AdapterError::GithubApi(error.to_string()))?;
+        if !response.status().is_success() {
+            return Err(AdapterError::GithubApi(format!(
+                "set label {desired}: {}",
+                response.status()
+            )));
+        }
+
+        let marker = format!("<!-- fleet-cloud:{}:{} -->", task.id, task.status);
+        let response = self
+            .github_request(
+                reqwest::Method::GET,
+                repository,
+                &["issues", &issue_number.to_string(), "comments"],
+                &token,
+            )?
+            .query(&[("per_page", "100")])
+            .send()
+            .await
+            .map_err(|error| AdapterError::GithubApi(error.to_string()))?;
+        if !response.status().is_success() {
+            return Err(AdapterError::GithubApi(format!(
+                "list issue comments: {}",
+                response.status()
+            )));
+        }
+        #[derive(Deserialize)]
+        struct Comment {
+            body: Option<String>,
+        }
+        let comments = response
+            .json::<Vec<Comment>>()
+            .await
+            .map_err(|error| AdapterError::GithubApi(error.to_string()))?;
+        if comments.iter().any(|comment| {
+            comment
+                .body
+                .as_deref()
+                .is_some_and(|body| body.contains(&marker))
+        }) {
+            return Ok(());
+        }
+        let task_url = format!("{}/tasks/{}", console_url.trim_end_matches('/'), task.id);
+        let body = format!(
+            "{marker}\nFleet Cloud task [`{}`]({task_url}) is now **{}**.",
+            task.id, task.status
+        );
+        let response = self
+            .github_request(
+                reqwest::Method::POST,
+                repository,
+                &["issues", &issue_number.to_string(), "comments"],
+                &token,
+            )?
+            .json(&json!({"body":body}))
+            .send()
+            .await
+            .map_err(|error| AdapterError::GithubApi(error.to_string()))?;
+        if !response.status().is_success() {
+            return Err(AdapterError::GithubApi(format!(
+                "create issue comment: {}",
+                response.status()
+            )));
+        }
+        Ok(())
+    }
+
+    fn github_request(
+        &self,
+        method: reqwest::Method,
+        repository: &str,
+        suffix: &[&str],
+        token: &str,
+    ) -> Result<reqwest::RequestBuilder, AdapterError> {
+        let (owner, name) = repository
+            .split_once('/')
+            .ok_or_else(|| AdapterError::InvalidConfig("repository must be owner/name".into()))?;
+        let mut url = reqwest::Url::parse(&self.api_url)
+            .map_err(|error| AdapterError::InvalidConfig(error.to_string()))?;
+        url.path_segments_mut()
+            .map_err(|_| AdapterError::InvalidConfig("GitHub API URL cannot be a base".into()))?
+            .pop_if_empty()
+            .extend(["repos", owner, name])
+            .extend(suffix.iter().copied());
+        Ok(self
+            .client
+            .request(method, url)
+            .bearer_auth(token)
+            .header("accept", "application/vnd.github+json")
+            .header("x-github-api-version", "2022-11-28"))
+    }
+}
+
+pub async fn run_status_sync(
+    fleet: FleetApiClient,
+    github: GithubApiClient,
+    repository: String,
+    console_url: String,
+    poll_interval: Duration,
+) -> ! {
+    let mut observed = HashMap::<String, String>::new();
+    loop {
+        match fleet.list_tasks().await {
+            Ok(tasks) => {
+                for task in tasks {
+                    let Some(issue_number) = task
+                        .external_id
+                        .as_deref()
+                        .and_then(|external| parse_external_issue(external, &repository))
+                    else {
+                        continue;
+                    };
+                    if observed.get(&task.id) == Some(&task.status) {
+                        continue;
+                    }
+                    match github
+                        .sync_issue(&repository, issue_number, &task, &console_url)
+                        .await
+                    {
+                        Ok(()) => {
+                            observed.insert(task.id.clone(), task.status.clone());
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, task_id=%task.id, issue_number, "GitHub issue status sync failed");
+                        }
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(%error, "Fleet task status poll failed"),
+        }
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
+fn parse_external_issue(external_id: &str, repository: &str) -> Option<u64> {
+    external_id
+        .strip_prefix(&format!("github:{repository}#"))?
+        .parse()
+        .ok()
 }
 
 #[derive(Clone)]
@@ -377,7 +566,10 @@ pub struct GithubWebhookState {
 
 pub fn webhook_router(state: GithubWebhookState) -> Router {
     Router::new()
-        .route("/health/live", get(|| async { Json(json!({"status":"ok"})) }))
+        .route(
+            "/health/live",
+            get(|| async { Json(json!({"status":"ok"})) }),
+        )
         .route("/github/webhook", post(github_webhook))
         .with_state(state)
 }
@@ -411,4 +603,127 @@ fn required_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<&'a str, Ad
         .get(name)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| AdapterError::InvalidPayload(format!("{name} header is required")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::{OriginalUri, State};
+    use axum::http::Method;
+    use axum::routing::any;
+    use std::future::IntoFuture;
+
+    #[derive(Clone, Default)]
+    struct GithubCapture(Arc<Mutex<Vec<(Method, String, Option<Value>, String)>>>);
+
+    async fn github_api(
+        State(capture): State<GithubCapture>,
+        OriginalUri(uri): OriginalUri,
+        method: Method,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> impl IntoResponse {
+        let json_body = (!body.is_empty()).then(|| serde_json::from_slice::<Value>(&body).unwrap());
+        let auth = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let mut calls = capture.0.lock().await;
+        calls.push((
+            method.clone(),
+            uri.path().to_owned(),
+            json_body.clone(),
+            auth,
+        ));
+        if method == Method::GET && uri.path().ends_with("/comments") {
+            let comments: Vec<Value> = calls
+                .iter()
+                .filter(|(method, path, _, _)| {
+                    *method == Method::POST && path.ends_with("/comments")
+                })
+                .filter_map(|(_, _, body, _)| body.as_ref())
+                .map(|body| json!({"body": body["body"]}))
+                .collect();
+            return (StatusCode::OK, Json(Value::Array(comments)));
+        }
+        if method == Method::DELETE {
+            return (StatusCode::NOT_FOUND, Json(json!({})));
+        }
+        (StatusCode::CREATED, Json(json!({})))
+    }
+
+    #[tokio::test]
+    async fn status_sync_sets_one_label_and_deduplicates_comments() {
+        let capture = GithubCapture::default();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(
+            axum::serve(
+                listener,
+                Router::new()
+                    .route("/{*path}", any(github_api))
+                    .with_state(capture.clone()),
+            )
+            .into_future(),
+        );
+        let github = GithubApiClient {
+            client: reqwest::Client::new(),
+            api_url: format!("http://{address}"),
+            app_id: "fixture".into(),
+            installation_id: "fixture".into(),
+            encoding_key: None,
+            token: Arc::new(Mutex::new(Some(InstallationToken {
+                value: "installation-token".into(),
+                expires_at: Utc::now() + chrono::Duration::hours(1),
+            }))),
+        };
+        let task = FleetTask {
+            id: "task_123".into(),
+            external_id: Some("github:hoveychen/claw-fleet#123".into()),
+            status: "running".into(),
+            title: Some("Fixture".into()),
+        };
+        github
+            .sync_issue(
+                "hoveychen/claw-fleet",
+                123,
+                &task,
+                "https://fleet-cloud.muveeai.com",
+            )
+            .await
+            .unwrap();
+        github
+            .sync_issue(
+                "hoveychen/claw-fleet",
+                123,
+                &task,
+                "https://fleet-cloud.muveeai.com",
+            )
+            .await
+            .unwrap();
+        let calls = capture.0.lock().await;
+        assert!(calls
+            .iter()
+            .all(|(_, _, _, auth)| auth == "Bearer installation-token"));
+        let label_calls: Vec<_> = calls
+            .iter()
+            .filter(|(method, path, _, _)| *method == Method::POST && path.ends_with("/labels"))
+            .collect();
+        assert_eq!(label_calls.len(), 2);
+        assert_eq!(
+            label_calls[0].2.as_ref().unwrap()["labels"][0],
+            "fleet:running"
+        );
+        let comment_calls: Vec<_> = calls
+            .iter()
+            .filter(|(method, path, _, _)| *method == Method::POST && path.ends_with("/comments"))
+            .collect();
+        assert_eq!(comment_calls.len(), 1);
+        let comment = comment_calls[0].2.as_ref().unwrap()["body"]
+            .as_str()
+            .unwrap();
+        assert!(comment.contains("<!-- fleet-cloud:task_123:running -->"));
+        assert!(comment.contains("https://fleet-cloud.muveeai.com/tasks/task_123"));
+    }
 }
