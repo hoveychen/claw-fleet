@@ -105,7 +105,14 @@ pub fn resolve_pending_display(pending: &mut PendingDecisions, sessions: &[Sessi
         sessions
             .iter()
             .find(|s| s.id == session_id)
-            .map(|s| (s.workspace_name.clone(), s.ai_title.clone()))
+            // Prefer the human/agent title override — for Codex sessions it's the
+            // only real title (ai_title is the raw first prompt).
+            .map(|s| {
+                (
+                    s.workspace_name.clone(),
+                    s.title_override.clone().or_else(|| s.ai_title.clone()),
+                )
+            })
     };
     macro_rules! resolve_vec {
         ($v:expr) => {
@@ -1056,6 +1063,28 @@ mod tests {
         resolve_pending_display(&mut pending, &sessions);
         assert_eq!(pending.elicitation[0].workspace_name, "my-workspace");
         assert_eq!(pending.elicitation[0].ai_title.as_deref(), Some("Fix the bug"));
+    }
+
+    #[test]
+    fn resolve_pending_display_prefers_title_override_over_ai_title() {
+        use crate::elicitation::ElicitationRequest;
+        let mut pending = PendingDecisions::default();
+        pending.elicitation.push(ElicitationRequest {
+            parked: false,
+            id: "e1".into(),
+            session_id: "s1".into(),
+            workspace_name: String::new(),
+            ai_title: None,
+            questions: vec![],
+            timestamp: "t".into(),
+        });
+        // Codex-like session: `ai_title` is the raw first prompt; the real,
+        // human/agent-set title lives in the override. The decision card must
+        // show the override, not the raw prompt.
+        let mut s = mk_session("s1", "ws", Some("raw first prompt"));
+        s.title_override = Some("Renamed nicely".into());
+        resolve_pending_display(&mut pending, &[s]);
+        assert_eq!(pending.elicitation[0].ai_title.as_deref(), Some("Renamed nicely"));
     }
 
     #[test]
