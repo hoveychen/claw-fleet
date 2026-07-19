@@ -551,7 +551,7 @@ fn spawn_successor_by_source(
     let predecessor_run_id = std::env::var("FLEET_CLOUD_RUN_ID").ok();
     let successor_run_id = task_id
         .as_ref()
-        .map(|_| format!("run_{}", uuid::Uuid::now_v7().simple()));
+        .map(|_| format!("run_{}", uuid::Uuid::new_v4().simple()));
     let mut environment = Vec::new();
     if let Some(value) = task_id.as_ref() {
         environment.push(("FLEET_CLOUD_TASK_ID".into(), value.clone()));
