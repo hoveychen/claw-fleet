@@ -1,0 +1,16 @@
+services:
+  runner-tls-passthrough:
+    image: haproxy:3.2-alpine
+    restart: unless-stopped
+    environment:
+      FLEET_CONTROL_PLANE_HOST: ${FLEET_CONTROL_PLANE_HOST:?control-plane private hostname required}
+      FLEET_CONTROL_PLANE_RUNNER_PORT: ${FLEET_CONTROL_PLANE_RUNNER_PORT:-8091}
+    ports:
+      - "443:443"
+    volumes:
+      - ./haproxy-runner.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    read_only: true
+    tmpfs:
+      - /var/lib/haproxy
+    security_opt:
+      - no-new-privileges:true
