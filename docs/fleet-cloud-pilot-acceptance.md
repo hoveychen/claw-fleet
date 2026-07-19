@@ -16,7 +16,7 @@
 | OpenAPI lint / 生成一致 | PASS | 2026-07-19：Spectral 零警告，openapi-typescript 7.13.0 生成一致 |
 | 三类本机容器镜像 | PASS | 2026-07-19：control-plane / Runner / Hosted Web 实构建；live/ready、SPA deep link、两种 provider CLI 烟测通过 |
 | linux/amd64 容器镜像 | PASS | 2026-07-19：三类镜像实构建；control-plane manifest list `sha256:014bc6d3...4995198`，Runner manifest list `sha256:54de885a...71d8eb63`，Hosted Web 构建成功 |
-| Runner Compose 配置展开 | NOT VERIFIED | 静态 YAML 已提供；本棒两次校验命令依次漏传 `FLEET_CLOUD_RUNNER_URL`、`FLEET_RUNNER_ID`，按一次修复上限停止，未把失败改写为 PASS |
+| Runner Compose 配置展开 | PASS | 2026-07-19：补齐 `FLEET_CLOUD_RUNNER_URL` 与 `FLEET_RUNNER_ID` 后 `docker compose ... config --quiet` 通过 |
 | 全 workspace Rust 测试 | PASS | 2026-07-19：`cargo test --workspace` 零失败；真实外部/超时用例按测试声明 ignored |
 | staging `cloud-e2e.sh` | NOT RUN | 尚无已部署 staging、Project Key、Runner 身份和 webhook receiver |
 | 100 个真实 Issues | NOT RUN | 2026-07-19 `gh issue list` 返回空数组；仅有 GitHub 默认 9 个 label |
@@ -55,6 +55,8 @@
 3. `scripts/cloud-e2e.sh` 会拒绝非数字 Issue，并执行 Project/API Key bootstrap、Runner claim、Task/SSE/Decision/Artifact/webhook 闭环；只有 staging 真实运行成功后才能把对应项改为 PASS。
 4. Runner claim 生成的证书是短期验收身份，正式 Runner 身份必须写入 VM secret store，不得提交 `deploy/cloud/identity/`。
 5. 当前 Runner gateway 是独立 `8091` 端到端 mTLS；Muvee 标准项目只暴露 HTTP `8080` 并终止 TLS。staging 前必须确认 TCP/TLS passthrough 或提供保留客户端证书的第二入口，不能把它当作普通反代 WebSocket。
+6. Boss 于 2026-07-19 选择 TLS passthrough；但冻结基线让 API 与 Runner 共用 `fleet-cloud.muveeai.com:443`，普通 L4 passthrough 无法在同一 SNI/端口同时转发 Muvee TLS 终止的 HTTP 与控制面端到端 mTLS。必须增加 Runner 专用 hostname/port，或实现可区分的 ALPN/L4 多路复用后再烟测。
+7. 冻结基线要求 GitHub App 以 `fleet-task` label 创建 Task 并回写评论/状态 label；2026-07-19 全仓检索确认该适配器尚未实现。创建 100 Issues 前必须先交付并验证 webhook→公开 Task API→Issue 回写闭环，避免制造无法消费的试点工单。
 
 ## 100 Task 记录模板
 
