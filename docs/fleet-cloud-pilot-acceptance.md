@@ -50,7 +50,7 @@
 
 ## 已知偏差与硬门槛
 
-1. 基线写明 MinIO，但当前 Artifact ciphertext 存在 PostgreSQL `artifact_objects`；上线前必须决定接入 MinIO 或正式修订基线并重做容量/恢复评估。
+1. Boss 已选择保持 MinIO 基线。2026-07-19 已实现 S3/MinIO 后端，目标测试证明 PostgreSQL 仅保留对象键和加密信封元数据，密文上传、签名下载、单对象删除与 retention 删除通过 mock S3；真实 MinIO staging 仍为 NOT RUN。
 2. 内部试点暂不做数据库/对象备份是 Boss 已接受的例外；该例外禁止进入外部 Beta。
 3. `scripts/cloud-e2e.sh` 会拒绝非数字 Issue，并执行 Project/API Key bootstrap、Runner claim、Task/SSE/Decision/Artifact/webhook 闭环；只有 staging 真实运行成功后才能把对应项改为 PASS。
 4. Runner claim 生成的证书是短期验收身份，正式 Runner 身份必须写入 VM secret store，不得提交 `deploy/cloud/identity/`。

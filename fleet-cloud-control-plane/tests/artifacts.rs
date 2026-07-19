@@ -302,8 +302,16 @@ async fn minio_backend_uploads_ciphertext_downloads_and_deletes_objects(pool: sq
     assert_eq!(metadata.0, "s3");
     assert!(metadata.1.is_none());
     let object_path = format!("fleet-artifacts/org_test/{task_id}/{artifact_id}");
-    let ciphertext = fake.objects.lock().unwrap().get(&object_path).cloned().unwrap();
-    assert!(!ciphertext.windows(plaintext.len()).any(|window| window == plaintext));
+    let ciphertext = fake
+        .objects
+        .lock()
+        .unwrap()
+        .get(&object_path)
+        .cloned()
+        .unwrap();
+    assert!(!ciphertext
+        .windows(plaintext.len())
+        .any(|window| window == plaintext));
 
     let signed = common::request_json(
         common::router_with_artifact_store(pool.clone(), store.clone()),
@@ -324,7 +332,10 @@ async fn minio_backend_uploads_ciphertext_downloads_and_deletes_objects(pool: sq
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(&to_bytes(response.into_body(), 1024).await.unwrap()[..], plaintext);
+    assert_eq!(
+        &to_bytes(response.into_body(), 1024).await.unwrap()[..],
+        plaintext
+    );
 
     let deleted = common::request_json(
         common::router_with_artifact_store(pool.clone(), store),
@@ -410,6 +421,7 @@ async fn artifact_upload_enforces_file_and_task_quotas(pool: sqlx::PgPool) {
     let error = artifacts::upload(
         &pool,
         &artifacts::ArtifactCrypto::from_pepper(common::PEPPER),
+        &ArtifactObjectStore::Postgres,
         &principal,
         artifacts::ArtifactUpload {
             task_id,
@@ -469,9 +481,14 @@ async fn task_delete_retries_after_object_failure_and_keeps_billing_tombstone(po
         api_key_id: seed.valid_key_id.into(),
     };
 
-    let failed =
-        artifacts::delete_task_content(&pool, &principal, task_id, DeleteFault::BeforeObjectDelete)
-            .await;
+    let failed = artifacts::delete_task_content(
+        &pool,
+        &ArtifactObjectStore::Postgres,
+        &principal,
+        task_id,
+        DeleteFault::BeforeObjectDelete,
+    )
+    .await;
     assert!(failed.is_err());
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM artifact_objects WHERE artifact_id=$1")
@@ -559,12 +576,16 @@ async fn retention_lease_prevents_double_run_and_cleans_expired_content(pool: sq
     assert!(artifacts::try_acquire_retention_lease(&pool, "owner-a")
         .await
         .unwrap());
-    let skipped = artifacts::run_retention(&pool, "owner-b").await.unwrap();
+    let skipped = artifacts::run_retention(&pool, &ArtifactObjectStore::Postgres, "owner-b")
+        .await
+        .unwrap();
     assert!(!skipped.acquired);
     artifacts::release_retention_lease(&pool, "owner-a", None)
         .await
         .unwrap();
-    let result = artifacts::run_retention(&pool, "owner-b").await.unwrap();
+    let result = artifacts::run_retention(&pool, &ArtifactObjectStore::Postgres, "owner-b")
+        .await
+        .unwrap();
     assert!(result.acquired);
     assert_eq!(result.transcripts_deleted, 1);
     assert_eq!(result.artifacts_deleted, 1);

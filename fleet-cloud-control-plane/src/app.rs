@@ -12,6 +12,7 @@ pub struct AppState {
     pub api_key_pepper: Vec<u8>,
     pub runner_identity_issuer: Option<Arc<crate::runner_gateway::identity::RunnerIdentityIssuer>>,
     pub artifact_crypto: Arc<crate::services::artifacts::ArtifactCrypto>,
+    pub artifact_store: crate::services::artifacts::ArtifactObjectStore,
 }
 
 impl AppState {
@@ -24,7 +25,16 @@ impl AppState {
             api_key_pepper,
             runner_identity_issuer: None,
             artifact_crypto,
+            artifact_store: crate::services::artifacts::ArtifactObjectStore::Postgres,
         }
+    }
+
+    pub fn with_artifact_store(
+        mut self,
+        store: crate::services::artifacts::ArtifactObjectStore,
+    ) -> Self {
+        self.artifact_store = store;
+        self
     }
 
     pub fn with_runner_identity_issuer(
