@@ -397,7 +397,7 @@ Fleet 的 Stop hook 就消费这个登记，并在同一 workspace spawn 一个�
 - **接力被记录**为一条交接链，显示在会话卡片上（接力 n/N），好让{title}事后\
 追溯整个序列。\n\
 - 给你会话的一个新用户 prompt 会取消你待定的交接——{title}接管永远优先。链最多\
-10 跳；重新登记会覆盖你之前的便条。\n\
+100 跳；重新登记会覆盖你之前的便条。\n\
 \n\
 你一旦逮到自己在想「上下文长了，我该收尾了」——那个冲动本身就是信号。去登记\
 交接并接力，而不是收尾。\n\
@@ -894,7 +894,7 @@ plan automatically.\n\
 - **The relay is recorded** as a handoff chain and shown on session cards \
 (接力 n/N), so {title} can trace the whole sequence afterwards.\n\
 - A new user prompt to your session cancels your pending handoff — {title} \
-taking over always wins. Chains are capped at 10 hops; re-registering \
+taking over always wins. Chains are capped at 100 hops; re-registering \
 overwrites your previous note.\n\
 \n\
 The moment you catch yourself thinking \"I should wrap up because context \
