@@ -6,6 +6,7 @@ Build all images from the repository root:
 docker build -f deploy/cloud/Dockerfile.control-plane -t fleet-cloud-control-plane:pilot .
 docker build -f deploy/cloud/Dockerfile.web -t fleet-cloud-web:pilot .
 docker build -f deploy/cloud/Dockerfile.runner -t fleet-cloud-runner:pilot .
+docker build -f deploy/cloud/Dockerfile.github-adapter -t fleet-cloud-github-adapter:pilot .
 ```
 
 Control-plane required secrets:
@@ -45,3 +46,24 @@ docker compose -f deploy/cloud/runner.compose.yaml up -d
 Provider credentials must be provisioned into dedicated Runner volumes or the VM secret store. Never put API keys, provider homes, or the generated `identity/` directory in Git. The image pins Codex CLI `0.144.5` and Claude Code `2.1.206`; version changes require rebuilding and rerunning P10 smoke tests.
 
 Artifact ciphertext is stored in MinIO when all five S3 variables are configured; PostgreSQL retains only the object key and envelope-encryption metadata. Omitting all five variables selects the PostgreSQL compatibility backend for local development. Partial S3 configuration is rejected at startup.
+
+GitHub adapter required configuration:
+
+```text
+FLEET_CLOUD_API_URL=https://fleet-cloud.muveeai.com/api/v1
+FLEET_CLOUD_CONSOLE_URL=https://fleet-cloud.muveeai.com
+FLEET_CLOUD_PROJECT_ID=proj_fleet_cloud_pilot
+FLEET_CLOUD_PROJECT_API_KEY
+FLEET_GITHUB_REPOSITORY=hoveychen/claw-fleet
+FLEET_GITHUB_APP_ID
+FLEET_GITHUB_INSTALLATION_ID
+FLEET_GITHUB_PRIVATE_KEY
+FLEET_GITHUB_WEBHOOK_SECRET
+```
+
+Configure the GitHub App webhook URL as `https://<adapter-host>/github/webhook` and subscribe to
+**Issues** events. The adapter verifies `X-Hub-Signature-256`, maps only the `fleet-task` label in
+the configured repository to `POST /tasks`, and uses the GitHub delivery ID as the Fleet
+idempotency key. It polls the public Task API and writes only the frozen `fleet:*` status labels and
+deduplicated status comments back through the installation token. It has no database or internal
+Fleet session access.

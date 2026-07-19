@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1
+FROM rust:1.90-slim-bookworm AS build
+WORKDIR /src
+COPY . .
+RUN cargo build --locked --release -p fleet-cloud-control-plane --bin fleet-cloud-github-adapter
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 10001 --create-home fleet
+COPY --from=build /src/target/release/fleet-cloud-github-adapter /usr/local/bin/
+USER fleet
+ENV FLEET_GITHUB_LISTEN_ADDR=0.0.0.0:8080 RUST_LOG=fleet_cloud_control_plane=info
+EXPOSE 8080
+ENTRYPOINT ["fleet-cloud-github-adapter"]

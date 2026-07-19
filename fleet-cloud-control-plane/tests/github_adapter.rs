@@ -1,14 +1,16 @@
-use fleet_cloud_control_plane::github_adapter::{
-    parse_labeled_issue, status_label, verify_github_signature,
-};
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use axum::body::{to_bytes, Body};
 use axum::http::Request;
 use axum::{extract::State, routing::post, Json, Router};
-use fleet_cloud_control_plane::github_adapter::{webhook_router, FleetApiClient, GithubWebhookState};
-use std::sync::Arc;
+use fleet_cloud_control_plane::github_adapter::{
+    parse_labeled_issue, status_label, verify_github_signature,
+};
+use fleet_cloud_control_plane::github_adapter::{
+    webhook_router, FleetApiClient, GithubWebhookState,
+};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::future::IntoFuture;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tower::ServiceExt;
 
@@ -50,8 +52,14 @@ fn fleet_task_label_maps_real_issue_to_public_task_contract() {
     assert_eq!(action.issue_number, 123);
     assert_eq!(action.external_id, "github:hoveychen/claw-fleet#123");
     assert_eq!(action.task.project_id, "proj_fleet_cloud_pilot");
-    assert_eq!(action.task.title.as_deref(), Some("Fix duplicate Runner events"));
-    assert_eq!(action.task.workspace.repository, "https://github.com/hoveychen/claw-fleet.git");
+    assert_eq!(
+        action.task.title.as_deref(),
+        Some("Fix duplicate Runner events")
+    );
+    assert_eq!(
+        action.task.workspace.repository,
+        "https://github.com/hoveychen/claw-fleet.git"
+    );
     assert_eq!(action.task.workspace.r#ref, "main");
     assert!(action.task.goal.contains("Reproduce the duplicate"));
     assert_eq!(action.task.metadata["issue_number"], 123);
@@ -69,9 +77,15 @@ fn unrelated_labels_and_repositories_are_ignored() {
         },
         "issue": {"number": 1, "title": "x", "body": null, "html_url": "https://example.test/1"}
     });
-    assert!(parse_labeled_issue(&payload, "hoveychen/claw-fleet", "proj").unwrap().is_none());
+    assert!(
+        parse_labeled_issue(&payload, "hoveychen/claw-fleet", "proj")
+            .unwrap()
+            .is_none()
+    );
     payload["label"]["name"] = "fleet-task".into();
-    assert!(parse_labeled_issue(&payload, "other/repository", "proj").unwrap().is_none());
+    assert!(parse_labeled_issue(&payload, "other/repository", "proj")
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -149,7 +163,10 @@ async fn signed_webhook_calls_only_public_task_api_with_delivery_idempotency() {
     let response = app
         .oneshot(
             Request::post("/github/webhook")
-                .header("x-hub-signature-256", signature(b"github-webhook-secret", &raw))
+                .header(
+                    "x-hub-signature-256",
+                    signature(b"github-webhook-secret", &raw),
+                )
                 .header("x-github-event", "issues")
                 .header("x-github-delivery", "delivery-fixture-123")
                 .header("content-type", "application/json")
@@ -160,7 +177,10 @@ async fn signed_webhook_calls_only_public_task_api_with_delivery_idempotency() {
         .unwrap();
     assert_eq!(response.status(), 202);
     let response_body = to_bytes(response.into_body(), 4096).await.unwrap();
-    assert_eq!(serde_json::from_slice::<serde_json::Value>(&response_body).unwrap()["task_id"], "task_github_123");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response_body).unwrap()["task_id"],
+        "task_github_123"
+    );
     let (auth, idempotency, task) = rx.recv().await.unwrap();
     assert_eq!(auth, "Bearer flk_pilot_fixture");
     assert_eq!(idempotency, "github-delivery-delivery-fixture-123");
