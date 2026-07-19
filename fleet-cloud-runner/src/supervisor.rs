@@ -1013,7 +1013,7 @@ impl Supervisor {
         source_event_id: &str,
         event_type: &str,
         task_id: &str,
-        run_id: Option<&str>,
+        _run_id: Option<&str>,
         data: Value,
     ) -> anyhow::Result<()> {
         debug_assert_eq!(data.get("task_id").and_then(Value::as_str), Some(task_id));
@@ -1025,7 +1025,7 @@ impl Supervisor {
             sequence: 0,
             event_type: event_type.into(),
             occurred_at: Utc::now(),
-            data: if run_id.is_some() { data } else { data },
+            data,
             schema_version: 1,
         })?;
         Ok(())

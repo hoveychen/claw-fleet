@@ -133,6 +133,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Task' }
         '404': { $ref: '#/components/responses/NotFoundError' }
+    delete:
+      tags: [Tasks]
+      operationId: deleteTaskContent
+      summary: Delete Task content while retaining billing and audit tombstones
+      responses:
+        '202':
+          description: Content deletion completed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandReceipt' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
 
   /tasks/{task_id}/messages:
     parameters:
@@ -289,6 +300,37 @@ paths:
                         type: array
                         items: { $ref: '#/components/schemas/Artifact' }
         '404': { $ref: '#/components/responses/NotFoundError' }
+    post:
+      tags: [Artifacts]
+      operationId: uploadTaskArtifact
+      summary: Upload and envelope-encrypt one Task Artifact
+      parameters:
+        - name: X-Artifact-Kind
+          in: header
+          schema:
+            type: string
+            enum: [attachment, image, patch, report, log, wiki, other]
+            default: other
+        - name: X-Run-Id
+          in: header
+          schema: { $ref: '#/components/schemas/ResourceId' }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Artifact encrypted and persisted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Artifact' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /decisions:
     get:
@@ -538,7 +580,7 @@ paths:
                 type: object
                 required: [url, expires_at]
                 properties:
-                  url: { type: string, format: uri }
+                  url: { type: string, format: uri-reference }
                   expires_at: { type: string, format: date-time }
         '404': { $ref: '#/components/responses/NotFoundError' }
 

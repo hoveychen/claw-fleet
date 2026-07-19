@@ -7,11 +7,15 @@ publish = false
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
-axum = "0.8"
+aes-gcm = "0.10"
+axum = { version = "0.8", features = ["multipart"] }
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 fleet-cloud-wire = { path = "../fleet-cloud-wire" }
 futures-util = "0.3"
 hex = "0.4"
+hmac = "0.12"
+rand = "0.8"
 rcgen = { version = "0.13", features = ["x509-parser"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2"

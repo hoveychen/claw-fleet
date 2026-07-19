@@ -128,6 +128,10 @@ impl Redactor {
         counters: &mut BTreeMap<String, u64>,
         started: Instant,
     ) -> Result<(), RedactionError> {
+        redact_sensitive_lines(text, counters);
+        if started.elapsed() > MAX_PROCESSING_TIME {
+            return Err(RedactionError::ProcessingTimedOut);
+        }
         replace_pem_blocks(text, counters);
         for (prefix, minimum_length, kind) in [
             ("ghp_", 24, "github_token"),
@@ -221,6 +225,48 @@ fn replace_pem_blocks(text: &mut String, counters: &mut BTreeMap<String, u64>) {
         text.replace_range(begin..end, &marker("private_key"));
         increment(counters, "private_key", 1);
         cursor = begin + marker("private_key").len();
+    }
+}
+
+fn redact_sensitive_lines(text: &mut String, counters: &mut BTreeMap<String, u64>) {
+    if !text.contains('=') && !text.contains(':') {
+        return;
+    }
+    let mut output = String::with_capacity(text.len());
+    let mut changed = false;
+    for segment in text.split_inclusive('\n') {
+        let (line, newline) = segment
+            .strip_suffix('\n')
+            .map_or((segment, ""), |line| (line, "\n"));
+        let trimmed = line.trim_start();
+        let env_line = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+        if let Some((key, _)) = env_line.split_once('=') {
+            if let Some(kind) = env_kind(key.trim()) {
+                let separator = line.find('=').unwrap_or(line.len());
+                output.push_str(&line[..=separator]);
+                output.push_str(&marker(kind));
+                output.push_str(newline);
+                increment(counters, kind, 1);
+                changed = true;
+                continue;
+            }
+        }
+        if let Some((key, _)) = trimmed.split_once(':') {
+            if let Some(kind) = header_kind(key.trim()) {
+                let separator = line.find(':').unwrap_or(line.len());
+                output.push_str(&line[..=separator]);
+                output.push(' ');
+                output.push_str(&marker(kind));
+                output.push_str(newline);
+                increment(counters, kind, 1);
+                changed = true;
+                continue;
+            }
+        }
+        output.push_str(segment);
+    }
+    if changed {
+        *text = output;
     }
 }
 

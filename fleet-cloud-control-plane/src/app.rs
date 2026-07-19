@@ -1,4 +1,4 @@
-use axum::{routing::get, Json, Router};
+use axum::{extract::DefaultBodyLimit, routing::get, Json, Router};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -10,14 +10,19 @@ pub struct AppState {
     pub pool: PgPool,
     pub api_key_pepper: Vec<u8>,
     pub runner_identity_issuer: Option<Arc<crate::runner_gateway::identity::RunnerIdentityIssuer>>,
+    pub artifact_crypto: Arc<crate::services::artifacts::ArtifactCrypto>,
 }
 
 impl AppState {
     pub fn new(pool: PgPool, api_key_pepper: Vec<u8>) -> Self {
+        let artifact_crypto = Arc::new(crate::services::artifacts::ArtifactCrypto::from_pepper(
+            &api_key_pepper,
+        ));
         Self {
             pool,
             api_key_pepper,
             runner_identity_issuer: None,
+            artifact_crypto,
         }
     }
 
@@ -37,7 +42,10 @@ pub fn router(state: AppState) -> Router {
             "/tasks",
             get(routes::tasks::list_tasks).post(routes::tasks::create_task),
         )
-        .route("/tasks/{task_id}", get(routes::tasks::get_task))
+        .route(
+            "/tasks/{task_id}",
+            get(routes::tasks::get_task).delete(routes::tasks::delete_task),
+        )
         .route(
             "/tasks/{task_id}/messages",
             axum::routing::post(routes::tasks::append_message),
@@ -58,12 +66,29 @@ pub fn router(state: AppState) -> Router {
             "/tasks/{task_id}/events",
             get(routes::tasks::list_task_events),
         )
+        .route(
+            "/tasks/{task_id}/artifacts",
+            get(routes::artifacts::list_task).post(routes::artifacts::upload),
+        )
         .route("/events/stream", get(routes::events::stream_events))
+        .route("/runs/{run_id}/messages", get(routes::runs::list_messages))
         .route("/decisions", get(routes::decisions::list))
         .route("/decisions/{decision_id}", get(routes::decisions::get))
         .route(
             "/decisions/{decision_id}/responses",
             axum::routing::post(routes::decisions::respond),
+        )
+        .route(
+            "/artifacts/{artifact_id}",
+            get(routes::artifacts::get).delete(routes::artifacts::delete),
+        )
+        .route(
+            "/artifacts/{artifact_id}/download-url",
+            axum::routing::post(routes::artifacts::create_download_url),
+        )
+        .route(
+            "/artifact-downloads/{artifact_id}",
+            get(routes::artifacts::download),
         )
         .route(
             "/runner-registrations",
@@ -81,6 +106,7 @@ pub fn router(state: AppState) -> Router {
             "/runners/{runner_id}/drain",
             axum::routing::post(routes::runners::drain_runner),
         )
+        .layer(DefaultBodyLimit::max(18 * 1024 * 1024))
         .with_state(state)
 }
 

@@ -21,6 +21,22 @@ async fn main() -> anyhow::Result<()> {
         .run(&pool)
         .await
         .context("run database migrations")?;
+    let retention_pool = pool.clone();
+    let retention_owner = format!("control-plane-{}", uuid::Uuid::now_v7().simple());
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+        loop {
+            interval.tick().await;
+            if let Err(error) = fleet_cloud_control_plane::services::artifacts::run_retention(
+                &retention_pool,
+                &retention_owner,
+            )
+            .await
+            {
+                tracing::warn!(%error, "Fleet Cloud retention job failed");
+            }
+        }
+    });
     let mut state = app::AppState::new(pool.clone(), config.api_key_pepper);
     if let Some(gateway) = config.runner_gateway.as_ref() {
         let ca_pem =

@@ -29,6 +29,8 @@ pub enum ApiError {
     RunnerCapabilityMissing,
     #[error("runner is unavailable for assignment")]
     RunnerUnavailable,
+    #[error("object storage is temporarily unavailable")]
+    StorageUnavailable,
     #[error("database error")]
     Database(#[from] sqlx::Error),
     #[error("internal error")]
@@ -72,6 +74,11 @@ impl ApiError {
                 (StatusCode::CONFLICT, "runner", "runner_capability_missing")
             }
             Self::RunnerUnavailable => (StatusCode::CONFLICT, "runner", "runner_unavailable"),
+            Self::StorageUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage",
+                "storage_unavailable",
+            ),
             Self::Database(_) | Self::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal",
