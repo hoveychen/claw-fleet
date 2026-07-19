@@ -28,6 +28,14 @@ Expose HTTP `8080` at `https://fleet-cloud.muveeai.com/api/v1`. The Hosted Web i
 
 **Blocked ingress requirement:** the Runner gateway listens separately on `8091` and requires end-to-end client-certificate TLS. Muvee's standard deployment route exposes HTTP `8080` and terminates TLS, so it cannot be assumed to carry this mTLS identity. Before staging, provision a confirmed TCP/TLS passthrough or a second ingress that preserves the client certificate; otherwise move the gateway to infrastructure that does. Do not downgrade the gateway to unauthenticated WebSocket forwarding.
 
+Boss selected a dedicated Runner hostname: `fleet-runner.muveeai.com:443`. Point that DNS record at the L4 host, allow TCP 443, set `FLEET_CONTROL_PLANE_HOST` to the control-plane private address reachable from that host, and run:
+
+```bash
+docker compose -f deploy/cloud/tls-passthrough.compose.yaml up -d
+```
+
+HAProxy does not terminate TLS; the control-plane on port `8091` still validates the Runner client certificate. The Runner outbound allowlist must include `fleet-runner.muveeai.com:443`. Do not put HTTP ForwardAuth or an HTTPS reverse proxy in front of this hostname.
+
 For the Runner VM, claim a one-time registration, write the returned PEM values to `identity/{ca.pem,client.pem,client-key.pem}`, set `FLEET_RUNNER_ID` and `FLEET_CLOUD_RUNNER_URL`, then run:
 
 ```bash
