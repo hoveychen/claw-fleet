@@ -135,7 +135,9 @@ fn list_dir_in(
     }
 
     let repo = git2::Repository::open(&root).ok();
-    let rd = fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    // A workspace can live anywhere the user keeps it, including under a
+    // TCC-protected folder; log a backtrace if this read is denied.
+    let rd = crate::tcc::guarded_read_dir(&dir).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
 
     for entry in rd.flatten() {
@@ -152,7 +154,7 @@ fn list_dir_in(
             .unwrap_or(false);
         // Follow symlinks for size/kind; fall back to the link's own metadata
         // when the target is dangling.
-        let Ok(metadata) = fs::metadata(&path).or_else(|_| entry.metadata()) else {
+        let Ok(metadata) = crate::tcc::guarded_metadata(&path).or_else(|_| entry.metadata()) else {
             continue;
         };
         let is_dir = metadata.is_dir();
