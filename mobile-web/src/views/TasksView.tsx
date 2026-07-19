@@ -218,7 +218,7 @@ export function TasksView({
       if (activeOnly && !LIVE.includes(s.status)) return false;
       if (q) {
         const clientMatch =
-          `${s.aiTitle ?? ""} ${s.slug ?? ""} ${s.lastMessagePreview ?? ""} ${s.workspaceName}`
+          `${s.titleOverride ?? ""} ${s.aiTitle ?? ""} ${s.slug ?? ""} ${s.lastMessagePreview ?? ""} ${s.workspaceName}`
             .toLowerCase()
             .includes(q) ||
           // The attributed TASKS.md plan — id / title / current P-task, so a
@@ -482,7 +482,8 @@ export function TasksView({
           const mode = stopMode(s);
           const unread = isSessionUnread(s);
           const isDone = s.userMark === "done";
-          const title = s.aiTitle || s.slug || s.lastMessagePreview || t("（无标题）");
+          const title =
+            s.titleOverride || s.aiTitle || s.slug || s.lastMessagePreview || t("（无标题）");
           const snippet = search.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined;
           const live = LIVE.includes(s.status);
           return (

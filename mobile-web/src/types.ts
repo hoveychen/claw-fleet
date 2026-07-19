@@ -75,6 +75,9 @@ export interface SessionInfo {
   workspaceName: string;
   aiTitle?: string | null;
   slug?: string | null;
+  /** Human rename / agent-set title. Wins over aiTitle/slug for display.
+   *  Load-bearing for Codex sessions (no local aiTitle). */
+  titleOverride?: string | null;
   status: SessionStatus;
   isSubagent: boolean;
   lastMessagePreview?: string | null;
