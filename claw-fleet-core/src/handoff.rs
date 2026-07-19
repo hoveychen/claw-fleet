@@ -153,7 +153,7 @@ pub const EXPIRY_MS: u64 = 30 * 60 * 1000;
 
 /// Hard ceiling on chain length — a relay loop (successor immediately hands
 /// off again without progress) must not spawn sessions forever.
-pub const MAX_CHAIN_HOPS: u32 = 10;
+pub const MAX_CHAIN_HOPS: u32 = 100;
 
 fn handoffs_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("handoffs"))
