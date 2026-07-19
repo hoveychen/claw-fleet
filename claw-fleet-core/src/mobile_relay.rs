@@ -1369,6 +1369,13 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
 /// its `<id>.response.json`, and a parked one (whose producer is long gone)
 /// resumes the session with the answer instead.
 fn handle_answer(payload: &Value) -> Result<(), String> {
+    deliver_decision_answer(payload)
+}
+
+/// Deliver a normalized decision response through the same live/parked path
+/// used by mobile and desktop clients. Fleet Cloud Runner calls this boundary
+/// after durably claiming a `decision.response` command.
+pub fn deliver_decision_answer(payload: &Value) -> Result<(), String> {
     let kind = payload.get("kind").and_then(Value::as_str).ok_or("missing kind")?;
     let id = payload
         .get("id")

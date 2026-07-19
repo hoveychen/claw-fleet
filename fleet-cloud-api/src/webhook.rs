@@ -141,6 +141,28 @@ impl<T: WebhookTransport> PgWebhookDispatcher<T> {
         Ok(summary)
     }
 
+    pub async fn replay_delivery(&self, delivery_id: Uuid) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let event_id: Uuid = sqlx::query_scalar(
+            "UPDATE webhook_deliveries SET status = 'pending', next_attempt_at = now(),
+                    last_error = NULL, delivered_at = NULL
+             WHERE id = $1
+             RETURNING event_id",
+        )
+        .bind(delivery_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE outbox SET completed_at = NULL, claimed_at = NULL, available_at = now()
+             WHERE topic = 'task.event' AND payload ->> 'event_id' = $1",
+        )
+        .bind(event_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     async fn dispatch_row(
         &self,
         row: &OutboxRow,

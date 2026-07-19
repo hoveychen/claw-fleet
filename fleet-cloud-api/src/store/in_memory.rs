@@ -3,13 +3,14 @@ use super::{
     StoreError, TaskStore,
 };
 use crate::domain::{
-    Attempt, Decision, EventProducer, RequestScope, Task, TaskDetail, TaskEvent, TaskStatus,
+    Attempt, Decision, EventProducer, IngestEventsOutcome, RequestScope, RunnerEventInput, Task,
+    TaskDetail, TaskEvent, TaskStatus,
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Mutex, MutexGuard},
 };
 use uuid::Uuid;
@@ -26,6 +27,8 @@ struct State {
     attempts: HashMap<Uuid, Vec<Attempt>>,
     decisions: HashMap<Uuid, Decision>,
     idempotency: HashMap<(Uuid, String, String), ([u8; 32], Uuid)>,
+    audit_denials: Vec<(RequestScope, String, Uuid, String)>,
+    runner_dedupe: HashSet<(Uuid, String)>,
 }
 
 impl InMemoryTaskStore {
@@ -124,6 +127,12 @@ impl InMemoryTaskStore {
             .or_default()
             .extend([attempt_event, decision_event]);
         Ok(decision)
+    }
+
+    pub fn audit_denial_count(&self) -> usize {
+        self.lock()
+            .map(|state| state.audit_denials.len())
+            .unwrap_or_default()
     }
 }
 
@@ -379,6 +388,156 @@ impl TaskStore for InMemoryTaskStore {
         Ok(RespondDecisionOutcome {
             decision,
             replayed: false,
+        })
+    }
+
+    async fn record_audit_denial(
+        &self,
+        scope: RequestScope,
+        resource_type: &str,
+        resource_id: Uuid,
+        reason: &str,
+    ) -> Result<(), StoreError> {
+        self.lock()?.audit_denials.push((
+            scope,
+            resource_type.to_string(),
+            resource_id,
+            reason.to_string(),
+        ));
+        Ok(())
+    }
+
+    async fn ingest_runner_events(
+        &self,
+        scope: RequestScope,
+        runner_id: Uuid,
+        mut events: Vec<RunnerEventInput>,
+    ) -> Result<IngestEventsOutcome, StoreError> {
+        events.sort_by_key(|event| event.local_sequence);
+        let accepted_through_local_sequence = events
+            .last()
+            .map(|event| event.local_sequence)
+            .unwrap_or_default();
+        let mut state = self.lock()?;
+        let mut accepted = 0;
+        let mut duplicates = 0;
+        for event in events {
+            if !state
+                .runner_dedupe
+                .insert((runner_id, event.dedupe_key.clone()))
+            {
+                duplicates += 1;
+                continue;
+            }
+            let task = state
+                .tasks
+                .get_mut(&(scope.project_id, event.task_id))
+                .filter(|task| task.organization_id == scope.organization_id)
+                .ok_or(StoreError::NotFound)?;
+            task.event_cursor += 1;
+            task.version += 1;
+            task.updated_at = event.occurred_at;
+            let sequence = task.event_cursor;
+            if event.event_type == "task.status_changed" {
+                if let Some(status) = event.data.get("status").and_then(Value::as_str) {
+                    task.status = status.parse().map_err(StoreError::Internal)?;
+                }
+            }
+            if event.event_type == "attempt.started" {
+                task.current_attempt_id = event.attempt_id;
+                task.status = TaskStatus::Running;
+            }
+            let _ = task;
+
+            if event.event_type == "attempt.started" {
+                if let Some(attempt_id) = event.attempt_id {
+                    state
+                        .attempts
+                        .entry(event.task_id)
+                        .or_default()
+                        .push(Attempt {
+                            id: attempt_id,
+                            task_id: event.task_id,
+                            runner_id: Some(runner_id),
+                            workspace_id: event
+                                .data
+                                .get("workspaceId")
+                                .and_then(Value::as_str)
+                                .and_then(|value| Uuid::parse_str(value).ok()),
+                            agent_source: event
+                                .data
+                                .get("agentSource")
+                                .and_then(Value::as_str)
+                                .unwrap_or("codex")
+                                .to_string(),
+                            agent_session_id: event
+                                .data
+                                .get("agentSessionId")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            ordinal: event
+                                .data
+                                .get("ordinal")
+                                .and_then(Value::as_i64)
+                                .unwrap_or(1) as i32,
+                            reason: event
+                                .data
+                                .get("reason")
+                                .and_then(Value::as_str)
+                                .unwrap_or("initial")
+                                .to_string(),
+                            status: "running".into(),
+                            started_at: event.occurred_at,
+                            ended_at: None,
+                        });
+                }
+            } else if event.event_type == "attempt.ended" {
+                if let Some(attempt_id) = event.attempt_id {
+                    if let Some(attempt) = state
+                        .attempts
+                        .entry(event.task_id)
+                        .or_default()
+                        .iter_mut()
+                        .find(|attempt| attempt.id == attempt_id)
+                    {
+                        attempt.status = "ended".into();
+                        attempt.ended_at = Some(event.occurred_at);
+                    }
+                }
+            } else if event.event_type == "decision.opened" {
+                if let Some(value) = event.data.get("decision") {
+                    let decision: Decision = serde_json::from_value(value.clone())
+                        .map_err(|error| StoreError::Internal(error.to_string()))?;
+                    state.decisions.insert(decision.id, decision);
+                }
+            }
+            state
+                .events
+                .entry(event.task_id)
+                .or_default()
+                .push(TaskEvent {
+                    id: Uuid::new_v4(),
+                    organization_id: scope.organization_id,
+                    project_id: scope.project_id,
+                    task_id: event.task_id,
+                    attempt_id: event.attempt_id,
+                    sequence,
+                    event_type: event.event_type,
+                    occurred_at: event.occurred_at,
+                    recorded_at: Utc::now(),
+                    producer: EventProducer {
+                        producer_type: "runner".into(),
+                        id: runner_id.to_string(),
+                    },
+                    schema_version: event.schema_version,
+                    data: event.data,
+                });
+            accepted += 1;
+        }
+        Ok(IngestEventsOutcome {
+            accepted,
+            duplicates,
+            accepted_through_local_sequence,
         })
     }
 

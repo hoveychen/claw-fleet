@@ -185,6 +185,26 @@ pub struct TaskEvent {
     pub data: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunnerEventInput {
+    pub local_sequence: i64,
+    pub dedupe_key: String,
+    pub task_id: Uuid,
+    pub attempt_id: Option<Uuid>,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub occurred_at: DateTime<Utc>,
+    pub schema_version: String,
+    pub data: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestEventsOutcome {
+    pub accepted: usize,
+    pub duplicates: usize,
+    pub accepted_through_local_sequence: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RequestScope {
     pub organization_id: Uuid,

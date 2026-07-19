@@ -71,6 +71,7 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
   const [details, setDetails] = useState<Record<string, TaskDetail>>({});
   const [selectedId, setSelectedId] = useState<string | null>(embedTaskId);
   const [detailState, setDetailState] = useState<CloudTaskState | null>(null);
+  const [detailReload, setDetailReload] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<"online" | "syncing" | "offline">("syncing");
@@ -138,7 +139,13 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
       active = false;
       controller.abort();
     };
-  }, [client, selectedId]);
+  }, [client, selectedId, detailReload]);
+
+  useEffect(() => {
+    if (!detailState?.refetchAfterGap) return;
+    setDetailState(null);
+    setDetailReload((current) => current + 1);
+  }, [detailState?.refetchAfterGap]);
 
   const openDecisions = useMemo(
     () =>

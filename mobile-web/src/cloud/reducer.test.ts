@@ -101,4 +101,14 @@ describe("cloud task event reducer", () => {
     expect(state.task.status).toBe("queued");
     expect(state.task.event_cursor).toBe(4);
   });
+
+  it("stops projection and requests an authoritative refetch on a sequence gap", () => {
+    const state = applyTaskEvent(
+      initialCloudTaskState({ ...task, event_cursor: 4, attempts: [], decisions: [] }),
+      event(6, "task.status_changed", { status: "failed" }),
+    );
+    expect(state.task.status).toBe("queued");
+    expect(state.task.event_cursor).toBe(4);
+    expect(state.refetchAfterGap).toEqual({ expected: 5, received: 6 });
+  });
 });
