@@ -239,8 +239,13 @@ pub async fn list_tasks(
         .then(|| rows.last().map(|row| row.id.clone()))
         .flatten();
     let mut data: Vec<TaskView> = rows.into_iter().map(Into::into).collect();
-    attach_waiting_decisions(pool, &principal.organization_id, &principal.project_id, &mut data)
-        .await?;
+    attach_waiting_decisions(
+        pool,
+        &principal.organization_id,
+        &principal.project_id,
+        &mut data,
+    )
+    .await?;
     Ok(TaskPage {
         data,
         next_cursor,
@@ -258,8 +263,13 @@ pub async fn get_task(
          FROM tasks WHERE organization_id=$1 AND project_id=$2 AND id=$3")
         .bind(&principal.organization_id).bind(&principal.project_id).bind(task_id).fetch_optional(pool).await?.ok_or(ApiError::NotFound)?;
     let mut views = vec![row.into()];
-    attach_waiting_decisions(pool, &principal.organization_id, &principal.project_id, &mut views)
-        .await?;
+    attach_waiting_decisions(
+        pool,
+        &principal.organization_id,
+        &principal.project_id,
+        &mut views,
+    )
+    .await?;
     Ok(views.remove(0))
 }
 

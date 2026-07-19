@@ -521,7 +521,7 @@ export interface components {
         /** @enum {string} */
         RunStatus: "assigned" | "starting" | "running" | "waiting_input" | "stopping" | "succeeded" | "failed" | "cancelled" | "lost";
         /** @enum {string} */
-        DecisionStatus: "pending" | "answered" | "declined" | "expired" | "cancelled";
+        DecisionStatus: "pending" | "answer_queued" | "answered" | "declined" | "expired" | "cancelled";
         /** @enum {string} */
         DecisionKind: "guard" | "elicitation" | "fleet_ask" | "plan_approval" | "permission_prompt" | "a2ui";
         /** @enum {string} */

@@ -1,5 +1,5 @@
 use chrono::{TimeZone, Utc};
-use fleet_cloud_wire::event::RunnerEvent;
+use fleet_cloud_wire::event::{DecisionCreated, DecisionKind, RunnerEvent};
 use fleet_cloud_wire::runner::{
     ClientHello, CloudCommand, CommandAck, CommandAckStatus, RunnerCapability, RunnerFrame,
     ServerFrame, ServerHello,
@@ -124,4 +124,32 @@ fn event_batch_round_trips_without_losing_data() {
     let encoded = serde_json::to_string(&frame).expect("serialize event batch");
     let decoded: RunnerFrame = serde_json::from_str(&encoded).expect("deserialize event batch");
     assert_eq!(decoded, frame);
+}
+
+#[test]
+fn all_six_decision_kinds_round_trip_in_created_events() {
+    let fixtures = [
+        (DecisionKind::Guard, "guard"),
+        (DecisionKind::Elicitation, "elicitation"),
+        (DecisionKind::FleetAsk, "fleet_ask"),
+        (DecisionKind::PlanApproval, "plan_approval"),
+        (DecisionKind::PermissionPrompt, "permission_prompt"),
+        (DecisionKind::A2ui, "a2ui"),
+    ];
+
+    for (kind, encoded_kind) in fixtures {
+        let decision = DecisionCreated {
+            source_decision_id: format!("local-{encoded_kind}"),
+            kind,
+            payload: json!({"sessionId":"session-1","fixture":encoded_kind}),
+            response_schema: json!({"type":"object"}),
+            deadline: None,
+        };
+        let value = serde_json::to_value(&decision).expect("encode Decision fixture");
+        assert_eq!(value["kind"], encoded_kind);
+        assert_eq!(
+            serde_json::from_value::<DecisionCreated>(value).expect("decode Decision fixture"),
+            decision
+        );
+    }
 }

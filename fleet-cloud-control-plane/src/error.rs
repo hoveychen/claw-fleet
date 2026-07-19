@@ -67,11 +67,7 @@ impl ApiError {
                 "conflict",
                 "decision_already_resolved",
             ),
-            Self::DecisionExpired => (
-                StatusCode::CONFLICT,
-                "conflict",
-                "decision_expired",
-            ),
+            Self::DecisionExpired => (StatusCode::CONFLICT, "conflict", "decision_expired"),
             Self::RunnerCapabilityMissing => {
                 (StatusCode::CONFLICT, "runner", "runner_capability_missing")
             }
