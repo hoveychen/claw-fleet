@@ -12,6 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 use crate::outbox::EventOutbox;
+use crate::redaction::{RedactionError, Redactor};
 
 pub const TASK_ENV: &str = "FLEET_CLOUD_TASK_ID";
 pub const RUN_ENV: &str = "FLEET_CLOUD_RUN_ID";
@@ -232,6 +233,7 @@ pub struct Supervisor {
     event_rx: mpsc::Receiver<HarnessEvent>,
     outbox: Arc<EventOutbox>,
     harness: Arc<dyn Harness>,
+    redactor: Redactor,
 }
 
 impl Supervisor {
@@ -243,6 +245,20 @@ impl Supervisor {
         state_directory: &Path,
         outbox: Arc<EventOutbox>,
         harness: Arc<dyn Harness>,
+    ) -> anyhow::Result<Self> {
+        Self::open_with_harness_and_redactor(
+            state_directory,
+            outbox,
+            harness,
+            Redactor::from_environment(),
+        )
+    }
+
+    pub fn open_with_harness_and_redactor(
+        state_directory: &Path,
+        outbox: Arc<EventOutbox>,
+        harness: Arc<dyn Harness>,
+        redactor: Redactor,
     ) -> anyhow::Result<Self> {
         fs::create_dir_all(state_directory)?;
         let workspace_root = state_directory.join("workspaces");
@@ -278,6 +294,7 @@ impl Supervisor {
             event_rx,
             outbox,
             harness,
+            redactor,
         })
     }
 
@@ -885,14 +902,15 @@ impl Supervisor {
         };
         for (index, message) in snapshot.messages.iter().enumerate() {
             let role = message["type"].as_str().unwrap_or("message");
-            let record = public_transcript_record(message.clone());
+            let (record, redactions) = self.cloud_record(message.clone());
             self.emit(
                 &format!("{run_id}:message:{index}"),
                 "message.created",
                 task_id,
                 Some(run_id),
                 json!({
-                    "task_id":task_id,"run_id":run_id,"role":role,"record":record
+                    "task_id":task_id,"run_id":run_id,"role":role,"record":record,
+                    "redactions":redactions
                 }),
             )?;
             if let Some(blocks) = message
@@ -906,13 +924,15 @@ impl Supervisor {
                         _ => None,
                     };
                     if let Some(kind) = kind {
+                        let (tool, redactions) = self.cloud_record(block.clone());
                         self.emit(
                             &format!("{run_id}:{kind}:{index}:{block_index}"),
                             kind,
                             task_id,
                             Some(run_id),
                             json!({
-                                "task_id":task_id,"run_id":run_id,"tool":public_transcript_record(block.clone())
+                                "task_id":task_id,"run_id":run_id,"tool":tool,
+                                "redactions":redactions
                             }),
                         )?;
                     }
@@ -930,6 +950,25 @@ impl Supervisor {
             }),
         )?;
         Ok(())
+    }
+
+    fn cloud_record(&self, value: Value) -> (Value, Value) {
+        match self.redactor.redact(value) {
+            Ok(redacted) => (
+                redacted.record,
+                serde_json::to_value(redacted.counters).unwrap_or_else(|_| json!({})),
+            ),
+            Err(error) => {
+                let reason = match error {
+                    RedactionError::RecordTooLarge => "record_too_large",
+                    RedactionError::ProcessingTimedOut => "processing_timed_out",
+                };
+                (
+                    json!({"type":"redaction_rejected","reason":reason}),
+                    json!({"record_rejected":1}),
+                )
+            }
+        }
     }
 
     fn drain_event_log(&mut self) -> anyhow::Result<()> {
@@ -1043,26 +1082,6 @@ fn contains_local_secret(value: &Value) -> bool {
         }),
         Value::Array(values) => values.iter().any(contains_local_secret),
         _ => false,
-    }
-}
-
-fn public_transcript_record(value: Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .filter(|(key, _)| {
-                    !matches!(
-                        key.as_str(),
-                        "pid" | "cwd" | "jsonl_path" | "workspace_path" | "absolute_path"
-                    )
-                })
-                .map(|(key, value)| (key, public_transcript_record(value)))
-                .collect(),
-        ),
-        Value::Array(values) => {
-            Value::Array(values.into_iter().map(public_transcript_record).collect())
-        }
-        other => other,
     }
 }
 

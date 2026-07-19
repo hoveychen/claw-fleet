@@ -35,7 +35,14 @@ impl Harness for FakeHarness {
             session_id.clone(),
             HarnessSnapshot {
                 messages: vec![
-                    json!({"type":"user","cwd":"/private/customer/repo","message":{"content":"fix it"}}),
+                    json!({
+                        "type":"user",
+                        "cwd":"/private/customer/repo",
+                        "message":{
+                            "content":"token ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+                            "headers":{"Authorization":"Bearer transcript-auth-secret"}
+                        }
+                    }),
                     json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Read","input":{"file":"safe.txt"}}]}}),
                     json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"ok"}]}}),
                 ],
@@ -293,6 +300,15 @@ fn supervisor_bridges_providers_handoff_controls_and_safe_cloud_events() {
     assert!(!encoded.contains("jsonl_path"));
     assert!(!encoded.contains("workspace_path"));
     assert!(!encoded.contains("/private/customer/repo"));
+    assert!(!encoded.contains("transcript-auth-secret"));
+    assert!(!encoded.contains("ghp_abcdefghijklmnopqrstuvwxyz1234567890"));
+    assert!(encoded.contains("[REDACTED:authorization]"));
+    assert!(encoded.contains("[REDACTED:github_token]"));
+    assert!(events.iter().any(|event| {
+        event.event_type == "message.created"
+            && event.data["redactions"]["authorization"] == 1
+            && event.data["redactions"]["github_token"] == 1
+    }));
     assert!(!encoded.contains(state.to_str().unwrap()));
 }
 
