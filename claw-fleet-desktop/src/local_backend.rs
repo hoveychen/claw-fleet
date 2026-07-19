@@ -1447,7 +1447,14 @@ fn resolve_session_display(
     let list = sessions.lock().unwrap();
     list.iter()
         .find(|s| s.id == session_id)
-        .map(|s| (s.workspace_name.clone(), s.ai_title.clone()))
+        // Prefer the human/agent title override — for Codex sessions it's the
+        // only real title (ai_title is the raw first prompt).
+        .map(|s| {
+            (
+                s.workspace_name.clone(),
+                s.title_override.clone().or_else(|| s.ai_title.clone()),
+            )
+        })
         .unwrap_or_default()
 }
 
