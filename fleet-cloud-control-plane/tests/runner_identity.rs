@@ -3,6 +3,10 @@ mod common;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use fleet_cloud_control_plane::routes::runners::authorize_runner_identity;
+use fleet_cloud_control_plane::{app, runner_gateway};
+use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
+use sha2::{Digest, Sha256};
+use std::io::BufReader;
 use tower::ServiceExt;
 
 async fn create_registration(pool: &sqlx::PgPool, key: &str, name: &str) -> String {
@@ -102,4 +106,62 @@ async fn revoked_identity_fails_without_affecting_other_runner(pool: sqlx::PgPoo
     authorize_runner_identity(&pool, runner_two, &fingerprint_two)
         .await
         .unwrap();
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn claim_issues_client_certificate_and_stores_its_fingerprint(pool: sqlx::PgPool) {
+    common::seed(&pool).await;
+    sqlx::query("INSERT INTO runner_pools(id,organization_id,project_id,name) VALUES('pool_test','org_test','proj_test','Test')")
+        .execute(&pool).await.unwrap();
+    let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca_key = KeyPair::generate().unwrap();
+    let ca = ca_params.self_signed(&ca_key).unwrap();
+    let issuer = runner_gateway::identity::RunnerIdentityIssuer::from_pem(
+        &ca.pem(),
+        &ca_key.serialize_pem(),
+    )
+    .unwrap();
+    let router = app::router(
+        app::AppState::new(pool.clone(), common::PEPPER.to_vec())
+            .with_runner_identity_issuer(issuer),
+    );
+    let registration = common::request_json(
+        router.clone(),
+        Method::POST,
+        "/runner-registrations",
+        common::VALID_KEY,
+        &[("idempotency-key", "register-issued-001")],
+        Some(serde_json::json!({"pool_id":"pool_test","name":"issued"})),
+    )
+    .await;
+    let claim = common::request_json(
+        router,
+        Method::POST,
+        "/runner-registrations/claim",
+        common::VALID_KEY,
+        &[],
+        Some(
+            serde_json::json!({"token":registration.body["token"],"capabilities":["claude_code"]}),
+        ),
+    )
+    .await;
+    assert_eq!(claim.status, StatusCode::CREATED, "{}", claim.body);
+    assert!(claim.body["private_key_pem"]
+        .as_str()
+        .unwrap()
+        .contains("PRIVATE KEY"));
+    assert_eq!(claim.body["ca_certificate_pem"], ca.pem());
+    let certificate = claim.body["certificate_pem"].as_str().unwrap();
+    let leaf = rustls_pemfile::certs(&mut BufReader::new(certificate.as_bytes()))
+        .next()
+        .unwrap()
+        .unwrap();
+    let stored: Vec<u8> =
+        sqlx::query_scalar("SELECT certificate_fingerprint FROM runners WHERE id=$1")
+            .bind(claim.body["runner_id"].as_str().unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, Sha256::digest(leaf.as_ref()).to_vec());
 }

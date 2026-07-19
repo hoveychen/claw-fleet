@@ -12,6 +12,7 @@ chrono = { version = "0.4", features = ["serde"] }
 fleet-cloud-wire = { path = "../fleet-cloud-wire" }
 futures-util = "0.3"
 hex = "0.4"
+rcgen = { version = "0.13", features = ["x509-parser"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2"
 serde = { version = "1", features = ["derive"] }
@@ -30,6 +31,5 @@ uuid = { version = "1", features = ["serde", "v7"] }
 
 [dev-dependencies]
 fleet-cloud-runner = { path = "../fleet-cloud-runner" }
-rcgen = "0.13"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

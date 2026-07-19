@@ -26,7 +26,7 @@ fn default_expiry() -> i64 {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClaimRegistrationRequest {
     token: String,
-    certificate_fingerprint: String,
+    certificate_fingerprint: Option<String>,
     #[serde(default)]
     capabilities: Vec<String>,
     #[serde(default = "default_concurrency")]
@@ -112,17 +112,12 @@ pub async fn claim_registration(
     State(state): State<AppState>,
     Json(request): Json<ClaimRegistrationRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    if request.token.len() < 32
-        || request.certificate_fingerprint.len() < 32
-        || !(1..=256).contains(&request.max_concurrency)
-    {
+    if request.token.len() < 32 || !(1..=256).contains(&request.max_concurrency) {
         return Err(ApiError::Validation(
             "invalid Runner registration claim".into(),
         ));
     }
     let token_hash = auth::hash_api_key(&state.api_key_pepper, &request.token);
-    let fingerprint = hex::decode(&request.certificate_fingerprint)
-        .map_err(|_| ApiError::Validation("certificate_fingerprint must be hex".into()))?;
     let mut tx = state.pool.begin().await?;
     let registration = sqlx::query_as::<_, (String,String,String,Option<String>)>(
         "SELECT id,organization_id,project_id,name FROM runner_registration_tokens WHERE token_hash=$1 AND used_at IS NULL AND expires_at>now() FOR UPDATE")
@@ -134,6 +129,22 @@ pub async fn claim_registration(
     .fetch_one(&mut *tx)
     .await?;
     let runner_id = new_id("runner");
+    let issued = state
+        .runner_identity_issuer
+        .as_ref()
+        .map(|issuer| issuer.issue(&runner_id))
+        .transpose()
+        .map_err(|_| ApiError::Internal)?;
+    let fingerprint = match (&issued, request.certificate_fingerprint.as_deref()) {
+        (Some(identity), _) => identity.fingerprint.clone(),
+        (None, Some(fingerprint)) if fingerprint.len() >= 32 => hex::decode(fingerprint)
+            .map_err(|_| ApiError::Validation("certificate_fingerprint must be hex".into()))?,
+        (None, _) => {
+            return Err(ApiError::Validation(
+                "certificate_fingerprint is required when certificate issuance is disabled".into(),
+            ))
+        }
+    };
     sqlx::query("INSERT INTO runners(id,organization_id,project_id,pool_id,name,certificate_fingerprint,build_version,platform,architecture,capabilities,max_concurrency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
         .bind(&runner_id).bind(&registration.1).bind(&registration.2).bind(pool_id)
         .bind(registration.3.unwrap_or_else(|| runner_id.clone())).bind(fingerprint).bind(request.build_version)
@@ -143,10 +154,13 @@ pub async fn claim_registration(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({"runner_id": runner_id, "status": "offline"})),
-    ))
+    let mut body = json!({"runner_id": runner_id, "status": "offline"});
+    if let Some(identity) = issued {
+        body["certificate_pem"] = json!(identity.certificate_pem);
+        body["private_key_pem"] = json!(identity.private_key_pem);
+        body["ca_certificate_pem"] = json!(identity.ca_certificate_pem);
+    }
+    Ok((StatusCode::CREATED, Json(body)))
 }
 
 pub async fn revoke_runner(
