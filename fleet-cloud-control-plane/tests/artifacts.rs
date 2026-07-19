@@ -252,8 +252,8 @@ async fn artifact_upload_enforces_file_and_task_quotas(pool: sqlx::PgPool) {
         b"x",
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(body["error"]["code"], "validation_failed");
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body["error"]["code"], "quota_exceeded");
 }
 
 #[sqlx::test(migrations = "./migrations")]

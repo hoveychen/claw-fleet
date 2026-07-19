@@ -37,6 +37,55 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+    let worker_pool = pool.clone();
+    let worker_pepper = config.api_key_pepper.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        loop {
+            interval.tick().await;
+            if let Err(error) = fleet_cloud_control_plane::services::webhooks::process_due_batch(
+                &worker_pool,
+                &worker_pepper,
+                50,
+            )
+            .await
+            {
+                tracing::warn!(%error, "Fleet Cloud webhook delivery batch failed");
+            }
+        }
+    });
+    let usage_pool = pool.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
+        loop {
+            interval.tick().await;
+            let projects = sqlx::query_as::<_, (String, String)>(
+                "SELECT organization_id,id FROM projects ORDER BY id",
+            )
+            .fetch_all(&usage_pool)
+            .await;
+            match projects {
+                Ok(projects) => {
+                    let now = chrono::Utc::now();
+                    for (organization_id, project_id) in projects {
+                        for hour in [now, now - chrono::Duration::hours(1)] {
+                            if let Err(error) = fleet_cloud_control_plane::services::governance::aggregate_usage_hour(
+                                &usage_pool,
+                                &organization_id,
+                                &project_id,
+                                hour,
+                            )
+                            .await
+                            {
+                                tracing::warn!(%error, %project_id, "Fleet Cloud usage aggregation failed");
+                            }
+                        }
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "Fleet Cloud usage project scan failed"),
+            }
+        }
+    });
     let mut state = app::AppState::new(pool.clone(), config.api_key_pepper);
     if let Some(gateway) = config.runner_gateway.as_ref() {
         let ca_pem =

@@ -104,7 +104,11 @@ pub async fn post_json(
     let bytes = to_bytes(response.into_body(), 2 * 1024 * 1024)
         .await
         .unwrap();
-    let body = serde_json::from_slice(&bytes).unwrap();
+    let body = if bytes.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     JsonResponse {
         status,
         body,
@@ -140,7 +144,11 @@ pub async fn request_json(
     let bytes = to_bytes(response.into_body(), 2 * 1024 * 1024)
         .await
         .unwrap();
-    let body = serde_json::from_slice(&bytes).unwrap();
+    let body = if bytes.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     JsonResponse {
         status,
         body,

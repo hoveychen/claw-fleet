@@ -335,6 +335,7 @@ pub async fn create_task(
             body: stored.body,
         });
     }
+    crate::services::governance::enforce_run_quota(&mut tx, principal).await?;
 
     let task_id = new_id("task");
     let run_id = new_id("run");

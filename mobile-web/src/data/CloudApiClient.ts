@@ -16,6 +16,7 @@ import type {
   TranscriptRecord,
   Run,
   Usage,
+  OperationsSnapshot,
 } from "./FleetDataClient";
 import { openCloudEventStream } from "./cloudSse";
 
@@ -155,6 +156,10 @@ export class CloudApiClient implements FleetDataClient {
 
   getRunUsage(runId: string): Promise<Usage> {
     return this.request("GET", `/runs/${encodeURIComponent(runId)}/usage`);
+  }
+
+  getOperations(): Promise<OperationsSnapshot> {
+    return this.request("GET", "/operations");
   }
 
   streamEvents(input: StreamEventsInput): EventSubscription {

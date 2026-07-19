@@ -4,6 +4,7 @@ use axum::{response::IntoResponse, Json};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::app::AppState;
 use crate::auth::{self, ProjectPrincipal};
@@ -117,6 +118,9 @@ pub async fn claim_registration(
             "invalid Runner registration claim".into(),
         ));
     }
+    let request_hash = hex::encode(Sha256::digest(
+        serde_json::to_vec(&request).map_err(|_| ApiError::Internal)?,
+    ));
     let token_hash = auth::hash_api_key(&state.api_key_pepper, &request.token);
     let mut tx = state.pool.begin().await?;
     let registration = sqlx::query_as::<_, (String,String,String,Option<String>)>(
@@ -153,6 +157,15 @@ pub async fn claim_registration(
         .bind(&registration.0)
         .execute(&mut *tx)
         .await?;
+    let response_hash = hex::encode(Sha256::digest(
+        serde_json::to_vec(&json!({"runner_id":&runner_id,"status":"offline"}))
+            .map_err(|_| ApiError::Internal)?,
+    ));
+    sqlx::query("INSERT INTO audit_records(organization_id,project_id,principal_type,principal_id,request_id,action,resource_type,resource_id,details) VALUES($1,$2,'runner_registration',$3,$4,'POST /runner-registrations/claim','runner',$5,$6)")
+        .bind(&registration.1).bind(&registration.2).bind(&registration.0)
+        .bind(new_id("req")).bind(&runner_id)
+        .bind(json!({"before_hash":request_hash,"after_hash":response_hash,"status":201}))
+        .execute(&mut *tx).await?;
     tx.commit().await?;
     let mut body = json!({"runner_id": runner_id, "status": "offline"});
     if let Some(identity) = issued {
