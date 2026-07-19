@@ -5,7 +5,9 @@ use chrono::Utc;
 use fleet_cloud_wire::runner::{ClientHello, CommandAck, RunnerFrame, ServerFrame};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
-use tokio_tungstenite::{connect_async_tls_with_config, Connector};
+use tokio_tungstenite::{
+    connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
+};
 
 use crate::journal::{CommandJournal, PersistResult};
 use crate::outbox::EventOutbox;
@@ -43,9 +45,7 @@ async fn run_once_inner(
     let range = outbox.range()?;
     hello.outbox_first_sequence = range.0;
     hello.outbox_last_sequence = range.1;
-    let request = url.into_client_request()?;
-    let (mut socket, _) =
-        connect_async_tls_with_config(request, None, false, Some(Connector::Rustls(tls))).await?;
+    let (mut socket, _) = connect_cloud(url, tls, Duration::from_secs(15)).await?;
     send_runner(&mut socket, &RunnerFrame::ClientHello(hello)).await?;
     let server_hello = match next_server(&mut socket).await? {
         ServerFrame::ServerHello(hello) => hello,
@@ -96,6 +96,24 @@ async fn run_once_inner(
             }
         }
     }
+}
+
+async fn connect_cloud(
+    url: &str,
+    tls: Arc<rustls::ClientConfig>,
+    timeout: Duration,
+) -> anyhow::Result<(
+    WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    tokio_tungstenite::tungstenite::handshake::client::Response,
+)> {
+    let request = url.into_client_request()?;
+    tokio::time::timeout(
+        timeout,
+        connect_async_tls_with_config(request, None, false, Some(Connector::Rustls(tls))),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Cloud WebSocket connection timed out after {timeout:?}"))?
+    .map_err(Into::into)
 }
 
 pub async fn run_forever(
@@ -172,5 +190,34 @@ fn decode_server(message: Message) -> anyhow::Result<ServerFrame> {
         Message::Binary(bytes) => Ok(serde_json::from_slice(&bytes)?),
         Message::Close(_) => anyhow::bail!("Cloud closed connection"),
         _ => anyhow::bail!("unexpected non-data WebSocket frame"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cloud_connect_times_out_when_peer_never_completes_tls() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let tls = Arc::new(
+            rustls::ClientConfig::builder()
+                .with_root_certificates(rustls::RootCertStore::empty())
+                .with_no_client_auth(),
+        );
+        let error = connect_cloud(
+            &format!("wss://localhost:{}", address.port()),
+            tls,
+            Duration::from_millis(50),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("timed out"));
     }
 }
