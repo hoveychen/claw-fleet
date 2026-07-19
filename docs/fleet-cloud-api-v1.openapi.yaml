@@ -1025,7 +1025,7 @@ components:
 
     DecisionStatus:
       type: string
-      enum: [pending, answered, declined, expired, cancelled]
+      enum: [pending, answer_queued, answered, declined, expired, cancelled]
 
     DecisionKind:
       type: string

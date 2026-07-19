@@ -19,9 +19,12 @@ struct DecisionRow {
     payload: Value,
     response_schema: Value,
     response: Option<Value>,
+    response_principal_id: Option<String>,
     deadline: Option<DateTime<Utc>>,
+    schema_version: i32,
     version: i64,
     created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
     resolved_at: Option<DateTime<Utc>>,
 }
 
@@ -36,23 +39,51 @@ pub struct DecisionView {
     pub payload: Value,
     pub response_schema: Value,
     pub response: Option<Value>,
+    pub resolved_by: Option<DecisionPrincipalView>,
     pub deadline: Option<DateTime<Utc>>,
+    pub schema_version: i32,
     pub version: i64,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub resolved_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DecisionPrincipalView {
+    pub r#type: &'static str,
+    pub id: String,
 }
 
 impl From<DecisionRow> for DecisionView {
     fn from(row: DecisionRow) -> Self {
-        Self { id: row.id, project_id: row.project_id, task_id: row.task_id, run_id: row.run_id,
-            kind: row.kind, status: row.status, payload: row.payload, response_schema: row.response_schema,
-            response: row.response, deadline: row.deadline, version: row.version,
-            created_at: row.created_at, resolved_at: row.resolved_at }
+        Self {
+            id: row.id,
+            project_id: row.project_id,
+            task_id: row.task_id,
+            run_id: row.run_id,
+            kind: row.kind,
+            status: row.status,
+            payload: row.payload,
+            response_schema: row.response_schema,
+            response: row.response,
+            resolved_by: row.response_principal_id.map(|id| DecisionPrincipalView {
+                r#type: "api_key",
+                id,
+            }),
+            deadline: row.deadline,
+            schema_version: row.schema_version,
+            version: row.version,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            resolved_at: row.resolved_at,
+        }
     }
 }
 
 #[derive(Debug, Serialize)]
-pub struct DecisionPage { pub data: Vec<DecisionView> }
+pub struct DecisionPage {
+    pub data: Vec<DecisionView>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionResponseRequest {
@@ -61,46 +92,88 @@ pub struct DecisionResponseRequest {
     pub answers: Value,
 }
 
-pub struct MutationResult { pub status: u16, pub body: Value }
+pub struct MutationResult {
+    pub status: u16,
+    pub body: Value,
+}
 
-const SELECT_VIEW: &str = "SELECT id,project_id,task_id,run_id,kind,status,payload,response_schema,response,deadline,version,created_at,resolved_at FROM decisions";
+const SELECT_VIEW: &str = "SELECT id,project_id,task_id,run_id,kind,status,payload,response_schema,response,response_principal_id,deadline,schema_version,version,created_at,updated_at,resolved_at FROM decisions";
 
-pub async fn list(pool: &PgPool, principal: &ProjectPrincipal, status: Option<&str>) -> Result<DecisionPage, ApiError> {
+pub async fn list(
+    pool: &PgPool,
+    principal: &ProjectPrincipal,
+    status: Option<&str>,
+) -> Result<DecisionPage, ApiError> {
     expire_pending(pool, &principal.project_id).await?;
     let sql = format!("{SELECT_VIEW} WHERE organization_id=$1 AND project_id=$2 AND ($3::text IS NULL OR status=$3) ORDER BY created_at DESC,id DESC");
-    let rows = sqlx::query_as::<_, DecisionRow>(&sql).bind(&principal.organization_id).bind(&principal.project_id)
-        .bind(status).fetch_all(pool).await?;
-    Ok(DecisionPage { data: rows.into_iter().map(Into::into).collect() })
+    let rows = sqlx::query_as::<_, DecisionRow>(&sql)
+        .bind(&principal.organization_id)
+        .bind(&principal.project_id)
+        .bind(status)
+        .fetch_all(pool)
+        .await?;
+    Ok(DecisionPage {
+        data: rows.into_iter().map(Into::into).collect(),
+    })
 }
 
-pub async fn get(pool: &PgPool, principal: &ProjectPrincipal, id: &str) -> Result<DecisionView, ApiError> {
+pub async fn get(
+    pool: &PgPool,
+    principal: &ProjectPrincipal,
+    id: &str,
+) -> Result<DecisionView, ApiError> {
     expire_pending(pool, &principal.project_id).await?;
     let sql = format!("{SELECT_VIEW} WHERE id=$1 AND organization_id=$2 AND project_id=$3");
-    sqlx::query_as::<_, DecisionRow>(&sql).bind(id).bind(&principal.organization_id).bind(&principal.project_id)
-        .fetch_optional(pool).await?.map(Into::into).ok_or(ApiError::NotFound)
+    sqlx::query_as::<_, DecisionRow>(&sql)
+        .bind(id)
+        .bind(&principal.organization_id)
+        .bind(&principal.project_id)
+        .fetch_optional(pool)
+        .await?
+        .map(Into::into)
+        .ok_or(ApiError::NotFound)
 }
 
-pub async fn respond(pool: &PgPool, principal: &ProjectPrincipal, id: &str, key: &str,
-    expected_version: i64, request: DecisionResponseRequest) -> Result<MutationResult, ApiError> {
+pub async fn respond(
+    pool: &PgPool,
+    principal: &ProjectPrincipal,
+    id: &str,
+    key: &str,
+    expected_version: i64,
+    request: DecisionResponseRequest,
+) -> Result<MutationResult, ApiError> {
     let mut tx = pool.begin().await?;
     let endpoint = format!("POST /decisions/{id}/responses");
     let hash = idempotency::request_hash(&(expected_version, &request))?;
-    if let Some(stored) = idempotency::lock_and_find(&mut tx, principal, &endpoint, key, &hash).await? {
+    if let Some(stored) =
+        idempotency::lock_and_find(&mut tx, principal, &endpoint, key, &hash).await?
+    {
         tx.commit().await?;
-        return Ok(MutationResult { status: stored.status, body: stored.body });
+        return Ok(MutationResult {
+            status: stored.status,
+            body: stored.body,
+        });
     }
-    let state = sqlx::query_as::<_, (String,i64,Option<DateTime<Utc>>,String,String,String)>(
-        "SELECT status,version,deadline,runner_id,task_id,run_id FROM decisions WHERE id=$1 AND organization_id=$2 AND project_id=$3 FOR UPDATE")
+    let state = sqlx::query_as::<_, (String,i64,Option<DateTime<Utc>>,String,String,String,String)>(
+        "SELECT status,version,deadline,runner_id,task_id,run_id,source_decision_id FROM decisions WHERE id=$1 AND organization_id=$2 AND project_id=$3 FOR UPDATE")
         .bind(id).bind(&principal.organization_id).bind(&principal.project_id).fetch_optional(&mut *tx).await?
         .ok_or(ApiError::NotFound)?;
-    if state.0 != "pending" { return Err(if state.0 == "expired" { ApiError::DecisionExpired } else { ApiError::DecisionAlreadyResolved }); }
+    if state.0 != "pending" {
+        return Err(if state.0 == "expired" {
+            ApiError::DecisionExpired
+        } else {
+            ApiError::DecisionAlreadyResolved
+        });
+    }
     if state.2.is_some_and(|deadline| deadline <= Utc::now()) {
-        sqlx::query("UPDATE decisions SET status='expired',version=version+1,resolved_at=now() WHERE id=$1 AND status='pending'")
+        sqlx::query("UPDATE decisions SET status='expired',version=version+1,updated_at=now(),resolved_at=now() WHERE id=$1 AND status='pending'")
             .bind(id).execute(&mut *tx).await?;
         tx.commit().await?;
         return Err(ApiError::DecisionExpired);
     }
-    if state.1 != expected_version { return Err(ApiError::VersionConflict); }
+    if state.1 != expected_version {
+        return Err(ApiError::VersionConflict);
+    }
     let terminal = match request.action.as_str() {
         "answer" | "allow" | "approve" => "answered",
         "decline" | "deny" | "reject" => "declined",
@@ -109,33 +182,61 @@ pub async fn respond(pool: &PgPool, principal: &ProjectPrincipal, id: &str, key:
     };
     let response = serde_json::to_value(&request).map_err(|_| ApiError::Internal)?;
     let changed = sqlx::query_scalar::<_, i64>(
-        "UPDATE decisions SET status=$1,response=$2,response_principal_id=$3,resolved_at=now(),version=version+1
-         WHERE id=$4 AND status='pending' AND version=$5 RETURNING version")
-        .bind(terminal).bind(&response).bind(&principal.api_key_id).bind(id).bind(expected_version)
+        "UPDATE decisions SET status='answer_queued',response=$1,response_principal_id=$2,version=version+1,updated_at=now()
+         WHERE id=$3 AND status='pending' AND version=$4 RETURNING version")
+        .bind(&response).bind(&principal.api_key_id).bind(id).bind(expected_version)
         .fetch_optional(&mut *tx).await?;
-    let Some(version) = changed else { return Err(ApiError::DecisionAlreadyResolved); };
-    let sequence = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(task_sequence),0)+1 FROM events WHERE task_id=$1")
-        .bind(&state.4).fetch_one(&mut *tx).await?;
+    let Some(version) = changed else {
+        return Err(ApiError::DecisionAlreadyResolved);
+    };
+    let sequence = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(task_sequence),0)+1 FROM events WHERE task_id=$1",
+    )
+    .bind(&state.4)
+    .fetch_one(&mut *tx)
+    .await?;
     sqlx::query("INSERT INTO events(id,organization_id,project_id,task_id,run_id,event_type,task_sequence,occurred_at,data,schema_version)
-        VALUES($1,$2,$3,$4,$5,'decision.resolved',$6,now(),$7,1)")
+        VALUES($1,$2,$3,$4,$5,'decision.response_queued',$6,now(),$7,1)")
         .bind(new_id("evt")).bind(&principal.organization_id).bind(&principal.project_id).bind(&state.4).bind(&state.5)
-        .bind(sequence).bind(json!({"decision_id":id,"status":terminal,"version":version})).execute(&mut *tx).await?;
-    let assignment = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(assignment_sequence),0)+1 FROM commands WHERE runner_id=$1")
-        .bind(&state.3).fetch_one(&mut *tx).await?;
-    sqlx::query("INSERT INTO commands(id,organization_id,project_id,task_id,run_id,runner_id,assignment_sequence,command_type,payload,expected_version,deadline)
-        VALUES($1,$2,$3,$4,$5,$6,$7,'resolve_decision',$8,$9,now()+interval '7 days')")
-        .bind(new_id("cmd")).bind(&principal.organization_id).bind(&principal.project_id).bind(&state.4).bind(&state.5)
-        .bind(&state.3).bind(assignment).bind(json!({"decision_id":id,"response":response})).bind(expected_version).execute(&mut *tx).await?;
+        .bind(sequence).bind(json!({"decision_id":id,"status":"answer_queued","terminal_status":terminal,"version":version})).execute(&mut *tx).await?;
+    let assignment = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(assignment_sequence),0)+1 FROM commands WHERE runner_id=$1",
+    )
+    .bind(&state.3)
+    .fetch_one(&mut *tx)
+    .await?;
+    let command_id = new_id("cmd");
+    let accepted_at = Utc::now();
+    sqlx::query("INSERT INTO commands(id,organization_id,project_id,task_id,run_id,runner_id,assignment_sequence,command_type,status,payload,expected_version,deadline,accepted_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,'resolve_decision','accepted',$8,$9,now()+interval '7 days',$10)")
+        .bind(&command_id).bind(&principal.organization_id).bind(&principal.project_id).bind(&state.4).bind(&state.5)
+        .bind(&state.3).bind(assignment).bind(json!({
+            "decision_id":id,
+            "source_decision_id":state.6,
+            "response":response,
+            "terminal_status":terminal
+        })).bind(expected_version).bind(accepted_at).execute(&mut *tx).await?;
     let sql = format!("{SELECT_VIEW} WHERE id=$1");
-    let view: DecisionView = sqlx::query_as::<_, DecisionRow>(&sql).bind(id).fetch_one(&mut *tx).await?.into();
-    let body = serde_json::to_value(view).map_err(|_| ApiError::Internal)?;
+    let view: DecisionView = sqlx::query_as::<_, DecisionRow>(&sql)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?
+        .into();
+    let body = json!({
+        "decision": view,
+        "command": {
+            "command_id": command_id,
+            "status": "accepted",
+            "accepted_at": accepted_at
+        }
+    });
     idempotency::store(&mut tx, principal, &endpoint, key, &hash, 202, &body).await?;
     tx.commit().await?;
     Ok(MutationResult { status: 202, body })
 }
 
 async fn expire_pending(pool: &PgPool, project_id: &str) -> Result<(), ApiError> {
-    sqlx::query("UPDATE decisions SET status='expired',version=version+1,resolved_at=now() WHERE project_id=$1 AND status='pending' AND deadline <= now()")
+    sqlx::query("UPDATE decisions SET status='expired',version=version+1,updated_at=now(),resolved_at=now() WHERE project_id=$1 AND status='pending' AND deadline <= now()")
         .bind(project_id).execute(pool).await?;
     Ok(())
 }

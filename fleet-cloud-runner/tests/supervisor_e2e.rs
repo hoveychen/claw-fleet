@@ -5,9 +5,11 @@ use chrono::{Duration, Utc};
 use claw_fleet_core::agent_source::SpawnSpec;
 use claw_fleet_core::backend::HarnessEvent;
 use fleet_cloud_runner::outbox::EventOutbox;
-use fleet_cloud_runner::supervisor::{Harness, HarnessSnapshot, Supervisor};
+use fleet_cloud_runner::supervisor::{Harness, HarnessSnapshot, PendingDecision, Supervisor};
 use fleet_cloud_wire::runner::{CloudCommand, CommandAckStatus};
 use serde_json::{json, Value};
+
+static HARNESS_SINK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Default)]
 struct FakeHarness {
@@ -15,6 +17,8 @@ struct FakeHarness {
     terminated: Mutex<Vec<u32>>,
     queued: Mutex<Vec<(String, String)>>,
     snapshots: Mutex<HashMap<String, HarnessSnapshot>>,
+    pending_decisions: Mutex<Vec<PendingDecision>>,
+    decision_responses: Mutex<Vec<(String, String, Value)>>,
 }
 
 impl Harness for FakeHarness {
@@ -62,6 +66,18 @@ impl Harness for FakeHarness {
     fn snapshot(&self, session_id: &str) -> Result<Option<HarnessSnapshot>, String> {
         Ok(self.snapshots.lock().unwrap().get(session_id).cloned())
     }
+
+    fn pending_decisions(&self) -> Result<Vec<PendingDecision>, String> {
+        Ok(self.pending_decisions.lock().unwrap().clone())
+    }
+
+    fn respond_decision(&self, kind: &str, id: &str, response: &Value) -> Result<(), String> {
+        self.decision_responses
+            .lock()
+            .unwrap()
+            .push((kind.into(), id.into(), response.clone()));
+        Ok(())
+    }
 }
 
 fn command(
@@ -104,6 +120,7 @@ fn exit_event(task_id: &str, run_id: &str, session_id: &str, provider: &str) -> 
 
 #[test]
 fn supervisor_bridges_providers_handoff_controls_and_safe_cloud_events() {
+    let _sink_lock = HARNESS_SINK_TEST_LOCK.lock().unwrap();
     let directory = tempfile::tempdir().unwrap();
     let repository = directory.path().join("repo");
     std::fs::create_dir_all(&repository).unwrap();
@@ -277,4 +294,119 @@ fn supervisor_bridges_providers_handoff_controls_and_safe_cloud_events() {
     assert!(!encoded.contains("workspace_path"));
     assert!(!encoded.contains("/private/customer/repo"));
     assert!(!encoded.contains(state.to_str().unwrap()));
+}
+
+#[test]
+fn supervisor_scans_six_decisions_and_replays_delivery_idempotently_after_restart() {
+    let _sink_lock = HARNESS_SINK_TEST_LOCK.lock().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let repository = directory.path().join("repo");
+    std::fs::create_dir_all(&repository).unwrap();
+    std::fs::write(repository.join("README.md"), "fixture").unwrap();
+    let state = directory.path().join("state");
+    let outbox = Arc::new(EventOutbox::open(&directory.path().join("outbox.sqlite")).unwrap());
+    let harness = Arc::new(FakeHarness::default());
+    let session_id = "fixture-claude_code-1";
+    let fixtures = [
+        ("guard", json!({"allow":true})),
+        ("elicitation", json!({"answers":{"Question":"Yes"}})),
+        ("fleet_ask", json!({"answers":{"Question":"Yes"}})),
+        ("plan_approval", json!({"decision":"approve"})),
+        (
+            "a2ui",
+            json!({"actionName":"submit","actionContext":{"x":"1"}}),
+        ),
+        ("permission_prompt", json!({"allow":true})),
+    ];
+
+    let mut supervisor =
+        Supervisor::open_with_harness(&state, outbox.clone(), harness.clone()).unwrap();
+    assert_eq!(
+        supervisor
+            .execute(&command(
+                1,
+                "start_run",
+                "task-decisions",
+                Some("run-decisions"),
+                start_payload(repository.to_str().unwrap(), "claude_code"),
+            ))
+            .status,
+        CommandAckStatus::Completed
+    );
+    *harness.pending_decisions.lock().unwrap() = fixtures
+        .iter()
+        .enumerate()
+        .map(|(index, (kind, _))| PendingDecision {
+            id: format!("source-{index}"),
+            session_id: session_id.into(),
+            kind: (*kind).into(),
+            request: json!({"id":format!("source-{index}"),"sessionId":session_id,"kind":kind}),
+        })
+        .collect();
+    supervisor.reconcile().unwrap();
+
+    let created = outbox
+        .batch_after(0, 100)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.event_type == "decision.created")
+        .collect::<Vec<_>>();
+    assert_eq!(created.len(), 6);
+    let encoded_kinds = created
+        .iter()
+        .map(|event| event.data["decision"]["kind"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        encoded_kinds,
+        vec![
+            "guard",
+            "elicitation",
+            "fleet_ask",
+            "plan_approval",
+            "a2ui",
+            "permission_prompt"
+        ]
+    );
+
+    for (index, (_, response)) in fixtures.iter().enumerate() {
+        let result = supervisor.execute(&command(
+            index as u64 + 2,
+            "resolve_decision",
+            "task-decisions",
+            Some("run-decisions"),
+            json!({
+                "decision_id":format!("cloud-{index}"),
+                "source_decision_id":format!("source-{index}"),
+                "response":response,
+                "terminal_status":"answered"
+            }),
+        ));
+        assert_eq!(result.status, CommandAckStatus::Completed, "{result:?}");
+    }
+    assert_eq!(harness.decision_responses.lock().unwrap().len(), 6);
+    drop(supervisor);
+
+    let mut restarted =
+        Supervisor::open_with_harness(&state, outbox.clone(), harness.clone()).unwrap();
+    let replay = restarted.execute(&command(
+        20,
+        "resolve_decision",
+        "task-decisions",
+        Some("run-decisions"),
+        json!({
+            "decision_id":"cloud-0",
+            "source_decision_id":"source-0",
+            "response":{"allow":true},
+            "terminal_status":"answered"
+        }),
+    ));
+    assert_eq!(replay.status, CommandAckStatus::Completed);
+    assert_eq!(harness.decision_responses.lock().unwrap().len(), 6);
+    let delivered = outbox
+        .batch_after(0, 100)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.event_type == "decision.delivered")
+        .collect::<Vec<_>>();
+    assert_eq!(delivered.len(), 6);
 }

@@ -6,7 +6,7 @@ use std::sync::{mpsc, Arc};
 use chrono::Utc;
 use claw_fleet_core::agent_source::SpawnSpec;
 use claw_fleet_core::backend::{HarnessEvent, HarnessEventSink};
-use fleet_cloud_wire::event::RunnerEvent;
+use fleet_cloud_wire::event::{DecisionCreated, DecisionKind, RunnerEvent};
 use fleet_cloud_wire::runner::{CloudCommand, CommandAckStatus};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -104,9 +104,9 @@ impl Harness for CoreHarness {
     fn pending_decisions(&self) -> Result<Vec<PendingDecision>, String> {
         let mut decisions = Vec::new();
         macro_rules! collect {
-            ($kind:literal, $module:path) => {
-                for id in $module::list_pending_requests() {
-                    if let Some(request) = $module::read_request(&id) {
+            ($kind:literal, $list:path, $read:path) => {
+                for id in $list() {
+                    if let Some(request) = $read(&id) {
                         let value = serde_json::to_value(&request).map_err(|e| e.to_string())?;
                         decisions.push(PendingDecision {
                             id,
@@ -118,79 +118,98 @@ impl Harness for CoreHarness {
                 }
             };
         }
-        collect!("guard", claw_fleet_core::guard);
-        collect!("elicitation", claw_fleet_core::elicitation);
-        collect!("fleet-ask", claw_fleet_core::mcp_ipc);
-        collect!("plan-approval", claw_fleet_core::plan_approval);
-        collect!("a2ui-render", claw_fleet_core::mcp_a2ui_ipc);
         collect!(
-            "permission-prompt",
-            claw_fleet_core::permission_prompt_ipc
+            "guard",
+            claw_fleet_core::guard::list_pending_requests,
+            claw_fleet_core::guard::read_request
+        );
+        collect!(
+            "elicitation",
+            claw_fleet_core::elicitation::list_pending_requests,
+            claw_fleet_core::elicitation::read_request
+        );
+        collect!(
+            "fleet_ask",
+            claw_fleet_core::mcp_ipc::list_pending_requests,
+            claw_fleet_core::mcp_ipc::read_request
+        );
+        collect!(
+            "plan_approval",
+            claw_fleet_core::plan_approval::list_pending_requests,
+            claw_fleet_core::plan_approval::read_request
+        );
+        collect!(
+            "a2ui",
+            claw_fleet_core::mcp_a2ui_ipc::list_pending_requests,
+            claw_fleet_core::mcp_a2ui_ipc::read_request
+        );
+        collect!(
+            "permission_prompt",
+            claw_fleet_core::permission_prompt_ipc::list_pending_requests,
+            claw_fleet_core::permission_prompt_ipc::read_request
         );
         Ok(decisions)
     }
 
     fn respond_decision(&self, kind: &str, id: &str, response: &Value) -> Result<(), String> {
+        let action = response["action"].as_str().unwrap_or("answer");
+        let answers = response.get("answers").cloned().unwrap_or_default();
         match kind {
-            "guard" => claw_fleet_core::guard::write_response(
-                &claw_fleet_core::guard::GuardResponse {
+            "guard" => {
+                claw_fleet_core::guard::write_response(&claw_fleet_core::guard::GuardResponse {
                     id: id.into(),
-                    decision: if response["allow"].as_bool().unwrap_or(false) {
+                    decision: if matches!(action, "allow" | "approve" | "answer") {
                         claw_fleet_core::guard::GuardDecision::Allow
                     } else {
                         claw_fleet_core::guard::GuardDecision::Block
                     },
-                    reason: response["reason"].as_str().map(str::to_owned),
-                },
-            ),
+                    reason: answers["reason"].as_str().map(str::to_owned),
+                })
+            }
             "elicitation" => claw_fleet_core::elicitation::write_response(
                 &claw_fleet_core::elicitation::ElicitationResponse {
                     id: id.into(),
-                    declined: response["declined"].as_bool().unwrap_or(false),
-                    answers: serde_json::from_value(
-                        response.get("answers").cloned().unwrap_or_default(),
-                    )
-                    .map_err(|e| e.to_string())?,
+                    declined: matches!(action, "decline" | "deny" | "reject" | "cancel"),
+                    answers: serde_json::from_value(answers).map_err(|e| e.to_string())?,
                 },
             ),
-            "fleet-ask" => claw_fleet_core::mcp_ipc::write_response(
+            "fleet_ask" => claw_fleet_core::mcp_ipc::write_response(
                 &claw_fleet_core::mcp_ipc::FleetAskResponse {
                     id: id.into(),
-                    answers: serde_json::from_value(
-                        response.get("answers").cloned().unwrap_or_default(),
-                    )
-                    .map_err(|e| e.to_string())?,
-                    cancelled: response["cancelled"].as_bool().unwrap_or(false),
+                    answers: serde_json::from_value(answers).map_err(|e| e.to_string())?,
+                    cancelled: action == "cancel",
                 },
             ),
-            "plan-approval" => claw_fleet_core::plan_approval::write_response(
+            "plan_approval" => claw_fleet_core::plan_approval::write_response(
                 &claw_fleet_core::plan_approval::PlanApprovalResponse {
                     id: id.into(),
-                    decision: response["decision"].as_str().unwrap_or("reject").into(),
-                    edited_plan: response["editedPlan"].as_str().map(str::to_owned),
-                    feedback: response["feedback"].as_str().map(str::to_owned),
+                    decision: if matches!(action, "approve" | "allow" | "answer") {
+                        "approve"
+                    } else {
+                        "reject"
+                    }
+                    .into(),
+                    edited_plan: answers["editedPlan"].as_str().map(str::to_owned),
+                    feedback: answers["feedback"].as_str().map(str::to_owned),
                 },
             ),
-            "a2ui-render" => claw_fleet_core::mcp_a2ui_ipc::write_response(
+            "a2ui" => claw_fleet_core::mcp_a2ui_ipc::write_response(
                 &claw_fleet_core::mcp_a2ui_ipc::A2uiRenderResponse {
                     id: id.into(),
-                    action_name: response["actionName"].as_str().map(str::to_owned),
-                    action_context: serde_json::from_value(
-                        response.get("actionContext").cloned().unwrap_or_default(),
-                    )
-                    .map_err(|e| e.to_string())?,
-                    cancelled: response["cancelled"].as_bool().unwrap_or(false),
+                    action_name: (action != "cancel").then(|| action.to_owned()),
+                    action_context: serde_json::from_value(answers).map_err(|e| e.to_string())?,
+                    cancelled: action == "cancel",
                 },
             ),
-            "permission-prompt" => claw_fleet_core::permission_prompt_ipc::write_response(
+            "permission_prompt" => claw_fleet_core::permission_prompt_ipc::write_response(
                 &claw_fleet_core::permission_prompt_ipc::PermissionPromptResponse {
                     id: id.into(),
-                    decision: if response["allow"].as_bool().unwrap_or(false) {
+                    decision: if matches!(action, "allow" | "approve" | "answer") {
                         claw_fleet_core::permission_prompt_ipc::PermissionPromptDecision::Allow
                     } else {
                         claw_fleet_core::permission_prompt_ipc::PermissionPromptDecision::Deny
                     },
-                    reason: response["reason"].as_str().map(str::to_owned),
+                    reason: answers["reason"].as_str().map(str::to_owned),
                 },
             ),
             _ => Err(format!("unsupported decision kind {kind}")),
@@ -313,7 +332,11 @@ impl Supervisor {
     }
 
     fn sync_pending_decisions(&mut self) -> anyhow::Result<()> {
-        for decision in self.harness.pending_decisions().map_err(anyhow::Error::msg)? {
+        for decision in self
+            .harness
+            .pending_decisions()
+            .map_err(anyhow::Error::msg)?
+        {
             let run: Option<(String, String)> = self
                 .connection
                 .query_row(
@@ -332,14 +355,29 @@ impl Supervisor {
             if inserted == 0 {
                 continue;
             }
+            let kind = match decision.kind.as_str() {
+                "guard" => DecisionKind::Guard,
+                "elicitation" => DecisionKind::Elicitation,
+                "fleet_ask" => DecisionKind::FleetAsk,
+                "plan_approval" => DecisionKind::PlanApproval,
+                "a2ui" => DecisionKind::A2ui,
+                "permission_prompt" => DecisionKind::PermissionPrompt,
+                other => anyhow::bail!("unsupported pending Decision kind {other}"),
+            };
             self.emit(
-                &format!("{}:opened", decision.id),
-                "decision.opened",
+                &format!("{}:created", decision.id),
+                "decision.created",
                 &task_id,
                 Some(&run_id),
                 json!({
-                    "task_id":task_id,"run_id":run_id,"decision_id":decision.id,
-                    "kind":decision.kind,"request":decision.request
+                    "task_id":task_id,"run_id":run_id,
+                    "decision": DecisionCreated {
+                        source_decision_id: decision.id.clone(),
+                        kind,
+                        payload: decision.request,
+                        response_schema: json!({}),
+                        deadline: None,
+                    }
                 }),
             )?;
             self.emit(
@@ -358,38 +396,53 @@ impl Supervisor {
         command: &CloudCommand,
     ) -> Result<Value, (&'static str, String)> {
         let task_id = required_task(command)?;
-        let id = command.payload["decision_id"]
-            .as_str()
-            .ok_or(("invalid_command", "resolve_decision requires decision_id".into()))?;
+        let cloud_id = command.payload["decision_id"].as_str().ok_or((
+            "invalid_command",
+            "resolve_decision requires decision_id".into(),
+        ))?;
+        let source_id = command.payload["source_decision_id"].as_str().ok_or((
+            "invalid_command",
+            "resolve_decision requires source_decision_id".into(),
+        ))?;
         let row: Option<(String, String, i64)> = self
             .connection
             .query_row(
                 "SELECT d.kind,d.run_id,d.resolved FROM decisions d JOIN runs r ON r.run_id=d.run_id WHERE d.decision_id=?1 AND r.task_id=?2",
-                params![id,task_id],
+                params![source_id,task_id],
                 |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
             )
             .optional()
             .map_err(db_error)?;
         let Some((kind, run_id, resolved)) = row else {
-            return Err(("decision_not_found", "decision is not pending on this Runner".into()));
+            return Err((
+                "decision_not_found",
+                "decision is not pending on this Runner".into(),
+            ));
         };
         if resolved == 0 {
             self.harness
-                .respond_decision(&kind, id, &command.payload["response"])
+                .respond_decision(&kind, source_id, &command.payload["response"])
                 .map_err(harness_error)?;
-            self.connection
-                .execute("UPDATE decisions SET resolved=1 WHERE decision_id=?1", [id])
-                .map_err(db_error)?;
             self.emit(
-                &format!("{id}:resolved"),
-                "decision.resolved",
+                &format!("{cloud_id}:delivered"),
+                "decision.delivered",
                 task_id,
                 Some(&run_id),
-                json!({"task_id":task_id,"run_id":run_id,"decision_id":id,"kind":kind}),
+                json!({
+                    "task_id":task_id,"run_id":run_id,"decision_id":cloud_id,
+                    "source_decision_id":source_id,"kind":kind,
+                    "status":command.payload["terminal_status"]
+                }),
             )
             .map_err(outbox_error)?;
+            self.connection
+                .execute(
+                    "UPDATE decisions SET resolved=1 WHERE decision_id=?1",
+                    [source_id],
+                )
+                .map_err(db_error)?;
         }
-        Ok(json!({"decision_id":id,"status":"resolved"}))
+        Ok(json!({"decision_id":cloud_id,"status":"delivered"}))
     }
 
     fn start_run(

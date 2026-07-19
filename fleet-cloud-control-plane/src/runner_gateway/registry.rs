@@ -342,15 +342,24 @@ async fn project_harness_event(
                 .bind(status).bind(occurred_at).bind(task_id).bind(run_id).execute(&mut **tx).await?;
         }
         "decision.created" => {
-            let run_id = run_id.ok_or(ApiError::Validation("decision.created requires run_id".into()))?;
-            let created: DecisionCreated = serde_json::from_value(
-                data.get("decision").cloned().ok_or_else(|| ApiError::Validation("decision.created requires decision".into()))?
-            ).map_err(|error| ApiError::Validation(format!("invalid Decision payload: {error}")))?;
-            let kind = serde_json::to_value(created.kind).map_err(|_| ApiError::Internal)?
-                .as_str().ok_or(ApiError::Internal)?.to_owned();
+            let run_id = run_id.ok_or(ApiError::Validation(
+                "decision.created requires run_id".into(),
+            ))?;
+            let created: DecisionCreated =
+                serde_json::from_value(data.get("decision").cloned().ok_or_else(|| {
+                    ApiError::Validation("decision.created requires decision".into())
+                })?)
+                .map_err(|error| {
+                    ApiError::Validation(format!("invalid Decision payload: {error}"))
+                })?;
+            let kind = serde_json::to_value(created.kind)
+                .map_err(|_| ApiError::Internal)?
+                .as_str()
+                .ok_or(ApiError::Internal)?
+                .to_owned();
             sqlx::query(
-                "INSERT INTO decisions(id,organization_id,project_id,task_id,run_id,runner_id,source_decision_id,kind,payload,response_schema,deadline,created_at)
-                 SELECT $1,t.organization_id,t.project_id,t.id,$2,$3,$4,$5,$6,$7,$8,$9 FROM tasks t WHERE t.id=$10
+                "INSERT INTO decisions(id,organization_id,project_id,task_id,run_id,runner_id,source_decision_id,kind,payload,response_schema,deadline,created_at,updated_at)
+                 SELECT $1,t.organization_id,t.project_id,t.id,$2,$3,$4,$5,$6,$7,$8,$9,$9 FROM tasks t WHERE t.id=$10
                  ON CONFLICT(runner_id,source_decision_id) DO NOTHING")
                 .bind(new_id("dec")).bind(run_id).bind(runner_id).bind(created.source_decision_id).bind(kind)
                 .bind(created.payload).bind(created.response_schema).bind(created.deadline).bind(occurred_at).bind(task_id)
@@ -361,16 +370,27 @@ async fn project_harness_event(
                 .bind(occurred_at).bind(task_id).execute(&mut **tx).await?;
         }
         "decision.delivered" => {
-            let decision_id = data.get("decision_id").and_then(|value| value.as_str())
-                .ok_or_else(|| ApiError::Validation("decision.delivered requires decision_id".into()))?;
-            let status = data.get("status").and_then(|value| value.as_str()).unwrap_or("answered");
+            let decision_id = data
+                .get("decision_id")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| {
+                    ApiError::Validation("decision.delivered requires decision_id".into())
+                })?;
+            let status = data
+                .get("status")
+                .and_then(|value| value.as_str())
+                .unwrap_or("answered");
             if !matches!(status, "answered" | "declined" | "cancelled") {
-                return Err(ApiError::Validation("invalid delivered Decision status".into()));
+                return Err(ApiError::Validation(
+                    "invalid delivered Decision status".into(),
+                ));
             }
             let changed = sqlx::query(
-                "UPDATE decisions SET status=$1,resolved_at=$2,version=version+1 WHERE id=$3 AND task_id=$4 AND status='answer_queued'",
+                "UPDATE decisions SET status=$1,resolved_at=$2,updated_at=$2,version=version+1 WHERE id=$3 AND task_id=$4 AND status='answer_queued'",
             ).bind(status).bind(occurred_at).bind(decision_id).bind(task_id).execute(&mut **tx).await?;
-            if changed.rows_affected() == 0 { return Err(ApiError::StateConflict); }
+            if changed.rows_affected() == 0 {
+                return Err(ApiError::StateConflict);
+            }
             let remaining = sqlx::query_scalar::<_, bool>(
                 "SELECT EXISTS(SELECT 1 FROM decisions WHERE task_id=$1 AND status IN ('pending','answer_queued'))",
             ).bind(task_id).fetch_one(&mut **tx).await?;
