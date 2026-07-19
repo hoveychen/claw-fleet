@@ -113,6 +113,31 @@ fn pem_provider_tokens_and_configured_literals_are_redacted_with_counts() {
 }
 
 #[test]
+fn raw_dotenv_and_header_lines_are_redacted() {
+    let record = json!({
+        "output": "export OPENAI_API_KEY=plain-env-secret\nDB_PASSWORD=database-secret\nPUBLIC_VALUE=visible\nAuthorization: Bearer raw-auth-secret\nCookie: raw-cookie-secret\n"
+    });
+    let result = Redactor::default().redact(record).unwrap();
+    let output = result.record["output"].as_str().unwrap();
+    for secret in [
+        "plain-env-secret",
+        "database-secret",
+        "raw-auth-secret",
+        "raw-cookie-secret",
+    ] {
+        assert!(!output.contains(secret));
+    }
+    assert!(output.contains("OPENAI_API_KEY=[REDACTED:api_key]"));
+    assert!(output.contains("DB_PASSWORD=[REDACTED:password]"));
+    assert!(output.contains("PUBLIC_VALUE=visible"));
+    assert!(output.contains("Authorization: [REDACTED:authorization]"));
+    assert_eq!(result.counters.get("api_key"), Some(&1));
+    assert_eq!(result.counters.get("password"), Some(&1));
+    assert_eq!(result.counters.get("authorization"), Some(&1));
+    assert_eq!(result.counters.get("cookie"), Some(&1));
+}
+
+#[test]
 fn oversized_records_are_rejected_before_processing() {
     let record = json!({"text": "x".repeat(MAX_RECORD_BYTES + 1)});
     assert_eq!(

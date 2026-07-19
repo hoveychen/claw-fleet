@@ -6,6 +6,7 @@ use serde::Deserialize;
 use crate::app::AppState;
 use crate::auth::ProjectPrincipal;
 use crate::error::ApiError;
+use crate::services::artifacts::{self, DeleteFault};
 use crate::services::tasks::{
     self, AppendMessageRequest, CreateTaskRequest, ResumeTaskRequest, TaskControlRequest,
 };
@@ -62,6 +63,22 @@ pub async fn get_task(
         HeaderValue::from_str(&format!("\"{}\"", task.version)).map_err(|_| ApiError::Internal)?,
     );
     Ok((headers, Json(task)))
+}
+
+pub async fn delete_task(
+    State(state): State<AppState>,
+    principal: ProjectPrincipal,
+    Path(task_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    artifacts::delete_task_content(&state.pool, &principal, &task_id, DeleteFault::None).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "command_id":tasks::new_id("cmd"),
+            "status":"accepted",
+            "accepted_at":chrono::Utc::now()
+        })),
+    ))
 }
 
 pub async fn create_task(

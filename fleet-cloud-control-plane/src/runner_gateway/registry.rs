@@ -230,9 +230,7 @@ pub async fn ingest_events(
             runner_id,
             task_id.as_deref(),
             run_id.as_deref(),
-            &event.event_type,
-            &event.data,
-            event.occurred_at,
+            &event,
         )
         .await?;
         let cursor = sqlx::query_scalar::<_,i64>(
@@ -253,10 +251,12 @@ async fn project_harness_event(
     runner_id: &str,
     task_id: Option<&str>,
     run_id: Option<&str>,
-    event_type: &str,
-    data: &serde_json::Value,
-    occurred_at: chrono::DateTime<chrono::Utc>,
+    event: &RunnerEvent,
 ) -> Result<(), ApiError> {
+    let event_type = event.event_type.as_str();
+    let data = &event.data;
+    let source_sequence = event.sequence as i64;
+    let occurred_at = event.occurred_at;
     let Some(task_id) = task_id else {
         return Ok(());
     };
@@ -402,6 +402,49 @@ async fn project_harness_event(
                 sqlx::query("UPDATE tasks SET status='running',version=version+1,updated_at=$1 WHERE id=$2 AND status='waiting_input'")
                     .bind(occurred_at).bind(task_id).execute(&mut **tx).await?;
             }
+        }
+        "message.created" | "tool.started" | "tool.finished" => {
+            let run_id = run_id.ok_or(ApiError::Validation(
+                "transcript event requires run_id".into(),
+            ))?;
+            let content = if event_type == "message.created" {
+                data.get("record")
+            } else {
+                data.get("tool")
+            }
+            .cloned()
+            .ok_or_else(|| ApiError::Validation("transcript event requires content".into()))?;
+            let redactions = data
+                .get("redactions")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            let role = if event_type == "message.created" {
+                data.get("role")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("assistant")
+            } else {
+                "tool"
+            };
+            sqlx::query(
+                "INSERT INTO transcript_records(
+                    id,organization_id,project_id,task_id,run_id,source_sequence,
+                    record_type,role,content,redactions,occurred_at
+                 )
+                 SELECT $1,t.organization_id,t.project_id,t.id,$2,$3,$4,$5,$6,$7,$8
+                 FROM tasks t WHERE t.id=$9
+                 ON CONFLICT(run_id,source_sequence) DO NOTHING",
+            )
+            .bind(new_id("trn"))
+            .bind(run_id)
+            .bind(source_sequence)
+            .bind(event_type)
+            .bind(role)
+            .bind(content)
+            .bind(redactions)
+            .bind(occurred_at)
+            .bind(task_id)
+            .execute(&mut **tx)
+            .await?;
         }
         _ => {}
     }

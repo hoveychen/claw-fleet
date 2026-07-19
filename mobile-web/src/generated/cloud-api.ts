@@ -35,7 +35,8 @@ export interface paths {
         get: operations["getTask"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete Task content while retaining billing and audit tombstones */
+        delete: operations["deleteTaskContent"];
         options?: never;
         head?: never;
         patch?: never;
@@ -148,7 +149,8 @@ export interface paths {
         /** List Task artifacts */
         get: operations["listTaskArtifacts"];
         put?: never;
-        post?: never;
+        /** Upload and envelope-encrypt one Task Artifact */
+        post: operations["uploadTaskArtifact"];
         delete?: never;
         options?: never;
         head?: never;
@@ -960,6 +962,29 @@ export interface operations {
             404: components["responses"]["NotFoundError"];
         };
     };
+    deleteTaskContent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Content deletion completed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommandReceipt"];
+                };
+            };
+            404: components["responses"]["NotFoundError"];
+        };
+    };
     appendTaskMessage: {
         parameters: {
             query?: never;
@@ -1149,6 +1174,40 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFoundError"];
+        };
+    };
+    uploadTaskArtifact: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Artifact-Kind"?: "attachment" | "image" | "patch" | "report" | "log" | "wiki" | "other";
+                "X-Run-Id"?: components["schemas"]["ResourceId"];
+            };
+            path: {
+                task_id: components["parameters"]["TaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Artifact encrypted and persisted */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Artifact"];
+                };
+            };
+            404: components["responses"]["NotFoundError"];
+            422: components["responses"]["ValidationError"];
         };
     };
     listDecisions: {
@@ -1434,7 +1493,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** Format: uri */
+                        /** Format: uri-reference */
                         url: string;
                         /** Format: date-time */
                         expires_at: string;

@@ -307,3 +307,78 @@ async fn harness_events_project_runs_and_handoff_without_finishing_task_early(po
         "succeeded"
     );
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn transcript_records_are_projected_once_in_runner_sequence_order(pool: sqlx::PgPool) {
+    let fingerprint = vec![0x88; 32];
+    seed_runner(&pool, &fingerprint).await;
+    let created = create_task(&pool, "transcript-task-001", "transcript-ticket").await;
+    let task_id = created["task"]["id"].as_str().unwrap();
+    let run_id = created["run"]["id"].as_str().unwrap();
+    let records = [
+        (
+            "message.created",
+            serde_json::json!({"type":"assistant","content":"first"}),
+        ),
+        (
+            "tool.finished",
+            serde_json::json!({"type":"tool_result","content":"second"}),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (event_type, content))| RunnerEvent {
+        source_event_id: format!("transcript-{}", index + 1),
+        sequence: (index + 1) as u64,
+        event_type: event_type.into(),
+        occurred_at: Utc::now(),
+        data: serde_json::json!({
+            "task_id":task_id,"run_id":run_id,
+            "record":content,"tool":content,
+            "redactions":{"authorization":index + 1}
+        }),
+        schema_version: 1,
+    })
+    .collect::<Vec<_>>();
+
+    registry::ingest_events(&pool, "runner_test", records.clone())
+        .await
+        .unwrap();
+    registry::ingest_events(&pool, "runner_test", records)
+        .await
+        .unwrap();
+
+    let stored = sqlx::query_as::<_, (i64, String, serde_json::Value, serde_json::Value)>(
+        "SELECT source_sequence,record_type,content,redactions FROM transcript_records WHERE run_id=$1 ORDER BY source_sequence",
+    )
+    .bind(run_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored.len(), 2);
+    assert_eq!(stored[0].0, 1);
+    assert_eq!(stored[0].1, "message.created");
+    assert_eq!(stored[0].2["content"], "first");
+    assert_eq!(stored[1].0, 2);
+    assert_eq!(stored[1].1, "tool.finished");
+    assert_eq!(stored[1].2["content"], "second");
+    assert_eq!(stored[1].3["authorization"], 2);
+
+    let replay = common::request_json(
+        common::router(pool.clone()),
+        axum::http::Method::GET,
+        &format!("/runs/{run_id}/messages?after=0&limit=10"),
+        common::VALID_KEY,
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(replay.status, axum::http::StatusCode::OK);
+    assert_eq!(replay.body["data"].as_array().unwrap().len(), 2);
+    assert_eq!(replay.body["data"][0]["sequence"], 1);
+    assert_eq!(replay.body["data"][1]["role"], "tool");
+    assert_eq!(
+        replay.body["data"][1]["redactions"][0]["kind"],
+        "authorization"
+    );
+}
