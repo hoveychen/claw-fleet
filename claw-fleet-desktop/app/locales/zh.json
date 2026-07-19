@@ -1376,6 +1376,8 @@
     "tool_spawn_agent_named": "启动子代理：{{name}}",
     "tool_update_plan": "更新计划",
     "tool_request_input": "请求用户输入",
+    "tool_skill": "加载技能",
+    "tool_skill_named": "加载技能 {{slug}}",
     "tool_patch_add": "新建 {{path}}",
     "tool_patch_update": "编辑 {{path}}",
     "tool_patch_delete": "删除 {{path}}",

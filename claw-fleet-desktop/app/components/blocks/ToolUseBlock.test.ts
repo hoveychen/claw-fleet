@@ -5,6 +5,7 @@ import {
   parsePatchFiles,
   readRange,
   searchFlags,
+  skillToolSummary,
   timeoutMsToSecs,
   waitTimeoutSecs,
 } from "./ToolUseBlock";
@@ -151,6 +152,23 @@ describe("codexToolSummary", () => {
   it("exec with neither note nor a parseable cmd → null (formatInput shows it raw)", () => {
     expect(codexToolSummary("exec", { command: "await tools.view_image({path: 'a.png'})" }, t)).toBeNull();
     expect(codexToolSummary("exec", {}, t)).toBeNull();
+  });
+});
+
+describe("skillToolSummary", () => {
+  it("Skill → named key carrying the slug (not the raw { skill, args } JSON)", () => {
+    expect(skillToolSummary("Skill", { skill: "game-pilot", args: "run it" }, t)).toBe(
+      'detail.tool_skill_named|{"slug":"game-pilot"}',
+    );
+  });
+
+  it("Skill without a slug → bare key", () => {
+    expect(skillToolSummary("Skill", { args: "run it" }, t)).toBe("detail.tool_skill");
+  });
+
+  it("returns null for any other tool (falls back to formatInput)", () => {
+    expect(skillToolSummary("Bash", { command: "ls" }, t)).toBeNull();
+    expect(skillToolSummary("Read", { file_path: "a.ts" }, t)).toBeNull();
   });
 });
 

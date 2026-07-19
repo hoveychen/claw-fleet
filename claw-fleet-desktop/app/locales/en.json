@@ -1379,6 +1379,8 @@
     "tool_spawn_agent_named": "Spawning subagent: {{name}}",
     "tool_update_plan": "Updating the plan",
     "tool_request_input": "Requesting your input",
+    "tool_skill": "Loading skill",
+    "tool_skill_named": "Loading skill {{slug}}",
     "tool_patch_add": "Creating {{path}}",
     "tool_patch_update": "Editing {{path}}",
     "tool_patch_delete": "Deleting {{path}}",
