@@ -60,7 +60,12 @@ pub struct BrowseDirResponse {
 /// List the directories one level under `path` (`None`/empty = the home dir).
 pub fn browse_dir(path: Option<&str>, known_workspaces: &[String]) -> Result<BrowseDirResponse, String> {
     let home = crate::session::real_home_dir().ok_or("home directory unknown")?;
-    browse_dir_in(path, &home, &browse_roots(&home, known_workspaces))
+    browse_dir_in(
+        path,
+        &home,
+        &browse_roots(&home, known_workspaces),
+        &|p| crate::tcc::is_tcc_protected(p),
+    )
 }
 
 /// The roots a client may browse: home, plus any known workspace that lives
@@ -83,6 +88,7 @@ fn browse_dir_in(
     path: Option<&str>,
     home: &Path,
     roots: &[PathBuf],
+    is_protected: &dyn Fn(&Path) -> bool,
 ) -> Result<BrowseDirResponse, String> {
     let requested = match path.map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) => expand(p, home),
@@ -102,10 +108,19 @@ fn browse_dir_in(
     let mut truncated = false;
     for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
         let child = entry.path();
-        // `is_dir` follows symlinks, which is what we want: a symlinked repo is
-        // a legitimate pick. Descending into it is still boundary-checked on the
-        // next call, because that check canonicalizes first.
-        if !child.is_dir() {
+        // Resolve dir-ness from the readdir `d_type` (`entry.file_type()`), NOT
+        // `child.is_dir()`: the latter `stat`s every entry, which fires a macOS
+        // TCC dialog the moment we list a home dir containing ~/Documents,
+        // ~/Desktop, ~/Downloads. A symlink still gets followed (a symlinked repo
+        // is a legitimate pick) — but only when its target is not TCC-protected,
+        // so following it can't stat into a protected folder either. Same guard
+        // shape as `session::paths::read_level_dirs`.
+        let is_dir = match entry.file_type() {
+            Ok(ft) if ft.is_dir() => true,
+            Ok(ft) if ft.is_symlink() => !is_protected(&child) && child.is_dir(),
+            _ => false,
+        };
+        if !is_dir {
             continue;
         }
         let Some(name) = child.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
@@ -122,7 +137,11 @@ fn browse_dir_in(
             break;
         }
         entries.push(BrowseEntry {
-            is_git_repo: child.join(".git").exists(),
+            // Never probe `.git` inside a TCC-protected dir: `child.join(".git")`
+            // starts_with the protected path, so `.exists()` would `stat` into it
+            // and fire a dialog. A protected dir is still offered as a pickable
+            // entry (a repo may live there) — just never badged.
+            is_git_repo: !is_protected(&child) && child.join(".git").exists(),
             name,
             path: child.to_string_lossy().into_owned(),
         });
@@ -170,6 +189,12 @@ fn enclosing_root<'a>(path: &Path, roots: &'a [PathBuf]) -> Option<&'a PathBuf> 
 mod tests {
     use super::*;
 
+    /// Default predicate for tests that don't exercise TCC: nothing is protected,
+    /// so the guard is a no-op and behaviour matches the pre-guard listing.
+    fn none_protected(_: &Path) -> bool {
+        false
+    }
+
     /// home/
     ///   proj/          (a git repo)
     ///     src/
@@ -203,7 +228,7 @@ mod tests {
     fn lists_only_visible_directories_and_flags_repos() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        let r = browse_dir_in(None, &home, &roots).unwrap();
+        let r = browse_dir_in(None, &home, &roots, &none_protected).unwrap();
         // Files and dotfiles are gone; the repo is badged; order is stable.
         assert_eq!(names(&r), vec!["notes", "proj"]);
         assert!(r.entries.iter().find(|e| e.name == "proj").unwrap().is_git_repo);
@@ -215,8 +240,8 @@ mod tests {
     fn home_is_a_root_so_it_has_no_parent_but_a_child_does() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert_eq!(browse_dir_in(None, &home, &roots).unwrap().parent, None);
-        let proj = browse_dir_in(Some("proj"), &home, &roots).unwrap();
+        assert_eq!(browse_dir_in(None, &home, &roots, &none_protected).unwrap().parent, None);
+        let proj = browse_dir_in(Some("proj"), &home, &roots, &none_protected).unwrap();
         assert_eq!(proj.path, home.join("proj").to_string_lossy());
         assert_eq!(proj.parent.as_deref(), Some(&*home.to_string_lossy()));
         assert_eq!(names(&proj), vec!["src"]);
@@ -228,7 +253,7 @@ mod tests {
         let roots = vec![home.clone()];
         let want = home.join("proj").to_string_lossy().into_owned();
         for input in ["~/proj", "proj", "  ~/proj  "] {
-            assert_eq!(browse_dir_in(Some(input), &home, &roots).unwrap().path, want, "{input}");
+            assert_eq!(browse_dir_in(Some(input), &home, &roots, &none_protected).unwrap().path, want, "{input}");
         }
     }
 
@@ -245,7 +270,7 @@ mod tests {
             "proj/../../outside".to_string(),
             "/etc".to_string(),
         ] {
-            let r = browse_dir_in(Some(&escape), &home, &roots);
+            let r = browse_dir_in(Some(&escape), &home, &roots, &none_protected);
             assert!(r.is_err(), "{escape:?} must be refused, got {r:?}");
         }
     }
@@ -260,12 +285,12 @@ mod tests {
         let roots = browse_roots(&home, &[ext.to_string_lossy().into_owned()]);
         assert_eq!(roots.len(), 2);
 
-        let r = browse_dir_in(Some(&ext.to_string_lossy()), &home, &roots).unwrap();
+        let r = browse_dir_in(Some(&ext.to_string_lossy()), &home, &roots, &none_protected).unwrap();
         assert_eq!(r.path, ext.to_string_lossy());
         assert_eq!(r.parent, None, "a root must not expose its parent");
 
         // ...but its parent `outside/` is still not browsable.
-        assert!(browse_dir_in(Some(&outside.to_string_lossy()), &home, &roots).is_err());
+        assert!(browse_dir_in(Some(&outside.to_string_lossy()), &home, &roots, &none_protected).is_err());
     }
 
     /// A known workspace already under home must not become a second root —
@@ -282,9 +307,31 @@ mod tests {
     fn missing_directory_errors_rather_than_silently_listing_home() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert!(browse_dir_in(Some("~/nope"), &home, &roots).is_err());
+        assert!(browse_dir_in(Some("~/nope"), &home, &roots, &none_protected).is_err());
         // A file is not a directory: the picker must not "descend" into it.
-        assert!(browse_dir_in(Some("file.txt"), &home, &roots).is_err());
+        assert!(browse_dir_in(Some("file.txt"), &home, &roots, &none_protected).is_err());
+    }
+
+    /// TCC guard: a protected top-level dir (e.g. `~/Documents`) is still listed
+    /// so a repo living there stays reachable, but it must NOT be probed for
+    /// `.git` — that probe `stat`s *inside* the protected dir and fires a macOS
+    /// TCC dialog. So a protected dir is always reported `is_git_repo: false`,
+    /// even when it really does contain a `.git`, because we never look.
+    #[test]
+    fn protected_dir_is_listed_but_never_git_probed() {
+        let (_tmp, home, _) = fixture();
+        // A protected-by-name dir that genuinely contains a repo marker.
+        fs::create_dir_all(home.join("Documents/.git")).unwrap();
+        let roots = vec![home.clone()];
+        let is_protected = |p: &Path| p.file_name().map_or(false, |n| n == "Documents");
+
+        let r = browse_dir_in(None, &home, &roots, &is_protected).unwrap();
+        // Still offered as a pickable directory...
+        let doc = r.entries.iter().find(|e| e.name == "Documents").expect("Documents must be listed");
+        // ...but never git-probed, so no stat lands inside ~/Documents.
+        assert!(!doc.is_git_repo, "protected dir must not be git-probed (would fire TCC)");
+        // The ordinary repo is still badged, proving the guard is scoped.
+        assert!(r.entries.iter().find(|e| e.name == "proj").unwrap().is_git_repo);
     }
 
     #[test]
@@ -294,7 +341,7 @@ mod tests {
         for i in 0..(MAX_ENTRIES + 10) {
             fs::create_dir_all(many.join(format!("d{i:04}"))).unwrap();
         }
-        let r = browse_dir_in(Some("many"), &home, &vec![home.clone()]).unwrap();
+        let r = browse_dir_in(Some("many"), &home, &vec![home.clone()], &none_protected).unwrap();
         assert!(r.truncated);
         assert_eq!(r.entries.len(), MAX_ENTRIES);
     }
