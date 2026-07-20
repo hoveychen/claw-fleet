@@ -1873,7 +1873,8 @@
       "zsh": "embedded zsh -c",
       "python": "embedded python -c",
       "node": "embedded node -e",
-      "eval": "embedded eval"
+      "eval": "embedded eval",
+      "heredoc": "heredoc script"
     }
   },
   "history": {

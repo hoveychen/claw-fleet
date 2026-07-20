@@ -2313,6 +2313,27 @@ mod tests {
     }
 
     #[test]
+    fn classify_leaves_flags_heredoc_interpreter_leaf() {
+        reset();
+        // `python3 - <<EOF ... exec(...) ... EOF`: the script that trips
+        // `py-dynamic-exec` lives in the heredoc body, not in argv.  The leaf
+        // must still be flagged triggering, and the body must be surfaced as
+        // its nested block so the operator can see what tripped the audit.
+        let cmd = "python3 - <<'PYEOF'\nimport os\nexec('rm -rf /')\nPYEOF";
+        let view = crate::cmd_ast::extract_structured_view(cmd);
+        let rules = UserAuditRules::default();
+        let flags = classify_leaves_with_rules(&view, &rules);
+        assert!(
+            flags[0].triggering,
+            "the python3 heredoc leaf must be flagged triggering"
+        );
+        assert!(
+            view.leaves[0].nested.is_some(),
+            "heredoc body must be surfaced as a nested block"
+        );
+    }
+
+    #[test]
     fn classify_leaves_marks_already_allowed_when_rule_covers_leaf() {
         reset();
         // `git pull` is a Medium (non-critical) hit, so a SIGNED whitelist rule
