@@ -662,6 +662,14 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn {shell}: {e}"))?;
     drop(slave_fd);
+    // `Command::spawn` borrows `&mut cmd` and does NOT consume it, so `cmd`
+    // keeps its three configured Stdio handles — the parent-side dups of the
+    // pty slave — open until it drops at end of scope. On Linux the master
+    // read at step 5 only reports EIO once *every* slave fd is closed, so
+    // those retained dups would keep this pump loop blocked forever after the
+    // command exits (a 6h CI hang). macOS reports EOF as soon as the child's
+    // slave fds close, which masked the leak. Drop `cmd` now to release them.
+    drop(cmd);
 
     // 4. Report in: from here the host owns the meta file.
     let host_pid = std::process::id();
