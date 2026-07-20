@@ -330,31 +330,218 @@ pub fn parse_v1_route(method: &str, path: &str) -> V1Route {
     }
 }
 
-/// Entry point for every `/v1/...` request. P1 skeleton: parses the route and
-/// returns `501 Not Implemented`; P2+ replace each arm with real handlers that
-/// call spawn/tail/decision and project via the types above.
+/// Pick the agent tool from the requested model id (`gpt-*`/`codex` → codex,
+/// else claude). Keeps the OpenAI `model` field meaningful without exposing
+/// Fleet's tool concept.
+pub fn tool_for_model(model: Option<&str>) -> &'static str {
+    match model {
+        Some(m) if m.starts_with("gpt") || m.starts_with("codex") => "codex",
+        _ => "claude",
+    }
+}
+
+/// Concatenate assistant text out of a transcript, handling both Claude
+/// (`{type:"assistant", message.content[].text}`) and Codex
+/// (`{type:"response_item", payload.content[].output_text}`) shapes. Pure;
+/// unit-tested.
+pub fn project_output_text(messages: &[serde_json::Value]) -> String {
+    let mut out = String::new();
+    let mut push = |t: &str| {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(t);
+    };
+    for msg in messages {
+        let ty = msg.get("type").and_then(|t| t.as_str());
+        if ty == Some("assistant") {
+            if let Some(content) = msg
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for b in content {
+                    if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                            push(t);
+                        }
+                    }
+                }
+            }
+        } else if ty == Some("response_item") {
+            let payload = msg.get("payload");
+            let is_assistant = payload
+                .and_then(|p| p.get("role"))
+                .and_then(|r| r.as_str())
+                == Some("assistant");
+            if is_assistant {
+                if let Some(content) = payload
+                    .and_then(|p| p.get("content"))
+                    .and_then(|c| c.as_array())
+                {
+                    for b in content {
+                        if b.get("type").and_then(|t| t.as_str()) == Some("output_text") {
+                            if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                                push(t);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Project a live Fleet session (found by internal id) into a `response`
+/// object: status, usage from token totals, and the assistant output text.
+/// `None` if no session with that id exists yet.
+fn build_response(ctx: &super::ServeCtx, session_id: &str) -> Option<ResponseObject> {
+    let sessions = crate::session::scan_all_sources(ctx.sources);
+    let s = sessions.iter().find(|s| s.id == session_id)?;
+    let status_str = serde_json::to_value(&s.status)
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let mut resp = ResponseObject::new(to_resp_id(session_id), map_status(&status_str));
+    resp.model = s.model.clone();
+    resp.usage = Some(Usage {
+        input_tokens: s.total_input_tokens,
+        output_tokens: s.total_output_tokens,
+        total_tokens: s.total_input_tokens.saturating_add(s.total_output_tokens),
+    });
+    if let Some(src) = crate::agent_source::find_source_for_path(ctx.sources, &s.jsonl_path) {
+        if let Ok(messages) = src.get_messages(&s.jsonl_path) {
+            let text = project_output_text(&messages);
+            if !text.is_empty() {
+                resp.output.push(OutputItem::Message {
+                    id: format!("msg_{session_id}"),
+                    role: "assistant".to_string(),
+                    content: vec![OutputContent::OutputText { text }],
+                });
+            }
+        }
+    }
+    Some(resp)
+}
+
+fn respond_value(request: tiny_http::Request, status: u16, body: &serde_json::Value, json_header: tiny_http::Header) {
+    let _ = request.respond(
+        tiny_http::Response::from_string(body.to_string())
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
+
+fn respond_error(request: tiny_http::Request, status: u16, code: &str, message: impl AsRef<str>, json_header: tiny_http::Header) {
+    let body = serde_json::json!({"error": {"code": code, "message": message.as_ref()}});
+    respond_value(request, status, &body, json_header);
+}
+
+/// Entry point for every `/v1/...` request.
 pub(crate) fn dispatch(
-    _ctx: &super::ServeCtx,
+    ctx: &super::ServeCtx,
     request: tiny_http::Request,
     _query: &std::collections::HashMap<String, String>,
     json_header: tiny_http::Header,
     path: &str,
 ) {
     let method = request.method().as_str().to_string();
-    let route = parse_v1_route(&method, path);
-    let (status, code) = match route {
-        V1Route::NotFound => (404u16, "not_found"),
-        _ => (501u16, "not_implemented"),
+    match parse_v1_route(&method, path) {
+        V1Route::CreateResponse => create_response(ctx, request, json_header),
+        V1Route::GetResponse(id) => get_response(ctx, request, json_header, &id),
+        V1Route::CancelResponse(id) => cancel_response(ctx, request, json_header, &id),
+        // Files land in P5.
+        V1Route::ListFiles(_) | V1Route::FileContent(_) => {
+            respond_error(request, 501, "not_implemented", "files endpoints arrive in P5", json_header)
+        }
+        V1Route::NotFound => {
+            respond_error(request, 404, "not_found", "unknown /v1 route", json_header)
+        }
+    }
+}
+
+/// `POST /v1/responses` — spawn a new run, or (with `previous_response_id`)
+/// resume one with a follow-up. Answering a decision via `function_call_output`
+/// is wired in P4.
+fn create_response(_ctx: &super::ServeCtx, mut request: tiny_http::Request, json_header: tiny_http::Header) {
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let req: CreateResponseRequest = match serde_json::from_str(&buf) {
+        Ok(r) => r,
+        Err(e) => return respond_error(request, 400, "invalid_request", e.to_string(), json_header),
     };
-    let body = serde_json::json!({
-        "error": { "code": code, "message": format!("{route:?} not yet implemented") }
-    })
-    .to_string();
-    let _ = request.respond(
-        tiny_http::Response::from_string(body)
-            .with_status_code(status)
-            .with_header(json_header),
-    );
+    let model = req.model.clone();
+    let tool = tool_for_model(model.as_deref());
+
+    if let Some(prev) = req.previous_response_id.clone() {
+        let Some(sid) = session_id_from_resp(&prev).map(|s| s.to_string()) else {
+            return respond_error(request, 400, "invalid_request", "malformed previous_response_id", json_header);
+        };
+        let spec = crate::agent_source::ResumeSpec {
+            session_id: sid.clone(),
+            workspace_path: public_workspace(),
+            prompt: req.prompt_text(),
+            model,
+            ..Default::default()
+        };
+        match crate::agent_source::resume_session(tool, &spec, Box::new(|_| {})) {
+            Ok(()) => {
+                let mut r = ResponseObject::new(to_resp_id(&sid), ResponseStatus::InProgress);
+                r.previous_response_id = Some(prev);
+                respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header)
+            }
+            Err(e) => respond_error(request, 500, "resume_failed", e, json_header),
+        }
+    } else {
+        let (resp_id, uuid) = new_resp_id();
+        let spec = crate::agent_source::SpawnSpec {
+            workspace_path: public_workspace(),
+            prompt: req.prompt_text(),
+            model: model.clone(),
+            effort: None,
+            permission_mode: None,
+            session_id: Some(uuid),
+            entrypoint: String::new(),
+        };
+        match crate::agent_source::spawn_session(tool, &spec) {
+            Ok(_) => {
+                let mut r = ResponseObject::new(resp_id, ResponseStatus::Queued);
+                r.model = model;
+                respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header)
+            }
+            Err(e) => respond_error(request, 500, "spawn_failed", e, json_header),
+        }
+    }
+}
+
+/// `GET /v1/responses/{id}` — project current session state.
+fn get_response(ctx: &super::ServeCtx, request: tiny_http::Request, json_header: tiny_http::Header, resp_id: &str) {
+    let Some(sid) = session_id_from_resp(resp_id) else {
+        return respond_error(request, 404, "not_found", "malformed response id", json_header);
+    };
+    match build_response(ctx, sid) {
+        Some(r) => respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header),
+        None => respond_error(request, 404, "not_found", "no such response", json_header),
+    }
+}
+
+/// `POST /v1/responses/{id}/cancel` — interrupt the run, best-effort.
+fn cancel_response(ctx: &super::ServeCtx, request: tiny_http::Request, json_header: tiny_http::Header, resp_id: &str) {
+    let Some(sid) = session_id_from_resp(resp_id) else {
+        return respond_error(request, 404, "not_found", "malformed response id", json_header);
+    };
+    let sessions = crate::session::scan_all_sources(ctx.sources);
+    let Some(s) = sessions.iter().find(|s| s.id == sid) else {
+        return respond_error(request, 404, "not_found", "no such response", json_header);
+    };
+    if let Some(pid) = s.pid {
+        let _ = crate::session::interrupt_pid_impl(pid);
+    }
+    let mut r = build_response(ctx, sid)
+        .unwrap_or_else(|| ResponseObject::new(to_resp_id(sid), ResponseStatus::Cancelled));
+    r.status = ResponseStatus::Cancelled;
+    respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header);
 }
 
 #[cfg(test)]
@@ -444,6 +631,37 @@ mod tests {
         assert!(r2.stream);
         assert_eq!(r2.previous_response_id.as_deref(), Some("resp_x"));
         assert_eq!(r2.function_call_outputs(), vec![("call_1".into(), "allow".into())]);
+    }
+
+    #[test]
+    fn tool_routing_by_model() {
+        assert_eq!(tool_for_model(Some("claude-opus-4-8")), "claude");
+        assert_eq!(tool_for_model(Some("gpt-5.6-sol")), "codex");
+        assert_eq!(tool_for_model(Some("codex")), "codex");
+        assert_eq!(tool_for_model(None), "claude");
+    }
+
+    #[test]
+    fn project_output_text_claude_and_codex() {
+        let claude = serde_json::json!({
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "text", "text": "hello"},
+                {"type": "tool_use", "name": "Read"},
+                {"type": "text", "text": "world"}
+            ]}
+        });
+        let codex = serde_json::json!({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "assistant", "content": [
+                {"type": "output_text", "text": "codex reply"}
+            ]}
+        });
+        let user = serde_json::json!({"type": "user", "message": {"content": "ignored"}});
+        assert_eq!(project_output_text(&[claude.clone()]), "hello\nworld");
+        assert_eq!(project_output_text(&[codex.clone()]), "codex reply");
+        assert_eq!(project_output_text(&[user, claude, codex]), "hello\nworld\ncodex reply");
+        assert_eq!(project_output_text(&[]), "");
     }
 
     #[test]
