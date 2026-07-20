@@ -92,6 +92,7 @@ pub mod task_progress;
 pub mod rate_limit_parser;
 pub mod remote_workspace;
 pub mod scan_cache_disk;
+pub mod schedule;
 pub mod search_index;
 pub mod session;
 pub mod session_launch;
