@@ -104,11 +104,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     // Mirror the permission injection for the MCP server registration. We are
     // the fleet binary, so current_exe() is the right `command` to publish.
     //
-    // Debug-only gate (matches the desktop side in gui.rs): v2 fleet__ask has
-    // UX gaps vs v1 AskUserQuestion that we want fixed before release users
-    // get the tool by default. Release builds skip injection and release()
-    // any stale entry left over by an earlier dev install.
-    if cfg!(debug_assertions) && crate::mcp_injector::load_config().enabled {
+    // Previously gated to debug builds only (v2 fleet__ask had UX gaps vs v1
+    // AskUserQuestion). Those gaps are now closed — the fleet-ask card renders
+    // option previews, the `mcp__fleet__*` permissions allow-list suppresses the
+    // per-call permission prompt, and the interaction-mode guidance no longer
+    // steers agents back to v1 — so the tool ships in every build, gated only by
+    // the user toggle. When the toggle is off we release() any stale entry left
+    // by an earlier install so the settings.json / .claude.json state self-heals.
+    if crate::mcp_injector::load_config().enabled {
         match std::env::current_exe() {
             Ok(p) => {
                 let path_str = p.to_string_lossy().to_string();
@@ -118,7 +121,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
             Err(e) => eprintln!("[fleet serve] current_exe failed, skipping mcp_injector: {e}"),
         }
-    } else if !cfg!(debug_assertions) {
+    } else {
         let _ = crate::mcp_injector::release(serve_pid);
     }
     if let Err(e) = ctrlc::try_set_handler(move || {
