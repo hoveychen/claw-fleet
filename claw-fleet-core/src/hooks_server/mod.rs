@@ -230,6 +230,24 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     // for the mobile web (see the broadcast loop below).
     crate::mobile_relay::ensure_ws_client();
 
+    // ── Headless control-plane ticker ──────────────────────────────────────
+    // The desktop LocalBackend runs a 30s ticker for auto-resume of
+    // rate-limited/errored sessions, delivery of queued follow-up messages,
+    // and interruption of hung Codex turns. A headless host (this serve
+    // process — the sole control plane in the Fleet Cloud lean container) has
+    // no desktop backend, so it must drive that reconciliation itself. The
+    // ticker builds its own source set (trait objects aren't Send, mirroring
+    // the SSE thread below) and scans via the same scan_all_sources path the
+    // request handlers use. Runs for the life of the process — serve() never
+    // returns — so the running flag stays true.
+    {
+        std::thread::spawn(move || {
+            let sources_ticker = build_sources();
+            let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            crate::headless_runtime::run(move || scan_all_sources(&sources_ticker), running);
+        });
+    }
+
     // ── Background SSE broadcaster thread ──────────────────────────────────
     // Polls for session changes, waiting alerts, guard/elicitation requests
     // and pushes them to connected SSE clients.

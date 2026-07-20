@@ -5,7 +5,13 @@
 #    them into the agent runtime — see the marked hook below. Credentials are
 #    pulled at runtime so they live only in the container process, never in the
 #    image and never under the customer's /workspace mount.
-# 2. Start `fleet serve` on the scoped-token API surface.
+# 2. Run `fleet bootstrap` to install the control plane (guard/elicitation/
+#    plan-approval/idle/prd hooks + guidance) — makes this a *controlled* host,
+#    not a bare request/response API. Runs every start because ~/.claude is on
+#    the ephemeral layer; all apply_* steps are idempotent.
+# 3. Start `fleet serve` on the scoped-token API surface. serve() injects the
+#    permissions allowlist + fleet MCP (both default-on) and runs the headless
+#    control-plane ticker (auto-resume / drain / codex-stall).
 set -euo pipefail
 
 : "${FLEET_SERVE_HOST:=0.0.0.0}"
@@ -49,6 +55,15 @@ if [[ "${FLEET_WAIT_FOR_CREDS:-1}" != "0" ]]; then
     [[ -s "${claude_cred}" ]] && echo "fleet-entrypoint: claude credential present" >&2
 fi
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ── Control-plane bootstrap ─────────────────────────────────────────────────
+# Install the MUST-set hooks + guidance idempotently before serving. Runs every
+# start because ~/.claude lives on the container's ephemeral layer (recreated on
+# each container start). A bootstrap failure aborts startup (set -e): a host
+# without guard/idle/prd hooks is not a controlled host. Locale from
+# FLEET_LOCALE (default en); no user title in a headless host.
+echo "fleet-entrypoint: installing control plane (fleet bootstrap) ..." >&2
+fleet bootstrap --locale "${FLEET_LOCALE:-en}"
 
 export FLEET_SERVE_HOST
 exec fleet serve --port "${FLEET_SERVE_PORT}" --token "${FLEET_ADMIN_TOKEN}"
