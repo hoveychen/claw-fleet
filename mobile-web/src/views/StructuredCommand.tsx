@@ -22,11 +22,12 @@ const NESTED_LABEL: Record<string, string> = {
   "python-c": "python -c 内嵌代码",
   "node-e": "node -e 内嵌代码",
   eval: "eval 内嵌脚本",
+  heredoc: "heredoc 脚本",
 };
 
-/** python/node payloads are opaque code, not shell — show them raw. */
+/** python/node/heredoc payloads are opaque code, not shell — show them raw. */
 function isOpaqueScript(kind: string): boolean {
-  return kind === "python-c" || kind === "node-e";
+  return kind === "python-c" || kind === "node-e" || kind === "heredoc";
 }
 
 export function StructuredCommand({
@@ -68,9 +69,12 @@ function ViewBody({ view }: { view: CommandView }) {
 function LeafRow({ leaf }: { leaf: CommandLeaf }) {
   const triggering = leaf.triggering === true;
   const covered = leaf.already_allowed === true;
-  // When the leaf carries a nested script the last argv entry is the raw
-  // script itself — the nested block below renders it, so drop it here.
-  const visible = leaf.nested ? leaf.argv.slice(0, -1) : leaf.argv;
+  // When the nested script is inline in argv (`bash -c "..."`) the last argv
+  // entry is the raw script — the nested block renders it, so drop it here.
+  // A heredoc/stdin script (`python3 -`) is NOT in argv, so keep every token.
+  const inline =
+    !!leaf.nested && leaf.argv[leaf.argv.length - 1] === leaf.nested.raw;
+  const visible = inline ? leaf.argv.slice(0, -1) : leaf.argv;
   return (
     <div className={styles.leaf} data-triggering={triggering}>
       <div className={styles.argv}>
