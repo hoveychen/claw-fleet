@@ -1453,6 +1453,21 @@ pub fn run() {
                 claw_fleet_core::log_debug(&format!("ensure_fleet_cli_link failed: {e}"));
             }
 
+            // Install the idle hooks (Stop → `fleet session idle`,
+            // UserPromptSubmit → `fleet session resume`). The Stop hook is the
+            // trigger for handoff relays (`handoff::consume_and_spawn`) and the
+            // loop/watch reconcile — without it, a registered `fleet handoff`
+            // never spawns its successor and stranded `fleet loop`/`fleet watch`
+            // timers never re-arm. This ran at every launch inside the old
+            // `daemon_autostart::ensure_supervisor_daemon` alongside
+            // `ensure_fleet_cli_link` above; when the kanban daemon was removed
+            // (192b35b) the CLI-link half was kept here but this call was
+            // dropped, silently orphaning the handoff trigger on every fresh
+            // install. Restored here as its twin. Idempotent (retain-then-push).
+            if let Err(e) = claw_fleet_core::hooks::apply_idle_hooks() {
+                claw_fleet_core::log_debug(&format!("apply_idle_hooks failed: {e}"));
+            }
+
             // One-time migration: port/token/bin and the defunct event log all
             // moved to ~/.fleet, so the old ~/.claude/fleet directory is now
             // pure legacy — remove it. Best-effort; a failure is not fatal.
