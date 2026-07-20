@@ -31,6 +31,8 @@ pub const AUDIT_RULES_SUGGEST: &str = "/audit/rules/suggest";
 pub const AUDIT_RULES_TOGGLE: &str = "/audit/rules/toggle";
 pub const BROWSE_DIR: &str = "/browse_dir";
 pub const CHAT_WORKSPACE: &str = "/chat_workspace";
+/// Fleet Cloud lean: consolidated per-container (== per-customer) token usage.
+pub const CLOUD_USAGE: &str = "/cloud_usage";
 pub const CLAUDE_BINARY_OVERRIDE: &str = "/claude_binary_override";
 pub const DAILY_REPORT: &str = "/daily_report";
 pub const DAILY_REPORT_AI_SUMMARY: &str = "/daily_report/ai_summary";
@@ -159,3 +161,75 @@ pub const WORKFLOW_TREES: &str = "/workflow_trees";
 /// Prefix arm: `/sources/<name>/account|usage` is matched by prefix on the
 /// server and built with `format!` on the client.
 pub const SOURCES_PREFIX: &str = "/sources/";
+
+/// Public API surface exposed to per-customer **scoped** tokens in the Fleet
+/// Cloud lean deployment (one-customer-per-container). This is the stable
+/// contract another service integrates against: drive an agent, observe it,
+/// answer its decision cards, fetch produced artifacts, read token usage.
+///
+/// **Default-deny.** A scoped token may reach ONLY these paths. Everything
+/// absent here — settings, guidance injectors (`/apply_*`, `/remove_*`),
+/// arbitrary command exec (`/proc_run`), filesystem browse (`/explorer_*`,
+/// `/browse_dir`, `/scratchpad_*`), plugin/skill/source management, LLM config,
+/// memories, wiki mutation, mobile-relay config, remote-workspace registry —
+/// requires the full **admin** token. That exclusion is what keeps provider
+/// credentials and host internals invisible to the customer.
+///
+/// `/explorer_file` is deliberately NOT public: it reads an arbitrary path and
+/// would let a scoped token exfiltrate credentials. Artifact fetch for
+/// customers goes through the narrower [`USER_ATTACHMENT`] / [`DECISION_ASSET`]
+/// routes instead.
+///
+/// `/events` (SSE) is handled before the router match but is public so scoped
+/// tokens can stream.
+pub fn is_public(path: &str) -> bool {
+    matches!(
+        path,
+        // Observe
+        HEALTH
+            | SESSIONS
+            | SESSION_READ
+            | SESSION_DECISIONS
+            | HANDOFF_CHAIN
+            | TAIL
+            | MESSAGES
+            | LIVE_THINKING
+            | TOOL_RESULT
+            // Drive
+            | SPAWN_SESSION
+            | RESUME_SESSION
+            | ENQUEUE_MESSAGE
+            | CANCEL_PENDING_MESSAGE
+            | INTERRUPT
+            | STOP
+            | STOP_WORKSPACE
+            // Answer the six decision-card types (pending + respond)
+            | GUARD_PENDING
+            | GUARD_RESPOND
+            | ELICITATION_PENDING
+            | ELICITATION_RESPOND
+            | ELICITATION_UPLOAD
+            | FLEET_ASK_PENDING
+            | FLEET_ASK_RESPOND
+            | PLAN_APPROVAL_PENDING
+            | PLAN_APPROVAL_RESPOND
+            | PERMISSION_PROMPT_PENDING
+            | PERMISSION_PROMPT_RESPOND
+            | A2UI_RENDER_PENDING
+            | A2UI_RENDER_RESPOND
+            // Fetch produced artifacts (narrow, non-arbitrary)
+            | USER_ATTACHMENT
+            | FILE_SIZE
+            | DECISION_ASSET
+            // Read token usage (metering; billing/quota deliberately out of v1)
+            | CLOUD_USAGE
+            | TODAY_USAGE
+            | TODAY_USAGE_BREAKDOWN
+            | USAGE_SUMMARIES
+            | USAGE_HISTORY
+            | CODEX_USAGE_HISTORY
+            | FLEET_LLM_USAGE_DAILY
+            | TOKEN_BREAKDOWN
+            | CODEX_TOKEN_BREAKDOWN
+    ) || path == "/events"
+}
