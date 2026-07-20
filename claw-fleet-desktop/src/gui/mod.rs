@@ -47,6 +47,7 @@ mod locale;
 mod alerts;
 mod mascot;
 mod llm;
+mod schedule;
 
 use self::tts::*;
 use self::decision::*;
@@ -63,6 +64,7 @@ use self::elicitation::*;
 use self::plan_approval::*;
 use self::cli_installer::*;
 use self::memory::*;
+use self::schedule::*;
 use self::wiki::*;
 use self::explorer::*;
 use self::scratchpad::*;
@@ -1785,6 +1787,10 @@ pub fn run() {
             get_source_account,
             get_source_usage,
             list_memories,
+            list_loops,
+            list_schedules,
+            cancel_loop,
+            cancel_schedule,
             get_memory_content,
             read_live_thinking,
             get_task_plans,
