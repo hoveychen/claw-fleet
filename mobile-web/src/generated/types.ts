@@ -11,7 +11,7 @@ export type NestedScript = { kind: NestedKind,
 raw: string, 
 view: CommandView, };
 
-export type NestedKind = "bash-c" | "sh-c" | "zsh-c" | "python-c" | "node-e" | "eval";
+export type NestedKind = "bash-c" | "sh-c" | "zsh-c" | "python-c" | "node-e" | "eval" | "heredoc";
 
 export type Connector = "and" | "or" | "pipe" | "semi";
 

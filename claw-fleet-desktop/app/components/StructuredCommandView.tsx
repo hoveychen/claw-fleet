@@ -23,6 +23,7 @@ const NESTED_LABEL_KEY: Record<NestedKind, string> = {
   "python-c": "command.nested.python",
   "node-e": "command.nested.node",
   eval: "command.nested.eval",
+  heredoc: "command.nested.heredoc",
 };
 
 const NESTED_LABEL_FALLBACK: Record<NestedKind, string> = {
@@ -32,10 +33,11 @@ const NESTED_LABEL_FALLBACK: Record<NestedKind, string> = {
   "python-c": "python -c",
   "node-e": "node -e",
   eval: "eval",
+  heredoc: "heredoc",
 };
 
 function isOpaqueScript(kind: NestedKind): boolean {
-  return kind === "python-c" || kind === "node-e";
+  return kind === "python-c" || kind === "node-e" || kind === "heredoc";
 }
 
 interface Props {
@@ -78,7 +80,7 @@ function LeafRow({ leaf }: { leaf: CommandLeaf }) {
     : styles.leaf;
   return (
     <div className={className}>
-      <ArgvLine argv={leaf.argv} hasNested={!!leaf.nested} />
+      <ArgvLine argv={leaf.argv} nested={leaf.nested} />
       {triggering && (
         <span
           className={
@@ -110,16 +112,18 @@ function LeafRow({ leaf }: { leaf: CommandLeaf }) {
 
 function ArgvLine({
   argv,
-  hasNested,
+  nested,
 }: {
   argv: string[];
-  hasNested: boolean;
+  nested?: NestedScript | null;
 }) {
   if (argv.length === 0) return null;
-  // When this leaf has a nested script (e.g. bash -c "...") the last argv
-  // entry is the raw script, which we don't want to repeat above the nested
-  // block.  Drop it from the inline display.
-  const visible = hasNested ? argv.slice(0, -1) : argv;
+  // When the nested script is inline in argv (e.g. `bash -c "..."`), the last
+  // argv entry IS the raw script — drop it so we don't repeat it above the
+  // nested block.  For a heredoc/stdin script the body lives in the redirect,
+  // not in argv (`python3 -`), so keep every token.
+  const inline = !!nested && argv[argv.length - 1] === nested.raw;
+  const visible = inline ? argv.slice(0, -1) : argv;
   return (
     <div className={styles.argv}>
       {visible.map((tok, j) => (

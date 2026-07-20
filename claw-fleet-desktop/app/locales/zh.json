@@ -1870,7 +1870,8 @@
       "zsh": "嵌入 zsh -c",
       "python": "嵌入 python -c",
       "node": "嵌入 node -e",
-      "eval": "嵌入 eval"
+      "eval": "嵌入 eval",
+      "heredoc": "heredoc 脚本"
     }
   },
   "history": {
