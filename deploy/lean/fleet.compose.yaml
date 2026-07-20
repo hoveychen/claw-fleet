@@ -30,8 +30,10 @@ services:
       # The ONLY host bind-mount: the customer's repos / workspace. Creds never
       # live here — they are fetched into the container process at runtime.
       - "${HOST_WORKSPACE:?set HOST_WORKSPACE to the customer repo dir}:/workspace"
-      # Fleet state (sessions, plans) — a named volume, not customer-visible.
-      - fleet-home:/fleet-home
+      # Fleet state (sessions, plans, tokens) — a named volume, not
+      # customer-visible. Mounted at ~/.fleet so it persists while ~/.claude
+      # (creds) stays on the ephemeral layer.
+      - fleet-state:/home/fleet/.fleet
 
 volumes:
-  fleet-home:
+  fleet-state:
