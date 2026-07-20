@@ -94,15 +94,14 @@ mod tests {
 
     #[test]
     fn scoped_token_reaches_public_paths() {
+        // v2: the scoped surface is the /v1/* tree (+ the health check).
         for p in [
-            routes::SPAWN_SESSION,
-            routes::TAIL,
-            routes::ENQUEUE_MESSAGE,
-            routes::GUARD_RESPOND,
-            routes::FLEET_ASK_RESPOND,
-            routes::USER_ATTACHMENT,
-            routes::USAGE_SUMMARIES,
-            "/events",
+            routes::HEALTH,
+            "/v1/responses",
+            "/v1/responses/resp_abc",
+            "/v1/responses/resp_abc/cancel",
+            "/v1/responses/resp_abc/files",
+            "/v1/files/file_xyz/content",
         ] {
             assert_eq!(
                 authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC)),
@@ -131,6 +130,40 @@ mod tests {
                 authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC)),
                 AuthOutcome::Denied,
                 "scoped token must be denied on internal path {p}"
+            );
+        }
+    }
+
+    #[test]
+    fn scoped_token_denied_on_v1_replaced_raw_routes() {
+        // v2 P6 confinement: the raw internal routes the v1 lean whitelist used
+        // to expose are now admin-only. A scoped token hitting /spawn_session
+        // (etc.) is Denied → the audit holes (unconstrained workspacePath, raw
+        // SessionInfo leak) are unreachable by construction.
+        for p in [
+            routes::SPAWN_SESSION,
+            routes::RESUME_SESSION,
+            routes::SESSIONS,
+            routes::TAIL,
+            routes::MESSAGES,
+            routes::LIVE_THINKING,
+            routes::ENQUEUE_MESSAGE,
+            routes::INTERRUPT,
+            routes::STOP,
+            routes::GUARD_RESPOND,
+            routes::FLEET_ASK_RESPOND,
+            routes::USER_ATTACHMENT,
+            routes::USAGE_SUMMARIES,
+            "/events",
+        ] {
+            assert!(
+                !routes::is_public(p),
+                "v1 raw route {p} must be off the v2 scoped whitelist"
+            );
+            assert_eq!(
+                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC)),
+                AuthOutcome::Denied,
+                "scoped token must be denied on v1-replaced raw route {p}"
             );
         }
     }

@@ -264,6 +264,27 @@ pub fn map_status(fleet_status: &str) -> ResponseStatus {
     }
 }
 
+/// Effective OpenAI status for a projected run. Two adjustments over the raw
+/// [`map_status`]:
+/// - A pending decision card means the turn yielded to await the caller's
+///   answer — OpenAI's `completed`-with-tool-calls contract.
+/// - A headless (`-p`) turn that reached `waitingInput` with no pending card
+///   has produced its answer and is idle awaiting the next input. That is a
+///   `completed` response (the caller continues via `previous_response_id`),
+///   not a run still in progress — otherwise a client polling
+///   `while status == in_progress` would spin forever on a finished turn.
+pub fn effective_status(raw_status: &str, has_pending_calls: bool) -> ResponseStatus {
+    if has_pending_calls {
+        return ResponseStatus::Completed;
+    }
+    let base = map_status(raw_status);
+    if base == ResponseStatus::InProgress && raw_status == "waitingInput" {
+        ResponseStatus::Completed
+    } else {
+        base
+    }
+}
+
 /// The OpenAI `function_call.name` a Fleet decision-card kind maps to.
 pub fn decision_function_name(kind: &str) -> &'static str {
     match kind {
@@ -1027,16 +1048,15 @@ fn build_response(
             }
         }
     }
-    // Pending decision cards surface as function_call items. When any exist the
-    // run has yielded to await the caller's answer, which is OpenAI's
-    // `completed`-with-tool-calls contract — so a client polling
-    // `while status == in_progress` breaks out and answers instead of
-    // spinning on a `waiting_input` session forever.
+    // Pending decision cards surface as function_call items; their presence
+    // (and a finished-but-idle `waitingInput` turn) drive the effective status
+    // via `effective_status`.
     let calls = pending_function_calls(session_id);
-    if !calls.is_empty() {
+    let has_calls = !calls.is_empty();
+    if has_calls {
         resp.output.extend(calls);
-        resp.status = ResponseStatus::Completed;
     }
+    resp.status = effective_status(&status_str, has_calls);
     Some(resp)
 }
 
@@ -1126,7 +1146,10 @@ fn run_stream(
                         .ok()
                         .and_then(|v| v.as_str().map(String::from))
                         .unwrap_or_default();
-                    let st = map_status(&status_str);
+                    // No pending calls here (handled above), so `has_pending_calls`
+                    // is false; this promotes a finished `waitingInput` turn to
+                    // `completed` the same way the polling projection does.
+                    let st = effective_status(&status_str, false);
                     if matches!(
                         st,
                         ResponseStatus::Completed | ResponseStatus::Failed | ResponseStatus::Cancelled
@@ -1412,6 +1435,22 @@ mod tests {
         assert_eq!(map_status("failed"), ResponseStatus::Failed);
         assert_eq!(map_status("stopped"), ResponseStatus::Cancelled);
         assert_eq!(map_status("queued"), ResponseStatus::Queued);
+    }
+
+    #[test]
+    fn effective_status_promotes_waiting_and_pending() {
+        // A finished-but-idle headless turn (waitingInput, no card) → completed.
+        assert_eq!(effective_status("waitingInput", false), ResponseStatus::Completed);
+        // Actively generating stays in_progress.
+        assert_eq!(effective_status("running", false), ResponseStatus::InProgress);
+        assert_eq!(effective_status("thinking", false), ResponseStatus::InProgress);
+        // A pending decision card completes the turn regardless of raw status.
+        assert_eq!(effective_status("running", true), ResponseStatus::Completed);
+        assert_eq!(effective_status("waitingInput", true), ResponseStatus::Completed);
+        // Terminal states pass through unchanged.
+        assert_eq!(effective_status("failed", false), ResponseStatus::Failed);
+        assert_eq!(effective_status("stopped", false), ResponseStatus::Cancelled);
+        assert_eq!(effective_status("queued", false), ResponseStatus::Queued);
     }
 
     #[test]
