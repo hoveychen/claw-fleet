@@ -502,6 +502,15 @@ pub fn on_codex_turn_exit(session_id: &str) {
             rearmed.len()
         ));
     }
+    // Same for one-shot schedules — re-arm stranded/overdue timers so a schedule
+    // fires even if the codex session it was created from is what next yields.
+    let sched_rearmed = crate::schedule::reconcile();
+    if !sched_rearmed.is_empty() {
+        crate::log_debug(&format!(
+            "codex turn exit: re-armed {} stranded schedule timer(s)",
+            sched_rearmed.len()
+        ));
+    }
 }
 
 /// Pin `HOME` + augment `PATH` exactly like the Claude spawn, so a
