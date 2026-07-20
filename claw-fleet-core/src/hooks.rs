@@ -894,6 +894,13 @@ fn read_settings() -> Option<Value> {
 
 fn write_settings(value: &Value) -> Result<(), String> {
     let path = settings_path().ok_or("cannot determine home dir")?;
+    // Create ~/.claude if it's absent — a fresh host (e.g. the Fleet Cloud
+    // container's ephemeral layer on first boot) has no ~/.claude yet, and
+    // fs::write does not create parent dirs. Without this the hook installers
+    // (guard / elicitation / plan-approval) fail with ENOENT.
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create settings dir: {e}"))?;
+    }
     let content =
         serde_json::to_string_pretty(value).map_err(|e| format!("serialize settings: {e}"))?;
     fs::write(&path, content + "\n").map_err(|e| format!("write settings: {e}"))
@@ -1119,6 +1126,49 @@ mod tests {
                 "timeout": 5000
             }]
         })
+    }
+
+    #[test]
+    fn write_settings_creates_claude_dir_when_absent() {
+        // Regression: a fresh host — e.g. the Fleet Cloud container on first
+        // boot, where ~/.claude is on the ephemeral layer and does not exist —
+        // must still get settings.json written. Before the fix write_settings
+        // called fs::write without creating the parent ~/.claude, so
+        // apply_guard_hook (the command audit gate) failed with ENOENT, leaving
+        // the injected Bash(*) allow rule with nothing to intercept commands.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-hooks-writesettings-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by the fleet_home_lock.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let claude_dir = tmp.join(".claude");
+        let setup_ok = !claude_dir.exists();
+        let res = write_settings(&json!({ "hooks": {} }));
+        let wrote = res.is_ok() && claude_dir.join("settings.json").is_file();
+
+        // Restore env before asserting so a failure can't leak FLEET_HOME.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = fs::remove_dir_all(&tmp);
+
+        assert!(setup_ok, "test setup: ~/.claude must start absent");
+        assert!(
+            wrote,
+            "write_settings must create ~/.claude and write settings.json on a fresh host: {res:?}"
+        );
     }
 
     #[test]

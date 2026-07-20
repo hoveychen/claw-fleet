@@ -36,8 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         "@openai/codex@${CODEX_VERSION}" \
     && npm cache clean --force \
     && useradd --uid 10001 --create-home fleet \
-    && mkdir -p /workspace /fleet-home \
-    && chown -R fleet:fleet /workspace /fleet-home
+    && mkdir -p /workspace /home/fleet/.fleet \
+    && chown -R fleet:fleet /workspace /home/fleet
 
 COPY --from=build /src/target/release/fleet-cli /usr/local/bin/fleet
 COPY deploy/lean/entrypoint.sh /usr/local/bin/fleet-entrypoint
@@ -45,16 +45,21 @@ RUN chmod +x /usr/local/bin/fleet-entrypoint
 
 USER fleet
 
-# Fleet state (sessions, plans, token files) lives here, separate from the
-# customer's bind-mounted /workspace.
+# One home for everything (`FLEET_HOME` intentionally unset, so Fleet's
+# real_home_dir() falls back to $HOME=/home/fleet). This keeps the control
+# plane, credentials, and Fleet-spawned agents all reading the SAME ~/.claude:
+# bootstrap writes hooks there, `fleet serve` injects permissions + MCP there,
+# and every spawned `claude` (whose HOME Fleet pins to real_home_dir()) reads
+# from there — no split between where hooks land and where the agent looks.
 #
-# Credentials land under $HOME (claude → ~/.claude/.credentials.json) and
-# $CODEX_HOME (codex → auth.json). Both are on the container's ephemeral
-# writable layer — NOT /workspace (customer mount) and NOT /fleet-home (named
-# state volume) — so leased credentials live only for the container's lifetime
-# and are never persisted or exposed to the customer.
-ENV FLEET_HOME=/fleet-home \
-    CODEX_HOME=/home/fleet/.codex \
+# Persistence boundary is the mount, not a divergent env:
+#   ~/.fleet  (/home/fleet/.fleet) — the named state volume below (sessions,
+#             plans, tokens) — persists across container restarts.
+#   ~/.claude, ~/.codex — the container's ephemeral writable layer. Leased
+#             credentials (claude → ~/.claude/.credentials.json, codex →
+#             $CODEX_HOME/auth.json) live only for the container's lifetime and
+#             are NEVER on a named volume or the /workspace customer mount.
+ENV CODEX_HOME=/home/fleet/.codex \
     FLEET_SERVE_HOST=0.0.0.0 \
     FLEET_SERVE_PORT=8080
 # FLEET_ADMIN_TOKEN  — first-party full-access token (required)
@@ -62,7 +67,8 @@ ENV FLEET_HOME=/fleet-home \
 # Credential-store env (P3) is documented in deploy/lean/README.md.
 
 # /workspace is the ONLY host bind-mount (customer repos). Creds never go here.
-VOLUME ["/workspace", "/fleet-home"]
+# ~/.fleet is the persistent state volume; ~/.claude stays ephemeral.
+VOLUME ["/workspace", "/home/fleet/.fleet"]
 EXPOSE 8080
 
 ENTRYPOINT ["fleet-entrypoint"]
