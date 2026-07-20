@@ -1481,15 +1481,15 @@ pub fn run() {
             // can't be located (dev runs without a built fleet-cli) — the
             // agent then falls back to native AskUserQuestion only.
             //
-            // Debug-only: v2 fleet__ask has known UX gaps vs v1 (no preview,
-            // form-style submit flow, every call prompts Claude Code for
-            // permission, frequently lands as a deferred tool so agents
-            // default to AskUserQuestion anyway). Release builds skip the
-            // injection AND release() any pre-existing entry so users
-            // upgrading from a dev build don't keep a stale mcpServers.fleet.
-            if cfg!(debug_assertions)
-                && claw_fleet_core::mcp_injector::load_config().enabled
-            {
+            // Previously debug-only: v2 fleet__ask had UX gaps vs v1 (no
+            // preview, per-call permission prompt, guidance defaulted to v1).
+            // Those are now closed — the fleet-ask card renders option previews,
+            // the `mcp__fleet__*` permissions allow-list suppresses the prompt,
+            // and the interaction-mode guidance no longer steers to v1 — so the
+            // tool ships in every build, gated only by the user toggle. When the
+            // toggle is off we release() any stale entry so an upgrade from an
+            // earlier build doesn't keep an orphaned mcpServers.fleet.
+            if claw_fleet_core::mcp_injector::load_config().enabled {
                 match crate::fleet_binary::resolve_fleet_binary() {
                     Some(p) => {
                         let path_str = p.to_string_lossy().to_string();
@@ -1508,7 +1508,7 @@ pub fn run() {
                         );
                     }
                 }
-            } else if !cfg!(debug_assertions) {
+            } else {
                 let _ = claw_fleet_core::mcp_injector::release(std::process::id());
             }
 
