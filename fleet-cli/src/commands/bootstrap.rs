@@ -54,6 +54,15 @@ pub(crate) fn cmd_bootstrap(locale: Option<String>, title: Option<String>, json:
             result: claw_fleet_core::hooks::apply_plan_approval_hook(),
         },
         Step {
+            // Wires Claude Code's Stop hook → `fleet session idle`, the trigger
+            // that consumes registered handoffs (spawns the successor session)
+            // and reconciles loop/watch. Without it a headless host silently
+            // drops every Claude handoff/loop/watch — the desktop half of this
+            // same install lives in gui/mod.rs setup().
+            name: "idle_hooks",
+            result: claw_fleet_core::hooks::apply_idle_hooks(),
+        },
+        Step {
             name: "prd_discipline",
             result: claw_fleet_core::prd_discipline::apply_prd_discipline(&title, &locale)
                 .and_then(|()| claw_fleet_core::hooks::apply_prd_context_hook()),
