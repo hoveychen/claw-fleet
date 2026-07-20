@@ -30,6 +30,7 @@ pub mod foxy;
 pub mod git_ops;
 pub mod guard;
 pub mod handoff;
+pub mod headless_runtime;
 pub mod hooks;
 pub mod hooks_server;
 pub mod idle;
