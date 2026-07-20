@@ -76,6 +76,19 @@ pub(crate) fn cmd_session_idle() {
             watch_rearmed.join(", ")
         );
     }
+
+    // Schedule reconcile: same contract as the loop/watch reconciles above, for
+    // one-shot schedules whose detached timer died — and, crucially, for fires
+    // the machine slept through: on the next yield after the due time, an overdue
+    // pending schedule gets a fresh timer that fires it immediately.
+    let schedule_rearmed = claw_fleet_core::schedule::reconcile();
+    if !schedule_rearmed.is_empty() {
+        println!(
+            "schedule: re-armed {} stranded timer(s): {}",
+            schedule_rearmed.len(),
+            schedule_rearmed.join(", ")
+        );
+    }
 }
 
 /// `fleet session resume` — UserPromptSubmit-hook entrypoint. Clears the idle
