@@ -15,6 +15,7 @@ import { useUsageRing } from "../hooks/useUsageRing";
 import { MemoryView } from "./MemoryView";
 import { WikiView } from "./WikiView";
 import { AuditView } from "./AuditView";
+import { ScheduleView } from "./ScheduleView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
 import { FilesView } from "./FilesView";
@@ -326,6 +327,13 @@ export function SessionList() {
             <span className={styles.nav_label}>{t("view_memory")}</span>
           </button>
           <button
+            className={`${styles.nav_item} ${viewMode === "schedule" ? styles.nav_active : ""}`}
+            onClick={() => navTo("schedule")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="3" width="11" height="10.5" rx="1.5"/><path d="M2.5 6.5H13.5"/><path d="M5.5 1.5V3.5"/><path d="M10.5 1.5V3.5"/><path d="M8 8.5v2l1.3.8"/></svg></span>
+            <span className={styles.nav_label}>{t("view_schedule", "计划")}</span>
+          </button>
+          <button
             className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
             onClick={() => navTo("wiki")}
           >
@@ -487,6 +495,8 @@ export function SessionList() {
         <AuditView />
       ) : viewMode === "memory" ? (
         <MemoryView />
+      ) : viewMode === "schedule" ? (
+        <ScheduleView />
       ) : viewMode === "wiki" ? (
         <WikiView />
       ) : viewMode === "skills" ? (

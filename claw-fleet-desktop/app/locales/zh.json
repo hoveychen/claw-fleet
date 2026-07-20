@@ -83,6 +83,7 @@
   "keep_awake_off_tooltip": "保持系统唤醒（相当于 caffeinate -i）",
   "view_audit": "审计",
   "view_memory": "记忆",
+  "view_schedule": "计划",
   "view_wiki": "知识库",
   "view_skills": "技能",
   "view_plugins": "插件",
@@ -392,6 +393,24 @@
     "no_rules": "未配置规则。",
     "rule_search_placeholder": "搜索规则名、模式或说明…",
     "no_matching_rules": "无匹配规则。"
+  },
+  "schedule": {
+    "title": "计划任务",
+    "refresh": "刷新",
+    "empty_title": "还没有计划任务",
+    "empty_sub": "用 `fleet schedule create --in 5d` 或 `fleet loop create` 安排一个未来任务",
+    "every": "每",
+    "next": "下次",
+    "fires": "触发",
+    "in": "还有",
+    "fired": "已触发",
+    "ago": "前",
+    "badge_loop": "循环",
+    "badge_once": "单次",
+    "status_pending": "待触发",
+    "status_fired": "已触发",
+    "cancel": "取消",
+    "cancelling": "取消中"
   },
   "memory": {
     "panel_title": "Memory",

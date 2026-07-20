@@ -309,6 +309,44 @@ function handleIPC(
       if (source === "codex") return MOCK_CODEX_USAGE;
       return null;
     }
+    case "list_loops":
+      return [
+        {
+          id: "a1b2c3d4",
+          workspacePath: "/Users/dev/workspace/netferry",
+          prompt: "检查 CI 是否有夜间构建失败，有的话汇总失败的 job 和错误摘要。",
+          intervalSecs: 86400,
+          nextFireAt: Date.now() + 5 * 3600 * 1000,
+          iterationsDone: 3,
+          model: "claude-opus-4-8",
+          agentSource: "claude",
+        },
+      ];
+    case "list_schedules":
+      return [
+        {
+          id: "9f8e7d6c",
+          workspacePath: "/Users/dev/workspace/claude-fleet",
+          prompt: "5 天后回来检查 fleet schedule 上线后的真实使用情况，看有没有 stranded 的计时器需要处理。",
+          fireAt: Date.now() + 3 * 86400 * 1000 + 4 * 3600 * 1000,
+          status: "pending",
+          model: "claude-opus-4-8",
+          agentSource: "claude",
+        },
+        {
+          id: "1a2b3c4d",
+          workspacePath: "/Users/dev/workspace/talk-cli",
+          prompt: "发布后巡检：确认 npm 包已可安装并跑通 smoke。",
+          fireAt: Date.now() - 2 * 3600 * 1000,
+          status: "fired",
+          firedAt: Date.now() - 2 * 3600 * 1000,
+          firedSessionId: "sess-abc123",
+          agentSource: "codex",
+        },
+      ];
+    case "cancel_loop":
+    case "cancel_schedule":
+      return null;
     case "list_memories":
       return qaMode
         ? MOCK_MEMORIES.map((workspace) => ({
