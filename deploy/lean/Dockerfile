@@ -47,7 +47,14 @@ USER fleet
 
 # Fleet state (sessions, plans, token files) lives here, separate from the
 # customer's bind-mounted /workspace.
+#
+# Credentials land under $HOME (claude → ~/.claude/.credentials.json) and
+# $CODEX_HOME (codex → auth.json). Both are on the container's ephemeral
+# writable layer — NOT /workspace (customer mount) and NOT /fleet-home (named
+# state volume) — so leased credentials live only for the container's lifetime
+# and are never persisted or exposed to the customer.
 ENV FLEET_HOME=/fleet-home \
+    CODEX_HOME=/home/fleet/.codex \
     FLEET_SERVE_HOST=0.0.0.0 \
     FLEET_SERVE_PORT=8080
 # FLEET_ADMIN_TOKEN  — first-party full-access token (required)
