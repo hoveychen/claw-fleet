@@ -136,6 +136,35 @@ mod tests {
     }
 
     #[test]
+    fn scoped_token_cannot_reach_credential_surfaces() {
+        // Invariant guard for the lean cred-isolation model: a scoped customer
+        // token must NEVER reach a route that could read provider credentials
+        // out of the container. If someone later adds one of these to
+        // routes::is_public, this test fails on purpose.
+        for p in [
+            routes::EXPLORER_FILE,          // reads an arbitrary path
+            routes::SCRATCHPAD_FILE,        // reads an arbitrary scratchpad path
+            routes::PROC_RUN,               // arbitrary command exec
+            routes::PROC_OUTPUT,            // output of arbitrary command
+            routes::BROWSE_DIR,             // directory listing
+            routes::SOURCES_CONFIG,         // provider source config
+            routes::SOURCES_CLAUDE_ACCOUNT, // provider account detail
+            "/sources/claude/account",      // SOURCES_PREFIX arm → account/creds info
+            "/sources/codex/account",
+        ] {
+            assert!(
+                !routes::is_public(p),
+                "credential-adjacent route {p} must not be on the public whitelist"
+            );
+            assert_eq!(
+                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC)),
+                AuthOutcome::Denied,
+                "scoped token must be denied on credential-adjacent route {p}"
+            );
+        }
+    }
+
+    #[test]
     fn no_token_is_denied() {
         assert_eq!(
             authorize(routes::SPAWN_SESSION, None, ADMIN, Some(PUBLIC)),

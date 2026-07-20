@@ -37,13 +37,33 @@ The API is then on `http://<host>:8080`. External integrators use
 | `FLEET_PUBLIC_TOKEN` | no | Per-customer scoped token; unset disables external access. |
 | `FLEET_SERVE_HOST` | no | Bind host, default `0.0.0.0` in-container. |
 | `FLEET_SERVE_PORT` | no | Listen port, default `8080`. |
-| `FLEET_HOME` | no | Fleet state dir, default `/fleet-home`. |
-| `FLEET_CRED_STORE_URL` | no | Encrypted cred-store endpoint (wired in P3). |
+| `FLEET_HOME` | no | Fleet state dir, default `/fleet-home` (named volume). |
+| `CODEX_HOME` | no | Codex cred/config dir, default `/home/fleet/.codex` (ephemeral). |
+| `FLEET_WAIT_FOR_CREDS` | no | Wait for the claude credential before serving. `1` (default) / `0`. |
+| `FLEET_CREDS_TIMEOUT` | no | Seconds to wait for the credential, default `60`. |
+| `FLEET_CRED_STORE_URL` | no | Cred-store endpoint the operator's injector uses (informational). |
 
-## Credential isolation
+## Credential isolation (the seam)
 
 Credentials are **not** baked into the image and **not** placed under
-`/workspace`. They are pulled at runtime by `entrypoint.sh` from the encrypted
-cred store (P3) into the container process only. A scoped (`FLEET_PUBLIC_TOKEN`)
-caller cannot reach any route that would read them — no `/proc_run`, no
-`/explorer_file`, no settings/source routes (see the public-API doc).
+`/workspace` or the persistent `/fleet-home` volume. They land only on the
+container's **ephemeral** layer, at the paths the agents read:
+
+- claude → `$HOME/.claude/.credentials.json`
+- codex  → `$CODEX_HOME/auth.json`
+
+So a leased credential lives only for the container's lifetime.
+
+**Who injects them:** the cred store — [foxy-switcher](https://github.com/hoveychen/foxy-switcher)'s
+self-hosted remote vault + its Linux credential injector, which writes exactly
+those two files (a paired agent leases one Claude + one Codex account from the
+vault). Wiring the vault lease/inject is the operator's step; Fleet's
+`entrypoint.sh` only **waits** for the claude credential to appear before
+starting `fleet serve`, so early API calls don't race an un-leased container.
+
+**Why the customer can't see them:** a scoped (`FLEET_PUBLIC_TOKEN`) caller
+cannot reach any route that would read those files — no `/proc_run`, no
+`/explorer_file`, no `/browse_dir`, no `/sources/*/account`, no settings/source
+routes (see the public-API doc). This is enforced by the default-deny
+`routes::is_public` whitelist and guarded by
+`hooks_server::auth::tests::scoped_token_cannot_reach_credential_surfaces`.

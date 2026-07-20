@@ -20,14 +20,33 @@ if [[ -z "${FLEET_PUBLIC_TOKEN:-}" ]]; then
     echo "fleet-entrypoint: FLEET_PUBLIC_TOKEN not set — scoped external access disabled (admin token only)" >&2
 fi
 
-# ── P3 HOOK: credential-store fetch ─────────────────────────────────────────
-# Implemented in P3 (encrypted cred store → claude/codex runtime). Until then,
-# credentials are expected to be provided out-of-band by the operator. This
-# block is intentionally the single place cred material is materialized so it
-# can be audited to never touch /workspace.
-if [[ -n "${FLEET_CRED_STORE_URL:-}" ]]; then
-    echo "fleet-entrypoint: FLEET_CRED_STORE_URL set — cred-store fetch is wired in P3" >&2
-    # fleet cred-store fetch  # (P3)
+# ── Credential seam ─────────────────────────────────────────────────────────
+# Credentials are injected by the cred store (foxy-switcher's remote vault +
+# Linux injector) into the paths claude/codex read:
+#   $HOME/.claude/.credentials.json   and   $CODEX_HOME/auth.json
+# Both are on the container's ephemeral layer, never /workspace. This is the
+# single seam where cred material is materialized, so it can be audited to
+# never touch the customer mount.
+#
+# Fleet's side is only to WAIT for the injector to land the claude credential
+# before serving, so early API calls don't race an un-leased container. The
+# vault lease/inject itself is wired by the operator (foxy). Disable the wait
+# with FLEET_WAIT_FOR_CREDS=0 (e.g. API-key deployments that need no lease).
+: "${CODEX_HOME:=${HOME}/.codex}"
+claude_cred="${HOME}/.claude/.credentials.json"
+if [[ "${FLEET_WAIT_FOR_CREDS:-1}" != "0" ]]; then
+    timeout_s="${FLEET_CREDS_TIMEOUT:-60}"
+    waited=0
+    while [[ ! -s "${claude_cred}" ]]; do
+        if (( waited >= timeout_s )); then
+            echo "fleet-entrypoint: timed out after ${timeout_s}s waiting for ${claude_cred} — is the cred store injecting? (set FLEET_WAIT_FOR_CREDS=0 to skip)" >&2
+            break
+        fi
+        [[ $waited -eq 0 ]] && echo "fleet-entrypoint: waiting for cred store to inject ${claude_cred} ..." >&2
+        sleep 1
+        (( waited++ ))
+    done
+    [[ -s "${claude_cred}" ]] && echo "fleet-entrypoint: claude credential present" >&2
 fi
 # ─────────────────────────────────────────────────────────────────────────────
 
