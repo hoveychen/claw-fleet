@@ -145,6 +145,73 @@ fn write_record(dir: &Path, rec: &ScheduleRecord) -> Result<(), String> {
     fs::write(record_path(dir, &rec.id), json).map_err(|e| format!("write schedule: {e}"))
 }
 
+// ── time parsing ───────────────────────────────────────────────────────────────
+
+/// Parse a relative duration (`5d`, `2h`, `90m`) into an absolute fire time.
+/// Reuses [`crate::agent_loop::parse_interval`] so the accepted units and the
+/// 60-second floor are identical to a loop's `--interval` — no second grammar to
+/// keep in sync.
+pub fn parse_in(spec: &str, now: u64) -> Result<u64, String> {
+    let secs = crate::agent_loop::parse_interval(spec)?;
+    Ok(now + secs * 1000)
+}
+
+/// Parse an absolute local wall-clock time into epoch ms. Accepts
+/// `YYYY-MM-DD HH:MM[:SS]`, `YYYY-MM-DDTHH:MM[:SS]`, or a bare `HH:MM[:SS]` (the
+/// next occurrence today, or tomorrow if that time already passed today). The
+/// wall-clock is interpreted in the machine's local timezone, matching what the
+/// user reads off their clock.
+pub fn parse_at(spec: &str, now: u64) -> Result<u64, String> {
+    use chrono::{Local, NaiveDateTime, NaiveTime, TimeZone};
+    let s = spec.trim();
+    if s.is_empty() {
+        return Err("--at time is required (e.g. \"2026-07-25 09:00\")".into());
+    }
+    // Full datetime forms first.
+    let full = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+    ]
+    .iter()
+    .find_map(|fmt| NaiveDateTime::parse_from_str(s, fmt).ok());
+    let naive = match full {
+        Some(dt) => dt,
+        None => {
+            // Bare time-of-day → today, or tomorrow if already past.
+            let t = NaiveTime::parse_from_str(s, "%H:%M:%S")
+                .or_else(|_| NaiveTime::parse_from_str(s, "%H:%M"))
+                .map_err(|_| {
+                    format!("cannot parse --at time '{s}' (try \"2026-07-25 09:00\" or \"09:00\")")
+                })?;
+            let now_local = Local
+                .timestamp_millis_opt(now as i64)
+                .single()
+                .ok_or("clock out of range")?;
+            let today = now_local.date_naive();
+            let candidate = NaiveDateTime::new(today, t);
+            if to_epoch_ms_local(candidate)? <= now {
+                NaiveDateTime::new(today.succ_opt().ok_or("date overflow")?, t)
+            } else {
+                candidate
+            }
+        }
+    };
+    to_epoch_ms_local(naive)
+}
+
+/// A naive local datetime → epoch ms, picking the earlier instant across a DST
+/// fold and rejecting a time that falls in a spring-forward gap.
+fn to_epoch_ms_local(naive: chrono::NaiveDateTime) -> Result<u64, String> {
+    use chrono::{Local, TimeZone};
+    match Local.from_local_datetime(&naive) {
+        chrono::LocalResult::Single(dt) => Ok(dt.timestamp_millis().max(0) as u64),
+        chrono::LocalResult::Ambiguous(dt, _) => Ok(dt.timestamp_millis().max(0) as u64),
+        chrono::LocalResult::None => Err("that local time does not exist (DST gap)".into()),
+    }
+}
+
 // ── create / read / cancel ─────────────────────────────────────────────────────
 
 /// Register a one-shot schedule that fires at absolute epoch-ms `fire_at`.
@@ -916,6 +983,52 @@ mod tests {
         let rearmed = reconcile_in(d.path(), 1_000_000, &mut |r| armed.push(r.id.clone()));
         assert_eq!(rearmed, vec!["stranded"], "only the stranded pending schedule is re-armed");
         assert_eq!(armed, vec!["stranded"]);
+    }
+
+    #[test]
+    fn parse_in_reuses_the_interval_grammar_and_floor() {
+        assert_eq!(parse_in("5d", 1_000).unwrap(), 1_000 + 5 * 86_400 * 1000);
+        assert_eq!(parse_in("90m", 0).unwrap(), 90 * 60 * 1000);
+        assert_eq!(parse_in("2h", 0).unwrap(), 2 * 3600 * 1000);
+        // the 60-second floor is inherited from agent_loop::parse_interval
+        assert!(parse_in("10s", 0).unwrap_err().contains("minimum"));
+    }
+
+    #[test]
+    fn parse_at_absolute_matches_local_interpretation() {
+        use chrono::{Local, NaiveDateTime, TimeZone};
+        for s in ["2026-07-25 09:30", "2026-07-25T09:30", "2026-07-25 09:30:15"] {
+            let got = parse_at(s, 0).unwrap();
+            let naive = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
+                .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M"))
+                .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
+                .unwrap();
+            let want = Local.from_local_datetime(&naive).single().unwrap().timestamp_millis() as u64;
+            assert_eq!(got, want, "parse_at({s}) must match local-tz interpretation");
+        }
+    }
+
+    #[test]
+    fn parse_at_bare_time_is_always_in_the_future() {
+        use chrono::{Duration, Local, TimeZone};
+        let now = 1_770_000_000_000u64; // fixed, mid-range epoch ms
+        let now_local = Local.timestamp_millis_opt(now as i64).single().unwrap();
+        // a time-of-day one hour ago must roll to tomorrow
+        let earlier = (now_local - Duration::hours(1)).format("%H:%M").to_string();
+        let got = parse_at(&earlier, now).unwrap();
+        assert!(got > now, "past time-of-day must roll forward");
+        assert!(got <= now + 24 * 3600 * 1000);
+        // a time-of-day two hours ahead stays today
+        let later = (now_local + Duration::hours(2)).format("%H:%M").to_string();
+        let got = parse_at(&later, now).unwrap();
+        assert!(got > now && got <= now + 3 * 3600 * 1000);
+    }
+
+    #[test]
+    fn parse_at_rejects_garbage_and_empty() {
+        assert!(parse_at("", 0).unwrap_err().contains("required"));
+        assert!(parse_at("not-a-date", 0).unwrap_err().contains("cannot parse"));
     }
 
     #[test]
