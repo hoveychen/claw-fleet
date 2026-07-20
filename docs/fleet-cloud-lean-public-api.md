@@ -1,12 +1,58 @@
 # Fleet Cloud (lean) — 公开 API 契约
 
-- **状态：** v1 精简版（lean-cloud-v1 P1）
+- **状态：** v1 精简版已合并 main（lean-cloud-v1 P1–P5，commit 91cea2d）
 - **定位：** 把现有 `fleet serve` harness 的 agent 能力，以一层 scoped token 开放给外部服务集成。**不是**新服务——就是 `fleet serve` 加了一层默认拒绝的公开白名单。
 - **真相来源：** 路由常量 `claw-fleet-core/src/routes.rs`；白名单函数 `routes::is_public()`；鉴权 `claw-fleet-core/src/hooks_server/auth.rs`。
 
 ## 部署模型
 
 一客户一容器：每个客户对应一个自托管的 Fleet 容器（完整 Linux Fleet + claude/codex + 凭证）。客户的集成服务只通过 HTTP + scoped token 访问，碰不到容器内部、凭证、宿主机。
+
+## 快速开始
+
+### 1. 起服务（单容器）
+
+```sh
+export FLEET_ADMIN_TOKEN=$(openssl rand -hex 32)    # 第一方，全权
+export FLEET_PUBLIC_TOKEN=$(openssl rand -hex 32)   # 客户，scoped
+export HOST_WORKSPACE=/srv/customer-a/repos         # 客户仓库（bind mount）
+docker compose -f deploy/lean/fleet.compose.yaml up --build
+# 本地开发也可直接：FLEET_PUBLIC_TOKEN=$FLEET_PUBLIC_TOKEN \
+#   fleet serve --port 8080 --token $FLEET_ADMIN_TOKEN
+```
+
+服务在 `http://<host>:8080`。凭证由 cred store（foxy-switcher 远程 vault + Linux 注入器）注入，见下方 deploy/lean/README。
+
+### 2. 集成方用 scoped token 驱动一个任务
+
+一条任务的完整生命周期——创建 → 观察 → 答决策 → 取用量：
+
+```sh
+B=http://<host>:8080
+H="Authorization: Bearer $FLEET_PUBLIC_TOKEN"
+
+# ① 创建任务：启动一个 agent。请求体 camelCase：
+#    workspacePath(必) prompt(必) model? effort? permissionMode?
+curl -H "$H" -X POST $B/spawn_session -d '{
+  "workspacePath": "/workspace/repo",
+  "prompt": "修复 issue #12：登录页在 Safari 下白屏",
+  "model": "claude-opus-4-8",
+  "effort": "high"
+}'
+
+# ② 实时观察：SSE 事件流（会话/决策变化），或轮询 tail 拿 transcript
+curl -N -H "$H" "$B/events"
+curl -H "$H" "$B/tail?..."               # 参数同现有 serve /tail
+
+# ③ 遇到决策卡时先看 pending，再作答（六类之一，如 fleet-ask）
+curl -H "$H" "$B/fleet-ask/pending"
+curl -H "$H" -X POST "$B/fleet-ask/respond" -d '{...}'
+
+# ④ 查该客户（=该容器）的 token 用量
+curl -H "$H" "$B/cloud_usage"
+```
+
+> SSE 无法设头，用 query 携带 token：`curl -N "$B/events?token=$FLEET_PUBLIC_TOKEN"`。
 
 ## 鉴权：两级 token
 
