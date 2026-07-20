@@ -4,6 +4,7 @@
 //! `fleet-cli/src/main.rs` into this module so both binaries can call the
 //! same `serve()` function instead of trampolining through `execvp`.
 
+pub mod auth;
 pub mod sse;
 
 pub use sse::{handle_sse_upgrade, SseBroadcaster, SseClient};
@@ -540,7 +541,16 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         });
     }
 
-    let expected_auth = format!("Bearer {}", token);
+    // Fleet Cloud lean: an optional per-customer **scoped** token. When set, a
+    // caller presenting it reaches ONLY the public whitelist (routes::is_public);
+    // the admin `token` above keeps full access. Empty/unset disables the tier.
+    // Read once at startup — the deployment sets it via compose env.
+    let public_token = std::env::var("FLEET_PUBLIC_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty());
+    if public_token.is_some() {
+        eprintln!("[fleet serve] scoped public token enabled (FLEET_PUBLIC_TOKEN); external callers limited to the public API surface");
+    }
 
     let ctx = &ServeCtx {
         sources: &sources,
@@ -559,18 +569,27 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
         let query = parse_query(query_str);
 
-        // Auth check — support both header and query param (for SSE EventSource)
-        let auth_ok = request
+        // Auth check — support both the `Authorization: Bearer <t>` header and
+        // the `?token=<t>` query param (the latter for SSE EventSource, which
+        // cannot set headers). The bare token is compared; see auth::authorize
+        // for the admin-vs-scoped tiering.
+        let presented: Option<String> = request
             .headers()
             .iter()
-            .any(|h| h.field.equiv("authorization")
-                && h.value.as_str() == expected_auth.as_str());
+            .find(|h| h.field.equiv("authorization"))
+            .map(|h| {
+                let v = h.value.as_str();
+                v.strip_prefix("Bearer ").unwrap_or(v).to_string()
+            })
+            .or_else(|| query.get("token").cloned());
 
-        if !auth_ok {
-            if query.get("token").map(|t| t.as_str()) != Some(&token) {
-                let _ = request.respond(tiny_http::Response::empty(401));
-                continue;
-            }
+        let outcome = auth::authorize(path, presented.as_deref(), &token, public_token.as_deref());
+        if !outcome.is_allowed() {
+            // 401 when nothing was presented, 403 when a token was presented but
+            // is wrong or a scoped token reached a non-public path.
+            let status = if presented.is_some() { 403 } else { 401 };
+            let _ = request.respond(tiny_http::Response::empty(status));
+            continue;
         }
 
         // Handle SSE endpoint — takes over the connection.
