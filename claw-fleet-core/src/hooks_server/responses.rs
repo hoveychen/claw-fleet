@@ -292,6 +292,451 @@ pub fn decision_kind_from_function(name: &str) -> Option<&'static str> {
     }
 }
 
+// ──────────────────── Decision cards ⇆ function_call ─────────────────
+//
+// Projection: each pending Fleet decision card for a session becomes an OpenAI
+// `function_call` output item whose `call_id` IS the decision request id, so the
+// caller answers by echoing that `call_id` in a `function_call_output`. The
+// `arguments` string carries the card payload (the module's request struct,
+// serialized) so the client has everything needed to decide.
+//
+// Answer: a `function_call_output` carries only `call_id` + `output` (no name),
+// so we reverse-look up the owning channel by probing each store for that id,
+// then build the channel's response struct from `output` and write it back
+// through the same path the desktop / mobile respond handlers use — a direct
+// `write_response` for guard/permission (their producer is still polling), or
+// `parked::deliver` for the four parkable channels (resumes the session when
+// the producer has already timed out).
+
+/// Build a `function_call` output item from a decision card payload. Pure.
+fn fc_item<T: Serialize>(kind: &str, call_id: &str, payload: &T) -> OutputItem {
+    OutputItem::FunctionCall {
+        id: format!("fc_{call_id}"),
+        call_id: call_id.to_string(),
+        name: decision_function_name(kind).to_string(),
+        arguments: serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string()),
+    }
+}
+
+/// Treat an answer verb as approval. Anything else is a denial. Pure.
+fn keyword_allow(s: &str) -> bool {
+    matches!(
+        s.trim().to_ascii_lowercase().as_str(),
+        "allow" | "approve" | "approved" | "accept" | "yes" | "true" | "ok"
+    )
+}
+
+/// Parse `output` as a JSON object, or an empty map if it isn't one. Pure.
+fn output_obj(output: &str) -> serde_json::Map<String, serde_json::Value> {
+    match serde_json::from_str::<serde_json::Value>(output) {
+        Ok(serde_json::Value::Object(m)) => m,
+        _ => serde_json::Map::new(),
+    }
+}
+
+/// Extract an answers map from a decision answer. Accepts `{"answers":{…}}`,
+/// a bare object (minus reserved keys) used directly as the map, or a plain
+/// string stored under `"answer"`. Pure. Shared by fleet-ask and elicitation.
+fn answers_from(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    output: &str,
+    reserved: &[&str],
+) -> std::collections::BTreeMap<String, String> {
+    if let Some(a) = obj.get("answers").and_then(|v| v.as_object()) {
+        return a
+            .iter()
+            .filter_map(|(k, v)| stringify_value(v).map(|s| (k.clone(), s)))
+            .collect();
+    }
+    // A JSON object (even one holding only reserved flags like `declined`) is
+    // authoritative: use its non-reserved keys as the answers map and never
+    // fall through to the plain-string branch, which would otherwise stuff the
+    // whole `{...}` string under "answer".
+    let output_is_object = matches!(
+        serde_json::from_str::<serde_json::Value>(output),
+        Ok(serde_json::Value::Object(_))
+    );
+    if output_is_object {
+        return obj
+            .iter()
+            .filter(|(k, _)| !reserved.contains(&k.as_str()))
+            .filter_map(|(k, v)| stringify_value(v).map(|s| (k.clone(), s)))
+            .collect();
+    }
+    let mut m = std::collections::BTreeMap::new();
+    if !output.trim().is_empty() {
+        m.insert("answer".to_string(), output.to_string());
+    }
+    m
+}
+
+/// JSON scalar → String (strings verbatim, others via `to_string`). Pure.
+fn stringify_value(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) => Some(s.clone()),
+        other => Some(other.to_string()),
+    }
+}
+
+// ── Pure output → response-struct builders (unit-tested) ──────────────
+
+fn build_guard_response(call_id: &str, output: &str) -> crate::guard::GuardResponse {
+    let obj = output_obj(output);
+    let verb = obj
+        .get("decision")
+        .and_then(|v| v.as_str())
+        .unwrap_or(output);
+    crate::guard::GuardResponse {
+        id: call_id.to_string(),
+        decision: if keyword_allow(verb) {
+            crate::guard::GuardDecision::Allow
+        } else {
+            crate::guard::GuardDecision::Block
+        },
+        reason: obj.get("reason").and_then(|v| v.as_str()).map(String::from),
+    }
+}
+
+fn build_permission_response(
+    call_id: &str,
+    output: &str,
+) -> crate::permission_prompt_ipc::PermissionPromptResponse {
+    let obj = output_obj(output);
+    let verb = obj
+        .get("decision")
+        .and_then(|v| v.as_str())
+        .unwrap_or(output);
+    crate::permission_prompt_ipc::PermissionPromptResponse {
+        id: call_id.to_string(),
+        decision: if keyword_allow(verb) {
+            crate::permission_prompt_ipc::PermissionPromptDecision::Allow
+        } else {
+            crate::permission_prompt_ipc::PermissionPromptDecision::Deny
+        },
+        reason: obj.get("reason").and_then(|v| v.as_str()).map(String::from),
+    }
+}
+
+fn build_plan_response(call_id: &str, output: &str) -> crate::plan_approval::PlanApprovalResponse {
+    let obj = output_obj(output);
+    let verb = obj
+        .get("decision")
+        .and_then(|v| v.as_str())
+        .unwrap_or(output);
+    crate::plan_approval::PlanApprovalResponse {
+        id: call_id.to_string(),
+        decision: if keyword_allow(verb) { "approve" } else { "reject" }.to_string(),
+        edited_plan: obj
+            .get("edited_plan")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        feedback: obj.get("feedback").and_then(|v| v.as_str()).map(String::from),
+    }
+}
+
+fn build_elicitation_response(
+    call_id: &str,
+    output: &str,
+) -> crate::elicitation::ElicitationResponse {
+    let obj = output_obj(output);
+    let declined = obj.get("declined").and_then(|v| v.as_bool()).unwrap_or(false);
+    crate::elicitation::ElicitationResponse {
+        id: call_id.to_string(),
+        declined,
+        answers: answers_from(&obj, output, &["declined", "reason"])
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn build_fleet_ask_response(call_id: &str, output: &str) -> crate::mcp_ipc::FleetAskResponse {
+    let obj = output_obj(output);
+    crate::mcp_ipc::FleetAskResponse {
+        id: call_id.to_string(),
+        cancelled: obj.get("cancelled").and_then(|v| v.as_bool()).unwrap_or(false),
+        answers: answers_from(&obj, output, &["cancelled"]),
+    }
+}
+
+fn build_a2ui_response(call_id: &str, output: &str) -> crate::mcp_a2ui_ipc::A2uiRenderResponse {
+    let obj = output_obj(output);
+    let action_context = obj
+        .get("action_context")
+        .and_then(|v| v.as_object())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| stringify_value(v).map(|s| (k.clone(), s)))
+                .collect()
+        })
+        .unwrap_or_default();
+    // action_name from the field, or a bare non-JSON string used directly.
+    let action_name = obj
+        .get("action_name")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| {
+            let t = output.trim();
+            if !t.is_empty() && output_obj(output).is_empty() && t != "null" {
+                Some(t.to_string())
+            } else {
+                None
+            }
+        });
+    crate::mcp_a2ui_ipc::A2uiRenderResponse {
+        id: call_id.to_string(),
+        action_name,
+        action_context,
+        cancelled: obj.get("cancelled").and_then(|v| v.as_bool()).unwrap_or(false),
+    }
+}
+
+/// Reverse-look up the decision channel that owns `call_id` by probing each
+/// store (live request files, then the four parkable stores). Returns the
+/// canonical kind string used by [`decision_function_name`].
+fn kind_for_call_id(call_id: &str) -> Option<&'static str> {
+    if crate::guard::read_request(call_id).is_some() {
+        return Some("guard");
+    }
+    if crate::permission_prompt_ipc::read_request(call_id).is_some() {
+        return Some("permission-prompt");
+    }
+    if crate::elicitation::read_request(call_id).is_some() {
+        return Some("elicitation");
+    }
+    if crate::plan_approval::read_request(call_id).is_some() {
+        return Some("plan-approval");
+    }
+    if crate::mcp_ipc::read_request(call_id).is_some() {
+        return Some("fleet-ask");
+    }
+    if crate::mcp_a2ui_ipc::read_request(call_id).is_some() {
+        return Some("a2ui");
+    }
+    // Parkable channels whose request file may have moved to the parked store.
+    if crate::parked::list_requests::<crate::elicitation::ElicitationRequest>(
+        crate::parked::ParkedKind::Elicitation,
+    )
+    .iter()
+    .any(|r| r.id == call_id)
+    {
+        return Some("elicitation");
+    }
+    if crate::parked::list_requests::<crate::plan_approval::PlanApprovalRequest>(
+        crate::parked::ParkedKind::PlanApproval,
+    )
+    .iter()
+    .any(|r| r.id == call_id)
+    {
+        return Some("plan-approval");
+    }
+    if crate::parked::list_requests::<crate::mcp_ipc::FleetAskRequest>(
+        crate::parked::ParkedKind::FleetAsk,
+    )
+    .iter()
+    .any(|r| r.id == call_id)
+    {
+        return Some("fleet-ask");
+    }
+    if crate::parked::list_requests::<crate::mcp_a2ui_ipc::A2uiRenderRequest>(
+        crate::parked::ParkedKind::A2uiRender,
+    )
+    .iter()
+    .any(|r| r.id == call_id)
+    {
+        return Some("a2ui");
+    }
+    None
+}
+
+/// The session id that owns a decision card (needed to project the answered
+/// run when the caller omitted `previous_response_id`). Checks the live request
+/// then the parked store for the parkable channels.
+fn session_for_call(call_id: &str, kind: &str) -> Option<String> {
+    match kind {
+        "guard" => crate::guard::read_request(call_id).map(|r| r.session_id),
+        "permission-prompt" => {
+            crate::permission_prompt_ipc::read_request(call_id).map(|r| r.session_id)
+        }
+        "elicitation" => crate::elicitation::read_request(call_id)
+            .map(|r| r.session_id)
+            .or_else(|| {
+                crate::parked::list_requests::<crate::elicitation::ElicitationRequest>(
+                    crate::parked::ParkedKind::Elicitation,
+                )
+                .into_iter()
+                .find(|r| r.id == call_id)
+                .map(|r| r.session_id)
+            }),
+        "plan-approval" => crate::plan_approval::read_request(call_id)
+            .map(|r| r.session_id)
+            .or_else(|| {
+                crate::parked::list_requests::<crate::plan_approval::PlanApprovalRequest>(
+                    crate::parked::ParkedKind::PlanApproval,
+                )
+                .into_iter()
+                .find(|r| r.id == call_id)
+                .map(|r| r.session_id)
+            }),
+        "fleet-ask" => crate::mcp_ipc::read_request(call_id)
+            .map(|r| r.session_id)
+            .or_else(|| {
+                crate::parked::list_requests::<crate::mcp_ipc::FleetAskRequest>(
+                    crate::parked::ParkedKind::FleetAsk,
+                )
+                .into_iter()
+                .find(|r| r.id == call_id)
+                .map(|r| r.session_id)
+            }),
+        "a2ui" => crate::mcp_a2ui_ipc::read_request(call_id)
+            .map(|r| r.session_id)
+            .or_else(|| {
+                crate::parked::list_requests::<crate::mcp_a2ui_ipc::A2uiRenderRequest>(
+                    crate::parked::ParkedKind::A2uiRender,
+                )
+                .into_iter()
+                .find(|r| r.id == call_id)
+                .map(|r| r.session_id)
+            }),
+        _ => None,
+    }
+}
+
+/// Build the channel's response from `output` and write it back through the
+/// same path the desktop/mobile respond handlers use.
+fn answer_decision(kind: &str, call_id: &str, output: &str) -> Result<(), String> {
+    match kind {
+        "guard" => crate::guard::write_response(&build_guard_response(call_id, output)),
+        "permission-prompt" => {
+            crate::permission_prompt_ipc::write_response(&build_permission_response(call_id, output))
+        }
+        "elicitation" => {
+            let resp = build_elicitation_response(call_id, output);
+            crate::parked::deliver(&resp.id, &resp, resp.declined, crate::elicitation::write_response)
+        }
+        "plan-approval" => {
+            let resp = build_plan_response(call_id, output);
+            crate::parked::deliver(&resp.id, &resp, false, crate::plan_approval::write_response)
+        }
+        "fleet-ask" => {
+            let resp = build_fleet_ask_response(call_id, output);
+            crate::parked::deliver(&resp.id, &resp, resp.cancelled, crate::mcp_ipc::write_response)
+        }
+        "a2ui" => {
+            let resp = build_a2ui_response(call_id, output);
+            crate::parked::deliver(
+                &resp.id,
+                &resp,
+                resp.cancelled,
+                crate::mcp_a2ui_ipc::write_response,
+            )
+        }
+        other => Err(format!("unknown decision kind {other}")),
+    }
+}
+
+/// Every pending decision card for `session_id`, projected as `function_call`
+/// output items. Scans all six live stores plus the four parkable stores,
+/// deduping by `call_id`.
+fn pending_function_calls(session_id: &str) -> Vec<OutputItem> {
+    use std::collections::HashSet;
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    let mut push = |kind: &str, id: &str, item: OutputItem, seen: &mut HashSet<String>| {
+        if seen.insert(id.to_string()) {
+            let _ = kind;
+            out.push(item);
+        }
+    };
+
+    for id in crate::guard::list_pending_requests() {
+        if let Some(req) = crate::guard::read_request(&id) {
+            if req.session_id == session_id {
+                push("guard", &id, fc_item("guard", &id, &req), &mut seen);
+            }
+        }
+    }
+    for id in crate::permission_prompt_ipc::list_pending_requests() {
+        if let Some(req) = crate::permission_prompt_ipc::read_request(&id) {
+            if req.session_id == session_id {
+                push(
+                    "permission-prompt",
+                    &id,
+                    fc_item("permission-prompt", &id, &req),
+                    &mut seen,
+                );
+            }
+        }
+    }
+    for id in crate::elicitation::list_pending_requests() {
+        if let Some(req) = crate::elicitation::read_request(&id) {
+            if req.session_id == session_id {
+                push("elicitation", &id, fc_item("elicitation", &id, &req), &mut seen);
+            }
+        }
+    }
+    for req in crate::parked::list_requests::<crate::elicitation::ElicitationRequest>(
+        crate::parked::ParkedKind::Elicitation,
+    ) {
+        if req.session_id == session_id {
+            push(
+                "elicitation",
+                &req.id.clone(),
+                fc_item("elicitation", &req.id, &req),
+                &mut seen,
+            );
+        }
+    }
+    for id in crate::plan_approval::list_pending_requests() {
+        if let Some(req) = crate::plan_approval::read_request(&id) {
+            if req.session_id == session_id {
+                push("plan-approval", &id, fc_item("plan-approval", &id, &req), &mut seen);
+            }
+        }
+    }
+    for req in crate::parked::list_requests::<crate::plan_approval::PlanApprovalRequest>(
+        crate::parked::ParkedKind::PlanApproval,
+    ) {
+        if req.session_id == session_id {
+            push(
+                "plan-approval",
+                &req.id.clone(),
+                fc_item("plan-approval", &req.id, &req),
+                &mut seen,
+            );
+        }
+    }
+    for id in crate::mcp_ipc::list_pending_requests() {
+        if let Some(req) = crate::mcp_ipc::read_request(&id) {
+            if req.session_id == session_id {
+                push("fleet-ask", &id, fc_item("fleet-ask", &id, &req), &mut seen);
+            }
+        }
+    }
+    for req in crate::parked::list_requests::<crate::mcp_ipc::FleetAskRequest>(
+        crate::parked::ParkedKind::FleetAsk,
+    ) {
+        if req.session_id == session_id {
+            push("fleet-ask", &req.id.clone(), fc_item("fleet-ask", &req.id, &req), &mut seen);
+        }
+    }
+    for id in crate::mcp_a2ui_ipc::list_pending_requests() {
+        if let Some(req) = crate::mcp_a2ui_ipc::read_request(&id) {
+            if req.session_id == session_id {
+                push("a2ui", &id, fc_item("a2ui", &id, &req), &mut seen);
+            }
+        }
+    }
+    for req in crate::parked::list_requests::<crate::mcp_a2ui_ipc::A2uiRenderRequest>(
+        crate::parked::ParkedKind::A2uiRender,
+    ) {
+        if req.session_id == session_id {
+            push("a2ui", &req.id.clone(), fc_item("a2ui", &req.id, &req), &mut seen);
+        }
+    }
+    out
+}
+
 // ─────────────────────────── Dispatch skeleton ───────────────────────
 
 /// Parsed `/v1/...` route target.
@@ -427,6 +872,16 @@ fn build_response(
             }
         }
     }
+    // Pending decision cards surface as function_call items. When any exist the
+    // run has yielded to await the caller's answer, which is OpenAI's
+    // `completed`-with-tool-calls contract — so a client polling
+    // `while status == in_progress` breaks out and answers instead of
+    // spinning on a `waiting_input` session forever.
+    let calls = pending_function_calls(session_id);
+    if !calls.is_empty() {
+        resp.output.extend(calls);
+        resp.status = ResponseStatus::Completed;
+    }
     Some(resp)
 }
 
@@ -491,6 +946,22 @@ fn run_stream(
                             }
                         }
                     }
+                }
+                // A pending decision card ends the stream turn: emit the
+                // function_call carried by build_response and let the caller
+                // answer via a follow-up create. Checked independent of
+                // `offset` because a card can appear before any assistant text
+                // (e.g. a guard on the very first command).
+                let calls = pending_function_calls(&session_id);
+                if !calls.is_empty() {
+                    let full = build_response(&sources, &session_id)
+                        .unwrap_or_else(|| ResponseObject::new(resp_id.clone(), ResponseStatus::Completed));
+                    let ev = serde_json::json!({
+                        "type": "response.completed",
+                        "response": serde_json::to_value(&full).unwrap_or_default(),
+                    });
+                    let _ = send_sse(&mut *stream, "response.completed", &ev);
+                    return;
                 }
                 // Honor a terminal status only once the run has begun writing
                 // (offset > 0), so an initial idle scan before the agent starts
@@ -578,10 +1049,10 @@ pub(crate) fn dispatch(
     }
 }
 
-/// `POST /v1/responses` — spawn a new run, or (with `previous_response_id`)
-/// resume one with a follow-up. Answering a decision via `function_call_output`
-/// is wired in P4.
-fn create_response(_ctx: &super::ServeCtx, mut request: tiny_http::Request, json_header: tiny_http::Header) {
+/// `POST /v1/responses` — spawn a new run, (with `previous_response_id`)
+/// resume one with a follow-up, or (with `function_call_output` items) answer a
+/// pending decision card and let the blocked run continue.
+fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_header: tiny_http::Header) {
     let mut buf = String::new();
     let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
     let req: CreateResponseRequest = match serde_json::from_str(&buf) {
@@ -591,6 +1062,55 @@ fn create_response(_ctx: &super::ServeCtx, mut request: tiny_http::Request, json
     let model = req.model.clone();
     let tool = tool_for_model(model.as_deref());
     let stream = req.stream;
+
+    // Decision-answer path: a `function_call_output` echoes the `call_id` of a
+    // card we emitted. Route each to its owning channel's respond path; this
+    // unblocks the same session (no spawn/resume). The prompt text, if any, is
+    // ignored here — the answer itself carries the turn forward.
+    let fc_outputs = req.function_call_outputs();
+    if !fc_outputs.is_empty() {
+        let mut session_id: Option<String> = req
+            .previous_response_id
+            .as_deref()
+            .and_then(session_id_from_resp)
+            .map(String::from);
+        for (call_id, output) in &fc_outputs {
+            let Some(kind) = kind_for_call_id(call_id) else {
+                return respond_error(
+                    request,
+                    404,
+                    "not_found",
+                    format!("no pending decision for call_id {call_id}"),
+                    json_header,
+                );
+            };
+            if session_id.is_none() {
+                session_id = session_for_call(call_id, kind);
+            }
+            if let Err(e) = answer_decision(kind, call_id, output) {
+                let status = if e.contains("no pending request") { 404 } else { 500 };
+                return respond_error(request, status, "decision_answer_failed", e, json_header);
+            }
+        }
+        let Some(sid) = session_id else {
+            return respond_error(
+                request,
+                500,
+                "internal",
+                "cannot determine session for answered decision",
+                json_header,
+            );
+        };
+        if stream {
+            return start_stream(request, sid.clone(), to_resp_id(&sid), model);
+        }
+        let r = build_response(ctx.sources, &sid).unwrap_or_else(|| {
+            let mut r = ResponseObject::new(to_resp_id(&sid), ResponseStatus::InProgress);
+            r.model = model.clone();
+            r
+        });
+        return respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header);
+    }
 
     // Launch: resume when previous_response_id is set, else spawn a new run.
     // Both yield the internal session id + wire resp_id + initial status.
@@ -812,6 +1332,134 @@ mod tests {
         assert_eq!(terminal_event(ResponseStatus::Completed), "completed");
         assert_eq!(terminal_event(ResponseStatus::Failed), "failed");
         assert_eq!(terminal_event(ResponseStatus::Cancelled), "cancelled");
+    }
+
+    #[test]
+    fn pending_card_projects_as_function_call() {
+        let item = fc_item("guard", "gid_1", &serde_json::json!({"command": "rm -rf /"}));
+        match item {
+            OutputItem::FunctionCall { id, call_id, name, arguments } => {
+                assert_eq!(id, "fc_gid_1");
+                assert_eq!(call_id, "gid_1");
+                assert_eq!(name, "fleet_guard");
+                assert!(arguments.contains("rm -rf /"));
+            }
+            _ => panic!("expected function_call item"),
+        }
+    }
+
+    #[test]
+    fn guard_output_maps_allow_and_block() {
+        assert_eq!(
+            build_guard_response("c1", "allow").decision,
+            crate::guard::GuardDecision::Allow
+        );
+        assert_eq!(
+            build_guard_response("c1", "approve").decision,
+            crate::guard::GuardDecision::Allow
+        );
+        assert_eq!(
+            build_guard_response("c1", "block").decision,
+            crate::guard::GuardDecision::Block
+        );
+        // JSON object form carries a reason and an explicit decision.
+        let r = build_guard_response("c1", r#"{"decision":"block","reason":"too risky"}"#);
+        assert_eq!(r.decision, crate::guard::GuardDecision::Block);
+        assert_eq!(r.reason.as_deref(), Some("too risky"));
+    }
+
+    #[test]
+    fn permission_output_maps_allow_and_deny() {
+        use crate::permission_prompt_ipc::PermissionPromptDecision as D;
+        assert_eq!(build_permission_response("c1", "yes").decision, D::Allow);
+        assert_eq!(build_permission_response("c1", "deny").decision, D::Deny);
+        assert_eq!(build_permission_response("c1", "").decision, D::Deny);
+    }
+
+    #[test]
+    fn plan_output_maps_approve_and_reject() {
+        assert_eq!(build_plan_response("c1", "approve").decision, "approve");
+        assert_eq!(build_plan_response("c1", "reject").decision, "reject");
+        let r = build_plan_response(
+            "c1",
+            r#"{"decision":"approve","edited_plan":"do X","feedback":"nit"}"#,
+        );
+        assert_eq!(r.decision, "approve");
+        assert_eq!(r.edited_plan.as_deref(), Some("do X"));
+        assert_eq!(r.feedback.as_deref(), Some("nit"));
+    }
+
+    #[test]
+    fn answers_extraction_forms() {
+        // nested answers object
+        let r = build_fleet_ask_response("c1", r#"{"answers":{"Q1":"A","Q2":"B"}}"#);
+        assert_eq!(r.answers.get("Q1").map(String::as_str), Some("A"));
+        assert_eq!(r.answers.get("Q2").map(String::as_str), Some("B"));
+        assert!(!r.cancelled);
+        // cancelled flag honored, reserved key excluded from the map
+        let r2 = build_fleet_ask_response("c1", r#"{"cancelled":true,"Q1":"A"}"#);
+        assert!(r2.cancelled);
+        assert_eq!(r2.answers.get("Q1").map(String::as_str), Some("A"));
+        assert!(!r2.answers.contains_key("cancelled"));
+        // plain string → single answer
+        let r3 = build_fleet_ask_response("c1", "just this");
+        assert_eq!(r3.answers.get("answer").map(String::as_str), Some("just this"));
+    }
+
+    #[test]
+    fn elicitation_declined_flag() {
+        let r = build_elicitation_response("c1", r#"{"declined":true}"#);
+        assert!(r.declined);
+        assert!(r.answers.is_empty());
+        let r2 = build_elicitation_response("c1", r#"{"answers":{"name":"foo"}}"#);
+        assert!(!r2.declined);
+        assert_eq!(r2.answers.get("name").map(String::as_str), Some("foo"));
+    }
+
+    #[test]
+    fn a2ui_action_name_forms() {
+        // bare string → action_name
+        let r = build_a2ui_response("c1", "submit");
+        assert_eq!(r.action_name.as_deref(), Some("submit"));
+        assert!(!r.cancelled);
+        // structured form with context
+        let r2 = build_a2ui_response(
+            "c1",
+            r#"{"action_name":"save","action_context":{"score":"7"},"cancelled":false}"#,
+        );
+        assert_eq!(r2.action_name.as_deref(), Some("save"));
+        assert_eq!(r2.action_context.get("score").map(String::as_str), Some("7"));
+        // cancelled with no action
+        let r3 = build_a2ui_response("c1", r#"{"cancelled":true}"#);
+        assert!(r3.cancelled);
+        assert_eq!(r3.action_name, None);
+    }
+
+    #[test]
+    fn keyword_allow_recognizes_verbs() {
+        for yes in ["allow", "APPROVE", " Yes ", "ok", "true", "accept"] {
+            assert!(keyword_allow(yes), "{yes} should be allow");
+        }
+        for no in ["block", "deny", "no", "", "reject", "maybe"] {
+            assert!(!keyword_allow(no), "{no} should not be allow");
+        }
+    }
+
+    #[test]
+    fn function_call_output_routes_by_call_id_shape() {
+        // A request carrying only a function_call_output (no message) parses,
+        // exposes the (call_id, output) pair, and no prompt text.
+        let r: CreateResponseRequest = serde_json::from_str(
+            r#"{"previous_response_id":"resp_s1","input":[
+                {"type":"function_call_output","call_id":"guard_42","output":"allow"}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.prompt_text(), "");
+        assert_eq!(
+            r.function_call_outputs(),
+            vec![("guard_42".into(), "allow".into())]
+        );
     }
 
     #[test]
