@@ -63,7 +63,19 @@
 | `GET /decision_asset` | 决策卡关联资产（图片等） |
 
 ### 用量（计量；出账/限额 v1 不做）
-`GET /today_usage`、`/today_usage_breakdown`、`/usage_summaries`、`/usage_history`、`/codex_usage_history`、`/fleet_llm_usage/daily`、`/token_breakdown`、`/codex_token_breakdown`。
+一客户一容器，所以本容器的用量**就是**该客户的用量。
+
+| 路由 | 用途 |
+|---|---|
+| `GET /cloud_usage` | **推荐给集成方**：单一合计视图 —— `today`（今日 input/output token + cost）+ `cumulative*`（所有留存 agent 会话的累计 token + cost，即计费基准）。 |
+| `GET /today_usage` | 今日窗口（含 Fleet 自身 LLM 开销） |
+| `GET /today_usage_breakdown` | 今日按模型拆分 |
+| `GET /usage_summaries` | 各 source 用量摘要 |
+| `GET /usage_history`、`/codex_usage_history` | 历史 |
+| `GET /fleet_llm_usage/daily` | Fleet 自身 LLM 每日用量 |
+| `GET /token_breakdown`、`/codex_token_breakdown` | 单任务 token 拆分 |
+
+> `cumulative*` 受会话保留策略影响（被清理的会话会掉出合计），是*当前用量*视图，不是权威计费账本。真正的按 token 出账与超额限流是 v1 之后的工作。
 
 ## 不在 v1 范围（见 lean 计划「明确不做」）
 

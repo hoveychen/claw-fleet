@@ -31,6 +31,8 @@ pub const AUDIT_RULES_SUGGEST: &str = "/audit/rules/suggest";
 pub const AUDIT_RULES_TOGGLE: &str = "/audit/rules/toggle";
 pub const BROWSE_DIR: &str = "/browse_dir";
 pub const CHAT_WORKSPACE: &str = "/chat_workspace";
+/// Fleet Cloud lean: consolidated per-container (== per-customer) token usage.
+pub const CLOUD_USAGE: &str = "/cloud_usage";
 pub const CLAUDE_BINARY_OVERRIDE: &str = "/claude_binary_override";
 pub const DAILY_REPORT: &str = "/daily_report";
 pub const DAILY_REPORT_AI_SUMMARY: &str = "/daily_report/ai_summary";
@@ -220,6 +222,7 @@ pub fn is_public(path: &str) -> bool {
             | FILE_SIZE
             | DECISION_ASSET
             // Read token usage (metering; billing/quota deliberately out of v1)
+            | CLOUD_USAGE
             | TODAY_USAGE
             | TODAY_USAGE_BREAKDOWN
             | USAGE_SUMMARIES
