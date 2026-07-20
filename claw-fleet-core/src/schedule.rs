@@ -333,6 +333,51 @@ fn cancel_in(dir: &Path, id: &str) -> bool {
     fs::remove_file(record_path(dir, id)).is_ok()
 }
 
+/// Adjust a still-`Pending` schedule: change its fire time and/or prompt. Bumps
+/// `generation` so any detached timer sleeping on the old time exits as
+/// superseded when it next wakes — the caller (`fleet schedule update`) re-arms a
+/// fresh timer from the returned record. A fired schedule is history and cannot
+/// be updated.
+pub fn update(id: &str, fire_at: Option<u64>, prompt: Option<&str>) -> Result<ScheduleRecord, String> {
+    let dir = schedules_dir().ok_or("cannot determine home dir")?;
+    update_in(&dir, id, fire_at, prompt, now_ms())
+}
+
+fn update_in(
+    dir: &Path,
+    id: &str,
+    fire_at: Option<u64>,
+    prompt: Option<&str>,
+    now: u64,
+) -> Result<ScheduleRecord, String> {
+    let mut rec = get_in(dir, id).ok_or_else(|| format!("no schedule with id {id}"))?;
+    if rec.status == ScheduleStatus::Fired {
+        return Err("cannot update a schedule that already fired".to_string());
+    }
+    if let Some(fa) = fire_at {
+        if fa <= now {
+            return Err("schedule time is in the past".to_string());
+        }
+        if fa.saturating_sub(now) > MAX_HORIZON_MS {
+            return Err(format!(
+                "schedule time is more than {} days out (horizon guard)",
+                MAX_HORIZON_MS / (24 * 60 * 60 * 1000)
+            ));
+        }
+        rec.fire_at = fa;
+    }
+    if let Some(p) = prompt {
+        let p = p.trim();
+        if p.is_empty() {
+            return Err("schedule prompt cannot be empty".to_string());
+        }
+        rec.prompt = p.to_string();
+    }
+    rec.generation += 1;
+    write_record(dir, &rec)?;
+    Ok(rec)
+}
+
 // ── firing ─────────────────────────────────────────────────────────────────────
 
 /// Why a claim was refused, so the timer process can log something truthful.
@@ -983,6 +1028,57 @@ mod tests {
         let rearmed = reconcile_in(d.path(), 1_000_000, &mut |r| armed.push(r.id.clone()));
         assert_eq!(rearmed, vec!["stranded"], "only the stranded pending schedule is re-armed");
         assert_eq!(armed, vec!["stranded"]);
+    }
+
+    #[test]
+    fn update_changes_fields_and_bumps_generation() {
+        let d = dir();
+        make(d.path(), "s1", 0, 300_000);
+        let updated = update_in(d.path(), "s1", Some(900_000), Some("new prompt"), 0).unwrap();
+        assert_eq!(updated.fire_at, 900_000);
+        assert_eq!(updated.prompt, "new prompt");
+        assert_eq!(updated.generation, 1, "bump supersedes the old timer");
+        // persisted
+        let on_disk = get_in(d.path(), "s1").unwrap();
+        assert_eq!(on_disk.fire_at, 900_000);
+        assert_eq!(on_disk.generation, 1);
+    }
+
+    #[test]
+    fn update_partial_leaves_other_fields() {
+        let d = dir();
+        make(d.path(), "s1", 0, 300_000);
+        // only the prompt
+        let u = update_in(d.path(), "s1", None, Some("just prompt"), 0).unwrap();
+        assert_eq!(u.fire_at, 300_000, "fire time unchanged");
+        assert_eq!(u.prompt, "just prompt");
+    }
+
+    #[test]
+    fn update_rejects_fired_past_and_beyond_horizon() {
+        let d = dir();
+        let mut fired = make(d.path(), "f", 0, 300_000);
+        fired.status = ScheduleStatus::Fired;
+        write_record(d.path(), &fired).unwrap();
+        assert!(update_in(d.path(), "f", Some(900_000), None, 0)
+            .unwrap_err()
+            .contains("already fired"));
+
+        make(d.path(), "s1", 0, 300_000);
+        assert!(update_in(d.path(), "s1", Some(500), None, 1_000)
+            .unwrap_err()
+            .contains("in the past"));
+        assert!(update_in(d.path(), "s1", Some(1_000 + MAX_HORIZON_MS + 1), None, 1_000)
+            .unwrap_err()
+            .contains("horizon"));
+        // empty prompt rejected
+        assert!(update_in(d.path(), "s1", None, Some("   "), 0)
+            .unwrap_err()
+            .contains("cannot be empty"));
+        // unknown id
+        assert!(update_in(d.path(), "nope", None, Some("x"), 0)
+            .unwrap_err()
+            .contains("no schedule with id"));
     }
 
     #[test]
