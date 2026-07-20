@@ -264,25 +264,110 @@ pub fn map_status(fleet_status: &str) -> ResponseStatus {
     }
 }
 
-/// Effective OpenAI status for a projected run. Two adjustments over the raw
+/// Effective OpenAI status for a projected run. Adjustments over the raw
 /// [`map_status`]:
 /// - A pending decision card means the turn yielded to await the caller's
 ///   answer — OpenAI's `completed`-with-tool-calls contract.
-/// - A headless (`-p`) turn that reached `waitingInput` with no pending card
-///   has produced its answer and is idle awaiting the next input. That is a
-///   `completed` response (the caller continues via `previous_response_id`),
-///   not a run still in progress — otherwise a client polling
-///   `while status == in_progress` would spin forever on a finished turn.
-pub fn effective_status(raw_status: &str, has_pending_calls: bool) -> ResponseStatus {
+/// - A headless (`-p`) turn that reached `waitingInput` is idle. If it has
+///   written new content **since this turn started** (`has_new_content`) the
+///   turn is done → `completed`; if not, the turn hasn't produced its answer
+///   yet (e.g. the brief window right after a resume, before the agent picks
+///   up) → keep it `in_progress` so a fast poll doesn't read the *previous*
+///   turn's stale `completed`.
+pub fn effective_status(
+    raw_status: &str,
+    has_pending_calls: bool,
+    has_new_content: bool,
+) -> ResponseStatus {
     if has_pending_calls {
         return ResponseStatus::Completed;
     }
     let base = map_status(raw_status);
     if base == ResponseStatus::InProgress && raw_status == "waitingInput" {
-        ResponseStatus::Completed
+        if has_new_content {
+            ResponseStatus::Completed
+        } else {
+            ResponseStatus::InProgress
+        }
     } else {
         base
     }
+}
+
+// ── Per-turn projection (multi-turn correctness) ──────────────────────
+//
+// A v2 response id is `resp_<session uuid>` and a follow-up (`previous_response
+// _id`) reuses it, so one evolving session backs every turn. To make each
+// projection reflect only the *current* turn — not the whole accumulated
+// conversation — we record, per session, the transcript message count at the
+// moment a turn starts (a new spawn starts at 0; a resume / decision-answer
+// starts at the count of messages already present). The projection then reads
+// only messages after that offset.
+
+/// `~/.fleet/cloud-responses/<session_id>.turn` — the message-count offset at
+/// which the session's current turn began.
+fn turn_marker_path(session_id: &str) -> Option<std::path::PathBuf> {
+    crate::session::real_home_dir().map(|h| {
+        h.join(".fleet")
+            .join("cloud-responses")
+            .join(format!("{session_id}.turn"))
+    })
+}
+
+/// Record the message count at which the current turn starts. `None` session
+/// dir is a no-op (projection then falls back to offset 0 = whole transcript).
+fn write_turn_offset(session_id: &str, offset: usize) {
+    if let Some(p) = turn_marker_path(session_id) {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&p, offset.to_string());
+    }
+}
+
+/// The current turn's start offset (0 when unset — projects the whole
+/// transcript, correct for a fresh single-turn session).
+fn read_turn_offset(session_id: &str) -> usize {
+    turn_marker_path(session_id)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// Assistant text from `messages[offset..]` — i.e. only the current turn's
+/// output. Pure. `offset` past the end yields "".
+fn project_turn_text(messages: &[serde_json::Value], offset: usize) -> String {
+    let start = offset.min(messages.len());
+    project_output_text(&messages[start..])
+}
+
+/// The number of transcript messages a session currently has (0 if the session
+/// or its transcript can't be found). Used to stamp a turn's start offset.
+fn current_message_count(
+    sources: &[Box<dyn crate::agent_source::AgentSource>],
+    session_id: &str,
+) -> usize {
+    let sessions = crate::session::scan_all_sources(sources);
+    let Some(s) = sessions.iter().find(|s| s.id == session_id) else {
+        return 0;
+    };
+    let Some(src) = crate::agent_source::find_source_for_path(sources, &s.jsonl_path) else {
+        return 0;
+    };
+    src.get_messages(&s.jsonl_path).map(|m| m.len()).unwrap_or(0)
+}
+
+/// Current byte length of a session's transcript file (0 if absent). Used to
+/// seed the streaming tail so a resumed stream emits only the new turn.
+fn current_transcript_bytes(
+    sources: &[Box<dyn crate::agent_source::AgentSource>],
+    session_id: &str,
+) -> u64 {
+    let sessions = crate::session::scan_all_sources(sources);
+    let Some(s) = sessions.iter().find(|s| s.id == session_id) else {
+        return 0;
+    };
+    std::fs::metadata(&s.jsonl_path).map(|m| m.len()).unwrap_or(0)
 }
 
 /// The OpenAI `function_call.name` a Fleet decision-card kind maps to.
@@ -1029,16 +1114,22 @@ fn build_response(
         .ok()
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_default();
-    let mut resp = ResponseObject::new(to_resp_id(session_id), map_status(&status_str));
+    let mut resp = ResponseObject::new(to_resp_id(session_id), ResponseStatus::InProgress);
     resp.model = s.model.clone();
     resp.usage = Some(Usage {
         input_tokens: s.total_input_tokens,
         output_tokens: s.total_output_tokens,
         total_tokens: s.total_input_tokens.saturating_add(s.total_output_tokens),
     });
+    // Project only the CURRENT turn: messages after the recorded turn-start
+    // offset. `has_new_content` (the turn has written since it started) also
+    // decides whether an idle `waitingInput` means done vs. not-yet-started.
+    let offset = read_turn_offset(session_id);
+    let mut has_new_content = false;
     if let Some(src) = crate::agent_source::find_source_for_path(sources, &s.jsonl_path) {
         if let Ok(messages) = src.get_messages(&s.jsonl_path) {
-            let text = project_output_text(&messages);
+            has_new_content = messages.len() > offset;
+            let text = project_turn_text(&messages, offset);
             if !text.is_empty() {
                 resp.output.push(OutputItem::Message {
                     id: format!("msg_{session_id}"),
@@ -1049,14 +1140,13 @@ fn build_response(
         }
     }
     // Pending decision cards surface as function_call items; their presence
-    // (and a finished-but-idle `waitingInput` turn) drive the effective status
-    // via `effective_status`.
+    // (and whether the idle turn has produced content) drive the status.
     let calls = pending_function_calls(session_id);
     let has_calls = !calls.is_empty();
     if has_calls {
         resp.output.extend(calls);
     }
-    resp.status = effective_status(&status_str, has_calls);
+    resp.status = effective_status(&status_str, has_calls, has_new_content);
     Some(resp)
 }
 
@@ -1103,7 +1193,11 @@ fn run_stream(
         }
 
         let sources = crate::agent_source::build_sources();
-        let mut offset = 0u64;
+        // Seed the tail at the transcript's current end so a resumed stream
+        // emits only THIS turn, not a replay of the whole conversation. A new
+        // spawn's file doesn't exist yet → seed 0.
+        let seed = current_transcript_bytes(&sources, &session_id);
+        let mut offset = seed;
         for _ in 0..STREAM_MAX_TICKS {
             let sessions = crate::session::scan_all_sources(&sources);
             if let Some(s) = sessions.iter().find(|s| s.id == session_id) {
@@ -1138,18 +1232,20 @@ fn run_stream(
                     let _ = send_sse(&mut *stream, "response.completed", &ev);
                     return;
                 }
-                // Honor a terminal status only once the run has begun writing
-                // (offset > 0), so an initial idle scan before the agent starts
-                // doesn't complete the response prematurely.
-                if offset > 0 {
+                // Honor a terminal status only once THIS turn has begun writing
+                // (offset advanced past the seed), so neither an initial idle
+                // scan (new spawn) nor a stale idle from the prior turn (resume)
+                // completes the response prematurely.
+                let has_new_content = offset > seed;
+                if has_new_content {
                     let status_str = serde_json::to_value(&s.status)
                         .ok()
                         .and_then(|v| v.as_str().map(String::from))
                         .unwrap_or_default();
-                    // No pending calls here (handled above), so `has_pending_calls`
-                    // is false; this promotes a finished `waitingInput` turn to
-                    // `completed` the same way the polling projection does.
-                    let st = effective_status(&status_str, false);
+                    // No pending calls here (handled above); has_new_content is
+                    // true, so a finished `waitingInput` turn → completed, same
+                    // as the polling projection.
+                    let st = effective_status(&status_str, false, has_new_content);
                     if matches!(
                         st,
                         ResponseStatus::Completed | ResponseStatus::Failed | ResponseStatus::Cancelled
@@ -1245,6 +1341,11 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
     // ignored here — the answer itself carries the turn forward.
     let fc_outputs = req.function_call_outputs();
     if !fc_outputs.is_empty() {
+        // Resolve each call's owning channel BEFORE answering — answering may
+        // remove the request file that `kind_for_call_id` / `session_for_call`
+        // read.
+        let mut resolved: Vec<(String, &'static str, String)> =
+            Vec::with_capacity(fc_outputs.len());
         let mut session_id: Option<String> = req
             .previous_response_id
             .as_deref()
@@ -1263,10 +1364,7 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
             if session_id.is_none() {
                 session_id = session_for_call(call_id, kind);
             }
-            if let Err(e) = answer_decision(kind, call_id, output) {
-                let status = if e.contains("no pending request") { 404 } else { 500 };
-                return respond_error(request, status, "decision_answer_failed", e, json_header);
-            }
+            resolved.push((call_id.clone(), kind, output.clone()));
         }
         let Some(sid) = session_id else {
             return respond_error(
@@ -1277,6 +1375,15 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
                 json_header,
             );
         };
+        // Stamp the turn start at the pre-answer message count so the projection
+        // shows only the continuation this answer unblocks.
+        write_turn_offset(&sid, current_message_count(ctx.sources, &sid));
+        for (call_id, kind, output) in &resolved {
+            if let Err(e) = answer_decision(kind, call_id, output) {
+                let status = if e.contains("no pending request") { 404 } else { 500 };
+                return respond_error(request, status, "decision_answer_failed", e, json_header);
+            }
+        }
         if stream {
             return start_stream(request, sid.clone(), to_resp_id(&sid), model);
         }
@@ -1295,6 +1402,9 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
             match session_id_from_resp(&prev).map(|s| s.to_string()) {
                 None => Err((400, "invalid_request", "malformed previous_response_id".into())),
                 Some(sid) => {
+                    // Capture the pre-resume message count; the new turn's
+                    // output is everything after it.
+                    let turn_offset = current_message_count(ctx.sources, &sid);
                     let spec = crate::agent_source::ResumeSpec {
                         session_id: sid.clone(),
                         workspace_path: public_workspace(),
@@ -1303,7 +1413,10 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
                         ..Default::default()
                     };
                     match crate::agent_source::resume_session(tool, &spec, Box::new(|_| {})) {
-                        Ok(()) => Ok((sid.clone(), to_resp_id(&sid), ResponseStatus::InProgress)),
+                        Ok(()) => {
+                            write_turn_offset(&sid, turn_offset);
+                            Ok((sid.clone(), to_resp_id(&sid), ResponseStatus::InProgress))
+                        }
                         Err(e) => Err((500, "resume_failed", e)),
                     }
                 }
@@ -1320,7 +1433,13 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
                 entrypoint: String::new(),
             };
             match crate::agent_source::spawn_session(tool, &spec) {
-                Ok(_) => Ok((uuid, resp_id, ResponseStatus::Queued)),
+                Ok(_) => {
+                    // Fresh session starts at turn offset 0 (whole transcript is
+                    // this turn); write it explicitly so any stale marker can't
+                    // hide the output.
+                    write_turn_offset(&uuid, 0);
+                    Ok((uuid, resp_id, ResponseStatus::Queued))
+                }
                 Err(e) => Err((500, "spawn_failed", e)),
             }
         };
@@ -1439,18 +1558,46 @@ mod tests {
 
     #[test]
     fn effective_status_promotes_waiting_and_pending() {
-        // A finished-but-idle headless turn (waitingInput, no card) → completed.
-        assert_eq!(effective_status("waitingInput", false), ResponseStatus::Completed);
-        // Actively generating stays in_progress.
-        assert_eq!(effective_status("running", false), ResponseStatus::InProgress);
-        assert_eq!(effective_status("thinking", false), ResponseStatus::InProgress);
-        // A pending decision card completes the turn regardless of raw status.
-        assert_eq!(effective_status("running", true), ResponseStatus::Completed);
-        assert_eq!(effective_status("waitingInput", true), ResponseStatus::Completed);
+        // A finished-but-idle headless turn (waitingInput + new content) → completed.
+        assert_eq!(
+            effective_status("waitingInput", false, true),
+            ResponseStatus::Completed
+        );
+        // waitingInput with NO new content yet (resume race window) stays in_progress.
+        assert_eq!(
+            effective_status("waitingInput", false, false),
+            ResponseStatus::InProgress
+        );
+        // Actively generating stays in_progress regardless of content.
+        assert_eq!(effective_status("running", false, true), ResponseStatus::InProgress);
+        assert_eq!(effective_status("thinking", false, false), ResponseStatus::InProgress);
+        // A pending decision card completes the turn regardless of raw/content.
+        assert_eq!(effective_status("running", true, false), ResponseStatus::Completed);
+        assert_eq!(effective_status("waitingInput", true, false), ResponseStatus::Completed);
         // Terminal states pass through unchanged.
-        assert_eq!(effective_status("failed", false), ResponseStatus::Failed);
-        assert_eq!(effective_status("stopped", false), ResponseStatus::Cancelled);
-        assert_eq!(effective_status("queued", false), ResponseStatus::Queued);
+        assert_eq!(effective_status("failed", false, false), ResponseStatus::Failed);
+        assert_eq!(effective_status("stopped", false, true), ResponseStatus::Cancelled);
+        assert_eq!(effective_status("queued", false, false), ResponseStatus::Queued);
+    }
+
+    #[test]
+    fn project_turn_text_slices_to_current_turn() {
+        let turn1_user = serde_json::json!({"type":"user","message":{"content":"go"}});
+        let turn1_asst = serde_json::json!({
+            "type":"assistant","message":{"content":[{"type":"text","text":"DONE"}]}
+        });
+        let turn2_user = serde_json::json!({"type":"user","message":{"content":"again"}});
+        let turn2_asst = serde_json::json!({
+            "type":"assistant","message":{"content":[{"type":"text","text":"SECOND"}]}
+        });
+        let msgs = [turn1_user, turn1_asst, turn2_user, turn2_asst];
+        // offset 0 → whole conversation (the old, buggy behavior if left at 0)
+        assert_eq!(project_turn_text(&msgs, 0), "DONE\nSECOND");
+        // offset 2 → only turn 2's assistant text
+        assert_eq!(project_turn_text(&msgs, 2), "SECOND");
+        // offset at/after end → empty (turn hasn't produced output yet)
+        assert_eq!(project_turn_text(&msgs, 4), "");
+        assert_eq!(project_turn_text(&msgs, 99), "");
     }
 
     #[test]
