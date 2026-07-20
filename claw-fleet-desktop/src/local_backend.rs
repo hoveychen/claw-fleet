@@ -632,8 +632,10 @@ impl LocalBackend {
                         &locale2,
                         &llm_config2,
                     );
-                    maybe_fire_auto_resume(&sess2, &ar2, &arif2, &arfail2, &arse2);
-                    maybe_drain_pending_messages(&sess2);
+                    claw_fleet_core::headless_runtime::maybe_fire_auto_resume(
+                        &sess2, &ar2, &arif2, &arfail2, &arse2,
+                    );
+                    claw_fleet_core::headless_runtime::maybe_drain_pending_messages(&sess2);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
                     last_rescan = Instant::now();
@@ -797,8 +799,10 @@ impl LocalBackend {
                         &locale3,
                         &llm_config3,
                     );
-                    maybe_fire_auto_resume(&sess3, &ar3, &arif3, &arfail3, &arse3);
-                    maybe_drain_pending_messages(&sess3);
+                    claw_fleet_core::headless_runtime::maybe_fire_auto_resume(
+                        &sess3, &ar3, &arif3, &arfail3, &arse3,
+                    );
+                    claw_fleet_core::headless_runtime::maybe_drain_pending_messages(&sess3);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
                 }
@@ -839,9 +843,15 @@ impl LocalBackend {
                     // card). The SIGINT makes codex record `turn_aborted` and exit;
                     // the liveness refresh above then clamps it on the next tick and
                     // the drain below delivers the queued continuation note.
-                    maybe_interrupt_stalled_codex(&sess_ar, &mut stall_fired, &mut stall_last_fire);
-                    maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar, &arfail_ar, &arse_ar);
-                    maybe_drain_pending_messages(&sess_ar);
+                    claw_fleet_core::headless_runtime::maybe_interrupt_stalled_codex(
+                        &sess_ar,
+                        &mut stall_fired,
+                        &mut stall_last_fire,
+                    );
+                    claw_fleet_core::headless_runtime::maybe_fire_auto_resume(
+                        &sess_ar, &ar_ar, &arif_ar, &arfail_ar, &arse_ar,
+                    );
+                    claw_fleet_core::headless_runtime::maybe_drain_pending_messages(&sess_ar);
                 }
             });
         }
@@ -1740,44 +1750,6 @@ pub fn resume_session_impl(
     )
 }
 
-/// Max number of `claude --resume` auto-resume processes alive at once. Each
-/// is a full Claude Code process (~150-200MB), so an unbounded fan-out of a
-/// few hundred is tens of GB of RSS — the startup runaway this caps.
-const AUTO_RESUME_MAX_CONCURRENT: usize = 4;
-
-/// After this many consecutive failed resumes, a session is backed off and no
-/// longer re-fired — stops the endless re-fire loop (24k+ doomed spawns seen
-/// in the field) for any session whose resume can never succeed.
-const AUTO_RESUME_FAILURE_BACKOFF: u32 = 3;
-
-/// Scan the current session list for auto-resume candidates and fire them,
-/// bounded by a global concurrency cap.
-///
-/// Two layers of protection against spamming:
-/// - **Debounce**: a given session can't be auto-resumed twice within 120s, so
-///   if the spawned `claude --resume` hasn't appended a new turn to the JSONL
-///   yet on the next rescan tick, we won't fire it again.
-/// - **Concurrency cap**: at most `AUTO_RESUME_MAX_CONCURRENT` resume processes
-///   run at once. A tick that finds 300 eligible sessions fires only enough to
-///   fill the free slots; `in_flight` is decremented by each process's reaper.
-/// Deliver any queued follow-up message to a session whose turn just ended.
-///
-/// Runs on the same session-refresh ticks as [`maybe_fire_auto_resume`]. Each
-/// session snapshot carries a fresh `proc_alive`, which is the gate
-/// [`claw_fleet_core::pending_message::drain_if_idle`] uses to know the turn is
-/// over — so a message typed while the session was running is fired here, on the
-/// first tick after the `claude` process exits. Independent of the auto-resume
-/// enabled toggle: queuing a follow-up is a direct user action, not the
-/// rate-limit recovery policy.
-fn maybe_drain_pending_messages(sessions: &Arc<Mutex<Vec<SessionInfo>>>) {
-    // Snapshot under the lock, then drain without holding it — draining spawns a
-    // detached `claude`, which must not run inside the sessions mutex.
-    let snapshot: Vec<SessionInfo> = { sessions.lock().unwrap().clone() };
-    for session in &snapshot {
-        claw_fleet_core::pending_message::maybe_drain(session);
-    }
-}
-
 /// Reconcile stale `proc_alive` on Codex sessions against the live process table
 /// and re-emit the snapshot when anything changed. The fs-watcher only rescans a
 /// Codex session on a rollout write, so a turn that dies mid-flight (no
@@ -1801,265 +1773,6 @@ fn refresh_dead_codex_liveness_and_emit(
         let _ = app.emit("sessions-updated", &s);
         crate::update_tray(app, &s);
         publish_mobile_sessions(&s);
-    }
-}
-
-/// Per-session hard cap on watchdog interrupts within one app run. A turn that
-/// stalls again after every resume is a persistent environment problem the
-/// watchdog can't fix — stop after this many attempts and leave it to the user.
-const STALL_MAX_INTERRUPTS: u32 = 2;
-/// Minimum spacing between watchdog interrupts of the same session, so the
-/// interrupt → drain → resume → (possibly re-stall) cycle gets a full silence
-/// window to prove itself before the next intervention.
-const STALL_COOLDOWN: Duration = Duration::from_secs(15 * 60);
-
-/// Detect and interrupt alive-but-hung Codex turns (see
-/// [`claw_fleet_core::codex_source::detect_stalled_codex_turns`]). Runs off the
-/// 30s ticker; detection is cheap (a process-table scan plus one stat per live
-/// Codex session) and the interrupt path only fires for sessions past the
-/// 10-minute silence threshold with no pending decision card.
-fn maybe_interrupt_stalled_codex(
-    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
-    fired: &mut HashMap<String, u32>,
-    last_fire: &mut HashMap<String, Instant>,
-) {
-    let snapshot: Vec<SessionInfo> = { sessions.lock().unwrap().clone() };
-    for stall in claw_fleet_core::codex_source::detect_stalled_codex_turns(&snapshot) {
-        let attempts = fired.get(&stall.session_id).copied().unwrap_or(0);
-        if attempts >= STALL_MAX_INTERRUPTS {
-            continue;
-        }
-        if let Some(at) = last_fire.get(&stall.session_id) {
-            if at.elapsed() < STALL_COOLDOWN {
-                continue;
-            }
-        }
-        match claw_fleet_core::codex_source::interrupt_stalled_codex_turn(&stall) {
-            Ok(()) => log_debug(&format!(
-                "[CODEX-STALL] interrupted {} (pid {}) after {}min rollout silence (attempt {}/{})",
-                stall.session_id,
-                stall.pid,
-                stall.silence_secs / 60,
-                attempts + 1,
-                STALL_MAX_INTERRUPTS,
-            )),
-            Err(e) => log_debug(&format!(
-                "[CODEX-STALL] interrupt {} (pid {}) failed: {e}",
-                stall.session_id, stall.pid,
-            )),
-        }
-        fired.insert(stall.session_id.clone(), attempts + 1);
-        last_fire.insert(stall.session_id.clone(), Instant::now());
-    }
-}
-
-fn maybe_fire_auto_resume(
-    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
-    last_fire: &Arc<Mutex<HashMap<String, Instant>>>,
-    in_flight: &Arc<AtomicUsize>,
-    failures: &Arc<Mutex<HashMap<String, u32>>>,
-    server_errors: &Arc<Mutex<HashMap<String, u32>>>,
-) {
-    let config = claw_fleet_core::auto_resume::AutoResumeConfig::load();
-    if !config.enabled {
-        return;
-    }
-    let now = chrono::Utc::now();
-    let debounce = Duration::from_secs(120);
-
-    // Only fire enough to fill the free concurrency slots this tick.
-    let slots = AUTO_RESUME_MAX_CONCURRENT.saturating_sub(in_flight.load(Ordering::SeqCst));
-    if slots == 0 {
-        return;
-    }
-
-    // Read the latest usage snapshot off disk once for this tick (no network
-    // call) so `should_auto_resume` can fire early when the account's limit has
-    // already recovered — a window reset or a foxy-switcher account swap — ahead
-    // of the hinted `resets_at`. `None` (no snapshot yet) simply means we fall
-    // back to the hint-time gate.
-    let usage = claw_fleet_core::account::latest_usage_snapshot();
-    // (id, workspace, agent_source) — source is captured under the lock so the
-    // tracked resume can be dispatched by source (claude vs codex) after the
-    // lock is released.
-    let candidates: Vec<(String, String, String)> = {
-        let sess = sessions.lock().unwrap();
-        let mut fire_map = last_fire.lock().unwrap();
-        let fail_map = failures.lock().unwrap();
-        // Drop entries older than the debounce window so the map doesn't grow
-        // unboundedly for sessions that come and go.
-        fire_map.retain(|_, t| t.elapsed() < debounce * 10);
-        let picked = claw_fleet_core::auto_resume::select_resume_candidates(
-            &sess,
-            &config,
-            now,
-            usage.as_ref(),
-            // Skip a session that's still debounced OR backed off after
-            // repeated failures.
-            |id| {
-                fire_map.get(id).is_some_and(|t| t.elapsed() < debounce)
-                    || claw_fleet_core::auto_resume::is_backed_off(
-                        &fail_map,
-                        id,
-                        AUTO_RESUME_FAILURE_BACKOFF,
-                    )
-            },
-            slots,
-        );
-        for (id, _) in &picked {
-            fire_map.insert(id.clone(), Instant::now());
-        }
-        // Attach each candidate's source from the same locked snapshot.
-        picked
-            .into_iter()
-            .map(|(id, ws)| {
-                let source = sess
-                    .iter()
-                    .find(|s| s.id == id)
-                    .map(|s| s.agent_source.clone())
-                    .unwrap_or_else(|| "claude-code".to_string());
-                (id, ws, source)
-            })
-            .collect()
-    };
-
-    for (session_id, workspace_path, agent_source) in candidates {
-        log_debug(&format!(
-            "auto_resume: firing for session {} ({}) in {} (in_flight={})",
-            session_id,
-            agent_source,
-            workspace_path,
-            in_flight.load(Ordering::SeqCst)
-        ));
-        // Reserve a slot now; the reaper releases it when the process exits.
-        in_flight.fetch_add(1, Ordering::SeqCst);
-        let in_flight_done = in_flight.clone();
-        let failures_done = failures.clone();
-        let id_done = session_id.clone();
-        let spawn_result = claw_fleet_core::agent_source::resume_session(
-            &agent_source,
-            &claw_fleet_core::agent_source::ResumeSpec {
-                session_id: session_id.clone(),
-                workspace_path: workspace_path.clone(),
-                prompt: "continue".to_string(),
-                model: None,
-                effort: None,
-                permission_mode: None,
-            },
-            Box::new(move |success| {
-                in_flight_done.fetch_sub(1, Ordering::SeqCst);
-                if let Ok(mut fail_map) = failures_done.lock() {
-                    claw_fleet_core::auto_resume::record_resume_outcome(
-                        &mut fail_map,
-                        &id_done,
-                        success,
-                    );
-                }
-            }),
-        );
-        if let Err(e) = spawn_result {
-            // Spawn failed before any process exists → release the slot here
-            // and record the failure, since no reaper will fire on_exit.
-            in_flight.fetch_sub(1, Ordering::SeqCst);
-            if let Ok(mut fail_map) = failures.lock() {
-                claw_fleet_core::auto_resume::record_resume_outcome(
-                    &mut fail_map,
-                    &session_id,
-                    false,
-                );
-            }
-            log_debug(&format!("auto_resume: failed for {}: {}", session_id, e));
-        }
-    }
-
-    // ── Transient server_error retries ──────────────────────────────────────
-    // A ServerErrored session resumes immediately (no resets_at wait). Recompute
-    // free slots — the rate-limit fires above may have consumed some — then retry
-    // eligible Fleet-headless sessions, capped per error episode so a turn that
-    // keeps erroring (or a server that stays down) can't re-fire forever.
-    if !config.retry_server_errors {
-        return;
-    }
-    let se_slots = AUTO_RESUME_MAX_CONCURRENT.saturating_sub(in_flight.load(Ordering::SeqCst));
-    if se_slots == 0 {
-        return;
-    }
-    let se_candidates: Vec<(String, String, String)> = {
-        let sess = sessions.lock().unwrap();
-        let mut fire_map = last_fire.lock().unwrap();
-        let mut se_map = server_errors.lock().unwrap();
-        // Reset the retry budget for any session no longer ServerErrored — a
-        // successful retry (or the user resuming) ends the episode, so the next
-        // error starts fresh. Also keeps the map bounded.
-        let errored: std::collections::HashSet<String> = sess
-            .iter()
-            .filter(|s| s.status == claw_fleet_core::session::SessionStatus::ServerErrored)
-            .map(|s| s.id.clone())
-            .collect();
-        se_map.retain(|id, _| errored.contains(id));
-        let max_retries = config.max_server_error_retries;
-        let picked = claw_fleet_core::auto_resume::select_server_error_retries(
-            &sess,
-            &config,
-            // Skip a session that's debounced, already has a resume/turn running,
-            // or has exhausted its per-episode retry budget.
-            |id| {
-                fire_map.get(id).is_some_and(|t| t.elapsed() < debounce)
-                    || se_map.get(id).is_some_and(|&n| n >= max_retries)
-                    || sess.iter().any(|s| s.id == id && s.proc_alive)
-            },
-            se_slots,
-        );
-        for (id, _) in &picked {
-            fire_map.insert(id.clone(), Instant::now());
-            *se_map.entry(id.clone()).or_insert(0) += 1;
-        }
-        picked
-            .into_iter()
-            .map(|(id, ws)| {
-                let source = sess
-                    .iter()
-                    .find(|s| s.id == id)
-                    .map(|s| s.agent_source.clone())
-                    .unwrap_or_else(|| "claude-code".to_string());
-                (id, ws, source)
-            })
-            .collect()
-    };
-
-    for (session_id, workspace_path, agent_source) in se_candidates {
-        log_debug(&format!(
-            "server_error_retry: firing for session {} ({}) in {} (in_flight={})",
-            session_id,
-            agent_source,
-            workspace_path,
-            in_flight.load(Ordering::SeqCst)
-        ));
-        in_flight.fetch_add(1, Ordering::SeqCst);
-        let in_flight_done = in_flight.clone();
-        let spawn_result = claw_fleet_core::agent_source::resume_session(
-            &agent_source,
-            &claw_fleet_core::agent_source::ResumeSpec {
-                session_id: session_id.clone(),
-                workspace_path: workspace_path.clone(),
-                prompt: "continue".to_string(),
-                model: None,
-                effort: None,
-                permission_mode: None,
-            },
-            // The per-episode se_map cap (not the failures backoff) bounds these,
-            // so the reaper only needs to release the concurrency slot.
-            Box::new(move |_success| {
-                in_flight_done.fetch_sub(1, Ordering::SeqCst);
-            }),
-        );
-        if let Err(e) = spawn_result {
-            in_flight.fetch_sub(1, Ordering::SeqCst);
-            log_debug(&format!(
-                "server_error_retry: failed for {}: {}",
-                session_id, e
-            ));
-        }
     }
 }
 
