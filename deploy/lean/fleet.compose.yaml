@@ -22,6 +22,8 @@ services:
       FLEET_ADMIN_TOKEN: "${FLEET_ADMIN_TOKEN:?set FLEET_ADMIN_TOKEN}"
       # Per-customer scoped token for external integrators (public API only).
       FLEET_PUBLIC_TOKEN: "${FLEET_PUBLIC_TOKEN:-}"
+      # Wait for the cred store to inject before serving (1=default, 0=skip).
+      FLEET_WAIT_FOR_CREDS: "${FLEET_WAIT_FOR_CREDS:-1}"
       # Credential-store wiring (P3). Leave unset to disable.
       FLEET_CRED_STORE_URL: "${FLEET_CRED_STORE_URL:-}"
     volumes:
