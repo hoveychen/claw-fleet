@@ -344,6 +344,29 @@ pub(crate) enum LoopCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Show one loop by its id (from `fleet loop list`).
+    Get {
+        /// The loop id.
+        id: String,
+        /// Output raw JSON instead of fields.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Adjust a loop in place. Pass any of --interval / --prompt / --max; a
+    /// changed interval reschedules the next fire one interval from now.
+    Update {
+        /// The loop id.
+        id: String,
+        /// New interval, e.g. `5m`, `2h`, `1d` (min 60s).
+        #[arg(long)]
+        interval: Option<String>,
+        /// New prompt each iteration runs.
+        #[arg(long)]
+        prompt: Option<String>,
+        /// New iteration cap (capped at 500).
+        #[arg(long)]
+        max: Option<u32>,
+    },
     /// Stop a loop by its id (from `fleet loop list`).
     Stop {
         /// The loop id.
@@ -440,6 +463,21 @@ pub(crate) enum ScheduleCommands {
         /// Output raw JSON instead of fields.
         #[arg(long)]
         json: bool,
+    },
+    /// Adjust a pending schedule. Pass any of --at / --in (not both) and/or
+    /// --prompt. A fired schedule cannot be updated.
+    Update {
+        /// The schedule id.
+        id: String,
+        /// New absolute local time, e.g. `"2026-07-25 09:00"`.
+        #[arg(long)]
+        at: Option<String>,
+        /// New relative delay, e.g. `5d`, `2h`.
+        #[arg(long)]
+        r#in: Option<String>,
+        /// New prompt the fired session runs.
+        #[arg(long)]
+        prompt: Option<String>,
     },
     /// Cancel a schedule (or forget a fired one) by its id.
     Cancel {

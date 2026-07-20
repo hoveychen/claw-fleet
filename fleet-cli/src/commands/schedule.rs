@@ -85,6 +85,51 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 std::process::exit(1);
             }
         },
+        ScheduleCommands::Update { id, at, r#in, prompt } => {
+            let now = now_ms_wall();
+            let fire_at = match (at.as_deref(), r#in.as_deref()) {
+                (Some(_), Some(_)) => {
+                    eprintln!("Error: pass at most one of --at or --in, not both.");
+                    std::process::exit(2);
+                }
+                (Some(a), None) => match schedule::parse_at(a, now) {
+                    Ok(t) => Some(t),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(2);
+                    }
+                },
+                (None, Some(i)) => match schedule::parse_in(i, now) {
+                    Ok(t) => Some(t),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(2);
+                    }
+                },
+                (None, None) => None,
+            };
+            if fire_at.is_none() && prompt.is_none() {
+                eprintln!("Error: nothing to update — pass --at/--in and/or --prompt.");
+                std::process::exit(2);
+            }
+            match schedule::update(&id, fire_at, prompt.as_deref()) {
+                Ok(rec) => {
+                    // Re-arm so the new time/generation takes effect; the old
+                    // timer exits as superseded on its next wake.
+                    let _ = schedule::arm_timer(&rec);
+                    println!(
+                        "ok: schedule {} updated — fires {} (in {}). 计时器已重挂。",
+                        rec.id,
+                        fmt_local(rec.fire_at),
+                        fmt_duration_ms(rec.due_in_ms(now)),
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         ScheduleCommands::Cancel { id } => {
             if schedule::cancel(&id) {
                 println!("ok: schedule {id} cancelled (its timer exits on next wake)");

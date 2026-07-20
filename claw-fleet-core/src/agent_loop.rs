@@ -294,6 +294,58 @@ fn stop_in(dir: &Path, id: &str) -> bool {
     fs::remove_file(record_path(dir, id)).is_ok()
 }
 
+/// Adjust a loop in place: change its interval, prompt, and/or max iterations.
+/// `None` for a field leaves it unchanged. Bumps `generation` so any detached
+/// timer sleeping on the old schedule exits as superseded when it next wakes —
+/// the caller (`fleet loop update`) re-arms a fresh timer from the returned
+/// record. A changed interval reschedules the next fire one full interval from
+/// now, matching how `create` places the first fire.
+pub fn update(
+    id: &str,
+    interval_secs: Option<u64>,
+    prompt: Option<&str>,
+    max: Option<u32>,
+) -> Result<LoopRecord, String> {
+    let dir = loops_dir().ok_or("cannot determine home dir")?;
+    update_in(&dir, id, interval_secs, prompt, max, now_ms())
+}
+
+fn update_in(
+    dir: &Path,
+    id: &str,
+    interval_secs: Option<u64>,
+    prompt: Option<&str>,
+    max: Option<u32>,
+    now: u64,
+) -> Result<LoopRecord, String> {
+    let mut rec = get_in(dir, id).ok_or_else(|| format!("no loop with id {id}"))?;
+    if let Some(secs) = interval_secs {
+        if secs < MIN_INTERVAL_SECS {
+            return Err(format!(
+                "interval {secs}s is below the {MIN_INTERVAL_SECS}s minimum"
+            ));
+        }
+        rec.interval_secs = secs;
+        rec.next_fire_at = now + secs * 1000;
+    }
+    if let Some(p) = prompt {
+        let p = p.trim();
+        if p.is_empty() {
+            return Err("loop prompt cannot be empty".to_string());
+        }
+        rec.prompt = p.to_string();
+    }
+    if let Some(m) = max {
+        if m == 0 {
+            return Err("max iterations must be at least 1".to_string());
+        }
+        rec.max_iterations = Some(m.min(MAX_ITERATIONS));
+    }
+    rec.generation += 1;
+    write_record(dir, &rec)?;
+    Ok(rec)
+}
+
 /// Record which session an iteration produced, for `fleet loop list`.
 pub fn record_iteration_session(id: &str, session_id: &str) {
     let Some(dir) = loops_dir() else { return };
@@ -727,6 +779,39 @@ mod tests {
                 .unwrap_err()
                 .contains("at least 1")
         );
+    }
+
+    #[test]
+    fn update_changes_interval_prompt_max_and_bumps_generation() {
+        let d = dir();
+        make(d.path(), "l1", 0); // interval 300, next_fire 300_000
+        let u = update_in(d.path(), "l1", Some(600), Some("new prompt"), Some(3), 1_000_000).unwrap();
+        assert_eq!(u.interval_secs, 600);
+        assert_eq!(u.next_fire_at, 1_000_000 + 600 * 1000, "reschedule from now");
+        assert_eq!(u.prompt, "new prompt");
+        assert_eq!(u.max_iterations, Some(3));
+        assert_eq!(u.generation, 1, "bump supersedes the old timer");
+    }
+
+    #[test]
+    fn update_partial_and_validation() {
+        let d = dir();
+        make(d.path(), "l1", 0);
+        // prompt only leaves interval + schedule alone
+        let u = update_in(d.path(), "l1", None, Some("p2"), None, 0).unwrap();
+        assert_eq!(u.interval_secs, 300);
+        assert_eq!(u.next_fire_at, 300_000);
+        assert_eq!(u.prompt, "p2");
+        // sub-minute interval rejected
+        assert!(update_in(d.path(), "l1", Some(10), None, None, 0).unwrap_err().contains("minimum"));
+        // empty prompt rejected
+        assert!(update_in(d.path(), "l1", None, Some("  "), None, 0).unwrap_err().contains("cannot be empty"));
+        // zero max rejected
+        assert!(update_in(d.path(), "l1", None, None, Some(0), 0).unwrap_err().contains("at least 1"));
+        // max clamped to ceiling
+        assert_eq!(update_in(d.path(), "l1", None, None, Some(99_999), 0).unwrap().max_iterations, Some(MAX_ITERATIONS));
+        // unknown id
+        assert!(update_in(d.path(), "nope", None, Some("x"), None, 0).unwrap_err().contains("no loop with id"));
     }
 
     #[test]
