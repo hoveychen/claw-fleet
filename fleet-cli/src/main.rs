@@ -240,6 +240,17 @@ enum Commands {
         #[command(subcommand)]
         action: WatchCommands,
     },
+    /// Schedule a one-shot prompt to fire at an absolute future time — the
+    /// sibling of `fleet loop`. A loop repeats on an interval and is capped at
+    /// Claude Code's 7-day cron horizon; a schedule fires exactly once, at a time
+    /// you name (`--at "2026-07-25 09:00"` or `--in 5d`), with no 7-day ceiling,
+    /// by spawning a fresh detached session — so it survives the turn boundary.
+    /// Fired schedules stay in `list` as history. Create reads FLEET_SESSION_ID
+    /// to inherit the current session's workspace/model/effort/source.
+    Schedule {
+        #[command(subcommand)]
+        action: ScheduleCommands,
+    },
     /// Install a headless Fleet host's control plane: idempotently apply the
     /// guard / elicitation / plan-approval hooks + PRD / interaction / wiki /
     /// model CLAUDE.md guidance that a desktop Fleet installs via onboarding.
@@ -393,6 +404,53 @@ pub(crate) enum WatchCommands {
     #[command(hide = true)]
     Fire {
         /// The watch id.
+        id: String,
+        /// Generation this timer was armed for (staleness guard).
+        generation: u64,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ScheduleCommands {
+    /// Register a one-shot schedule. Pass exactly one of --at / --in.
+    Create {
+        /// Absolute local time to fire, e.g. `"2026-07-25 09:00"`, the ISO
+        /// `2026-07-25T09:00`, or a bare `09:00` (next occurrence today/tomorrow).
+        #[arg(long)]
+        at: Option<String>,
+        /// Relative delay to fire, e.g. `5d`, `2h`, `90m` (min 60s). Same grammar
+        /// as `fleet loop --interval`.
+        #[arg(long)]
+        r#in: Option<String>,
+        /// The prompt the fired session runs — the schedule's full context.
+        #[arg(long)]
+        prompt: String,
+    },
+    /// List all registered schedules (pending + fired history).
+    #[command(alias = "ls")]
+    List {
+        /// Output raw JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one schedule by its id (from `fleet schedule list`).
+    Get {
+        /// The schedule id.
+        id: String,
+        /// Output raw JSON instead of fields.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Cancel a schedule (or forget a fired one) by its id.
+    Cancel {
+        /// The schedule id.
+        id: String,
+    },
+    /// Internal: the detached timer body. Sleeps until due, fires once, exits.
+    /// Spawned by `create` and the Stop-hook reconcile; not meant to be run by hand.
+    #[command(hide = true)]
+    Fire {
+        /// The schedule id.
         id: String,
         /// Generation this timer was armed for (staleness guard).
         generation: u64,
@@ -748,6 +806,7 @@ fn main() {
         ),
         Commands::Loop { action } => commands::loop_cmd::cmd_loop(action),
         Commands::Watch { action } => commands::watch::cmd_watch(action),
+        Commands::Schedule { action } => commands::schedule::cmd_schedule(action),
         Commands::Bootstrap { locale, title, json } => {
             commands::bootstrap::cmd_bootstrap(locale, title, json)
         }
