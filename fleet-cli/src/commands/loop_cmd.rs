@@ -49,6 +49,70 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 );
             }
         }
+        LoopCommands::Get { id, json } => match agent_loop::get(&id) {
+            Some(rec) => {
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&rec).unwrap_or_default());
+                } else {
+                    let now = now_ms_wall();
+                    println!("id:        {}", rec.id);
+                    println!("every:     {}", fmt_interval_secs(rec.interval_secs));
+                    println!(
+                        "next:      {}",
+                        if rec.is_due(now) { "due".to_string() } else { fmt_duration_ms(rec.due_in_ms(now)) }
+                    );
+                    println!(
+                        "done:      {}{}",
+                        rec.iterations_done,
+                        rec.max_iterations.map(|m| format!("/{m}")).unwrap_or_default()
+                    );
+                    println!("workspace: {}", rec.workspace_path);
+                    println!("model:     {}", rec.model.as_deref().unwrap_or("<CLI 默认>"));
+                    if let Some(s) = &rec.last_session_id {
+                        println!("last:      {s}");
+                    }
+                    println!("prompt:    {}", rec.prompt);
+                }
+            }
+            None => {
+                eprintln!("no loop with id {id}");
+                std::process::exit(1);
+            }
+        },
+        LoopCommands::Update {
+            id,
+            interval,
+            prompt,
+            max,
+        } => {
+            let interval_secs = match interval.as_deref() {
+                Some(i) => match agent_loop::parse_interval(i) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        std::process::exit(2);
+                    }
+                },
+                None => None,
+            };
+            match agent_loop::update(&id, interval_secs, prompt.as_deref(), max) {
+                Ok(rec) => {
+                    // Re-arm so the new schedule/generation takes effect; the old
+                    // timer exits as superseded on its next wake.
+                    let _ = agent_loop::arm_timer(&rec);
+                    println!(
+                        "ok: loop {} updated — every {}, next in {}. 计时器已重挂。",
+                        rec.id,
+                        fmt_interval_secs(rec.interval_secs),
+                        fmt_duration_ms(rec.due_in_ms(now_ms_wall())),
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         LoopCommands::Stop { id } => {
             if agent_loop::stop(&id) {
                 println!("ok: loop {id} stopped (its timer exits on next wake)");

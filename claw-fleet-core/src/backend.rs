@@ -456,6 +456,36 @@ pub trait Backend: Send + Sync {
     fn get_memory_content(&self, path: &str) -> Result<String, String>;
     fn get_memory_history(&self, path: &str) -> Vec<MemoryHistoryEntry>;
 
+    // ── Scheduled + looped future tasks ────────────────────────────────────────
+    /// Registered agent loops (`fleet loop`) — recurring future tasks. Default
+    /// reads this machine's `~/.fleet/loops`; RemoteBackend overrides to fetch
+    /// the remote host's over HTTP.
+    fn list_loops(&self) -> Vec<crate::agent_loop::LoopRecord> {
+        crate::agent_loop::list()
+    }
+    /// Registered one-shot schedules (`fleet schedule`), pending + fired history.
+    /// Default reads local; RemoteBackend overrides.
+    fn list_schedules(&self) -> Vec<crate::schedule::ScheduleRecord> {
+        crate::schedule::list()
+    }
+    /// Cancel a loop by id. Default acts on this machine; RemoteBackend overrides.
+    fn cancel_loop(&self, id: String) -> Result<(), String> {
+        if crate::agent_loop::stop(&id) {
+            Ok(())
+        } else {
+            Err(format!("no loop with id {id}"))
+        }
+    }
+    /// Cancel (or forget-history-of) a schedule by id. Default acts on this
+    /// machine; RemoteBackend overrides.
+    fn cancel_schedule(&self, id: String) -> Result<(), String> {
+        if crate::schedule::cancel(&id) {
+            Ok(())
+        } else {
+            Err(format!("no schedule with id {id}"))
+        }
+    }
+
     // ── Live thinking ────────────────────────────────────────────────────────
     /// Token-level reasoning for a Fleet-spawned session that is streaming
     /// right now, reconstructed from its live-thinking sidecar. `None` when the

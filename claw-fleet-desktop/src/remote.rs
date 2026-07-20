@@ -316,6 +316,8 @@ impl crate::backend::Backend for RemoteBackend {
             today_usage -> crate::today_usage::TodayUsage = TODAY_USAGE;
             today_usage_breakdown -> crate::today_usage::TodayUsageBreakdown = TODAY_USAGE_BREAKDOWN;
             list_memories -> Vec<crate::memory::WorkspaceMemory> = MEMORIES;
+            list_loops -> Vec<claw_fleet_core::agent_loop::LoopRecord> = LOOPS;
+            list_schedules -> Vec<claw_fleet_core::schedule::ScheduleRecord> = SCHEDULES;
             list_wiki_docs -> Vec<crate::wiki::WikiDoc> = WIKI_DOCS;
             list_skills -> Vec<crate::skills::SkillItem> = SKILLS;
             list_plugins -> Vec<crate::plugins::PluginItem> = PLUGINS;
@@ -341,6 +343,16 @@ impl crate::backend::Backend for RemoteBackend {
             remove_model_guidance = REMOVE_MODEL_GUIDANCE;
             remove_prd_mode = REMOVE_PRD_MODE;
         }
+    }
+
+    fn cancel_loop(&self, id: String) -> Result<(), String> {
+        self.probe
+            .post_ok(&format!("{}?id={}", claw_fleet_core::routes::LOOP_CANCEL, id))
+    }
+
+    fn cancel_schedule(&self, id: String) -> Result<(), String> {
+        self.probe
+            .post_ok(&format!("{}?id={}", claw_fleet_core::routes::SCHEDULE_CANCEL, id))
     }
 
     fn list_sessions(&self) -> Vec<crate::session::SessionInfo> {

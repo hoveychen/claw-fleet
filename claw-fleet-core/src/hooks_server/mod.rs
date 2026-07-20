@@ -24,6 +24,7 @@ mod routes_memory;
 mod routes_mobile;
 mod routes_plan_approval;
 mod routes_proc;
+mod routes_schedule;
 mod routes_session_state;
 mod routes_skills;
 mod routes_spawn;
@@ -42,6 +43,7 @@ use routes_memory::*;
 use routes_mobile::*;
 use routes_plan_approval::*;
 use routes_proc::*;
+use routes_schedule::*;
 use routes_session_state::*;
 use routes_skills::*;
 use routes_spawn::*;
@@ -678,6 +680,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             crate::routes::TAIL => route_tail(ctx, request, &query, json_header, path),
 
             crate::routes::MEMORIES => route_memories(ctx, request, &query, json_header, path),
+
+            crate::routes::LOOPS => route_loops(ctx, request, &query, json_header, path),
+
+            crate::routes::SCHEDULES => route_schedules(ctx, request, &query, json_header, path),
+
+            crate::routes::LOOP_CANCEL => route_loop_cancel(ctx, request, &query, json_header, path),
+
+            crate::routes::SCHEDULE_CANCEL => route_schedule_cancel(ctx, request, &query, json_header, path),
 
             crate::routes::LIVE_THINKING => route_live_thinking(ctx, request, &query, json_header, path),
 

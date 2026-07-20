@@ -83,6 +83,7 @@
   "keep_awake_off_tooltip": "Keep the system awake (like caffeinate -i)",
   "view_audit": "Audit",
   "view_memory": "Memory",
+  "view_schedule": "Schedule",
   "view_wiki": "Wiki",
   "view_skills": "Skills",
   "view_plugins": "Plugins",
@@ -395,6 +396,24 @@
     "no_rules": "No rules configured.",
     "rule_search_placeholder": "Search rule name, pattern, or description…",
     "no_matching_rules": "No matching rules."
+  },
+  "schedule": {
+    "title": "Scheduled tasks",
+    "refresh": "Refresh",
+    "empty_title": "No scheduled tasks yet",
+    "empty_sub": "Schedule a future task with `fleet schedule create --in 5d` or `fleet loop create`",
+    "every": "every",
+    "next": "next",
+    "fires": "fires",
+    "in": "in",
+    "fired": "fired",
+    "ago": "ago",
+    "badge_loop": "Loop",
+    "badge_once": "Once",
+    "status_pending": "pending",
+    "status_fired": "fired",
+    "cancel": "Cancel",
+    "cancelling": "Cancelling"
   },
   "memory": {
     "panel_title": "Memory",
