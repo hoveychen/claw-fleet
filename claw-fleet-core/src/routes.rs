@@ -232,4 +232,9 @@ pub fn is_public(path: &str) -> bool {
             | TOKEN_BREAKDOWN
             | CODEX_TOKEN_BREAKDOWN
     ) || path == "/events"
+        // Fleet Cloud v2: the OpenAI Responses-compatible public surface. The
+        // whole /v1/* tree is scoped-token reachable; it is the intended
+        // external API. (v2 P6 removes the raw internal routes above from this
+        // whitelist so external clients see ONLY /v1/*.)
+        || path.starts_with("/v1/")
 }
