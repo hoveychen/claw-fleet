@@ -737,6 +737,161 @@ fn pending_function_calls(session_id: &str) -> Vec<OutputItem> {
     out
 }
 
+// ─────────────────────────── Files (artifacts) ───────────────────────
+//
+// A customer's run produces files in the container's single workspace
+// ([`public_workspace`]). We expose them OpenAI-file-shaped:
+//   GET /v1/responses/{id}/files      → { object: "list", data: [file …] }
+//   GET /v1/files/{file_id}/content   → raw bytes
+// The `file_id` is an opaque `file_<base64url(rel_path)>`; content reads
+// canonicalize the joined path and assert it stays under the canonical
+// workspace root, so a crafted id can't escape the container.
+
+use base64::Engine as _;
+
+/// OpenAI-shaped file object. `bytes` is the size; `id` round-trips a
+/// workspace-relative path through base64url.
+#[derive(Debug, Clone, Serialize)]
+struct FileObject {
+    id: String,
+    object: &'static str, // "file"
+    bytes: u64,
+    created_at: i64,
+    filename: String,
+    purpose: &'static str, // "output"
+}
+
+/// `file_<base64url(rel)>`. Pure.
+fn encode_file_id(rel: &str) -> String {
+    format!(
+        "file_{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rel.as_bytes())
+    )
+}
+
+/// `file_<base64url(rel)>` → workspace-relative path. `None` if malformed. Pure.
+fn decode_file_id(id: &str) -> Option<String> {
+    let b64 = id.strip_prefix("file_").filter(|s| !s.is_empty())?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(b64)
+        .ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+/// Directories skipped when walking the workspace — VCS metadata and
+/// regenerable build output that a customer never wants to download. Pure.
+fn is_ignored_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | ".hg"
+            | ".svn"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".worktrees"
+            | ".venv"
+            | "__pycache__"
+    )
+}
+
+/// Cap the walk so an enormous tree can't blow up memory / the response.
+const MAX_LISTED_FILES: usize = 2000;
+
+/// List regular files under the workspace root (recursively, skipping ignored
+/// dirs and symlinks), newest first, capped at [`MAX_LISTED_FILES`].
+fn list_workspace_files() -> Vec<FileObject> {
+    let root = std::path::PathBuf::from(public_workspace());
+    let Ok(canon_root) = root.canonicalize() else {
+        return Vec::new();
+    };
+    let mut out: Vec<(FileObject, std::time::SystemTime)> = Vec::new();
+    let mut stack = vec![canon_root.clone()];
+    while let Some(dir) = stack.pop() {
+        if out.len() >= MAX_LISTED_FILES {
+            break;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // symlink_metadata: never follow links (escape guard + loop guard).
+            let Ok(md) = entry.path().symlink_metadata() else {
+                continue;
+            };
+            if md.file_type().is_symlink() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if md.is_dir() {
+                if !is_ignored_dir(&name) {
+                    stack.push(path);
+                }
+                continue;
+            }
+            if !md.is_file() {
+                continue;
+            }
+            let Ok(rel) = path.strip_prefix(&canon_root) else {
+                continue;
+            };
+            let rel_str = rel.to_string_lossy().to_string();
+            let mtime = md.modified().unwrap_or(std::time::UNIX_EPOCH);
+            let created_at = mtime
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            out.push((
+                FileObject {
+                    id: encode_file_id(&rel_str),
+                    object: "file",
+                    bytes: md.len(),
+                    created_at,
+                    filename: rel_str,
+                    purpose: "output",
+                },
+                mtime,
+            ));
+            if out.len() >= MAX_LISTED_FILES {
+                break;
+            }
+        }
+    }
+    out.sort_by(|a, b| b.1.cmp(&a.1)); // newest first
+    out.into_iter().map(|(f, _)| f).collect()
+}
+
+/// Read a workspace file by opaque id, confined to the workspace root. Returns
+/// `(bytes, mime)`. Errors carry an HTTP status so the handler can map them.
+fn read_workspace_file(file_id: &str) -> Result<(Vec<u8>, String), (u16, String)> {
+    let rel = decode_file_id(file_id).ok_or((404, "malformed file id".to_string()))?;
+    let root = std::path::PathBuf::from(public_workspace());
+    let canon_root = root
+        .canonicalize()
+        .map_err(|_| (404, "workspace not found".to_string()))?;
+    let joined = canon_root.join(&rel);
+    let canon_file = joined
+        .canonicalize()
+        .map_err(|_| (404, "file not found".to_string()))?;
+    // Confinement: the resolved path must stay under the workspace root, and it
+    // must be a regular file (not a dir / device).
+    if !canon_file.starts_with(&canon_root) {
+        return Err((403, "path escapes workspace".to_string()));
+    }
+    let md = canon_file
+        .symlink_metadata()
+        .map_err(|_| (404, "file not found".to_string()))?;
+    if !md.is_file() {
+        return Err((404, "not a regular file".to_string()));
+    }
+    let bytes = std::fs::read(&canon_file).map_err(|e| (500, format!("read: {e}")))?;
+    let mime = crate::wiki::mime_for_path(&canon_file).to_string();
+    Ok((bytes, mime))
+}
+
 // ─────────────────────────── Dispatch skeleton ───────────────────────
 
 /// Parsed `/v1/...` route target.
@@ -1039,10 +1194,8 @@ pub(crate) fn dispatch(
         V1Route::CreateResponse => create_response(ctx, request, json_header),
         V1Route::GetResponse(id) => get_response(ctx, request, json_header, &id),
         V1Route::CancelResponse(id) => cancel_response(ctx, request, json_header, &id),
-        // Files land in P5.
-        V1Route::ListFiles(_) | V1Route::FileContent(_) => {
-            respond_error(request, 501, "not_implemented", "files endpoints arrive in P5", json_header)
-        }
+        V1Route::ListFiles(id) => list_files(request, json_header, &id),
+        V1Route::FileContent(id) => file_content(request, &id, json_header),
         V1Route::NotFound => {
             respond_error(request, 404, "not_found", "unknown /v1 route", json_header)
         }
@@ -1195,9 +1348,41 @@ fn cancel_response(ctx: &super::ServeCtx, request: tiny_http::Request, json_head
     respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header);
 }
 
+/// `GET /v1/responses/{id}/files` — list the run's workspace artifacts. One
+/// customer per container means one workspace, so the listing is
+/// workspace-scoped; the `{id}` only needs to be a well-formed response id.
+fn list_files(request: tiny_http::Request, json_header: tiny_http::Header, resp_id: &str) {
+    if session_id_from_resp(resp_id).is_none() {
+        return respond_error(request, 404, "not_found", "malformed response id", json_header);
+    }
+    let files = list_workspace_files();
+    let body = serde_json::json!({ "object": "list", "data": files });
+    respond_value(request, 200, &body, json_header);
+}
+
+/// `GET /v1/files/{file_id}/content` — stream a workspace file, confined to
+/// the workspace root.
+fn file_content(request: tiny_http::Request, file_id: &str, json_header: tiny_http::Header) {
+    match read_workspace_file(file_id) {
+        Ok((bytes, mime)) => {
+            let mime_header: tiny_http::Header =
+                format!("Content-Type: {mime}").parse().unwrap();
+            let _ = request.respond(tiny_http::Response::from_data(bytes).with_header(mime_header));
+        }
+        Err((status, msg)) => {
+            let code = if status == 403 { "forbidden" } else { "not_found" };
+            respond_error(request, status, code, msg, json_header);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serializes tests that mutate the `FLEET_PUBLIC_WORKSPACE` env var, since
+    /// cargo runs the test fns concurrently in one process.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn resp_id_round_trips() {
@@ -1211,8 +1396,13 @@ mod tests {
 
     #[test]
     fn public_workspace_defaults_and_overrides() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("FLEET_PUBLIC_WORKSPACE").ok();
         std::env::remove_var("FLEET_PUBLIC_WORKSPACE");
         assert_eq!(public_workspace(), "/workspace");
+        if let Some(v) = prev {
+            std::env::set_var("FLEET_PUBLIC_WORKSPACE", v);
+        }
     }
 
     #[test]
@@ -1460,6 +1650,69 @@ mod tests {
             r.function_call_outputs(),
             vec![("guard_42".into(), "allow".into())]
         );
+    }
+
+    #[test]
+    fn file_id_round_trips() {
+        for rel in ["report.md", "src/main.rs", "a b/c-d.txt", "深/文件.json"] {
+            let id = encode_file_id(rel);
+            assert!(id.starts_with("file_"));
+            assert_eq!(decode_file_id(&id).as_deref(), Some(rel));
+        }
+        assert_eq!(decode_file_id("file_"), None);
+        assert_eq!(decode_file_id("nope"), None);
+        assert_eq!(decode_file_id("file_!!!not-base64"), None);
+    }
+
+    #[test]
+    fn ignored_dirs_skipped() {
+        assert!(is_ignored_dir(".git"));
+        assert!(is_ignored_dir("node_modules"));
+        assert!(is_ignored_dir("target"));
+        assert!(!is_ignored_dir("src"));
+        assert!(!is_ignored_dir("docs"));
+    }
+
+    #[test]
+    fn workspace_walk_lists_and_confines() {
+        // A private temp workspace: bound via FLEET_PUBLIC_WORKSPACE for this
+        // test only. Serializes with other env-mutating tests via a mutex.
+        let _g = ENV_LOCK.lock().unwrap();
+        let base = std::env::temp_dir().join(format!("fleet-resp-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("src")).unwrap();
+        std::fs::create_dir_all(base.join("node_modules/pkg")).unwrap();
+        std::fs::write(base.join("report.md"), b"hello").unwrap();
+        std::fs::write(base.join("src/main.rs"), b"fn main(){}").unwrap();
+        std::fs::write(base.join("node_modules/pkg/index.js"), b"junk").unwrap();
+        let prev = std::env::var("FLEET_PUBLIC_WORKSPACE").ok();
+        std::env::set_var("FLEET_PUBLIC_WORKSPACE", &base);
+
+        let files = list_workspace_files();
+        let names: std::collections::HashSet<&str> =
+            files.iter().map(|f| f.filename.as_str()).collect();
+        assert!(names.contains("report.md"));
+        assert!(names.contains("src/main.rs"));
+        // ignored dir excluded
+        assert!(!names.iter().any(|n| n.contains("node_modules")));
+
+        // content read is confined + correct
+        let rid = files.iter().find(|f| f.filename == "report.md").unwrap();
+        let (bytes, mime) = read_workspace_file(&rid.id).unwrap();
+        assert_eq!(bytes, b"hello");
+        assert!(mime.starts_with("text/"));
+
+        // a crafted escaping id is rejected (403), not served
+        let escape = encode_file_id("../../../etc/passwd");
+        let err = read_workspace_file(&escape).unwrap_err();
+        assert!(err.0 == 403 || err.0 == 404, "escape must not succeed: {err:?}");
+
+        // restore env + cleanup
+        match prev {
+            Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
+            None => std::env::remove_var("FLEET_PUBLIC_WORKSPACE"),
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
