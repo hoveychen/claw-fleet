@@ -128,6 +128,58 @@ pub fn today_usage(sessions: &[SessionInfo]) -> TodayUsage {
     }
 }
 
+/// Consolidated per-container token usage for the Fleet Cloud lean deployment.
+///
+/// One customer per container, so this container's usage **is** the customer's
+/// usage. `today` reuses [`today_usage`] (includes Fleet's own LLM overhead for
+/// the operational view); the `cumulative_*` fields sum **agent sessions only**
+/// (claude/codex consumption — the token basis you'd bill on) across every
+/// session currently retained on disk.
+///
+/// Metering only. Billing and quota enforcement are deliberately out of v1, and
+/// the cumulative figure is subject to session retention (pruned sessions drop
+/// out), so it is a *current usage* view, not an authoritative billing ledger.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct CloudUsage {
+    /// Today's window (agent + Fleet overhead), same shape as `/today_usage`.
+    pub today: TodayUsage,
+    /// Cumulative input tokens across all retained agent sessions.
+    pub cumulative_input_tokens: u64,
+    /// Cumulative output tokens across all retained agent sessions.
+    pub cumulative_output_tokens: u64,
+    /// Cumulative agent cost (USD) across all retained agent sessions.
+    pub cumulative_agent_cost_usd: f64,
+    /// Number of top-level (non-subagent) sessions counted in the cumulative sum.
+    pub cumulative_session_count: u64,
+}
+
+/// Build the consolidated cloud usage view from an already-scanned session list
+/// (no extra JSONL scan). Pure — driven directly by the unit test.
+pub fn cloud_usage(sessions: &[SessionInfo]) -> CloudUsage {
+    let today = today_usage(sessions);
+    let mut input = 0u64;
+    let mut output = 0u64;
+    let mut cost = 0.0;
+    let mut count = 0u64;
+    for s in sessions {
+        input = input.saturating_add(s.total_input_tokens);
+        output = output.saturating_add(s.total_output_tokens);
+        cost += s.total_cost_usd;
+        if !s.is_subagent {
+            count += 1;
+        }
+    }
+    CloudUsage {
+        today,
+        cumulative_input_tokens: input,
+        cumulative_output_tokens: output,
+        cumulative_agent_cost_usd: cost,
+        cumulative_session_count: count,
+    }
+}
+
 // ── Per-model receipt breakdown ──────────────────────────────────────────────
 //
 // The sidebar badge shows a single `$X · Y tok` figure. Clicking it opens a
@@ -536,6 +588,24 @@ mod tests {
             "input = 4000 + 1000 + 500 (yesterday excluded)"
         );
         assert_eq!(output, 350);
+    }
+
+    #[test]
+    fn cloud_usage_cumulative_sums_all_sessions_regardless_of_date() {
+        // Cumulative is the customer billing basis: every retained agent session
+        // counts regardless of when it was created; subagents contribute tokens
+        // but not to the top-level session count.
+        let old = 1_000_000_000_000u64; // 2001 — definitely not today
+        let sessions = vec![
+            session_with_input(old, 3.0, 1000, 200, false),
+            session_with_input(old + 5, 1.0, 500, 50, true), // subagent
+            session_with_input(9_000_000_000_000, 2.0, 400, 80, false),
+        ];
+        let u = cloud_usage(&sessions);
+        assert_eq!(u.cumulative_input_tokens, 1900); // 1000 + 500 + 400
+        assert_eq!(u.cumulative_output_tokens, 330); // 200 + 50 + 80
+        assert!((u.cumulative_agent_cost_usd - 6.0).abs() < 1e-9);
+        assert_eq!(u.cumulative_session_count, 2); // subagent excluded from count
     }
 
     #[test]
