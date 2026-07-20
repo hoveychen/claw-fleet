@@ -395,9 +395,14 @@ pub fn project_output_text(messages: &[serde_json::Value]) -> String {
 
 /// Project a live Fleet session (found by internal id) into a `response`
 /// object: status, usage from token totals, and the assistant output text.
-/// `None` if no session with that id exists yet.
-fn build_response(ctx: &super::ServeCtx, session_id: &str) -> Option<ResponseObject> {
-    let sessions = crate::session::scan_all_sources(ctx.sources);
+/// `None` if no session with that id exists yet. Takes an owned/borrowed
+/// sources slice so both the request handlers (`ctx.sources`) and the
+/// streaming thread (`build_sources()`) can call it.
+fn build_response(
+    sources: &[Box<dyn crate::agent_source::AgentSource>],
+    session_id: &str,
+) -> Option<ResponseObject> {
+    let sessions = crate::session::scan_all_sources(sources);
     let s = sessions.iter().find(|s| s.id == session_id)?;
     let status_str = serde_json::to_value(&s.status)
         .ok()
@@ -410,7 +415,7 @@ fn build_response(ctx: &super::ServeCtx, session_id: &str) -> Option<ResponseObj
         output_tokens: s.total_output_tokens,
         total_tokens: s.total_input_tokens.saturating_add(s.total_output_tokens),
     });
-    if let Some(src) = crate::agent_source::find_source_for_path(ctx.sources, &s.jsonl_path) {
+    if let Some(src) = crate::agent_source::find_source_for_path(sources, &s.jsonl_path) {
         if let Ok(messages) = src.get_messages(&s.jsonl_path) {
             let text = project_output_text(&messages);
             if !text.is_empty() {
@@ -423,6 +428,118 @@ fn build_response(ctx: &super::ServeCtx, session_id: &str) -> Option<ResponseObj
         }
     }
     Some(resp)
+}
+
+/// Write one SSE frame (`event: <type>\ndata: <json>\n\n`). Returns `false`
+/// once the client has disconnected (write failed).
+fn send_sse(stream: &mut dyn std::io::Write, event: &str, data: &serde_json::Value) -> bool {
+    let msg = format!("event: {event}\ndata: {data}\n\n");
+    stream.write_all(msg.as_bytes()).and_then(|_| stream.flush()).is_ok()
+}
+
+fn terminal_event(st: ResponseStatus) -> &'static str {
+    match st {
+        ResponseStatus::Failed => "failed",
+        ResponseStatus::Cancelled => "cancelled",
+        _ => "completed",
+    }
+}
+
+const STREAM_POLL_MS: u64 = 500;
+/// Cap the streaming thread so a stuck run can't leak a thread forever
+/// (~20 min at 500ms). On timeout we emit `response.incomplete`.
+const STREAM_MAX_TICKS: u32 = 2_400;
+
+/// Detach a per-response SSE stream onto its own thread (like
+/// [`super::handle_sse_upgrade`], but scoped to one run). Polls the session's
+/// transcript incrementally, emitting `response.created` → repeated
+/// `response.output_text.delta` → terminal `response.completed/failed/
+/// cancelled`. Never touches the serve loop.
+fn run_stream(
+    mut stream: Box<dyn std::io::Write + Send>,
+    session_id: String,
+    resp_id: String,
+    model: Option<String>,
+) {
+    std::thread::spawn(move || {
+        let mut created = ResponseObject::new(resp_id.clone(), ResponseStatus::Queued);
+        created.model = model;
+        if !send_sse(
+            &mut *stream,
+            "response.created",
+            &serde_json::to_value(&created).unwrap_or_default(),
+        ) {
+            return;
+        }
+
+        let sources = crate::agent_source::build_sources();
+        let mut offset = 0u64;
+        for _ in 0..STREAM_MAX_TICKS {
+            let sessions = crate::session::scan_all_sources(&sources);
+            if let Some(s) = sessions.iter().find(|s| s.id == session_id) {
+                if let Some(src) = crate::agent_source::find_source_for_path(&sources, &s.jsonl_path) {
+                    if let Ok((msgs, new_off)) = src.tail_incremental(&s.jsonl_path, offset) {
+                        offset = new_off;
+                        let delta = project_output_text(&msgs);
+                        if !delta.is_empty() {
+                            let ev = serde_json::json!({
+                                "type": "response.output_text.delta",
+                                "delta": delta,
+                            });
+                            if !send_sse(&mut *stream, "response.output_text.delta", &ev) {
+                                return; // client gone
+                            }
+                        }
+                    }
+                }
+                // Honor a terminal status only once the run has begun writing
+                // (offset > 0), so an initial idle scan before the agent starts
+                // doesn't complete the response prematurely.
+                if offset > 0 {
+                    let status_str = serde_json::to_value(&s.status)
+                        .ok()
+                        .and_then(|v| v.as_str().map(String::from))
+                        .unwrap_or_default();
+                    let st = map_status(&status_str);
+                    if matches!(
+                        st,
+                        ResponseStatus::Completed | ResponseStatus::Failed | ResponseStatus::Cancelled
+                    ) {
+                        let evname = format!("response.{}", terminal_event(st));
+                        let full = build_response(&sources, &session_id)
+                            .unwrap_or_else(|| ResponseObject::new(resp_id.clone(), st));
+                        let ev = serde_json::json!({
+                            "type": evname,
+                            "response": serde_json::to_value(&full).unwrap_or_default(),
+                        });
+                        let _ = send_sse(&mut *stream, &evname, &ev);
+                        return;
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(STREAM_POLL_MS));
+        }
+        let ev = serde_json::json!({
+            "type": "response.incomplete",
+            "response": { "id": resp_id, "status": "incomplete" },
+        });
+        let _ = send_sse(&mut *stream, "response.incomplete", &ev);
+    });
+}
+
+/// Upgrade the request to an SSE stream and start [`run_stream`] on it.
+fn start_stream(
+    request: tiny_http::Request,
+    session_id: String,
+    resp_id: String,
+    model: Option<String>,
+) {
+    let resp = tiny_http::Response::empty(200)
+        .with_header("Content-Type: text/event-stream".parse::<tiny_http::Header>().unwrap())
+        .with_header("Cache-Control: no-cache".parse::<tiny_http::Header>().unwrap())
+        .with_header("Connection: keep-alive".parse::<tiny_http::Header>().unwrap());
+    let stream = request.upgrade("sse", resp);
+    run_stream(stream, session_id, resp_id, model);
 }
 
 fn respond_value(request: tiny_http::Request, status: u16, body: &serde_json::Value, json_header: tiny_http::Header) {
@@ -473,44 +590,58 @@ fn create_response(_ctx: &super::ServeCtx, mut request: tiny_http::Request, json
     };
     let model = req.model.clone();
     let tool = tool_for_model(model.as_deref());
+    let stream = req.stream;
 
-    if let Some(prev) = req.previous_response_id.clone() {
-        let Some(sid) = session_id_from_resp(&prev).map(|s| s.to_string()) else {
-            return respond_error(request, 400, "invalid_request", "malformed previous_response_id", json_header);
-        };
-        let spec = crate::agent_source::ResumeSpec {
-            session_id: sid.clone(),
-            workspace_path: public_workspace(),
-            prompt: req.prompt_text(),
-            model,
-            ..Default::default()
-        };
-        match crate::agent_source::resume_session(tool, &spec, Box::new(|_| {})) {
-            Ok(()) => {
-                let mut r = ResponseObject::new(to_resp_id(&sid), ResponseStatus::InProgress);
-                r.previous_response_id = Some(prev);
-                respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header)
+    // Launch: resume when previous_response_id is set, else spawn a new run.
+    // Both yield the internal session id + wire resp_id + initial status.
+    let launched: Result<(String, String, ResponseStatus), (u16, &'static str, String)> =
+        if let Some(prev) = req.previous_response_id.clone() {
+            match session_id_from_resp(&prev).map(|s| s.to_string()) {
+                None => Err((400, "invalid_request", "malformed previous_response_id".into())),
+                Some(sid) => {
+                    let spec = crate::agent_source::ResumeSpec {
+                        session_id: sid.clone(),
+                        workspace_path: public_workspace(),
+                        prompt: req.prompt_text(),
+                        model: model.clone(),
+                        ..Default::default()
+                    };
+                    match crate::agent_source::resume_session(tool, &spec, Box::new(|_| {})) {
+                        Ok(()) => Ok((sid.clone(), to_resp_id(&sid), ResponseStatus::InProgress)),
+                        Err(e) => Err((500, "resume_failed", e)),
+                    }
+                }
             }
-            Err(e) => respond_error(request, 500, "resume_failed", e, json_header),
-        }
-    } else {
-        let (resp_id, uuid) = new_resp_id();
-        let spec = crate::agent_source::SpawnSpec {
-            workspace_path: public_workspace(),
-            prompt: req.prompt_text(),
-            model: model.clone(),
-            effort: None,
-            permission_mode: None,
-            session_id: Some(uuid),
-            entrypoint: String::new(),
+        } else {
+            let (resp_id, uuid) = new_resp_id();
+            let spec = crate::agent_source::SpawnSpec {
+                workspace_path: public_workspace(),
+                prompt: req.prompt_text(),
+                model: model.clone(),
+                effort: None,
+                permission_mode: None,
+                session_id: Some(uuid.clone()),
+                entrypoint: String::new(),
+            };
+            match crate::agent_source::spawn_session(tool, &spec) {
+                Ok(_) => Ok((uuid, resp_id, ResponseStatus::Queued)),
+                Err(e) => Err((500, "spawn_failed", e)),
+            }
         };
-        match crate::agent_source::spawn_session(tool, &spec) {
-            Ok(_) => {
-                let mut r = ResponseObject::new(resp_id, ResponseStatus::Queued);
+
+    match launched {
+        Err((status, code, msg)) => respond_error(request, status, code, msg, json_header),
+        Ok((session_id, resp_id, init_status)) => {
+            if stream {
+                start_stream(request, session_id, resp_id, model);
+            } else {
+                let mut r = ResponseObject::new(resp_id, init_status);
                 r.model = model;
-                respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header)
+                if req.previous_response_id.is_some() {
+                    r.previous_response_id = req.previous_response_id;
+                }
+                respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header);
             }
-            Err(e) => respond_error(request, 500, "spawn_failed", e, json_header),
         }
     }
 }
@@ -520,7 +651,7 @@ fn get_response(ctx: &super::ServeCtx, request: tiny_http::Request, json_header:
     let Some(sid) = session_id_from_resp(resp_id) else {
         return respond_error(request, 404, "not_found", "malformed response id", json_header);
     };
-    match build_response(ctx, sid) {
+    match build_response(ctx.sources, sid) {
         Some(r) => respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header),
         None => respond_error(request, 404, "not_found", "no such response", json_header),
     }
@@ -538,7 +669,7 @@ fn cancel_response(ctx: &super::ServeCtx, request: tiny_http::Request, json_head
     if let Some(pid) = s.pid {
         let _ = crate::session::interrupt_pid_impl(pid);
     }
-    let mut r = build_response(ctx, sid)
+    let mut r = build_response(ctx.sources, sid)
         .unwrap_or_else(|| ResponseObject::new(to_resp_id(sid), ResponseStatus::Cancelled));
     r.status = ResponseStatus::Cancelled;
     respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header);
@@ -662,6 +793,25 @@ mod tests {
         assert_eq!(project_output_text(&[codex.clone()]), "codex reply");
         assert_eq!(project_output_text(&[user, claude, codex]), "hello\nworld\ncodex reply");
         assert_eq!(project_output_text(&[]), "");
+    }
+
+    #[test]
+    fn sse_framing_is_event_data_blank() {
+        let mut buf: Vec<u8> = Vec::new();
+        let data = serde_json::json!({"type": "response.output_text.delta", "delta": "hi"});
+        assert!(send_sse(&mut buf, "response.output_text.delta", &data));
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.starts_with("event: response.output_text.delta\n"));
+        assert!(s.contains("data: {"));
+        assert!(s.ends_with("\n\n"));
+        assert!(s.contains("\"delta\":\"hi\""));
+    }
+
+    #[test]
+    fn terminal_event_names() {
+        assert_eq!(terminal_event(ResponseStatus::Completed), "completed");
+        assert_eq!(terminal_event(ResponseStatus::Failed), "failed");
+        assert_eq!(terminal_event(ResponseStatus::Cancelled), "cancelled");
     }
 
     #[test]
