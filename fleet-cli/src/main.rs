@@ -240,6 +240,27 @@ enum Commands {
         #[command(subcommand)]
         action: WatchCommands,
     },
+    /// Install a headless Fleet host's control plane: idempotently apply the
+    /// guard / elicitation / plan-approval hooks + PRD / interaction / wiki /
+    /// model CLAUDE.md guidance that a desktop Fleet installs via onboarding.
+    /// `fleet serve` alone is only an HTTP probe + permissions/MCP injection;
+    /// this makes the container a *controlled* Fleet host. Intended for the
+    /// Fleet Cloud container (run before `fleet serve`); idempotent, so safe on
+    /// every start. Desktop users manage these modes via the app UI instead.
+    Bootstrap {
+        /// Locale for generated guidance (e.g. "en", "zh"). Defaults to
+        /// $FLEET_LOCALE, else "en".
+        #[arg(long)]
+        locale: Option<String>,
+        /// Title agents address the user as in interaction / PRD guidance. Empty
+        /// (default) renders the locale-correct Boss/老板; a literal value forces
+        /// that string across all locales.
+        #[arg(long)]
+        title: Option<String>,
+        /// Emit a JSON summary instead of human-readable lines.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -727,6 +748,9 @@ fn main() {
         ),
         Commands::Loop { action } => commands::loop_cmd::cmd_loop(action),
         Commands::Watch { action } => commands::watch::cmd_watch(action),
+        Commands::Bootstrap { locale, title, json } => {
+            commands::bootstrap::cmd_bootstrap(locale, title, json)
+        }
         Commands::PrdDiscipline { action } => match action {
             PrdDisciplineCommands::Apply { title, locale } => {
                 commands::prd::cmd_prd_discipline_apply(&title, &locale)
