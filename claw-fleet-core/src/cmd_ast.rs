@@ -17,7 +17,7 @@
 use conch_parser::ast::{
     AndOr, AndOrList, Arithmetic, Command, ComplexWord, CompoundCommandKind,
     DefaultCompoundCommand, DefaultListableCommand, DefaultPipeableCommand, DefaultSimpleCommand,
-    GuardBodyPair, ListableCommand, Parameter, ParameterSubstitution, PipeableCommand,
+    GuardBodyPair, ListableCommand, Parameter, ParameterSubstitution, PipeableCommand, Redirect,
     RedirectOrCmdWord, RedirectOrEnvVar, SimpleWord, TopLevelCommand, TopLevelWord, Word,
 };
 use conch_parser::lexer::Lexer;
@@ -681,6 +681,10 @@ pub enum NestedKind {
     NodeE,
     /// `eval "..."`
     Eval,
+    /// A script fed to an interpreter over a heredoc / stdin, e.g.
+    /// `python3 - <<EOF ... EOF` or `bash <<'SH' ... SH`.  The body lives in
+    /// the redirect, never in argv, so it must be lifted out explicitly.
+    Heredoc,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -916,7 +920,11 @@ fn visit_simple_for_view(
         }
         return;
     }
-    let nested = detect_nested(&argv);
+    // Inline interpreter scripts (`-c "..."` / `-e "..."` / `eval "..."`)
+    // live in argv.  Failing that, a script fed to an interpreter over a
+    // heredoc/stdin lives in a redirect and never reaches argv — lift it out
+    // so the guard card can show the body that tripped the audit.
+    let nested = detect_nested(&argv).or_else(|| detect_heredoc(&argv, s));
     let conn = next.take();
     b.push(
         CommandLeaf {
@@ -927,6 +935,43 @@ fn visit_simple_for_view(
         },
         conn,
     );
+}
+
+/// When an interpreter reads its script from a heredoc (`python3 - <<EOF`,
+/// `bash <<'SH'`), the body is parked in a `Redirect::Heredoc` and never
+/// appears in argv.  Lift the first such body out as an opaque nested script
+/// so the guard card surfaces the code that actually runs.  Scoped to known
+/// interpreter heads so ordinary data heredocs (`cat <<EOF > file`) keep
+/// rendering as a bare command.
+fn detect_heredoc(argv: &[String], s: &DefaultSimpleCommand) -> Option<NestedScript> {
+    let head = argv.first()?.as_str();
+    if !matches!(
+        head,
+        "bash" | "sh" | "zsh" | "python" | "python2" | "python3" | "node"
+    ) {
+        return None;
+    }
+    for r in &s.redirects_or_cmd_words {
+        if let RedirectOrCmdWord::Redirect(redir) = r {
+            if let Redirect::Heredoc(_, w) = redir {
+                let body = display_top_word(w);
+                if body.trim().is_empty() {
+                    continue;
+                }
+                return Some(NestedScript {
+                    kind: NestedKind::Heredoc,
+                    raw: body,
+                    // Treat the body as opaque: a python heredoc is python, a
+                    // bash heredoc is shell — don't re-parse and pretend.
+                    view: Box::new(CommandView {
+                        leaves: Vec::new(),
+                        connectors: Vec::new(),
+                    }),
+                });
+            }
+        }
+    }
+    None
 }
 
 fn splice_substs_from_complex(c: &ComplexT, b: &mut ViewBuilder, next: &mut Option<Connector>) {
@@ -1621,6 +1666,49 @@ mod tests {
         // Python script is a single opaque leaf — no shell-parsing of `;`.
         assert_eq!(nested.view.leaves.len(), 1);
         assert!(nested.view.connectors.is_empty());
+    }
+
+    #[test]
+    fn view_python_heredoc_surfaces_script() {
+        // A script fed to an interpreter via a heredoc lives in the redirect,
+        // not in argv.  The guard classifier still matches it against the raw
+        // command, so the card MUST surface it too — otherwise the very script
+        // that tripped the audit (`python3 - <<EOF ... exec(...) ... EOF`) is
+        // invisible and the operator can only blind-approve.
+        let v = extract_structured_view(
+            "python3 - <<'PYEOF'\nimport os\nexec('rm -rf /')\nPYEOF",
+        );
+        let leaf = &v.leaves[0];
+        assert_eq!(leaf.argv[0], "python3");
+        let nested = leaf
+            .nested
+            .as_ref()
+            .expect("heredoc script must be surfaced as a nested block");
+        assert!(
+            nested.raw.contains("exec("),
+            "heredoc body should carry the script, got {:?}",
+            nested.raw
+        );
+    }
+
+    #[test]
+    fn view_bash_heredoc_surfaces_script() {
+        let v = extract_structured_view("bash <<'SH'\nrm -rf /tmp/x\nSH");
+        let nested = v.leaves[0]
+            .nested
+            .as_ref()
+            .expect("bash heredoc must be surfaced");
+        assert_eq!(nested.kind, NestedKind::Heredoc);
+        assert!(nested.raw.contains("rm -rf"));
+    }
+
+    #[test]
+    fn view_data_heredoc_stays_bare() {
+        // A heredoc feeding a non-interpreter (data, not code) must NOT sprout
+        // a nested block — that would change rendering for ordinary `cat`/`tee`
+        // heredocs.  Only interpreter heads lift the body.
+        let v = extract_structured_view("cat <<'EOF'\nhello world\nEOF");
+        assert!(v.leaves[0].nested.is_none());
     }
 
     #[test]
