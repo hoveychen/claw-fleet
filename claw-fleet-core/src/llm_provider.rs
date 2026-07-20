@@ -864,7 +864,10 @@ mod tests {
         let p = CodexCliProvider::new();
         let models = p.list_models();
         assert!(!models.is_empty());
-        assert!(models.iter().any(|m| m.id.contains("codex")));
+        // Codex lists the GPT-5 family (sol/terra/luna, or whatever the CLI
+        // cached at login). The older `*-codex` slugs were dropped because they
+        // 400 under a ChatGPT account, so assert the current contract instead.
+        assert!(models.iter().any(|m| m.id.starts_with("gpt-5")));
     }
 
     #[test]
