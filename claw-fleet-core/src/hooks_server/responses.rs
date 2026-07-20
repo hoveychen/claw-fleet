@@ -277,21 +277,30 @@ pub fn map_status(fleet_status: &str) -> ResponseStatus {
 pub fn effective_status(
     raw_status: &str,
     has_pending_calls: bool,
-    has_new_content: bool,
+    turn_has_output: bool,
 ) -> ResponseStatus {
     if has_pending_calls {
         return ResponseStatus::Completed;
     }
-    let base = map_status(raw_status);
-    if base == ResponseStatus::InProgress && raw_status == "waitingInput" {
-        if has_new_content {
+    // `waitingInput` maps to in_progress but is really "idle awaiting input" —
+    // for a headless turn that means done. Complete it only once the turn has
+    // produced output.
+    if raw_status == "waitingInput" {
+        return if turn_has_output {
             ResponseStatus::Completed
         } else {
             ResponseStatus::InProgress
-        }
-    } else {
-        base
+        };
     }
+    let base = map_status(raw_status);
+    // A genuine completed mapping (done / idle / succeeded) with no output for
+    // THIS turn is a stale completion from before the turn engaged — e.g. the
+    // brief idle window right after a resume, before the agent picks up. Hold
+    // it in progress until the turn delivers, so a poll can't read empty.
+    if base == ResponseStatus::Completed && !turn_has_output {
+        return ResponseStatus::InProgress;
+    }
+    base
 }
 
 // ── Per-turn projection (multi-turn correctness) ──────────────────────
@@ -1121,16 +1130,20 @@ fn build_response(
         output_tokens: s.total_output_tokens,
         total_tokens: s.total_input_tokens.saturating_add(s.total_output_tokens),
     });
-    // Project only the CURRENT turn: messages after the recorded turn-start
-    // offset. `has_new_content` (the turn has written since it started) also
-    // decides whether an idle `waitingInput` means done vs. not-yet-started.
+    // Project only the CURRENT turn: assistant text from messages after the
+    // recorded turn-start offset. `turn_has_output` — the turn produced
+    // assistant text — is the completion signal for an idle `waitingInput`
+    // turn. It must key off assistant text, NOT raw message growth: on resume
+    // the agent writes bookkeeping lines (queue-operation / user echo) BEFORE
+    // it generates, so "any new line" would complete the turn with empty text
+    // during the brief stale-idle window.
     let offset = read_turn_offset(session_id);
-    let mut has_new_content = false;
+    let mut turn_has_output = false;
     if let Some(src) = crate::agent_source::find_source_for_path(sources, &s.jsonl_path) {
         if let Ok(messages) = src.get_messages(&s.jsonl_path) {
-            has_new_content = messages.len() > offset;
             let text = project_turn_text(&messages, offset);
-            if !text.is_empty() {
+            turn_has_output = !text.is_empty();
+            if turn_has_output {
                 resp.output.push(OutputItem::Message {
                     id: format!("msg_{session_id}"),
                     role: "assistant".to_string(),
@@ -1140,13 +1153,13 @@ fn build_response(
         }
     }
     // Pending decision cards surface as function_call items; their presence
-    // (and whether the idle turn has produced content) drive the status.
+    // (or the turn having produced text) drives the status.
     let calls = pending_function_calls(session_id);
     let has_calls = !calls.is_empty();
     if has_calls {
         resp.output.extend(calls);
     }
-    resp.status = effective_status(&status_str, has_calls, has_new_content);
+    resp.status = effective_status(&status_str, has_calls, turn_has_output);
     Some(resp)
 }
 
@@ -1198,6 +1211,9 @@ fn run_stream(
         // spawn's file doesn't exist yet → seed 0.
         let seed = current_transcript_bytes(&sources, &session_id);
         let mut offset = seed;
+        // Whether THIS turn has streamed any assistant text yet — the terminal
+        // guard (mirrors the polling projection's `turn_has_output`).
+        let mut emitted_text = false;
         for _ in 0..STREAM_MAX_TICKS {
             let sessions = crate::session::scan_all_sources(&sources);
             if let Some(s) = sessions.iter().find(|s| s.id == session_id) {
@@ -1213,6 +1229,7 @@ fn run_stream(
                             if !send_sse(&mut *stream, "response.output_text.delta", &ev) {
                                 return; // client gone
                             }
+                            emitted_text = true;
                         }
                     }
                 }
@@ -1232,20 +1249,19 @@ fn run_stream(
                     let _ = send_sse(&mut *stream, "response.completed", &ev);
                     return;
                 }
-                // Honor a terminal status only once THIS turn has begun writing
-                // (offset advanced past the seed), so neither an initial idle
-                // scan (new spawn) nor a stale idle from the prior turn (resume)
-                // completes the response prematurely.
-                let has_new_content = offset > seed;
-                if has_new_content {
+                // Honor a terminal status only once THIS turn has streamed
+                // assistant text, so neither an initial idle scan (new spawn)
+                // nor the stale idle / bookkeeping-line window right after a
+                // resume completes the response prematurely.
+                if emitted_text {
                     let status_str = serde_json::to_value(&s.status)
                         .ok()
                         .and_then(|v| v.as_str().map(String::from))
                         .unwrap_or_default();
-                    // No pending calls here (handled above); has_new_content is
+                    // No pending calls here (handled above); emitted_text is
                     // true, so a finished `waitingInput` turn → completed, same
                     // as the polling projection.
-                    let st = effective_status(&status_str, false, has_new_content);
+                    let st = effective_status(&status_str, false, emitted_text);
                     if matches!(
                         st,
                         ResponseStatus::Completed | ResponseStatus::Failed | ResponseStatus::Cancelled
@@ -1558,25 +1574,33 @@ mod tests {
 
     #[test]
     fn effective_status_promotes_waiting_and_pending() {
-        // A finished-but-idle headless turn (waitingInput + new content) → completed.
+        // A finished-but-idle headless turn (waitingInput + output) → completed.
         assert_eq!(
             effective_status("waitingInput", false, true),
             ResponseStatus::Completed
         );
-        // waitingInput with NO new content yet (resume race window) stays in_progress.
+        // waitingInput with NO output yet (resume race window) stays in_progress.
         assert_eq!(
             effective_status("waitingInput", false, false),
             ResponseStatus::InProgress
         );
-        // Actively generating stays in_progress regardless of content.
+        // A completed-mapping status (idle/done) with no output yet is a stale
+        // completion from before the turn engaged → held in_progress.
+        assert_eq!(effective_status("idle", false, false), ResponseStatus::InProgress);
+        assert_eq!(effective_status("done", false, false), ResponseStatus::InProgress);
+        // …but once the turn produced output they complete.
+        assert_eq!(effective_status("idle", false, true), ResponseStatus::Completed);
+        assert_eq!(effective_status("done", false, true), ResponseStatus::Completed);
+        // Actively generating stays in_progress regardless of output.
         assert_eq!(effective_status("running", false, true), ResponseStatus::InProgress);
         assert_eq!(effective_status("thinking", false, false), ResponseStatus::InProgress);
-        // A pending decision card completes the turn regardless of raw/content.
+        // A pending decision card completes the turn regardless of raw/output.
         assert_eq!(effective_status("running", true, false), ResponseStatus::Completed);
         assert_eq!(effective_status("waitingInput", true, false), ResponseStatus::Completed);
-        // Terminal states pass through unchanged.
+        // Failed / cancelled pass through even with no output (failed turns may
+        // produce nothing).
         assert_eq!(effective_status("failed", false, false), ResponseStatus::Failed);
-        assert_eq!(effective_status("stopped", false, true), ResponseStatus::Cancelled);
+        assert_eq!(effective_status("stopped", false, false), ResponseStatus::Cancelled);
         assert_eq!(effective_status("queued", false, false), ResponseStatus::Queued);
     }
 
