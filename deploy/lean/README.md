@@ -13,9 +13,10 @@ the container boundary. Run one of these per customer.
 
 - `Dockerfile` — multi-stage: builds `fleet-cli`, ships it on a node runtime
   with the claude + codex CLIs. Binary installed as `/usr/local/bin/fleet`.
-- `entrypoint.sh` — fetches credentials (P3 hook) then runs `fleet serve`.
-- `fleet.compose.yaml` — one service, host-mounted `/workspace`, named
-  `/fleet-home` state volume.
+- `entrypoint.sh` — fetches credentials (P3 hook), runs `fleet bootstrap` to
+  install the control plane, then runs `fleet serve`.
+- `fleet.compose.yaml` — one service, host-mounted `/workspace`, named state
+  volume mounted at `~/.fleet` (`/home/fleet/.fleet`).
 
 ## Run
 
@@ -46,7 +47,7 @@ r = client.responses.create(model="claude-opus-4-8", input="fix issue #12")
 | `FLEET_PUBLIC_TOKEN` | no | Per-customer scoped token; unset disables external access. |
 | `FLEET_SERVE_HOST` | no | Bind host, default `0.0.0.0` in-container. |
 | `FLEET_SERVE_PORT` | no | Listen port, default `8080`. |
-| `FLEET_HOME` | no | Fleet state dir, default `/fleet-home` (named volume). |
+| `FLEET_HOME` | no | Override for Fleet's home root. **Leave unset in the container** so it resolves to `$HOME=/home/fleet` — the same home the agents read, with `~/.fleet` on the named state volume and `~/.claude` ephemeral. |
 | `FLEET_PUBLIC_WORKSPACE` | no | Workspace bound to every `/v1` response, default `/workspace`. Requests carry no path — this is the confinement root. |
 | `CODEX_HOME` | no | Codex cred/config dir, default `/home/fleet/.codex` (ephemeral). |
 | `FLEET_WAIT_FOR_CREDS` | no | Wait for the claude credential before serving. `1` (default) / `0`. |
@@ -56,7 +57,7 @@ r = client.responses.create(model="claude-opus-4-8", input="fix issue #12")
 ## Credential isolation (the seam)
 
 Credentials are **not** baked into the image and **not** placed under
-`/workspace` or the persistent `/fleet-home` volume. They land only on the
+`/workspace` or the persistent `~/.fleet` state volume. They land only on the
 container's **ephemeral** layer, at the paths the agents read:
 
 - claude → `$HOME/.claude/.credentials.json`
