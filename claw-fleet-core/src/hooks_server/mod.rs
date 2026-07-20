@@ -5,6 +5,7 @@
 //! same `serve()` function instead of trampolining through `execvp`.
 
 pub mod auth;
+pub mod responses;
 pub mod sse;
 
 pub use sse::{handle_sse_upgrade, SseBroadcaster, SseClient};
@@ -626,6 +627,11 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // that path receive the catch-all 404 below. `/resume_session` was
             // re-added later (POST, with follow-up prompt) for the history
             // panel — see the handler further down.
+
+            // ── OpenAI Responses-compatible public API (Fleet Cloud v2) ──
+            // The external customer surface. Internally calls spawn/tail/
+            // decision and projects to clean `response` objects.
+            _ if path.starts_with("/v1/") => responses::dispatch(ctx, request, &query, json_header, path),
 
             // ── Unified /sources/{name}/account and /sources/{name}/usage ──
             _ if path.starts_with(crate::routes::SOURCES_PREFIX) => route_sources_prefix(ctx, request, &query, json_header, path),
