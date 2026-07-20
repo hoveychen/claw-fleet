@@ -1,0 +1,35 @@
+# Fleet Cloud (lean) — one-customer-per-container.
+#
+# Build context is the repo root so the Dockerfile can compile fleet-cli:
+#   docker compose -f deploy/lean/fleet.compose.yaml up --build
+#
+# Set FLEET_ADMIN_TOKEN and FLEET_PUBLIC_TOKEN in the environment (or a .env
+# file next to this compose). Point HOST_WORKSPACE at the customer's repo dir.
+
+services:
+  fleet:
+    build:
+      context: ../..
+      dockerfile: deploy/lean/Dockerfile
+    image: fleet-cloud-lean:latest
+    restart: unless-stopped
+    ports:
+      - "${FLEET_PUBLISH_PORT:-8080}:8080"
+    environment:
+      FLEET_SERVE_HOST: "0.0.0.0"
+      FLEET_SERVE_PORT: "8080"
+      # First-party full-access token (required).
+      FLEET_ADMIN_TOKEN: "${FLEET_ADMIN_TOKEN:?set FLEET_ADMIN_TOKEN}"
+      # Per-customer scoped token for external integrators (public API only).
+      FLEET_PUBLIC_TOKEN: "${FLEET_PUBLIC_TOKEN:-}"
+      # Credential-store wiring (P3). Leave unset to disable.
+      FLEET_CRED_STORE_URL: "${FLEET_CRED_STORE_URL:-}"
+    volumes:
+      # The ONLY host bind-mount: the customer's repos / workspace. Creds never
+      # live here — they are fetched into the container process at runtime.
+      - "${HOST_WORKSPACE:?set HOST_WORKSPACE to the customer repo dir}:/workspace"
+      # Fleet state (sessions, plans) — a named volume, not customer-visible.
+      - fleet-home:/fleet-home
+
+volumes:
+  fleet-home:

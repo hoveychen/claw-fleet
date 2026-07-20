@@ -170,7 +170,13 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
     let sse = SseBroadcaster::new();
 
-    let addr = format!("127.0.0.1:{}", port);
+    // Bind host defaults to loopback so a local `fleet serve` is never exposed
+    // by accident. The Fleet Cloud lean container overrides it to `0.0.0.0`
+    // (env FLEET_SERVE_HOST) so the scoped-token API is reachable from outside
+    // the container. The scoped-token whitelist above is what makes binding a
+    // wider interface safe for external callers.
+    let host = std::env::var("FLEET_SERVE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let addr = format!("{}:{}", host, port);
     let server = tiny_http::Server::http(&addr).unwrap_or_else(|e| {
         eprintln!("Error: cannot bind to {}: {}", addr, e);
         std::process::exit(1);
@@ -203,7 +209,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         println!("FLEET_PROBE_PORT={}", actual_port);
         let _ = std::io::stdout().flush();
     }
-    eprintln!("[fleet serve] listening on 127.0.0.1:{} (version {})", actual_port, env!("CARGO_PKG_VERSION"));
+    eprintln!("[fleet serve] listening on {}:{} (version {})", host, actual_port, env!("CARGO_PKG_VERSION"));
 
     // ── Usage occupancy sampler ─────────────────────────────────────────────
     // Sample the Claude usage API every 10 minutes so the 24h occupancy chart
