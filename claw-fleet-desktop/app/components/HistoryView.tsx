@@ -38,7 +38,7 @@ import {
   type MarkFilter,
 } from "../store";
 import type { SessionInfo } from "../types";
-import { LIVE_STATUSES, isFleetOwnedEntrypoint, rowBarColor, sessionUnread } from "../types";
+import { LIVE_STATUSES, isFleetOwnedTask, rowBarColor, sessionUnread } from "../types";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { PageShell } from "./PageShell";
@@ -638,10 +638,7 @@ export function HistoryView() {
   const { searching, ftsMatchPaths, snippetByPath } = useSessionSearch(query);
 
   const adhocSessions = useMemo(
-    () =>
-      sessions.filter(
-        (s) => !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint),
-      ),
+    () => sessions.filter(isFleetOwnedTask),
     [sessions],
   );
 

@@ -19,7 +19,7 @@ import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
-import { isFleetOwnedEntrypoint, isSessionUnread } from "../types";
+import { isFleetOwnedEntrypoint, isFleetOwnedTask, isSessionUnread } from "../types";
 import { useDraft } from "../draft";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
@@ -243,7 +243,7 @@ export function TasksView({
   const all = useMemo(
     () =>
       sessions
-        .filter((s) => !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint))
+        .filter(isFleetOwnedTask)
         .map((s) => {
           const o = markOverride[s.id];
           return o !== undefined && o !== (s.userMark ?? null) ? { ...s, userMark: o } : s;

@@ -595,6 +595,10 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "titleOverride",
     "status",
     "isSubagent",
+    // Ground truth for "Fleet spawned this" — the phone's Tasks list ANDs it with
+    // the entrypoint check so a `claude -p` child that only inherited a Fleet
+    // CLAUDE_CODE_ENTRYPOINT stops showing up as a task (mirrors desktop).
+    "fleetSpawned",
     "lastMessagePreview",
     "lastActivityMs",
     "createdAtMs",

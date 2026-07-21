@@ -3,6 +3,7 @@ import {
   CODEX_FLEET_ORIGINATOR,
   canResumeSession,
   isFleetOwnedEntrypoint,
+  isFleetOwnedTask,
   type SessionInfo,
 } from "./types";
 
@@ -38,6 +39,33 @@ describe("isFleetOwnedEntrypoint", () => {
     expect(isFleetOwnedEntrypoint("codex_exec")).toBe(false);
     expect(isFleetOwnedEntrypoint(null)).toBe(false);
     expect(isFleetOwnedEntrypoint(undefined)).toBe(false);
+  });
+});
+
+describe("isFleetOwnedTask", () => {
+  it("收录 Fleet 真 spawn 的会话", () => {
+    expect(
+      isFleetOwnedTask(mk({ entrypoint: "claw-fleet-newsession", fleetSpawned: true })),
+    ).toBe(true);
+  });
+
+  it("剔除 claude -p 泄漏会话：Fleet entrypoint 但 fleetSpawned=false", () => {
+    expect(
+      isFleetOwnedTask(mk({ entrypoint: "claw-fleet-newsession", fleetSpawned: false })),
+    ).toBe(false);
+  });
+
+  it("旧 relay 不带 fleetSpawned 时按非泄漏处理（fail-open，不隐藏真会话）", () => {
+    expect(
+      isFleetOwnedTask(mk({ entrypoint: "claw-fleet-newsession" })),
+    ).toBe(true);
+  });
+
+  it("剔除 subagent 与外部来源", () => {
+    expect(
+      isFleetOwnedTask(mk({ entrypoint: "claw-fleet-newsession", isSubagent: true })),
+    ).toBe(false);
+    expect(isFleetOwnedTask(mk({ entrypoint: "cli" }))).toBe(false);
   });
 });
 
