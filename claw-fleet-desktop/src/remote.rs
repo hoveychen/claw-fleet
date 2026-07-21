@@ -1740,6 +1740,20 @@ fn install_rca_remote_impl(
         return Err("rca install produced no remote path".to_string());
     }
 
+    // 3b. Fail fast if the installed rca predates the stdio transport — the
+    //     published release can lag `rca serve --stdio` landing on rca main, in
+    //     which case registering the entry would point every spawn at a remote
+    //     that can't serve --stdio and break with a confusing runtime error.
+    let probe = format!("{remote_rca} serve -h 2>&1 | grep -qi stdio && echo STDIO_OK || echo STDIO_MISSING");
+    let cap = ssh_exec(&conn, &probe).unwrap_or_default();
+    if !cap.contains("STDIO_OK") {
+        return Err(format!(
+            "the rca just installed on the remote ({remote_rca}) has no `serve --stdio` support — \
+             its published release predates the stdio-over-ssh transport. Wait for a newer \
+             remote-adapter release (or install a build that includes stdio) and re-run."
+        ));
+    }
+
     // 4. Single-token ssh target for the `--via` command.
     let ssh_target = ssh_target_token(&conn)?;
 
