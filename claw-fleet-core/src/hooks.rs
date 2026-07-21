@@ -22,16 +22,10 @@ const FLEET_HOOK_COMMAND: &str =
 /// seen at 5.3 GB in the wild. `purge_legacy_event_hooks` deletes it on sync.
 const LEGACY_EVENTS_HOOK_SUBSTR: &str = ".claude/fleet/hooks.jsonl";
 
-// Identity markers for the fleet hook groups. These substrings must appear
-// verbatim in the command string produced by `fault_tolerant_command`, which
-// wraps the binary path in double quotes — so the character between `fleet`
-// and the subcommand is `"`, not a space.
-const FLEET_GUARD_MARKER: &str = "\" guard;";
-const FLEET_ELICITATION_MARKER: &str = "\" elicitation;";
-const FLEET_PLAN_APPROVAL_MARKER: &str = "\" plan-approval;";
-const FLEET_PRD_CONTEXT_MARKER: &str = "\" prd-context;";
-const FLEET_IDLE_STOP_MARKER: &str = "\" session idle;";
-const FLEET_IDLE_RESUME_MARKER: &str = "\" session resume;";
+// Fleet hook groups are identified structurally by
+// [`group_invokes_fleet_subcommand`], which recognizes both shapes a Fleet
+// hook can take: the unix `sh -c` wrapper from [`fault_tolerant_command`] and
+// the Windows exec form from [`fleet_subcommand_hook`].
 
 /// Event types we need hooks for.
 const FLEET_HOOK_EVENTS: &[&str] = &[
@@ -109,6 +103,34 @@ fn settings_path() -> Option<PathBuf> {
 
 pub fn hooks_events_path() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("hooks.jsonl"))
+}
+
+/// `fleet hook-event` — the exec-form counterpart of the unix
+/// `sh -c 'cat >> "$HOME/.fleet/hooks.jsonl"'` event hook (Windows runs hook
+/// strings through PowerShell when Git Bash is absent, so the sh one-liner
+/// can't be relied on there). Appends the hook JSON from `reader` to
+/// `~/.fleet/hooks.jsonl`, newline-terminated, creating the directory on
+/// first use just like the guard/elicitation entrypoints do.
+pub fn append_hook_event(reader: &mut impl std::io::Read) -> Result<(), String> {
+    let mut buf = String::new();
+    reader
+        .read_to_string(&mut buf)
+        .map_err(|e| format!("read hook event from stdin: {e}"))?;
+    let line = buf.trim();
+    if line.is_empty() {
+        return Ok(());
+    }
+    let path = hooks_events_path().ok_or("cannot determine home dir")?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    use std::io::Write as _;
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("open {}: {e}", path.display()))?;
+    writeln!(f, "{line}").map_err(|e| format!("append {}: {e}", path.display()))
 }
 
 fn fleet_dir() -> Option<PathBuf> {
@@ -309,13 +331,11 @@ pub fn apply_guard_hook() -> Result<(), String> {
         .and_then(|h| h.as_object_mut())
         .ok_or("hooks is not an object")?;
 
+    let mut guard_hook = fleet_subcommand_hook(&fleet_bin, "guard");
+    guard_hook["timeout"] = json!(120000);
     let guard_group = json!({
         "matcher": "Bash",
-        "hooks": [{
-            "type": "command",
-            "command": fault_tolerant_command(&fleet_bin, "guard"),
-            "timeout": 120000
-        }]
+        "hooks": [guard_hook]
     });
 
     // Idempotent: strip any pre-existing fleet guard groups (possibly pointing
@@ -367,18 +387,7 @@ fn has_guard_hook(hooks_obj: &Map<String, Value>) -> bool {
 
 /// Check whether a hook group is a guard hook (by matching the command).
 fn is_guard_group(group: &Value) -> bool {
-    group
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .map(|arr| {
-            arr.iter().any(|hook| {
-                hook.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|c| c.contains(FLEET_GUARD_MARKER))
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
+    group_invokes_fleet_subcommand(group, "guard")
 }
 
 // ── Elicitation hook (AskUserQuestion interception) ─────────────────────
@@ -399,13 +408,11 @@ pub fn apply_elicitation_hook() -> Result<(), String> {
         .and_then(|h| h.as_object_mut())
         .ok_or("hooks is not an object")?;
 
+    let mut elicitation_hook = fleet_subcommand_hook(&fleet_bin, "elicitation");
+    elicitation_hook["timeout"] = json!(120000);
     let elicitation_group = json!({
         "matcher": "AskUserQuestion",
-        "hooks": [{
-            "type": "command",
-            "command": fault_tolerant_command(&fleet_bin, "elicitation"),
-            "timeout": 120000
-        }]
+        "hooks": [elicitation_hook]
     });
 
     // Idempotent: strip any pre-existing fleet elicitation groups (possibly
@@ -455,18 +462,7 @@ fn has_elicitation_hook(hooks_obj: &Map<String, Value>) -> bool {
 }
 
 fn is_elicitation_group(group: &Value) -> bool {
-    group
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .map(|arr| {
-            arr.iter().any(|hook| {
-                hook.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|c| c.contains(FLEET_ELICITATION_MARKER))
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
+    group_invokes_fleet_subcommand(group, "elicitation")
 }
 
 // ── Plan-approval hook (ExitPlanMode interception) ──────────────────────
@@ -487,13 +483,11 @@ pub fn apply_plan_approval_hook() -> Result<(), String> {
         .and_then(|h| h.as_object_mut())
         .ok_or("hooks is not an object")?;
 
+    let mut plan_approval_hook = fleet_subcommand_hook(&fleet_bin, "plan-approval");
+    plan_approval_hook["timeout"] = json!(600000);
     let plan_approval_group = json!({
         "matcher": "ExitPlanMode",
-        "hooks": [{
-            "type": "command",
-            "command": fault_tolerant_command(&fleet_bin, "plan-approval"),
-            "timeout": 600000
-        }]
+        "hooks": [plan_approval_hook]
     });
 
     // Idempotent: strip any pre-existing fleet plan-approval groups before
@@ -543,18 +537,7 @@ fn has_plan_approval_hook(hooks_obj: &Map<String, Value>) -> bool {
 }
 
 fn is_plan_approval_group(group: &Value) -> bool {
-    group
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .map(|arr| {
-            arr.iter().any(|hook| {
-                hook.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|c| c.contains(FLEET_PLAN_APPROVAL_MARKER))
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
+    group_invokes_fleet_subcommand(group, "plan-approval")
 }
 
 // ── PRD-context hook (UserPromptSubmit injection of TASKS.md) ───────────
@@ -579,12 +562,10 @@ pub fn apply_prd_context_hook() -> Result<(), String> {
         .ok_or("hooks is not an object")?;
 
     // UserPromptSubmit hooks have no matcher field — they run for every prompt.
+    let mut prd_context_hook = fleet_subcommand_hook(&fleet_bin, "prd-context");
+    prd_context_hook["timeout"] = json!(10000);
     let prd_context_group = json!({
-        "hooks": [{
-            "type": "command",
-            "command": fault_tolerant_command(&fleet_bin, "prd-context"),
-            "timeout": 10000
-        }]
+        "hooks": [prd_context_hook]
     });
 
     if let Some(existing) = hooks_obj.get_mut("UserPromptSubmit") {
@@ -638,18 +619,7 @@ fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
 }
 
 fn is_prd_context_group(group: &Value) -> bool {
-    group
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .map(|arr| {
-            arr.iter().any(|hook| {
-                hook.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|c| c.contains(FLEET_PRD_CONTEXT_MARKER))
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
+    group_invokes_fleet_subcommand(group, "prd-context")
 }
 
 // ── Idle hooks (Stop + UserPromptSubmit → kanban Pending sentinel) ──────
@@ -675,19 +645,15 @@ pub fn apply_idle_hooks() -> Result<(), String> {
         .and_then(|h| h.as_object_mut())
         .ok_or("hooks is not an object")?;
 
+    let mut stop_hook = fleet_subcommand_hook(&fleet_bin, "session idle");
+    stop_hook["timeout"] = json!(5000);
     let stop_group = json!({
-        "hooks": [{
-            "type": "command",
-            "command": fault_tolerant_command(&fleet_bin, "session idle"),
-            "timeout": 5000
-        }]
+        "hooks": [stop_hook]
     });
+    let mut resume_hook = fleet_subcommand_hook(&fleet_bin, "session resume");
+    resume_hook["timeout"] = json!(5000);
     let resume_group = json!({
-        "hooks": [{
-            "type": "command",
-            "command": fault_tolerant_command(&fleet_bin, "session resume"),
-            "timeout": 5000
-        }]
+        "hooks": [resume_hook]
     });
 
     if let Some(existing) = hooks_obj.get_mut("Stop") {
@@ -759,33 +725,11 @@ fn has_idle_hooks(hooks_obj: &Map<String, Value>) -> bool {
 }
 
 fn is_idle_stop_group(group: &Value) -> bool {
-    group
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .map(|arr| {
-            arr.iter().any(|hook| {
-                hook.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|c| c.contains(FLEET_IDLE_STOP_MARKER))
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
+    group_invokes_fleet_subcommand(group, "session idle")
 }
 
 fn is_idle_resume_group(group: &Value) -> bool {
-    group
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .map(|arr| {
-            arr.iter().any(|hook| {
-                hook.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|c| c.contains(FLEET_IDLE_RESUME_MARKER))
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
+    group_invokes_fleet_subcommand(group, "session resume")
 }
 
 // ── Read hook events ─────────────────────────────────────────────────────────
@@ -907,7 +851,25 @@ fn write_settings(value: &Value) -> Result<(), String> {
 }
 
 /// Build the Fleet hook group object.
+///
+/// Unix appends the raw hook JSON via the `sh -c 'cat >> …'` one-liner. On
+/// Windows that string only runs when Git Bash is installed (Claude Code falls
+/// back to PowerShell otherwise), so emit the shell-free exec form invoking
+/// `fleet hook-event` — the CLI equivalent that appends stdin to
+/// `~/.fleet/hooks.jsonl`. When the fleet binary can't be resolved on Windows
+/// the sh form is still written (same best-effort behavior as before).
 fn fleet_hook_group() -> Value {
+    #[cfg(windows)]
+    if let Some(bin) = resolve_fleet_binary() {
+        return json!({
+            "hooks": [{
+                "type": "command",
+                "command": bin,
+                "args": ["hook-event"],
+                "async": true
+            }]
+        });
+    }
     json!({
         "hooks": [{
             "type": "command",
@@ -926,9 +888,11 @@ fn has_fleet_hook(hooks_obj: &Map<String, Value>, event: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Check whether a hook group object is ours (by matching the command string).
+/// Check whether a hook group object is ours — either the `cat >>` shell
+/// one-liner (identified by its `.fleet/hooks.jsonl` target) or the Windows
+/// exec form invoking `fleet hook-event`.
 fn is_fleet_group(group: &Value) -> bool {
-    group
+    let cat_shape = group
         .get("hooks")
         .and_then(|h| h.as_array())
         .map(|arr| {
@@ -939,7 +903,8 @@ fn is_fleet_group(group: &Value) -> bool {
                     .unwrap_or(false)
             })
         })
-        .unwrap_or(false)
+        .unwrap_or(false);
+    cat_shape || group_invokes_fleet_subcommand(group, "hook-event")
 }
 
 /// Build a fault-tolerant shell command that silently exits 0 when the fleet
@@ -954,6 +919,83 @@ fn fault_tolerant_command(fleet_bin: &str, subcommand: &str) -> String {
         bin = fleet_bin,
         sub = subcommand,
     )
+}
+
+/// Build the hook entry that runs `fleet <subcommand…>`.
+///
+/// Unix keeps the [`fault_tolerant_command`] `sh -c` wrapper (silently exits 0
+/// when the binary is gone, so an uninstalled Fleet never blocks Claude Code).
+/// Windows cannot rely on that string: Claude Code runs hook command strings
+/// through Git Bash only when it is installed and falls back to PowerShell
+/// otherwise, where `sh -c '…'` is a parse error and every Fleet hook dies
+/// silently. The exec form (`command` + `args`, hooks.md "Command Hook
+/// Fields") bypasses the shell entirely — the exe is spawned directly with the
+/// hook JSON on stdin, identical to shell form — so it works regardless of
+/// which shell Claude Code would have picked. `fleet.exe` satisfies exec
+/// form's real-executable requirement. The trade-off is no missing-binary
+/// fault tolerance on Windows; the published `~/.fleet/bin/fleet.exe` copy is
+/// what the hooks point at, and hook spawn failures are non-blocking.
+fn fleet_subcommand_hook(fleet_bin: &str, subcommand: &str) -> Value {
+    fleet_subcommand_hook_with(cfg!(windows), fleet_bin, subcommand)
+}
+
+/// Pure core of [`fleet_subcommand_hook`] — the `windows` flag stands in for
+/// `cfg!(windows)` so both shapes are unit-testable on any host.
+fn fleet_subcommand_hook_with(windows: bool, fleet_bin: &str, subcommand: &str) -> Value {
+    if windows {
+        json!({
+            "type": "command",
+            "command": fleet_bin,
+            "args": subcommand.split_whitespace().collect::<Vec<_>>(),
+        })
+    } else {
+        json!({
+            "type": "command",
+            "command": fault_tolerant_command(fleet_bin, subcommand),
+        })
+    }
+}
+
+/// Does this hook entry invoke `fleet <subcommand…>`? Recognizes both shapes
+/// from [`fleet_subcommand_hook_with`]; both are checked on every platform so
+/// a settings.json carrying the other platform's shape (or a pre-upgrade one)
+/// is still recognized and replaced idempotently rather than duplicated.
+fn hook_invokes_fleet_subcommand(hook: &Value, subcommand: &str) -> bool {
+    let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) else {
+        return false;
+    };
+    // Unix sh-wrapper shape: `… exec "{bin}" {sub}; else …` — the char before
+    // the subcommand is the closing quote around the binary path.
+    if cmd.contains(&format!("\" {subcommand};")) {
+        return true;
+    }
+    // Windows exec shape: bare fleet binary path + exact args tokens. Split
+    // the basename by hand — `Path::file_stem` treats `\` as a separator only
+    // on Windows, and this matcher must recognize a Windows-written
+    // settings.json on every platform.
+    let base = cmd.rsplit(['/', '\\']).next().unwrap_or(cmd).to_ascii_lowercase();
+    let is_fleet_bin = base == "fleet" || base == "fleet.exe";
+    is_fleet_bin
+        && hook
+            .get("args")
+            .and_then(|a| a.as_array())
+            .is_some_and(|args| {
+                args.iter()
+                    .map(|v| v.as_str().unwrap_or(""))
+                    .eq(subcommand.split_whitespace())
+            })
+}
+
+/// Group-level wrapper over [`hook_invokes_fleet_subcommand`].
+fn group_invokes_fleet_subcommand(group: &Value, subcommand: &str) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|arr| {
+            arr.iter()
+                .any(|hook| hook_invokes_fleet_subcommand(hook, subcommand))
+        })
+        .unwrap_or(false)
 }
 
 /// Read the last `max_lines` lines of a file without loading all of it.
@@ -1058,6 +1100,79 @@ fn read_recent_events(path: &Path, max_lines: usize) -> Vec<HookEvent> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod fleet_subcommand_hook_tests {
+    use super::*;
+
+    #[test]
+    fn unix_shape_is_the_fault_tolerant_sh_wrapper() {
+        let hook = fleet_subcommand_hook_with(false, "/usr/local/bin/fleet", "guard");
+        let cmd = hook["command"].as_str().unwrap();
+        assert!(cmd.starts_with("sh -c"), "unix shape must stay sh-wrapped: {cmd}");
+        assert!(cmd.contains("\" guard;"), "sh wrapper must carry the subcommand: {cmd}");
+        assert!(hook.get("args").is_none(), "unix shape must not carry exec-form args");
+    }
+
+    #[test]
+    fn windows_shape_is_exec_form_with_split_args() {
+        let hook =
+            fleet_subcommand_hook_with(true, r"C:\Users\foo\.fleet\bin\fleet.exe", "session idle");
+        assert_eq!(hook["command"], r"C:\Users\foo\.fleet\bin\fleet.exe");
+        assert_eq!(hook["args"], json!(["session", "idle"]));
+    }
+
+    #[test]
+    fn matcher_recognizes_both_shapes_and_distinguishes_subcommands() {
+        for windows in [false, true] {
+            let bin = if windows { r"C:\x\fleet.exe" } else { "/usr/local/bin/fleet" };
+            let hook = fleet_subcommand_hook_with(windows, bin, "session idle");
+            assert!(
+                hook_invokes_fleet_subcommand(&hook, "session idle"),
+                "windows={windows}: own subcommand must match"
+            );
+            assert!(
+                !hook_invokes_fleet_subcommand(&hook, "session resume"),
+                "windows={windows}: sibling subcommand must not match"
+            );
+            assert!(
+                !hook_invokes_fleet_subcommand(&hook, "guard"),
+                "windows={windows}: unrelated subcommand must not match"
+            );
+        }
+    }
+
+    #[test]
+    fn exec_shape_requires_the_fleet_binary() {
+        // Same args under a different exe is someone else's hook.
+        let foreign = json!({"type": "command", "command": r"C:\x\other.exe", "args": ["guard"]});
+        assert!(!hook_invokes_fleet_subcommand(&foreign, "guard"));
+    }
+
+    #[test]
+    fn is_guard_group_accepts_the_windows_exec_shape() {
+        let group = json!({
+            "matcher": "Bash",
+            "hooks": [fleet_subcommand_hook_with(true, r"C:\x\fleet.exe", "guard")]
+        });
+        assert!(is_guard_group(&group));
+    }
+
+    #[test]
+    fn is_fleet_group_accepts_the_hook_event_exec_shape() {
+        let group = json!({
+            "hooks": [{
+                "type": "command",
+                "command": r"C:\Users\foo\.fleet\bin\fleet.exe",
+                "args": ["hook-event"],
+                "async": true
+            }]
+        });
+        assert!(is_fleet_group(&group));
+        // The unix cat-append one-liner keeps matching too.
+        assert!(is_fleet_group(&fleet_hook_group()));
+    }
 }
 
 #[cfg(test)]
