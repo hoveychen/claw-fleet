@@ -448,6 +448,14 @@ pub(crate) enum ScheduleCommands {
         /// The prompt the fired session runs — the schedule's full context.
         #[arg(long)]
         prompt: String,
+        /// Model the fired session runs on (e.g. `claude-opus-4-8`,
+        /// `gpt-5.6-sol`). Overrides the value inherited from this session.
+        #[arg(long)]
+        model: Option<String>,
+        /// Reasoning effort for the fired session (`low`/`medium`/`high`/`xhigh`/
+        /// `max`, or codex `minimal`..`high`). Overrides the inherited value.
+        #[arg(long)]
+        effort: Option<String>,
     },
     /// List all registered schedules (pending + fired history).
     #[command(alias = "ls")]
@@ -464,8 +472,9 @@ pub(crate) enum ScheduleCommands {
         #[arg(long)]
         json: bool,
     },
-    /// Adjust a pending schedule. Pass any of --at / --in (not both) and/or
-    /// --prompt. A fired schedule cannot be updated.
+    /// Adjust a pending schedule. Pass any of --at / --in (not both), --prompt,
+    /// --model, --effort. Pass `--model ""` / `--effort ""` to clear back to the
+    /// inherited default. A fired schedule cannot be updated.
     Update {
         /// The schedule id.
         id: String,
@@ -478,6 +487,12 @@ pub(crate) enum ScheduleCommands {
         /// New prompt the fired session runs.
         #[arg(long)]
         prompt: Option<String>,
+        /// New model (or `""` to inherit the default).
+        #[arg(long)]
+        model: Option<String>,
+        /// New reasoning effort (or `""` to inherit the default).
+        #[arg(long)]
+        effort: Option<String>,
     },
     /// Cancel a schedule (or forget a fired one) by its id.
     Cancel {
