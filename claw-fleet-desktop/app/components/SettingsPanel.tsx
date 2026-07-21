@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useConnectionStore, useDetailStore } from "../store";
+import { useConnectionStore, useDetailStore, useUIStore } from "../store";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { getItem, setItem } from "../storage";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
@@ -873,6 +873,12 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     setItem("auto-update-check", enabled ? "true" : "false");
   }, []);
 
+  // ── Group handoff-relay sessions ───────────────────────────────────────────
+  // Lives in the UI store (which persists it) so the task list reacts live when
+  // this is flipped, rather than only after a restart.
+  const groupHandoff = useUIStore((s) => s.historyGroupHandoff);
+  const setGroupHandoff = useUIStore((s) => s.setHistoryGroupHandoff);
+
   // ── LLM provider state ──────────────────────────────────────────────────
   const [llmProviders, setLlmProviders] = useState<LlmProviderInfo[]>([]);
   const [llmConfig, setLlmConfigState] = useState<LlmConfig>(() => ({
@@ -1041,6 +1047,23 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       type="checkbox"
                       checked={autoUpdateCheck}
                       onChange={(e) => handleToggleAutoUpdateCheck(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.group_handoff")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.group_handoff_desc")}
+                    </span>
+                  </div>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={groupHandoff}
+                      onChange={(e) => setGroupHandoff(e.target.checked)}
                     />
                     <span className={styles.toggle_slider} />
                   </label>
