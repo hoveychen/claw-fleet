@@ -454,6 +454,66 @@ pub(crate) fn encode_workspace_path(path: &str) -> String {
         .collect()
 }
 
+/// Do `a` and `b` name the same workspace directory?
+///
+/// A workspace path reaches a comparison from two spellings that never agree
+/// byte-for-byte on Windows: the decode side (`decode_workspace_path` /
+/// `decode_walk`) always joins with `/` (e.g. `C:/code/proj`), while a live
+/// process cwd from sysinfo comes back with native `\` separators
+/// (`C:\code\proj`). A plain `==` therefore never matches a Fleet-spawned
+/// session's process on Windows — liveness reads dead and workspace kills
+/// find nothing. Separators are folded on every platform (both comparands are
+/// directory paths from the OS or our own decode, so a literal `\` inside a
+/// unix file name colliding with a real `/` boundary is not a practical
+/// concern); case is folded only where the filesystem is case-insensitive
+/// (Windows), keeping unix comparisons exact.
+pub fn same_workspace_path(a: &str, b: &str) -> bool {
+    workspace_path_key_with(cfg!(windows), a) == workspace_path_key_with(cfg!(windows), b)
+}
+
+/// Pure core of [`same_workspace_path`] — the `windows` flag stands in for
+/// `cfg!(windows)` so the Windows folding rules are unit-testable on unix.
+fn workspace_path_key_with(windows: bool, p: &str) -> String {
+    let mut s = p.replace('\\', "/");
+    while s.len() > 1 && s.ends_with('/') {
+        s.pop();
+    }
+    if windows {
+        s = s.to_lowercase();
+    }
+    s
+}
+
+#[cfg(test)]
+mod same_workspace_path_tests {
+    use super::{same_workspace_path, workspace_path_key_with};
+
+    #[test]
+    fn separator_spellings_match_on_all_platforms() {
+        assert!(same_workspace_path("C:\\code\\proj", "C:/code/proj"));
+        assert!(same_workspace_path("/Users/foo/proj", "/Users/foo/proj"));
+        assert!(!same_workspace_path("/Users/foo/proj", "/Users/foo/other"));
+    }
+
+    #[test]
+    fn trailing_separator_is_ignored_but_root_survives() {
+        assert!(same_workspace_path("/Users/foo/proj/", "/Users/foo/proj"));
+        assert_eq!(workspace_path_key_with(false, "/"), "/");
+    }
+
+    #[test]
+    fn windows_key_folds_case_unix_key_does_not() {
+        assert_eq!(
+            workspace_path_key_with(true, "C:\\Code\\Proj"),
+            workspace_path_key_with(true, "c:/code/proj")
+        );
+        assert_ne!(
+            workspace_path_key_with(false, "/Users/Foo"),
+            workspace_path_key_with(false, "/users/foo")
+        );
+    }
+}
+
 /// Human-facing name for a workspace path. Shared with the memory module so
 /// both derive worktree names identically.
 pub(crate) fn workspace_name(path: &str) -> String {

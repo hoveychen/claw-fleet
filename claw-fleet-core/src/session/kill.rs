@@ -229,7 +229,7 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
         let procs = scan_cli_processes();
         let root_pids: Vec<u32> = procs
             .iter()
-            .filter(|p| p.cwd == workspace_path)
+            .filter(|p| same_workspace_path(&p.cwd, workspace_path))
             .map(|p| p.pid)
             .collect();
 
@@ -272,7 +272,7 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
     {
         let pids: Vec<u32> = scan_cli_processes()
             .iter()
-            .filter(|p| p.cwd == workspace_path)
+            .filter(|p| same_workspace_path(&p.cwd, workspace_path))
             .map(|p| p.pid)
             .collect();
         // Match the unix branch: an empty workspace is an explicit error, not a
