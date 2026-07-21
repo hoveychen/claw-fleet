@@ -1,4 +1,6 @@
-/* ── Handoff relay chain ─────────────────────────────────────────────────── */
+/* ── Handoff relay chain chip ────────────────────────────────────────────── */
+/* The chain itself renders in HandoffChainModal; this file styles only the
+   chip that opens it. */
 
 .handoff_row {
   margin: 0 0 6px;
@@ -21,74 +23,4 @@
 
 .handoff_chip:hover {
   background: var(--color-bg-secondary);
-}
-
-.handoff_panel {
-  margin-top: 4px;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-tool);
-  cursor: default;
-}
-
-.handoff_leg {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-text-secondary);
-}
-
-.handoff_current .handoff_leg_title,
-.handoff_current {
-  color: var(--color-text, inherit);
-  font-weight: 600;
-}
-
-.handoff_leg_no {
-  flex: 0 0 auto;
-  font-size: 10px;
-  opacity: 0.75;
-}
-
-.handoff_leg_title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.handoff_link {
-  display: flex;
-  gap: 6px;
-  margin: 2px 0 2px 6px;
-}
-
-.handoff_arrow {
-  flex: 0 0 auto;
-  opacity: 0.5;
-}
-
-.handoff_link_body {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.handoff_next {
-  font-size: 10px;
-  color: var(--color-text-secondary);
-  opacity: 0.9;
-}
-
-.handoff_note {
-  color: var(--color-text-secondary);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  white-space: pre-wrap;
-}
-
-.handoff_time {
-  font-size: 10px;
-  opacity: 0.6;
 }
