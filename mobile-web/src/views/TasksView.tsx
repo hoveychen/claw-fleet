@@ -519,13 +519,24 @@ export function TasksView({
     done: t("已完成"),
   };
 
-  // One session card — shared by standalone cards and the members inside an
-  // expanded handoff group, so both stay identical.
-  const renderCard = (s: SessionInfo) => {
+  // One session card — shared by standalone cards, the tip of a relay group
+  // (with `group` set: adds an expand chevron + whole-chain mark), and the
+  // members inside an expanded group, so all three stay identical.
+  const renderCard = (
+    s: SessionInfo,
+    group?: {
+      expanded: boolean;
+      onToggleExpand: () => void;
+      /** Whole-chain membership the mark toggle fans out across. */
+      markMembers: SessionInfo[];
+    },
+  ) => {
     const tone = statusTone(s.status);
     const mode = stopMode(s);
     const unread = isSessionUnread(s);
-    const isDone = s.userMark === "done";
+    const isDone = group
+      ? group.markMembers.length > 0 && group.markMembers.every((m) => m.userMark === "done")
+      : s.userMark === "done";
     const title =
       s.titleOverride || s.aiTitle || s.slug || s.lastMessagePreview || t("（无标题）");
     const snippet = search.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined;
@@ -540,6 +551,20 @@ export function TasksView({
           <span className={styles.title}>{title}</span>
           {unread && <span className={styles.unreadDot} />}
           <span className={styles.time}>{timeAgo(s.lastActivityMs)}</span>
+          {group && (
+            <button
+              className={styles.groupToggle}
+              data-open={group.expanded}
+              aria-expanded={group.expanded}
+              onClick={(e) => {
+                e.stopPropagation();
+                group.onToggleExpand();
+              }}
+              title={group.expanded ? t("收起接力链") : t("展开接力链上更早的会话")}
+            >
+              <ChevronRight size={16} className={styles.groupChevron} data-open={group.expanded} />
+            </button>
+          )}
         </div>
         <div className={styles.metaRow}>
           <span className={styles.project}>
@@ -568,11 +593,29 @@ export function TasksView({
           <button
             className={styles.markToggle}
             data-done={isDone}
-            onClick={() => setMark(s, isDone ? null : "done")}
+            onClick={() =>
+              group
+                ? setMarkChain(group.markMembers, !isDone)
+                : setMark(s, isDone ? null : "done")
+            }
             aria-pressed={isDone}
-            title={isDone ? t("已完成 — 点击改回进行中") : t("进行中 — 点击标为已完成")}
+            title={
+              group
+                ? isDone
+                  ? t("整条接力链已完成 — 点击全部改回进行中")
+                  : t("点击把整条接力链标为已完成")
+                : isDone
+                  ? t("已完成 — 点击改回进行中")
+                  : t("进行中 — 点击标为已完成")
+            }
           >
-            {isDone ? <CheckCircle2 size={16} /> : <Circle size={15} />}
+            {group ? (
+              <CheckCheck size={16} opacity={isDone ? 1 : 0.55} />
+            ) : isDone ? (
+              <CheckCircle2 size={16} />
+            ) : (
+              <Circle size={15} />
+            )}
           </button>
           <span className={styles.opsSpacer} />
           {canControl(s) && mode !== "spent" && (
@@ -683,55 +726,22 @@ export function TasksView({
       <div className={styles.list}>
         {renderItems.map((item) => {
           if (item.kind === "single") return renderCard(item.session);
-          const { chainId, chainLen, tip, members, key } = item;
+          const { chainId, tip, members, key } = item;
           const full = chainMembersAll.get(chainId) ?? members;
-          const allDone = full.length > 0 && full.every((m) => m.userMark === "done");
           const expanded = expandedChains.has(chainId);
           const limit = chainLoadMore[chainId] ?? GROUP_VISIBLE;
-          const shown = expanded ? members.slice(0, limit) : [];
-          const hidden = members.length - shown.length;
-          const tone = statusTone(tip.status);
-          const title =
-            tip.titleOverride || tip.aiTitle || tip.slug || tip.lastMessagePreview || t("（无标题）");
+          // The header card *is* the tip (latest hop); the expanded list shows
+          // only the chain's *other* hops, never the tip again.
+          const rest = members.filter((m) => m.id !== tip.id);
+          const shown = expanded ? rest.slice(0, limit) : [];
+          const hidden = rest.length - shown.length;
           return (
             <div key={key} className={styles.group}>
-              <div
-                className={styles.groupHead}
-                role="button"
-                aria-expanded={expanded}
-                onClick={() => toggleChain(chainId)}
-              >
-                <ChevronRight
-                  size={16}
-                  className={styles.groupChevron}
-                  data-open={expanded}
-                />
-                {tone && <span className={styles.statusDot} data-tone={tone} />}
-                <span className={styles.sourceIcon} title={tip.agentSource || "claude-code"}>
-                  <AgentSourceIcon source={tip.agentSource} />
-                </span>
-                <span className={styles.title}>{title}</span>
-                <span className={styles.groupBadge}>
-                  <Share2 size={11} />
-                  {t("接力 {0}", chainLen)}
-                </span>
-                <button
-                  className={styles.markToggle}
-                  data-done={allDone}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMarkChain(full, !allDone);
-                  }}
-                  aria-pressed={allDone}
-                  title={
-                    allDone
-                      ? t("整条接力链已完成 — 点击全部改回进行中")
-                      : t("点击把整条接力链标为已完成")
-                  }
-                >
-                  <CheckCheck size={16} opacity={allDone ? 1 : 0.55} />
-                </button>
-              </div>
+              {renderCard(tip, {
+                expanded,
+                onToggleExpand: () => toggleChain(chainId),
+                markMembers: full,
+              })}
               {expanded && (
                 <div className={styles.groupChildren}>
                   {shown.map((m) => renderCard(m))}
