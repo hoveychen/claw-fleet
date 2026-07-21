@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Blocks } from "lucide-react";
+import { Blocks, Copy, Download, ExternalLink, FolderOpen, Power, Trash2 } from "lucide-react";
 import { useConnectionStore, useUIStore } from "../store";
 import { EmptyState } from "./EmptyState";
+import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { PageShell } from "./PageShell";
 import { SkillsSourceTabs } from "./SkillsSourceTabs";
 import styles from "./MemoryView.module.css";
@@ -65,10 +67,12 @@ function PluginCard({
   plugin,
   active,
   onClick,
+  onContextMenu,
 }: {
   plugin: PluginItem;
   active: boolean;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const installs = formatInstalls(plugin.installCount);
   const c = plugin.contributes;
@@ -83,6 +87,7 @@ function PluginCard({
     <button
       className={`${styles.card} ${active ? styles.card_active : ""}`}
       onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       <div className={styles.card_body}>
         <div className={pluginStyles.card_title_row}>
@@ -224,6 +229,86 @@ export function PluginsView() {
     });
   }, [expanded, updateMainViewState]);
 
+  const isLocal = useConnectionStore((s) => s.connection?.type === "local");
+
+  // Row context menu — anchor + subject held together, mirroring WikiView.
+  const [ctxMenu, setCtxMenu] = useState<{ plugin: PluginItem; anchor: ContextMenuAnchor } | null>(
+    null,
+  );
+
+  // Same mutations the detail pane fires; reload (setLoaded false) on success.
+  const runPluginMutation = async (cmd: string, args: Record<string, unknown>) => {
+    try {
+      await invoke<void>(cmd, args);
+      setLoaded(false);
+    } catch (e) {
+      window.alert(typeof e === "string" ? e : String(e));
+    }
+  };
+
+  const pluginMenuItems = (plugin: PluginItem): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+    if (!plugin.isDownloaded) {
+      items.push({
+        id: "install",
+        label: t("plugins.install_btn"),
+        icon: <Download size={13} strokeWidth={1.7} />,
+        onSelect: () => void runPluginMutation("install_plugin", { pluginId: plugin.pluginId }),
+      });
+    }
+    if (plugin.isDownloaded) {
+      items.push({
+        id: "toggle",
+        label: plugin.enabled ? t("plugins.toggle_disable") : t("plugins.toggle_enable"),
+        icon: <Power size={13} strokeWidth={1.7} />,
+        onSelect: () =>
+          void runPluginMutation("set_plugin_enabled", {
+            pluginId: plugin.pluginId,
+            enabled: !plugin.enabled,
+          }),
+      });
+    }
+    if (plugin.homepage) {
+      items.push({
+        id: "homepage",
+        label: t("plugins.meta_homepage"),
+        icon: <ExternalLink size={13} strokeWidth={1.7} />,
+        onSelect: () =>
+          void import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
+            openUrl(plugin.homepage as string).catch(() => {}),
+          ),
+      });
+    }
+    items.push({
+      id: "copy-path",
+      label: t("paths.copy_path", "复制路径"),
+      icon: <Copy size={13} strokeWidth={1.7} />,
+      sub: plugin.rootPath,
+      onSelect: () => void writeText(plugin.rootPath).catch(() => {}),
+    });
+    if (isLocal && plugin.isDownloaded) {
+      items.push({
+        id: "reveal",
+        label: t("plugins.reveal_manifest"),
+        icon: <FolderOpen size={13} strokeWidth={1.7} />,
+        onSelect: () =>
+          void import("@tauri-apps/plugin-opener").then(({ revealItemInDir }) =>
+            revealItemInDir(plugin.manifestPath).catch(() => {}),
+          ),
+      });
+    }
+    if (plugin.isDownloaded) {
+      items.push({
+        id: "uninstall",
+        label: t("plugins.uninstall_btn"),
+        icon: <Trash2 size={13} strokeWidth={1.7} />,
+        danger: true,
+        onSelect: () => void runPluginMutation("uninstall_plugin", { pluginId: plugin.pluginId }),
+      });
+    }
+    return items;
+  };
+
   const renderSection = (
     key: SectionKey,
     titleKey: string,
@@ -260,6 +345,11 @@ export function PluginsView() {
               onClick={() =>
                 updateMainViewState("plugins", { selectedPluginId: plugin.pluginId })
               }
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setCtxMenu({ plugin, anchor: { x: e.clientX, y: e.clientY } });
+              }}
             />
           ))}
       </div>
@@ -323,6 +413,13 @@ export function PluginsView() {
                 "plugins.section_empty_catalog",
               )}
             </>
+          )}
+          {ctxMenu && (
+            <ContextMenu
+              anchor={ctxMenu.anchor}
+              items={pluginMenuItems(ctxMenu.plugin)}
+              onClose={() => setCtxMenu(null)}
+            />
           )}
         </div>
       }
