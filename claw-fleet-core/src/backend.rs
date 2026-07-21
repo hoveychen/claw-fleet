@@ -444,6 +444,16 @@ pub trait Backend: Send + Sync {
     /// one line per (source, model) with token counts, official unit prices and
     /// line cost; the total reconciles with `today_usage` to the cent.
     fn today_usage_breakdown(&self) -> crate::today_usage::TodayUsageBreakdown;
+    /// Per-model receipt + per-day trend over an arbitrary inclusive
+    /// `[from_ms, to_ms]` window (epoch ms). The longer-range generalisation of
+    /// [`Self::today_usage_breakdown`] for the Settings usage view: Claude turns
+    /// bucket per-turn by their own timestamp; Codex sessions attribute whole to
+    /// their creation day. See [`crate::today_usage::usage_range_breakdown`].
+    fn usage_range_breakdown(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> crate::today_usage::UsageRangeBreakdown;
     fn check_setup(&self) -> SetupStatus;
     /// Start tailing a session file for new lines.
     /// Returns the initial byte offset (file size at call time).

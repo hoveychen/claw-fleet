@@ -1720,6 +1720,7 @@ pub fn run() {
             list_sessions,
             today_usage,
             today_usage_breakdown,
+            usage_range_breakdown,
             search_sessions,
             get_messages,
             get_messages_tail,

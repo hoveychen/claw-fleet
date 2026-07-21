@@ -73,6 +73,15 @@ date: string,
 lines: Array<ModelReceiptLine>, totalInputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalOutputTokens: number, 
 totalCostUsd: number, agentCostUsd: number, fleetCostUsd: number, };
 
+export type DailyUsagePoint = { 
+date: string, inputTokens: number, cacheCreationTokens: number, cacheReadTokens: number, outputTokens: number, costUsd: number, };
+
+export type UsageRangeBreakdown = { 
+fromDate: string, toDate: string, 
+lines: Array<ModelReceiptLine>, 
+daily: Array<DailyUsagePoint>, totalInputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalOutputTokens: number, totalCostUsd: number, agentCostUsd: number, fleetCostUsd: number, 
+hasCodexApproximation: boolean, };
+
 export type SearchHit = { sessionId: string, jsonlPath: string, snippet: string, rank: number, };
 
 export type WaitingAlert = { sessionId: string, workspaceName: string, summary: string, detectedAtMs: number, jsonlPath: string, 

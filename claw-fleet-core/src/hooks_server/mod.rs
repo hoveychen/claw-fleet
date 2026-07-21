@@ -669,6 +669,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::TODAY_USAGE_BREAKDOWN => route_today_usage_breakdown(ctx, request, &query, json_header, path),
 
+            crate::routes::USAGE_RANGE_BREAKDOWN => route_usage_range_breakdown(ctx, request, &query, json_header, path),
+
             crate::routes::SESSION_DECISIONS => route_session_decisions(ctx, request, &query, json_header, path),
 
             crate::routes::MESSAGES => route_messages(ctx, request, &query, json_header, path),

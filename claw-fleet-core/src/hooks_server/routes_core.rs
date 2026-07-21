@@ -320,6 +320,27 @@ pub(crate) fn route_today_usage_breakdown(
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
+pub(crate) fn route_usage_range_breakdown(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let from_ms = query
+        .get("from_ms")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let to_ms = query
+        .get("to_ms")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(i64::MAX);
+    let sessions = scan_all_sources(ctx.sources);
+    let breakdown = crate::today_usage::usage_range_breakdown(&sessions, from_ms, to_ms);
+    let body = serde_json::to_string(&breakdown).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_session_decisions(
     ctx: &ServeCtx,
     request: tiny_http::Request,
