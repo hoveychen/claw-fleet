@@ -48,7 +48,7 @@ import {
   repoRootPath,
   type NewSessionCreated,
 } from "./NewSessionForm";
-import { useComposerDraftStore } from "../composerDraft";
+import { useComposerDraftStore, type ComposerDraft } from "../composerDraft";
 import { SessionDetail } from "./SessionDetail";
 import { SessionTabs, type TabItem } from "./SessionTabs";
 import {
@@ -1063,8 +1063,18 @@ export function HistoryView() {
     if (!newSessionNav) return;
     if (handledNavNonce.current === newSessionNav.nonce) return;
     handledNavNonce.current = newSessionNav.nonce;
-    if (newSessionNav.prompt) {
-      useComposerDraftStore.getState().patchDraft("new", { prompt: newSessionNav.prompt });
+    // Seed the "new" draft with every field the request carried. The schedule
+    // page's "立即运行" fills workspace/model/effort/tool so the draft opens as
+    // a ready-to-send copy of the task; the "新建" shortcut passes only prompt.
+    const seed: Partial<ComposerDraft> = {};
+    if (newSessionNav.prompt) seed.prompt = newSessionNav.prompt;
+    if (newSessionNav.workspace) seed.workspace = newSessionNav.workspace;
+    if (newSessionNav.model !== undefined) seed.model = newSessionNav.model;
+    if (newSessionNav.effort !== undefined) seed.effort = newSessionNav.effort;
+    if (newSessionNav.tool) seed.tool = newSessionNav.tool;
+    if (newSessionNav.permissionMode) seed.permissionMode = newSessionNav.permissionMode;
+    if (Object.keys(seed).length > 0) {
+      useComposerDraftStore.getState().patchDraft("new", seed);
     }
     applyTabs((st) => openTabState(st, DRAFT_TAB_ID));
     clearNewSessionNav();

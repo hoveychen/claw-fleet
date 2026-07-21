@@ -37,6 +37,10 @@ export const HANDOFF_ENTRYPOINT = "claw-fleet-handoff";
  *  badge a session as "由计划触发". */
 export const SCHEDULE_ENTRYPOINT = "claw-fleet-schedule";
 
+/** `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions spawned by a loop
+ *  iteration — mirrors agent_loop::LOOP_ENTRYPOINT. */
+export const LOOP_ENTRYPOINT = "claw-fleet-loop";
+
 /** Codex has no `CLAUDE_CODE_ENTRYPOINT`; the Codex scanner surfaces the rollout
  *  `originator` in the same `entrypoint` field, and Fleet-launched Codex sessions
  *  carry `originator === "fleet"` — mirrors codex_launch::CODEX_FLEET_ORIGINATOR. */
@@ -49,13 +53,18 @@ export function preferredSessionTitle(s: SessionInfo): string | null {
 }
 
 /** True for sessions Fleet itself launched (the "新会话" button, the handoff
- *  relay, or a Fleet-spawned Codex session). These are the sessions the 启动台
- *  lists and that the detail view can resume; other entrypoints/originators
- *  (cli, claude-vscode, codex_exec, …) are read-only here. */
+ *  relay, a fired schedule / loop iteration, or a Fleet-spawned Codex session).
+ *  These are the sessions the 启动台 lists and that the detail view can resume;
+ *  other entrypoints/originators (cli, claude-vscode, codex_exec, …) are
+ *  read-only here. Schedule/loop fires are headless `-p` spawns just like the
+ *  新会话 button, so they belong here too — otherwise a fired scheduled task
+ *  would run but never show up on the task page. */
 export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
   return (
     entrypoint === NEW_SESSION_ENTRYPOINT ||
     entrypoint === HANDOFF_ENTRYPOINT ||
+    entrypoint === SCHEDULE_ENTRYPOINT ||
+    entrypoint === LOOP_ENTRYPOINT ||
     entrypoint === CODEX_FLEET_ORIGINATOR
   );
 }
