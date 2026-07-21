@@ -6,6 +6,7 @@ import { useDraft } from "../draft";
 import { useI18n, type Lang } from "../i18n";
 import type { PushState } from "../push";
 import { clearSecret } from "../secretStore";
+import { clearCachedSessions } from "../sessionCache";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
 import styles from "./MoreView.module.css";
@@ -259,6 +260,7 @@ export function MoreView({
             onClick={() => {
               if (window.confirm(t("清除本机配对密钥？需回到桌面端重新扫码才能再连接。"))) {
                 clearSecret();
+                clearCachedSessions();
                 location.reload();
               }
             }}
