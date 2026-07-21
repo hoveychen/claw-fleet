@@ -13,6 +13,7 @@
 
 mod frames;
 mod harmony_push;
+mod limits;
 mod push;
 mod registry;
 mod ws;
@@ -28,6 +29,7 @@ use axum::{Json, Router};
 use tower_http::services::{ServeDir, ServeFile};
 
 use harmony_push::HarmonyPush;
+use limits::ConnLimiter;
 use push::Push;
 use registry::Registry;
 
@@ -36,10 +38,24 @@ pub struct AppState {
     pub push: Push,
     /// HarmonyOS Push Kit channel; `None` unless RELAY_HARMONY_* creds are set.
     pub harmony: Option<HarmonyPush>,
+    /// Global + per-IP concurrent-connection backstops for the public relay.
+    pub conn_limiter: Arc<ConnLimiter>,
 }
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+/// Parse a `usize` env override, falling back to `default` (with a warning) when
+/// unset or unparseable.
+fn env_usize(name: &str, default: usize) -> usize {
+    match std::env::var(name) {
+        Ok(v) => v.parse().unwrap_or_else(|_| {
+            log::warn!("{name}={v:?} is not a number — using default {default}");
+            default
+        }),
+        Err(_) => default,
+    }
 }
 
 /// The API part of the router (everything except static files).
@@ -91,7 +107,12 @@ async fn main() {
         ),
     }
 
-    let state = Arc::new(AppState { registry: Registry::default(), push, harmony });
+    let max_total = env_usize("RELAY_MAX_CONNECTIONS", limits::DEFAULT_MAX_TOTAL);
+    let max_per_ip = env_usize("RELAY_MAX_CONNECTIONS_PER_IP", limits::DEFAULT_MAX_PER_IP);
+    log::info!("connection caps: {max_total} total, {max_per_ip} per IP");
+    let conn_limiter = ConnLimiter::new(max_total, max_per_ip);
+
+    let state = Arc::new(AppState { registry: Registry::default(), push, harmony, conn_limiter });
 
     let index = static_dir.join("index.html");
     let static_service = ServeDir::new(&static_dir).not_found_service(ServeFile::new(index));
