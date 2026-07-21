@@ -415,7 +415,15 @@ function GroupMarkControl({ members }: { members: SessionInfo[] }) {
       aria-label={title}
       aria-pressed={isDone}
     >
-      <CheckCheck size={15} strokeWidth={1.8} opacity={isDone ? 1 : 0.55} />
+      {/* Same hollow-circle / filled-check glyph as a single row's MarkControl —
+          the whole-chain semantics are already carried by the chevron, the 接力
+          badge and this button's tooltip, so the mark itself stays visually
+          identical to every other row's rather than a distinct double-check. */}
+      {isDone ? (
+        <CheckCircle2 size={15} strokeWidth={1.8} />
+      ) : (
+        <Circle size={14} strokeWidth={1.8} />
+      )}
     </button>
   );
 }

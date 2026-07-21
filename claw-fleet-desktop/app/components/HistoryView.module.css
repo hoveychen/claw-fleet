@@ -490,9 +490,14 @@
 
 /* A group header is the tip session rendered as an ordinary row, so it carries
    two overlaid controls on its right edge (expand chevron + whole-chain mark)
-   instead of one. Widen the right gutter so a long title never runs under them. */
-.row_expandable {
-  padding-right: 48px;
+   instead of one. Those controls are top-anchored (see .row_actions), so only the
+   title's first line runs under them — the meta/time line sits below and stays
+   clear. Keep the row's base right gutter (so the relative-time column lines up
+   with single rows), and give the title alone the extra clearance for the second
+   control. Widening the whole row here instead would shove .row_time's right edge
+   left of the single-row column and misalign the times. */
+.row_expandable .row_title {
+  padding-right: 22px;
 }
 
 /* Expand/collapse toggle for a relay chain — a plain icon button sharing the
