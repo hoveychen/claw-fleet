@@ -4,6 +4,7 @@
 // the phone.
 import type { PluggableList } from "unified";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
@@ -70,6 +71,9 @@ const schema = {
  */
 export const mdRemarkPlugins: PluggableList = [
   remarkGfm,
+  // A single `\n` (soft break) renders as a real line break, not a space — handoff
+  // notes and chat messages often lean on bare newlines instead of blank lines.
+  remarkBreaks,
   remarkCjkFriendly,
   remarkMath,
 ];
