@@ -9,7 +9,9 @@ const LS_KEY = "fleet-relay-secret";
 const DB_NAME = "fleet-relay";
 const STORE = "kv";
 
-function openDb(): Promise<IDBDatabase> {
+/** Shared by sessionCache.ts, which stores the sessions snapshot under a
+ *  different key in this same DB/store (no schema change). */
+export function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
     req.onupgradeneeded = () => {
