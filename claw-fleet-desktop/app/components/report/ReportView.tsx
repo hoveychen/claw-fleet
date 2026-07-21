@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useReportStore } from "../../store";
 import type { DailyReport } from "../../types";
 import { ContributionsHeatmap } from "./ContributionsHeatmap";
@@ -10,9 +11,10 @@ import { AISummaryCard } from "./AISummaryCard";
 import { LessonsCard } from "./LessonsCard";
 import { ToolCallChart } from "./ToolCallChart";
 import { ReportShareMenu } from "./ReportShareMenu";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, RefreshCw, Copy } from "lucide-react";
 import { EmptyState } from "../EmptyState";
 import { PageShell } from "../PageShell";
+import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "../ContextMenu";
 import styles from "./ReportView.module.css";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -97,8 +99,32 @@ function DateList() {
     loadReport,
     loadTimelinePage,
     resetTimeline,
+    generateReport,
   } = useReportStore();
   const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Row context menu — anchor + subject held together, mirroring WikiView.
+  const [ctxMenu, setCtxMenu] = useState<{ report: DailyReport; anchor: ContextMenuAnchor } | null>(
+    null,
+  );
+  const menuItems = (report: DailyReport): ContextMenuItem[] => [
+    {
+      id: "regen",
+      label:
+        (report.metrics.totalSessions ?? 0) > 0 || report.aiSummary
+          ? t("report.regenerate", "重新生成报告")
+          : t("report.generate", "生成报告"),
+      icon: <RefreshCw size={13} strokeWidth={1.7} />,
+      onSelect: () => generateReport(report.date),
+    },
+    {
+      id: "copy-date",
+      label: t("report.copy_date", "复制日期"),
+      icon: <Copy size={13} strokeWidth={1.7} />,
+      sub: report.date,
+      onSelect: () => void writeText(report.date).catch(() => {}),
+    },
+  ];
 
   // Build the timeline once heatmap data is available. The timeline itself is
   // independent of which day is selected — selection only affects which card
@@ -153,8 +179,20 @@ function DateList() {
           active={report.date === selectedDate}
           locale={i18n.language}
           onClick={() => loadReport(report.date)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setCtxMenu({ report, anchor: { x: e.clientX, y: e.clientY } });
+          }}
         />
       ))}
+      {ctxMenu && (
+        <ContextMenu
+          anchor={ctxMenu.anchor}
+          items={menuItems(ctxMenu.report)}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
       <div ref={sentinelRef} className={styles.list_sentinel}>
         {timelineLoading && <span className={styles.empty_inline}>{t("report.loading")}</span>}
         {!timelineHasMore && displayed.length > 1 && (
@@ -170,11 +208,13 @@ function DateCard({
   active,
   locale,
   onClick,
+  onContextMenu,
 }: {
   report: DailyReport;
   active: boolean;
   locale: string;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const { t } = useTranslation();
   const totalTokens =
@@ -186,6 +226,7 @@ function DateCard({
     <button
       className={`${styles.date_card} ${active ? styles.date_card_active : ""}`}
       onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       <div className={styles.date_card_top}>
         <span className={styles.date_card_label}>
