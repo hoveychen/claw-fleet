@@ -33,6 +33,11 @@ import {
   needsA2hsForDurableStorage,
   persistSecret,
 } from "./secretStore";
+import {
+  clearCachedSessions,
+  loadCachedSessions,
+  saveCachedSessions,
+} from "./sessionCache";
 import { useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
@@ -117,6 +122,24 @@ export function App() {
   // Flips true the first time a `sessions` snapshot arrives, so the task page
   // can tell "still waiting for the first push" from "pushed, genuinely empty".
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
+
+  // Cold-start hydrate: paint the last cached task list immediately so the page
+  // isn't blank while the socket (re)connects and delivers the first full
+  // snapshot. Seed only if the live snapshot hasn't already landed — the
+  // functional update keeps fresh data if `onSessions` won the race. `sessions`
+  // being non-empty while `sessionsLoaded` is still false is exactly the
+  // "showing cache, awaiting first live push" state the task page labels.
+  useEffect(() => {
+    if (MOCK) return;
+    let cancelled = false;
+    void loadCachedSessions().then((cached) => {
+      if (cancelled || !cached?.length) return;
+      setSessions((prev) => (prev.length === 0 ? cached : prev));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [todayUsage, setTodayUsage] = useState<TodayUsage | null>(null);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   const [push, setPush] = useState<PushState>(pushState);
@@ -245,6 +268,10 @@ export function App() {
       onSessions: (list: SessionInfo[]) => {
         setSessions(list);
         setSessionsLoaded(true);
+        // Persist the merged full list so the next cold start paints it. Both
+        // full and delta frames arrive here already merged (see relay.ts), so
+        // the cache always holds the latest complete snapshot.
+        saveCachedSessions(list);
       },
       onSessionsKind: (kind: "full" | "delta") =>
         setSessionsFrame((s) => ({
@@ -479,6 +506,7 @@ export function App() {
           className={styles.gateButton}
           onClick={() => {
             clearSecret();
+            clearCachedSessions();
             location.reload();
           }}
         >

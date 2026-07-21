@@ -522,3 +522,24 @@
 .planItem[data-done="true"] .checkbox {
   border-color: var(--color-success);
 }
+
+/* Shown while the cold-start cached task list is on screen but the first live
+ * snapshot hasn't landed yet — tells 老板 the rows are last-seen, not stale-forever. */
+.syncingHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.syncingSpin {
+  flex-shrink: 0;
+  color: var(--color-accent);
+  animation: spin 0.7s linear infinite;
+}
