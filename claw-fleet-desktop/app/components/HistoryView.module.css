@@ -477,6 +477,62 @@
   font-weight: 600;
 }
 
+/* ── Handoff-relay group ─────────────────────────────────────────────────────
+   A collapsed relay chain: a header row (tip session + 接力 badge, click to
+   expand) over an indented list of the chain's other hops. The header reuses
+   `.row`; these classes only add the chevron, the left rail, and the child
+   inset so a group reads as one unit rather than a run of look-alike rows. */
+.group_wrap {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* Swap the left-padding: the chevron takes the gutter the status dot uses on a
+   plain row, so the title lines up with standalone rows either way. */
+.group_header {
+  padding-left: 6px;
+}
+
+.group_chevron {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--color-text-dim);
+  transition: transform 0.15s;
+}
+
+.group_chevron[data-open="true"] {
+  transform: rotate(90deg);
+}
+
+/* The children hang off a faint rail so the chain reads as one group. The inset
+   clears the header's chevron gutter. */
+.group_children {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 2px 14px;
+  padding-left: 8px;
+  border-left: 1.5px solid var(--color-border);
+}
+
+.group_more {
+  align-self: flex-start;
+  margin-left: 18px;
+  padding: 3px 8px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--color-accent);
+  cursor: pointer;
+  transition: background 0.14s;
+}
+
+.group_more:hover {
+  background: var(--color-bg-card-hover);
+}
+
 /* ── Inline detail column ────────────────────────────────────────────────── */
 
 /* Fills PageShell's main container: the tab strip stacked over the detail body.
