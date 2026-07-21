@@ -2,21 +2,25 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   ArrowDown,
   ArrowUp,
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   FileDiff,
   FolderOpen,
   FolderPlus,
   GitBranch,
   RefreshCw,
+  Trash2,
   Upload,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { CopyButton } from "./CopyButton";
+import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DirPickerDialog } from "./DirPickerDialog";
 import { isTempWorkspacePath, repoRootPath } from "./NewSessionForm";
@@ -120,6 +124,58 @@ export function FilesView() {
   // Remote-only: the backend-driven directory picker, since the native dialog
   // would browse *this* desktop rather than the probe (mirrors NewSessionForm).
   const [pickingDir, setPickingDir] = useState(false);
+
+  // Row context menu — anchor + subject held together, mirroring WikiView.
+  const [ctxMenu, setCtxMenu] = useState<{
+    ws: { path: string; name: string; count: number };
+    anchor: ContextMenuAnchor;
+  } | null>(null);
+
+  // Drop a hand-added path (zero-count card) back out of the session view.
+  const removePath = (path: string) => {
+    updateMainViewState("files", { extraPaths: extraPaths.filter((p) => p !== path) });
+    if (selected === path) setSelected(null);
+  };
+
+  const wsMenuItems = (ws: {
+    path: string;
+    name: string;
+    count: number;
+  }): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+    // Remote workspaces live on the probe host — nothing to reveal locally.
+    if (!isRemote) {
+      const revealKey =
+        document.documentElement.getAttribute("data-platform") === "windows"
+          ? "paths.reveal_in_explorer"
+          : "paths.reveal_in_finder";
+      items.push({
+        id: "reveal",
+        label: t(revealKey),
+        icon: <FolderOpen size={13} strokeWidth={1.7} />,
+        onSelect: () => void invoke("reveal_path", { path: ws.path }).catch(() => {}),
+      });
+    }
+    items.push({
+      id: "copy-path",
+      label: t("paths.copy_path", "复制路径"),
+      icon: <Copy size={13} strokeWidth={1.7} />,
+      sub: ws.path,
+      onSelect: () => void writeText(ws.path).catch(() => {}),
+    });
+    // Only hand-added dirs (zero session count, tracked in extraPaths) can be
+    // removed — session-derived cards reappear on the next scan anyway.
+    if (ws.count === 0 && extraPaths.includes(ws.path)) {
+      items.push({
+        id: "remove",
+        label: t("files.remove_path", "从列表移除"),
+        icon: <Trash2 size={13} strokeWidth={1.7} />,
+        danger: true,
+        onSelect: () => removePath(ws.path),
+      });
+    }
+    return items;
+  };
 
   // A path clicked in agent prose lands here: select its workspace, then hand
   // the request down so the explorer can expand to the file itself.
@@ -233,6 +289,11 @@ export function FilesView() {
                 key={ws.path}
                 className={`${styles.card} ${selected === ws.path ? styles.card_active : ""}`}
                 onClick={() => setSelected(ws.path)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCtxMenu({ ws, anchor: { x: e.clientX, y: e.clientY } });
+                }}
               >
                 <div className={styles.card_body}>
                   <div className={styles.card_title}>{ws.name}</div>
@@ -249,6 +310,13 @@ export function FilesView() {
               </button>
             ))}
           </div>
+          {ctxMenu && (
+            <ContextMenu
+              anchor={ctxMenu.anchor}
+              items={wsMenuItems(ctxMenu.ws)}
+              onClose={() => setCtxMenu(null)}
+            />
+          )}
         </div>
       }
     >

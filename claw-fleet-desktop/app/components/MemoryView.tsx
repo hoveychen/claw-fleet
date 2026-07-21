@@ -1,13 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Brain, GraduationCap, Trash2 } from "lucide-react";
+import { ArrowUpToLine, Brain, Copy, FolderOpen, GraduationCap, Trash2 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { useAutoFlip } from "./useAutoFlip";
 import { PageShell } from "./PageShell";
-import { useReportStore, useUIStore } from "../store";
+import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
+import { useConnectionStore, useReportStore, useUIStore } from "../store";
 import type { ManagedLesson } from "../types";
 import styles from "./MemoryView.module.css";
 
@@ -145,6 +147,7 @@ export function MemoryView() {
     selectedKey,
   } = useUIStore((s) => s.mainViewState.memory);
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const isRemote = useConnectionStore((s) => s.connection?.type === "remote");
   const setQuery = (value: string) => updateMainViewState("memory", { query: value });
   const setFilterType = (value: string) =>
     updateMainViewState("memory", { filterType: value });
@@ -174,6 +177,83 @@ export function MemoryView() {
       setLoaded(true);
     }
   }, []);
+
+  // Row context menu — anchor + subject held together, mirroring WikiView.
+  const [ctxMenu, setCtxMenu] = useState<{
+    ws: WorkspaceMemory;
+    file: MemoryFile;
+    anchor: ContextMenuAnchor;
+  } | null>(null);
+
+  // Same call the detail pane's promote button fires; clears selection and
+  // reloads so the file surfaces under its new scope.
+  const promoteMemory = async (
+    ws: WorkspaceMemory,
+    file: MemoryFile,
+    target: "project" | "global",
+  ) => {
+    try {
+      await invoke("promote_memory", {
+        memoryPath: file.path,
+        target,
+        workspacePath: ws.workspacePath,
+      });
+      setSelection(null);
+      load();
+    } catch (e) {
+      console.error("promote_memory failed:", e);
+    }
+  };
+
+  const cardMenuItems = (ws: WorkspaceMemory, file: MemoryFile): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+    // Promotion mirrors the detail pane: only real Claude-Code entries, never
+    // the MEMORY.md index.
+    if (file.name !== "MEMORY.md" && ws.source === "claude-code") {
+      items.push({
+        id: "promote-project",
+        label: t("memory.promote_project"),
+        icon: <ArrowUpToLine size={13} strokeWidth={1.7} />,
+        onSelect: () => void promoteMemory(ws, file, "project"),
+      });
+      items.push({
+        id: "promote-global",
+        label: t("memory.promote_global"),
+        icon: <ArrowUpToLine size={13} strokeWidth={1.7} />,
+        onSelect: () => void promoteMemory(ws, file, "global"),
+      });
+    }
+    items.push({
+      id: "copy-content",
+      label: t("memory.copy_content", "复制内容"),
+      icon: <Copy size={13} strokeWidth={1.7} />,
+      onSelect: () =>
+        void invoke<string>("get_memory_content", { path: file.path })
+          .then((c) => writeText(c))
+          .catch(() => {}),
+    });
+    items.push({
+      id: "copy-path",
+      label: t("paths.copy_path", "复制路径"),
+      icon: <Copy size={13} strokeWidth={1.7} />,
+      sub: file.path,
+      onSelect: () => void writeText(file.path).catch(() => {}),
+    });
+    // Memory files on a remote probe live on that host — nothing to reveal here.
+    if (!isRemote) {
+      const revealKey =
+        document.documentElement.getAttribute("data-platform") === "windows"
+          ? "paths.reveal_in_explorer"
+          : "paths.reveal_in_finder";
+      items.push({
+        id: "reveal",
+        label: t(revealKey),
+        icon: <FolderOpen size={13} strokeWidth={1.7} />,
+        onSelect: () => void invoke("reveal_path", { path: file.path }).catch(() => {}),
+      });
+    }
+    return items;
+  };
 
   useEffect(() => {
     if (!loaded) load();
@@ -430,6 +510,11 @@ export function MemoryView() {
                         selection.file.path === f.path
                       }
                       onClick={() => setSelection({ kind: "file", workspace: ws, file: f })}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setCtxMenu({ ws, file: f, anchor: { x: e.clientX, y: e.clientY } });
+                      }}
                     />
                   ))}
                 </div>
@@ -461,6 +546,11 @@ export function MemoryView() {
                               selection.file.path === f.path
                             }
                             onClick={() => setSelection({ kind: "file", workspace: ws, file: f })}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setCtxMenu({ ws, file: f, anchor: { x: e.clientX, y: e.clientY } });
+                            }}
                           />
                         ))}
                       </div>
@@ -470,6 +560,13 @@ export function MemoryView() {
               </div>
             );
           })}
+          {ctxMenu && (
+            <ContextMenu
+              anchor={ctxMenu.anchor}
+              items={cardMenuItems(ctxMenu.ws, ctxMenu.file)}
+              onClose={() => setCtxMenu(null)}
+            />
+          )}
         </div>
       }
     >
@@ -849,11 +946,13 @@ function MemoryCard({
   source,
   active,
   onClick,
+  onContextMenu,
 }: {
   file: MemoryFile;
   source: string;
   active: boolean;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const isIndexFile = file.name === "MEMORY.md";
   const memType = isMemType(file.memType) ? file.memType : null;
@@ -868,6 +967,7 @@ function MemoryCard({
         isIndexFile ? styles.card_index : ""
       }`}
       onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       {source === "codex" ? (
         <span className={`${styles.type_badge} ${styles.type_codex}`}>CX</span>

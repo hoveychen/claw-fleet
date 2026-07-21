@@ -446,6 +446,7 @@
     "promoting": "Moving…",
     "promote_project": "Project CLAUDE.md",
     "promote_global": "Global CLAUDE.md (~/.claude)",
+    "copy_content": "Copy Content",
     "search_placeholder": "Search memories…",
     "filter_all": "All",
     "filter_user": "User",
@@ -1866,6 +1867,8 @@
     "loading": "Loading report...",
     "no_report": "No report for this date.",
     "generate": "Generate Report",
+    "regenerate": "Regenerate Report",
+    "copy_date": "Copy Date",
     "total_tokens": "Total Tokens",
     "sessions": "Sessions",
     "subagents": "subagents",
@@ -1971,6 +1974,7 @@
   "files": {
     "panel_title": "Repos",
     "add_path": "Add path",
+    "remove_path": "Remove from list",
     "tab_files": "Files",
     "no_workspaces_title": "No workspaces yet",
     "no_workspaces_subtitle": "Project directories appear here once sessions are running.",
@@ -2032,6 +2036,7 @@
     "open_in_files": "Open in Repos",
     "reveal_in_finder": "Reveal in Finder",
     "reveal_in_explorer": "Show in File Explorer",
+    "copy_path": "Copy Path",
     "open_hint": "Open {{path}}",
     "not_found": "Path not found"
   },
