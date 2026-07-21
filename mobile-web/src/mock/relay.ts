@@ -19,6 +19,7 @@ import {
   MOCK_FLEET_ASK,
   MOCK_GUARD,
   MOCK_GUARD_ANALYSIS,
+  MOCK_HANDOFF_CHAIN,
   MOCK_MESSAGES,
   MOCK_SESSIONS,
   MOCK_TODAY_USAGE,
@@ -130,6 +131,12 @@ export class MockRelayClient extends RelayClient {
       }
       case "live_thinking":
         return null;
+      // Only the billing legs sit on a chain; every other session is off-chain
+      // (null), which the tab renders as "not on any relay chain".
+      case "handoff_chain":
+        return String(params?.sessionId ?? "").startsWith("sess-billing-")
+          ? MOCK_HANDOFF_CHAIN
+          : null;
       case "wiki_list":
         return MOCK_WIKI_DOCS;
       case "account_usage":
