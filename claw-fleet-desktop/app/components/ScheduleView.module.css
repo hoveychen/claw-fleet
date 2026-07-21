@@ -153,7 +153,8 @@
   gap: 6px;
   flex-shrink: 0;
 }
-.edit {
+.edit,
+.run_now {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -166,10 +167,15 @@
   font-size: 11px;
   cursor: pointer;
 }
-.edit:hover {
+.edit:hover,
+.run_now:hover:not(:disabled) {
   color: var(--color-accent);
   border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
   background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+.run_now:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .cancel {
   display: inline-flex;

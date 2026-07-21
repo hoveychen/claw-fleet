@@ -185,6 +185,17 @@ impl ProbeClient {
         self.get::<serde_json::Value>(endpoint)
     }
 
+    /// POST a `?id=` run-now request (empty body) and pull `sessionId` out of the
+    /// `{ "ok": true, "sessionId": ... }` reply. A 500 body's `error` is surfaced
+    /// by `post_json`.
+    fn run_now(&self, endpoint: &str, id: &str) -> Result<Option<String>, String> {
+        let v: serde_json::Value =
+            self.post_json(&format!("{endpoint}?id={id}"), &serde_json::json!({}))?;
+        Ok(v.get("sessionId")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()))
+    }
+
     /// POST raw bytes (e.g. a file upload) and deserialize the JSON response.
     fn post_bytes<T: serde::de::DeserializeOwned>(
         &self,
@@ -362,6 +373,15 @@ impl crate::backend::Backend for RemoteBackend {
         // The host's route re-arms the timer on that machine; we just POST + read back.
         self.probe
             .post_json(claw_fleet_core::routes::SCHEDULE_UPDATE, &update)
+    }
+
+    fn run_schedule_now(&self, id: String) -> Result<Option<String>, String> {
+        // The fire spawns on the host; we POST and read back the session id.
+        self.probe.run_now(claw_fleet_core::routes::SCHEDULE_RUN, &id)
+    }
+
+    fn run_loop_now(&self, id: String) -> Result<Option<String>, String> {
+        self.probe.run_now(claw_fleet_core::routes::LOOP_RUN, &id)
     }
 
     fn list_sessions(&self) -> Vec<crate::session::SessionInfo> {
