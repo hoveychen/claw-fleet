@@ -61,9 +61,12 @@ pub struct RemoteWorkspace {
     /// `rca serve` on the remote host. `None` for stdio-over-ssh entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pairing_code: Option<String>,
-    /// stdio-over-ssh transport: the ssh target (host alias or `user@host`)
-    /// Fleet runs `ssh <target> <remote-rca> serve --stdio` against. `None`
-    /// for pairing-code entries.
+    /// stdio-over-ssh transport: the ssh argument fragment Fleet drops into
+    /// `ssh <ssh_target> <remote-rca> serve --stdio`. Either a bare ssh-config
+    /// `alias`, or a full fragment carrying connection options —
+    /// `-p 2222 -i /path/key -J jump user@host`. Spaces are allowed (they split
+    /// into argv words for ssh); shell metacharacters are rejected. `None` for
+    /// pairing-code entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_target: Option<String>,
     /// stdio-over-ssh transport: the rca binary path ON THE REMOTE host.
@@ -169,20 +172,42 @@ fn validate_pairing_code(code: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The ssh target and remote rca path are embedded verbatim into the
-/// `sh -c '<via>'` string rca runs for `--via` (`cmd/rca/run.go`), so a space,
-/// quote, or shell metacharacter would break argv splitting or inject.
-/// Registration values come from saved SSH connections (trusted), but reject
-/// them defensively — an ssh host alias / `user@host` / rca path never needs
-/// these characters.
+/// Shell metacharacters that, embedded into the `sh -c '<via>'` string rca
+/// runs for `--via` (`cmd/rca/run.go`), could break argv splitting or inject a
+/// command. Registration values come from saved SSH connections (trusted), but
+/// reject these defensively. NOTE: a space is NOT here — see the two validators.
+const SHELL_METACHARS: &[char] =
+    &['\'', '"', ';', '&', '|', '$', '`', '\n', '\r', '<', '>', '(', ')', '\\', '*', '\t'];
+
+/// A single unsplittable token (the remote rca path): reject spaces AND
+/// metacharacters — a filesystem path passed as one argv word never needs them.
 fn validate_shell_token(tok: &str, what: &str) -> Result<(), String> {
     if tok.is_empty() {
         return Err(format!("{what} must not be empty"));
     }
-    const BAD: &[char] =
-        &[' ', '\t', '\'', '"', ';', '&', '|', '$', '`', '\n', '\r', '<', '>', '(', ')', '\\', '*'];
-    if let Some(c) = tok.chars().find(|c| BAD.contains(c)) {
+    if tok.contains(' ') {
+        return Err(format!("{what} must not contain spaces"));
+    }
+    if let Some(c) = tok.chars().find(|c| SHELL_METACHARS.contains(c)) {
         return Err(format!("{what} contains an unsupported character {c:?}"));
+    }
+    Ok(())
+}
+
+/// The ssh target holds a full ssh argument fragment (e.g. `-p 2222 -i /key
+/// -J jump user@host`, or just an ssh-config `alias`), so spaces ARE allowed —
+/// `sh -c` splits them into separate argv words for ssh, which is exactly the
+/// point. Shell metacharacters are still rejected (a space is a benign argv
+/// separator; `;`/`$`/backtick/quotes would inject or misparse). This is what
+/// lets a connection with a custom port / identity file / jump host be
+/// expressed, instead of only a single bare host token.
+fn validate_ssh_target(tok: &str) -> Result<(), String> {
+    let tok = tok.trim();
+    if tok.is_empty() {
+        return Err("ssh target must not be empty".to_string());
+    }
+    if let Some(c) = tok.chars().find(|c| SHELL_METACHARS.contains(c)) {
+        return Err(format!("ssh target contains an unsupported character {c:?}"));
     }
     Ok(())
 }
@@ -200,7 +225,7 @@ impl RemoteWorkspace {
                 Ok(Transport::Pairing(code.to_string()))
             }
             (None, Some(target)) => {
-                validate_shell_token(target, "ssh target")?;
+                validate_ssh_target(target)?;
                 let remote_rca = self
                     .remote_rca_path
                     .as_deref()
@@ -612,11 +637,12 @@ mod tests {
     }
 
     /// The ssh target / remote rca path are embedded into a `sh -c` string, so
-    /// shell metacharacters must be rejected at registration.
+    /// shell metacharacters must be rejected at registration. Spaces in the ssh
+    /// target are NOT rejected — they carry ssh option words (see D1).
     #[test]
     fn upsert_rejects_shell_metachars() {
         let home = TmpHome::new("shellmeta");
-        for bad in ["host; rm -rf /", "host$(whoami)", "a host", "host`id`", "h|p"] {
+        for bad in ["host; rm -rf /", "host$(whoami)", "host`id`", "h|p", "a\"b", "x&y"] {
             assert!(
                 upsert(stdio_entry(&home.path("proj"), bad)).is_err(),
                 "ssh target {bad:?} must be refused"
@@ -625,5 +651,36 @@ mod tests {
         let mut e = stdio_entry(&home.path("proj"), "safe-host");
         e.remote_rca_path = Some("/opt/rca; evil".into());
         assert!(upsert(e).is_err(), "remote rca path with metachars must be refused");
+        // A remote rca path with a space is also refused (single argv word).
+        let mut sp = stdio_entry(&home.path("proj"), "safe-host");
+        sp.remote_rca_path = Some("/opt/my rca".into());
+        assert!(upsert(sp).is_err(), "remote rca path with a space must be refused");
+    }
+
+    /// D1: an ssh target carrying full connection options (custom port /
+    /// identity / jump host) round-trips and slots verbatim into the `--via`
+    /// command — spaces split into ssh argv words.
+    #[test]
+    fn wrap_launch_stdio_ssh_target_with_full_args() {
+        let home = TmpHome::new("stdio-fullargs");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        let mut e = stdio_entry(&ws, "-p 2222 -i /home/me/.ssh/id_ed25519 -J bastion me@gpu-box");
+        e.remote_rca_path = Some("/opt/rca".into());
+        e.rca_path = Some(fake_rca);
+        upsert(e).unwrap();
+
+        let saved = load().workspaces.into_iter().find(|w| w.path == ws).unwrap();
+        assert_eq!(
+            saved.ssh_target.as_deref(),
+            Some("-p 2222 -i /home/me/.ssh/id_ed25519 -J bastion me@gpu-box")
+        );
+        let got = wrap_launch(&ws, "claude", &[]).unwrap().unwrap();
+        assert_eq!(
+            got.args.last().unwrap(),
+            "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+             -p 2222 -i /home/me/.ssh/id_ed25519 -J bastion me@gpu-box /opt/rca serve --stdio"
+        );
     }
 }
