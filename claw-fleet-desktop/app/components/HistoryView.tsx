@@ -1312,17 +1312,16 @@ export function HistoryView() {
                       aria-expanded={expanded}
                       title={t("history.group_hint", "接力链 — 点击展开链上会话")}
                     >
-                      {tipColor && (
-                        <span
-                          className={styles.row_status_dot}
-                          style={{ background: tipColor }}
-                        />
-                      )}
+                      {/* The chevron sits in the gutter a plain row's status dot
+                          would occupy (see .group_header), so a separate dot here
+                          would land on top of it. Fold run-status onto the chevron
+                          itself — colour it live/waiting like the dot, dim otherwise. */}
                       <ChevronRight
                         className={styles.group_chevron}
                         data-open={expanded ? "true" : "false"}
                         size={14}
                         strokeWidth={2}
+                        style={tipColor ? { color: tipColor } : undefined}
                       />
                       <span className={styles.row_body}>
                         <span className={styles.row_title}>
