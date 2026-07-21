@@ -247,3 +247,42 @@ describe("inline SVG survives the sanitize pass", () => {
     expect(html).not.toContain("onerror");
   });
 });
+
+describe("CJK first-line indent", () => {
+  it("marks a Chinese paragraph with cjk-indent", () => {
+    const html = render("这是一段中文正文，应该首行缩进两个字。");
+    expect(html).toContain('class="cjk-indent"');
+  });
+
+  it("leaves an English paragraph unindented", () => {
+    const html = render("This is an English paragraph and stays flush left.");
+    expect(html).not.toContain("cjk-indent");
+  });
+
+  it("indents a paragraph that opens with a Chinese curly quote", () => {
+    const html = render("“引号开头的中文段落”也要缩进。");
+    expect(html).toContain('class="cjk-indent"');
+  });
+
+  it("judges by the first meaningful char — English-leading stays unindented", () => {
+    const html = render("SaaS 产品的中文说明，但以英文单词开头。");
+    expect(html).not.toContain("cjk-indent");
+  });
+
+  it("does not indent Chinese paragraphs inside list items", () => {
+    const html = render("- 列表项里的中文，不应首行缩进\n- 第二项");
+    expect(html).not.toContain("cjk-indent");
+  });
+
+  it("does not indent Chinese paragraphs inside a blockquote", () => {
+    const html = render("> 引用块里的中文，不应首行缩进");
+    expect(html).not.toContain("cjk-indent");
+  });
+
+  it("keeps the class through the sanitize pass and merges with existing ones", () => {
+    // A leading inline element must not hide the CJK first char from detection.
+    const html = render("**加粗开头**的中文段落也要缩进。");
+    expect(html).toContain("cjk-indent");
+    expect(html).toContain("<strong>加粗开头</strong>");
+  });
+});

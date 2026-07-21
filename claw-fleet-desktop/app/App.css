@@ -459,3 +459,8 @@ html.os-windows::-webkit-scrollbar-thumb,
 .os-windows ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
 html.os-windows::-webkit-scrollbar-thumb:hover,
 .os-windows ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* 中文段落首行缩进 2 字。`cjk-indent` 由 markdown 的 rehypeCjkIndent 插件加在
+   首字为 CJK 的 <p> 上（英文段落不加），所以只有中文正文段落缩进。1em ≈ 1 个
+   全角字宽，2em 即 2 个中文字。 */
+.cjk-indent { text-indent: 2em; }
