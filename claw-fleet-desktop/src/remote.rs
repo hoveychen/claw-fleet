@@ -1654,6 +1654,121 @@ pub fn delete_connection(id: String) -> Result<(), String> {
     save_connections(&conns)
 }
 
+// ── rca stdio-over-ssh auto-installer ────────────────────────────────────────
+
+/// Map `uname -sm` output to the rca release archive slug (`<os>_<arch>`),
+/// matching the tarballs published at
+/// `github.com/hoveychen/remote-adapter/releases` (Go arch naming: amd64/arm64).
+fn rca_release_slug(uname: &str) -> Option<&'static str> {
+    let u = uname.to_lowercase();
+    let os = if u.contains("linux") {
+        "linux"
+    } else if u.contains("darwin") {
+        "darwin"
+    } else {
+        return None;
+    };
+    let arch = if u.contains("x86_64") || u.contains("amd64") {
+        "amd64"
+    } else if u.contains("aarch64") || u.contains("arm64") {
+        "arm64"
+    } else {
+        return None;
+    };
+    Some(match (os, arch) {
+        ("linux", "amd64") => "linux_amd64",
+        ("linux", "arm64") => "linux_arm64",
+        ("darwin", "amd64") => "darwin_amd64",
+        ("darwin", "arm64") => "darwin_arm64",
+        _ => return None,
+    })
+}
+
+/// Derive the single spaceless ssh target token that goes into the `--via`
+/// command. An SSH config profile name is ideal (`ssh <alias>` resolves
+/// port/key/user/proxyjump on its own). A manual connection only fits a token
+/// if it is a bare `user@host` on port 22 with a key ssh finds itself; custom
+/// port/identity/jump must be expressed as a `~/.ssh/config` Host alias.
+fn ssh_target_token(conn: &RemoteConnection) -> Result<String, String> {
+    if let Some(profile) = conn.ssh_profile.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        return Ok(profile.to_string());
+    }
+    if conn.port != 22 || conn.jump_host.is_some() || conn.identity_file.is_some() {
+        return Err(
+            "this connection uses a custom port, identity file, or jump host — add it as a Host \
+             alias in ~/.ssh/config and re-scan so stdio-over-ssh can reference it by name"
+                .to_string(),
+        );
+    }
+    Ok(format!("{}@{}", conn.username, conn.host))
+}
+
+fn install_rca_remote_impl(
+    conn: RemoteConnection,
+    path: String,
+    label: Option<String>,
+) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+    use claw_fleet_core::remote_workspace;
+
+    // 1. Probe SSH connectivity.
+    ssh_exec(&conn, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
+
+    // 2. Detect remote OS/arch → release archive slug.
+    let uname = ssh_exec(&conn, "uname -sm").map_err(|e| format!("uname failed: {e}"))?;
+    let slug = rca_release_slug(&uname)
+        .ok_or_else(|| format!("unsupported remote platform for rca: {uname:?}"))?;
+
+    // 3. Install rca into ~/.fleet/bin on the remote, echoing its ABSOLUTE path.
+    //    `$HOME` is resolved on the remote here so the `--via` string later
+    //    carries no `~` (local `sh -c` would expand it to the LOCAL home).
+    let url = format!(
+        "https://github.com/hoveychen/remote-adapter/releases/latest/download/rca_{slug}.tar.gz"
+    );
+    let install = format!(
+        "set -e; mkdir -p \"$HOME/.fleet/bin\"; cd \"$HOME/.fleet/bin\"; \
+         curl -fsSL {url} | tar xz; chmod +x rca; test -x \"$HOME/.fleet/bin/rca\"; \
+         printf '%s\\n' \"$HOME/.fleet/bin/rca\""
+    );
+    let remote_rca = ssh_exec(&conn, &install)
+        .map_err(|e| format!("rca install failed: {e}"))?
+        .lines()
+        .last()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if remote_rca.is_empty() {
+        return Err("rca install produced no remote path".to_string());
+    }
+
+    // 4. Single-token ssh target for the `--via` command.
+    let ssh_target = ssh_target_token(&conn)?;
+
+    // 5. Register the stdio-over-ssh workspace (validates transport + creates
+    //    the local mirror directory at the identity-mapped path).
+    remote_workspace::upsert(remote_workspace::RemoteWorkspace {
+        path,
+        ssh_target: Some(ssh_target),
+        remote_rca_path: Some(remote_rca),
+        label: label.filter(|l| !l.trim().is_empty()),
+        ..Default::default()
+    })
+}
+
+/// Tauri command — install rca on a saved SSH host and register `path` as a
+/// stdio-over-ssh remote workspace. Desktop-layer local SSH op (like
+/// [`connect_remote`]); does NOT go through the Backend trait. Runs on the
+/// blocking pool so the multi-second SSH work never freezes the UI thread.
+#[tauri::command]
+pub async fn install_rca_remote(
+    conn: RemoteConnection,
+    path: String,
+    label: Option<String>,
+) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+    tauri::async_runtime::spawn_blocking(move || install_rca_remote_impl(conn, path, label))
+        .await
+        .map_err(|e| format!("install task join failed: {e}"))?
+}
+
 // ── SSH helpers ───────────────────────────────────────────────────────────────
 
 /// Apply the real HOME environment to an SSH/SCP `Command` so that the child
@@ -2943,6 +3058,49 @@ mod tests {
     use std::sync::MutexGuard;
 
     const TOKEN: &str = "integration-test-token";
+
+    #[test]
+    fn rca_release_slug_maps_uname() {
+        use super::rca_release_slug;
+        assert_eq!(rca_release_slug("Linux x86_64"), Some("linux_amd64"));
+        assert_eq!(rca_release_slug("Linux aarch64"), Some("linux_arm64"));
+        assert_eq!(rca_release_slug("Darwin arm64"), Some("darwin_arm64"));
+        assert_eq!(rca_release_slug("Darwin x86_64"), Some("darwin_amd64"));
+        assert_eq!(rca_release_slug("FreeBSD amd64"), None);
+        assert_eq!(rca_release_slug("Linux riscv64"), None);
+    }
+
+    #[test]
+    fn ssh_target_token_prefers_profile_then_user_host() {
+        use super::{ssh_target_token, RemoteConnection};
+        let base = RemoteConnection {
+            id: "x".into(),
+            label: "".into(),
+            host: "box".into(),
+            port: 22,
+            username: "dev".into(),
+            identity_file: None,
+            jump_host: None,
+            ssh_profile: None,
+        };
+        // Profile alias wins.
+        let mut c = base.clone();
+        c.ssh_profile = Some("gpu-box".into());
+        assert_eq!(ssh_target_token(&c).unwrap(), "gpu-box");
+        // Plain default-port host → user@host.
+        assert_eq!(ssh_target_token(&base).unwrap(), "dev@box");
+        // Custom port / identity / jump without a profile is refused (can't fit
+        // a single --via token).
+        let mut p = base.clone();
+        p.port = 2222;
+        assert!(ssh_target_token(&p).is_err());
+        let mut k = base.clone();
+        k.identity_file = Some("/k".into());
+        assert!(ssh_target_token(&k).is_err());
+        let mut j = base.clone();
+        j.jump_host = Some("bastion".into());
+        assert!(ssh_target_token(&j).is_err());
+    }
 
     /// A booted server plus everything that must outlive it.
     struct Fixture {
