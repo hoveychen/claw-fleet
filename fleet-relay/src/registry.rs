@@ -63,10 +63,28 @@ impl Channel {
     }
 }
 
-#[derive(Default)]
+/// Default cap on distinct live channels (override: `RELAY_MAX_CHANNELS`). Each
+/// channel is one pairing secret, so this bounds how many independent tenants
+/// can hold state at once — a memory backstop, set well above any realistic
+/// active-user count.
+pub const DEFAULT_MAX_CHANNELS: usize = 100_000;
+/// Default cap on connections of one role within a single channel (override:
+/// `RELAY_MAX_PER_CHANNEL`). A tenant normally has one agent (desktop) and a
+/// handful of clients (phone/tablet/web); 64 leaves generous headroom while
+/// stopping one channel from being packed with sockets.
+pub const DEFAULT_MAX_PER_CHANNEL: usize = 64;
+
 pub struct Registry {
     channels: Mutex<HashMap<String, Channel>>,
     next_id: AtomicU64,
+    max_channels: usize,
+    max_per_channel: usize,
+}
+
+impl Default for Registry {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_CHANNELS, DEFAULT_MAX_PER_CHANNEL)
+    }
 }
 
 /// Snapshot returned by `join`, used for the `authed` acknowledgement.
@@ -77,10 +95,41 @@ pub struct JoinState {
 }
 
 impl Registry {
-    /// Register a connection and notify the opposite role of the change.
-    pub fn join(&self, channel: &str, role: Role, tx: Tx) -> JoinState {
-        let conn_id = self.next_id.fetch_add(1, Ordering::Relaxed);
+    pub fn new(max_channels: usize, max_per_channel: usize) -> Self {
+        Self {
+            channels: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+            max_channels,
+            max_per_channel,
+        }
+    }
+
+    /// Register a connection and notify the opposite role of the change. Returns
+    /// `None` (admission rejected) when the connection would create a channel
+    /// past the channel-count cap, or add a role past the per-channel cap.
+    pub fn join(&self, channel: &str, role: Role, tx: Tx) -> Option<JoinState> {
         let mut channels = self.channels.lock().unwrap();
+        // Cap check under the lock, before creating the bucket, so a rejected
+        // join never leaves an empty channel behind or races the count.
+        match channels.get(channel) {
+            Some(ch) => {
+                if ch.members(role).len() >= self.max_per_channel {
+                    log::warn!(
+                        "join rejected: channel {}… {role:?} at per-channel cap {}",
+                        &channel[..channel.len().min(12)],
+                        self.max_per_channel
+                    );
+                    return None;
+                }
+            }
+            None => {
+                if channels.len() >= self.max_channels {
+                    log::warn!("join rejected: channel cap {} reached", self.max_channels);
+                    return None;
+                }
+            }
+        }
+        let conn_id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let ch = channels.entry(channel.to_string()).or_default();
         ch.members_mut(role).insert(conn_id, tx);
         let state = JoinState {
@@ -89,7 +138,7 @@ impl Registry {
             agent_online: !ch.agents.is_empty(),
         };
         Self::broadcast_membership(ch, role);
-        state
+        Some(state)
     }
 
     /// Deregister a connection and notify the opposite role of the change.
@@ -248,12 +297,12 @@ mod tests {
     fn membership_changes_notify_opposite_role() {
         let reg = Registry::default();
         let (agent_tx, mut agent_rx) = unbounded_channel();
-        let st = reg.join("ch", Role::Agent, agent_tx);
+        let st = reg.join("ch", Role::Agent, agent_tx).unwrap();
         assert_eq!(st.clients, 0);
         assert!(st.agent_online);
 
         let (client_tx, mut client_rx) = unbounded_channel();
-        let st = reg.join("ch", Role::Client, client_tx);
+        let st = reg.join("ch", Role::Client, client_tx).unwrap();
         assert_eq!(st.clients, 1);
         let events = drain(&mut agent_rx);
         assert_eq!(events.last().unwrap()["type"], "presence");
@@ -269,7 +318,7 @@ mod tests {
     fn agent_departure_flips_agent_status() {
         let reg = Registry::default();
         let (agent_tx, _agent_rx) = unbounded_channel();
-        let agent = reg.join("ch", Role::Agent, agent_tx);
+        let agent = reg.join("ch", Role::Agent, agent_tx).unwrap();
         let (client_tx, mut client_rx) = unbounded_channel();
         reg.join("ch", Role::Client, client_tx);
         drain(&mut client_rx);
@@ -278,5 +327,35 @@ mod tests {
         let events = drain(&mut client_rx);
         assert_eq!(events.last().unwrap()["type"], "agent_status");
         assert_eq!(events.last().unwrap()["online"], false);
+    }
+
+    #[test]
+    fn channel_count_cap_rejects_new_channels_only() {
+        let reg = Registry::new(1, 64); // room for exactly one channel
+        let (a_tx, _a) = unbounded_channel();
+        assert!(reg.join("ch-a", Role::Agent, a_tx).is_some(), "first channel admitted");
+        let (b_tx, _b) = unbounded_channel();
+        assert!(reg.join("ch-b", Role::Agent, b_tx).is_none(), "second channel over cap");
+        // But another connection to the *existing* channel is fine (no new bucket).
+        let (a2_tx, _a2) = unbounded_channel();
+        assert!(reg.join("ch-a", Role::Client, a2_tx).is_some(), "existing channel still accepts");
+    }
+
+    #[test]
+    fn per_channel_role_cap_rejects_within_channel() {
+        let reg = Registry::new(100, 2); // 2 per role per channel
+        let (a1, _r1) = unbounded_channel();
+        let (a2, _r2) = unbounded_channel();
+        assert!(reg.join("ch", Role::Agent, a1).is_some());
+        assert!(reg.join("ch", Role::Agent, a2).is_some());
+        let (a3, _r3) = unbounded_channel();
+        assert!(reg.join("ch", Role::Agent, a3).is_none(), "third agent over per-channel cap");
+        // The other role has its own budget in the same channel.
+        let (c1, _rc1) = unbounded_channel();
+        let (c2, _rc2) = unbounded_channel();
+        assert!(reg.join("ch", Role::Client, c1).is_some(), "client role has its own cap");
+        assert!(reg.join("ch", Role::Client, c2).is_some());
+        let (c3, _rc3) = unbounded_channel();
+        assert!(reg.join("ch", Role::Client, c3).is_none(), "third client over per-channel cap");
     }
 }

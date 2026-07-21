@@ -111,7 +111,10 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
     let channel = channel_id(&secret);
 
     let (tx, mut rx) = unbounded_channel::<OutMsg>();
-    let joined = state.registry.join(&channel, role, tx);
+    let Some(joined) = state.registry.join(&channel, role, tx) else {
+        let _ = send_frame(&mut socket, &OutFrame::Error { message: "channel at capacity".into() }).await;
+        return;
+    };
     log::info!("{role:?} joined channel {}… ({} client(s))", &channel[..12], joined.clients);
     let authed = OutFrame::Authed {
         role,
