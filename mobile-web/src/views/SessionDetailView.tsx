@@ -767,7 +767,7 @@ const MessageRow = memo(function MessageRow({
       <div className={styles.userRow}>
         <div className={styles.userBubble}>
           {thumbs.length > 0 && <ThumbRow srcs={thumbs} />}
-          {text}
+          {text && <LazyMarkdown text={text} bare />}
         </div>
         <div className={styles.rowTime}>
           {text && <CopyButton text={text} />}
