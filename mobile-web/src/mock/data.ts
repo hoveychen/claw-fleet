@@ -469,6 +469,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
         content: [
           { type: "tool_use", id: "at4", name: "Edit", input: { file_path: "/Users/demo/workspace/api-server/src/middleware/auth.ts" } },
           { type: "tool_use", id: "at5", name: "Bash", input: { command: "npm test -- auth", description: "Re-run the suite against the dual-issuer patch" } },
+          { type: "tool_use", id: "at7", name: "WebSearch", input: { query: "jwt issuer migration dual issuer verify node" } },
         ],
       },
     },
@@ -517,6 +518,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_result", tool_use_id: "at4", _digest: { added: 3, removed: 1 } },
           { type: "tool_result", tool_use_id: "at5", _digest: { stdoutLines: 87, stderrLines: 0 } },
           { type: "tool_result", tool_use_id: "at6", _digest: { todoDone: 2, todoTotal: 3 } },
+          { type: "tool_result", tool_use_id: "at7", _digest: { links: 9 } },
         ],
       },
     },
@@ -609,6 +611,33 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
 /** `tool_detail` replies keyed by tool_use_id — what tapping a tool line
  *  fetches. Shapes mirror serve_tool_detail (mobile_relay.rs). */
 export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
+  // WebSearch as the relay ships it: the untouched `toolUseResult`, whose
+  // `results[]` interleaves narration strings with `{content:[{title,url}]}`
+  // objects. Exercises the favicon result-card body + the flatten path.
+  at7: {
+    name: "WebSearch",
+    input: { query: "jwt issuer migration dual issuer verify node" },
+    toolUseResult: {
+      query: "jwt issuer migration dual issuer verify node",
+      results: [
+        "Let me look up how others handle a JWT issuer migration.",
+        {
+          tool_use_id: "srvtoolu_mockjwt",
+          content: [
+            { title: "jsonwebtoken - npm", url: "https://www.npmjs.com/package/jsonwebtoken" },
+            { title: "Migrating JWT issuers without downtime - Auth0 Blog", url: "https://auth0.com/blog/migrating-jwt-issuers" },
+            { title: "RFC 7519: JSON Web Token (JWT)", url: "https://datatracker.ietf.org/doc/html/rfc7519" },
+            { title: "Verify tokens from multiple issuers - Stack Overflow", url: "https://stackoverflow.com/questions/jwt-multiple-issuers" },
+            { title: "jose - Verify JWT with issuer allowlist", url: "https://github.com/panva/jose" },
+            { title: "Rotating signing keys and issuers - Okta Developer", url: "https://developer.okta.com/docs/guides/key-rotation" },
+            { title: "JWT best practices - OWASP Cheat Sheet", url: "https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html" },
+            { title: "aud and iss validation in express-jwt", url: "https://github.com/auth0/express-jwt" },
+            { title: "Zero-downtime auth migrations - Dev.to", url: "https://dev.to/zero-downtime-auth-migrations" },
+          ],
+        },
+      ],
+    },
+  },
   at3: {
     name: "Bash",
     input: { command: "npm test -- auth", description: "Run the auth middleware suite" },
