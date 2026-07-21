@@ -2071,6 +2071,15 @@ impl Backend for LocalBackend {
         crate::today_usage::today_usage_breakdown(&sessions)
     }
 
+    fn usage_range_breakdown(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> crate::today_usage::UsageRangeBreakdown {
+        let sessions = self.sessions.lock().unwrap().clone();
+        crate::today_usage::usage_range_breakdown(&sessions, from_ms, to_ms)
+    }
+
     fn check_setup(&self) -> crate::backend::SetupStatus {
         let (cli_installed, cli_path) = crate::check_cli_installed();
         let claude_dir_exists = crate::session::real_home_dir()

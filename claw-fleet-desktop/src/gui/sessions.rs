@@ -20,6 +20,19 @@ pub(crate) fn today_usage_breakdown(
 }
 
 #[tauri::command(async)]
+pub(crate) fn usage_range_breakdown(
+    from_ms: i64,
+    to_ms: i64,
+    state: tauri::State<'_, AppState>,
+) -> claw_fleet_core::today_usage::UsageRangeBreakdown {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .usage_range_breakdown(from_ms, to_ms)
+}
+
+#[tauri::command(async)]
 pub(crate) fn search_sessions(
     query: String,
     limit: Option<usize>,

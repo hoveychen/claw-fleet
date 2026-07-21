@@ -1475,6 +1475,19 @@ impl crate::backend::Backend for RemoteBackend {
             .unwrap_or_default()
     }
 
+    fn usage_range_breakdown(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> crate::today_usage::UsageRangeBreakdown {
+        self.probe
+            .get(&format!(
+                "{}?from_ms={from_ms}&to_ms={to_ms}",
+                claw_fleet_core::routes::USAGE_RANGE_BREAKDOWN
+            ))
+            .unwrap_or_default()
+    }
+
     fn usage_history(
         &self,
         from_ms: i64,
