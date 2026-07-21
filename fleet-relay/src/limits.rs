@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// Default global concurrent-connection ceiling (override: `RELAY_MAX_CONNECTIONS`).
 pub const DEFAULT_MAX_TOTAL: usize = 20_000;
@@ -107,12 +108,81 @@ impl Drop for ConnGuard {
     }
 }
 
+/// Default burst size for the per-IP connection-rate bucket
+/// (override: `RELAY_CONN_RATE_BURST`).
+pub const DEFAULT_RATE_BURST: usize = 60;
+/// Default steady-state new-connections-per-second per IP
+/// (override: `RELAY_CONN_RATE_PER_SEC`).
+pub const DEFAULT_RATE_PER_SEC: f64 = 10.0;
+/// Sweep full (== fresh) buckets once the map grows past this, to bound memory.
+const RATE_PRUNE_THRESHOLD: usize = 10_000;
+
+struct Bucket {
+    tokens: f64,
+    last: Instant,
+}
+
+/// Per-IP token-bucket limiter for the *rate* of new connections. The per-IP
+/// concurrent cap (`ConnLimiter`) bounds sockets held open at once; this bounds
+/// churny connect/disconnect floods that never accumulate a live count but still
+/// burn CPU and the registry lock on every handshake.
+///
+/// Hand-rolled rather than pulling in `governor`: the need is a single-process
+/// per-key token bucket that the standard library covers in a few lines, so a
+/// timing/concurrency dependency would buy nothing here.
+pub struct ConnRateLimiter {
+    buckets: Mutex<HashMap<IpAddr, Bucket>>,
+    burst: f64,
+    per_sec: f64,
+}
+
+impl ConnRateLimiter {
+    pub fn new(burst: usize, per_sec: f64) -> Arc<Self> {
+        Arc::new(Self {
+            buckets: Mutex::new(HashMap::new()),
+            burst: burst as f64,
+            per_sec,
+        })
+    }
+
+    /// Consume one token for a new connection from `ip`. Returns `true` if the
+    /// connection is allowed, `false` if the IP is over its rate.
+    pub fn check(&self, ip: IpAddr) -> bool {
+        self.check_at(ip, Instant::now())
+    }
+
+    /// `check` with an injectable clock for deterministic tests.
+    fn check_at(&self, ip: IpAddr, now: Instant) -> bool {
+        let mut map = self.buckets.lock().unwrap();
+        // A full bucket is indistinguishable from a fresh one, so dropping full
+        // buckets when the map gets large is lossless and bounds memory.
+        if map.len() > RATE_PRUNE_THRESHOLD {
+            map.retain(|_, b| b.tokens < self.burst);
+        }
+        let b = map.entry(ip).or_insert(Bucket { tokens: self.burst, last: now });
+        let elapsed = now.saturating_duration_since(b.last).as_secs_f64();
+        b.tokens = (b.tokens + elapsed * self.per_sec).min(self.burst);
+        b.last = now;
+        if b.tokens >= 1.0 {
+            b.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn ip(s: &str) -> Option<IpAddr> {
         Some(s.parse().unwrap())
+    }
+
+    fn ipa(s: &str) -> IpAddr {
+        s.parse().unwrap()
     }
 
     #[test]
@@ -154,5 +224,37 @@ mod tests {
         let b = lim.try_acquire(None);
         assert!(a.is_some() && b.is_some(), "unkeyed connections bypass per-IP cap");
         assert_eq!(lim.live_total(), 2, "but they still count toward the global total");
+    }
+
+    #[test]
+    fn rate_limiter_allows_burst_then_blocks() {
+        let rl = ConnRateLimiter::new(3, 1.0); // burst 3, refill 1/s
+        let now = Instant::now();
+        // Three back-to-back (same instant) allowed, fourth blocked.
+        assert!(rl.check_at(ipa("1.2.3.4"), now));
+        assert!(rl.check_at(ipa("1.2.3.4"), now));
+        assert!(rl.check_at(ipa("1.2.3.4"), now));
+        assert!(!rl.check_at(ipa("1.2.3.4"), now), "fourth in a burst is blocked");
+    }
+
+    #[test]
+    fn rate_limiter_refills_over_time() {
+        let rl = ConnRateLimiter::new(2, 5.0); // 5 tokens/sec
+        let t0 = Instant::now();
+        assert!(rl.check_at(ipa("1.2.3.4"), t0));
+        assert!(rl.check_at(ipa("1.2.3.4"), t0));
+        assert!(!rl.check_at(ipa("1.2.3.4"), t0), "burst drained");
+        // 0.5s later → 2.5 tokens refilled (capped at burst 2), so allowed again.
+        let t1 = t0 + Duration::from_millis(500);
+        assert!(rl.check_at(ipa("1.2.3.4"), t1), "refilled after waiting");
+    }
+
+    #[test]
+    fn rate_limiter_is_per_ip() {
+        let rl = ConnRateLimiter::new(1, 1.0);
+        let now = Instant::now();
+        assert!(rl.check_at(ipa("1.1.1.1"), now));
+        assert!(!rl.check_at(ipa("1.1.1.1"), now), "same IP drained");
+        assert!(rl.check_at(ipa("2.2.2.2"), now), "different IP has its own bucket");
     }
 }

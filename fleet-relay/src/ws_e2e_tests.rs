@@ -27,11 +27,13 @@ async fn spawn_server() -> String {
     std::mem::forget(dir);
     // Caps set effectively unlimited: these tests exercise forwarding, not admission.
     let conn_limiter = crate::limits::ConnLimiter::new(100_000, 100_000);
+    let conn_rate = crate::limits::ConnRateLimiter::new(100_000, 1e9);
     let state = Arc::new(AppState {
         registry: Registry::default(),
         push,
         harmony: None,
         conn_limiter,
+        conn_rate,
     });
     let app = build_api(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

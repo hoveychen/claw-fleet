@@ -52,6 +52,15 @@ pub async fn ws_handler(
     ws: WebSocketUpgrade,
 ) -> Response {
     let ip = client_ip(&headers);
+    // Rate-limit new connections per IP first (cheapest rejection for a flood),
+    // then reserve a concurrent slot. Unkeyed (no forwarded IP) skips the rate
+    // gate — there's no bucket to key — and is bounded only by the global cap.
+    if let Some(ip) = ip {
+        if !state.conn_rate.check(ip) {
+            log::warn!("connection rejected: rate limit (ip={ip})");
+            return (StatusCode::TOO_MANY_REQUESTS, "too many connection attempts").into_response();
+        }
+    }
     let Some(guard) = state.conn_limiter.try_acquire(ip) else {
         log::warn!("connection rejected: at capacity (ip={ip:?})");
         return (StatusCode::SERVICE_UNAVAILABLE, "relay at capacity").into_response();
