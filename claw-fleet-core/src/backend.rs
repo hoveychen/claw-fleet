@@ -498,20 +498,6 @@ pub trait Backend: Send + Sync {
         let _ = crate::schedule::arm_timer(&rec);
         Ok(rec)
     }
-    /// Manually run a schedule **now** without consuming it — the pending
-    /// schedule and its armed timer are left untouched, so it still fires at its
-    /// scheduled time. Default spawns on this machine (where the fire belongs);
-    /// RemoteBackend overrides to POST to the host. Returns the spawned session
-    /// id, if any.
-    fn run_schedule_now(&self, id: String) -> Result<Option<String>, String> {
-        crate::schedule::run_now(&id)
-    }
-    /// Manually run one iteration of a loop **now** without advancing its
-    /// schedule (`next_fire_at` / `iterations_done` / `generation` untouched).
-    /// Default local; RemoteBackend overrides.
-    fn run_loop_now(&self, id: String) -> Result<Option<String>, String> {
-        crate::agent_loop::run_now(&id)
-    }
 
     // ── Live thinking ────────────────────────────────────────────────────────
     /// Token-level reasoning for a Fleet-spawned session that is streaming

@@ -141,7 +141,7 @@ export function ScheduleView() {
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [cancelling, setCancelling] = useState<Set<string>>(new Set());
-  const [running, setRunning] = useState<Set<string>>(new Set());
+  const requestNewSession = useUIStore((s) => s.requestNewSession);
 
   const load = useCallback(async () => {
     try {
@@ -185,31 +185,25 @@ export function ScheduleView() {
     [load],
   );
 
-  // Run a task now without consuming it: the schedule/loop record is left
-  // untouched (it still fires on its own timer), so this just spawns one extra
-  // session with the same prompt. Jump to it if the scan already sees it.
+  // "立即运行": open a pre-filled new-session draft on the task page, seeded
+  // from this task (prompt / workspace / model / effort / agent tool). Same flow
+  // as "新建" — the user reviews and sends — so the spawned session carries the
+  // NEW_SESSION entrypoint and shows up on the task page as its own tab. The
+  // schedule/loop record itself is untouched: it still fires on its own timer.
   const runNow = useCallback(
-    async (task: FutureTask) => {
-      setRunning((prev) => new Set(prev).add(task.id));
-      try {
-        const sid = await invoke<string | null>(
-          task.kind === "loop" ? "run_loop_now" : "run_schedule_now",
-          { id: task.id },
-        );
-        if (sid) {
-          const s = useSessionsStore.getState().sessions.find((x) => x.id === sid);
-          if (s) useDetailStore.getState().open(s);
-        }
-        await load();
-      } finally {
-        setRunning((prev) => {
-          const next = new Set(prev);
-          next.delete(task.id);
-          return next;
-        });
-      }
+    (task: FutureTask) => {
+      const rec = task.rec;
+      const effort =
+        task.kind === "schedule" ? (task.rec as ScheduleRecord).effort : undefined;
+      requestNewSession({
+        prompt: rec.prompt,
+        workspace: rec.workspacePath,
+        model: rec.model ?? "",
+        effort: effort ?? "",
+        tool: rec.agentSource || "claude",
+      });
     },
-    [load],
+    [requestNewSession],
   );
 
   // Unified list, soonest-due first. Pending items lead; fired history trails.
@@ -235,7 +229,6 @@ export function ScheduleView() {
   );
 
   // "新建" shortcut: pick a time → open a new session seeded with the template.
-  const requestNewSession = useUIStore((s) => s.requestNewSession);
   const [creating, setCreating] = useState(false);
   const [fireLocal, setFireLocal] = useState("");
 
@@ -322,7 +315,6 @@ export function ScheduleView() {
             task={task}
             cancelling={cancelling.has(task.id)}
             onCancel={() => cancel(task)}
-            running={running.has(task.id)}
             onRunNow={
               task.kind === "schedule" && task.rec.status === "fired"
                 ? undefined
@@ -527,7 +519,6 @@ function TaskRow({
   task,
   cancelling,
   onCancel,
-  running,
   onRunNow,
   onEdit,
   onOpenSession,
@@ -535,9 +526,8 @@ function TaskRow({
   task: FutureTask;
   cancelling: boolean;
   onCancel: () => void;
-  /** True while a manual run is being kicked off. */
-  running?: boolean;
-  /** Run the task now without consuming it — absent for fired schedules. */
+  /** Open a pre-filled new-session draft seeded from this task — absent for
+   *  fired schedules (history). */
   onRunNow?: () => void;
   /** Present only for pending schedules — opens the edit form. */
   onEdit?: () => void;
@@ -639,12 +629,14 @@ function TaskRow({
         {onRunNow && (
           <button
             className={styles.run_now}
-            disabled={running}
             onClick={onRunNow}
-            title={t("schedule.run_now_tip", "立即运行一次；不消耗原计划，它仍会按原定时间触发")}
+            title={t(
+              "schedule.run_now_tip",
+              "用这个任务的参数打开一个新会话草稿，确认后发送即可运行；不影响原计划",
+            )}
           >
             <Play size={13} strokeWidth={2} />
-            {running ? t("schedule.running", "启动中") : t("schedule.run_now", "立即运行")}
+            {t("schedule.run_now", "立即运行")}
           </button>
         )}
         {onEdit && (
