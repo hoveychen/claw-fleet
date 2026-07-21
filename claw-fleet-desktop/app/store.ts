@@ -256,6 +256,16 @@ export interface FileNavRequest {
 export interface NewSessionNavRequest {
   /** Seed text for the new-session composer's prompt field. */
   prompt: string;
+  /** Optional seeds for the rest of the new-session draft, used by the schedule
+   *  page's "立即运行" so the draft opens pre-filled with the task's own
+   *  workspace / model / effort / agent tool. Omitted fields keep the draft's
+   *  own defaults (the "新建" shortcut passes only `prompt`). */
+  workspace?: string;
+  model?: string;
+  effort?: string;
+  /** Agent tool value (e.g. "claude" / "codex"), from the record's agentSource. */
+  tool?: string;
+  permissionMode?: string;
   /** Bumped per request so repeat clicks re-trigger the hop. */
   nonce: number;
 }
