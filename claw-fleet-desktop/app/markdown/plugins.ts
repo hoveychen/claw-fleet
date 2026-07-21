@@ -9,6 +9,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeKatex from "rehype-katex";
 import { remarkCjkAutolinkFix } from "./cjkAutolinkFix";
+import { rehypeCjkIndent } from "./cjkIndent";
 import "katex/dist/katex.min.css";
 
 /**
@@ -170,4 +171,7 @@ export const safeRehypePlugins: PluggableList = [
   rehypeRaw,
   [rehypeSanitize, schema],
   rehypeKatex,
+  // Runs last so the `cjk-indent` class it adds to CJK-leading <p> survives the
+  // sanitize pass above (className is globally allow-listed by `schema`).
+  rehypeCjkIndent,
 ];
