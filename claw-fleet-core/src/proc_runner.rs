@@ -16,7 +16,15 @@
 //!   `~/.fleet/procs/<id>.json`  — [`ProcRecord`] metadata (host rewrites it)
 //!   `~/.fleet/procs/<id>.out`   — raw pty output bytes (ansi preserved)
 //!   `~/.fleet/procs/<id>.sock`  — unix control socket (stdin / resize)
+//!   `~/.fleet/procs/<id>.ctl`   — Windows control file (JSON lines, appended
+//!                                 by `send_control`, tailed by the host)
 //!   `~/.fleet/procs/<id>.err`   — host's own stderr (diagnostics only)
+//!
+//! **Windows** has no pty/killpg, so the host runs a reduced transport:
+//! `cmd /S /C <command>` on plain pipes (stdout+stderr merged into `<id>.out`;
+//! commands see a non-TTY, so raw-mode/interactive fidelity is degraded and
+//! resize is a logged no-op), stdin arrives via the `<id>.ctl` control file
+//! the host tails, and kill is a `taskkill /F /T` on the command's tree.
 //!
 //! The spawner writes the initial `starting` record, then execs the host with
 //! just the id; from that point the **host is the only writer** of the meta
@@ -157,6 +165,12 @@ fn out_path(dir: &Path, id: &str) -> PathBuf {
 fn sock_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.sock"))
 }
+/// Windows control transport: `send_control` appends JSON lines here and the
+/// host tails it (there is no unix socket to connect to). Defined on every
+/// platform so cleanup paths can remove it unconditionally.
+fn ctl_path(dir: &Path, id: &str) -> PathBuf {
+    dir.join(format!("{id}.ctl"))
+}
 fn err_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.err"))
 }
@@ -229,58 +243,59 @@ pub fn spawn_proc_in(
     if !Path::new(workspace_path).is_dir() {
         return Err(format!("workspace path does not exist: {workspace_path}"));
     }
-    #[cfg(not(unix))]
-    {
-        let _ = (dir, host_exe, cols, rows);
-        Err("workspace commands are not supported on this platform yet".into())
-    }
+
+    let rec = ProcRecord {
+        id: gen_id(),
+        workspace_path: workspace_path.to_string(),
+        command: command.to_string(),
+        status: ProcStatus::Starting,
+        child_pid: None,
+        host_pid: None,
+        host_start_time: None,
+        exit_code: None,
+        started_ms: now_ms(),
+        finished_ms: None,
+        cols,
+        rows,
+    };
+    write_record(dir, &rec)?;
+
+    let err_file = fs::File::create(err_path(dir, &rec.id))
+        .map_err(|e| format!("create host err log: {e}"))?;
+    let mut cmd = crate::process_util::command(host_exe);
+    cmd.arg(HOST_ARGV_MARKER)
+        .arg(&rec.id)
+        .env("FLEET_PROCS_DIR", dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(err_file);
+    // Detach the host into its own session: killing / quitting the
+    // spawner (desktop app, fleet serve) must not take the host down.
+    // On Windows there is no setsid analogue and none is needed — a child
+    // there is not killed with its parent by default (no job object).
     #[cfg(unix)]
-    {
+    unsafe {
         use std::os::unix::process::CommandExt;
-
-        let rec = ProcRecord {
-            id: gen_id(),
-            workspace_path: workspace_path.to_string(),
-            command: command.to_string(),
-            status: ProcStatus::Starting,
-            child_pid: None,
-            host_pid: None,
-            host_start_time: None,
-            exit_code: None,
-            started_ms: now_ms(),
-            finished_ms: None,
-            cols,
-            rows,
-        };
-        write_record(dir, &rec)?;
-
-        let err_file = fs::File::create(err_path(dir, &rec.id))
-            .map_err(|e| format!("create host err log: {e}"))?;
-        let mut cmd = std::process::Command::new(host_exe);
-        cmd.arg(HOST_ARGV_MARKER)
-            .arg(&rec.id)
-            .env("FLEET_PROCS_DIR", dir)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(err_file);
-        // Detach the host into its own session: killing / quitting the
-        // spawner (desktop app, fleet serve) must not take the host down.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("spawn proc host {}: {e}", host_exe.display()))?;
-        // Reap the direct child so it doesn't linger as a zombie; the host
-        // keeps running detached regardless.
-        std::thread::spawn(move || {
-            let _ = child.wait();
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
         });
-        Ok(rec)
     }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn proc host {}: {e}", host_exe.display()))?;
+    crate::log_debug(&format!(
+        "proc_runner: spawned host pid={} for proc {} ({})",
+        child.id(),
+        rec.id,
+        rec.command
+    ));
+    // Reap the direct child so it doesn't linger as a zombie; the host
+    // keeps running detached regardless.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(rec)
 }
 
 /// All known procs, newest first, after self-healing stale `running` /
@@ -343,6 +358,7 @@ fn heal_stale(dir: &Path, rec: &mut ProcRecord) -> bool {
     rec.status = ProcStatus::Exited;
     rec.finished_ms = Some(now_ms());
     let _ = fs::remove_file(sock_path(dir, &rec.id));
+    let _ = fs::remove_file(ctl_path(dir, &rec.id));
     true
 }
 
@@ -380,10 +396,19 @@ pub fn kill_proc_in(dir: &Path, id: &str, force: bool) -> Result<(), String> {
         }
         Ok(())
     }
+    // taskkill /T kills the whole tree under the shell; there is no graceful
+    // tier on Windows, so `force` only affects logging. A nonzero exit means
+    // the tree was already gone — `list_procs` self-heals the record.
     #[cfg(not(unix))]
     {
-        let _ = pgid;
-        Err("workspace commands are not supported on this platform yet".into())
+        let status = crate::process_util::command("taskkill")
+            .args(["/F", "/T", "/PID", &pgid.to_string()])
+            .status()
+            .map_err(|e| format!("taskkill failed: {e}"))?;
+        crate::log_debug(&format!(
+            "proc_runner: taskkill /F /T /PID {pgid} (force={force}) -> {status}"
+        ));
+        Ok(())
     }
 }
 
@@ -462,10 +487,25 @@ fn send_control(dir: &Path, id: &str, msg: &ControlMsg) -> Result<(), String> {
             .write_all(line.as_bytes())
             .map_err(|e| format!("write control message: {e}"))
     }
+    // Windows: append the JSON line to the `<id>.ctl` file the host tails.
+    // Same wire format as the unix socket, different transport.
     #[cfg(not(unix))]
     {
-        let _ = (dir, id, msg);
-        Err("workspace commands are not supported on this platform yet".into())
+        use std::io::Write;
+
+        let rec = read_record(dir, id)?;
+        if rec.status == ProcStatus::Exited {
+            return Err("proc has exited".into());
+        }
+        let mut line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
+        line.push('\n');
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(ctl_path(dir, id))
+            .map_err(|e| format!("open proc control file: {e}"))?;
+        f.write_all(line.as_bytes())
+            .map_err(|e| format!("write control message: {e}"))
     }
 }
 
@@ -485,6 +525,7 @@ pub fn clear_proc_in(dir: &Path, id: &str) -> Result<(), String> {
         meta_path(dir, id),
         out_path(dir, id),
         sock_path(dir, id),
+        ctl_path(dir, id),
         err_path(dir, id),
     ] {
         let _ = fs::remove_file(p);
@@ -549,11 +590,131 @@ fn mark_host_failed(dir: &Path, id: &str, _err: &str) {
         let _ = write_record(dir, &rec);
     }
     let _ = fs::remove_file(sock_path(dir, id));
+    let _ = fs::remove_file(ctl_path(dir, id));
 }
 
+/// Read complete new JSON lines from the control file starting at `offset`.
+/// Returns the parsed messages and the offset just past the last complete
+/// line — a partial trailing line stays unconsumed for the next poll. Pure
+/// file logic, shared by the Windows host loop and unit-tested everywhere.
+#[cfg(any(not(unix), test))]
+fn drain_control_file(path: &Path, offset: u64) -> (Vec<ControlMsg>, u64) {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let Ok(mut f) = fs::File::open(path) else {
+        return (Vec::new(), offset);
+    };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    // Truncated/replaced behind our back → restart from the top.
+    let start = if offset > len { 0 } else { offset };
+    if len == start {
+        return (Vec::new(), start);
+    }
+    let mut buf = vec![0u8; (len - start) as usize];
+    if f.seek(SeekFrom::Start(start)).is_err() || f.read_exact(&mut buf).is_err() {
+        return (Vec::new(), start);
+    }
+    let Some(last_newline) = buf.iter().rposition(|&b| b == b'\n') else {
+        return (Vec::new(), start);
+    };
+    let msgs = buf[..=last_newline]
+        .split(|&b| b == b'\n')
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| serde_json::from_slice::<ControlMsg>(l).ok())
+        .collect();
+    (msgs, start + last_newline as u64 + 1)
+}
+
+/// Windows host loop: `cmd /S /C <command>` on plain pipes. stdout+stderr are
+/// merged into `<id>.out` by handing the child two handles to the same
+/// appending file; stdin arrives via the `<id>.ctl` file that `send_control`
+/// appends to; resize is a logged no-op (no ConPTY — commands see a non-TTY).
 #[cfg(not(unix))]
-fn run_host(_dir: &Path, _id: &str) -> Result<i32, String> {
-    Err("workspace commands are not supported on this platform yet".into())
+fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
+    use std::io::Write;
+
+    let mut rec = read_record(dir, id)?;
+
+    let out_file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(out_path(dir, id))
+        .map_err(|e| format!("open out log: {e}"))?;
+    let err_clone = out_file
+        .try_clone()
+        .map_err(|e| format!("clone out log handle: {e}"))?;
+
+    // /S: treat everything after /C as one command string (quotes preserved).
+    let mut cmd = crate::process_util::command("cmd");
+    cmd.arg("/S")
+        .arg("/C")
+        .arg(&rec.command)
+        .current_dir(&rec.workspace_path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::from(out_file))
+        .stderr(std::process::Stdio::from(err_clone));
+    let mut child = cmd.spawn().map_err(|e| format!("spawn cmd /S /C: {e}"))?;
+    drop(cmd);
+
+    let host_pid = std::process::id();
+    rec.status = ProcStatus::Running;
+    rec.child_pid = Some(child.id());
+    rec.host_pid = Some(host_pid);
+    rec.host_start_time = crate::session::process_start_time(host_pid);
+    write_record(dir, &rec)?;
+    eprintln!(
+        "fleet-proc-host {id}: running pid={} via cmd pipes (no ConPTY: non-TTY output, resize ignored)",
+        rec.child_pid.unwrap_or(0)
+    );
+
+    // Poll loop: forward control-file stdin to the child, watch for exit.
+    let ctl = ctl_path(dir, id);
+    let mut stdin_pipe = child.stdin.take();
+    let mut ctl_offset: u64 = 0;
+    let mut resize_noted = false;
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| format!("wait: {e}"))? {
+            break status;
+        }
+        let (msgs, next) = drain_control_file(&ctl, ctl_offset);
+        ctl_offset = next;
+        for msg in msgs {
+            match msg {
+                ControlMsg::Stdin { data_b64 } => {
+                    let Ok(bytes) =
+                        base64::engine::general_purpose::STANDARD.decode(data_b64)
+                    else {
+                        continue;
+                    };
+                    if let Some(pipe) = stdin_pipe.as_mut() {
+                        if pipe.write_all(&bytes).and_then(|_| pipe.flush()).is_err() {
+                            // Child closed its stdin; stop forwarding.
+                            stdin_pipe = None;
+                        }
+                    }
+                }
+                ControlMsg::Resize { cols, rows } => {
+                    if !resize_noted {
+                        eprintln!(
+                            "fleet-proc-host {id}: resize({cols}x{rows}) ignored — pipes transport has no pty"
+                        );
+                        resize_noted = true;
+                    }
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+
+    let exit_code = status.code().unwrap_or(1);
+    let mut rec = read_record(dir, id)?;
+    rec.status = ProcStatus::Exited;
+    rec.exit_code = Some(exit_code);
+    rec.finished_ms = Some(now_ms());
+    write_record(dir, &rec)?;
+    let _ = fs::remove_file(ctl_path(dir, id));
+    eprintln!("fleet-proc-host {id}: exited with code {exit_code}");
+    Ok(0)
 }
 
 /// The host loop: open a pty, spawn the command as a session leader on the
@@ -769,6 +930,59 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
     write_record(dir, &rec)?;
     let _ = fs::remove_file(sock_path(dir, id));
     Ok(0)
+}
+
+#[cfg(test)]
+mod drain_control_file_tests {
+    use super::*;
+    use std::io::Write as _;
+
+    /// The Windows host tails the control file in 50ms polls; a poll landing
+    /// mid-append must consume only complete lines and pick the partial one up
+    /// once its newline arrives.
+    #[test]
+    fn consumes_complete_lines_and_leaves_the_partial_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p1.ctl");
+        let mut f = fs::File::create(&path).unwrap();
+        write!(
+            f,
+            "{}\n{}\n{{\"op\":\"stdin\",\"data_", // third line cut mid-append
+            r#"{"op":"stdin","data_b64":"aGk="}"#,
+            r#"{"op":"resize","cols":120,"rows":40}"#,
+        )
+        .unwrap();
+
+        let (msgs, offset) = drain_control_file(&path, 0);
+        assert_eq!(msgs.len(), 2, "only the two complete lines parse");
+        assert!(matches!(&msgs[0], ControlMsg::Stdin { data_b64 } if data_b64 == "aGk="));
+        assert!(matches!(msgs[1], ControlMsg::Resize { cols: 120, rows: 40 }));
+
+        // Nothing new yet: same offset, no messages.
+        let (again, same) = drain_control_file(&path, offset);
+        assert!(again.is_empty());
+        assert_eq!(same, offset);
+
+        // The append completes → exactly the finished line is drained.
+        write!(f, "b64\":\"eW8=\"}}\n").unwrap();
+        let (rest, end) = drain_control_file(&path, offset);
+        assert_eq!(rest.len(), 1);
+        assert!(matches!(&rest[0], ControlMsg::Stdin { data_b64 } if data_b64 == "eW8="));
+        assert_eq!(end, path.metadata().unwrap().len());
+    }
+
+    #[test]
+    fn truncated_file_restarts_and_missing_file_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p2.ctl");
+        assert_eq!(drain_control_file(&path, 5).1, 5, "missing file keeps the offset");
+
+        fs::write(&path, "{\"op\":\"stdin\",\"data_b64\":\"YQ==\"}\n").unwrap();
+        // Offset beyond the (shorter) file = it was replaced → restart at 0.
+        let (msgs, end) = drain_control_file(&path, 9999);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(end, path.metadata().unwrap().len());
+    }
 }
 
 #[cfg(all(test, unix))]
