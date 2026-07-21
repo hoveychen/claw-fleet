@@ -53,6 +53,22 @@ pub fn which(bin: &str) -> Option<String> {
     }
 }
 
+/// Run a caller-supplied shell command string through the platform shell:
+/// `sh -c` on Unix, `cmd /C` on Windows. Window-suppressed on Windows via
+/// [`command`]. For agent-authored command strings (`fleet watch --until` /
+/// `--capture`) that must be evaluated on whatever platform the watch runs
+/// on — a bare `Command::new("sh")` never resolves on a stock Windows host,
+/// so the condition would silently read false forever.
+pub fn shell_command(script: &str) -> Command {
+    #[cfg(unix)]
+    let (shell, flag) = ("sh", "-c");
+    #[cfg(not(unix))]
+    let (shell, flag) = ("cmd", "/C");
+    let mut cmd = command(shell);
+    cmd.arg(flag).arg(script);
+    cmd
+}
+
 /// Put the child in its own process group (Unix), no-op on Windows.
 ///
 /// For long-lived agent children only (claude / codex sessions). A child left
@@ -90,6 +106,14 @@ mod tests {
 
         let status = no_window(&mut cmd).status().expect("spawn");
         assert!(status.success());
+    }
+
+    #[test]
+    fn shell_command_evaluates_the_platform_shell_string() {
+        // `exit 0` / `exit 1` parse identically under sh and cmd, so this
+        // exercises the real platform shell on whichever host runs the tests.
+        assert!(shell_command("exit 0").status().expect("spawn").success());
+        assert!(!shell_command("exit 1").status().expect("spawn").success());
     }
 
     #[test]

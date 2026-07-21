@@ -1682,11 +1682,32 @@ mod tests {
         derive_codex_title,
         extract_context_percent, extract_first_user_prompt, last_rollout_rate_limits,
         latest_total_token_usage, normalize_messages, strip_leading_system_reminder,
-        strip_trailing_context_files, read_rollout_originator, CodexProcess,
+        resolve_pid, strip_trailing_context_files, read_rollout_originator, CodexProcess,
         CodexRateLimitWindow, CodexUsageItem, SqliteThread,
     };
     use crate::session::SessionStatus as S;
     use serde_json::json;
+
+    /// The rollout records cwd as the process wrote it (native separators),
+    /// while the comparison target may come from a decoded projects-dir key
+    /// (always forward slashes). On Windows the two spellings name the same
+    /// directory, so the cwd tier of resolve_pid must not require an exact
+    /// string match — a `C:\code\proj` process is the `C:/code/proj` session.
+    #[test]
+    fn resolve_pid_cwd_match_tolerates_separator_spelling() {
+        let procs = vec![CodexProcess {
+            pid: 4242,
+            cwd: "C:\\code\\proj".to_string(),
+            thread_id: None,
+        }];
+        let (pid, precise) = resolve_pid(&procs, "no-such-thread-separator-test", "C:/code/proj");
+        assert_eq!(
+            pid,
+            Some(4242),
+            "cwd tier must match across separator spellings of the same path"
+        );
+        assert!(precise, "a single cwd match is precise");
+    }
 
     /// FSEvents starvation fallback: a codex session whose on-disk rollout
     /// mtime is newer than the snapshot's `last_activity_ms` must be reported
@@ -4045,7 +4066,10 @@ fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Optio
         }
     }
     // Third: cwd match. Precise only if exactly one process matches.
-    let cwd_matches: Vec<_> = processes.iter().filter(|p| p.cwd == cwd).collect();
+    let cwd_matches: Vec<_> = processes
+        .iter()
+        .filter(|p| crate::session::same_workspace_path(&p.cwd, cwd))
+        .collect();
     match cwd_matches.len() {
         1 => (Some(cwd_matches[0].pid), true),
         n if n > 1 => (Some(cwd_matches[0].pid), false),

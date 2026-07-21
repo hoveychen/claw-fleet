@@ -1679,45 +1679,6 @@ fn watch_start_target(
 
 use crate::agent_source::find_source_for_path;
 
-// ── Public kill helpers (used by ClaudeCodeSource) ──────────────────────────
-
-/// Kill a process by PID (with process tree cleanup).
-pub fn kill_pid_impl(pid: u32) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        let pids = collect_process_tree(pid);
-        crate::log_debug(&format!(
-            "kill_pid: SIGTERM to {} pids (root={}): {:?}",
-            pids.len(),
-            pid,
-            pids
-        ));
-        for &p in pids.iter().rev() {
-            unsafe { libc::kill(p as libc::pid_t, libc::SIGTERM) };
-        }
-
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(2000));
-            for &p in pids.iter().rev() {
-                if unsafe { libc::kill(p as libc::pid_t, 0) } == 0 {
-                    unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
-                }
-            }
-        });
-
-        Ok(())
-    }
-
-    #[cfg(not(unix))]
-    {
-        claw_fleet_core::process_util::command("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .status()
-            .map_err(|e| format!("taskkill failed: {e}"))?;
-        Ok(())
-    }
-}
-
 /// Headlessly resume a rate-limited session by spawning
 /// `claude --resume <session_id> -p "continue"` detached in the given workspace.
 ///
@@ -1776,70 +1737,6 @@ fn refresh_dead_codex_liveness_and_emit(
     }
 }
 
-/// Kill all processes in a workspace.
-pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use crate::session::scan_cli_processes;
-        let procs = scan_cli_processes();
-        let root_pids: Vec<u32> = procs
-            .iter()
-            .filter(|p| p.cwd == workspace_path)
-            .map(|p| p.pid)
-            .collect();
-
-        if root_pids.is_empty() {
-            return Err(format!("No agent processes found in {}", workspace_path));
-        }
-
-        let mut all_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-        for &root in &root_pids {
-            for pid in collect_process_tree(root) {
-                all_pids.insert(pid);
-            }
-        }
-        let pids: Vec<u32> = all_pids.into_iter().collect();
-
-        crate::log_debug(&format!(
-            "kill_workspace: SIGTERM to {} pids for workspace '{}': {:?}",
-            pids.len(),
-            workspace_path,
-            pids
-        ));
-
-        for &p in pids.iter().rev() {
-            unsafe { libc::kill(p as libc::pid_t, libc::SIGTERM) };
-        }
-
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(2000));
-            for &p in pids.iter().rev() {
-                if unsafe { libc::kill(p as libc::pid_t, 0) } == 0 {
-                    unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
-                }
-            }
-        });
-
-        Ok(())
-    }
-
-    #[cfg(not(unix))]
-    {
-        claw_fleet_core::process_util::command("taskkill")
-            .args(["/F", "/T", "/PID"])
-            .args(
-                crate::session::scan_cli_processes()
-                    .iter()
-                    .filter(|p| p.cwd == workspace_path)
-                    .map(|p| p.pid.to_string())
-                    .collect::<Vec<_>>(),
-            )
-            .status()
-            .map_err(|e| format!("taskkill failed: {e}"))?;
-        Ok(())
-    }
-}
-
 // ── Backend impl ──────────────────────────────────────────────────────────────
 
 impl Backend for LocalBackend {
@@ -1884,7 +1781,7 @@ impl Backend for LocalBackend {
     }
 
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
-        kill_pid_impl(pid)?;
+        claw_fleet_core::session::kill_pid_impl(pid)?;
         // Trigger a rescan after a delay.
         let app = self.app.clone();
         let sessions = self.sessions.clone();
@@ -1898,7 +1795,7 @@ impl Backend for LocalBackend {
     }
 
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String> {
-        kill_workspace_impl(&workspace_path)?;
+        claw_fleet_core::session::kill_workspace_impl(&workspace_path)?;
         // Trigger a rescan after a delay.
         let app = self.app.clone();
         let sessions = self.sessions.clone();
@@ -3557,47 +3454,6 @@ pub(crate) fn send_os_notification(app: &AppHandle, title: &str, body: &str) {
     } else {
         log_debug("[notify] tauri notification sent");
     }
-}
-
-// ── Unix process-tree helper ──────────────────────────────────────────────────
-
-#[cfg(unix)]
-pub(crate) fn collect_process_tree(root_pid: u32) -> Vec<u32> {
-    let output = match std::process::Command::new("ps")
-        .args(["-A", "-o", "pid=,ppid="])
-        .output()
-    {
-        Ok(o) => o,
-        Err(_) => return vec![root_pid],
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for line in stdout.lines() {
-        let mut parts = line.split_whitespace();
-        let pid: u32 = match parts.next().and_then(|s| s.parse().ok()) {
-            Some(p) => p,
-            None => continue,
-        };
-        let ppid: u32 = match parts.next().and_then(|s| s.parse().ok()) {
-            Some(p) => p,
-            None => continue,
-        };
-        children.entry(ppid).or_default().push(pid);
-    }
-
-    let mut result = Vec::new();
-    let mut queue = std::collections::VecDeque::new();
-    queue.push_back(root_pid);
-    while let Some(pid) = queue.pop_front() {
-        result.push(pid);
-        if let Some(kids) = children.get(&pid) {
-            for &kid in kids {
-                queue.push_back(kid);
-            }
-        }
-    }
-    result
 }
 
 #[cfg(test)]

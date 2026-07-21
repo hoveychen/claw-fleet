@@ -795,7 +795,9 @@ fn reconcile_in(dir: &Path, now: u64, arm: &mut dyn FnMut(&ScheduleRecord)) -> V
 }
 
 fn arm_timer_with(fleet_bin: &str, rec: &ScheduleRecord) -> Result<u32, String> {
-    let mut cmd = std::process::Command::new(fleet_bin);
+    // process_util::command: no conhost flash on Windows; a Windows child
+    // survives its parent by default, so no setsid analogue is needed there.
+    let mut cmd = crate::process_util::command(fleet_bin);
     cmd.arg("schedule")
         .arg("fire")
         .arg(&rec.id)
