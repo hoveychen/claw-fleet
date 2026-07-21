@@ -1684,43 +1684,87 @@ fn rca_release_slug(uname: &str) -> Option<&'static str> {
     })
 }
 
-/// Derive the single spaceless ssh target token that goes into the `--via`
-/// command. An SSH config profile name is ideal (`ssh <alias>` resolves
-/// port/key/user/proxyjump on its own). A manual connection only fits a token
-/// if it is a bare `user@host` on port 22 with a key ssh finds itself; custom
-/// port/identity/jump must be expressed as a `~/.ssh/config` Host alias.
-fn ssh_target_token(conn: &RemoteConnection) -> Result<String, String> {
+/// Build the ssh argument fragment that goes into the `--via` command
+/// (`ssh <fragment> <remote-rca> serve --stdio`). An ssh-config profile
+/// resolves everything on its own, so it is just the alias. A manual
+/// connection is expanded into its option words — `-p <port>` (when not 22),
+/// `-i <key>`, `-J <jump>`, then `user@host` — which `sh -c` splits back into
+/// argv for ssh (D1 method A). The pieces are shell-token-validated by
+/// [`remote_workspace::upsert`]'s `validate_ssh_target` at registration.
+fn ssh_target_from_connection(conn: &RemoteConnection) -> Result<String, String> {
     if let Some(profile) = conn.ssh_profile.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         return Ok(profile.to_string());
     }
-    if conn.port != 22 || conn.jump_host.is_some() || conn.identity_file.is_some() {
-        return Err(
-            "this connection uses a custom port, identity file, or jump host — add it as a Host \
-             alias in ~/.ssh/config and re-scan so stdio-over-ssh can reference it by name"
-                .to_string(),
-        );
+    let host = conn.host.trim();
+    let user = conn.username.trim();
+    if host.is_empty() || user.is_empty() {
+        return Err("connection is missing a username or host".to_string());
     }
-    Ok(format!("{}@{}", conn.username, conn.host))
+    let mut parts: Vec<String> = Vec::new();
+    if conn.port != 22 {
+        parts.push(format!("-p {}", conn.port));
+    }
+    if let Some(key) = conn.identity_file.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        parts.push(format!("-i {key}"));
+    }
+    if let Some(jump) = conn.jump_host.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        parts.push(format!("-J {jump}"));
+    }
+    parts.push(format!("{user}@{host}"));
+    Ok(parts.join(" "))
 }
 
-fn install_rca_remote_impl(
-    conn: RemoteConnection,
-    path: String,
-    label: Option<String>,
-) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
-    use claw_fleet_core::remote_workspace;
+/// Emit an rca-install progress step to the wizard (mirrors [`emit_progress`]
+/// but on a dedicated `rca-install-progress` channel so it doesn't collide with
+/// the backend-connect flow).
+fn emit_install_progress(app: &AppHandle, step: &str, done: bool) {
+    let _ = app.emit(
+        "rca-install-progress",
+        ConnectProgress { step: step.to_string(), done, error: None, update_last: false },
+    );
+}
 
-    // 1. Probe SSH connectivity.
-    ssh_exec(&conn, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
+/// Run a remote command over ssh addressing a raw ssh-target fragment — the
+/// stored `ssh_target` (an ssh-config alias, or `-p … -i … -J … user@host`).
+/// Splits the fragment into argv words; same Strict/BatchMode options as
+/// [`base_ssh_args`]. Used by `update_rca_remote`, which has no structured
+/// `RemoteConnection`, only the registry's ssh_target string.
+fn ssh_exec_target(ssh_target: &str, remote_cmd: &str) -> Result<String, String> {
+    let mut args: Vec<String> = vec![
+        "-o".into(),
+        "StrictHostKeyChecking=accept-new".into(),
+        "-o".into(),
+        "ConnectTimeout=15".into(),
+        "-o".into(),
+        "BatchMode=yes".into(),
+    ];
+    args.extend(ssh_target.split_whitespace().map(String::from));
+    args.push(remote_cmd.to_string());
+    let mut cmd = claw_fleet_core::process_util::command("ssh");
+    cmd.args(&args);
+    apply_real_home(&mut cmd);
+    let output = cmd.output().map_err(|e| format!("ssh exec failed: {e}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
 
-    // 2. Detect remote OS/arch → release archive slug.
-    let uname = ssh_exec(&conn, "uname -sm").map_err(|e| format!("uname failed: {e}"))?;
+/// Detect the remote platform, download + install rca into `~/.fleet/bin`, and
+/// verify it supports `serve --stdio`. Returns the absolute remote rca path.
+/// Shared by install (structured connection) and update (raw ssh target) via
+/// the `ssh` runner closure. `$HOME` is resolved on the remote so the path
+/// carries no `~` (a local `sh -c` in `--via` would expand it to the LOCAL home).
+fn provision_rca(
+    app: &AppHandle,
+    ssh: impl Fn(&str) -> Result<String, String>,
+) -> Result<String, String> {
+    emit_install_progress(app, "Detecting remote platform…", false);
+    let uname = ssh("uname -sm").map_err(|e| format!("uname failed: {e}"))?;
     let slug = rca_release_slug(&uname)
         .ok_or_else(|| format!("unsupported remote platform for rca: {uname:?}"))?;
 
-    // 3. Install rca into ~/.fleet/bin on the remote, echoing its ABSOLUTE path.
-    //    `$HOME` is resolved on the remote here so the `--via` string later
-    //    carries no `~` (local `sh -c` would expand it to the LOCAL home).
     let url = format!(
         "https://github.com/hoveychen/remote-adapter/releases/latest/download/rca_{slug}.tar.gz"
     );
@@ -1729,7 +1773,8 @@ fn install_rca_remote_impl(
          curl -fsSL {url} | tar xz; chmod +x rca; test -x \"$HOME/.fleet/bin/rca\"; \
          printf '%s\\n' \"$HOME/.fleet/bin/rca\""
     );
-    let remote_rca = ssh_exec(&conn, &install)
+    emit_install_progress(app, &format!("Installing rca ({slug})…"), false);
+    let remote_rca = ssh(&install)
         .map_err(|e| format!("rca install failed: {e}"))?
         .lines()
         .last()
@@ -1740,47 +1785,131 @@ fn install_rca_remote_impl(
         return Err("rca install produced no remote path".to_string());
     }
 
-    // 3b. Fail fast if the installed rca predates the stdio transport — the
-    //     published release can lag `rca serve --stdio` landing on rca main, in
-    //     which case registering the entry would point every spawn at a remote
-    //     that can't serve --stdio and break with a confusing runtime error.
-    let probe = format!("{remote_rca} serve -h 2>&1 | grep -qi stdio && echo STDIO_OK || echo STDIO_MISSING");
-    let cap = ssh_exec(&conn, &probe).unwrap_or_default();
+    // Fail fast if the installed rca predates the stdio transport — the
+    // published release can lag `rca serve --stdio` landing on rca main.
+    emit_install_progress(app, "Verifying serve --stdio support…", false);
+    let probe =
+        format!("{remote_rca} serve -h 2>&1 | grep -qi stdio && echo STDIO_OK || echo STDIO_MISSING");
+    let cap = ssh(&probe).unwrap_or_default();
     if !cap.contains("STDIO_OK") {
         return Err(format!(
-            "the rca just installed on the remote ({remote_rca}) has no `serve --stdio` support — \
-             its published release predates the stdio-over-ssh transport. Wait for a newer \
-             remote-adapter release (or install a build that includes stdio) and re-run."
+            "the rca on the remote ({remote_rca}) has no `serve --stdio` support — its published \
+             release predates the stdio-over-ssh transport. Wait for a newer remote-adapter \
+             release (or install a build that includes stdio) and re-run."
         ));
     }
+    Ok(remote_rca)
+}
 
-    // 4. Single-token ssh target for the `--via` command.
-    let ssh_target = ssh_target_token(&conn)?;
+fn install_rca_remote_impl(
+    app: &AppHandle,
+    conn: RemoteConnection,
+    path: String,
+    label: Option<String>,
+) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+    use claw_fleet_core::remote_workspace;
+
+    // 1. Probe SSH connectivity.
+    emit_install_progress(app, "Connecting via SSH…", false);
+    ssh_exec(&conn, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
+
+    // 1b. Verify the workspace path is creatable + writable ON THE REMOTE
+    //     (D3). The same-absolute-path constraint means it must exist on both
+    //     machines; `upsert` fails loudly for the local side, this covers the
+    //     remote side up front instead of at first spawn. The path is
+    //     single-quoted; a path containing a single quote is refused (paths
+    //     never legitimately need one and it would break the quoting).
+    emit_install_progress(app, "Checking workspace path on remote…", false);
+    if path.contains('\'') {
+        return Err("workspace path must not contain a single quote".to_string());
+    }
+    ssh_exec(&conn, &format!("mkdir -p '{path}' && test -w '{path}'")).map_err(|e| {
+        format!(
+            "remote workspace path '{path}' is not creatable/writable on the remote host: {e} — \
+             pick an absolute path that exists (or can be made) identically on both machines"
+        )
+    })?;
+
+    // 2-3. Detect platform, install rca, verify stdio support.
+    let remote_rca = provision_rca(app, |cmd| ssh_exec(&conn, cmd))?;
+
+    // 4. ssh target fragment for the `--via` command.
+    let ssh_target = ssh_target_from_connection(&conn)?;
 
     // 5. Register the stdio-over-ssh workspace (validates transport + creates
     //    the local mirror directory at the identity-mapped path).
-    remote_workspace::upsert(remote_workspace::RemoteWorkspace {
+    emit_install_progress(app, "Registering workspace…", false);
+    let cfg = remote_workspace::upsert(remote_workspace::RemoteWorkspace {
         path,
         ssh_target: Some(ssh_target),
         remote_rca_path: Some(remote_rca),
         label: label.filter(|l| !l.trim().is_empty()),
         ..Default::default()
-    })
+    })?;
+    emit_install_progress(app, "Installed rca & registered workspace.", true);
+    Ok(cfg)
 }
 
 /// Tauri command — install rca on a saved SSH host and register `path` as a
 /// stdio-over-ssh remote workspace. Desktop-layer local SSH op (like
 /// [`connect_remote`]); does NOT go through the Backend trait. Runs on the
-/// blocking pool so the multi-second SSH work never freezes the UI thread.
+/// blocking pool so the multi-second SSH work never freezes the UI thread, and
+/// streams `rca-install-progress` events while it runs. The final config is
+/// returned so the caller refreshes the list; errors reject the promise.
 #[tauri::command]
 pub async fn install_rca_remote(
     conn: RemoteConnection,
     path: String,
     label: Option<String>,
+    app: AppHandle,
 ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
-    tauri::async_runtime::spawn_blocking(move || install_rca_remote_impl(conn, path, label))
+    tauri::async_runtime::spawn_blocking(move || install_rca_remote_impl(&app, conn, path, label))
         .await
         .map_err(|e| format!("install task join failed: {e}"))?
+}
+
+fn update_rca_remote_impl(
+    app: &AppHandle,
+    path: String,
+) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+    use claw_fleet_core::remote_workspace;
+
+    let entry = remote_workspace::find_for_path(&path)
+        .ok_or("no remote workspace is registered at this path")?;
+    let ssh_target = entry
+        .ssh_target
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or("this remote workspace is not a stdio-over-ssh entry — nothing to update")?;
+
+    emit_install_progress(app, "Connecting via SSH…", false);
+    ssh_exec_target(&ssh_target, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
+
+    let remote_rca = provision_rca(app, |cmd| ssh_exec_target(&ssh_target, cmd))?;
+
+    emit_install_progress(app, "Updating registry…", false);
+    let cfg = remote_workspace::upsert(remote_workspace::RemoteWorkspace {
+        path: entry.path.clone(),
+        ssh_target: Some(ssh_target),
+        remote_rca_path: Some(remote_rca),
+        label: entry.label.clone(),
+        ..Default::default()
+    })?;
+    emit_install_progress(app, "rca updated.", true);
+    Ok(cfg)
+}
+
+/// Tauri command — re-run the rca install on an already-registered stdio
+/// workspace (pull the latest release, re-verify `serve --stdio`, update the
+/// entry's remote rca path). Streams the same `rca-install-progress` events.
+#[tauri::command]
+pub async fn update_rca_remote(
+    path: String,
+    app: AppHandle,
+) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+    tauri::async_runtime::spawn_blocking(move || update_rca_remote_impl(&app, path))
+        .await
+        .map_err(|e| format!("update task join failed: {e}"))?
 }
 
 // ── SSH helpers ───────────────────────────────────────────────────────────────
@@ -3085,8 +3214,8 @@ mod tests {
     }
 
     #[test]
-    fn ssh_target_token_prefers_profile_then_user_host() {
-        use super::{ssh_target_token, RemoteConnection};
+    fn ssh_target_from_connection_builds_full_arg_fragment() {
+        use super::{ssh_target_from_connection, RemoteConnection};
         let base = RemoteConnection {
             id: "x".into(),
             label: "".into(),
@@ -3097,23 +3226,29 @@ mod tests {
             jump_host: None,
             ssh_profile: None,
         };
-        // Profile alias wins.
+        // Profile alias wins — resolves everything on its own.
         let mut c = base.clone();
         c.ssh_profile = Some("gpu-box".into());
-        assert_eq!(ssh_target_token(&c).unwrap(), "gpu-box");
-        // Plain default-port host → user@host.
-        assert_eq!(ssh_target_token(&base).unwrap(), "dev@box");
-        // Custom port / identity / jump without a profile is refused (can't fit
-        // a single --via token).
+        assert_eq!(ssh_target_from_connection(&c).unwrap(), "gpu-box");
+        // Plain default-port host → bare user@host (no -p 22).
+        assert_eq!(ssh_target_from_connection(&base).unwrap(), "dev@box");
+        // D1: custom port / identity / jump are now expanded into option words.
+        let mut full = base.clone();
+        full.port = 2222;
+        full.identity_file = Some("/home/me/.ssh/id".into());
+        full.jump_host = Some("bastion".into());
+        assert_eq!(
+            ssh_target_from_connection(&full).unwrap(),
+            "-p 2222 -i /home/me/.ssh/id -J bastion dev@box"
+        );
+        // Just a custom port.
         let mut p = base.clone();
         p.port = 2222;
-        assert!(ssh_target_token(&p).is_err());
-        let mut k = base.clone();
-        k.identity_file = Some("/k".into());
-        assert!(ssh_target_token(&k).is_err());
-        let mut j = base.clone();
-        j.jump_host = Some("bastion".into());
-        assert!(ssh_target_token(&j).is_err());
+        assert_eq!(ssh_target_from_connection(&p).unwrap(), "-p 2222 dev@box");
+        // Missing user/host is an error.
+        let mut bad = base.clone();
+        bad.host = "".into();
+        assert!(ssh_target_from_connection(&bad).is_err());
     }
 
     /// A booted server plus everything that must outlive it.

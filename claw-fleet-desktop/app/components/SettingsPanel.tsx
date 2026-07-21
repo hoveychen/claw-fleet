@@ -187,10 +187,26 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const [rwLabel, setRwLabel] = useState("");
   const [rwError, setRwError] = useState("");
   const [rwBusy, setRwBusy] = useState(false);
-  // stdio-over-ssh auto-installer wizard
+  // stdio-over-ssh auto-installer wizard. The ssh-target picker merges three
+  // sources: ~/.ssh/config Host aliases, saved Fleet connections, and a manual
+  // `user@host` entry — all resolved to a RemoteConnection for install_rca_remote.
   const [rwSavedConns, setRwSavedConns] = useState<RemoteConnection[]>([]);
-  const [rwConnId, setRwConnId] = useState("");
+  const [rwSshProfiles, setRwSshProfiles] = useState<string[]>([]);
+  const [rwConnId, setRwConnId] = useState(""); // "saved:<id>" | "profile:<alias>" | "__manual__"
+  const [rwManualTarget, setRwManualTarget] = useState(""); // user@host when __manual__
   const [rwInstalling, setRwInstalling] = useState(false);
+  const [rwInstallSteps, setRwInstallSteps] = useState<string[]>([]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlisten = await listen<{ step: string; done: boolean }>("rca-install-progress", (e) => {
+        setRwInstallSteps((prev) => [...prev, e.payload.step]);
+      });
+    })();
+    return () => unlisten?.();
+  }, []);
 
   useEffect(() => {
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
@@ -199,14 +215,42 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     invoke<RemoteConnection[]>("list_saved_connections")
       .then((conns) => setRwSavedConns(conns ?? []))
       .catch(() => {});
+    invoke<string[]>("list_ssh_profiles")
+      .then((profiles) => setRwSshProfiles(profiles ?? []))
+      .catch(() => {});
   }, []);
+
+  // Resolve the picker selection to the RemoteConnection install_rca_remote needs.
+  const resolveInstallConn = useCallback((): RemoteConnection | null => {
+    if (rwConnId.startsWith("saved:")) {
+      return rwSavedConns.find((c) => c.id === rwConnId.slice("saved:".length)) ?? null;
+    }
+    if (rwConnId.startsWith("profile:")) {
+      const alias = rwConnId.slice("profile:".length);
+      return {
+        id: rwConnId, label: alias, host: "", port: 22, username: "",
+        identityFile: null, jumpHost: null, sshProfile: alias,
+      };
+    }
+    if (rwConnId === "__manual__") {
+      const t = rwManualTarget.trim();
+      const at = t.indexOf("@");
+      if (at <= 0 || at === t.length - 1) return null; // require user@host
+      return {
+        id: "manual", label: t, host: t.slice(at + 1), port: 22, username: t.slice(0, at),
+        identityFile: null, jumpHost: null, sshProfile: null,
+      };
+    }
+    return null;
+  }, [rwConnId, rwManualTarget, rwSavedConns]);
 
   const handleInstallRca = useCallback(async () => {
     const path = rwPath.trim();
-    const conn = rwSavedConns.find((c) => c.id === rwConnId);
+    const conn = resolveInstallConn();
     if (!path || !conn) return;
     setRwInstalling(true);
     setRwError("");
+    setRwInstallSteps([]);
     try {
       const cfg = await invoke<RemoteWorkspacesConfig>("install_rca_remote", {
         conn,
@@ -217,12 +261,13 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       setRwPath("");
       setRwLabel("");
       setRwConnId("");
+      setRwManualTarget("");
     } catch (e) {
       setRwError(String(e));
     } finally {
       setRwInstalling(false);
     }
-  }, [rwPath, rwLabel, rwConnId, rwSavedConns]);
+  }, [rwPath, rwLabel, resolveInstallConn]);
 
   const handleAddRemoteWorkspace = useCallback(async () => {
     const path = rwPath.trim();
@@ -252,6 +297,21 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       setRemoteWorkspaces(cfg.workspaces ?? []);
     } catch (e) {
       setRwError(String(e));
+    }
+  }, []);
+
+  const [rwUpdating, setRwUpdating] = useState<string | null>(null);
+  const handleUpdateRca = useCallback(async (path: string) => {
+    setRwError("");
+    setRwInstallSteps([]);
+    setRwUpdating(path);
+    try {
+      const cfg = await invoke<RemoteWorkspacesConfig>("update_rca_remote", { path });
+      setRemoteWorkspaces(cfg.workspaces ?? []);
+    } catch (e) {
+      setRwError(String(e));
+    } finally {
+      setRwUpdating(null);
     }
   }, []);
 
@@ -1487,13 +1547,10 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </div>
                 )}
 
-                {/* rca remote workspaces: re-gated debug-only (import.meta.env.DEV
-                    false in `vite build`). The install wizard's ssh picker only
-                    lists saved connections — not ~/.ssh/config aliases — so the
-                    release-facing UX is not ready. Keep out of shipped builds
-                    until the picker + design are revisited. */}
-                {import.meta.env.DEV && (
-                  <>
+                {/* rca remote workspaces: un-gated for release. The setup UX is
+                    now usable — the ssh-target picker merges ~/.ssh/config
+                    aliases + saved connections + manual user@host, the installer
+                    streams progress, and the transport is real-machine verified. */}
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.remote_workspaces")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
@@ -1518,6 +1575,17 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                           : w.pairingCode}
                       </span>
                     </span>
+                    {w.sshTarget && (
+                      <button
+                        className={styles.sources_restart_btn}
+                        onClick={() => handleUpdateRca(w.path)}
+                        disabled={rwUpdating !== null}
+                      >
+                        {rwUpdating === w.path
+                          ? t("settings.remote_ws_installing")
+                          : t("settings.remote_ws_update_btn")}
+                      </button>
+                    )}
                     <button
                       className={styles.sources_restart_btn}
                       onClick={() => handleRemoveRemoteWorkspace(w.path)}
@@ -1541,15 +1609,36 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     style={{ flex: "1 1 180px" }}
                     value={rwConnId}
                     onChange={(e) => setRwConnId(e.target.value)}
-                    disabled={rwSavedConns.length === 0}
                   >
                     <option value="">{t("settings.remote_ws_pick_conn")}</option>
-                    {rwSavedConns.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.label || c.sshProfile || `${c.username}@${c.host}`}
-                      </option>
-                    ))}
+                    {rwSshProfiles.length > 0 && (
+                      <optgroup label={t("settings.remote_ws_src_ssh_config")}>
+                        {rwSshProfiles.map((alias) => (
+                          <option key={`profile:${alias}`} value={`profile:${alias}`}>{alias}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {rwSavedConns.length > 0 && (
+                      <optgroup label={t("settings.remote_ws_src_saved")}>
+                        {rwSavedConns.map((c) => (
+                          <option key={`saved:${c.id}`} value={`saved:${c.id}`}>
+                            {c.label || c.sshProfile || `${c.username}@${c.host}`}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <option value="__manual__">{t("settings.remote_ws_src_manual")}</option>
                   </select>
+                  {rwConnId === "__manual__" && (
+                    <input
+                      className={styles.select}
+                      style={{ flex: "1 1 160px" }}
+                      value={rwManualTarget}
+                      onChange={(e) => setRwManualTarget(e.target.value)}
+                      placeholder="user@host"
+                      spellCheck={false}
+                    />
+                  )}
                   <input
                     className={styles.select}
                     style={{ flex: "1 1 180px" }}
@@ -1569,18 +1658,31 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   <button
                     className={styles.sources_restart_btn}
                     onClick={handleInstallRca}
-                    disabled={rwInstalling || !rwPath.trim() || !rwConnId}
+                    disabled={rwInstalling || !rwPath.trim() || !resolveInstallConn()}
                   >
                     {rwInstalling
                       ? t("settings.remote_ws_installing")
                       : t("settings.remote_ws_install_btn")}
                   </button>
                 </div>
-                {rwSavedConns.length === 0 && (
+                {rwSavedConns.length === 0 && rwSshProfiles.length === 0 && (
                   <div className={styles.row}>
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                       {t("settings.remote_ws_no_conns")}
                     </span>
+                  </div>
+                )}
+                {rwInstallSteps.length > 0 && (
+                  <div className={styles.row} style={{ flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                    {rwInstallSteps.map((s, i) => (
+                      <span
+                        key={i}
+                        style={{ fontSize: 11, color: "var(--color-text-dim)", fontFamily: "var(--font-mono, monospace)" }}
+                      >
+                        {i === rwInstallSteps.length - 1 && rwInstalling ? "▸ " : "✓ "}
+                        {s}
+                      </span>
+                    ))}
                   </div>
                 )}
 
@@ -1623,8 +1725,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 {rwError && (
                   <p className={styles.hooks_error}>{rwError}</p>
-                )}
-                  </>
                 )}
               </div>
             )}
