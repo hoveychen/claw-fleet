@@ -88,10 +88,15 @@ fn handoff_from_worktree_bash_cwd_hands_successor_the_session_cwd() {
     write_transcript(&home, &repo);
 
     // …but the agent's Bash cwd is the worktree when it calls `fleet handoff`.
+    // env_remove: running this suite from inside a Claude session leaks the
+    // session's CLAUDE_CODE_SESSION_ID into the child, and that variable
+    // outranks FLEET_SESSION_ID in resolve_fleet_session_id_from_env — the
+    // pending record then lands under the leaked id and `pending()` panics.
     let out = Command::new(bin_path("fleet-cli"))
         .args(["handoff", "--note", "P1-P3 done, continue with P4"])
         .current_dir(&worktree)
         .env("FLEET_HOME", &home)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("FLEET_SESSION_ID", SID)
         .output()
         .expect("run fleet handoff");
@@ -135,6 +140,8 @@ fn handoff_from_session_cwd_is_unchanged() {
         .args(["handoff", "--note", "keep going"])
         .current_dir(&repo)
         .env("FLEET_HOME", &home)
+        // See the sibling test: a Claude-session ancestor's id must not leak in.
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("FLEET_SESSION_ID", SID)
         .output()
         .expect("run fleet handoff");
