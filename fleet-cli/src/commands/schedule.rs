@@ -112,7 +112,12 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 eprintln!("Error: nothing to update — pass --at/--in and/or --prompt.");
                 std::process::exit(2);
             }
-            match schedule::update(&id, fire_at, prompt.as_deref()) {
+            match schedule::update(&schedule::ScheduleUpdate {
+                id: id.clone(),
+                fire_at,
+                prompt,
+                ..Default::default()
+            }) {
                 Ok(rec) => {
                     // Re-arm so the new time/generation takes effect; the old
                     // timer exits as superseded on its next wake.
