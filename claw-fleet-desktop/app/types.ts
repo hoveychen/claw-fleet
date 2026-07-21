@@ -69,6 +69,19 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
   );
 }
 
+/** Whether a session belongs on the 启动台 / 任务 list: a Fleet-owned main
+ *  session that Fleet *actually spawned*. The entrypoint check alone is not
+ *  enough — a plain `claude -p` run inside a Fleet-spawned session inherits
+ *  `CLAUDE_CODE_ENTRYPOINT` from its parent's environment, so its transcript
+ *  looks Fleet-owned on disk even though Fleet never launched it. `fleetSpawned`
+ *  is the core-computed ground truth (a per-session spawn marker, or a
+ *  grandfather for sessions predating the marker) that filters those leaked
+ *  `claude -p` children back out. Resume / enqueue / SIGINT still key off the
+ *  entrypoint alone — this stricter gate is only for the task list. */
+export function isFleetOwnedTask(s: SessionInfo): boolean {
+  return !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint) && s.fleetSpawned;
+}
+
 /** Statuses that mean "this session still has something going on" — the agent
  *  is working, or it is parked waiting for the user. Anything else has ended. */
 export const LIVE_STATUSES = new Set([

@@ -80,6 +80,11 @@ export interface SessionInfo {
   titleOverride?: string | null;
   status: SessionStatus;
   isSubagent: boolean;
+  /** Ground truth that Fleet actually spawned this session (a spawn marker, or a
+   *  grandfather for sessions predating the marker). Absent on payloads from a
+   *  relay that predates the field — treated as "not a leak" so those don't
+   *  vanish (see isFleetOwnedTask). */
+  fleetSpawned?: boolean;
   lastMessagePreview?: string | null;
   lastActivityMs: number;
   createdAtMs: number;
@@ -121,6 +126,21 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null | undefined): b
     entrypoint === "claw-fleet-newsession" ||
     entrypoint === "claw-fleet-handoff" ||
     entrypoint === CODEX_FLEET_ORIGINATOR
+  );
+}
+
+/** Whether a session belongs on the phone's 任务 list: a Fleet-owned main
+ *  session Fleet *actually spawned*. The entrypoint alone can't be trusted — a
+ *  plain `claude -p` run inside a Fleet session inherits `CLAUDE_CODE_ENTRYPOINT`
+ *  from its parent and looks Fleet-owned — so it's ANDed with `fleetSpawned`.
+ *  Only an explicit `false` (the core's verdict for a leaked child) excludes;
+ *  an absent field (older relay) is treated as not-a-leak so real tasks stay.
+ *  Mirrors claw-fleet-desktop isFleetOwnedTask. */
+export function isFleetOwnedTask(s: SessionInfo): boolean {
+  return (
+    !s.isSubagent &&
+    isFleetOwnedEntrypoint(s.entrypoint) &&
+    s.fleetSpawned !== false
   );
 }
 
