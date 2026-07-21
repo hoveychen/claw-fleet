@@ -123,14 +123,121 @@ pub fn interrupt_pid_with_grace(pid: u32, grace: Duration) -> Result<(), String>
         Ok(())
     }
 
-    // Windows has no way to deliver SIGINT to an unrelated process (the console
-    // control events only reach the sender's own console group), so there is no
-    // graceful tier — fall through to the hard kill.
+    // Windows graceful tier: a console process spawned with CREATE_NO_WINDOW
+    // still owns a (hidden) console, and a helper process that attaches to it
+    // can deliver CTRL_C — which Node maps to SIGINT, so a headless claude.exe
+    // unwinds like the unix path (kills its tool child, appends the interrupt
+    // marker, exits 0). The attach dance must happen in a separate process
+    // (`fleet win-interrupt <pid>`) because AttachConsole mutates the caller's
+    // global console state. If any link in that chain fails, fall back to the
+    // hard tree kill — the same end state this branch produced before the
+    // graceful tier existed.
     #[cfg(not(unix))]
     {
-        let _ = grace;
-        kill_pid_impl(pid)
+        match run_win_interrupt_helper(pid) {
+            Ok(()) => {
+                crate::log_debug(&format!(
+                    "interrupt_pid(win): CTRL_C delivered to {pid}; escalation armed in {grace:?}"
+                ));
+                std::thread::spawn(move || {
+                    std::thread::sleep(grace);
+                    if is_process_alive(pid) {
+                        crate::log_debug(&format!(
+                            "interrupt_pid(win): {pid} still alive {grace:?} after CTRL_C; escalating to taskkill tree"
+                        ));
+                        let _ = kill_pid_impl(pid);
+                    } else {
+                        crate::log_debug(&format!(
+                            "interrupt_pid(win): {pid} exited within the grace period"
+                        ));
+                    }
+                });
+                Ok(())
+            }
+            Err(e) => {
+                crate::log_debug(&format!(
+                    "interrupt_pid(win): graceful tier unavailable ({e}); hard-killing tree {pid}"
+                ));
+                kill_pid_impl(pid)
+            }
+        }
     }
+}
+
+/// Spawn `fleet win-interrupt <pid>` and wait briefly for its verdict. Exit 0
+/// means the CTRL_C event was generated on the target's console; anything
+/// else (helper missing, AttachConsole refused, timeout) is a reason to fall
+/// back to the hard kill.
+#[cfg(not(unix))]
+fn run_win_interrupt_helper(pid: u32) -> Result<(), String> {
+    let fleet = crate::fleet_cli::resolve_fleet_binary()
+        .ok_or("cannot resolve fleet binary for the win-interrupt helper")?;
+    let mut child = crate::process_util::command(&fleet)
+        .args(["win-interrupt", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("spawn win-interrupt helper: {e}"))?;
+    // The helper attaches, fires one console event and exits — normally well
+    // under a second. Poll instead of a blocking wait so a wedged helper can't
+    // hang the interrupt entry point.
+    for _ in 0..8 {
+        if let Some(status) = child.try_wait().map_err(|e| format!("wait helper: {e}"))? {
+            return if status.success() {
+                Ok(())
+            } else {
+                Err(format!("win-interrupt helper exited {status}"))
+            };
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    let _ = child.kill();
+    Err("win-interrupt helper timed out after 2s".to_string())
+}
+
+/// Deliver CTRL_C to every process attached to `pid`'s console. Runs inside
+/// the `fleet win-interrupt` helper process — AttachConsole swaps the caller's
+/// own console, which is why this must never run inside the desktop app or
+/// `fleet serve` directly.
+///
+/// CTRL_C (unlike CTRL_BREAK) cannot be scoped to a process group — group id 0
+/// reaches every console client, tool children included. That matches what a
+/// terminal Ctrl-C does, and the headless CLI already handles that shape (see
+/// the SIGINT taxonomy on [`interrupt_pid_impl`]).
+#[cfg(windows)]
+pub fn deliver_console_ctrl_c(pid: u32) -> Result<(), String> {
+    use std::ffi::c_void;
+    extern "system" {
+        fn FreeConsole() -> i32;
+        fn AttachConsole(dw_process_id: u32) -> i32;
+        fn SetConsoleCtrlHandler(handler: *mut c_void, add: i32) -> i32;
+        fn GenerateConsoleCtrlEvent(dw_ctrl_event: u32, dw_process_group_id: u32) -> i32;
+        fn GetLastError() -> u32;
+    }
+    const CTRL_C_EVENT: u32 = 0;
+    // SAFETY: plain Win32 console calls; the helper process is disposable.
+    unsafe {
+        // Detach from whatever console the spawner gave us; harmless if none.
+        FreeConsole();
+        if AttachConsole(pid) == 0 {
+            return Err(format!(
+                "AttachConsole({pid}) failed (error {}): target has no console or access denied",
+                GetLastError()
+            ));
+        }
+        // Shield the helper itself from the event it is about to broadcast.
+        if SetConsoleCtrlHandler(std::ptr::null_mut(), 1) == 0 {
+            return Err(format!("SetConsoleCtrlHandler failed (error {})", GetLastError()));
+        }
+        if GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) == 0 {
+            return Err(format!("GenerateConsoleCtrlEvent failed (error {})", GetLastError()));
+        }
+    }
+    // Let conhost dispatch the event to its clients before this process exits
+    // and detaches from the console.
+    std::thread::sleep(Duration::from_millis(200));
+    Ok(())
 }
 
 /// Kill a process by PID (with process tree cleanup).
