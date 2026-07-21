@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CalendarClock, Repeat, Trash2, RefreshCw } from "lucide-react";
 import { EmptyState } from "./EmptyState";
@@ -216,6 +216,18 @@ function TaskRow({
   const isLoop = task.kind === "loop";
   const fired = task.kind === "schedule" && task.rec.status === "fired";
 
+  // Prompt can be long; clamp to 2 lines and let the user click to expand.
+  const [expanded, setExpanded] = useState(false);
+  const promptRef = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  useEffect(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    // When clamped, the box's real content is taller than its rendered height.
+    setOverflowing(el.scrollHeight > el.clientHeight + 1);
+  }, [rec.prompt, expanded]);
+  const expandable = overflowing || expanded;
+
   // Timing summary line.
   let timing: string;
   if (isLoop) {
@@ -239,7 +251,26 @@ function TaskRow({
         {isLoop ? t("schedule.badge_loop", "循环") : t("schedule.badge_once", "单次")}
       </span>
       <div className={styles.body}>
-        <div className={styles.prompt}>{rec.prompt}</div>
+        <div
+          ref={promptRef}
+          className={`${styles.prompt} ${expanded ? styles.prompt_expanded : ""} ${expandable ? styles.prompt_clickable : ""}`}
+          onClick={expandable ? () => setExpanded((v) => !v) : undefined}
+          role={expandable ? "button" : undefined}
+          tabIndex={expandable ? 0 : undefined}
+          onKeyDown={
+            expandable
+              ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setExpanded((v) => !v);
+                  }
+                }
+              : undefined
+          }
+          title={expandable ? (expanded ? t("schedule.collapse", "点击收起") : t("schedule.expand", "点击展开全文")) : undefined}
+        >
+          {rec.prompt}
+        </div>
         <div className={styles.meta}>
           <span className={fired ? styles.status_fired : styles.status_pending}>
             {fired ? t("schedule.status_fired", "已触发") : t("schedule.status_pending", "待触发")}
