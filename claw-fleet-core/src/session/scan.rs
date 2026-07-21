@@ -338,7 +338,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         // terminate the editor itself, not just the Claude session).
         let procs_in_cwd: Vec<CliProcess> = cli_processes
             .iter()
-            .filter(|p| p.cwd == workspace_path)
+            .filter(|p| same_workspace_path(&p.cwd, &workspace_path))
             .cloned()
             .collect();
 
