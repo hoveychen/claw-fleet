@@ -3,7 +3,7 @@
 // first open via its relay method and renders a compact mobile layout.
 
 import { useEffect, useState } from "react";
-import { Check, CheckCircle2, ListTodo, Waypoints, Workflow } from "lucide-react";
+import { Check, CheckCircle2, ChevronRight, ListTodo, Waypoints, Workflow } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -491,7 +491,9 @@ export function HandoffTab({
 
   if (data === "loading") return <Hint>{t("加载接力链…")}</Hint>;
   if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
-  if (!data) return <EmptyState compact icon={Waypoints} title={t("该会话不在任何接力链上")} />;
+  // The relay resolves a null reply to an empty placeholder object, so a real
+  // chain is only present when it carries a chainId.
+  if (!data || !data.chainId) return <EmptyState compact icon={Waypoints} title={t("该会话不在任何接力链上")} />;
 
   const hops: string[] = [];
   for (const l of data.links) {
@@ -506,29 +508,78 @@ export function HandoffTab({
         {hops.includes(session.id) && ` · ${t("当前第 {0} 棒", hops.indexOf(session.id) + 1)}`}
       </div>
       {data.links.map((l, i) => (
-        <div key={i} className={styles.planCard}>
-          <div className={styles.hopHead}>
-            <span className={styles.hopBadge}>{t("第 {0} → {1} 棒", i + 1, i + 2)}</span>
-            <span className={styles.recordTime}>
-              {new Date(l.handedAt).toLocaleString(dateLocale(), {
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-          </div>
-          {(l.planId || l.nextTask) && (
-            <div className={styles.dimNote}>
-              {l.planId && t("计划 {0}", l.planId)}
-              {l.nextTask && ` · ${t("下一步 {0}", l.nextTask)}`}
-            </div>
-          )}
-          <div className={styles.markdown}>
-            <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>{l.note}</ReactMarkdown>
-          </div>
-        </div>
+        <HandoffLinkCard
+          key={i}
+          link={l}
+          index={i}
+          // Auto-expand the leg the viewer is on; a long chain stays scannable
+          // with every other note collapsed until tapped.
+          defaultOpen={l.fromSessionId === session.id || l.toSessionId === session.id}
+        />
       ))}
+    </div>
+  );
+}
+
+/** One relay leg: a tap-to-expand card. Collapsed shows a two-line note preview;
+ *  expanded renders the full markdown note. */
+function HandoffLinkCard({
+  link,
+  index,
+  defaultOpen,
+}: {
+  link: HandoffChain["links"][number];
+  index: number;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const preview = link.note.replace(/\s+/g, " ").trim();
+  const toggle = () => setOpen((v) => !v);
+
+  return (
+    <div className={styles.planCard}>
+      <div
+        className={styles.hopHead}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        style={{ cursor: "pointer" }}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+      >
+        <ChevronRight
+          size={14}
+          className={styles.hopChevron}
+          style={{ transform: open ? "rotate(90deg)" : "none" }}
+        />
+        <span className={styles.hopBadge}>{t("第 {0} → {1} 棒", index + 1, index + 2)}</span>
+        <span className={styles.recordTime}>
+          {new Date(link.handedAt).toLocaleString(dateLocale(), {
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+      </div>
+      {(link.planId || link.nextTask) && (
+        <div className={styles.dimNote}>
+          {link.planId && t("计划 {0}", link.planId)}
+          {link.nextTask && ` · ${t("下一步 {0}", link.nextTask)}`}
+        </div>
+      )}
+      {open ? (
+        <div className={styles.markdown}>
+          <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>{link.note}</ReactMarkdown>
+        </div>
+      ) : (
+        <div className={styles.notePreview}>{preview}</div>
+      )}
     </div>
   );
 }

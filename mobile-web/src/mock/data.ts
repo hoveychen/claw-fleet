@@ -12,6 +12,7 @@ import type {
   ElicitationRequest,
   FleetAskRequest,
   GuardRequest,
+  HandoffChain,
   RawMessage,
   SessionInfo,
   TodayUsage,
@@ -737,3 +738,44 @@ export function mockBrowseDir(path?: string): BrowseDirResponse {
   }
   return { path: p, parent, entries: [], truncated: false };
 }
+
+/** The relay chain behind `sess-billing-*` — three legs, so the handoff tab has
+ *  something to collapse/expand. Long notes with bare newlines also exercise the
+ *  markdown line-break rendering. Keyed lookup lives in the mock relay. */
+export const MOCK_HANDOFF_CHAIN: HandoffChain = {
+  chainId: "chain-billing",
+  workspacePath: "/Users/demo/workspace/billing-service",
+  planId: "billing-migration",
+  links: [
+    {
+      fromSessionId: "sess-billing-1",
+      toSessionId: "sess-billing-2",
+      planId: "billing-migration",
+      nextTask: "P2",
+      handedAt: NOW - 3 * HOUR,
+      note:
+        "接力:计量计费迁移 PRD(TASKS.md id=billing-migration)。P1 已把用量事件写入双写表并验通,你从 P2 起在 worktree 实现新读路径。\n" +
+        "## 背景\n" +
+        "旧读路径直接查 invoices 聚合,新路径改读 usage_events 物化视图,两者需在 usage_billing_v2 flag 后并存对账。\n" +
+        "## P2 要做\n" +
+        "- 新增 UsageReader 走物化视图\n" +
+        "- flag 关闭时仍回落旧聚合\n" +
+        "- 对账脚本比对两条路径日结差额,阈值 <0.01 元\n" +
+        "注意别动 invoices 写路径,那是 P5 的活。",
+    },
+    {
+      fromSessionId: "sess-billing-2",
+      toSessionId: "sess-billing-3",
+      planId: "billing-migration",
+      nextTask: "P4",
+      handedAt: NOW - 40 * MIN,
+      note:
+        "接力:P3 已完成并合并 worktree(对账连续 7 日差额 0),你接 P4 端到端切流。\n" +
+        "## P4 切流步骤\n" +
+        "- 先灰度 1% 账户走 usage_billing_v2\n" +
+        "- 盯 24h 对账无差再放量到 100%\n" +
+        "- 出任何差额立刻翻 flag 回落,别自行改数据\n" +
+        "P5(下线旧路径)要等 P4 放量稳定两周,别提前。",
+    },
+  ],
+};

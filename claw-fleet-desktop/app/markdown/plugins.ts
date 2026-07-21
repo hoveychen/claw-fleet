@@ -3,6 +3,7 @@
 // modules so plugins.test.ts can drive it directly.
 import type { PluggableList } from "unified";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
@@ -156,6 +157,9 @@ export const safeRemarkPlugins: PluggableList = [
   // everything between them into a <del>. GFM's standard `~~text~~` form
   // remains enabled when the single-tilde extension is disabled.
   [remarkGfm, { singleTilde: false }],
+  // A single `\n` (soft break) renders as a real line break, not a space —
+  // kept in step with the mobile-web chain (mobile-web/src/markdown/plugins.ts).
+  remarkBreaks,
   remarkCjkFriendly,
   remarkMath,
   remarkCjkAutolinkFix,
