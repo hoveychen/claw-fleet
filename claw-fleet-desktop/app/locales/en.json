@@ -1936,6 +1936,11 @@
     "mark_f_new": "Needs review",
     "mark_f_pending": "In progress",
     "mark_f_done": "Done",
+    "group_hint": "Handoff relay chain — click to expand its sessions",
+    "group_chain": "Relay {{n}}",
+    "group_load_more": "Show {{n}} earlier hop(s)",
+    "group_toggle_done": "Whole relay chain done — click to reopen all",
+    "group_toggle_pending": "Mark the whole relay chain done",
     "select_hint": "Select a session on the left to view its detail"
   },
   "view_files": "Repos",

@@ -1933,6 +1933,11 @@
     "mark_f_new": "待 review",
     "mark_f_pending": "进行中",
     "mark_f_done": "已完成",
+    "group_hint": "接力链 — 点击展开链上会话",
+    "group_chain": "接力 {{n}}",
+    "group_load_more": "显示更早的 {{n}} 棒",
+    "group_toggle_done": "整条接力链已完成 — 点击全部改回进行中",
+    "group_toggle_pending": "点击把整条接力链标为已完成",
     "select_hint": "从左侧选择一个会话查看详情"
   },
   "view_files": "仓库",
