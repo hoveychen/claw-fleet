@@ -8,16 +8,19 @@
 //! a routing bucket) and sealed bytes it passes through verbatim. It holds no
 //! key and does no crypto; do not add any decrypt/encrypt logic here.
 
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::response::Response;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::frames::{InFrame, OutFrame, PushPayload, Role};
+use crate::limits::ConnGuard;
 use crate::registry::{channel_id, OutMsg};
 use crate::AppState;
 
@@ -43,13 +46,49 @@ const MIN_SECRET_LEN: usize = 16;
 /// in this comment rather than importing the constant.
 const MAX_WS_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 
-pub async fn ws_handler(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) -> Response {
+pub async fn ws_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let ip = client_ip(&headers);
+    let Some(guard) = state.conn_limiter.try_acquire(ip) else {
+        log::warn!("connection rejected: at capacity (ip={ip:?})");
+        return (StatusCode::SERVICE_UNAVAILABLE, "relay at capacity").into_response();
+    };
     ws.max_message_size(MAX_WS_MESSAGE_BYTES)
         .max_frame_size(MAX_WS_MESSAGE_BYTES)
-        .on_upgrade(move |socket| handle_socket(state, socket))
+        .on_upgrade(move |socket| handle_socket(state, socket, guard))
 }
 
-async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
+/// Resolve the client IP for per-IP capping. Behind Traefik (TLS terminator)
+/// the TCP peer is always the proxy, so the real address must come from a
+/// forwarded header: prefer `X-Real-Ip` (the single immediate-client address the
+/// proxy sets), else the **right-most** `X-Forwarded-For` entry (the address the
+/// trusted proxy appended — left-most entries are client-supplied and
+/// spoofable). Absent both (a direct/dev connection), returns `None` and per-IP
+/// capping is skipped for that socket.
+///
+/// NOTE: which header muvee's Traefik actually forwards is confirmed at deploy
+/// time (P5); handling both keeps this correct for any standard proxy setup.
+fn client_ip(headers: &HeaderMap) -> Option<IpAddr> {
+    let parse = |s: &str| s.trim().parse::<IpAddr>().ok();
+    headers
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse)
+        .or_else(|| {
+            headers
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.rsplit(',').next())
+                .and_then(parse)
+        })
+}
+
+async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnGuard) {
+    // `_conn` holds this socket's reserved connection slot; dropping it when the
+    // function returns (any exit path) releases the global + per-IP count.
     // --- auth: first text frame within the timeout ---
     let auth = tokio::time::timeout(AUTH_TIMEOUT, next_text(&mut socket)).await;
     let (role, secret) = match auth {
