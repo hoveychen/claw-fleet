@@ -15,6 +15,7 @@ import type { DecisionKind } from "../types";
 import {
   MOCK_CHAT_WORKSPACE,
   mockBrowseDir,
+  MOCK_DECISION_HISTORY,
   MOCK_ELICITATION,
   MOCK_FLEET_ASK,
   MOCK_GUARD,
@@ -107,6 +108,8 @@ export class MockRelayClient extends RelayClient {
         );
       case "chat_workspace":
         return { path: MOCK_CHAT_WORKSPACE };
+      case "session_decisions":
+        return MOCK_DECISION_HISTORY;
       case "today_usage":
         return MOCK_TODAY_USAGE;
       case "tail":
