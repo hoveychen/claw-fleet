@@ -9,9 +9,26 @@
 //! registry of which workspace paths are remote, and wrap the launch at the
 //! two spawn chokepoints ([`crate::session_launch`] for claude,
 //! [`crate::codex_launch`] for codex) so `claude <args>` becomes
-//! `rca <claude-path> <args> --code <pairing-code>`.
+//! `rca <claude-path> <args> <transport-flags>`.
 //!
 //! Registry file: `~/.fleet/remote-workspaces.json`.
+//!
+//! ## Two transports
+//!
+//! A registry entry carries exactly one of two transports ([`Transport`],
+//! resolved by [`RemoteWorkspace::transport`]):
+//!
+//! - **Pairing code** (libp2p): the self-contained `rca1.…` string printed by
+//!   `rca serve` on the remote host (`internal/paircode`, `Prefix = "rca1."`).
+//!   It changes when the remote serve restarts with a fresh identity; the
+//!   registry entry is then updated via [`upsert`]. [`wrap_launch`] appends
+//!   `--code <pairing-code>`.
+//! - **stdio-over-ssh**: the entry stores an `ssh_target` (+ optional remote
+//!   rca path). No pairing code, no relay, no long-lived remote serve —
+//!   [`wrap_launch`] appends `--via 'ssh <target> <remote-rca> serve --stdio'`,
+//!   and rca spawns that ssh command per run, speaking a single yamux-muxed
+//!   byte stream over ssh's stdin/stdout. The serve dies when the ssh child
+//!   exits (session end). See wiki `rca/stdio-transport-design`.
 //!
 //! Hard constraints inherited from rca (verified against its source):
 //! - **Identity path mapping** (`internal/routing/routing.go` has no
@@ -21,13 +38,9 @@
 //!   [`upsert`] does so at registration so an uncreatable path (e.g.
 //!   `/home/...` on macOS, an automount) fails loudly at registration time,
 //!   not at first spawn.
-//! - The **pairing code** is the self-contained `rca1.…` string printed by
-//!   `rca serve` on the remote host (`internal/paircode`, `Prefix = "rca1."`).
-//!   It changes when the remote serve restarts with a fresh identity; the
-//!   registry entry is then updated via [`upsert`].
-//! - rca-owned flags (`--code`) are extracted from anywhere after the wrapped
-//!   command token and are chosen upstream to not collide with claude/codex
-//!   flags, so the original argv is passed through verbatim.
+//! - rca-owned flags (`--code` / `--via`) are extracted from anywhere after
+//!   the wrapped command token and are chosen upstream to not collide with
+//!   claude/codex flags, so the original argv is passed through verbatim.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,20 +49,43 @@ use serde::{Deserialize, Serialize};
 
 use crate::session_launch::normalize_workspace_path;
 
-/// One registered remote workspace.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One registered remote workspace. Exactly one transport is set: either
+/// `pairing_code` (libp2p) or `ssh_target` (stdio-over-ssh); see
+/// [`RemoteWorkspace::transport`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteWorkspace {
     /// Absolute workspace path — identical on both machines (identity mapping).
     pub path: String,
-    /// The `rca1.…` pairing code printed by `rca serve` on the remote host.
-    pub pairing_code: String,
+    /// Pairing-code (libp2p) transport: the `rca1.…` code printed by
+    /// `rca serve` on the remote host. `None` for stdio-over-ssh entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pairing_code: Option<String>,
+    /// stdio-over-ssh transport: the ssh target (host alias or `user@host`)
+    /// Fleet runs `ssh <target> <remote-rca> serve --stdio` against. `None`
+    /// for pairing-code entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_target: Option<String>,
+    /// stdio-over-ssh transport: the rca binary path ON THE REMOTE host.
+    /// `None` = `rca` on the remote `$PATH`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_rca_path: Option<String>,
     /// Display label for the UI (e.g. the remote host's name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    /// Per-workspace override of the rca binary path.
+    /// Per-workspace override of the LOCAL rca binary path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rca_path: Option<String>,
+}
+
+/// The resolved transport for a registry entry, after validating that exactly
+/// one mode's fields are set and well-formed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Transport {
+    /// libp2p pairing code (`rca1.…`).
+    Pairing(String),
+    /// stdio-over-ssh: ssh target + rca binary path on the remote host.
+    Stdio { ssh_target: String, remote_rca: String },
 }
 
 /// The registry file: `~/.fleet/remote-workspaces.json`.
@@ -68,7 +104,8 @@ pub struct RemoteWorkspacesConfig {
 pub struct WrappedLaunch {
     /// The rca binary to exec instead of the agent CLI.
     pub program: String,
-    /// `[<agent-cli-path>, <original args...>, --code, <pairing-code>]`.
+    /// `[<agent-cli-path>, <original args...>, <transport-flags>]` — the
+    /// transport flags are `--code <pairing-code>` or `--via '<ssh cmd>'`.
     pub args: Vec<String>,
     /// Extra env for the rca process (inherited by the agent CLI under it).
     pub envs: Vec<(String, String)>,
@@ -132,12 +169,69 @@ fn validate_pairing_code(code: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The ssh target and remote rca path are embedded verbatim into the
+/// `sh -c '<via>'` string rca runs for `--via` (`cmd/rca/run.go`), so a space,
+/// quote, or shell metacharacter would break argv splitting or inject.
+/// Registration values come from saved SSH connections (trusted), but reject
+/// them defensively — an ssh host alias / `user@host` / rca path never needs
+/// these characters.
+fn validate_shell_token(tok: &str, what: &str) -> Result<(), String> {
+    if tok.is_empty() {
+        return Err(format!("{what} must not be empty"));
+    }
+    const BAD: &[char] =
+        &[' ', '\t', '\'', '"', ';', '&', '|', '$', '`', '\n', '\r', '<', '>', '(', ')', '\\', '*'];
+    if let Some(c) = tok.chars().find(|c| BAD.contains(c)) {
+        return Err(format!("{what} contains an unsupported character {c:?}"));
+    }
+    Ok(())
+}
+
+impl RemoteWorkspace {
+    /// Resolve which transport this entry describes, validating that exactly
+    /// one mode's fields are set and well-formed. The remote rca path defaults
+    /// to `rca` (on the remote `$PATH`) for stdio entries.
+    fn transport(&self) -> Result<Transport, String> {
+        let code = self.pairing_code.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let target = self.ssh_target.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        match (code, target) {
+            (Some(code), None) => {
+                validate_pairing_code(code)?;
+                Ok(Transport::Pairing(code.to_string()))
+            }
+            (None, Some(target)) => {
+                validate_shell_token(target, "ssh target")?;
+                let remote_rca = self
+                    .remote_rca_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("rca")
+                    .to_string();
+                validate_shell_token(&remote_rca, "remote rca path")?;
+                Ok(Transport::Stdio { ssh_target: target.to_string(), remote_rca })
+            }
+            (Some(_), Some(_)) => Err(
+                "a remote workspace has both a pairing code and an ssh target — set exactly one \
+                 transport"
+                    .to_string(),
+            ),
+            (None, None) => Err(
+                "a remote workspace needs either a pairing code (libp2p) or an ssh target \
+                 (stdio-over-ssh)"
+                    .to_string(),
+            ),
+        }
+    }
+}
+
 /// Register (or update) a remote workspace. Normalizes the path, validates the
-/// pairing code, and creates the local mirror directory — so an uncreatable
-/// path fails here, with the OS error, instead of at first spawn.
+/// transport (exactly one of pairing code / ssh target, well-formed), and
+/// creates the local mirror directory — so an uncreatable path fails here,
+/// with the OS error, instead of at first spawn.
 pub fn upsert(entry: RemoteWorkspace) -> Result<RemoteWorkspacesConfig, String> {
     let path = normalize_workspace_path(&entry.path)?;
-    validate_pairing_code(&entry.pairing_code)?;
+    entry.transport()?;
     fs::create_dir_all(&path).map_err(|e| {
         format!(
             "cannot create local mirror directory {path}: {e} — the workspace must live at a path \
@@ -146,7 +240,12 @@ pub fn upsert(entry: RemoteWorkspace) -> Result<RemoteWorkspacesConfig, String> 
     })?;
     let entry = RemoteWorkspace {
         path: path.clone(),
-        pairing_code: entry.pairing_code.trim().to_string(),
+        pairing_code: entry.pairing_code.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()),
+        ssh_target: entry.ssh_target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
+        remote_rca_path: entry
+            .remote_rca_path
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty()),
         label: entry.label.map(|l| l.trim().to_string()).filter(|l| !l.is_empty()),
         rca_path: entry.rca_path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
     };
@@ -236,13 +335,29 @@ pub fn wrap_launch(
     };
     let cfg = load();
     let rca = resolve_rca_binary(&entry, &cfg)?;
+    let transport = entry.transport()?;
     fs::create_dir_all(workspace_path)
         .map_err(|e| format!("create local mirror directory {workspace_path}: {e}"))?;
     let mut wrapped = Vec::with_capacity(args.len() + 3);
     wrapped.push(program.to_string());
     wrapped.extend_from_slice(args);
-    wrapped.push("--code".to_string());
-    wrapped.push(entry.pairing_code.clone());
+    match transport {
+        Transport::Pairing(code) => {
+            wrapped.push("--code".to_string());
+            wrapped.push(code);
+        }
+        Transport::Stdio { ssh_target, remote_rca } => {
+            // `--via '<shell cmd>'` — rca runs it under `sh -c` and speaks a
+            // single yamux stream over its stdin/stdout. ServerAliveInterval
+            // keeps the ssh tunnel from silently half-dying on an idle
+            // session; both fields are shell-token-validated in `transport()`.
+            wrapped.push("--via".to_string());
+            wrapped.push(format!(
+                "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 {ssh_target} {remote_rca} \
+                 serve --stdio"
+            ));
+        }
+    }
     Ok(Some(WrappedLaunch {
         program: rca,
         args: wrapped,
@@ -301,12 +416,21 @@ mod tests {
         }
     }
 
+    /// A pairing-code (libp2p) entry.
     fn entry(path: &str, code: &str) -> RemoteWorkspace {
         RemoteWorkspace {
             path: path.to_string(),
-            pairing_code: code.to_string(),
-            label: None,
-            rca_path: None,
+            pairing_code: Some(code.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// A stdio-over-ssh entry.
+    fn stdio_entry(path: &str, ssh_target: &str) -> RemoteWorkspace {
+        RemoteWorkspace {
+            path: path.to_string(),
+            ssh_target: Some(ssh_target.to_string()),
+            ..Default::default()
         }
     }
 
@@ -324,8 +448,8 @@ mod tests {
         let cfg = load();
         assert_eq!(cfg.workspaces.len(), 2);
         assert_eq!(
-            cfg.workspaces.iter().find(|w| w.path == a).unwrap().pairing_code,
-            "rca1.CCC"
+            cfg.workspaces.iter().find(|w| w.path == a).unwrap().pairing_code.as_deref(),
+            Some("rca1.CCC")
         );
 
         remove(&a).unwrap();
@@ -422,5 +546,84 @@ mod tests {
         upsert(e).unwrap();
         let err = wrap_launch(&ws, "claude", &[]).unwrap_err();
         assert!(err.contains("does not exist"), "got: {err}");
+    }
+
+    /// A stdio-over-ssh entry appends `--via 'ssh … serve --stdio'` instead of
+    /// `--code`, and round-trips through the registry unchanged.
+    #[test]
+    fn wrap_launch_stdio_appends_via_not_code() {
+        let home = TmpHome::new("stdio-wrap");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        let mut e = stdio_entry(&ws, "gpu-box");
+        e.remote_rca_path = Some("/opt/rca".into());
+        e.rca_path = Some(fake_rca.clone());
+        upsert(e).unwrap();
+
+        // Round-trips: ssh target + remote rca path survive, no pairing code.
+        let saved = load().workspaces.into_iter().find(|w| w.path == ws).unwrap();
+        assert_eq!(saved.ssh_target.as_deref(), Some("gpu-box"));
+        assert_eq!(saved.remote_rca_path.as_deref(), Some("/opt/rca"));
+        assert_eq!(saved.pairing_code, None);
+
+        let got = wrap_launch(&ws, "/usr/local/bin/claude", &["-p".into()]).unwrap().unwrap();
+        assert_eq!(got.program, fake_rca);
+        assert_eq!(got.args[0], "/usr/local/bin/claude");
+        assert_eq!(got.args[1], "-p");
+        assert_eq!(got.args[2], "--via");
+        assert_eq!(
+            got.args[3],
+            "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 gpu-box /opt/rca serve --stdio"
+        );
+        assert!(!got.args.contains(&"--code".to_string()), "stdio must not append --code");
+        // The fleet-local pins still apply regardless of transport.
+        assert!(got.envs.iter().any(|(k, _)| k == "RCC_LOCAL_BINS"));
+    }
+
+    /// A stdio entry with no explicit remote rca path defaults to `rca`.
+    #[test]
+    fn wrap_launch_stdio_defaults_remote_rca_to_rca() {
+        let home = TmpHome::new("stdio-default");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        let mut e = stdio_entry(&ws, "user@host");
+        e.rca_path = Some(fake_rca);
+        upsert(e).unwrap();
+        let got = wrap_launch(&ws, "claude", &[]).unwrap().unwrap();
+        assert_eq!(
+            got.args.last().unwrap(),
+            "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 user@host rca serve --stdio"
+        );
+    }
+
+    /// Exactly one transport: neither set, or both set, is refused at upsert.
+    #[test]
+    fn upsert_requires_exactly_one_transport() {
+        let home = TmpHome::new("onetransport");
+        // Neither.
+        let bare = RemoteWorkspace { path: home.path("a"), ..Default::default() };
+        assert!(upsert(bare).is_err(), "no transport must be refused");
+        // Both.
+        let mut both = stdio_entry(&home.path("b"), "host");
+        both.pairing_code = Some("rca1.AAA".into());
+        assert!(upsert(both).is_err(), "both transports must be refused");
+    }
+
+    /// The ssh target / remote rca path are embedded into a `sh -c` string, so
+    /// shell metacharacters must be rejected at registration.
+    #[test]
+    fn upsert_rejects_shell_metachars() {
+        let home = TmpHome::new("shellmeta");
+        for bad in ["host; rm -rf /", "host$(whoami)", "a host", "host`id`", "h|p"] {
+            assert!(
+                upsert(stdio_entry(&home.path("proj"), bad)).is_err(),
+                "ssh target {bad:?} must be refused"
+            );
+        }
+        let mut e = stdio_entry(&home.path("proj"), "safe-host");
+        e.remote_rca_path = Some("/opt/rca; evil".into());
+        assert!(upsert(e).is_err(), "remote rca path with metachars must be refused");
     }
 }

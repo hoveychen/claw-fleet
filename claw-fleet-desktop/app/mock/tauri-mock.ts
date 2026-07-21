@@ -119,7 +119,13 @@ let spawnCounter = 0;
 
 // Remote-workspace registry (rca), in-memory so the settings section's
 // add/remove flow is exercisable in ?mock screenshots.
-let mockRemoteWorkspaces: { path: string; pairingCode: string; label?: string }[] = [
+let mockRemoteWorkspaces: {
+  path: string;
+  pairingCode?: string;
+  sshTarget?: string;
+  remoteRcaPath?: string;
+  label?: string;
+}[] = [
   { path: "/Users/dev/remote-api", pairingCode: "rca1.JgAkCAESIPuTmockmockmock", label: "gpu-box" },
 ];
 
@@ -420,6 +426,17 @@ function handleIPC(
       mockRemoteWorkspaces = mockRemoteWorkspaces.filter(
         (w) => w.path !== (args.path as string),
       );
+      return { workspaces: mockRemoteWorkspaces };
+    }
+    case "install_rca_remote": {
+      const conn = args.conn as { sshProfile?: string | null; username?: string; host?: string };
+      const path = args.path as string;
+      const label = (args.label as string | null) ?? undefined;
+      const sshTarget = conn.sshProfile || `${conn.username ?? "user"}@${conn.host ?? "host"}`;
+      mockRemoteWorkspaces = [
+        ...mockRemoteWorkspaces.filter((w) => w.path !== path),
+        { path, sshTarget, remoteRcaPath: "/home/user/.fleet/bin/rca", label },
+      ];
       return { workspaces: mockRemoteWorkspaces };
     }
     case "check_setup_status": {

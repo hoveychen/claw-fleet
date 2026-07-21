@@ -2314,9 +2314,9 @@ mod remote_workspace_wrap_tests {
         std::fs::write(&fake_rca, "").unwrap();
         crate::remote_workspace::upsert(crate::remote_workspace::RemoteWorkspace {
             path: rws.to_string_lossy().into_owned(),
-            pairing_code: "rca1.CODEX".to_string(),
-            label: None,
+            pairing_code: Some("rca1.CODEX".to_string()),
             rca_path: Some(fake_rca.to_string_lossy().into_owned()),
+            ..Default::default()
         })
         .unwrap();
         let (program, out_args, envs) = super::wrap_codex_launch(
