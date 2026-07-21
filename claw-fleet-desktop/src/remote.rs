@@ -1724,6 +1724,83 @@ fn emit_install_progress(app: &AppHandle, step: &str, done: bool) {
     );
 }
 
+/// Run a remote command over ssh addressing a raw ssh-target fragment — the
+/// stored `ssh_target` (an ssh-config alias, or `-p … -i … -J … user@host`).
+/// Splits the fragment into argv words; same Strict/BatchMode options as
+/// [`base_ssh_args`]. Used by `update_rca_remote`, which has no structured
+/// `RemoteConnection`, only the registry's ssh_target string.
+fn ssh_exec_target(ssh_target: &str, remote_cmd: &str) -> Result<String, String> {
+    let mut args: Vec<String> = vec![
+        "-o".into(),
+        "StrictHostKeyChecking=accept-new".into(),
+        "-o".into(),
+        "ConnectTimeout=15".into(),
+        "-o".into(),
+        "BatchMode=yes".into(),
+    ];
+    args.extend(ssh_target.split_whitespace().map(String::from));
+    args.push(remote_cmd.to_string());
+    let mut cmd = claw_fleet_core::process_util::command("ssh");
+    cmd.args(&args);
+    apply_real_home(&mut cmd);
+    let output = cmd.output().map_err(|e| format!("ssh exec failed: {e}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+/// Detect the remote platform, download + install rca into `~/.fleet/bin`, and
+/// verify it supports `serve --stdio`. Returns the absolute remote rca path.
+/// Shared by install (structured connection) and update (raw ssh target) via
+/// the `ssh` runner closure. `$HOME` is resolved on the remote so the path
+/// carries no `~` (a local `sh -c` in `--via` would expand it to the LOCAL home).
+fn provision_rca(
+    app: &AppHandle,
+    ssh: impl Fn(&str) -> Result<String, String>,
+) -> Result<String, String> {
+    emit_install_progress(app, "Detecting remote platform…", false);
+    let uname = ssh("uname -sm").map_err(|e| format!("uname failed: {e}"))?;
+    let slug = rca_release_slug(&uname)
+        .ok_or_else(|| format!("unsupported remote platform for rca: {uname:?}"))?;
+
+    let url = format!(
+        "https://github.com/hoveychen/remote-adapter/releases/latest/download/rca_{slug}.tar.gz"
+    );
+    let install = format!(
+        "set -e; mkdir -p \"$HOME/.fleet/bin\"; cd \"$HOME/.fleet/bin\"; \
+         curl -fsSL {url} | tar xz; chmod +x rca; test -x \"$HOME/.fleet/bin/rca\"; \
+         printf '%s\\n' \"$HOME/.fleet/bin/rca\""
+    );
+    emit_install_progress(app, &format!("Installing rca ({slug})…"), false);
+    let remote_rca = ssh(&install)
+        .map_err(|e| format!("rca install failed: {e}"))?
+        .lines()
+        .last()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if remote_rca.is_empty() {
+        return Err("rca install produced no remote path".to_string());
+    }
+
+    // Fail fast if the installed rca predates the stdio transport — the
+    // published release can lag `rca serve --stdio` landing on rca main.
+    emit_install_progress(app, "Verifying serve --stdio support…", false);
+    let probe =
+        format!("{remote_rca} serve -h 2>&1 | grep -qi stdio && echo STDIO_OK || echo STDIO_MISSING");
+    let cap = ssh(&probe).unwrap_or_default();
+    if !cap.contains("STDIO_OK") {
+        return Err(format!(
+            "the rca on the remote ({remote_rca}) has no `serve --stdio` support — its published \
+             release predates the stdio-over-ssh transport. Wait for a newer remote-adapter \
+             release (or install a build that includes stdio) and re-run."
+        ));
+    }
+    Ok(remote_rca)
+}
+
 fn install_rca_remote_impl(
     app: &AppHandle,
     conn: RemoteConnection,
@@ -1753,51 +1830,10 @@ fn install_rca_remote_impl(
         )
     })?;
 
-    // 2. Detect remote OS/arch → release archive slug.
-    emit_install_progress(app, "Detecting remote platform…", false);
-    let uname = ssh_exec(&conn, "uname -sm").map_err(|e| format!("uname failed: {e}"))?;
-    let slug = rca_release_slug(&uname)
-        .ok_or_else(|| format!("unsupported remote platform for rca: {uname:?}"))?;
+    // 2-3. Detect platform, install rca, verify stdio support.
+    let remote_rca = provision_rca(app, |cmd| ssh_exec(&conn, cmd))?;
 
-    // 3. Install rca into ~/.fleet/bin on the remote, echoing its ABSOLUTE path.
-    //    `$HOME` is resolved on the remote here so the `--via` string later
-    //    carries no `~` (local `sh -c` would expand it to the LOCAL home).
-    let url = format!(
-        "https://github.com/hoveychen/remote-adapter/releases/latest/download/rca_{slug}.tar.gz"
-    );
-    let install = format!(
-        "set -e; mkdir -p \"$HOME/.fleet/bin\"; cd \"$HOME/.fleet/bin\"; \
-         curl -fsSL {url} | tar xz; chmod +x rca; test -x \"$HOME/.fleet/bin/rca\"; \
-         printf '%s\\n' \"$HOME/.fleet/bin/rca\""
-    );
-    emit_install_progress(app, &format!("Installing rca ({slug})…"), false);
-    let remote_rca = ssh_exec(&conn, &install)
-        .map_err(|e| format!("rca install failed: {e}"))?
-        .lines()
-        .last()
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if remote_rca.is_empty() {
-        return Err("rca install produced no remote path".to_string());
-    }
-
-    // 3b. Fail fast if the installed rca predates the stdio transport — the
-    //     published release can lag `rca serve --stdio` landing on rca main, in
-    //     which case registering the entry would point every spawn at a remote
-    //     that can't serve --stdio and break with a confusing runtime error.
-    emit_install_progress(app, "Verifying serve --stdio support…", false);
-    let probe = format!("{remote_rca} serve -h 2>&1 | grep -qi stdio && echo STDIO_OK || echo STDIO_MISSING");
-    let cap = ssh_exec(&conn, &probe).unwrap_or_default();
-    if !cap.contains("STDIO_OK") {
-        return Err(format!(
-            "the rca just installed on the remote ({remote_rca}) has no `serve --stdio` support — \
-             its published release predates the stdio-over-ssh transport. Wait for a newer \
-             remote-adapter release (or install a build that includes stdio) and re-run."
-        ));
-    }
-
-    // 4. Single-token ssh target for the `--via` command.
+    // 4. ssh target fragment for the `--via` command.
     let ssh_target = ssh_target_from_connection(&conn)?;
 
     // 5. Register the stdio-over-ssh workspace (validates transport + creates
@@ -1830,6 +1866,50 @@ pub async fn install_rca_remote(
     tauri::async_runtime::spawn_blocking(move || install_rca_remote_impl(&app, conn, path, label))
         .await
         .map_err(|e| format!("install task join failed: {e}"))?
+}
+
+fn update_rca_remote_impl(
+    app: &AppHandle,
+    path: String,
+) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+    use claw_fleet_core::remote_workspace;
+
+    let entry = remote_workspace::find_for_path(&path)
+        .ok_or("no remote workspace is registered at this path")?;
+    let ssh_target = entry
+        .ssh_target
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or("this remote workspace is not a stdio-over-ssh entry — nothing to update")?;
+
+    emit_install_progress(app, "Connecting via SSH…", false);
+    ssh_exec_target(&ssh_target, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
+
+    let remote_rca = provision_rca(app, |cmd| ssh_exec_target(&ssh_target, cmd))?;
+
+    emit_install_progress(app, "Updating registry…", false);
+    let cfg = remote_workspace::upsert(remote_workspace::RemoteWorkspace {
+        path: entry.path.clone(),
+        ssh_target: Some(ssh_target),
+        remote_rca_path: Some(remote_rca),
+        label: entry.label.clone(),
+        ..Default::default()
+    })?;
+    emit_install_progress(app, "rca updated.", true);
+    Ok(cfg)
+}
+
+/// Tauri command — re-run the rca install on an already-registered stdio
+/// workspace (pull the latest release, re-verify `serve --stdio`, update the
+/// entry's remote rca path). Streams the same `rca-install-progress` events.
+#[tauri::command]
+pub async fn update_rca_remote(
+    path: String,
+    app: AppHandle,
+) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
+    tauri::async_runtime::spawn_blocking(move || update_rca_remote_impl(&app, path))
+        .await
+        .map_err(|e| format!("update task join failed: {e}"))?
 }
 
 // ── SSH helpers ───────────────────────────────────────────────────────────────
