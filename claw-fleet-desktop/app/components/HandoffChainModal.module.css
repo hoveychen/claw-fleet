@@ -1,0 +1,125 @@
+/* ── Handoff relay chain modal ───────────────────────────────────────────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg-modal-overlay);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  flex-shrink: 0;
+}
+
+.title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.close_btn {
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 12px;
+}
+.close_btn:hover { background: var(--color-bg-secondary); color: var(--color-text); }
+
+/* Scroll area — the whole point of the modal: a long chain scrolls here. */
+.scroll_area {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 14px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.handoff_leg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-secondary);
+}
+
+.handoff_current .handoff_leg_title,
+.handoff_current {
+  color: var(--color-text, inherit);
+  font-weight: 600;
+}
+
+.handoff_leg_no {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.handoff_leg_title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handoff_link {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 2px 6px;
+}
+
+.handoff_arrow {
+  flex: 0 0 auto;
+  opacity: 0.5;
+}
+
+.handoff_link_body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.handoff_next {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  opacity: 0.9;
+}
+
+/* Full note text — no line clamp now that the modal scrolls. */
+.handoff_note {
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.handoff_time {
+  font-size: 10px;
+  opacity: 0.6;
+}
