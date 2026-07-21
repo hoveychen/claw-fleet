@@ -1173,9 +1173,9 @@ mod remote_workspace_spawn_tests {
 
         crate::remote_workspace::upsert(crate::remote_workspace::RemoteWorkspace {
             path: ws.to_string_lossy().into_owned(),
-            pairing_code: "rca1.TESTCODE".to_string(),
-            label: None,
+            pairing_code: Some("rca1.TESTCODE".to_string()),
             rca_path: Some(fake_rca.to_string_lossy().into_owned()),
+            ..Default::default()
         })
         .unwrap();
 
