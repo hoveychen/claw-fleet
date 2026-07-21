@@ -420,6 +420,16 @@ type SessionRowProps = {
   showSource: boolean;
   onClick: (s: SessionInfo) => void;
   onContextMenu: (e: React.MouseEvent, s: SessionInfo) => void;
+  /** Relay-chain group header mode: when set, this row is a chain's tip session
+   *  and gains an expand/collapse chevron (toggling the chain's other hops) plus
+   *  a supplied whole-chain mark control in place of the single-row one. Clicking
+   *  the row body still opens the tip like any other session. */
+  expandable?: {
+    expanded: boolean;
+    onToggle: () => void;
+    /** Whole-chain mark toggle, rendered instead of the single-session one. */
+    markControl: React.ReactNode;
+  };
 };
 
 const SessionRow = memo(function SessionRow({
@@ -431,6 +441,7 @@ const SessionRow = memo(function SessionRow({
   showSource,
   onClick,
   onContextMenu,
+  expandable,
 }: SessionRowProps) {
   const { t } = useTranslation();
   const runColor = rowBarColor(s);
@@ -441,7 +452,7 @@ const SessionRow = memo(function SessionRow({
     >
       <button
         type="button"
-        className={`${styles.row} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""} ${unread ? styles.row_unread : ""}`}
+        className={`${styles.row} ${expandable ? styles.row_expandable : ""} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""} ${unread ? styles.row_unread : ""}`}
         onClick={() => onClick(s)}
         title={s.lastMessagePreview ?? undefined}
         aria-label={unread ? t("history.unread", "未读 — 有新消息") : undefined}
@@ -523,7 +534,30 @@ const SessionRow = memo(function SessionRow({
         </span>
       </button>
       <span className={styles.row_actions}>
-        <MarkControl session={s} />
+        {expandable && (
+          <button
+            type="button"
+            className={styles.group_expand}
+            onClick={(e) => {
+              e.stopPropagation();
+              expandable.onToggle();
+            }}
+            aria-expanded={expandable.expanded}
+            title={
+              expandable.expanded
+                ? t("history.group_collapse", "收起接力链")
+                : t("history.group_expand", "展开接力链上更早的会话")
+            }
+          >
+            <ChevronRight
+              className={styles.group_chevron}
+              data-open={expandable.expanded ? "true" : "false"}
+              size={14}
+              strokeWidth={2}
+            />
+          </button>
+        )}
+        {expandable ? expandable.markControl : <MarkControl session={s} />}
       </span>
     </div>
   );
@@ -537,6 +571,11 @@ const SessionRow = memo(function SessionRow({
   prev.showSource === next.showSource &&
   prev.onClick === next.onClick &&
   prev.onContextMenu === next.onContextMenu &&
+  // Group headers pass a fresh markControl element + toggle closure each render,
+  // so this never short-circuits them; that's fine (headers are few) and keeps
+  // the chevron's open-state in sync. Plain rows leave `expandable` undefined,
+  // so they still benefit from the memo.
+  prev.expandable === next.expandable &&
   sessionEq(prev.session, next.session));
 
 /**
@@ -1293,68 +1332,40 @@ export function HistoryView() {
           ) : (
             displayItems.map((item) => {
               if (item.kind === "single") return renderSessionRow(item.session);
-              const { chainId, chainLen, tip, members, key } = item;
+              const { chainId, tip, members, key } = item;
               // Full chain for the mark-all + aggregate state; falls back to the
               // present members if the scan hasn't indexed the chain yet.
               const full = chainMembersAll.get(chainId) ?? members;
               const expanded = expandedChains.has(chainId);
               const limit = chainLoadMore[chainId] ?? GROUP_VISIBLE;
-              const shown = expanded ? members.slice(0, limit) : [];
-              const hidden = members.length - shown.length;
-              const tipColor = rowBarColor(tip);
+              // The header *is* the tip session (latest hop), so the expanded
+              // list shows only the chain's *other* hops — never the tip again.
+              const rest = members.filter((m) => m.id !== tip.id);
+              const shown = expanded ? rest.slice(0, limit) : [];
+              const hidden = rest.length - shown.length;
               return (
                 <div key={key} className={styles.group_wrap}>
-                  <div className={styles.row_wrap}>
-                    <button
-                      type="button"
-                      className={`${styles.row} ${styles.group_header} ${expanded ? styles.group_header_open : ""}`}
-                      onClick={() => toggleChain(chainId)}
-                      aria-expanded={expanded}
-                      title={t("history.group_hint", "接力链 — 点击展开链上会话")}
-                    >
-                      {/* The chevron sits in the gutter a plain row's status dot
-                          would occupy (see .group_header), so a separate dot here
-                          would land on top of it. Fold run-status onto the chevron
-                          itself — colour it live/waiting like the dot, dim otherwise. */}
-                      <ChevronRight
-                        className={styles.group_chevron}
-                        data-open={expanded ? "true" : "false"}
-                        size={14}
-                        strokeWidth={2}
-                        style={tipColor ? { color: tipColor } : undefined}
-                      />
-                      <span className={styles.row_body}>
-                        <span className={styles.row_title}>
-                          {multiSource && (
-                            <span className={styles.row_source} title={tip.agentSource}>
-                              <AgentSourceIcon source={tip.agentSource} />
-                            </span>
-                          )}
-                          {tip.titleOverride ??
-                            tip.aiTitle ??
-                            tip.slug ??
-                            tip.lastMessagePreview ??
-                            t("history.untitled", "（无标题）")}
-                        </span>
-                        <span className={styles.row_meta}>
-                          <span className={styles.row_project} title={tip.workspacePath}>
-                            <FolderGit2 size={10} strokeWidth={1.6} />
-                            {tip.workspaceName}
-                          </span>
-                          <span className={styles.row_handoff}>
-                            <Waypoints size={10} strokeWidth={1.6} />
-                            {t("history.group_chain", "接力 {{n}}", { n: chainLen })}
-                          </span>
-                          <span className={styles.row_time}>
-                            {timeAgo(tip.agentLastActivityMs, t)}
-                          </span>
-                        </span>
-                      </span>
-                    </button>
-                    <span className={styles.row_actions}>
-                      <GroupMarkControl members={full} />
-                    </span>
-                  </div>
+                  {/* Header = the tip rendered as an ordinary clickable row (opens
+                      its detail), plus a chevron that reveals the earlier hops and
+                      a whole-chain mark toggle. */}
+                  <SessionRow
+                    session={tip}
+                    snippet={
+                      query.trim().length >= 2 ? snippetByPath.get(tip.jsonlPath) : undefined
+                    }
+                    isSelected={activeId === tip.id}
+                    isOpen={activeId !== tip.id && tabIds.includes(tip.id)}
+                    unread={sessionUnread(tip, readOverrides[tip.id])}
+                    nowTick={nowTick}
+                    showSource={multiSource}
+                    onClick={handleRowClick}
+                    onContextMenu={openRowMenu}
+                    expandable={{
+                      expanded,
+                      onToggle: () => toggleChain(chainId),
+                      markControl: <GroupMarkControl members={full} />,
+                    }}
+                  />
                   {expanded && (
                     <div className={styles.group_children}>
                       {shown.map((m) => renderSessionRow(m))}
