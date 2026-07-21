@@ -459,13 +459,132 @@
   margin-top: 4px;
 }
 
-.imgLoading {
-  padding: 24px;
-  text-align: center;
-  color: var(--color-text-dim);
+/* ── loading skeletons ──────────────────────────────────────────────────────
+   Shimmer placeholders for the two "not yet loaded" moments: decision-card
+   assets (gallery image / html preview) while their bytes stream in, and whole
+   skeleton cards on the decisions tab before the first pending snapshot lands —
+   so nothing flashes a broken <img> or an empty state first.
+   `.skeleton` is the shared base: a dim fill with a band sweeping across it. The
+   band middle stop is `--color-bg-card`, which sits opposite `--color-bg-secondary`
+   in both themes (lighter on light, darker on dark), so the sweep stays visible
+   either way. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
   background: var(--color-bg-secondary);
+  /* Opacity breathing carries the "loading" signal on its own — theme-agnostic,
+     so it stays legible even where the token deltas are small (the warm-paper
+     light theme). The sweep below layers on top for a bit of extra life. */
+  animation: skelPulse 1.4s ease-in-out infinite;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-bg-card) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skelPulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .skeleton::after {
+    animation: none;
+  }
+}
+
+/* Asset skeletons take the same footprint as the real image / iframe so the
+   card doesn't jump when content swaps in. */
+.imgSkeleton {
+  width: 100%;
+  height: 180px;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
-  font-size: 13px;
+}
+
+.previewSkeleton {
+  width: 100%;
+  height: 220px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  margin-top: 8px;
+}
+
+/* Whole-card skeleton in the decision-card silhouette. */
+.skelCard {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skelChip {
+  height: 18px;
+  width: 64px;
+  border-radius: 999px;
+}
+
+.skelWs {
+  height: 14px;
+  width: 90px;
+  border-radius: 6px;
+}
+
+.skelTitle {
+  height: 16px;
+  width: 70%;
+  border-radius: 6px;
+}
+
+.skelLine {
+  height: 12px;
+  width: 100%;
+  border-radius: 6px;
+}
+
+.skelLineShort {
+  height: 12px;
+  width: 55%;
+  border-radius: 6px;
+}
+
+.skelActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.skelBtn {
+  flex: 1;
+  height: 38px;
+  border-radius: 10px;
 }
 
 /* Tap-to-retry surface for a failed asset (timeout on a slow link, or a

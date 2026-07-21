@@ -50,7 +50,9 @@ const KIND_LABEL: Record<string, string> = {
 interface Props {
   decisions: PendingDecision[];
   client: RelayClient | null;
+  connected: boolean;
   agentOnline: boolean;
+  decisionsLoaded: boolean;
   workspaceOf: (sessionId: string) => SessionInfo | undefined;
   onAnswered: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
@@ -59,7 +61,9 @@ interface Props {
 export function DecisionsView({
   decisions,
   client,
+  connected,
   agentOnline,
+  decisionsLoaded,
   workspaceOf,
   onAnswered,
   onOpenSession,
@@ -93,6 +97,18 @@ export function DecisionsView({
   }, [activeCardId]);
 
   if (decisions.length === 0) {
+    // Order mirrors the task page: connectivity first, then whether the first
+    // snapshot has landed, then a genuine empty. The two transient states show
+    // shimmer skeleton cards so a pending card never flashes an empty state
+    // first; only "desktop offline" and "nothing pending" are terminal.
+    if (!connected || (agentOnline && !decisionsLoaded)) {
+      return (
+        <div className={styles.list} aria-busy="true" aria-label={t("正在加载决策…")}>
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      );
+    }
     return agentOnline ? (
       <EmptyState
         icon={CheckCircle2}
@@ -145,6 +161,27 @@ export function DecisionsView({
           {t("第 {0} / {1} 张 · 处理完自动跳到下一张", activeIndex + 1, sorted.length)}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Shimmer placeholder in the decision-card silhouette (chip · workspace ·
+ *  title · two body lines · action row), shown while the first pending snapshot
+ *  is still in flight so the tab doesn't flash an empty state then pop a card. */
+function SkeletonCard() {
+  return (
+    <div className={styles.skelCard} aria-hidden="true">
+      <div className={styles.skelRow}>
+        <span className={`${styles.skeleton} ${styles.skelChip}`} />
+        <span className={`${styles.skeleton} ${styles.skelWs}`} />
+      </div>
+      <span className={`${styles.skeleton} ${styles.skelTitle}`} />
+      <span className={`${styles.skeleton} ${styles.skelLine}`} />
+      <span className={`${styles.skeleton} ${styles.skelLineShort}`} />
+      <div className={styles.skelActions}>
+        <span className={`${styles.skeleton} ${styles.skelBtn}`} />
+        <span className={`${styles.skeleton} ${styles.skelBtn}`} />
+      </div>
     </div>
   );
 }
@@ -1448,6 +1485,15 @@ function HtmlPreview({
     () => names.filter((n) => states[n]?.status === "error"),
     [names, states],
   );
+  // Until every referenced image resolves, the srcDoc still holds raw
+  // `src="name"` refs the sandbox renders as broken-image glyphs (the torn
+  // thumbnails in Boss's screenshot). Hold the iframe back behind a shimmer
+  // until the assets settle; an errored asset stops being "pending" so the
+  // iframe mounts and the tap-to-retry surface below can take over.
+  const assetsPending = useMemo(
+    () => names.some((n) => !states[n] || states[n].status === "loading"),
+    [names, states],
+  );
 
   // `sandbox="allow-scripts"` without `allow-same-origin` (same as the desktop
   // AutoHeightFrame): the document keeps an opaque origin — no DOM/storage
@@ -1470,16 +1516,24 @@ function HtmlPreview({
 
   return (
     <>
-      <iframe
-        ref={ref}
-        className={styles.htmlPreview}
-        sandbox="allow-scripts"
-        srcDoc={resolved}
-        // CSS keeps the legacy 220px fallback for documents that never report
-        // (html stored before the script injection existed).
-        style={height === null ? undefined : { height: `${height}px` }}
-        title={t("预览")}
-      />
+      {assetsPending ? (
+        <div
+          className={`${styles.skeleton} ${styles.previewSkeleton}`}
+          role="img"
+          aria-label={t("加载预览…")}
+        />
+      ) : (
+        <iframe
+          ref={ref}
+          className={styles.htmlPreview}
+          sandbox="allow-scripts"
+          srcDoc={resolved}
+          // CSS keeps the legacy 220px fallback for documents that never report
+          // (html stored before the script injection existed).
+          style={height === null ? undefined : { height: `${height}px` }}
+          title={t("预览")}
+        />
+      )}
       {failed.length > 0 && (
         <button
           type="button"
@@ -1523,7 +1577,11 @@ function ImageGallery({
                 {t("图片加载失败，点按重试")}
               </button>
             ) : (
-              <div className={styles.imgLoading}>{t("加载图片…")}</div>
+              <div
+                className={`${styles.skeleton} ${styles.imgSkeleton}`}
+                role="img"
+                aria-label={t("加载图片…")}
+              />
             )}
             {img.caption && <figcaption>{img.caption}</figcaption>}
           </figure>
