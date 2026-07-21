@@ -542,6 +542,25 @@ pub fn compose_fire_prompt(rec: &ScheduleRecord) -> String {
     out
 }
 
+/// The prompt a **manual run** ("立即运行") uses. Unlike [`compose_fire_prompt`],
+/// this run does *not* consume the schedule: the record stays `Pending` and its
+/// timer is untouched, so it will still fire at the originally scheduled time.
+/// The footer says so, so the agent doesn't think it was the scheduled fire.
+pub fn compose_run_now_prompt(rec: &ScheduleRecord) -> String {
+    let mut out = String::new();
+    out.push_str(&rec.prompt);
+    out.push_str("\n\n---\n");
+    out.push_str(&format!(
+        "（这是 Fleet 定时任务 `{}` 的一次**手动运行**：你在 {} 注册它、约定 {} 触发，\
+         老板现在手动跑了一次。原定时任务并未消耗——它仍会在原定时间自动触发一次。\
+         你无需注册任何 cron 或 wakeup。用 `fleet schedule list` 看它的状态。）",
+        rec.id,
+        fmt_local(rec.created),
+        fmt_local(rec.fire_at),
+    ));
+    out
+}
+
 /// Epoch ms → human-readable local time for the fire-prompt footer.
 fn fmt_local(ms: u64) -> String {
     use chrono::{Local, TimeZone};
@@ -625,6 +644,53 @@ fn fire_once_in(
         }
     }
     Ok(claimed)
+}
+
+/// Manually run a schedule **now**, without touching its record. Spawns a session
+/// with the schedule's own prompt/workspace/model/effort/source, but does *not*
+/// claim, flip `status`, bump `generation`, or stamp `firedSessionId` — so the
+/// pending schedule and its armed timer are untouched and it still fires at its
+/// scheduled time. Works whether the schedule is `Pending` or already `Fired`
+/// (a fired one is just re-run). Returns the spawned session id, if any.
+pub fn run_now(id: &str) -> Result<Option<String>, String> {
+    let dir = schedules_dir().ok_or_else(|| "no fleet home".to_string())?;
+    run_now_in(
+        &dir,
+        id,
+        &move |source, ws, prompt, model, effort, perm, ep| {
+            crate::agent_source::spawn_session(
+                source,
+                &crate::agent_source::SpawnSpec {
+                    workspace_path: ws.to_string(),
+                    prompt: prompt.to_string(),
+                    model: model.map(str::to_string),
+                    effort: effort.map(str::to_string),
+                    permission_mode: perm.map(str::to_string),
+                    session_id: None,
+                    entrypoint: ep.to_string(),
+                },
+            )
+        },
+    )
+}
+
+fn run_now_in(dir: &Path, id: &str, spawn: &SpawnFn<'_>) -> Result<Option<String>, String> {
+    let rec = get_in(dir, id).ok_or_else(|| format!("no schedule with id {id}"))?;
+    let prompt = compose_run_now_prompt(&rec);
+    let resp = spawn(
+        rec.agent_source.as_deref().unwrap_or("claude"),
+        &rec.workspace_path,
+        &prompt,
+        rec.model.as_deref(),
+        rec.effort.as_deref(),
+        None,
+        SCHEDULE_ENTRYPOINT,
+    )
+    .map_err(|e| format!("run-now spawn failed: {e}"))?;
+    if let Some(sid) = &resp.session_id {
+        crate::log_debug(&format!("schedule {id}: manual run -> session {sid}"));
+    }
+    Ok(resp.session_id)
 }
 
 /// Longest a timer sleeps in one go before re-checking the record. Caps how long
@@ -1282,5 +1348,40 @@ mod tests {
             .unwrap();
         assert_eq!(rec.model, None);
         assert_eq!(rec.effort, None);
+    }
+
+    #[test]
+    fn run_now_spawns_but_leaves_the_record_untouched() {
+        let d = dir();
+        make(d.path(), "s1", 1_000_000, 1_000_000 + 300_000);
+        let before = get_in(d.path(), "s1").unwrap();
+
+        let calls = RefCell::new(Vec::new());
+        let sid = run_now_in(d.path(), "s1", &ok_spawner(&calls, "manual-sid")).unwrap();
+        assert_eq!(sid.as_deref(), Some("manual-sid"));
+
+        // a session was spawned with the schedule's own params + entrypoint
+        let calls = calls.into_inner();
+        assert_eq!(calls.len(), 1, "exactly one session spawned");
+        assert_eq!(calls[0].workspace, "/ws");
+        assert_eq!(calls[0].entrypoint, SCHEDULE_ENTRYPOINT);
+        assert!(calls[0].prompt.contains("check the deploy"));
+        assert!(calls[0].prompt.contains("手动运行"), "run-now footer");
+
+        // the record is byte-for-byte unchanged: still pending, no generation
+        // bump, no fired stamp — the scheduled fire is untouched.
+        let after = get_in(d.path(), "s1").unwrap();
+        assert_eq!(after, before, "run_now must not mutate the schedule record");
+        assert_eq!(after.status, ScheduleStatus::Pending);
+        assert!(after.fired_session_id.is_none());
+    }
+
+    #[test]
+    fn run_now_on_missing_schedule_errors() {
+        let d = dir();
+        let calls = RefCell::new(Vec::new());
+        let err = run_now_in(d.path(), "nope", &ok_spawner(&calls, "x")).unwrap_err();
+        assert!(err.contains("no schedule with id nope"), "got: {err}");
+        assert_eq!(calls.into_inner().len(), 0, "no spawn for a missing schedule");
     }
 }
