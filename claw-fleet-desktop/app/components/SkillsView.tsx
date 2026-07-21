@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Sparkles } from "lucide-react";
+import { Copy, FolderOpen, Share2, Sparkles, Trash2, Unlink } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
+import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { useConnectionStore, useUIStore } from "../store";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
@@ -181,6 +183,105 @@ export function SkillsView() {
     }
   }, [load, syncing, t]);
 
+  const isLocal = useConnectionStore((s) => s.connection?.type === "local");
+
+  // Row context menu — anchor + subject held together, mirroring WikiView.
+  const [ctxMenu, setCtxMenu] = useState<{ skill: SkillItem; anchor: ContextMenuAnchor } | null>(
+    null,
+  );
+
+  // These mirror the SkillDetail action buttons so the same operations are one
+  // right-click away from the list. Each reloads on success.
+  const adoptSkill = async (skill: SkillItem) => {
+    try {
+      const report = await invoke<SkillSyncReport>("skill_sync_adopt", { path: skill.path });
+      if (report.conflicts.length > 0) {
+        window.alert(t("skills.sync_conflicts", { count: report.conflicts.length }));
+      }
+      await load();
+    } catch (error) {
+      window.alert(t("skills.sync_failed", { error: String(error) }));
+    }
+  };
+  const unlinkSkill = async (skill: SkillItem) => {
+    try {
+      await invoke("skill_sync_unlink", {
+        slug: skill.name,
+        target: skill.source === "codex" ? "codex" : "claude-code",
+      });
+      await load();
+    } catch (error) {
+      window.alert(t("skills.sync_failed", { error: String(error) }));
+    }
+  };
+  const deleteSkill = async (skill: SkillItem) => {
+    if (!window.confirm(t("skills.delete_confirm", { name: skill.name }))) return;
+    try {
+      await invoke("delete_skill", { skillPath: skill.path });
+      setSkills((prev) => prev.filter((s) => s.path !== skill.path));
+      if (selectedPath === skill.path) updateMainViewState("skills", { selectedPath: null });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      window.alert(t("skills.delete_failed", { error: msg }));
+    }
+  };
+
+  const skillMenuItems = (skill: SkillItem): ContextMenuItem[] => {
+    const syncEntry = syncBySlug.get(skill.name);
+    const managed =
+      skill.source === "codex"
+        ? syncEntry?.codexManaged === true
+        : syncEntry?.claudeManaged === true;
+    const items: ContextMenuItem[] = [];
+    if (skill.scope === "user" && syncEntry?.state === "unmanaged") {
+      items.push({
+        id: "adopt",
+        label: t("skills.share_both"),
+        icon: <Share2 size={13} strokeWidth={1.7} />,
+        onSelect: () => void adoptSkill(skill),
+      });
+    }
+    if (managed) {
+      items.push({
+        id: "unlink",
+        label: t("skills.unlink_target"),
+        icon: <Unlink size={13} strokeWidth={1.7} />,
+        onSelect: () => void unlinkSkill(skill),
+      });
+    }
+    items.push({
+      id: "copy-path",
+      label: t("paths.copy_path", "复制路径"),
+      icon: <Copy size={13} strokeWidth={1.7} />,
+      sub: skill.path,
+      onSelect: () => void writeText(skill.path).catch(() => {}),
+    });
+    if (isLocal) {
+      const revealKey =
+        document.documentElement.getAttribute("data-platform") === "windows"
+          ? "paths.reveal_in_explorer"
+          : "paths.reveal_in_finder";
+      items.push({
+        id: "reveal",
+        label: t(revealKey),
+        icon: <FolderOpen size={13} strokeWidth={1.7} />,
+        onSelect: () => void invoke("reveal_path", { path: skill.path }).catch(() => {}),
+      });
+    }
+    // Deletion mirrors the detail button: deletable, and not currently synced
+    // (unlink first, so the canonical copy isn't orphaned).
+    if (skill.canDelete && !managed) {
+      items.push({
+        id: "delete",
+        label: t("skills.delete"),
+        icon: <Trash2 size={13} strokeWidth={1.7} />,
+        danger: true,
+        onSelect: () => void deleteSkill(skill),
+      });
+    }
+    return items;
+  };
+
   useEffect(() => {
     if (loaded && selectedPath && !selected) {
       updateMainViewState("skills", { selectedPath: null });
@@ -239,9 +340,21 @@ export function SkillsView() {
                 syncEntry={syncBySlug.get(skill.name)}
                 active={selected?.path === skill.path}
                 onClick={() => updateMainViewState("skills", { selectedPath: skill.path })}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCtxMenu({ skill, anchor: { x: e.clientX, y: e.clientY } });
+                }}
               />
             ))}
           </div>
+          {ctxMenu && (
+            <ContextMenu
+              anchor={ctxMenu.anchor}
+              items={skillMenuItems(ctxMenu.skill)}
+              onClose={() => setCtxMenu(null)}
+            />
+          )}
         </div>
       }
     >
@@ -276,17 +389,20 @@ function SkillCard({
   syncEntry,
   active,
   onClick,
+  onContextMenu,
 }: {
   skill: SkillItem;
   syncEntry?: SkillSyncEntry;
   active: boolean;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const { t } = useTranslation();
   return (
     <button
       className={`${styles.card} ${active ? styles.card_active : ""}`}
       onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       <span className={skillStyles.skill_badge}>⚡</span>
       <div className={styles.card_body}>
