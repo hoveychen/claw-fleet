@@ -8,6 +8,7 @@
 // they must read like the same fleet the desktop footage shows.
 import type {
   BrowseDirResponse,
+  DecisionHistoryRecord,
   ElicitationRequest,
   FleetAskRequest,
   GuardRequest,
@@ -245,6 +246,133 @@ export const MOCK_FLEET_ASK: FleetAskRequest = {
     },
   ],
 };
+
+/** Decision-history fixture for the session-detail "决策" tab (`session_decisions`).
+ *  Covers all four record kinds with markdown-rich bodies so the tab exercises
+ *  the shared markdown chain, ✓/○/▸ option markers, selected-green, the plan
+ *  scroll box, italic feedback, the raw user-prompt <pre>, and the amber
+ *  timeout/heartbeat-lost outcome tone. Ordered newest-first here; the tab
+ *  re-sorts oldest-first. */
+export const MOCK_DECISION_HISTORY: DecisionHistoryRecord[] = [
+  {
+    kind: "user-prompt",
+    id: "hist-user-1",
+    sessionId: "sess-e2e-main",
+    text: "帮我把 checkout spec 的 flaky race 修掉，别 quarantine。\n\n验收：npm test -- checkout 连跑 20 次全绿。",
+    sentAt: new Date(NOW - 30 * MIN).toISOString(),
+  },
+  {
+    kind: "elicitation",
+    id: "hist-elic-1",
+    sessionId: "sess-e2e-main",
+    workspaceName: "e2e-tests",
+    aiTitle: "Flaky checkout spec — how should I proceed?",
+    requestedAt: new Date(NOW - 28 * MIN).toISOString(),
+    resolvedAt: new Date(NOW - 27 * MIN).toISOString(),
+    outcome: "answered",
+    questions: [
+      {
+        question:
+          "The checkout spec fails 1 in 8 runs on a race in **cart totals**. Pick my move:",
+        header: "Flaky spec",
+        multiSelect: false,
+        options: [
+          {
+            label: "Fix the race now",
+            description: "Root-cause the `cart-totals` race before the release.",
+          },
+          {
+            label: "Quarantine for v2.4",
+            description: "Ship with the spec quarantined, fix after the train.",
+          },
+        ],
+      },
+    ],
+    answers: {
+      "The checkout spec fails 1 in 8 runs on a race in **cart totals**. Pick my move:":
+        { label: "Fix the race now", description: "Root-cause the `cart-totals` race before the release." },
+    },
+  },
+  {
+    kind: "plan-approval",
+    id: "hist-plan-1",
+    sessionId: "sess-e2e-main",
+    workspaceName: "e2e-tests",
+    aiTitle: "Fix cart-totals race in checkout spec",
+    requestedAt: new Date(NOW - 25 * MIN).toISOString(),
+    resolvedAt: new Date(NOW - 24 * MIN).toISOString(),
+    outcome: "approved-with-edits",
+    planContent: [
+      "## Plan: fix the cart-totals race",
+      "",
+      "1. Await the `recalcTotals()` promise before asserting.",
+      "2. Replace the fixed `sleep(200)` with a `waitFor(totalsSettled)`.",
+      "3. Add a regression test that loops the flow **20×**.",
+      "",
+      "```ts",
+      "await waitFor(() => cart.totalsSettled);",
+      "expect(cart.total).toBe(expected);",
+      "```",
+    ].join("\n"),
+    editedPlan: [
+      "## Plan (edited)",
+      "",
+      "- Keep steps 1–3.",
+      "- Also assert **no** duplicate `recalc` fires per mutation.",
+    ].join("\n"),
+    feedback: "批准，但加一条：确认 recalc 不会重复触发。",
+  },
+  {
+    kind: "fleet-ask",
+    id: "hist-ask-1",
+    sessionId: "sess-e2e-main",
+    workspaceName: "billing-service",
+    aiTitle: "Cutover plan ready — pick the rollout window",
+    requestedAt: new Date(NOW - 20 * MIN).toISOString(),
+    resolvedAt: new Date(NOW - 19 * MIN).toISOString(),
+    outcome: "answered",
+    questions: [
+      {
+        question: "Backfill is validated (`2.1M` rows, **0 drift**). Pick the cutover window:",
+        header: "Cutover",
+        multiSelect: false,
+        options: [
+          { label: "Tonight 02:00 UTC", description: "Lowest traffic; on-call already scheduled." },
+          { label: "Saturday 06:00 UTC", description: "More slack, pushes the train by 2 days." },
+        ],
+        formFields: [
+          { name: "rollout_note", kind: "textarea", label: "Rollout note", required: false },
+        ],
+      },
+    ],
+    answers: {
+      "Backfill is validated (`2.1M` rows, **0 drift**). Pick the cutover window:": "Tonight 02:00 UTC",
+      rollout_note: "状态页挂公告，02:00 UTC 起 5 分钟只读窗口。",
+    },
+  },
+  {
+    kind: "fleet-ask",
+    id: "hist-ask-2",
+    sessionId: "sess-e2e-main",
+    workspaceName: "billing-service",
+    aiTitle: "Needs confirmation on cache purge",
+    requestedAt: new Date(NOW - 12 * MIN).toISOString(),
+    resolvedAt: new Date(NOW - 12 * MIN).toISOString(),
+    outcome: "timeout",
+    questions: [
+      {
+        question: "Purge the CDN cache for `/pricing`?",
+        header: "Cache",
+        multiSelect: false,
+        options: [
+          { label: "Purge now", description: "Invalidate the edge cache immediately." },
+          { label: "Wait for TTL", description: "Let the 10-minute TTL expire." },
+        ],
+      },
+    ],
+    answers: {},
+  },
+];
 
 export const MOCK_TODAY_USAGE: TodayUsage = {
   date: new Date(NOW).toISOString().slice(0, 10),

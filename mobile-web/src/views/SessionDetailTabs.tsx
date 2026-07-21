@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Check, CheckCircle2, ListTodo, Waypoints, Workflow } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
@@ -88,7 +89,73 @@ const OUTCOME_LABEL: Record<string, string> = {
 function outcomeTone(outcome: string): string {
   if (["answered", "approved", "approved-with-edits"].includes(outcome)) return "good";
   if (["declined", "rejected", "cancelled"].includes(outcome)) return "bad";
+  if (["timeout", "heartbeat-lost"].includes(outcome)) return "warn";
   return "dim";
+}
+
+/** Sort/display by request time (sent time for user prompts) — matches the
+ *  desktop DecisionHistory, which reads chronologically oldest-first. */
+function recordTime(r: DecisionHistoryRecord): string {
+  return r.kind === "user-prompt" ? r.sentAt : r.requestedAt;
+}
+
+/** One-line collapsed preview: whitespace-collapsed and rendered raw (markdown
+ *  in a clamped one-liner reads worse than plain text). */
+function recordSummary(r: DecisionHistoryRecord): string {
+  if (r.kind === "elicitation" || r.kind === "fleet-ask")
+    return (r.questions[0]?.question ?? "").replace(/\s+/g, " ").trim();
+  if (r.kind === "user-prompt") return r.text.replace(/\s+/g, " ").trim();
+  return r.aiTitle ?? r.workspaceName ?? t("计划审批");
+}
+
+// Markdown for decision bodies: the shared full chain (GFM + CJK bold + KaTeX +
+// mermaid + sanitize), same as the wiki/message views. Links are rendered inert
+// (mobile has no in-app path navigation in this tab). The inline variant unwraps
+// <p> so it can sit inside the option label/description <span>s.
+const mdLink: Components["a"] = ({ children }) => (
+  <span className={styles.mdLink}>{children}</span>
+);
+const MD_BLOCK: Components = { a: mdLink };
+const MD_INLINE: Components = { a: mdLink, p: ({ children }) => <>{children}</> };
+
+function Md({ text, inline }: { text: string; inline?: boolean }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={mdRemarkPlugins}
+      rehypePlugins={mdRehypePlugins}
+      components={inline ? MD_INLINE : MD_BLOCK}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
+
+/** Option row with a ✓/○/▸ marker + markdown label/description, mirroring the
+ *  desktop DecisionHistory option layout. */
+function OptionRow({
+  label,
+  description,
+  selected,
+  marker,
+}: {
+  label: string;
+  description?: string | null;
+  selected: boolean;
+  marker?: string;
+}) {
+  return (
+    <div className={styles.qaOption} data-picked={selected}>
+      <span className={styles.qaOptionLabel}>
+        <span className={styles.qaOptionMarker}>{marker ?? (selected ? "✓" : "○")}</span>
+        <Md text={label} inline />
+      </span>
+      {description && (
+        <span className={styles.qaOptionDesc}>
+          <Md text={description} inline />
+        </span>
+      )}
+    </div>
+  );
 }
 
 export function DecisionHistoryTab({
@@ -117,86 +184,147 @@ export function DecisionHistoryTab({
       return next;
     });
 
+  // Oldest-first so the list reads chronologically as the session evolved.
+  const ordered = [...data].sort((a, b) => recordTime(a).localeCompare(recordTime(b)));
+
   return (
     <div className={styles.stack}>
-      {data.map((r) => {
+      {ordered.map((r) => {
         const expanded = open.has(r.id);
-        const time = r.kind === "user-prompt" ? r.sentAt : r.resolvedAt;
         return (
           <div key={`${r.kind}:${r.id}`} className={styles.record} onClick={() => toggle(r.id)}>
             <div className={styles.recordHead}>
-              <span className={styles.kindChip}>{t(KIND_LABEL[r.kind] ?? r.kind)}</span>
+              <span className={styles.kindChip} data-kind={r.kind}>
+                {t(KIND_LABEL[r.kind] ?? r.kind)}
+              </span>
               {r.kind !== "user-prompt" && (
                 <span className={styles.outcomeChip} data-tone={outcomeTone(r.outcome)}>
                   {t(OUTCOME_LABEL[r.outcome] ?? r.outcome)}
                 </span>
               )}
-              <span className={styles.recordTime}>{fmtDateTime(time)}</span>
+              <span className={styles.recordTime}>{fmtDateTime(recordTime(r))}</span>
             </div>
             <div className={styles.recordSummary} data-expanded={expanded}>
-              {r.kind === "user-prompt" && (
-                <>
-                  {r.text}
-                  {r.hasImage && <span className={styles.dimNote}>{t("（含图片）")}</span>}
-                </>
+              {recordSummary(r)}
+              {r.kind === "user-prompt" && r.hasImage && (
+                <span className={styles.dimNote}> {t("（含图片）")}</span>
               )}
-              {r.kind === "elicitation" && (r.questions[0]?.question ?? "")}
-              {r.kind === "plan-approval" && r.planContent.slice(0, expanded ? undefined : 200)}
-              {r.kind === "fleet-ask" && (r.questions[0]?.question ?? "")}
             </div>
+
             {expanded && r.kind === "elicitation" && (
               <div className={styles.recordBody} onClick={(e) => e.stopPropagation()}>
                 {r.questions.map((q, i) => {
                   const picked = r.answers[q.question];
+                  const selectedLabels =
+                    picked && !picked.other
+                      ? picked.label.split(",").map((s) => s.trim())
+                      : [];
                   return (
                     <div key={i} className={styles.qaBlock}>
-                      <div className={styles.qaQuestion}>{q.question}</div>
+                      <div className={styles.qaQuestion}>
+                        <Md text={q.question} />
+                      </div>
                       {q.options.map((o, j) => (
-                        <div
+                        <OptionRow
                           key={j}
-                          className={styles.qaOption}
-                          data-picked={picked?.label === o.label}
-                        >
-                          {o.label}
-                        </div>
+                          label={o.label}
+                          description={o.description}
+                          selected={selectedLabels.includes(o.label)}
+                        />
                       ))}
                       {picked?.other && (
-                        <div className={styles.qaOption} data-picked="true">
-                          {t("其他：{0}", picked.label)}
-                        </div>
+                        <OptionRow label={t("其他")} description={picked.label} selected marker="✓" />
                       )}
                     </div>
                   );
                 })}
               </div>
             )}
+
             {expanded && r.kind === "plan-approval" && (
               <div className={styles.recordBody} onClick={(e) => e.stopPropagation()}>
+                <div className={styles.planBody}>
+                  <Md text={r.planContent} />
+                </div>
                 {r.editedPlan && (
                   <div className={styles.qaBlock}>
                     <div className={styles.qaQuestion}>{t("用户编辑后的计划")}</div>
-                    <div className={styles.preWrap}>{r.editedPlan}</div>
+                    <div className={styles.planBody}>
+                      <Md text={r.editedPlan} />
+                    </div>
                   </div>
                 )}
                 {r.feedback && (
                   <div className={styles.qaBlock}>
                     <div className={styles.qaQuestion}>{t("驳回意见")}</div>
-                    <div className={styles.preWrap}>{r.feedback}</div>
+                    <div className={styles.feedback}>
+                      <Md text={r.feedback} />
+                    </div>
                   </div>
                 )}
               </div>
             )}
+
+            {expanded && r.kind === "user-prompt" && (
+              <div className={styles.recordBody} onClick={(e) => e.stopPropagation()}>
+                <pre className={styles.preWrap}>{r.text}</pre>
+              </div>
+            )}
+
             {expanded && r.kind === "fleet-ask" && (
               <div className={styles.recordBody} onClick={(e) => e.stopPropagation()}>
-                {r.questions.some((q) => q.html) && (
-                  <div className={styles.dimNote}>{t("[当时展示过 HTML 预览]")}</div>
-                )}
-                {Object.entries(r.answers).map(([k, v]) => (
-                  <div key={k} className={styles.qaBlock}>
-                    <div className={styles.qaQuestion}>{k}</div>
-                    <div className={styles.preWrap}>{v}</div>
-                  </div>
-                ))}
+                {r.questions.map((q, i) => {
+                  const raw = r.answers[q.question] ?? "";
+                  const opts = q.options ?? [];
+                  const fields = q.formFields ?? [];
+                  const selectedLabels = raw
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  const matched = opts.some((o) => selectedLabels.includes(o.label));
+                  const isOther = !matched && raw.length > 0 && opts.length > 0;
+                  return (
+                    <div key={i} className={styles.qaBlock}>
+                      <div className={styles.qaQuestion}>
+                        <Md text={q.question} />
+                      </div>
+                      {q.images && q.images.length > 0 ? (
+                        <div className={styles.dimNote}>{t("[当时展示过图片预览]")}</div>
+                      ) : (
+                        q.html && (
+                          <div className={styles.dimNote}>{t("[当时展示过 HTML 预览]")}</div>
+                        )
+                      )}
+                      {opts.map((o, j) => (
+                        <OptionRow
+                          key={j}
+                          label={o.label}
+                          description={o.description}
+                          selected={selectedLabels.includes(o.label)}
+                        />
+                      ))}
+                      {isOther && (
+                        <OptionRow label={t("其他")} description={raw} selected marker="✓" />
+                      )}
+                      {fields.map((f, fi) => {
+                        const v = r.answers[f.name];
+                        if (v === undefined || v === "") return null;
+                        return (
+                          <OptionRow
+                            key={`f-${fi}`}
+                            label={f.label || f.name}
+                            description={v}
+                            selected
+                            marker="▸"
+                          />
+                        );
+                      })}
+                      {opts.length === 0 && fields.length === 0 && raw && (
+                        <div className={styles.preWrap}>{raw}</div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
