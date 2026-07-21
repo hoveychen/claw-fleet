@@ -72,11 +72,12 @@
   width: 820px;
 }
 
-/* With-detail variant: panel becomes a 2-column flex row — left is an inline
- * SessionDetail column, right is the normal panel body (history strip + card
- * + tab bar). Inline-style sets the overall width; the children divide it. */
+/* With-detail variant: panel becomes a 2-column flex row — left is the normal
+ * panel body (history strip + card + tab bar), right is an inline SessionDetail
+ * column. The detail column is emitted first in the DOM, so `row-reverse` puts
+ * it on the right. Inline-style sets the overall width; the children divide it. */
 .panel_with_detail {
-  flex-direction: row;
+  flex-direction: row-reverse;
   align-items: stretch;
   max-height: calc(100vh - 56px);
   height: 80vh;
@@ -87,7 +88,7 @@
   min-width: 420px;
   display: flex;
   overflow: hidden;
-  border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-left: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   /* The embedded SessionDetail is column-flex with its own scrollable area;
    * give it a stable height by stretching to the panel's. */
   align-self: stretch;
