@@ -195,6 +195,18 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const [rwConnId, setRwConnId] = useState(""); // "saved:<id>" | "profile:<alias>" | "__manual__"
   const [rwManualTarget, setRwManualTarget] = useState(""); // user@host when __manual__
   const [rwInstalling, setRwInstalling] = useState(false);
+  const [rwInstallSteps, setRwInstallSteps] = useState<string[]>([]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlisten = await listen<{ step: string; done: boolean }>("rca-install-progress", (e) => {
+        setRwInstallSteps((prev) => [...prev, e.payload.step]);
+      });
+    })();
+    return () => unlisten?.();
+  }, []);
 
   useEffect(() => {
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
@@ -238,6 +250,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     if (!path || !conn) return;
     setRwInstalling(true);
     setRwError("");
+    setRwInstallSteps([]);
     try {
       const cfg = await invoke<RemoteWorkspacesConfig>("install_rca_remote", {
         conn,
@@ -1634,6 +1647,19 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                       {t("settings.remote_ws_no_conns")}
                     </span>
+                  </div>
+                )}
+                {rwInstallSteps.length > 0 && (
+                  <div className={styles.row} style={{ flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                    {rwInstallSteps.map((s, i) => (
+                      <span
+                        key={i}
+                        style={{ fontSize: 11, color: "var(--color-text-dim)", fontFamily: "var(--font-mono, monospace)" }}
+                      >
+                        {i === rwInstallSteps.length - 1 && rwInstalling ? "▸ " : "✓ "}
+                        {s}
+                      </span>
+                    ))}
                   </div>
                 )}
 
