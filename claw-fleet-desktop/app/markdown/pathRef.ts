@@ -32,6 +32,9 @@ const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 const LINE_SUFFIX = /:(\d+)(?::\d+)?$/;
 /** A final segment like `.rs`, `.tsx`, `.module.css`. */
 const EXTENSION = /\.[A-Za-z0-9]{1,10}$/;
+/** A Windows drive-absolute prefix: `C:\` or `C:/`. Its colon is the one colon
+ *  a path may legitimately contain, so the stray-colon rejection skips it. */
+const WIN_DRIVE = /^[A-Za-z]:[\\/]/;
 
 /**
  * Parse the contents of an inline-code span as a path reference.
@@ -50,12 +53,14 @@ export function parsePathRef(raw: string): PathRef | null {
   const path = lineMatch ? text.slice(0, lineMatch.index) : text;
   const line = lineMatch ? Number(lineMatch[1]) : null;
   if (!path) return null;
-  // A stray colon anywhere else means this wasn't a path:line reference.
-  if (path.includes(":")) return null;
+  // A stray colon anywhere else means this wasn't a path:line reference —
+  // except the drive colon of a Windows-absolute path (`C:\…`).
+  const isDriveAbsolute = WIN_DRIVE.test(path);
+  if ((isDriveAbsolute ? path.slice(2) : path).includes(":")) return null;
 
-  const hasPrefix = /^(\/|~\/|\.\.?\/)/.test(path);
-  const hasSlash = path.includes("/");
-  const isDir = path.endsWith("/");
+  const hasPrefix = /^(\/|~\/|\.\.?\/)/.test(path) || isDriveAbsolute;
+  const hasSlash = path.includes("/") || path.includes("\\");
+  const isDir = path.endsWith("/") || path.endsWith("\\");
   const hasExtension = EXTENSION.test(path);
 
   // Positive evidence required. A slash alone is not enough ("and/or"), and an
@@ -78,7 +83,7 @@ export function resolvePathRef(
   home: string | null,
 ): string | null {
   let absolute: string;
-  if (path.startsWith("/")) {
+  if (path.startsWith("/") || WIN_DRIVE.test(path)) {
     absolute = path;
   } else if (path.startsWith("~/") || path === "~") {
     if (!home) return null;
@@ -90,10 +95,15 @@ export function resolvePathRef(
 }
 
 /** Collapse `.`, `..` and duplicate separators. `..` past the root is clamped
- *  at the root rather than escaping it. */
+ *  at the root rather than escaping it. Windows drive paths keep their `C:`
+ *  root and come out with forward slashes — every consumer (backend open,
+ *  display) accepts them, and it keeps the output shape uniform. */
 function normalise(absolute: string): string {
+  const drive = WIN_DRIVE.exec(absolute);
+  const root = drive ? absolute.slice(0, 2) : "";
+  const rest = drive ? absolute.slice(2) : absolute;
   const out: string[] = [];
-  for (const segment of absolute.split("/")) {
+  for (const segment of rest.split(/[\\/]/)) {
     if (!segment || segment === ".") continue;
     if (segment === "..") {
       out.pop();
@@ -101,7 +111,8 @@ function normalise(absolute: string): string {
     }
     out.push(segment);
   }
-  const joined = `/${out.join("/")}`;
-  // Preserve a trailing slash so directory refs stay directory refs.
-  return absolute.endsWith("/") && joined !== "/" ? `${joined}/` : joined;
+  const joined = `${root}/${out.join("/")}`;
+  // Preserve a trailing separator so directory refs stay directory refs.
+  const endsWithSep = /[\\/]$/.test(absolute);
+  return endsWithSep && joined !== `${root}/` ? `${joined}/` : joined;
 }

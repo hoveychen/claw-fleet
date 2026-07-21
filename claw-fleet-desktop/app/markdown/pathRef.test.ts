@@ -48,6 +48,38 @@ describe("parsePathRef — accepts", () => {
   });
 });
 
+describe("parsePathRef — Windows paths", () => {
+  it("absolute drive paths with backslashes", () => {
+    expect(parsePathRef("C:\\code\\proj\\src\\main.rs")).toEqual({
+      path: "C:\\code\\proj\\src\\main.rs",
+      line: null,
+    });
+  });
+
+  it("absolute drive paths with forward slashes", () => {
+    expect(parsePathRef("C:/code/proj/src/main.rs")).toEqual({
+      path: "C:/code/proj/src/main.rs",
+      line: null,
+    });
+  });
+
+  it("drive path with :line keeps the drive colon and strips the line", () => {
+    expect(parsePathRef("C:\\code\\proj\\src\\main.rs:42")).toEqual({
+      path: "C:\\code\\proj\\src\\main.rs",
+      line: 42,
+    });
+  });
+
+  it("backslash-relative path with an extension", () => {
+    expect(parsePathRef("src\\backend.rs")).toEqual({ path: "src\\backend.rs", line: null });
+  });
+
+  it("still rejects a stray non-drive colon", () => {
+    expect(parsePathRef("C:\\code\\a:b.rs")).toBeNull();
+    expect(parsePathRef("key:value")).toBeNull();
+  });
+});
+
 describe("parsePathRef — rejects", () => {
   // Each of these appears in agent prose inside backticks. A false positive here
   // turns ordinary technical writing into a field of blue links.
@@ -100,5 +132,28 @@ describe("resolvePathRef", () => {
 
   it("refuses to escape above the filesystem root", () => {
     expect(resolvePathRef("../../../../../../etc/passwd", "/a/b", "/home")).toBe("/etc/passwd");
+  });
+
+  describe("Windows", () => {
+    const winWs = "C:\\Users\\hovey\\ws";
+
+    it("passes drive-absolute paths through, normalised to forward slashes", () => {
+      expect(resolvePathRef("C:\\code\\a.rs", winWs, null)).toBe("C:/code/a.rs");
+      expect(resolvePathRef("D:/data/x.csv", winWs, null)).toBe("D:/data/x.csv");
+    });
+
+    it("joins relative paths onto a backslash workspace root", () => {
+      expect(resolvePathRef("src/backend.rs", winWs, null)).toBe(
+        "C:/Users/hovey/ws/src/backend.rs",
+      );
+    });
+
+    it("normalises ../ against a drive root without escaping the drive", () => {
+      expect(resolvePathRef("..\\..\\..\\..\\etc", "C:\\a\\b", null)).toBe("C:/etc");
+    });
+
+    it("keeps a trailing separator on directory refs", () => {
+      expect(resolvePathRef("C:\\code\\dir\\", winWs, null)).toBe("C:/code/dir/");
+    });
   });
 });
