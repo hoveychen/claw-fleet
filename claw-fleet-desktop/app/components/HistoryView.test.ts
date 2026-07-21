@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFrozenOrder,
+  chainBarColor,
   CHAT_HIDDEN,
   CHAT_ONLY,
   matchesWorkspaceFilter,
   sessionPaneStyle,
   sessionEq,
 } from "./HistoryView";
-import type { SessionInfo } from "../types";
+import type { SessionInfo, SessionStatus } from "../types";
 
 /**
  * `sessionEq` backs SessionRow's memo. Two failure modes matter and they pull
@@ -46,6 +47,38 @@ function base(): SessionInfo {
     taskPlan: null,
   } as unknown as SessionInfo;
 }
+
+function member(status: SessionStatus, hop: number): SessionInfo {
+  return {
+    ...base(),
+    status,
+    handoff: { hop, chainLen: 5, chainId: "c" },
+  } as unknown as SessionInfo;
+}
+
+const SUCCESS = "var(--color-success)";
+const WARNING = "var(--color-warning)";
+
+describe("chainBarColor (collapsed relay-group header liveness)", () => {
+  it("is null when no member is live", () => {
+    expect(chainBarColor([member("idle", 1), member("idle", 2)])).toBe(null);
+  });
+
+  it("surfaces a live mid-chain hop even when the tip is done", () => {
+    // The bug: the tip (highest hop) is idle, but hop 2 is executing. The header
+    // must show the chain as live rather than inheriting only the tip's null.
+    const members = [member("executing", 2), member("idle", 3)];
+    expect(chainBarColor(members)).toBe(SUCCESS);
+  });
+
+  it("shows amber when the only live member is waiting for input", () => {
+    expect(chainBarColor([member("waitingInput", 2), member("idle", 3)])).toBe(WARNING);
+  });
+
+  it("prefers a running member (green) over a waiting one (amber)", () => {
+    expect(chainBarColor([member("waitingInput", 1), member("executing", 2)])).toBe(SUCCESS);
+  });
+});
 
 describe("sessionEq", () => {
   it("treats a fresh deserialisation of identical data as equal", () => {

@@ -278,6 +278,24 @@ function chainTip(members: SessionInfo[]): SessionInfo {
   return members.reduce((a, b) => ((b.handoff?.hop ?? 0) > (a.handoff?.hop ?? 0) ? b : a));
 }
 
+/** Run-status colour for a *collapsed* relay group's header. A group hides its
+ *  other hops, so the header must surface the whole chain's liveness — not just
+ *  the tip's. The tip alone is wrong because the group is sorted to the top by
+ *  its most recently active member (`agentLastActivityMs`), which need not be
+ *  the highest hop: a chain can float up on a mid-chain hop's activity while its
+ *  tip sits done, leaving the header with no dot. Aggregate instead, preferring
+ *  a running member (green) over a merely waiting one (amber), matching
+ *  `rowBarColor`'s own green-beats-amber priority. */
+export function chainBarColor(members: SessionInfo[]): string | null {
+  let waiting = false;
+  for (const m of members) {
+    const c = rowBarColor(m);
+    if (c === "var(--color-success)") return c; // a running hop wins outright
+    if (c === "var(--color-warning)") waiting = true;
+  }
+  return waiting ? "var(--color-warning)" : null;
+}
+
 /** One entry in the rendered task list: either a standalone session or a
  *  collapsed handoff-relay chain. */
 export type RenderItem =
@@ -420,6 +438,12 @@ type SessionRowProps = {
   showSource: boolean;
   onClick: (s: SessionInfo) => void;
   onContextMenu: (e: React.MouseEvent, s: SessionInfo) => void;
+  /** Overrides the run-status dot colour. A collapsed relay group's header is
+   *  the tip session, but its dot must reflect the *whole chain's* liveness (see
+   *  `chainBarColor`), so the header passes the aggregate here instead of letting
+   *  the row derive it from the tip alone. `undefined` = derive from the session
+   *  (the normal single-row path); `null` = force no dot. */
+  runColorOverride?: string | null;
   /** Relay-chain group header mode: when set, this row is a chain's tip session
    *  and gains an expand/collapse chevron (toggling the chain's other hops) plus
    *  a supplied whole-chain mark control in place of the single-row one. Clicking
@@ -441,10 +465,11 @@ const SessionRow = memo(function SessionRow({
   showSource,
   onClick,
   onContextMenu,
+  runColorOverride,
   expandable,
 }: SessionRowProps) {
   const { t } = useTranslation();
-  const runColor = rowBarColor(s);
+  const runColor = runColorOverride !== undefined ? runColorOverride : rowBarColor(s);
   return (
     <div
       className={styles.row_wrap}
@@ -569,6 +594,7 @@ const SessionRow = memo(function SessionRow({
   prev.snippet === next.snippet &&
   prev.nowTick === next.nowTick &&
   prev.showSource === next.showSource &&
+  prev.runColorOverride === next.runColorOverride &&
   prev.onClick === next.onClick &&
   prev.onContextMenu === next.onContextMenu &&
   // Group headers pass a fresh markControl element + toggle closure each render,
@@ -1355,7 +1381,13 @@ export function HistoryView() {
                     }
                     isSelected={activeId === tip.id}
                     isOpen={activeId !== tip.id && tabIds.includes(tip.id)}
-                    unread={sessionUnread(tip, readOverrides[tip.id])}
+                    // Bold (unread) and the run-status dot represent the whole
+                    // collapsed chain, not just the tip: the group is sorted to
+                    // the top by its most-recently-active member, so its header
+                    // must show that member's live/unread state or it reads as
+                    // stale. `full` is the chain's complete membership.
+                    unread={full.some((m) => sessionUnread(m, readOverrides[m.id]))}
+                    runColorOverride={chainBarColor(full)}
                     nowTick={nowTick}
                     showSource={multiSource}
                     onClick={handleRowClick}
