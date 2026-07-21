@@ -1714,7 +1714,18 @@ fn ssh_target_from_connection(conn: &RemoteConnection) -> Result<String, String>
     Ok(parts.join(" "))
 }
 
+/// Emit an rca-install progress step to the wizard (mirrors [`emit_progress`]
+/// but on a dedicated `rca-install-progress` channel so it doesn't collide with
+/// the backend-connect flow).
+fn emit_install_progress(app: &AppHandle, step: &str, done: bool) {
+    let _ = app.emit(
+        "rca-install-progress",
+        ConnectProgress { step: step.to_string(), done, error: None, update_last: false },
+    );
+}
+
 fn install_rca_remote_impl(
+    app: &AppHandle,
     conn: RemoteConnection,
     path: String,
     label: Option<String>,
@@ -1722,6 +1733,7 @@ fn install_rca_remote_impl(
     use claw_fleet_core::remote_workspace;
 
     // 1. Probe SSH connectivity.
+    emit_install_progress(app, "Connecting via SSH…", false);
     ssh_exec(&conn, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
 
     // 1b. Verify the workspace path is creatable + writable ON THE REMOTE
@@ -1730,6 +1742,7 @@ fn install_rca_remote_impl(
     //     remote side up front instead of at first spawn. The path is
     //     single-quoted; a path containing a single quote is refused (paths
     //     never legitimately need one and it would break the quoting).
+    emit_install_progress(app, "Checking workspace path on remote…", false);
     if path.contains('\'') {
         return Err("workspace path must not contain a single quote".to_string());
     }
@@ -1741,6 +1754,7 @@ fn install_rca_remote_impl(
     })?;
 
     // 2. Detect remote OS/arch → release archive slug.
+    emit_install_progress(app, "Detecting remote platform…", false);
     let uname = ssh_exec(&conn, "uname -sm").map_err(|e| format!("uname failed: {e}"))?;
     let slug = rca_release_slug(&uname)
         .ok_or_else(|| format!("unsupported remote platform for rca: {uname:?}"))?;
@@ -1756,6 +1770,7 @@ fn install_rca_remote_impl(
          curl -fsSL {url} | tar xz; chmod +x rca; test -x \"$HOME/.fleet/bin/rca\"; \
          printf '%s\\n' \"$HOME/.fleet/bin/rca\""
     );
+    emit_install_progress(app, &format!("Installing rca ({slug})…"), false);
     let remote_rca = ssh_exec(&conn, &install)
         .map_err(|e| format!("rca install failed: {e}"))?
         .lines()
@@ -1771,6 +1786,7 @@ fn install_rca_remote_impl(
     //     published release can lag `rca serve --stdio` landing on rca main, in
     //     which case registering the entry would point every spawn at a remote
     //     that can't serve --stdio and break with a confusing runtime error.
+    emit_install_progress(app, "Verifying serve --stdio support…", false);
     let probe = format!("{remote_rca} serve -h 2>&1 | grep -qi stdio && echo STDIO_OK || echo STDIO_MISSING");
     let cap = ssh_exec(&conn, &probe).unwrap_or_default();
     if !cap.contains("STDIO_OK") {
@@ -1786,26 +1802,32 @@ fn install_rca_remote_impl(
 
     // 5. Register the stdio-over-ssh workspace (validates transport + creates
     //    the local mirror directory at the identity-mapped path).
-    remote_workspace::upsert(remote_workspace::RemoteWorkspace {
+    emit_install_progress(app, "Registering workspace…", false);
+    let cfg = remote_workspace::upsert(remote_workspace::RemoteWorkspace {
         path,
         ssh_target: Some(ssh_target),
         remote_rca_path: Some(remote_rca),
         label: label.filter(|l| !l.trim().is_empty()),
         ..Default::default()
-    })
+    })?;
+    emit_install_progress(app, "Installed rca & registered workspace.", true);
+    Ok(cfg)
 }
 
 /// Tauri command — install rca on a saved SSH host and register `path` as a
 /// stdio-over-ssh remote workspace. Desktop-layer local SSH op (like
 /// [`connect_remote`]); does NOT go through the Backend trait. Runs on the
-/// blocking pool so the multi-second SSH work never freezes the UI thread.
+/// blocking pool so the multi-second SSH work never freezes the UI thread, and
+/// streams `rca-install-progress` events while it runs. The final config is
+/// returned so the caller refreshes the list; errors reject the promise.
 #[tauri::command]
 pub async fn install_rca_remote(
     conn: RemoteConnection,
     path: String,
     label: Option<String>,
+    app: AppHandle,
 ) -> Result<claw_fleet_core::remote_workspace::RemoteWorkspacesConfig, String> {
-    tauri::async_runtime::spawn_blocking(move || install_rca_remote_impl(conn, path, label))
+    tauri::async_runtime::spawn_blocking(move || install_rca_remote_impl(&app, conn, path, label))
         .await
         .map_err(|e| format!("install task join failed: {e}"))?
 }
