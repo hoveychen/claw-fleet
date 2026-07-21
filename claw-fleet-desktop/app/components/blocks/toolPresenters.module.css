@@ -300,6 +300,34 @@
   margin-left: auto;
 }
 
+/* WebFetch: a source line (favicon + domain + path) above the summary — the
+   same claude.ai source-chip idiom as the search rows. */
+.fetch_source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.fetch_host {
+  font-size: 12px;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.fetch_path {
+  font-size: 12px;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 /* WebFetch: the model's page summary, kept visually quieter than message
    prose — it is tool output, not the agent speaking. */
 .fetch_result {

@@ -225,6 +225,58 @@ function WebSearchBody({ result }: { result: Record<string, unknown> }) {
   );
 }
 
+/** `WebFetch`: a source line (favicon + domain + path) over the model's
+ *  markdown summary of the fetched page — the mobile counterpart of the
+ *  desktop WebFetchBody. Replaces the raw input+output JSON this used to fall
+ *  through to. Status / size stay on the collapsed line's digest chips. */
+function WebFetchBody({
+  result,
+  input,
+  fallback,
+}: {
+  result: Record<string, unknown>;
+  input?: Record<string, unknown>;
+  fallback: string;
+}) {
+  const url =
+    typeof result.url === "string"
+      ? result.url
+      : typeof input?.url === "string"
+        ? input.url
+        : "";
+  const summary = typeof result.result === "string" ? result.result : "";
+  let host = "";
+  let rest = "";
+  try {
+    const u = new URL(url);
+    host = u.hostname.replace(/^www\./, "");
+    rest = `${u.pathname}${u.search}`;
+    if (rest === "/") rest = "";
+  } catch {
+    // Malformed URL: show the raw string as the host.
+  }
+  return (
+    <div className={styles.fetchBody}>
+      {url && (
+        <div className={styles.fetchSource}>
+          <SearchFavicon url={url} />
+          <span className={styles.fetchHost}>{host || url}</span>
+          {rest && <span className={styles.fetchPath}>{rest}</span>}
+        </div>
+      )}
+      {summary ? (
+        <div className={styles.fetchSummary}>
+          <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>
+            {summary}
+          </ReactMarkdown>
+        </div>
+      ) : (
+        <pre className={styles.pre}>{fallback || t("（无输出）")}</pre>
+      )}
+    </div>
+  );
+}
+
 function GenericBody({ detail }: { detail: ToolDetail }) {
   const text = contentText(detail.content);
   const input = detail.input && Object.keys(detail.input).length > 0 ? detail.input : null;
@@ -259,6 +311,9 @@ function DetailBody({ detail, isError }: { detail: ToolDetail; isError?: boolean
     return <TodoBody result={result} />;
   }
   if (name === "WebSearch" && result) return <WebSearchBody result={result} />;
+  if (name === "WebFetch" && result) {
+    return <WebFetchBody result={result} input={detail.input} fallback={fallback} />;
+  }
   return <GenericBody detail={detail} />;
 }
 

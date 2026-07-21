@@ -186,6 +186,40 @@
   text-overflow: ellipsis;
 }
 
+/* WebFetch: a source line (favicon + domain + path) over the page summary. */
+.fetchBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fetchSource {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fetchHost {
+  font-size: 12px;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.fetchPath {
+  font-size: 12px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.fetchSummary {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 /* ── Detail images (decision-asset budget re-encodes) ── */
 .imageList {
   display: flex;

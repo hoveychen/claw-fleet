@@ -451,16 +451,46 @@ function WebSearchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: u
   );
 }
 
-/** `WebFetch`: the model's summary of the fetched page, rendered as markdown
- *  under the URL (the URL is skipped in rail mode, where the collapsed summary
- *  line already shows it — same convention as WebSearchBody). */
-function WebFetchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: unknown; rail?: boolean }) {
+/** A compact source line for a fetched page — favicon + domain + path, the same
+ *  claude.ai source-chip idiom the search rows use. Clickable, opening the URL
+ *  through the same surfaced-error opener as the search results. */
+function FetchSource({ url }: { url: string }) {
+  let host = "";
+  let rest = "";
+  try {
+    const u = new URL(url);
+    host = u.hostname.replace(/^www\./, "");
+    rest = `${u.pathname}${u.search}`;
+    if (rest === "/") rest = "";
+  } catch {
+    // Malformed URL: fall back to showing the raw string as the host.
+  }
+  return (
+    <a
+      className={styles.fetch_source}
+      href={url}
+      onClick={(e) => {
+        e.preventDefault();
+        openUrl(url).catch((err) => console.error("openUrl failed:", url, err));
+      }}
+    >
+      <Favicon url={url} />
+      <span className={styles.fetch_host}>{host || url}</span>
+      {rest && <span className={styles.fetch_path}>{rest}</span>}
+    </a>
+  );
+}
+
+/** `WebFetch`: the fetched page's source line (favicon + domain + path) over the
+ *  model's markdown summary. The collapsed header already carries the status /
+ *  size / duration chips, so the source line stays to the URL itself. */
+function WebFetchBody({ block, meta }: { block: ToolUseBlockType; meta: unknown; rail?: boolean }) {
   const fetch = asWebFetchResult(meta);
   if (!fetch) return null;
-  const url = rail ? "" : fetch.url || (typeof block.input.url === "string" ? block.input.url : "");
+  const url = fetch.url || (typeof block.input.url === "string" ? block.input.url : "");
   return (
     <>
-      {url && <div className={styles.search_query}>{url}</div>}
+      {url && <FetchSource url={url} />}
       {fetch.result ? (
         <div className={styles.fetch_result}>
           <TextBlock text={fetch.result} />
