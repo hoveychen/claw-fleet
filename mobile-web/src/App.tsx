@@ -33,7 +33,11 @@ import {
   needsA2hsForDurableStorage,
   persistSecret,
 } from "./secretStore";
-import { loadCachedSessions } from "./sessionCache";
+import {
+  clearCachedSessions,
+  loadCachedSessions,
+  saveCachedSessions,
+} from "./sessionCache";
 import { useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
@@ -264,6 +268,10 @@ export function App() {
       onSessions: (list: SessionInfo[]) => {
         setSessions(list);
         setSessionsLoaded(true);
+        // Persist the merged full list so the next cold start paints it. Both
+        // full and delta frames arrive here already merged (see relay.ts), so
+        // the cache always holds the latest complete snapshot.
+        saveCachedSessions(list);
       },
       onSessionsKind: (kind: "full" | "delta") =>
         setSessionsFrame((s) => ({
@@ -498,6 +506,7 @@ export function App() {
           className={styles.gateButton}
           onClick={() => {
             clearSecret();
+            clearCachedSessions();
             location.reload();
           }}
         >
