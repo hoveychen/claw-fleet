@@ -24,8 +24,29 @@ use crate::AppState;
 const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 const MIN_SECRET_LEN: usize = 16;
 
+/// Cap on a single WebSocket message (and frame). tungstenite's defaults are
+/// 64 MiB per message / 16 MiB per frame; on a public multi-tenant relay a
+/// 64 MiB-per-connection ceiling is a needless memory-exhaustion surface, so we
+/// tighten it — but it must stay **above the largest legitimate frame** or it
+/// would silently truncate real uploads.
+///
+/// Largest legitimate payload is a decision asset: `MAX_ASSET_BYTES` = 12 MiB
+/// of raw bytes (claw-fleet-core `mobile_relay.rs`). The phone base64-encodes it
+/// into the request JSON (×4/3 → 16 MiB), then E2E-seals it and base64-encodes
+/// the ciphertext (×4/3 again → ~21 MiB), and sends it as **one** text `msg`
+/// frame (`relay.ts` never fragments). So the on-wire max is ~21 MiB.
+///
+/// 32 MiB gives ~50% headroom over that while still halving tungstenite's
+/// message default; we also raise the *frame* cap to the same 32 MiB (up from
+/// the 16 MiB default) so a large single-frame upload can't trip the per-frame
+/// limit. The relay is generic (no Fleet business deps), so the derivation lives
+/// in this comment rather than importing the constant.
+const MAX_WS_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
+
 pub async fn ws_handler(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(state, socket))
+    ws.max_message_size(MAX_WS_MESSAGE_BYTES)
+        .max_frame_size(MAX_WS_MESSAGE_BYTES)
+        .on_upgrade(move |socket| handle_socket(state, socket))
 }
 
 async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
