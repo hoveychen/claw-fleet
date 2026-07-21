@@ -341,6 +341,13 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
             .collect();
 
         if root_pids.is_empty() {
+            // Surface what WAS scanned — the separator/case folding in
+            // same_workspace_path is exactly the kind of thing a real-machine
+            // report needs to falsify quickly.
+            let cwds: Vec<&str> = procs.iter().map(|p| p.cwd.as_str()).collect();
+            crate::log_debug(&format!(
+                "kill_workspace: no match for '{workspace_path}'; live agent cwds: {cwds:?}"
+            ));
             return Err(format!("No agent processes found in {}", workspace_path));
         }
 
@@ -377,7 +384,8 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
 
     #[cfg(not(unix))]
     {
-        let pids: Vec<u32> = scan_cli_processes()
+        let procs = scan_cli_processes();
+        let pids: Vec<u32> = procs
             .iter()
             .filter(|p| same_workspace_path(&p.cwd, workspace_path))
             .map(|p| p.pid)
@@ -387,6 +395,13 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
         // then reported as success. `build_taskkill_tree_args` also gives each
         // pid its own `/PID` (`/PID a b c` is rejected by taskkill).
         let Some(args) = build_taskkill_tree_args(&pids) else {
+            // Surface what WAS scanned — the separator/case folding in
+            // same_workspace_path is exactly what a real-machine report needs
+            // to falsify quickly.
+            let cwds: Vec<&str> = procs.iter().map(|p| p.cwd.as_str()).collect();
+            crate::log_debug(&format!(
+                "kill_workspace: no match for '{workspace_path}'; live agent cwds: {cwds:?}"
+            ));
             return Err(format!("No agent processes found in {}", workspace_path));
         };
         let status = crate::process_util::command("taskkill")

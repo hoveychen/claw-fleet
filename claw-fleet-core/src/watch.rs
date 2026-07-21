@@ -425,13 +425,21 @@ fn decide(
 /// are suppressed — only the exit code matters here (the event text comes from
 /// the separate `capture` command).
 fn poll_met(cmd: &str) -> bool {
-    crate::process_util::shell_command(cmd)
+    match crate::process_util::shell_command(cmd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    {
+        Ok(s) => s.success(),
+        Err(e) => {
+            // A spawn failure (shell missing, command unrunnable) would
+            // otherwise read as "condition not met" forever — make the watch
+            // running to timeout diagnosable from the debug log.
+            crate::log_debug(&format!("watch poll: cannot run until-command ({e}): {cmd}"));
+            false
+        }
+    }
 }
 
 /// Run the `capture` command; its trimmed stdout becomes the event text handed to
@@ -443,7 +451,10 @@ fn capture_event(rec: &WatchRecord) -> String {
     };
     match crate::process_util::shell_command(cmd).output() {
         Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        Err(_) => String::new(),
+        Err(e) => {
+            crate::log_debug(&format!("watch capture: cannot run capture-command ({e}): {cmd}"));
+            String::new()
+        }
     }
 }
 
