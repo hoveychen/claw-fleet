@@ -35,6 +35,10 @@ fn plan(fleet_home: &Path, cwd: &Path, args: &[&str]) -> std::process::Output {
         .args(args)
         .current_dir(cwd)
         .env("FLEET_HOME", fleet_home)
+        // A Claude-session ancestor's CLAUDE_CODE_SESSION_ID outranks
+        // FLEET_SESSION_ID in resolve_fleet_session_id_from_env; strip it so
+        // attribution lands under SID when the suite runs inside a session.
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("FLEET_SESSION_ID", SID)
         .output()
         .expect("run fleet plan");
