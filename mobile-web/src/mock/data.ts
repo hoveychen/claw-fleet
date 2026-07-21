@@ -470,6 +470,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_use", id: "at4", name: "Edit", input: { file_path: "/Users/demo/workspace/api-server/src/middleware/auth.ts" } },
           { type: "tool_use", id: "at5", name: "Bash", input: { command: "npm test -- auth", description: "Re-run the suite against the dual-issuer patch" } },
           { type: "tool_use", id: "at7", name: "WebSearch", input: { query: "jwt issuer migration dual issuer verify node" } },
+          { type: "tool_use", id: "at8", name: "WebFetch", input: { url: "https://auth0.com/blog/migrating-jwt-issuers", prompt: "How do others migrate JWT issuers without downtime?" } },
         ],
       },
     },
@@ -519,6 +520,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_result", tool_use_id: "at5", _digest: { stdoutLines: 87, stderrLines: 0 } },
           { type: "tool_result", tool_use_id: "at6", _digest: { todoDone: 2, todoTotal: 3 } },
           { type: "tool_result", tool_use_id: "at7", _digest: { links: 9 } },
+          { type: "tool_result", tool_use_id: "at8", _digest: { httpCode: 200, bytes: 48210 } },
         ],
       },
     },
@@ -636,6 +638,24 @@ export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
           ],
         },
       ],
+    },
+  },
+  // WebFetch as the relay ships it: the untouched `toolUseResult` carries the
+  // status/size plus the model's markdown summary of the page.
+  at8: {
+    name: "WebFetch",
+    input: {
+      url: "https://auth0.com/blog/migrating-jwt-issuers",
+      prompt: "How do others migrate JWT issuers without downtime?",
+    },
+    toolUseResult: {
+      url: "https://auth0.com/blog/migrating-jwt-issuers",
+      code: 200,
+      codeText: "OK",
+      bytes: 48210,
+      durationMs: 3120,
+      result:
+        "The post recommends a **dual-issuer overlap window**: keep verifying tokens signed by the old `iss` while issuing new ones under the new `iss`, then retire the old issuer only after the maximum token TTL has elapsed.\n\n- Add the new issuer to the verifier's allowlist *before* rotating the signer\n- Never shorten the overlap below the longest-lived token's TTL\n- Drop the legacy issuer in a follow-up deploy once no live token can still carry it",
     },
   },
   at3: {
