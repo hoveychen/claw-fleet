@@ -16,6 +16,10 @@ type Client = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 const SECRET: &str = "0123456789abcdef0123456789abcdef";
 
 async fn spawn_server() -> String {
+    spawn_server_with(crate::ws::DEFAULT_MAX_WS_MESSAGE_BYTES).await
+}
+
+async fn spawn_server_with(max_ws_message_bytes: usize) -> String {
     let dir = tempfile::tempdir().unwrap();
     let push = Push::new(
         Push::generate_private_key(),
@@ -25,7 +29,17 @@ async fn spawn_server() -> String {
     .unwrap();
     // keep the tempdir alive for the process lifetime; tests are short-lived
     std::mem::forget(dir);
-    let state = Arc::new(AppState { registry: Registry::default(), push, harmony: None });
+    // Caps set effectively unlimited: these tests exercise forwarding, not admission.
+    let conn_limiter = crate::limits::ConnLimiter::new(100_000, 100_000);
+    let conn_rate = crate::limits::ConnRateLimiter::new(100_000, 1e9);
+    let state = Arc::new(AppState {
+        registry: Registry::default(),
+        push,
+        harmony: None,
+        conn_limiter,
+        conn_rate,
+        max_ws_message_bytes,
+    });
     let app = build_api(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -228,4 +242,54 @@ async fn sealed_payload_round_trips_through_relay() {
     // ciphertext the relay just forwarded — confirms confidentiality end-to-end.
     let wrong = derive_keys("some-other-secret-0000000000000000");
     assert!(open(&wrong.enc_key, &opened).is_err());
+}
+
+/// A message over the size cap is rejected by the transport and never forwarded
+/// to the opposite role — confirms `WebSocketUpgrade::max_message_size` is
+/// actually wired (the one hardening cap that's pure axum config, not our own
+/// admission logic).
+#[tokio::test]
+async fn oversized_message_is_rejected_not_forwarded() {
+    use std::time::Duration;
+    // 1 KiB cap; the auth frame (~90 bytes) still fits so the socket authenticates.
+    let url = spawn_server_with(1024).await;
+
+    let (mut agent, _) = connect(&url, "agent", SECRET).await;
+    let (mut client, _) = connect(&url, "client", SECRET).await;
+    // drain the agent's presence bump from the client joining
+    let _ = recv_json(&mut agent).await;
+
+    // Agent sends a msg far over the 1 KiB cap.
+    let big = "x".repeat(8 * 1024);
+    let _ = agent
+        .send(Message::Text(json!({"type": "msg", "payload": {"blob": big}}).to_string().into()))
+        .await;
+
+    // The relay must not forward it: the client sees no `msg` frame.
+    let forwarded = tokio::time::timeout(Duration::from_millis(400), async {
+        loop {
+            match client.next().await {
+                Some(Ok(Message::Text(t))) => {
+                    let v: Value = serde_json::from_str(&t).unwrap();
+                    if v["type"] == "msg" {
+                        return true;
+                    }
+                }
+                Some(Ok(_)) => continue, // presence/status chatter
+                _ => return false,       // socket closed → nothing forwarded
+            }
+        }
+    })
+    .await;
+    assert!(
+        !matches!(forwarded, Ok(true)),
+        "oversized frame must not be forwarded past the size cap"
+    );
+
+    // And the offending sender's connection is torn down by the transport.
+    let after = tokio::time::timeout(Duration::from_secs(2), agent.next()).await;
+    assert!(
+        matches!(after, Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(Message::Close(_))))),
+        "the oversized frame should close the sender's connection, got {after:?}"
+    );
 }
