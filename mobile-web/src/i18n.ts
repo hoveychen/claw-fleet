@@ -192,6 +192,7 @@ const DICT: Record<string, string> = {
     "Cannot pinpoint the process — this stops ALL sessions under \"{0}\". Continue?",
   操作失败: "Operation failed",
   "还没有会话": "No sessions yet",
+  "显示上次缓存，正在同步…": "Showing last cached list, syncing…",
   "等待桌面端推送快照。桌面端各会话上线后会出现在这里。":
     "Waiting for the desktop snapshot. Sessions show up here once the desktop pushes them.",
   "搜索标题 / 摘要…": "Search title / summary…",
