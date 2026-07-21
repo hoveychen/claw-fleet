@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarClock, Repeat, Trash2, RefreshCw, Plus, Pencil } from "lucide-react";
+import { CalendarClock, Repeat, Trash2, RefreshCw, Plus, Pencil, ArrowUpRight } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { SessionOptionPills } from "./SessionOptionPills";
 import { agentToolsForSources, type SourceInfo } from "../modelChoices";
-import { useUIStore } from "../store";
+import { useUIStore, useSessionsStore, useDetailStore } from "../store";
 import styles from "./ScheduleView.module.css";
 
 // ── Create shortcut helpers ──────────────────────────────────────────────────
@@ -229,6 +229,18 @@ export function ScheduleView() {
     invoke<SourceInfo[]>("get_sources_config").then(setSources).catch(() => {});
   }, []);
 
+  // Jump from a fired schedule to the session it produced. The detail store's
+  // open() needs the SessionInfo, looked up from the global scan by id; if the
+  // session isn't in the scan, fall back to landing on the session list.
+  const openFiredSession = useCallback((sessionId: string) => {
+    const s = useSessionsStore.getState().sessions.find((x) => x.id === sessionId);
+    if (s) {
+      useDetailStore.getState().open(s);
+    } else {
+      useUIStore.getState().setViewMode(useUIStore.getState().lastSessionViewMode);
+    }
+  }, []);
+
   return (
     <PageShell
       view="schedule"
@@ -287,6 +299,7 @@ export function ScheduleView() {
                 ? () => setEditing(task.rec)
                 : undefined
             }
+            onOpenSession={openFiredSession}
           />
         ))}
       </div>
@@ -481,12 +494,15 @@ function TaskRow({
   cancelling,
   onCancel,
   onEdit,
+  onOpenSession,
 }: {
   task: FutureTask;
   cancelling: boolean;
   onCancel: () => void;
   /** Present only for pending schedules — opens the edit form. */
   onEdit?: () => void;
+  /** Jump to the session a fired schedule produced. */
+  onOpenSession?: (sessionId: string) => void;
 }) {
   const { t } = useTranslation();
   const rec = task.rec;
@@ -564,6 +580,19 @@ function TaskRow({
           )}
           <span className={styles.dot}>·</span>
           <span className={styles.id}>{rec.id}</span>
+          {fired && (task.rec as ScheduleRecord).firedSessionId && onOpenSession && (
+            <>
+              <span className={styles.dot}>·</span>
+              <button
+                className={styles.session_link}
+                onClick={() => onOpenSession((task.rec as ScheduleRecord).firedSessionId!)}
+                title={t("schedule.open_session_tip", "查看触发出的会话")}
+              >
+                {t("schedule.open_session", "查看会话")}
+                <ArrowUpRight size={11} strokeWidth={2.2} />
+              </button>
+            </>
+          )}
         </div>
       </div>
       <div className={styles.row_actions}>

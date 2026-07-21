@@ -154,6 +154,26 @@
   color: var(--color-warning, #e8a838);
 }
 
+/* Provenance: this session was fired by a one-shot schedule. Clickable → jumps
+   to the Schedule page. Accent-tinted so it reads as a link, not just a stat. */
+.schedule_chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  padding: 1px 7px;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.schedule_chip:hover {
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
 .close_btn {
   width: 24px;
   height: 24px;
