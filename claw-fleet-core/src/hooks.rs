@@ -936,6 +936,10 @@ fn fault_tolerant_command(fleet_bin: &str, subcommand: &str) -> String {
 /// fault tolerance on Windows; the published `~/.fleet/bin/fleet.exe` copy is
 /// what the hooks point at, and hook spawn failures are non-blocking.
 fn fleet_subcommand_hook(fleet_bin: &str, subcommand: &str) -> Value {
+    crate::log_debug(&format!(
+        "hooks: emitting `fleet {subcommand}` hook as {} (bin={fleet_bin})",
+        if cfg!(windows) { "exec form" } else { "sh wrapper" },
+    ));
     fleet_subcommand_hook_with(cfg!(windows), fleet_bin, subcommand)
 }
 

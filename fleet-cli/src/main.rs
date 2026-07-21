@@ -171,6 +171,15 @@ enum Commands {
     /// one-liner, used on Windows where hooks may run under PowerShell)
     #[command(name = "hook-event", hide = true)]
     HookEvent,
+    /// [internal] Windows graceful-interrupt helper: attach to <pid>'s hidden
+    /// console and deliver CTRL_C (Node maps it to SIGINT). Spawned by the
+    /// interrupt path; must run as its own process because AttachConsole
+    /// mutates the caller's console state.
+    #[command(name = "win-interrupt", hide = true)]
+    WinInterrupt {
+        /// Target process id (the root claude/codex CLI process).
+        pid: u32,
+    },
     /// Manage the current fleet-managed session (called from inside a Claude session)
     Session {
         #[command(subcommand)]
@@ -859,6 +868,20 @@ fn main() {
         // must not surface as a hook error to Claude Code.
         Commands::HookEvent => {
             let _ = claw_fleet_core::hooks::append_hook_event(&mut std::io::stdin().lock());
+        }
+        Commands::WinInterrupt { pid } => {
+            #[cfg(windows)]
+            {
+                if let Err(e) = claw_fleet_core::session::deliver_console_ctrl_c(pid) {
+                    eprintln!("win-interrupt {pid}: {e}");
+                    std::process::exit(1);
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                eprintln!("win-interrupt {pid}: Windows-only helper");
+                std::process::exit(1);
+            }
         }
         Commands::Session { action } => match action {
             SessionCommands::Idle => commands::session::cmd_session_idle(),
