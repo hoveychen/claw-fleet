@@ -689,6 +689,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::SCHEDULE_CANCEL => route_schedule_cancel(ctx, request, &query, json_header, path),
 
+            crate::routes::SCHEDULE_UPDATE => route_schedule_update(ctx, request, &query, json_header, path),
+
             crate::routes::LIVE_THINKING => route_live_thinking(ctx, request, &query, json_header, path),
 
             crate::routes::MEMORY_CONTENT => route_memory_content(ctx, request, &query, json_header, path),

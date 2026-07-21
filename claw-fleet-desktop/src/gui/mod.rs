@@ -1791,6 +1791,7 @@ pub fn run() {
             list_schedules,
             cancel_loop,
             cancel_schedule,
+            update_schedule,
             get_memory_content,
             read_live_thinking,
             get_task_plans,
