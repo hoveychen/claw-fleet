@@ -1608,6 +1608,8 @@
     "notification_open_settings": "Open Notification Settings",
     "auto_update_check": "Automatic update check",
     "auto_update_check_desc": "Check for new versions once a day and show a notification when an update is available",
+    "group_handoff": "Group handoff sessions",
+    "group_handoff_desc": "Collapse sessions from the same handoff relay chain into one group in the task list; click to expand, and mark the whole chain done at once",
     "auto_resume": "Auto-resume after rate limit",
     "auto_resume_desc": "When a session is stopped by a rate limit, resume it automatically once the reset time has passed",
     "auto_resume_max_wait": "Max wait window (hours)",
