@@ -669,6 +669,13 @@ export function TasksView({
         </div>
       </div>
 
+      {!sessionsLoaded && all.length > 0 && (
+        <div className={styles.syncingHint}>
+          <Loader2 size={12} className={styles.syncingSpin} />
+          {t("显示上次缓存，正在同步…")}
+        </div>
+      )}
+
       {visible.length === 0 && (
         <EmptyState compact icon={SearchX} title={t("没有匹配的会话")} />
       )}
