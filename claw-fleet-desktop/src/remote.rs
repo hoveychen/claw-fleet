@@ -1684,23 +1684,34 @@ fn rca_release_slug(uname: &str) -> Option<&'static str> {
     })
 }
 
-/// Derive the single spaceless ssh target token that goes into the `--via`
-/// command. An SSH config profile name is ideal (`ssh <alias>` resolves
-/// port/key/user/proxyjump on its own). A manual connection only fits a token
-/// if it is a bare `user@host` on port 22 with a key ssh finds itself; custom
-/// port/identity/jump must be expressed as a `~/.ssh/config` Host alias.
-fn ssh_target_token(conn: &RemoteConnection) -> Result<String, String> {
+/// Build the ssh argument fragment that goes into the `--via` command
+/// (`ssh <fragment> <remote-rca> serve --stdio`). An ssh-config profile
+/// resolves everything on its own, so it is just the alias. A manual
+/// connection is expanded into its option words — `-p <port>` (when not 22),
+/// `-i <key>`, `-J <jump>`, then `user@host` — which `sh -c` splits back into
+/// argv for ssh (D1 method A). The pieces are shell-token-validated by
+/// [`remote_workspace::upsert`]'s `validate_ssh_target` at registration.
+fn ssh_target_from_connection(conn: &RemoteConnection) -> Result<String, String> {
     if let Some(profile) = conn.ssh_profile.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         return Ok(profile.to_string());
     }
-    if conn.port != 22 || conn.jump_host.is_some() || conn.identity_file.is_some() {
-        return Err(
-            "this connection uses a custom port, identity file, or jump host — add it as a Host \
-             alias in ~/.ssh/config and re-scan so stdio-over-ssh can reference it by name"
-                .to_string(),
-        );
+    let host = conn.host.trim();
+    let user = conn.username.trim();
+    if host.is_empty() || user.is_empty() {
+        return Err("connection is missing a username or host".to_string());
     }
-    Ok(format!("{}@{}", conn.username, conn.host))
+    let mut parts: Vec<String> = Vec::new();
+    if conn.port != 22 {
+        parts.push(format!("-p {}", conn.port));
+    }
+    if let Some(key) = conn.identity_file.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        parts.push(format!("-i {key}"));
+    }
+    if let Some(jump) = conn.jump_host.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        parts.push(format!("-J {jump}"));
+    }
+    parts.push(format!("{user}@{host}"));
+    Ok(parts.join(" "))
 }
 
 fn install_rca_remote_impl(
@@ -1755,7 +1766,7 @@ fn install_rca_remote_impl(
     }
 
     // 4. Single-token ssh target for the `--via` command.
-    let ssh_target = ssh_target_token(&conn)?;
+    let ssh_target = ssh_target_from_connection(&conn)?;
 
     // 5. Register the stdio-over-ssh workspace (validates transport + creates
     //    the local mirror directory at the identity-mapped path).
@@ -3085,8 +3096,8 @@ mod tests {
     }
 
     #[test]
-    fn ssh_target_token_prefers_profile_then_user_host() {
-        use super::{ssh_target_token, RemoteConnection};
+    fn ssh_target_from_connection_builds_full_arg_fragment() {
+        use super::{ssh_target_from_connection, RemoteConnection};
         let base = RemoteConnection {
             id: "x".into(),
             label: "".into(),
@@ -3097,23 +3108,29 @@ mod tests {
             jump_host: None,
             ssh_profile: None,
         };
-        // Profile alias wins.
+        // Profile alias wins — resolves everything on its own.
         let mut c = base.clone();
         c.ssh_profile = Some("gpu-box".into());
-        assert_eq!(ssh_target_token(&c).unwrap(), "gpu-box");
-        // Plain default-port host → user@host.
-        assert_eq!(ssh_target_token(&base).unwrap(), "dev@box");
-        // Custom port / identity / jump without a profile is refused (can't fit
-        // a single --via token).
+        assert_eq!(ssh_target_from_connection(&c).unwrap(), "gpu-box");
+        // Plain default-port host → bare user@host (no -p 22).
+        assert_eq!(ssh_target_from_connection(&base).unwrap(), "dev@box");
+        // D1: custom port / identity / jump are now expanded into option words.
+        let mut full = base.clone();
+        full.port = 2222;
+        full.identity_file = Some("/home/me/.ssh/id".into());
+        full.jump_host = Some("bastion".into());
+        assert_eq!(
+            ssh_target_from_connection(&full).unwrap(),
+            "-p 2222 -i /home/me/.ssh/id -J bastion dev@box"
+        );
+        // Just a custom port.
         let mut p = base.clone();
         p.port = 2222;
-        assert!(ssh_target_token(&p).is_err());
-        let mut k = base.clone();
-        k.identity_file = Some("/k".into());
-        assert!(ssh_target_token(&k).is_err());
-        let mut j = base.clone();
-        j.jump_host = Some("bastion".into());
-        assert!(ssh_target_token(&j).is_err());
+        assert_eq!(ssh_target_from_connection(&p).unwrap(), "-p 2222 dev@box");
+        // Missing user/host is an error.
+        let mut bad = base.clone();
+        bad.host = "".into();
+        assert!(ssh_target_from_connection(&bad).is_err());
     }
 
     /// A booted server plus everything that must outlive it.
