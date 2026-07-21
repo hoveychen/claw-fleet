@@ -1487,11 +1487,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </div>
                 )}
 
-                {/* rca remote workspaces: debug-only, hidden from release builds
-                    (import.meta.env.DEV is false in `vite build`). The transport
-                    is unproven cross-host, so keep it out of shipped UI. */}
-                {import.meta.env.DEV && (
-                  <>
+                {/* rca remote workspaces: stdio-over-ssh (auto-installer) is the
+                    primary path; manual pairing-code registration remains below. */}
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.remote_workspaces")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
@@ -1621,8 +1618,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 {rwError && (
                   <p className={styles.hooks_error}>{rwError}</p>
-                )}
-                  </>
                 )}
               </div>
             )}
