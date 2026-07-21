@@ -260,6 +260,13 @@ impl Backend for NullBackend {
     fn today_usage_breakdown(&self) -> crate::today_usage::TodayUsageBreakdown {
         crate::today_usage::TodayUsageBreakdown::default()
     }
+    fn usage_range_breakdown(
+        &self,
+        _: i64,
+        _: i64,
+    ) -> crate::today_usage::UsageRangeBreakdown {
+        crate::today_usage::UsageRangeBreakdown::default()
+    }
     fn check_setup(&self) -> SetupStatus {
         SetupStatus {
             cli_installed: false,
