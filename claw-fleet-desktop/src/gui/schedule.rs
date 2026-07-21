@@ -42,3 +42,22 @@ pub(crate) fn update_schedule(
 ) -> Result<claw_fleet_core::schedule::ScheduleRecord, String> {
     state.backend.read().unwrap().update_schedule(update)
 }
+
+/// Run a schedule now without consuming it (the pending schedule still fires at
+/// its scheduled time). Returns the spawned session id, if any.
+#[tauri::command(async)]
+pub(crate) fn run_schedule_now(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    state.backend.read().unwrap().run_schedule_now(id)
+}
+
+/// Run one loop iteration now without advancing its schedule.
+#[tauri::command(async)]
+pub(crate) fn run_loop_now(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    state.backend.read().unwrap().run_loop_now(id)
+}
