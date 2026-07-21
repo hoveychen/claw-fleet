@@ -38,12 +38,6 @@ pub struct LaunchSpec {
     pub effort: Option<String>,
 }
 
-impl LaunchSpec {
-    fn is_empty(&self) -> bool {
-        self.model.is_none() && self.effort.is_none()
-    }
-}
-
 fn spec_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("launch-spec"))
 }
@@ -62,20 +56,24 @@ fn spec_path(session_id: &str) -> Option<PathBuf> {
 /// Write down what a session was launched with. Called from every Fleet spawn
 /// path (new session, resume, handoff relay) right after the flags are settled.
 ///
-/// A spawn with no overrides records nothing: an empty note would be
-/// indistinguishable from "Fleet chose the CLI default", and re-reading it as an
-/// override would pin a session to a model nobody asked for.
+/// The note is written **unconditionally** — even when Fleet passed no
+/// model/effort override, so an empty `{}` is stored. Its mere presence is the
+/// ground truth for [`was_fleet_spawned`]: the Tasks list needs to tell a
+/// session Fleet actually spawned from a `claude -p` child that only *inherited*
+/// `CLAUDE_CODE_ENTRYPOINT` from a Fleet-spawned parent's environment. An empty
+/// note still reads back as "no override" (`model_of`/`effort_of` return `None`),
+/// so the CLI default stays dynamic — the two concerns are decoupled.
 pub fn record(session_id: &str, model: Option<&str>, effort: Option<&str>) {
     let spec = LaunchSpec {
         model: model.map(str::trim).filter(|m| !m.is_empty()).map(str::to_string),
         effort: effort.map(str::trim).filter(|e| !e.is_empty()).map(str::to_string),
     };
-    if spec.is_empty() {
-        return;
-    }
     let Some(path) = spec_path(session_id) else {
         return;
     };
+    // Pin the machine-local cutoff on the first spawn so sessions predating the
+    // marker feature can be grandfathered into the Tasks list.
+    ensure_marker_since();
     if let Some(parent) = path.parent() {
         if let Err(e) = fs::create_dir_all(parent) {
             crate::log_debug(&format!("launch_spec: create dir: {e}"));
@@ -107,6 +105,60 @@ pub fn model_of(session_id: &str) -> Option<String> {
 /// The recorded `--effort`.
 pub fn effort_of(session_id: &str) -> Option<String> {
     get(session_id)?.effort
+}
+
+/// Path of the machine-local sentinel that pins the moment the always-write
+/// spawn marker went live on this host (see [`spawn_marker_cutoff_ms`]).
+fn marker_since_path() -> Option<PathBuf> {
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("spawn-marker-since"))
+}
+
+/// Did Fleet spawn this exact session id? True iff a per-session note exists —
+/// written by [`record`] on every Fleet spawn path, even one with no
+/// model/effort override. This is the ground truth the Tasks list uses instead
+/// of trusting `CLAUDE_CODE_ENTRYPOINT`, which a plain `claude -p` child
+/// *inherits* from a Fleet-spawned parent's environment and so cannot be trusted
+/// on its own.
+pub fn was_fleet_spawned(session_id: &str) -> bool {
+    spec_path(session_id).map(|p| p.exists()).unwrap_or(false)
+}
+
+/// Epoch-ms after which an entrypoint-Fleet-owned session that carries no spawn
+/// marker is a leaked `claude -p` child rather than a real Fleet session.
+/// Established on this machine at the first [`record`] once the marker feature
+/// shipped; `u64::MAX` (grandfather every prior session) until then.
+pub fn spawn_marker_cutoff_ms() -> u64 {
+    let Some(path) = marker_since_path() else {
+        return u64::MAX;
+    };
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(u64::MAX)
+}
+
+/// Stamp the cutoff sentinel the first time Fleet records a spawn on this host.
+/// Idempotent: later spawns leave the original moment intact.
+fn ensure_marker_since() {
+    let Some(path) = marker_since_path() else {
+        return;
+    };
+    if path.exists() {
+        return;
+    }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            crate::log_debug(&format!("launch_spec: create marker dir: {e}"));
+            return;
+        }
+    }
+    if let Err(e) = fs::write(&path, now_ms.to_string()) {
+        crate::log_debug(&format!("launch_spec: write marker sentinel: {e}"));
+    }
 }
 
 #[cfg(test)]
@@ -161,17 +213,39 @@ mod tests {
         assert_eq!(effort_of("s1").as_deref(), Some("high"));
     }
 
-    /// A spawn that passed no overrides must leave no note. Recording an empty
-    /// one and reading it back as an override would pin the session to a model
-    /// nobody chose — the CLI default has to stay dynamic.
+    /// A spawn that passed no overrides must still leave a per-session marker —
+    /// that marker is the ground truth for "Fleet spawned this exact id", which
+    /// the Tasks list uses to reject `claude -p` children that merely *inherited*
+    /// `CLAUDE_CODE_ENTRYPOINT` from a Fleet-spawned parent. But an empty note
+    /// must NOT read back as a model/effort override: the CLI default stays
+    /// dynamic.
     #[test]
-    fn a_spawn_without_overrides_records_nothing() {
+    fn a_default_flag_spawn_still_marks_fleet_spawned_without_a_phantom_override() {
         let _home = TmpHome::new("empty");
         record("s2", None, None);
         record("s3", Some("  "), Some(""));
-        assert_eq!(get("s2"), None);
-        assert_eq!(get("s3"), None);
+        // Marker is present for both — Fleet spawned them.
+        assert!(spec_path("s2").unwrap().exists(), "default-flag spawn must leave a marker");
+        assert!(spec_path("s3").unwrap().exists(), "blank-override spawn must leave a marker");
+        assert!(was_fleet_spawned("s2"));
+        assert!(was_fleet_spawned("s3"));
+        // …but no phantom override leaks back out.
+        assert_eq!(model_of("s2"), None);
+        assert_eq!(effort_of("s2"), None);
+        assert_eq!(model_of("s3"), None);
+        // A session Fleet never spawned has no marker and no override.
+        assert!(!was_fleet_spawned("never-spawned"));
         assert_eq!(model_of("never-spawned"), None);
+    }
+
+    /// The cutoff sentinel is established on this machine at the first `record`,
+    /// so sessions that predate the marker feature can be grandfathered in.
+    #[test]
+    fn first_record_establishes_the_marker_cutoff() {
+        let _home = TmpHome::new("cutoff");
+        assert_eq!(spawn_marker_cutoff_ms(), u64::MAX, "no cutoff before any spawn");
+        record("c1", None, None);
+        assert_ne!(spawn_marker_cutoff_ms(), u64::MAX, "cutoff stamped after first spawn");
     }
 
     /// Only one of the two flags is common (model set, effort left to default).
