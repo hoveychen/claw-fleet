@@ -297,6 +297,10 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   // offer the ones with no sessions yet (they can't appear in recents).
   const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspace[]>([]);
   useEffect(() => {
+    // rca re-gated debug-only: skipping the fetch leaves remoteWorkspaces empty
+    // so the remote badge / unseen-workspace entries never appear in release
+    // builds (import.meta.env.DEV is false in `vite build`).
+    if (!import.meta.env.DEV) return;
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
       .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
       .catch(() => {});
