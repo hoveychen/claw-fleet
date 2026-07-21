@@ -109,10 +109,15 @@ async fn main() {
 
     let max_total = env_usize("RELAY_MAX_CONNECTIONS", limits::DEFAULT_MAX_TOTAL);
     let max_per_ip = env_usize("RELAY_MAX_CONNECTIONS_PER_IP", limits::DEFAULT_MAX_PER_IP);
-    log::info!("connection caps: {max_total} total, {max_per_ip} per IP");
+    let max_channels = env_usize("RELAY_MAX_CHANNELS", registry::DEFAULT_MAX_CHANNELS);
+    let max_per_channel = env_usize("RELAY_MAX_PER_CHANNEL", registry::DEFAULT_MAX_PER_CHANNEL);
+    log::info!(
+        "connection caps: {max_total} total, {max_per_ip} per IP, {max_channels} channels, {max_per_channel} per channel/role"
+    );
     let conn_limiter = ConnLimiter::new(max_total, max_per_ip);
+    let registry = Registry::new(max_channels, max_per_channel);
 
-    let state = Arc::new(AppState { registry: Registry::default(), push, harmony, conn_limiter });
+    let state = Arc::new(AppState { registry, push, harmony, conn_limiter });
 
     let index = static_dir.join("index.html");
     let static_service = ServeDir::new(&static_dir).not_found_service(ServeFile::new(index));
