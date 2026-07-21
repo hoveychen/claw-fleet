@@ -142,6 +142,11 @@ export function App() {
   }, []);
   const [todayUsage, setTodayUsage] = useState<TodayUsage | null>(null);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
+  // Mirrors `sessionsLoaded`: flips true once the first authoritative pending
+  // snapshot (or a live decision event) has landed, so the decisions tab can
+  // tell "still awaiting the first push" (show skeleton cards) from "pushed,
+  // genuinely nothing pending" (show the empty state).
+  const [decisionsLoaded, setDecisionsLoaded] = useState(false);
   const [push, setPush] = useState<PushState>(pushState);
   // Sub-state below "granted": the user can turn notifications off even while
   // the browser permission stays granted. Persisted so it survives reloads.
@@ -185,6 +190,9 @@ export function App() {
   const addDecision = useCallback((kind: DecisionKind, request: unknown) => {
     const req = request as DecisionRequest;
     if (!req?.id) return;
+    // A live decision frame is proof the pipe is delivering — clear the skeleton
+    // even if the initial snapshot request hasn't returned yet.
+    setDecisionsLoaded(true);
     setDecisions((prev) => {
       if (prev.some((d) => d.id === req.id)) return prev;
       return [...prev, { kind, id: req.id, request: req, arrivedAt: Date.now() }];
@@ -236,6 +244,8 @@ export function App() {
         answeredRef.current = answeredAt;
         return decisions;
       });
+      // First authoritative snapshot is in — retire the loading skeleton.
+      setDecisionsLoaded(true);
     } catch {
       // agent offline — live events will catch us up later
     }
@@ -590,7 +600,9 @@ export function App() {
           <DecisionsView
             decisions={decisions}
             client={clientRef.current}
+            connected={connected}
             agentOnline={agentOnline}
+            decisionsLoaded={decisionsLoaded}
             workspaceOf={workspaceOf}
             onAnswered={markAnswered}
             onOpenSession={setDetailSessionId}
