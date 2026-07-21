@@ -42,6 +42,8 @@ pub struct AppState {
     pub conn_limiter: Arc<ConnLimiter>,
     /// Per-IP new-connection rate limiter (anti connect/disconnect flood).
     pub conn_rate: Arc<ConnRateLimiter>,
+    /// Cap on a single inbound WebSocket message/frame.
+    pub max_ws_message_bytes: usize,
 }
 
 fn env_or(name: &str, default: &str) -> String {
@@ -134,8 +136,17 @@ async fn main() {
     let conn_limiter = ConnLimiter::new(max_total, max_per_ip);
     let conn_rate = ConnRateLimiter::new(rate_burst, rate_per_sec);
     let registry = Registry::new(max_channels, max_per_channel);
+    let max_ws_message_bytes =
+        env_usize("RELAY_MAX_WS_MESSAGE_BYTES", ws::DEFAULT_MAX_WS_MESSAGE_BYTES);
 
-    let state = Arc::new(AppState { registry, push, harmony, conn_limiter, conn_rate });
+    let state = Arc::new(AppState {
+        registry,
+        push,
+        harmony,
+        conn_limiter,
+        conn_rate,
+        max_ws_message_bytes,
+    });
 
     let index = static_dir.join("index.html");
     let static_service = ServeDir::new(&static_dir).not_found_service(ServeFile::new(index));
