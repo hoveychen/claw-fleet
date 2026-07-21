@@ -526,10 +526,17 @@
     "open_receipt": "查看今日花费明细"
   },
   "token_receipt": {
-    "title": "今日花费明细",
+    "title": "花费明细",
     "subtitle": "Token 消费小票",
     "loading": "统计中…",
     "no_usage": "今天还没有用量",
+    "no_usage_range": "此区间还没有用量",
+    "range_today": "今天",
+    "range_7d": "近 7 天",
+    "range_30d": "近 30 天",
+    "range_all": "全部",
+    "trend_title": "每日花费",
+    "codex_note": "Codex 无逐轮明细,其用量整体归到会话起始日,趋势为近似",
     "row_input": "输入",
     "row_cache_write": "缓存写入",
     "row_cache_read": "缓存读取",
@@ -539,7 +546,7 @@
     "split_agent": "会话",
     "split_fleet": "Fleet 自身",
     "tokens": "tokens",
-    "footnote": "价格为各模型官方 $/M 单价 · 含缓存读写 · 与侧边栏计数同口径"
+    "footnote": "价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径"
   },
   "chart": {
     "title": "Token 速度",

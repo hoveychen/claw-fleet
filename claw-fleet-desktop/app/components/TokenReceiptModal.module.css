@@ -55,9 +55,91 @@
   color: var(--color-text);
 }
 
+/* ── Range selector ───────────────────────────────────────────────────────── */
+
+.range_bar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  flex-shrink: 0;
+}
+
+.range_btn {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+.range_btn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.range_btn_active,
+.range_btn_active:hover {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
 .body {
   padding: 16px;
   overflow-y: auto;
+}
+
+/* ── Per-day trend chart ──────────────────────────────────────────────────── */
+
+.chart {
+  margin: 4px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.chart_title {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  margin-bottom: 6px;
+}
+
+.chart_svg {
+  display: block;
+  width: 100%;
+  height: 92px;
+}
+
+.bar {
+  fill: var(--color-accent);
+  opacity: 0.85;
+}
+.bar:hover {
+  opacity: 1;
+}
+
+.chart_axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Codex approximation note ─────────────────────────────────────────────── */
+
+.codex_note {
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-xs);
 }
 
 .empty {
