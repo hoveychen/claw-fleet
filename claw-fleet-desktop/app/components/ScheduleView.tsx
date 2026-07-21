@@ -1,10 +1,37 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarClock, Repeat, Trash2, RefreshCw } from "lucide-react";
+import { CalendarClock, Repeat, Trash2, RefreshCw, Plus } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
+import { useUIStore } from "../store";
 import styles from "./ScheduleView.module.css";
+
+// ── Create shortcut helpers ──────────────────────────────────────────────────
+// The "新建" button is a shortcut, not a form: the user only picks a time, then
+// we open a NEW session seeded with a scheduling-assistant template so the agent
+// (not the user) authors the schedule content via `fleet schedule create`.
+
+/** A Date → `YYYY-MM-DDTHH:MM` local string, the shape a datetime-local input
+ *  wants and the exact form `schedule::parse_at` accepts. */
+function toLocalInput(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** The seed prompt: tells the agent to confirm the task then schedule it. */
+function scheduleTemplate(fireLocal: string): string {
+  const human = fireLocal.replace("T", " ");
+  return [
+    `请协助我安排一个定时任务,预定在 ${human} 触发。`,
+    ``,
+    `先跟我确认清楚要做的事,理解需求后用下面的命令把它排程(需要时可加 --model / --effort 指定模型和推理档位):`,
+    ``,
+    `    fleet schedule create --at "${fireLocal}" --prompt "<把要做的事写清楚>"`,
+    ``,
+    `事情是:`,
+  ].join("\n");
+}
 
 // ── Types (mirror the Rust serde camelCase records) ──────────────────────────
 
@@ -165,17 +192,47 @@ export function ScheduleView() {
     [tasks],
   );
 
+  // "新建" shortcut: pick a time → open a new session seeded with the template.
+  const requestNewSession = useUIStore((s) => s.requestNewSession);
+  const [creating, setCreating] = useState(false);
+  const [fireLocal, setFireLocal] = useState("");
+
+  const openCreate = useCallback(() => {
+    setFireLocal(toLocalInput(new Date(Date.now() + 60 * 60 * 1000))); // default +1h
+    setCreating(true);
+  }, []);
+
+  const confirmCreate = useCallback(() => {
+    if (!fireLocal) return;
+    requestNewSession({ prompt: scheduleTemplate(fireLocal) });
+    setCreating(false);
+  }, [fireLocal, requestNewSession]);
+
   return (
     <PageShell
       view="schedule"
       title={t("schedule.title", "计划任务")}
       count={loaded && pendingCount > 0 ? pendingCount : null}
       bannerCenter={
-        <button className={styles.refresh} onClick={load} title={t("schedule.refresh", "刷新")}>
-          <RefreshCw size={14} strokeWidth={2} />
-        </button>
+        <div className={styles.banner_actions}>
+          <button className={styles.create_btn} onClick={openCreate} title={t("schedule.create", "新建计划")}>
+            <Plus size={14} strokeWidth={2.4} />
+            {t("schedule.create", "新建")}
+          </button>
+          <button className={styles.refresh} onClick={load} title={t("schedule.refresh", "刷新")}>
+            <RefreshCw size={14} strokeWidth={2} />
+          </button>
+        </div>
       }
     >
+      {creating && (
+        <CreateModal
+          fireLocal={fireLocal}
+          setFireLocal={setFireLocal}
+          onConfirm={confirmCreate}
+          onCancel={() => setCreating(false)}
+        />
+      )}
       <div className={styles.list}>
         {loaded && tasks.length === 0 && (
           <EmptyState
@@ -197,6 +254,84 @@ export function ScheduleView() {
         ))}
       </div>
     </PageShell>
+  );
+}
+
+// ── Create modal ─────────────────────────────────────────────────────────────
+// Just a time picker. Confirming hands off to a new session; the agent writes
+// the actual schedule. Deliberately no prompt/model fields here — that content
+// is the agent's job, per the "教育用户内容应由 agent 创建" design.
+
+function CreateModal({
+  fireLocal,
+  setFireLocal,
+  onConfirm,
+  onCancel,
+}: {
+  fireLocal: string;
+  setFireLocal: (v: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const preset = (fn: (d: Date) => Date) => setFireLocal(toLocalInput(fn(new Date())));
+  const presets: Array<{ label: string; fn: (d: Date) => Date }> = [
+    { label: t("schedule.preset_1h", "+1 小时"), fn: (d) => new Date(d.getTime() + 3600_000) },
+    {
+      label: t("schedule.preset_tonight", "今晚 20:00"),
+      fn: (d) => {
+        const x = new Date(d);
+        x.setHours(20, 0, 0, 0);
+        if (x.getTime() <= d.getTime()) x.setDate(x.getDate() + 1);
+        return x;
+      },
+    },
+    {
+      label: t("schedule.preset_tomorrow", "明早 09:00"),
+      fn: (d) => {
+        const x = new Date(d);
+        x.setDate(x.getDate() + 1);
+        x.setHours(9, 0, 0, 0);
+        return x;
+      },
+    },
+    { label: t("schedule.preset_1d", "+1 天"), fn: (d) => new Date(d.getTime() + 86_400_000) },
+  ];
+
+  return (
+    <div className={styles.modal_overlay} onClick={onCancel}>
+      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.modal_title}>{t("schedule.create_title", "新建计划任务")}</div>
+        <div className={styles.modal_hint}>
+          {t(
+            "schedule.create_hint",
+            "选个触发时间,然后去新会话把事情讲给 agent —— 由它替你把计划创建好。",
+          )}
+        </div>
+        <label className={styles.field_label}>{t("schedule.fire_at", "触发时间")}</label>
+        <input
+          className={styles.time_input}
+          type="datetime-local"
+          value={fireLocal}
+          onChange={(e) => setFireLocal(e.target.value)}
+        />
+        <div className={styles.presets}>
+          {presets.map((p) => (
+            <button key={p.label} className={styles.preset} onClick={() => preset(p.fn)}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className={styles.modal_actions}>
+          <button className={styles.btn_ghost} onClick={onCancel}>
+            {t("schedule.cancel", "取消")}
+          </button>
+          <button className={styles.btn_primary} onClick={onConfirm} disabled={!fireLocal}>
+            {t("schedule.go_new_session", "去新会话")}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -229,6 +229,12 @@ interface UIState {
   fileNav: FileNavRequest | null;
   requestFileNav: (req: Omit<FileNavRequest, "nonce">) => void;
   clearFileNav: () => void;
+  /** Schedule page → "新建" shortcut: seed the new-session composer with a
+   *  scheduling-assistant template and hop to the session view, so the agent
+   *  (not a form) authors the schedule. Consumed by HistoryView. */
+  newSessionNav: NewSessionNavRequest | null;
+  requestNewSession: (req: Omit<NewSessionNavRequest, "nonce">) => void;
+  clearNewSessionNav: () => void;
 }
 
 export interface FileNavRequest {
@@ -238,6 +244,13 @@ export interface FileNavRequest {
   line: number | null;
   /** Bumped on every request so clicking the same path twice re-navigates
    *  even when nothing else in the request changed. */
+  nonce: number;
+}
+
+export interface NewSessionNavRequest {
+  /** Seed text for the new-session composer's prompt field. */
+  prompt: string;
+  /** Bumped per request so repeat clicks re-trigger the hop. */
   nonce: number;
 }
 
@@ -340,6 +353,21 @@ export const useUIStore = create<UIState>((set) => ({
       };
     }),
   clearFileNav: () => set({ fileNav: null }),
+  newSessionNav: null,
+  requestNewSession: (req) =>
+    set((s) => {
+      // Hop to the user's preferred session layout (list/gallery) where the
+      // new-session draft tab lives, persisting it like setViewMode.
+      const target = s.lastSessionViewMode;
+      setItem("viewMode", target);
+      setItem("lastSessionViewMode", target);
+      return {
+        viewMode: target,
+        lastSessionViewMode: target,
+        newSessionNav: { ...req, nonce: (s.newSessionNav?.nonce ?? 0) + 1 },
+      };
+    }),
+  clearNewSessionNav: () => set({ newSessionNav: null }),
   setSidebarCollapsed: (on) => {
     setItem("sidebar-collapsed", on ? "true" : "false");
     set({ sidebarCollapsed: on });
