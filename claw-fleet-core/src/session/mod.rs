@@ -83,6 +83,23 @@ pub struct SessionInfo {
     #[serde(default)]
     pub entrypoint: Option<String>,
     pub is_subagent: bool,
+    /// Did Fleet actually spawn this exact session, or is a Fleet-owned
+    /// `entrypoint` merely inherited? A plain `claude -p` run *inside* a
+    /// Fleet-spawned session inherits `CLAUDE_CODE_ENTRYPOINT` from the parent's
+    /// environment, so its transcript looks Fleet-owned on disk even though
+    /// Fleet never launched it. This is the ground truth: `true` iff Fleet left a
+    /// spawn marker for this id (see [`crate::launch_spec::was_fleet_spawned`]),
+    /// or the session predates the marker feature and is grandfathered in.
+    /// The Tasks/launchpad list ANDs this with the entrypoint check so leaked
+    /// `claude -p` children stop showing up as Fleet tasks.
+    ///
+    /// `#[serde(default)]`: payloads predating this field (a stale disk-cache
+    /// entry, an older `fleet serve` over the wire) deserialize to `false`
+    /// rather than erroring. The disk cache additionally bumps `CACHE_VERSION`
+    /// so grandfathered sessions re-parse instead of being pinned to that
+    /// default.
+    #[serde(default)]
+    pub fleet_spawned: bool,
     pub parent_session_id: Option<String>,
     pub agent_type: Option<String>,
     pub agent_description: Option<String>,
@@ -610,6 +627,7 @@ mod tests {
             ide_name: None,
             entrypoint: None,
             is_subagent: false,
+            fleet_spawned: false,
             parent_session_id: None,
             agent_type: None,
             agent_description: None,
