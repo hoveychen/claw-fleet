@@ -1487,8 +1487,13 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </div>
                 )}
 
-                {/* rca remote workspaces: stdio-over-ssh (auto-installer) is the
-                    primary path; manual pairing-code registration remains below. */}
+                {/* rca remote workspaces: re-gated debug-only (import.meta.env.DEV
+                    false in `vite build`). The install wizard's ssh picker only
+                    lists saved connections — not ~/.ssh/config aliases — so the
+                    release-facing UX is not ready. Keep out of shipped builds
+                    until the picker + design are revisited. */}
+                {import.meta.env.DEV && (
+                  <>
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.remote_workspaces")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
@@ -1618,6 +1623,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 {rwError && (
                   <p className={styles.hooks_error}>{rwError}</p>
+                )}
+                  </>
                 )}
               </div>
             )}
