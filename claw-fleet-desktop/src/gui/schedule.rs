@@ -1,8 +1,8 @@
 use super::*;
 
 // ── Future-task commands (agent loops + one-shot schedules) ───────────────────
-// Display + cancel only; create/update stay on the CLI (`fleet loop|schedule`)
-// so an agent adjusts plans, while the desktop panel shows and cancels them.
+// Display + cancel for both; schedules additionally support edit (the desktop
+// "编辑" form). Creation stays agent-driven on the CLI (`fleet loop|schedule`).
 // All delegate through the Backend trait so remote workspaces work identically.
 
 #[tauri::command(async)]
@@ -33,4 +33,12 @@ pub(crate) fn cancel_schedule(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     state.backend.read().unwrap().cancel_schedule(id)
+}
+
+#[tauri::command(async)]
+pub(crate) fn update_schedule(
+    update: claw_fleet_core::schedule::ScheduleUpdate,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::schedule::ScheduleRecord, String> {
+    state.backend.read().unwrap().update_schedule(update)
 }

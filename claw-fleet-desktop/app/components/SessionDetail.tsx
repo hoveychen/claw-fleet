@@ -10,7 +10,8 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES } from "../types";
+import { CalendarClock } from "lucide-react";
+import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
 import { AgentNavProvider } from "./AgentNavContext";
@@ -81,6 +82,45 @@ function optimisticToMessage(o: OptimisticSend): RawMessage {
 const InlineFleetAskCard = lazy(() =>
   import("./DecisionPanel").then(({ FleetAskCard }) => ({ default: FleetAskCard })),
 );
+
+/** "由计划 X 触发" provenance chip. Shown only for sessions a one-shot schedule
+ *  fired (entrypoint === SCHEDULE_ENTRYPOINT); reverse-maps the session id back
+ *  to the schedule via list_schedules' firedSessionId to name the id. Clicking
+ *  jumps to the Schedule page. Falls back to a generic "定时触发" label if the
+ *  schedule record was cancelled/forgotten and no id is recoverable. */
+function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
+  const { t } = useTranslation();
+  const setViewMode = useUIStore((s) => s.setViewMode);
+  const [scheduleId, setScheduleId] = useState<string | null>(null);
+  const isScheduled = session.entrypoint === SCHEDULE_ENTRYPOINT;
+  useEffect(() => {
+    if (!isScheduled) return;
+    let alive = true;
+    invoke<{ id: string; firedSessionId?: string }[]>("list_schedules")
+      .then((list) => {
+        if (!alive) return;
+        const hit = list.find((s) => s.firedSessionId === session.id);
+        if (hit) setScheduleId(hit.id);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [isScheduled, session.id]);
+  if (!isScheduled) return null;
+  return (
+    <button
+      className={styles.schedule_chip}
+      title={t("detail.triggered_by_schedule_tip", "由 Fleet 定时任务触发,点击查看计划")}
+      onClick={() => setViewMode("schedule")}
+    >
+      <CalendarClock size={11} strokeWidth={2.2} />
+      {scheduleId
+        ? t("detail.triggered_by_schedule", { id: scheduleId })
+        : t("detail.triggered_by_schedule_generic")}
+    </button>
+  );
+}
 
 export function SessionDetail({
   lite = false,
@@ -788,6 +828,7 @@ export function SessionDetail({
                   {liveSession.slug}
                 </span>
               )}
+              <ScheduleProvenanceChip session={liveSession} />
             </div>
             {/* Handoff relay chain — chip toggles the chain detail panel */}
             {liveSession.handoff && <HandoffChainRow session={liveSession} />}

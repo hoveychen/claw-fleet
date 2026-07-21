@@ -47,6 +47,7 @@ import {
   repoRootPath,
   type NewSessionCreated,
 } from "./NewSessionForm";
+import { useComposerDraftStore } from "../composerDraft";
 import { SessionDetail } from "./SessionDetail";
 import { SessionTabs, type TabItem } from "./SessionTabs";
 import {
@@ -867,6 +868,23 @@ export function HistoryView() {
   const handleNewSession = () => {
     applyTabs((st) => openTabState(st, DRAFT_TAB_ID));
   };
+
+  // Schedule page "新建" shortcut: seed the new-session composer with a
+  // scheduling-assistant template, then open (or refocus) the draft tab. The
+  // store hop to list/gallery mounts this view; we react to the nonce once.
+  const newSessionNav = useUIStore((s) => s.newSessionNav);
+  const clearNewSessionNav = useUIStore((s) => s.clearNewSessionNav);
+  const handledNavNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!newSessionNav) return;
+    if (handledNavNonce.current === newSessionNav.nonce) return;
+    handledNavNonce.current = newSessionNav.nonce;
+    if (newSessionNav.prompt) {
+      useComposerDraftStore.getState().patchDraft("new", { prompt: newSessionNav.prompt });
+    }
+    applyTabs((st) => openTabState(st, DRAFT_TAB_ID));
+    clearNewSessionNav();
+  }, [newSessionNav, applyTabs, clearNewSessionNav]);
 
   // Form spawned the process: flip the draft tab's pane to the "starting…"
   // spinner and start polling for the session. Snapshot the ad-hoc session ids

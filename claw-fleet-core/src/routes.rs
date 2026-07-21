@@ -80,6 +80,7 @@ pub const LOOPS: &str = "/loops";
 pub const SCHEDULES: &str = "/schedules";
 pub const LOOP_CANCEL: &str = "/loop_cancel";
 pub const SCHEDULE_CANCEL: &str = "/schedule_cancel";
+pub const SCHEDULE_UPDATE: &str = "/schedule_update";
 pub const MESSAGES: &str = "/messages";
 pub const TOOL_RESULT: &str = "/tool-result";
 pub const MOBILE_RELAY_CONFIG: &str = "/mobile-relay/config";
