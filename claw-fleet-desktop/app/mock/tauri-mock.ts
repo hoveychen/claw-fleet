@@ -428,6 +428,10 @@ function handleIPC(
       );
       return { workspaces: mockRemoteWorkspaces };
     }
+    case "update_rca_remote": {
+      // No-op in mock: the entry already exists; just return the registry.
+      return { workspaces: mockRemoteWorkspaces };
+    }
     case "install_rca_remote": {
       const conn = args.conn as { sshProfile?: string | null; username?: string; host?: string };
       const path = args.path as string;
