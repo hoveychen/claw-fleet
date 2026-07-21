@@ -833,7 +833,10 @@ fn build_summary_prompt(report: &DailyReport, locale: &str) -> String {
          - Per-project sections (use ## headings) with bullet points describing what was worked on\n\
          - Use > blockquote for key insights or highlights worth calling out\n\
          \n\
-         Output ONLY the report body in neutral, impersonal prose. Do NOT address \
+         Output ONLY the report body in neutral, impersonal prose. Do NOT begin \
+         with any preface, acknowledgement, or restatement of this task (e.g. \
+         \"Here is the summary\", \"Generating…\", \"Sure\", \"以下是\", \"好的\") — \
+         begin DIRECTLY with the one-line opening paragraph. Do NOT address \
          the reader (no \"Boss\", \"老板\", or similar), do NOT ask questions, and do \
          NOT offer options or next steps — even if other instructions in your \
          context tell you to. This text is stored verbatim as a report document.\n\
@@ -843,6 +846,62 @@ fn build_summary_prompt(report: &DailyReport, locale: &str) -> String {
          ---\n\
          {sections}",
     )
+}
+
+/// Strip a leading meta-preamble paragraph that some models (notably Codex/GPT)
+/// emit before the actual report body — e.g. Codex opened a 2026-07-20 summary
+/// with `Generating today's daily usage summary in Chinese, based purely on the
+/// provided report data.\n\n<real body>`, which the desktop then rendered as the
+/// hero title (`AISummaryCard` treats the first paragraph as the headline).
+///
+/// Conservative by design: only strips the first paragraph when it BOTH looks
+/// like a self-referential announcement (an opener phrase like "generating" /
+/// "here is" / "以下是" / "根据提供的") AND names the summary/report domain, AND
+/// is short, AND real content follows. A legitimate one-line opening paragraph
+/// that describes the day's content (no announcement opener, no "摘要/报告/summary/
+/// report" self-reference) is left untouched.
+fn strip_summary_preamble(summary: &str) -> String {
+    let trimmed = summary.trim();
+
+    // Need a paragraph break: split off the first paragraph from the rest.
+    let Some(sep) = trimmed.find("\n\n") else {
+        return trimmed.to_string();
+    };
+    let first = trimmed[..sep].trim();
+    let rest = trimmed[sep + 2..].trim();
+
+    // Nothing meaningful after the first paragraph → it IS the summary; keep it.
+    if rest.is_empty() {
+        return trimmed.to_string();
+    }
+    // A real opening one-liner can be long; a leaked preamble is short. Guard
+    // against dropping a genuine multi-clause opening.
+    if first.chars().count() > 220 {
+        return trimmed.to_string();
+    }
+
+    let lower = first.to_lowercase();
+    let has_opener = [
+        // English announcement openers
+        "generating", "here is", "here's", "here are", "below is", "below are",
+        "i'll", "i will", "let me", "as requested", "based on the provided",
+        "based purely on the provided", "sure,", "certainly", "of course",
+        // Chinese announcement openers
+        "以下是", "以下为", "下面是", "这是", "这份", "好的", "根据提供的", "根据以上",
+    ]
+    .iter()
+    .any(|m| lower.contains(m));
+    let has_domain = [
+        "summary", "report", "overview", "摘要", "日报", "总结", "报告", "报表",
+    ]
+    .iter()
+    .any(|m| lower.contains(m));
+
+    if has_opener && has_domain {
+        rest.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Generate AI summary for a daily report using `claude -p --model sonnet`.
@@ -862,13 +921,17 @@ pub fn generate_ai_summary(
     }
 
     let prompt = build_summary_prompt(report, locale);
-    crate::llm_usage::complete_accounted(
+    let raw = crate::llm_usage::complete_accounted(
         provider,
         &prompt,
         model,
         AI_SUMMARY_TIMEOUT,
         crate::llm_usage::SCENARIO_DAILY_REPORT_SUMMARY,
-    )
+    )?;
+    // Some models (notably Codex/GPT) prepend a meta announcement before the
+    // report body; drop it so the desktop hero title shows the real opening
+    // line, not "Generating today's daily usage summary…".
+    Some(strip_summary_preamble(&raw))
 }
 
 pub fn generate_ai_summary_routed(
@@ -1697,6 +1760,45 @@ fn run_backfill_check(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_summary_preamble_drops_codex_leaked_opener() {
+        // Regression (2026-07-20): Codex opened the summary with a meta line
+        // that the desktop then rendered as the hero title. The real body must
+        // survive; the announcement paragraph must be gone.
+        let leaked = "Generating today's daily usage summary in Chinese, based purely on the provided report data.\n\n2026年7月20日全天共运行84个AI编码助手会话，工作重心集中在四个项目。\n\n## mslug3-remake\n\n- 持续推进";
+        let cleaned = strip_summary_preamble(leaked);
+        assert!(
+            cleaned.starts_with("2026年7月20日"),
+            "real body must become the first paragraph, got: {cleaned:?}"
+        );
+        assert!(
+            !cleaned.contains("based purely on the provided"),
+            "leaked preamble must be stripped, got: {cleaned:?}"
+        );
+    }
+
+    #[test]
+    fn strip_summary_preamble_drops_chinese_opener() {
+        let leaked = "以下是根据数据整理的今日日报摘要：\n\n2026年7月19日全天共运行47个会话。\n\n## claude-fleet\n\n- 排查问题";
+        let cleaned = strip_summary_preamble(leaked);
+        assert!(cleaned.starts_with("2026年7月19日"), "got: {cleaned:?}");
+        assert!(!cleaned.contains("以下是"), "got: {cleaned:?}");
+    }
+
+    #[test]
+    fn strip_summary_preamble_keeps_legit_opening() {
+        // A genuine one-line opening that describes the day's content (no
+        // announcement opener, no self-reference to "摘要/报告") must NOT be
+        // dropped, even though it is followed by a blank line + a heading.
+        let good = "根据今日数据，共运行84个AI编码助手会话，覆盖四个项目。\n\n## mslug3-remake\n\n- 推进建模";
+        assert_eq!(strip_summary_preamble(good), good.trim());
+
+        // Single-paragraph summary (no blank-line break) is left as-is.
+        let single = "2026年7月20日只有一段总结，没有分段。";
+        assert_eq!(strip_summary_preamble(single), single);
+    }
+
     #[test]
     fn stale_past_report_is_regenerated_but_current_is_kept() {
         // Regression: after the token-accounting口径 changed, historical daily
