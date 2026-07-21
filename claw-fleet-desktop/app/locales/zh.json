@@ -1839,6 +1839,8 @@
     "loading": "加载报告中...",
     "no_report": "该日期没有报告。",
     "generate": "生成报告",
+    "regenerate": "重新生成报告",
+    "copy_date": "复制日期",
     "total_tokens": "总 Tokens",
     "sessions": "会话数",
     "subagents": "子代理",
@@ -1939,6 +1941,7 @@
   "files": {
     "panel_title": "仓库",
     "add_path": "添加路径",
+    "remove_path": "从列表移除",
     "tab_files": "文件",
     "no_workspaces_title": "暂无工作区",
     "no_workspaces_subtitle": "有会话跑起来之后，这里会列出它们的项目目录。",
@@ -2000,6 +2003,7 @@
     "open_in_files": "在仓库页中打开",
     "reveal_in_finder": "在访达中显示",
     "reveal_in_explorer": "在资源管理器中显示",
+    "copy_path": "复制路径",
     "open_hint": "打开 {{path}}",
     "not_found": "路径不存在"
   },
