@@ -53,6 +53,54 @@ pub(crate) fn route_schedule_cancel(
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }
 
+/// Manually run a schedule **now** on this host (where the spawn belongs)
+/// without consuming it — the record and its timer stay untouched. Returns the
+/// spawned session id. Mirrors `Backend::run_schedule_now`'s local default.
+pub(crate) fn route_schedule_run(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    run_now_response(request, json_header, crate::schedule::run_now(query.get("id").map(|s| s.as_str()).unwrap_or("")));
+}
+
+/// Manually run one loop iteration **now** on this host without advancing its
+/// schedule. Returns the spawned session id.
+pub(crate) fn route_loop_run(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    run_now_response(request, json_header, crate::agent_loop::run_now(query.get("id").map(|s| s.as_str()).unwrap_or("")));
+}
+
+/// Shared reply for the two run-now routes: `{ "ok": true, "sessionId": ... }`
+/// on success, or 500 `{ "error": ... }` on failure.
+fn run_now_response(
+    request: tiny_http::Request,
+    json_header: tiny_http::Header,
+    result: Result<Option<String>, String>,
+) {
+    match result {
+        Ok(sid) => {
+            let body = serde_json::json!({ "ok": true, "sessionId": sid }).to_string();
+            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(500)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
 /// Edit a pending schedule: apply the JSON `ScheduleUpdate` body, re-arm the
 /// timer on *this* host (where the detached timer lives), and return the updated
 /// record. Mirrors `Backend::update_schedule`'s local default.

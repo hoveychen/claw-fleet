@@ -372,6 +372,13 @@ pub(crate) enum LoopCommands {
         /// The loop id.
         id: String,
     },
+    /// Run one iteration now without advancing the schedule — the loop's own
+    /// timer, next-fire time and iteration count are untouched. Spawns one extra
+    /// session with the loop's prompt.
+    Run {
+        /// The loop id.
+        id: String,
+    },
     /// Internal: the detached timer body. Sleeps until the loop is due, fires
     /// one iteration, repeats. Spawned by `create` and the Stop-hook reconcile;
     /// not meant to be run by hand.
@@ -496,6 +503,13 @@ pub(crate) enum ScheduleCommands {
     },
     /// Cancel a schedule (or forget a fired one) by its id.
     Cancel {
+        /// The schedule id.
+        id: String,
+    },
+    /// Run the schedule now without consuming it — the pending schedule and its
+    /// timer are untouched, so it still fires at its scheduled time. Spawns one
+    /// extra session with the schedule's prompt.
+    Run {
         /// The schedule id.
         id: String,
     },

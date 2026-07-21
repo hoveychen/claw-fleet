@@ -483,6 +483,25 @@ pub fn compose_iteration_prompt(rec: &LoopRecord) -> String {
     out
 }
 
+/// The prompt a **manual run** ("立即运行") uses. Unlike
+/// [`compose_iteration_prompt`], a manual run does *not* advance the loop: the
+/// record's `next_fire_at` / `iterations_done` / `generation` are untouched, so
+/// the recurring schedule is unaffected. The footer says so.
+pub fn compose_run_now_prompt(rec: &LoopRecord) -> String {
+    let mut out = String::new();
+    out.push_str(&rec.prompt);
+    out.push_str("\n\n---\n");
+    out.push_str(&format!(
+        "（这是 Fleet 循环 `{}` 的一次**手动运行**，每 {} 自动触发一次。\
+         老板现在手动跑了一次——这次不计入迭代，也不影响下一次的自动触发时间。\
+         你无需注册任何 cron 或 wakeup。要停止这个循环用 `fleet loop stop {}`。）",
+        rec.id,
+        humanize_secs(rec.interval_secs),
+        rec.id,
+    ));
+    out
+}
+
 fn humanize_secs(secs: u64) -> String {
     if secs % 86400 == 0 {
         format!("{}d", secs / 86400)
@@ -584,6 +603,52 @@ fn fire_once_in(
         }
     }
     Ok(claimed)
+}
+
+/// Manually run a loop **now**, without touching its record. Spawns one session
+/// with the loop's own prompt/workspace/model/effort/source, but does *not*
+/// claim, advance `next_fire_at`, bump `iterations_done`/`generation`, or stamp a
+/// session — so the recurring schedule is untouched and the next auto-fire lands
+/// on time. Returns the spawned session id, if any.
+pub fn run_now(id: &str) -> Result<Option<String>, String> {
+    let dir = loops_dir().ok_or_else(|| "no fleet home".to_string())?;
+    run_now_in(
+        &dir,
+        id,
+        &move |source, ws, prompt, model, effort, perm, ep| {
+            crate::agent_source::spawn_session(
+                source,
+                &crate::agent_source::SpawnSpec {
+                    workspace_path: ws.to_string(),
+                    prompt: prompt.to_string(),
+                    model: model.map(str::to_string),
+                    effort: effort.map(str::to_string),
+                    permission_mode: perm.map(str::to_string),
+                    session_id: None,
+                    entrypoint: ep.to_string(),
+                },
+            )
+        },
+    )
+}
+
+fn run_now_in(dir: &Path, id: &str, spawn: &SpawnFn<'_>) -> Result<Option<String>, String> {
+    let rec = get_in(dir, id).ok_or_else(|| format!("no loop with id {id}"))?;
+    let prompt = compose_run_now_prompt(&rec);
+    let resp = spawn(
+        rec.agent_source.as_deref().unwrap_or("claude"),
+        &rec.workspace_path,
+        &prompt,
+        rec.model.as_deref(),
+        rec.effort.as_deref(),
+        None,
+        LOOP_ENTRYPOINT,
+    )
+    .map_err(|e| format!("run-now spawn failed: {e}"))?;
+    if let Some(sid) = &resp.session_id {
+        crate::log_debug(&format!("loop {id}: manual run -> session {sid}"));
+    }
+    Ok(resp.session_id)
 }
 
 /// Longest a timer sleeps in one go before re-checking the record. Caps how
@@ -1148,5 +1213,37 @@ mod tests {
         fire_once_in(d.path(), "cl", 0, 300_000, &ok_spawner(&calls, "cl-sid")).unwrap();
         let calls = calls.into_inner();
         assert_eq!(calls[0].agent_source, "claude", "absent source falls back to claude");
+    }
+
+    #[test]
+    fn run_now_spawns_but_leaves_the_record_untouched() {
+        let d = dir();
+        make(d.path(), "l1", 1_000_000);
+        let before = get_in(d.path(), "l1").unwrap();
+
+        let calls = RefCell::new(Vec::new());
+        let sid = run_now_in(d.path(), "l1", &ok_spawner(&calls, "manual-sid")).unwrap();
+        assert_eq!(sid.as_deref(), Some("manual-sid"));
+
+        let calls = calls.into_inner();
+        assert_eq!(calls.len(), 1, "exactly one session spawned");
+        assert_eq!(calls[0].workspace, "/ws");
+        assert_eq!(calls[0].entrypoint, LOOP_ENTRYPOINT);
+        assert!(calls[0].prompt.contains("check the deploy"));
+        assert!(calls[0].prompt.contains("手动运行"), "run-now footer");
+
+        // next_fire_at / iterations_done / generation all unchanged — the
+        // recurring schedule is untouched by a manual run.
+        let after = get_in(d.path(), "l1").unwrap();
+        assert_eq!(after, before, "run_now must not mutate the loop record");
+    }
+
+    #[test]
+    fn run_now_on_missing_loop_errors() {
+        let d = dir();
+        let calls = RefCell::new(Vec::new());
+        let err = run_now_in(d.path(), "nope", &ok_spawner(&calls, "x")).unwrap_err();
+        assert!(err.contains("no loop with id nope"), "got: {err}");
+        assert_eq!(calls.into_inner().len(), 0, "no spawn for a missing loop");
     }
 }

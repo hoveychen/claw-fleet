@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarClock, Repeat, Trash2, RefreshCw, Plus, Pencil, ArrowUpRight } from "lucide-react";
+import { CalendarClock, Repeat, Trash2, RefreshCw, Plus, Pencil, ArrowUpRight, Play } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { SessionOptionPills } from "./SessionOptionPills";
@@ -141,6 +141,7 @@ export function ScheduleView() {
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [cancelling, setCancelling] = useState<Set<string>>(new Set());
+  const [running, setRunning] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -175,6 +176,33 @@ export function ScheduleView() {
         await load();
       } finally {
         setCancelling((prev) => {
+          const next = new Set(prev);
+          next.delete(task.id);
+          return next;
+        });
+      }
+    },
+    [load],
+  );
+
+  // Run a task now without consuming it: the schedule/loop record is left
+  // untouched (it still fires on its own timer), so this just spawns one extra
+  // session with the same prompt. Jump to it if the scan already sees it.
+  const runNow = useCallback(
+    async (task: FutureTask) => {
+      setRunning((prev) => new Set(prev).add(task.id));
+      try {
+        const sid = await invoke<string | null>(
+          task.kind === "loop" ? "run_loop_now" : "run_schedule_now",
+          { id: task.id },
+        );
+        if (sid) {
+          const s = useSessionsStore.getState().sessions.find((x) => x.id === sid);
+          if (s) useDetailStore.getState().open(s);
+        }
+        await load();
+      } finally {
+        setRunning((prev) => {
           const next = new Set(prev);
           next.delete(task.id);
           return next;
@@ -294,6 +322,12 @@ export function ScheduleView() {
             task={task}
             cancelling={cancelling.has(task.id)}
             onCancel={() => cancel(task)}
+            running={running.has(task.id)}
+            onRunNow={
+              task.kind === "schedule" && task.rec.status === "fired"
+                ? undefined
+                : () => runNow(task)
+            }
             onEdit={
               task.kind === "schedule" && task.rec.status === "pending"
                 ? () => setEditing(task.rec)
@@ -493,12 +527,18 @@ function TaskRow({
   task,
   cancelling,
   onCancel,
+  running,
+  onRunNow,
   onEdit,
   onOpenSession,
 }: {
   task: FutureTask;
   cancelling: boolean;
   onCancel: () => void;
+  /** True while a manual run is being kicked off. */
+  running?: boolean;
+  /** Run the task now without consuming it — absent for fired schedules. */
+  onRunNow?: () => void;
   /** Present only for pending schedules — opens the edit form. */
   onEdit?: () => void;
   /** Jump to the session a fired schedule produced. */
@@ -596,6 +636,17 @@ function TaskRow({
         </div>
       </div>
       <div className={styles.row_actions}>
+        {onRunNow && (
+          <button
+            className={styles.run_now}
+            disabled={running}
+            onClick={onRunNow}
+            title={t("schedule.run_now_tip", "立即运行一次；不消耗原计划，它仍会按原定时间触发")}
+          >
+            <Play size={13} strokeWidth={2} />
+            {running ? t("schedule.running", "启动中") : t("schedule.run_now", "立即运行")}
+          </button>
+        )}
         {onEdit && (
           <button className={styles.edit} onClick={onEdit} title={t("schedule.edit", "编辑")}>
             <Pencil size={13} strokeWidth={2} />
