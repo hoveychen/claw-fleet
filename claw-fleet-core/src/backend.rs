@@ -485,6 +485,19 @@ pub trait Backend: Send + Sync {
             Err(format!("no schedule with id {id}"))
         }
     }
+    /// Edit a still-`Pending` schedule (prompt / fire time / model / effort /
+    /// agent source) and re-arm its timer so the new time+generation takes
+    /// effect. Default acts on this machine — it must both persist *and* re-arm,
+    /// because the detached timer lives here. RemoteBackend overrides to POST the
+    /// update to the host, whose route re-arms on that machine instead.
+    fn update_schedule(
+        &self,
+        update: crate::schedule::ScheduleUpdate,
+    ) -> Result<crate::schedule::ScheduleRecord, String> {
+        let rec = crate::schedule::update(&update)?;
+        let _ = crate::schedule::arm_timer(&rec);
+        Ok(rec)
+    }
 
     // ── Live thinking ────────────────────────────────────────────────────────
     /// Token-level reasoning for a Fleet-spawned session that is streaming

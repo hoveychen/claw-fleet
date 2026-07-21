@@ -410,7 +410,26 @@
     "status_pending": "待触发",
     "status_fired": "已触发",
     "cancel": "取消",
-    "cancelling": "取消中"
+    "cancelling": "取消中",
+    "expand": "点击展开全文",
+    "collapse": "点击收起",
+    "create": "新建",
+    "create_title": "新建计划任务",
+    "create_hint": "选个触发时间,然后去新会话把事情讲给 agent —— 由它替你把计划创建好。",
+    "fire_at": "触发时间",
+    "preset_1h": "+1 小时",
+    "preset_tonight": "今晚 20:00",
+    "preset_tomorrow": "明早 09:00",
+    "preset_1d": "+1 天",
+    "go_new_session": "去新会话",
+    "edit": "编辑",
+    "edit_title": "编辑计划任务",
+    "prompt": "任务内容",
+    "run_options": "运行选项",
+    "save": "保存",
+    "saving": "保存中",
+    "open_session": "查看会话",
+    "open_session_tip": "查看触发出的会话"
   },
   "memory": {
     "panel_title": "Memory",
@@ -1330,6 +1349,9 @@
     "close_all": "全部关闭"
   },
   "detail": {
+    "triggered_by_schedule": "由计划 {{id}} 触发",
+    "triggered_by_schedule_generic": "定时触发",
+    "triggered_by_schedule_tip": "由 Fleet 定时任务触发,点击查看计划",
     "following": "自动跟随中",
     "scroll_to_latest": "滚动到最新",
     "load_earlier": "加载更早的消息",

@@ -355,6 +355,15 @@ impl crate::backend::Backend for RemoteBackend {
             .post_ok(&format!("{}?id={}", claw_fleet_core::routes::SCHEDULE_CANCEL, id))
     }
 
+    fn update_schedule(
+        &self,
+        update: claw_fleet_core::schedule::ScheduleUpdate,
+    ) -> Result<claw_fleet_core::schedule::ScheduleRecord, String> {
+        // The host's route re-arms the timer on that machine; we just POST + read back.
+        self.probe
+            .post_json(claw_fleet_core::routes::SCHEDULE_UPDATE, &update)
+    }
+
     fn list_sessions(&self) -> Vec<crate::session::SessionInfo> {
         self.sessions.lock().unwrap().clone()
     }

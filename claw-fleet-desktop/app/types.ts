@@ -32,6 +32,11 @@ export const NEW_SESSION_ENTRYPOINT = "claw-fleet-newsession";
  *  and it stays resumable, same as a "新会话" spawn. */
 export const HANDOFF_ENTRYPOINT = "claw-fleet-handoff";
 
+/** `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions spawned when a one-shot
+ *  schedule fires — mirrors schedule::SCHEDULE_ENTRYPOINT. Lets the detail view
+ *  badge a session as "由计划触发". */
+export const SCHEDULE_ENTRYPOINT = "claw-fleet-schedule";
+
 /** Codex has no `CLAUDE_CODE_ENTRYPOINT`; the Codex scanner surfaces the rollout
  *  `originator` in the same `entrypoint` field, and Fleet-launched Codex sessions
  *  carry `originator === "fleet"` — mirrors codex_launch::CODEX_FLEET_ORIGINATOR. */

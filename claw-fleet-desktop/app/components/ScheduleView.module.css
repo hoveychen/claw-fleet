@@ -7,6 +7,28 @@
   height: 100%;
 }
 
+.banner_actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.create_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 11px 0 8px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.create_btn:hover {
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
 .refresh {
   display: inline-flex;
   align-items: center;
@@ -100,6 +122,21 @@
   font-family: monospace;
   opacity: 0.8;
 }
+.session_link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.session_link:hover {
+  text-decoration: underline;
+}
 
 .status_pending {
   color: var(--color-success);
@@ -110,6 +147,30 @@
   font-weight: 600;
 }
 
+.row_actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.edit:hover {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
 .cancel {
   display: inline-flex;
   align-items: center;
@@ -129,6 +190,157 @@
   background: color-mix(in srgb, var(--color-error) 10%, transparent);
 }
 .cancel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Create modal ─────────────────────────────────────────────────────────── */
+.modal_overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg-modal-overlay);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  backdrop-filter: blur(2px);
+}
+.modal {
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px 22px;
+  max-width: 400px;
+  width: 100%;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+.modal_wide {
+  max-width: 520px;
+}
+.edit_textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+  margin-bottom: 14px;
+}
+.edit_textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.pills_row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.error {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  color: var(--color-error);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.modal_title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 6px;
+}
+.modal_hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-dim);
+  margin-bottom: 16px;
+}
+.field_label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  margin-bottom: 6px;
+}
+.time_input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-size: 13px;
+}
+.time_input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+/* Spacing when a labelled field follows the time input (edit form). */
+.time_input + .field_label {
+  margin-top: 14px;
+}
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.preset {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.preset:hover {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+}
+.modal_actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.btn_ghost {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn_ghost:hover {
+  background: var(--color-bg-hover);
+}
+.btn_primary {
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn_primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+.btn_primary:disabled {
   opacity: 0.5;
   cursor: default;
 }

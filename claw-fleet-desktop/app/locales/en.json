@@ -413,7 +413,26 @@
     "status_pending": "pending",
     "status_fired": "fired",
     "cancel": "Cancel",
-    "cancelling": "Cancelling"
+    "cancelling": "Cancelling",
+    "expand": "Click to expand",
+    "collapse": "Click to collapse",
+    "create": "New",
+    "create_title": "New scheduled task",
+    "create_hint": "Pick a fire time, then head to a new session and tell the agent what to do — it will create the schedule for you.",
+    "fire_at": "Fire time",
+    "preset_1h": "+1 hour",
+    "preset_tonight": "Tonight 20:00",
+    "preset_tomorrow": "Tomorrow 09:00",
+    "preset_1d": "+1 day",
+    "go_new_session": "Go to new session",
+    "edit": "Edit",
+    "edit_title": "Edit scheduled task",
+    "prompt": "Task content",
+    "run_options": "Run options",
+    "save": "Save",
+    "saving": "Saving",
+    "open_session": "Open session",
+    "open_session_tip": "Open the session this schedule produced"
   },
   "memory": {
     "panel_title": "Memory",
@@ -1333,6 +1352,9 @@
     "close_all": "Close All"
   },
   "detail": {
+    "triggered_by_schedule": "Triggered by schedule {{id}}",
+    "triggered_by_schedule_generic": "Scheduled",
+    "triggered_by_schedule_tip": "Fired by a Fleet scheduled task — click to view the schedule",
     "following": "Auto-following",
     "scroll_to_latest": "Scroll to latest",
     "load_earlier": "Load earlier messages",

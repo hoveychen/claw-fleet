@@ -333,28 +333,56 @@ fn cancel_in(dir: &Path, id: &str) -> bool {
     fs::remove_file(record_path(dir, id)).is_ok()
 }
 
-/// Adjust a still-`Pending` schedule: change its fire time and/or prompt. Bumps
-/// `generation` so any detached timer sleeping on the old time exits as
-/// superseded when it next wakes — the caller (`fleet schedule update`) re-arms a
-/// fresh timer from the returned record. A fired schedule is history and cannot
-/// be updated.
-pub fn update(id: &str, fire_at: Option<u64>, prompt: Option<&str>) -> Result<ScheduleRecord, String> {
-    let dir = schedules_dir().ok_or("cannot determine home dir")?;
-    update_in(&dir, id, fire_at, prompt, now_ms())
+/// A requested change to a still-`Pending` schedule. Every field is optional:
+/// `None` = leave that field untouched (CLI partial update). For the three
+/// inherited spawn knobs (`model` / `effort` / `agent_source`), `Some("")` (or
+/// whitespace) clears the field back to "inherit the CLI default" — this mirrors
+/// the desktop pickers' `""`-means-default convention, so an edit form that
+/// always sends every field can both set and clear. Crosses the `fleet serve`
+/// HTTP boundary, hence `Serialize + Deserialize` in camelCase.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleUpdate {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fire_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_source: Option<String>,
 }
 
-fn update_in(
-    dir: &Path,
-    id: &str,
-    fire_at: Option<u64>,
-    prompt: Option<&str>,
-    now: u64,
-) -> Result<ScheduleRecord, String> {
-    let mut rec = get_in(dir, id).ok_or_else(|| format!("no schedule with id {id}"))?;
+/// A blank/whitespace spawn-knob string means "inherit the CLI default" ⇒ `None`.
+fn norm_knob(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
+}
+
+/// Adjust a still-`Pending` schedule: change its fire time, prompt, and/or the
+/// inherited spawn knobs (model / effort / agent source). Bumps `generation` so
+/// any detached timer sleeping on the old time exits as superseded when it next
+/// wakes — the caller (`fleet schedule update`, or the desktop edit form via
+/// `Backend::update_schedule`) re-arms a fresh timer from the returned record. A
+/// fired schedule is history and cannot be updated.
+pub fn update(u: &ScheduleUpdate) -> Result<ScheduleRecord, String> {
+    let dir = schedules_dir().ok_or("cannot determine home dir")?;
+    update_in(&dir, u, now_ms())
+}
+
+fn update_in(dir: &Path, u: &ScheduleUpdate, now: u64) -> Result<ScheduleRecord, String> {
+    let mut rec = get_in(dir, &u.id).ok_or_else(|| format!("no schedule with id {}", u.id))?;
     if rec.status == ScheduleStatus::Fired {
         return Err("cannot update a schedule that already fired".to_string());
     }
-    if let Some(fa) = fire_at {
+    if let Some(fa) = u.fire_at {
         if fa <= now {
             return Err("schedule time is in the past".to_string());
         }
@@ -366,12 +394,22 @@ fn update_in(
         }
         rec.fire_at = fa;
     }
-    if let Some(p) = prompt {
+    if let Some(p) = &u.prompt {
         let p = p.trim();
         if p.is_empty() {
             return Err("schedule prompt cannot be empty".to_string());
         }
         rec.prompt = p.to_string();
+    }
+    // Spawn knobs: Some("") clears to inherit-default (None); Some(x) sets; None leaves.
+    if let Some(m) = &u.model {
+        rec.model = norm_knob(m);
+    }
+    if let Some(e) = &u.effort {
+        rec.effort = norm_knob(e);
+    }
+    if let Some(s) = &u.agent_source {
+        rec.agent_source = norm_knob(s);
     }
     rec.generation += 1;
     write_record(dir, &rec)?;
@@ -1030,11 +1068,28 @@ mod tests {
         assert_eq!(armed, vec!["stranded"]);
     }
 
+    /// Build a `ScheduleUpdate` for a given id with only the fields a test sets.
+    fn upd(id: &str) -> ScheduleUpdate {
+        ScheduleUpdate {
+            id: id.to_string(),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn update_changes_fields_and_bumps_generation() {
         let d = dir();
         make(d.path(), "s1", 0, 300_000);
-        let updated = update_in(d.path(), "s1", Some(900_000), Some("new prompt"), 0).unwrap();
+        let updated = update_in(
+            d.path(),
+            &ScheduleUpdate {
+                fire_at: Some(900_000),
+                prompt: Some("new prompt".into()),
+                ..upd("s1")
+            },
+            0,
+        )
+        .unwrap();
         assert_eq!(updated.fire_at, 900_000);
         assert_eq!(updated.prompt, "new prompt");
         assert_eq!(updated.generation, 1, "bump supersedes the old timer");
@@ -1049,9 +1104,66 @@ mod tests {
         let d = dir();
         make(d.path(), "s1", 0, 300_000);
         // only the prompt
-        let u = update_in(d.path(), "s1", None, Some("just prompt"), 0).unwrap();
+        let u = update_in(
+            d.path(),
+            &ScheduleUpdate {
+                prompt: Some("just prompt".into()),
+                ..upd("s1")
+            },
+            0,
+        )
+        .unwrap();
         assert_eq!(u.fire_at, 300_000, "fire time unchanged");
         assert_eq!(u.prompt, "just prompt");
+    }
+
+    /// model / effort / agent_source: `Some(x)` sets, `Some("")` clears to
+    /// inherit-default (`None`), `None` leaves the field untouched.
+    #[test]
+    fn update_sets_and_clears_spawn_knobs() {
+        let d = dir();
+        create_in(
+            d.path(),
+            "/ws",
+            "p",
+            300_000,
+            Some("claude-opus-4-8"),
+            Some("high"),
+            Some("claude"),
+            None,
+            "s1",
+            0,
+        )
+        .unwrap();
+        // set model+effort+source to new values
+        let u = update_in(
+            d.path(),
+            &ScheduleUpdate {
+                model: Some("claude-fable-5".into()),
+                effort: Some("max".into()),
+                agent_source: Some("codex".into()),
+                ..upd("s1")
+            },
+            0,
+        )
+        .unwrap();
+        assert_eq!(u.model.as_deref(), Some("claude-fable-5"));
+        assert_eq!(u.effort.as_deref(), Some("max"));
+        assert_eq!(u.agent_source.as_deref(), Some("codex"));
+        // blank clears back to inherit-default; None leaves effort untouched
+        let u = update_in(
+            d.path(),
+            &ScheduleUpdate {
+                model: Some("  ".into()),
+                agent_source: Some("".into()),
+                ..upd("s1")
+            },
+            0,
+        )
+        .unwrap();
+        assert_eq!(u.model, None, "blank model clears to inherit-default");
+        assert_eq!(u.effort.as_deref(), Some("max"), "effort left untouched");
+        assert_eq!(u.agent_source, None, "blank source clears to inherit-default");
     }
 
     #[test]
@@ -1060,25 +1172,45 @@ mod tests {
         let mut fired = make(d.path(), "f", 0, 300_000);
         fired.status = ScheduleStatus::Fired;
         write_record(d.path(), &fired).unwrap();
-        assert!(update_in(d.path(), "f", Some(900_000), None, 0)
-            .unwrap_err()
-            .contains("already fired"));
+        assert!(update_in(
+            d.path(),
+            &ScheduleUpdate { fire_at: Some(900_000), ..upd("f") },
+            0
+        )
+        .unwrap_err()
+        .contains("already fired"));
 
         make(d.path(), "s1", 0, 300_000);
-        assert!(update_in(d.path(), "s1", Some(500), None, 1_000)
-            .unwrap_err()
-            .contains("in the past"));
-        assert!(update_in(d.path(), "s1", Some(1_000 + MAX_HORIZON_MS + 1), None, 1_000)
-            .unwrap_err()
-            .contains("horizon"));
+        assert!(update_in(
+            d.path(),
+            &ScheduleUpdate { fire_at: Some(500), ..upd("s1") },
+            1_000
+        )
+        .unwrap_err()
+        .contains("in the past"));
+        assert!(update_in(
+            d.path(),
+            &ScheduleUpdate { fire_at: Some(1_000 + MAX_HORIZON_MS + 1), ..upd("s1") },
+            1_000
+        )
+        .unwrap_err()
+        .contains("horizon"));
         // empty prompt rejected
-        assert!(update_in(d.path(), "s1", None, Some("   "), 0)
-            .unwrap_err()
-            .contains("cannot be empty"));
+        assert!(update_in(
+            d.path(),
+            &ScheduleUpdate { prompt: Some("   ".into()), ..upd("s1") },
+            0
+        )
+        .unwrap_err()
+        .contains("cannot be empty"));
         // unknown id
-        assert!(update_in(d.path(), "nope", None, Some("x"), 0)
-            .unwrap_err()
-            .contains("no schedule with id"));
+        assert!(update_in(
+            d.path(),
+            &ScheduleUpdate { prompt: Some("x".into()), ..upd("nope") },
+            0
+        )
+        .unwrap_err()
+        .contains("no schedule with id"));
     }
 
     #[test]
