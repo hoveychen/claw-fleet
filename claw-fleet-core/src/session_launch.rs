@@ -168,18 +168,22 @@ fn normalize_workspace_path_with_home(input: &str, home: Option<&Path>) -> Resul
 pub const NEW_SESSION_ENTRYPOINT: &str = "claw-fleet-newsession";
 
 /// True for the sessions Fleet spawned itself, headless (`-p`): the "新会话"
-/// button and the handoff relay. Mirrors `isFleetOwnedEntrypoint` in the
-/// desktop's `types.ts`.
+/// button, the handoff relay, and a fired schedule / loop iteration. Mirrors
+/// `isFleetOwnedEntrypoint` in the desktop's `types.ts`.
 ///
 /// Load-bearing for interrupts. SIGINT only means "abort the tool call" for a
 /// headless CLI; an interactive one, attached to a pty, reads Ctrl-C as a
 /// keystroke, so a real SIGINT makes it quit and abandon its tool child. Only
-/// these sessions may be offered an interrupt.
+/// these sessions may be offered an interrupt. Schedule/loop fires are spawned
+/// headless `-p` exactly like the 新会话 button, so they qualify on both counts
+/// (interrupt-eligible, and listed on the task page).
 pub fn is_fleet_owned_entrypoint(entrypoint: Option<&str>) -> bool {
     matches!(
         entrypoint,
         Some(e) if e == NEW_SESSION_ENTRYPOINT
             || e == crate::handoff::HANDOFF_ENTRYPOINT
+            || e == crate::schedule::SCHEDULE_ENTRYPOINT
+            || e == crate::agent_loop::LOOP_ENTRYPOINT
             // Codex has no `CLAUDE_CODE_ENTRYPOINT`; the Codex scanner surfaces the
             // rollout `originator` in this same field, and Fleet-launched Codex
             // sessions carry `originator == "fleet"` (see `codex_launch`).
@@ -1063,6 +1067,14 @@ mod fleet_owned_tests {
         assert!(is_fleet_owned_entrypoint(Some(NEW_SESSION_ENTRYPOINT)));
         assert!(is_fleet_owned_entrypoint(Some(
             crate::handoff::HANDOFF_ENTRYPOINT
+        )));
+        // A fired schedule / loop iteration is spawned headless `-p` just like
+        // the 新会话 button, so it is Fleet-owned too (task-page + interrupt).
+        assert!(is_fleet_owned_entrypoint(Some(
+            crate::schedule::SCHEDULE_ENTRYPOINT
+        )));
+        assert!(is_fleet_owned_entrypoint(Some(
+            crate::agent_loop::LOOP_ENTRYPOINT
         )));
 
         // Interactive / foreign launches must never be offered an interrupt:
