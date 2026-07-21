@@ -72,29 +72,33 @@ pub async fn ws_handler(
         .on_upgrade(move |socket| handle_socket(state, socket, guard))
 }
 
-/// Resolve the client IP for per-IP capping. Behind Traefik (TLS terminator)
-/// the TCP peer is always the proxy, so the real address must come from a
-/// forwarded header: prefer `X-Real-Ip` (the single immediate-client address the
-/// proxy sets), else the **right-most** `X-Forwarded-For` entry (the address the
-/// trusted proxy appended — left-most entries are client-supplied and
-/// spoofable). Absent both (a direct/dev connection), returns `None` and per-IP
-/// capping is skipped for that socket.
+/// Resolve the client IP for per-IP capping. Behind Traefik (which terminates
+/// TLS) the TCP peer is always the proxy, so the real address must come from a
+/// forwarded header — and only from one Traefik itself controls.
 ///
-/// NOTE: which header muvee's Traefik actually forwards is confirmed at deploy
-/// time (P5); handling both keeps this correct for any standard proxy setup.
+/// We use the **right-most** `X-Forwarded-For` entry. muvee's Traefik has no
+/// `forwardedHeaders.trustedIPs`, so it owns the header: it discards/overwrites
+/// any client-supplied XFF and appends the real connecting IP, which lands
+/// right-most (verified against ~/workspace/muvee `traefik/traefik.yml` +
+/// `handleTraefikConfig`, which adds no header-stripping middleware). The
+/// left-most entry, by contrast, is whatever the client claimed — spoofable.
+///
+/// We deliberately do NOT trust `X-Real-Ip`: Traefik doesn't set it and doesn't
+/// strip a client-supplied one, so a hostile client could rotate fake
+/// `X-Real-Ip` values to dodge the per-IP cap. Absent XFF (a direct/dev
+/// connection with no proxy), returns `None` and per-IP capping is skipped.
+///
+/// Caveat: this assumes exactly one trusted proxy hop. If a CDN in proxied mode
+/// (e.g. Cloudflare) is ever placed in front of Traefik, all clients collapse to
+/// the CDN's egress IPs and per-IP keying degrades toward the global cap. The
+/// current deployment uses Traefik-direct ACME (httpChallenge), incompatible
+/// with a proxying CDN, so that isn't the case today.
 fn client_ip(headers: &HeaderMap) -> Option<IpAddr> {
-    let parse = |s: &str| s.trim().parse::<IpAddr>().ok();
     headers
-        .get("x-real-ip")
+        .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
-        .and_then(parse)
-        .or_else(|| {
-            headers
-                .get("x-forwarded-for")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.rsplit(',').next())
-                .and_then(parse)
-        })
+        .and_then(|s| s.rsplit(',').next())
+        .and_then(|s| s.trim().parse::<IpAddr>().ok())
 }
 
 async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnGuard) {
@@ -234,4 +238,52 @@ async fn next_text(socket: &mut WebSocket) -> Option<String> {
 async fn send_frame(socket: &mut WebSocket, frame: &OutFrame) -> Result<(), axum::Error> {
     let s = serde_json::to_string(frame).unwrap_or_default();
     socket.send(Message::Text(s.into())).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::client_ip;
+    use axum::http::header::HeaderName;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        h
+    }
+
+    #[test]
+    fn uses_rightmost_forwarded_for() {
+        let ip = client_ip(&headers(&[("x-forwarded-for", "1.1.1.1, 2.2.2.2, 3.3.3.3")]));
+        assert_eq!(ip.unwrap().to_string(), "3.3.3.3", "right-most (proxy-appended) entry wins");
+    }
+
+    #[test]
+    fn ignores_spoofable_x_real_ip() {
+        // A hostile client sets X-Real-Ip and a fake left-most XFF; Traefik
+        // appends the true IP right-most. We must key on the right-most XFF and
+        // ignore X-Real-Ip, or the per-IP cap is trivially bypassed.
+        let ip = client_ip(&headers(&[
+            ("x-real-ip", "9.9.9.9"),
+            ("x-forwarded-for", "6.6.6.6, 4.4.4.4"),
+        ]));
+        assert_eq!(ip.unwrap().to_string(), "4.4.4.4", "X-Real-Ip must not override XFF");
+    }
+
+    #[test]
+    fn x_real_ip_alone_is_not_trusted() {
+        // No XFF (so no trusted proxy hop) → don't fall back to the spoofable
+        // X-Real-Ip; skip per-IP capping instead.
+        assert!(client_ip(&headers(&[("x-real-ip", "9.9.9.9")])).is_none());
+    }
+
+    #[test]
+    fn no_forwarding_header_yields_none() {
+        assert!(client_ip(&headers(&[])).is_none());
+    }
 }
