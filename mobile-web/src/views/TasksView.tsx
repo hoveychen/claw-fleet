@@ -51,6 +51,28 @@ function statusTone(status: SessionStatus): string | null {
   return null;
 }
 
+/** Highest-salience status tone across a collapsed relay group's members. The
+ *  header card is the tip, but the group floats up the list on its most recently
+ *  active member (which need not be the tip), so its dot must reflect the whole
+ *  chain — a running hop outranks a waiting/active/errored one, mirroring the
+ *  desktop launchpad's `chainBarColor`. */
+const TONE_PRIORITY = ["working", "waiting", "active", "error"];
+function chainTone(members: SessionInfo[]): string | null {
+  let best: string | null = null;
+  let bestRank = TONE_PRIORITY.length;
+  for (const m of members) {
+    const tn = statusTone(m.status);
+    if (tn == null) continue;
+    const r = TONE_PRIORITY.indexOf(tn);
+    if (r >= 0 && r < bestRank) {
+      bestRank = r;
+      best = tn;
+      if (r === 0) break; // a running hop wins outright
+    }
+  }
+  return best;
+}
+
 function timeAgo(ms: number): string {
   const diff = Date.now() - ms;
   if (diff < 60_000) return t("刚刚");
@@ -531,9 +553,13 @@ export function TasksView({
       markMembers: SessionInfo[];
     },
   ) => {
-    const tone = statusTone(s.status);
+    // For a collapsed group the header card is the tip, but its dot and unread
+    // bold must reflect the whole chain (`group.markMembers` = full membership),
+    // not just the tip — otherwise a chain floated to the top by a live mid-hop
+    // shows no dot. Plain cards keep deriving from the session itself.
+    const tone = group ? chainTone(group.markMembers) : statusTone(s.status);
     const mode = stopMode(s);
-    const unread = isSessionUnread(s);
+    const unread = group ? group.markMembers.some(isSessionUnread) : isSessionUnread(s);
     const isDone = group
       ? group.markMembers.length > 0 && group.markMembers.every((m) => m.userMark === "done")
       : s.userMark === "done";
