@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  CheckCheck,
   CheckCircle2,
+  ChevronRight,
   Circle,
   Clock,
   Folder,
@@ -125,6 +127,74 @@ function renderSnippet(snippet: string): ReactNode[] {
   });
 }
 
+/** How many chain members an expanded group shows before "load more"; a relay
+ *  chain can run 50 hops deep, so we reveal the most recent few and page in the
+ *  rest on demand. Mirrors the desktop launchpad's HistoryView. */
+const GROUP_VISIBLE = 3;
+const GROUP_LOAD_STEP = 10;
+
+/** Highest-hop (tip / latest relay) member — the chain's "current" session. */
+function chainTip(members: SessionInfo[]): SessionInfo {
+  return members.reduce((a, b) => ((b.handoff?.hop ?? 0) > (a.handoff?.hop ?? 0) ? b : a));
+}
+
+/** One entry in the rendered task list: either a standalone session or a
+ *  collapsed handoff-relay chain. */
+type RenderItem =
+  | { kind: "single"; key: string; session: SessionInfo }
+  | {
+      kind: "group";
+      key: string;
+      chainId: string;
+      chainLen: number;
+      tip: SessionInfo;
+      members: SessionInfo[];
+    };
+
+/**
+ * Fold a flat, already-filtered+sorted list into render items, collapsing
+ * sessions that share a `handoff.chainId` into one group. A chain becomes a
+ * group only when ≥2 of its members are present; a lone surviving hop renders
+ * as an ordinary card (keeping its own handoff chip). The group takes the list
+ * position of its first (most recently active) member; members are ordered
+ * newest-hop-first so "show last N" reveals the recent relays first. Same shape
+ * as the desktop launchpad's `buildRenderItems`.
+ */
+export function buildRenderItems(rows: SessionInfo[], group: boolean): RenderItem[] {
+  if (!group) return rows.map((s) => ({ kind: "single", key: s.id, session: s }));
+  const items: RenderItem[] = [];
+  const groupAt = new Map<string, number>();
+  for (const s of rows) {
+    const cid = s.handoff && s.handoff.chainLen > 1 ? s.handoff.chainId : null;
+    if (!cid) {
+      items.push({ kind: "single", key: s.id, session: s });
+      continue;
+    }
+    const at = groupAt.get(cid);
+    if (at === undefined) {
+      groupAt.set(cid, items.length);
+      items.push({
+        kind: "group",
+        key: `chain:${cid}`,
+        chainId: cid,
+        chainLen: s.handoff!.chainLen,
+        tip: s,
+        members: [s],
+      });
+    } else {
+      (items[at] as Extract<RenderItem, { kind: "group" }>).members.push(s);
+    }
+  }
+  return items.map((it) => {
+    if (it.kind !== "group") return it;
+    if (it.members.length < 2) {
+      return { kind: "single", key: it.members[0].id, session: it.members[0] };
+    }
+    const members = [...it.members].sort((a, b) => b.handoff!.hop - a.handoff!.hop);
+    return { ...it, tip: chainTip(members), members };
+  });
+}
+
 interface Props {
   sessions: SessionInfo[];
   client: RelayClient | null;
@@ -156,6 +226,10 @@ export function TasksView({
   const [workspace, setWorkspace] = useDraft<string>("tasks:workspace", "");
   const [activeOnly, setActiveOnly] = useDraft<boolean>("tasks:activeOnly", false);
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
+  // Group handoff-relay chains into one collapsible card. Default on; the setter
+  // lives in the More tab. Tabs unmount on switch, so this re-reads the saved
+  // value whenever the task page remounts — no cross-tab live sync needed.
+  const [groupHandoff] = useDraft<boolean>("tasks:groupHandoff", true);
   const [busyOp, setBusyOp] = useState<string | null>(null);
   // Optimistic mark overrides, dropped once the server snapshot catches up.
   const [markOverride, setMarkOverride] = useState<Record<string, SessionMark | null>>({});
@@ -269,6 +343,51 @@ export function TasksView({
         });
     },
     [client],
+  );
+
+  // Full membership of every relay chain, keyed by chainId — over ALL Fleet
+  // sessions (not the filtered `visible`), so a group's mark-all covers the
+  // whole chain even when the mark filter hides some hops, and the header's
+  // aggregate done-state reflects the entire chain. `all` already folds in the
+  // optimistic `markOverride`, so this reacts on tap.
+  const chainMembersAll = useMemo(() => {
+    const m = new Map<string, SessionInfo[]>();
+    for (const s of all) {
+      if (s.handoff && s.handoff.chainLen > 1) {
+        const arr = m.get(s.handoff.chainId);
+        if (arr) arr.push(s);
+        else m.set(s.handoff.chainId, [s]);
+      }
+    }
+    return m;
+  }, [all]);
+
+  const [expandedChains, setExpandedChains] = useState<Set<string>>(() => new Set());
+  const [chainLoadMore, setChainLoadMore] = useState<Record<string, number>>({});
+  const toggleChain = useCallback((cid: string) => {
+    setExpandedChains((prev) => {
+      const next = new Set(prev);
+      if (next.has(cid)) next.delete(cid);
+      else next.add(cid);
+      return next;
+    });
+  }, []);
+  const loadMoreChain = useCallback((cid: string) => {
+    setChainLoadMore((prev) => ({
+      ...prev,
+      [cid]: (prev[cid] ?? GROUP_VISIBLE) + GROUP_LOAD_STEP,
+    }));
+  }, []);
+  const setMarkChain = useCallback(
+    (members: SessionInfo[], done: boolean) => {
+      for (const m of members) setMark(m, done ? "done" : null);
+    },
+    [setMark],
+  );
+
+  const renderItems = useMemo(
+    () => buildRenderItems(visible, groupHandoff),
+    [visible, groupHandoff],
   );
 
   const handleStop = useCallback(
@@ -400,6 +519,84 @@ export function TasksView({
     done: t("已完成"),
   };
 
+  // One session card — shared by standalone cards and the members inside an
+  // expanded handoff group, so both stay identical.
+  const renderCard = (s: SessionInfo) => {
+    const tone = statusTone(s.status);
+    const mode = stopMode(s);
+    const unread = isSessionUnread(s);
+    const isDone = s.userMark === "done";
+    const title =
+      s.titleOverride || s.aiTitle || s.slug || s.lastMessagePreview || t("（无标题）");
+    const snippet = search.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined;
+    const live = LIVE.includes(s.status);
+    return (
+      <div key={s.id} className={styles.card} onClick={() => onOpenSession(s)}>
+        <div className={styles.cardHead}>
+          {tone && <span className={styles.statusDot} data-tone={tone} />}
+          <span className={styles.sourceIcon} title={s.agentSource || "claude-code"}>
+            <AgentSourceIcon source={s.agentSource} />
+          </span>
+          <span className={styles.title}>{title}</span>
+          {unread && <span className={styles.unreadDot} />}
+          <span className={styles.time}>{timeAgo(s.lastActivityMs)}</span>
+        </div>
+        <div className={styles.metaRow}>
+          <span className={styles.project}>
+            <Folder size={11} />
+            {s.workspaceName}
+          </span>
+          {s.handoff && (
+            <span className={styles.handoff}>
+              <Share2 size={11} />
+              {s.handoff.hop}/{s.handoff.chainLen}
+            </span>
+          )}
+          {live && (
+            <span className={styles.runtime} data-tone={tone ?? undefined}>
+              <Clock size={11} />
+              {formatRunning(s.createdAtMs)}
+            </span>
+          )}
+        </div>
+        {snippet ? (
+          <div className={styles.snippet}>{renderSnippet(snippet)}</div>
+        ) : (
+          s.lastMessagePreview && <div className={styles.preview}>{s.lastMessagePreview}</div>
+        )}
+        <div className={styles.opsRow} onClick={(e) => e.stopPropagation()}>
+          <button
+            className={styles.markToggle}
+            data-done={isDone}
+            onClick={() => setMark(s, isDone ? null : "done")}
+            aria-pressed={isDone}
+            title={isDone ? t("已完成 — 点击改回进行中") : t("进行中 — 点击标为已完成")}
+          >
+            {isDone ? <CheckCircle2 size={16} /> : <Circle size={15} />}
+          </button>
+          <span className={styles.opsSpacer} />
+          {canControl(s) && mode !== "spent" && (
+            <button
+              className={styles.stopButton}
+              data-mode={mode}
+              disabled={busyOp === s.id}
+              onClick={() => void handleStop(s)}
+            >
+              {busyOp === s.id ? (
+                "…"
+              ) : (
+                <>
+                  <Square size={12} />
+                  {mode === "interrupt" ? t("中断") : t("停止")}
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className={styles.wrapper}>
       <div className={styles.filterBar}>
@@ -477,78 +674,70 @@ export function TasksView({
       )}
 
       <div className={styles.list}>
-        {visible.map((s) => {
-          const tone = statusTone(s.status);
-          const mode = stopMode(s);
-          const unread = isSessionUnread(s);
-          const isDone = s.userMark === "done";
+        {renderItems.map((item) => {
+          if (item.kind === "single") return renderCard(item.session);
+          const { chainId, chainLen, tip, members, key } = item;
+          const full = chainMembersAll.get(chainId) ?? members;
+          const allDone = full.length > 0 && full.every((m) => m.userMark === "done");
+          const expanded = expandedChains.has(chainId);
+          const limit = chainLoadMore[chainId] ?? GROUP_VISIBLE;
+          const shown = expanded ? members.slice(0, limit) : [];
+          const hidden = members.length - shown.length;
+          const tone = statusTone(tip.status);
           const title =
-            s.titleOverride || s.aiTitle || s.slug || s.lastMessagePreview || t("（无标题）");
-          const snippet = search.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined;
-          const live = LIVE.includes(s.status);
+            tip.titleOverride || tip.aiTitle || tip.slug || tip.lastMessagePreview || t("（无标题）");
           return (
-            <div key={s.id} className={styles.card} onClick={() => onOpenSession(s)}>
-              <div className={styles.cardHead}>
+            <div key={key} className={styles.group}>
+              <div
+                className={styles.groupHead}
+                role="button"
+                aria-expanded={expanded}
+                onClick={() => toggleChain(chainId)}
+              >
+                <ChevronRight
+                  size={16}
+                  className={styles.groupChevron}
+                  data-open={expanded}
+                />
                 {tone && <span className={styles.statusDot} data-tone={tone} />}
-                <span className={styles.sourceIcon} title={s.agentSource || "claude-code"}>
-                  <AgentSourceIcon source={s.agentSource} />
+                <span className={styles.sourceIcon} title={tip.agentSource || "claude-code"}>
+                  <AgentSourceIcon source={tip.agentSource} />
                 </span>
                 <span className={styles.title}>{title}</span>
-                {unread && <span className={styles.unreadDot} />}
-                <span className={styles.time}>{timeAgo(s.lastActivityMs)}</span>
-              </div>
-              <div className={styles.metaRow}>
-                <span className={styles.project}>
-                  <Folder size={11} />
-                  {s.workspaceName}
+                <span className={styles.groupBadge}>
+                  <Share2 size={11} />
+                  {t("接力 {0}", chainLen)}
                 </span>
-                {s.handoff && (
-                  <span className={styles.handoff}>
-                    <Share2 size={11} />
-                    {s.handoff.hop}/{s.handoff.chainLen}
-                  </span>
-                )}
-                {live && (
-                  <span className={styles.runtime} data-tone={tone ?? undefined}>
-                    <Clock size={11} />
-                    {formatRunning(s.createdAtMs)}
-                  </span>
-                )}
-              </div>
-              {snippet ? (
-                <div className={styles.snippet}>{renderSnippet(snippet)}</div>
-              ) : (
-                s.lastMessagePreview && <div className={styles.preview}>{s.lastMessagePreview}</div>
-              )}
-              <div className={styles.opsRow} onClick={(e) => e.stopPropagation()}>
                 <button
                   className={styles.markToggle}
-                  data-done={isDone}
-                  onClick={() => setMark(s, isDone ? null : "done")}
-                  aria-pressed={isDone}
-                  title={isDone ? t("已完成 — 点击改回进行中") : t("进行中 — 点击标为已完成")}
+                  data-done={allDone}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMarkChain(full, !allDone);
+                  }}
+                  aria-pressed={allDone}
+                  title={
+                    allDone
+                      ? t("整条接力链已完成 — 点击全部改回进行中")
+                      : t("点击把整条接力链标为已完成")
+                  }
                 >
-                  {isDone ? <CheckCircle2 size={16} /> : <Circle size={15} />}
+                  <CheckCheck size={16} opacity={allDone ? 1 : 0.55} />
                 </button>
-                <span className={styles.opsSpacer} />
-                {canControl(s) && mode !== "spent" && (
-                  <button
-                    className={styles.stopButton}
-                    data-mode={mode}
-                    disabled={busyOp === s.id}
-                    onClick={() => void handleStop(s)}
-                  >
-                    {busyOp === s.id ? (
-                      "…"
-                    ) : (
-                      <>
-                        <Square size={12} />
-                        {mode === "interrupt" ? t("中断") : t("停止")}
-                      </>
-                    )}
-                  </button>
-                )}
               </div>
+              {expanded && (
+                <div className={styles.groupChildren}>
+                  {shown.map((m) => renderCard(m))}
+                  {hidden > 0 && (
+                    <button
+                      className={styles.groupMore}
+                      onClick={() => loadMoreChain(chainId)}
+                    >
+                      {t("显示更早的 {0} 棒", hidden)}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
