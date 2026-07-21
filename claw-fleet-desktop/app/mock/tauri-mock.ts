@@ -347,6 +347,21 @@ function handleIPC(
     case "cancel_loop":
     case "cancel_schedule":
       return null;
+    case "update_schedule": {
+      // Echo back a plausibly-updated record so the edit form's round-trip works
+      // in mock mode (real backend re-arms the timer; the mock just reflects).
+      const u = (args?.update ?? {}) as Record<string, unknown>;
+      return {
+        id: u.id ?? "9f8e7d6c",
+        workspacePath: "/Users/dev/workspace/claude-fleet",
+        prompt: u.prompt ?? "",
+        fireAt: u.fireAt ?? Date.now() + 3600 * 1000,
+        status: "pending",
+        model: u.model || undefined,
+        effort: u.effort || undefined,
+        agentSource: u.agentSource || undefined,
+      };
+    }
     case "list_memories":
       return qaMode
         ? MOCK_MEMORIES.map((workspace) => ({
