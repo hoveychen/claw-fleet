@@ -116,8 +116,8 @@ function ScheduleProvenanceChip({ session }: { session: SessionInfo }) {
     >
       <CalendarClock size={11} strokeWidth={2.2} />
       {scheduleId
-        ? t("detail.triggered_by_schedule", "由计划 {{id}} 触发").replace("{{id}}", scheduleId)
-        : t("detail.triggered_by_schedule_generic", "定时触发")}
+        ? t("detail.triggered_by_schedule", { id: scheduleId })
+        : t("detail.triggered_by_schedule_generic")}
     </button>
   );
 }
