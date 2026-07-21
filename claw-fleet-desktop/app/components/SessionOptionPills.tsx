@@ -26,6 +26,7 @@ export function SessionOptionPills({
   tool = "claude",
   onToolChange,
   toolChoices = AGENT_TOOL_CHOICES,
+  showPermission = true,
 }: {
   model: string;
   effort: string;
@@ -34,6 +35,9 @@ export function SessionOptionPills({
   onEffortChange: (v: string) => void;
   onPermissionModeChange: (v: string) => void;
   disabled?: boolean;
+  /** Hide the permission-mode pill entirely. A schedule stores no permission
+   *  mode (fired sessions inherit the CLI default), so its edit form omits it. */
+  showPermission?: boolean;
   /** Label for the "" permission item; defaults to new_session.permission_default. */
   permissionDefaultLabel?: string;
   /** Popover side. Hosts near the top of a clipping panel (e.g. the resume
@@ -121,8 +125,9 @@ export function SessionOptionPills({
         ]}
       />
       {/* Codex has no --permission-mode analogue (its sandbox/approval mapping
-          is a later milestone), so the permission pill is Claude-only. */}
-      {!isCodex && (
+          is a later milestone), so the permission pill is Claude-only. Hosts
+          with no permission concept (e.g. schedule edit) hide it outright. */}
+      {showPermission && !isCodex && (
         <PillMenu
           placement={placement}
           label={permissionLabel}

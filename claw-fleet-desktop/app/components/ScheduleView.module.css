@@ -132,6 +132,30 @@
   font-weight: 600;
 }
 
+.row_actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.edit:hover {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
 .cancel {
   display: inline-flex;
   align-items: center;
@@ -176,6 +200,43 @@
   width: 100%;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
 }
+.modal_wide {
+  max-width: 520px;
+}
+.edit_textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+  margin-bottom: 14px;
+}
+.edit_textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.pills_row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.error {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  color: var(--color-error);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
 .modal_title {
   font-size: 15px;
   font-weight: 600;
@@ -208,6 +269,10 @@
 .time_input:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+/* Spacing when a labelled field follows the time input (edit form). */
+.time_input + .field_label {
+  margin-top: 14px;
 }
 .presets {
   display: flex;

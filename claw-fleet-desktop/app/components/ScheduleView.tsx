@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarClock, Repeat, Trash2, RefreshCw, Plus } from "lucide-react";
+import { CalendarClock, Repeat, Trash2, RefreshCw, Plus, Pencil } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
+import { SessionOptionPills } from "./SessionOptionPills";
+import { agentToolsForSources, type SourceInfo } from "../modelChoices";
 import { useUIStore } from "../store";
 import styles from "./ScheduleView.module.css";
 
@@ -56,6 +58,7 @@ interface ScheduleRecord {
   status: "pending" | "fired";
   firedAt?: number;
   model?: string;
+  effort?: string;
   agentSource?: string;
   firedSessionId?: string;
 }
@@ -64,6 +67,17 @@ interface ScheduleRecord {
 type FutureTask =
   | { kind: "loop"; id: string; rec: LoopRecord }
   | { kind: "schedule"; id: string; rec: ScheduleRecord };
+
+// Mirrors the Rust `ScheduleUpdate` serde record (camelCase). Every field is
+// optional; for model/effort/agentSource, `""` clears back to inherit-default.
+interface ScheduleUpdate {
+  id: string;
+  fireAt?: number;
+  prompt?: string;
+  model?: string;
+  effort?: string;
+  agentSource?: string;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -208,6 +222,13 @@ export function ScheduleView() {
     setCreating(false);
   }, [fireLocal, requestNewSession]);
 
+  // Edit an existing pending schedule (prompt / time / model / effort / source).
+  const [editing, setEditing] = useState<ScheduleRecord | null>(null);
+  const [sources, setSources] = useState<SourceInfo[]>([]);
+  useEffect(() => {
+    invoke<SourceInfo[]>("get_sources_config").then(setSources).catch(() => {});
+  }, []);
+
   return (
     <PageShell
       view="schedule"
@@ -233,6 +254,17 @@ export function ScheduleView() {
           onCancel={() => setCreating(false)}
         />
       )}
+      {editing && (
+        <EditModal
+          rec={editing}
+          toolChoices={agentToolsForSources(sources)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+          onCancel={() => setEditing(null)}
+        />
+      )}
       <div className={styles.list}>
         {loaded && tasks.length === 0 && (
           <EmptyState
@@ -250,6 +282,11 @@ export function ScheduleView() {
             task={task}
             cancelling={cancelling.has(task.id)}
             onCancel={() => cancel(task)}
+            onEdit={
+              task.kind === "schedule" && task.rec.status === "pending"
+                ? () => setEditing(task.rec)
+                : undefined
+            }
           />
         ))}
       </div>
@@ -335,16 +372,121 @@ function CreateModal({
   );
 }
 
+// ── Edit modal ───────────────────────────────────────────────────────────────
+// Unlike create, editing IS a form: it changes an existing schedule's full
+// content (prompt / time / model / effort / source) via update_schedule.
+
+function EditModal({
+  rec,
+  toolChoices,
+  onSaved,
+  onCancel,
+}: {
+  rec: ScheduleRecord;
+  toolChoices: { value: string; label: string }[];
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const [prompt, setPrompt] = useState(rec.prompt);
+  const [fireLocal, setFireLocal] = useState(toLocalInput(new Date(rec.fireAt)));
+  const [model, setModel] = useState(rec.model ?? "");
+  const [effort, setEffort] = useState(rec.effort ?? "");
+  const [tool, setTool] = useState(rec.agentSource === "codex" ? "codex" : "claude");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    if (!prompt.trim() || !fireLocal) return;
+    setSaving(true);
+    setError(null);
+    const update: ScheduleUpdate = {
+      id: rec.id,
+      fireAt: new Date(fireLocal).getTime(), // datetime-local parsed as local time
+      prompt: prompt.trim(),
+      model, // "" clears back to inherit-default
+      effort,
+      agentSource: tool,
+    };
+    try {
+      await invoke("update_schedule", { update });
+      onSaved();
+    } catch (e) {
+      setError(String(e));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={styles.modal_overlay} onClick={onCancel}>
+      <div className={`${styles.modal} ${styles.modal_wide}`} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.modal_title}>{t("schedule.edit_title", "编辑计划任务")}</div>
+        <label className={styles.field_label}>{t("schedule.prompt", "任务内容")}</label>
+        <textarea
+          className={styles.edit_textarea}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={5}
+        />
+        <label className={styles.field_label}>{t("schedule.fire_at", "触发时间")}</label>
+        <input
+          className={styles.time_input}
+          type="datetime-local"
+          value={fireLocal}
+          onChange={(e) => setFireLocal(e.target.value)}
+        />
+        <label className={styles.field_label}>{t("schedule.run_options", "运行选项")}</label>
+        <div className={styles.pills_row}>
+          <SessionOptionPills
+            model={model}
+            effort={effort}
+            permissionMode=""
+            onModelChange={setModel}
+            onEffortChange={setEffort}
+            onPermissionModeChange={() => {}}
+            showPermission={false}
+            placement="above"
+            tool={tool}
+            toolChoices={toolChoices}
+            onToolChange={(v) => {
+              // Claude/Codex have distinct model+effort catalogs — reset on switch.
+              setTool(v);
+              setModel("");
+              setEffort("");
+            }}
+          />
+        </div>
+        {error && <div className={styles.error}>{error}</div>}
+        <div className={styles.modal_actions}>
+          <button className={styles.btn_ghost} onClick={onCancel} disabled={saving}>
+            {t("schedule.cancel", "取消")}
+          </button>
+          <button
+            className={styles.btn_primary}
+            onClick={save}
+            disabled={saving || !prompt.trim() || !fireLocal}
+          >
+            {saving ? t("schedule.saving", "保存中") : t("schedule.save", "保存")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Row ──────────────────────────────────────────────────────────────────────
 
 function TaskRow({
   task,
   cancelling,
   onCancel,
+  onEdit,
 }: {
   task: FutureTask;
   cancelling: boolean;
   onCancel: () => void;
+  /** Present only for pending schedules — opens the edit form. */
+  onEdit?: () => void;
 }) {
   const { t } = useTranslation();
   const rec = task.rec;
@@ -424,15 +566,23 @@ function TaskRow({
           <span className={styles.id}>{rec.id}</span>
         </div>
       </div>
-      <button
-        className={styles.cancel}
-        disabled={cancelling}
-        onClick={onCancel}
-        title={t("schedule.cancel", "取消")}
-      >
-        <Trash2 size={13} strokeWidth={2} />
-        {cancelling ? t("schedule.cancelling", "取消中") : t("schedule.cancel", "取消")}
-      </button>
+      <div className={styles.row_actions}>
+        {onEdit && (
+          <button className={styles.edit} onClick={onEdit} title={t("schedule.edit", "编辑")}>
+            <Pencil size={13} strokeWidth={2} />
+            {t("schedule.edit", "编辑")}
+          </button>
+        )}
+        <button
+          className={styles.cancel}
+          disabled={cancelling}
+          onClick={onCancel}
+          title={t("schedule.cancel", "取消")}
+        >
+          <Trash2 size={13} strokeWidth={2} />
+          {cancelling ? t("schedule.cancelling", "取消中") : t("schedule.cancel", "取消")}
+        </button>
+      </div>
     </div>
   );
 }
