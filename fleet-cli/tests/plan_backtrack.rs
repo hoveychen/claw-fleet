@@ -31,6 +31,10 @@ fn check(home: &std::path::Path, ws: &std::path::Path, plan: &str, task: &str) -
         .args(["plan", "check", plan, task])
         .current_dir(ws)
         .env("FLEET_HOME", home)
+        // A Claude-session ancestor's CLAUDE_CODE_SESSION_ID outranks
+        // FLEET_SESSION_ID; strip it so attribution lands under SID when the
+        // suite runs inside a session.
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("FLEET_SESSION_ID", SID)
         .output()
         .expect("run fleet plan check");
@@ -168,6 +172,8 @@ fn hook_backstops_focus_left_on_completed_child() {
         .args(["plan", "resume", "child-y"])
         .current_dir(&ws)
         .env("FLEET_HOME", &home)
+        // See `check`: a leaked CLAUDE_CODE_SESSION_ID would steal attribution.
+        .env_remove("CLAUDE_CODE_SESSION_ID")
         .env("FLEET_SESSION_ID", sid)
         .output()
         .expect("run fleet plan resume");
