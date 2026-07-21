@@ -49,6 +49,23 @@ pub const MIN_INTERVAL_SECS: u64 = 60;
 /// but a timer refuses to fire it. Mirrors Claude Code's own 7-day cron expiry.
 pub const EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
+/// How many past iterations we retain in [`LoopRecord::history`]. A loop can run
+/// up to [`MAX_ITERATIONS`] times; keeping every session id would bloat the
+/// record with stale entries the Schedule view never scrolls to. The tail is the
+/// interesting part, so we keep the most recent N.
+pub const MAX_HISTORY: usize = 20;
+
+/// One iteration Fleet spawned for a loop, retained as history so the Schedule
+/// view can list every run under the loop and jump into each one's session.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LoopIteration {
+    /// Session the iteration produced.
+    pub session_id: String,
+    /// Epoch ms the iteration was spawned.
+    pub fired_at: u64,
+}
+
 /// One registered loop.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +105,12 @@ pub struct LoopRecord {
     /// Most recent iteration Fleet spawned.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub last_session_id: Option<String>,
+    /// Every iteration Fleet spawned, oldest → newest, capped to the most recent
+    /// [`MAX_HISTORY`]. `last_session_id` mirrors this list's tail; the list adds
+    /// the per-run timestamps and older runs the tail alone can't show. Absent on
+    /// records written before loop history existed (deserializes to empty).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<LoopIteration>,
 }
 
 impl LoopRecord {
@@ -241,6 +264,7 @@ fn create_in(
         created_by_session: created_by_session.map(str::to_string),
         agent_source: agent_source.filter(|s| !blank(s)).map(str::to_string),
         last_session_id: None,
+        history: Vec::new(),
     };
     write_record(dir, &rec)?;
     Ok(rec)
@@ -349,12 +373,21 @@ fn update_in(
 /// Record which session an iteration produced, for `fleet loop list`.
 pub fn record_iteration_session(id: &str, session_id: &str) {
     let Some(dir) = loops_dir() else { return };
-    record_iteration_session_in(&dir, id, session_id);
+    record_iteration_session_in(&dir, id, session_id, now_ms());
 }
 
-fn record_iteration_session_in(dir: &Path, id: &str, session_id: &str) {
+fn record_iteration_session_in(dir: &Path, id: &str, session_id: &str, now: u64) {
     if let Some(mut rec) = get_in(dir, id) {
         rec.last_session_id = Some(session_id.to_string());
+        rec.history.push(LoopIteration {
+            session_id: session_id.to_string(),
+            fired_at: now,
+        });
+        // Keep only the most recent MAX_HISTORY runs — drop the oldest overflow.
+        if rec.history.len() > MAX_HISTORY {
+            let drop = rec.history.len() - MAX_HISTORY;
+            rec.history.drain(0..drop);
+        }
         let _ = write_record(dir, &rec);
     }
 }
@@ -587,7 +620,7 @@ fn fire_once_in(
                 // The record may have been retired (final iteration) — only stamp
                 // if it's still around.
                 if get_in(dir, id).is_some() {
-                    record_iteration_session_in(dir, id, &sid);
+                    record_iteration_session_in(dir, id, &sid, now);
                 }
                 crate::log_debug(&format!(
                     "loop {id}: fired iteration {} -> session {sid}",
@@ -1067,7 +1100,35 @@ mod tests {
         assert!(calls[0].prompt.contains("fleet loop stop l1"));
 
         // the produced session id is recorded on the loop
-        assert_eq!(get_in(d.path(), "l1").unwrap().last_session_id.as_deref(), Some("iter-sid-1"));
+        let rec = get_in(d.path(), "l1").unwrap();
+        assert_eq!(rec.last_session_id.as_deref(), Some("iter-sid-1"));
+        // and appended to the run history with the fire timestamp
+        assert_eq!(rec.history.len(), 1);
+        assert_eq!(rec.history[0].session_id, "iter-sid-1");
+        assert_eq!(rec.history[0].fired_at, 300_000);
+    }
+
+    /// History keeps every run, newest last, and caps at MAX_HISTORY by dropping
+    /// the oldest — so a long-running loop's record can't grow without bound.
+    #[test]
+    fn history_accumulates_and_caps_at_max() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path();
+        create_in(dir, "/ws", "p", 60, None, None, None, None, None, "l1", 0).unwrap();
+
+        // Record more runs than the cap; each with a distinct id and timestamp.
+        let total = MAX_HISTORY + 5;
+        for i in 0..total {
+            record_iteration_session_in(dir, "l1", &format!("sid-{i}"), 1000 + i as u64);
+        }
+
+        let rec = get_in(dir, "l1").unwrap();
+        assert_eq!(rec.history.len(), MAX_HISTORY, "capped at MAX_HISTORY");
+        // Oldest `total - MAX_HISTORY` runs were dropped; the tail is the newest.
+        assert_eq!(rec.history.first().unwrap().session_id, format!("sid-{}", total - MAX_HISTORY));
+        assert_eq!(rec.history.last().unwrap().session_id, format!("sid-{}", total - 1));
+        // last_session_id mirrors the newest run.
+        assert_eq!(rec.last_session_id.as_deref(), Some(format!("sid-{}", total - 1).as_str()));
     }
 
     /// The claim happens before the spawn; if two timers race, the second's
