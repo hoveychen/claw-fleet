@@ -418,6 +418,17 @@ Fleet 会话里悄悄空转、什么都不 spawn。真正会跨回合边界触�
 结束回合——Fleet 在后台轮询，条件一触发就 `claude --resume` *这个*会话，把捕获\
 的结果喂给你的下一回合。`fleet watch stop <id>` 取消它。\n\
 \n\
+## Rule 6 —— 需求保真：别把不存在的需求写进计划\n\
+\n\
+Rule 1/2/4 管执行期的纪律，本规则管它们的上游——把{title}的请求变成计划的那一刻。长程计划最贵的失败不是做得慢，而是**做歪**：计划里混进了{title}从没要求的需求，实现又和这些幻觉需求强耦合，最后重构比重写还贵。本规则锁死这个失败模式。\n\
+\n\
+- **「该写个 RFC / 设计文档 / 要签字过一版」这个冲动本身是信号，但它指向的不是「停下」，而是「先做一次范围审计」。**你想写 RFC，往往是因为你正把这个体裁的完整性——扩展点、配置项、「未来考虑」、边界大全——误当成需求。RFC 奖励穷尽，而对你来说穷尽就等于编造。逮到这个冲动，先别急着把想象力铺开成文档。\n\
+- **计划里每一条 P-task、每一个需求，都必须能追溯到{title}本回合实际说过的话，或由它直接推导出的必要项。**把每条需求默默分成三类：{title}明说的、由明说项推导出的必要项、你自己加的。凡是「你自己加的」（「顺手抽象一层」「为了将来好扩展」「这类功能一般还得有 X」），要么删掉，要么单独拎出来问{title}一句「这条是我加的，你要吗」——**绝不静默写进计划。没有无源头的需求。**\n\
+- **先做能跑通的最薄一条竖切，跑通了再加。**在出现第二个具体用例逼你之前，不要为想象中的需求建抽象层、配置面或插件点。幻觉需求之所以致命，正因为它们往往是架构性的——一旦变成承重墙就拆不动了。薄竖切让「改得动」这件事一直握在你手里：就算范围飘了，飘进来的也是可拆的零件，而不是要推倒重来的地基。\n\
+- **需要设计文档不是罪；把设计文档当成「已批准的需求合同」再逐字实现才是。**真要写设计，审阅时盘的是那张可枚举的需求清单（每条标注 明说／推导／我加的），而不是那段读起来很合理的散文——{title}点头的往往是散文的调性，不是他逐条盘过的细节。签字签在清单上，不在散文上。\n\
+\n\
+本规则无论计划是多步还是单步都适用；它管的是「把请求变成要做的东西」这个动作，不是执行的节奏。\n\
+\n\
 ## worktree 工作流的推荐工具\n\
 \n\
 因为 Rule 3 在一个全新 worktree 里开发每个计划，每个新计划实际上是一个干净的\
@@ -922,6 +933,17 @@ done>' --capture '<shell cmd whose stdout you want reported>' --note '<what you 
 are waiting for>'`, then end the turn — Fleet polls in the background and \
 `claude --resume`s THIS session the moment the condition fires, feeding the \
 captured result to your next turn. `fleet watch stop <id>` cancels it.\n\
+\n\
+## Rule 6 — Requirement fidelity: don't plan hallucinated scope\n\
+\n\
+Rules 1/2/4 govern execution discipline; this rule governs their upstream — the moment you turn {title}'s request into a plan. The most expensive way a long plan fails is not by being slow, it's by going **sideways**: the plan picks up requirements {title} never asked for, the implementation couples tightly to those hallucinated requirements, and refactoring ends up costing more than a rewrite. This rule locks that failure mode down.\n\
+\n\
+- **The urge to \"write an RFC / a design doc / get a version signed off\" is itself a signal — but it points at \"run a scope audit first,\" not \"stop.\"** When you want to write an RFC it's usually because you're mistaking the genre's completeness — extension points, config knobs, \"future considerations,\" an exhaustive edge-case list — for requirements. The RFC format rewards exhaustiveness, and for you exhaustiveness is just confabulation. So when you catch that urge, don't spool your imagination out into a document yet.\n\
+- **Every P-task and every requirement in the plan must be traceable to something {title} actually said this turn, or a necessity that follows directly from it.** Silently sort each requirement into three buckets: what {title} stated explicitly, what's a necessary consequence of that, and what you added. For anything in the \"I added it\" bucket (\"let me abstract a layer while I'm here,\" \"for future extensibility,\" \"this kind of feature usually also needs X\"), either drop it or pull it out and ask {title} \"this one's mine — do you want it?\" — **never write it silently into the plan. No silent scope.**\n\
+- **Build the thinnest vertical slice that runs, get it working, then add.** Do not build an abstraction layer, a config surface, or a plugin point for an imagined requirement until a second concrete use case forces it. Hallucinated requirements are lethal precisely because they tend to be architectural — once one becomes a load-bearing wall, you can't pull it out. A thin slice keeps \"still refactorable\" in your hands: even if scope drifts, what drifts in is a removable part, not a foundation you'd have to demolish.\n\
+- **Needing a design doc isn't the sin; treating the design doc as an approved requirements contract and implementing it verbatim is.** If you do write a design, what you review is the enumerable requirement list (each item tagged stated / inferred / mine), not the prose that reads well — what {title} nods at is usually the prose's vibe, not details he checked line by line. The sign-off lives on the list, not the prose.\n\
+\n\
+This rule applies whether the plan is multi-step or single-step; it governs the act of turning a request into the thing you build, not the rhythm of executing it.\n\
 \n\
 ## Recommended tooling for the worktree workflow\n\
 \n\
@@ -1617,6 +1639,29 @@ mod tests {
         assert!(
             tooling_body.contains("package-lock.json"),
             "tooling section must name the lockfile so the rule is concrete, not abstract"
+        );
+    }
+
+    #[test]
+    fn render_includes_rule_6_scope_fidelity() {
+        let g = render_guidance("Boss", "en");
+        let r6_pos = g.find("## Rule 6").expect("Rule 6 section must exist");
+        let r6_body = &g[r6_pos..];
+        assert!(
+            r6_body.contains("traceable") && r6_body.contains("actually said"),
+            "Rule 6 must require every planned requirement to be traceable to what Boss actually said"
+        );
+        assert!(
+            r6_body.contains("No silent scope"),
+            "Rule 6 must forbid silently adding un-asked-for requirements to the plan"
+        );
+        assert!(
+            r6_body.contains("thinnest vertical slice"),
+            "Rule 6 must prescribe a thin vertical slice before building abstractions for imagined needs"
+        );
+        assert!(
+            r6_body.contains("RFC") && r6_body.contains("scope audit"),
+            "Rule 6 must reframe the 'I need an RFC' urge as a scope-audit trigger, not a design contract"
         );
     }
 }
