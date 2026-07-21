@@ -1784,6 +1784,7 @@ pub fn run() {
             remote::delete_connection,
             remote::connect_remote,
             remote::install_rca_remote,
+            remote::update_rca_remote,
             remote::disconnect_remote,
             pick_file,
             get_source_account,

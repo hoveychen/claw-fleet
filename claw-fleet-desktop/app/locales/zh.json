@@ -1666,6 +1666,7 @@
     "remote_ws_label_placeholder": "标签（可选）",
     "remote_ws_add": "添加",
     "remote_ws_remove": "移除",
+    "remote_ws_update_btn": "更新 rca",
     "remote_ws_install_title": "经 SSH 自动安装(推荐)",
     "remote_ws_install_desc": "选一个已保存的 SSH 主机:Fleet 在其上安装 rca,每次运行经 ssh 连接(无配对码、无常驻进程)。",
     "remote_ws_pick_conn": "选择一个 SSH 目标…",

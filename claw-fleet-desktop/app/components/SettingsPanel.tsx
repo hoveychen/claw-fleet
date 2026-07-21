@@ -300,6 +300,21 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, []);
 
+  const [rwUpdating, setRwUpdating] = useState<string | null>(null);
+  const handleUpdateRca = useCallback(async (path: string) => {
+    setRwError("");
+    setRwInstallSteps([]);
+    setRwUpdating(path);
+    try {
+      const cfg = await invoke<RemoteWorkspacesConfig>("update_rca_remote", { path });
+      setRemoteWorkspaces(cfg.workspaces ?? []);
+    } catch (e) {
+      setRwError(String(e));
+    } finally {
+      setRwUpdating(null);
+    }
+  }, []);
+
   // ── Hooks state ──────────────────────────────────────────────────────────
   const [hooksPlan, setHooksPlan] = useState<HookSetupPlan | null>(null);
   const [hooksStatus, setHooksStatus] = useState<"idle" | "installing" | "success" | "error">("idle");
@@ -1563,6 +1578,17 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                           : w.pairingCode}
                       </span>
                     </span>
+                    {w.sshTarget && (
+                      <button
+                        className={styles.sources_restart_btn}
+                        onClick={() => handleUpdateRca(w.path)}
+                        disabled={rwUpdating !== null}
+                      >
+                        {rwUpdating === w.path
+                          ? t("settings.remote_ws_installing")
+                          : t("settings.remote_ws_update_btn")}
+                      </button>
+                    )}
                     <button
                       className={styles.sources_restart_btn}
                       onClick={() => handleRemoveRemoteWorkspace(w.path)}
