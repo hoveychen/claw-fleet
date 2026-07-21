@@ -13,6 +13,7 @@
 
 mod frames;
 mod harmony_push;
+mod limits;
 mod push;
 mod registry;
 mod ws;
@@ -28,6 +29,7 @@ use axum::{Json, Router};
 use tower_http::services::{ServeDir, ServeFile};
 
 use harmony_push::HarmonyPush;
+use limits::{ConnLimiter, ConnRateLimiter};
 use push::Push;
 use registry::Registry;
 
@@ -36,10 +38,40 @@ pub struct AppState {
     pub push: Push,
     /// HarmonyOS Push Kit channel; `None` unless RELAY_HARMONY_* creds are set.
     pub harmony: Option<HarmonyPush>,
+    /// Global + per-IP concurrent-connection backstops for the public relay.
+    pub conn_limiter: Arc<ConnLimiter>,
+    /// Per-IP new-connection rate limiter (anti connect/disconnect flood).
+    pub conn_rate: Arc<ConnRateLimiter>,
+    /// Cap on a single inbound WebSocket message/frame.
+    pub max_ws_message_bytes: usize,
 }
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+/// Parse a `usize` env override, falling back to `default` (with a warning) when
+/// unset or unparseable.
+fn env_usize(name: &str, default: usize) -> usize {
+    match std::env::var(name) {
+        Ok(v) => v.parse().unwrap_or_else(|_| {
+            log::warn!("{name}={v:?} is not a number — using default {default}");
+            default
+        }),
+        Err(_) => default,
+    }
+}
+
+/// Parse an `f64` env override, falling back to `default` (with a warning) when
+/// unset or unparseable.
+fn env_f64(name: &str, default: f64) -> f64 {
+    match std::env::var(name) {
+        Ok(v) => v.parse().unwrap_or_else(|_| {
+            log::warn!("{name}={v:?} is not a number — using default {default}");
+            default
+        }),
+        Err(_) => default,
+    }
 }
 
 /// The API part of the router (everything except static files).
@@ -91,7 +123,30 @@ async fn main() {
         ),
     }
 
-    let state = Arc::new(AppState { registry: Registry::default(), push, harmony });
+    let max_total = env_usize("RELAY_MAX_CONNECTIONS", limits::DEFAULT_MAX_TOTAL);
+    let max_per_ip = env_usize("RELAY_MAX_CONNECTIONS_PER_IP", limits::DEFAULT_MAX_PER_IP);
+    let max_channels = env_usize("RELAY_MAX_CHANNELS", registry::DEFAULT_MAX_CHANNELS);
+    let max_per_channel = env_usize("RELAY_MAX_PER_CHANNEL", registry::DEFAULT_MAX_PER_CHANNEL);
+    let rate_burst = env_usize("RELAY_CONN_RATE_BURST", limits::DEFAULT_RATE_BURST);
+    let rate_per_sec = env_f64("RELAY_CONN_RATE_PER_SEC", limits::DEFAULT_RATE_PER_SEC);
+    log::info!(
+        "connection caps: {max_total} total, {max_per_ip} per IP, {max_channels} channels, \
+         {max_per_channel} per channel/role; rate {rate_per_sec}/s burst {rate_burst} per IP"
+    );
+    let conn_limiter = ConnLimiter::new(max_total, max_per_ip);
+    let conn_rate = ConnRateLimiter::new(rate_burst, rate_per_sec);
+    let registry = Registry::new(max_channels, max_per_channel);
+    let max_ws_message_bytes =
+        env_usize("RELAY_MAX_WS_MESSAGE_BYTES", ws::DEFAULT_MAX_WS_MESSAGE_BYTES);
+
+    let state = Arc::new(AppState {
+        registry,
+        push,
+        harmony,
+        conn_limiter,
+        conn_rate,
+        max_ws_message_bytes,
+    });
 
     let index = static_dir.join("index.html");
     let static_service = ServeDir::new(&static_dir).not_found_service(ServeFile::new(index));
