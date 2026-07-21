@@ -121,6 +121,16 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 std::process::exit(1);
             }
         }
+        LoopCommands::Run { id } => match agent_loop::run_now(&id) {
+            Ok(sid) => match sid {
+                Some(s) => println!("ok: loop {id} run now -> session {s} (schedule unchanged; next auto-fire is unaffected)"),
+                None => println!("ok: loop {id} run now (schedule unchanged; next auto-fire is unaffected)"),
+            },
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
         LoopCommands::Create {
             interval,
             prompt,

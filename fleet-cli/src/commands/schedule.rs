@@ -149,6 +149,16 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 std::process::exit(1);
             }
         }
+        ScheduleCommands::Run { id } => match schedule::run_now(&id) {
+            Ok(sid) => match sid {
+                Some(s) => println!("ok: schedule {id} run now -> session {s} (schedule still fires at its scheduled time)"),
+                None => println!("ok: schedule {id} run now (schedule still fires at its scheduled time)"),
+            },
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
         ScheduleCommands::Create { at, r#in, prompt, model: model_flag, effort: effort_flag } => {
             let now = now_ms_wall();
             // Exactly one of --at / --in.
