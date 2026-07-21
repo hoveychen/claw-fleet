@@ -425,9 +425,7 @@ fn decide(
 /// are suppressed — only the exit code matters here (the event text comes from
 /// the separate `capture` command).
 fn poll_met(cmd: &str) -> bool {
-    std::process::Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
+    crate::process_util::shell_command(cmd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -443,7 +441,7 @@ fn capture_event(rec: &WatchRecord) -> String {
     let Some(cmd) = &rec.capture_cmd else {
         return String::new();
     };
-    match std::process::Command::new("sh").arg("-c").arg(cmd).output() {
+    match crate::process_util::shell_command(cmd).output() {
         Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         Err(_) => String::new(),
     }
@@ -642,7 +640,11 @@ pub fn arm_timer(rec: &WatchRecord) -> Result<u32, String> {
 }
 
 fn arm_timer_with(fleet_bin: &str, rec: &WatchRecord) -> Result<u32, String> {
-    let mut cmd = std::process::Command::new(fleet_bin);
+    // process_util::command: no conhost flash on Windows. There is no setsid
+    // equivalent there — a Windows child is not killed with its parent by
+    // default (no job object is attached), so the detach contract holds
+    // without extra flags.
+    let mut cmd = crate::process_util::command(fleet_bin);
     cmd.arg("watch")
         .arg("fire")
         .arg(&rec.id)
