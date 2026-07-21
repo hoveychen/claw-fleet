@@ -12,7 +12,7 @@
  * agent sources (which emit no `toolUseResult`) working unchanged.
  */
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useAgentNav } from "../AgentNavContext";
@@ -378,9 +378,59 @@ function Favicon({ url }: { url: string }) {
   );
 }
 
-/** `WebSearch`: the query as a headline over one row per returned link —
- *  favicon, title, domain — the claude.ai search-card look. Narration strings
- *  in the payload are dropped; the links are the substance. */
+/** The returned links in a recessed rounded card — one favicon + title + domain
+ *  row each, the claude.ai search-card look. When the list is taller than the
+ *  card the rows scroll inside it and a bottom gradient fades the last row to
+ *  hint there is more; the gradient clears once the reader scrolls to the end. */
+function SearchResultsCard({ links }: { links: Array<{ title: string; url: string }> }) {
+  const scrollRef = useRef<HTMLUListElement>(null);
+  const [faded, setFaded] = useState(false);
+  // Fade only while there is content below the fold (1px slack absorbs the
+  // sub-pixel rounding that would otherwise leave the gradient stuck on).
+  const sync = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setFaded(el.scrollHeight - el.clientHeight - el.scrollTop > 1);
+  }, []);
+  // Measure after layout and whenever the row count changes (a live tail can
+  // append results into an already-open card).
+  useLayoutEffect(sync, [sync, links.length]);
+  return (
+    <div className={`${styles.search_card} ${faded ? styles.search_card_faded : ""}`}>
+      <ul className={styles.search_results} ref={scrollRef} onScroll={sync}>
+        {links.map((l, i) => {
+          let host = "";
+          try {
+            host = new URL(l.url).hostname.replace(/^www\./, "");
+          } catch {
+            // Row still renders; it just has no domain tag.
+          }
+          return (
+            <li key={i}>
+              <a
+                className={styles.search_result}
+                href={l.url}
+                onClick={(e) => {
+                  e.preventDefault();
+                  // Same surfaced-error pattern as SafeLink: a missing
+                  // opener capability must not fail silently.
+                  openUrl(l.url).catch((err) => console.error("openUrl failed:", l.url, err));
+                }}
+              >
+                <Favicon url={l.url} />
+                <span className={styles.search_title}>{l.title}</span>
+                {host && <span className={styles.search_domain}>{host}</span>}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** `WebSearch`: the query as a headline over the search-results card. Narration
+ *  strings in the payload are dropped; the links are the substance. */
 function WebSearchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: unknown; rail?: boolean }) {
   const search = asWebSearchResult(meta);
   if (!search) return null;
@@ -393,34 +443,7 @@ function WebSearchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: u
     <>
       {query && <div className={styles.search_query}>{query}</div>}
       {search.links.length > 0 ? (
-        <ul className={styles.search_results}>
-          {search.links.map((l, i) => {
-            let host = "";
-            try {
-              host = new URL(l.url).hostname.replace(/^www\./, "");
-            } catch {
-              // Row still renders; it just has no domain tag.
-            }
-            return (
-              <li key={i}>
-                <a
-                  className={styles.search_result}
-                  href={l.url}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    // Same surfaced-error pattern as SafeLink: a missing
-                    // opener capability must not fail silently.
-                    openUrl(l.url).catch((err) => console.error("openUrl failed:", l.url, err));
-                  }}
-                >
-                  <Favicon url={l.url} />
-                  <span className={styles.search_title}>{l.title}</span>
-                  {host && <span className={styles.search_domain}>{host}</span>}
-                </a>
-              </li>
-            );
-          })}
-        </ul>
+        <SearchResultsCard links={search.links} />
       ) : (
         <div className={styles.note}>No results.</div>
       )}

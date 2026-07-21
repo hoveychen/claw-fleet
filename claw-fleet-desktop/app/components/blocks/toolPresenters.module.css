@@ -216,13 +216,43 @@
   word-break: break-word;
 }
 
+/* The results live in a recessed rounded card (the claude.ai search-card look).
+   Overflow scrolls inside the card; the bottom gradient below hints at more. */
+.search_card {
+  position: relative;
+  margin-top: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-sunken);
+  overflow: hidden;
+}
+
 .search_results {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 4px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* ~5–6 rows before it scrolls; keeps a long result set from dominating the
+     transcript while still reading as one card, and lets the bottom fade hint
+     at the overflow (the claude.ai search-card cap). */
+  max-height: 150px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Bottom fade, toggled on only while more rows sit below the fold. Sits above
+   the scroll area (pointer-events off so it never eats a row click). */
+.search_card_faded::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--color-bg-sunken));
 }
 
 .search_result {
