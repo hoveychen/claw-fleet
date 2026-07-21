@@ -427,6 +427,7 @@
     "promoting": "Moving…",
     "promote_project": "Project CLAUDE.md",
     "promote_global": "Global CLAUDE.md (~/.claude)",
+    "copy_content": "Copy Content",
     "search_placeholder": "Search memories…",
     "filter_all": "All",
     "filter_user": "User",
