@@ -488,16 +488,40 @@
   position: relative;
 }
 
-/* Swap the left-padding: the chevron takes the gutter the status dot uses on a
-   plain row, so the title lines up with standalone rows either way. */
-.group_header {
-  padding-left: 6px;
+/* A group header is the tip session rendered as an ordinary row, so it carries
+   two overlaid controls on its right edge (expand chevron + whole-chain mark)
+   instead of one. Widen the right gutter so a long title never runs under them. */
+.row_expandable {
+  padding-right: 48px;
+}
+
+/* Expand/collapse toggle for a relay chain — a plain icon button sharing the
+   mark toggle's box so the two sit level in .row_actions. */
+.group_expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--color-text-dim);
+  transition:
+    color 0.15s,
+    transform 0.1s;
+}
+
+.group_expand:hover {
+  transform: scale(1.12);
+  color: var(--color-text);
 }
 
 .group_chevron {
   flex: 0 0 auto;
-  margin-top: 2px;
-  color: var(--color-text-dim);
   transition: transform 0.15s;
 }
 
