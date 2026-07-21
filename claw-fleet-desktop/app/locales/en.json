@@ -1668,7 +1668,14 @@
     "remote_ws_code_placeholder": "rca1.… pairing code from `rca serve`",
     "remote_ws_label_placeholder": "Label (optional)",
     "remote_ws_add": "Add",
-    "remote_ws_remove": "Remove"
+    "remote_ws_remove": "Remove",
+    "remote_ws_install_title": "Install via SSH (recommended)",
+    "remote_ws_install_desc": "Pick a saved SSH host: Fleet installs rca on it and connects over ssh per run (no pairing code, no long-lived process).",
+    "remote_ws_pick_conn": "Select an SSH connection…",
+    "remote_ws_no_conns": "No saved SSH connections — add one in the Remote panel first.",
+    "remote_ws_install_btn": "Install rca & register",
+    "remote_ws_installing": "Installing rca…",
+    "remote_ws_manual_title": "Or register manually (pairing code)"
   },
   "usage": {
     "total_tokens": "Tokens",

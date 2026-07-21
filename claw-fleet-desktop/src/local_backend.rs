@@ -3643,6 +3643,7 @@ mod tests {
             last_skill: None,
             context_percent: None,
             agent_source: source.into(),
+            fleet_spawned: false,
             last_outcome: None,
             rate_limit: None,
             todos: None,

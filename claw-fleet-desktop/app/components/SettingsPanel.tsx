@@ -13,6 +13,7 @@ import { AgentSourceIcon } from "./SessionCard";
 import { UsageTrendPanel } from "./UsageTrendPanel";
 import styles from "./SettingsPanel.module.css";
 import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
+import type { RemoteConnection } from "./ConnectionDialog";
 
 interface HookSetupPlan {
   toAdd: string[];
@@ -186,12 +187,42 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const [rwLabel, setRwLabel] = useState("");
   const [rwError, setRwError] = useState("");
   const [rwBusy, setRwBusy] = useState(false);
+  // stdio-over-ssh auto-installer wizard
+  const [rwSavedConns, setRwSavedConns] = useState<RemoteConnection[]>([]);
+  const [rwConnId, setRwConnId] = useState("");
+  const [rwInstalling, setRwInstalling] = useState(false);
 
   useEffect(() => {
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
       .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
       .catch(() => {});
+    invoke<RemoteConnection[]>("list_saved_connections")
+      .then((conns) => setRwSavedConns(conns ?? []))
+      .catch(() => {});
   }, []);
+
+  const handleInstallRca = useCallback(async () => {
+    const path = rwPath.trim();
+    const conn = rwSavedConns.find((c) => c.id === rwConnId);
+    if (!path || !conn) return;
+    setRwInstalling(true);
+    setRwError("");
+    try {
+      const cfg = await invoke<RemoteWorkspacesConfig>("install_rca_remote", {
+        conn,
+        path,
+        label: rwLabel.trim() || null,
+      });
+      setRemoteWorkspaces(cfg.workspaces ?? []);
+      setRwPath("");
+      setRwLabel("");
+      setRwConnId("");
+    } catch (e) {
+      setRwError(String(e));
+    } finally {
+      setRwInstalling(false);
+    }
+  }, [rwPath, rwLabel, rwConnId, rwSavedConns]);
 
   const handleAddRemoteWorkspace = useCallback(async () => {
     const path = rwPath.trim();
@@ -1480,7 +1511,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       {w.label ? `${w.label} — ` : ""}
                       <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}>{w.path}</span>
                       <span style={{ display: "block", fontSize: 10, color: "var(--color-text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 360 }}>
-                        {w.pairingCode}
+                        {w.sshTarget
+                          ? `ssh · ${w.sshTarget}${w.remoteRcaPath ? ` · ${w.remoteRcaPath}` : ""}`
+                          : w.pairingCode}
                       </span>
                     </span>
                     <button
@@ -1491,6 +1524,68 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     </button>
                   </div>
                 ))}
+                {/* stdio-over-ssh auto-installer (recommended path) */}
+                <div className={styles.section_title} style={{ marginTop: 12 }}>
+                  {t("settings.remote_ws_install_title")}
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.remote_ws_install_desc")}
+                  </span>
+                </div>
+                <div className={styles.row} style={{ flexWrap: "wrap", gap: 6 }}>
+                  <select
+                    className={styles.select}
+                    style={{ flex: "1 1 180px" }}
+                    value={rwConnId}
+                    onChange={(e) => setRwConnId(e.target.value)}
+                    disabled={rwSavedConns.length === 0}
+                  >
+                    <option value="">{t("settings.remote_ws_pick_conn")}</option>
+                    {rwSavedConns.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label || c.sshProfile || `${c.username}@${c.host}`}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className={styles.select}
+                    style={{ flex: "1 1 180px" }}
+                    value={rwPath}
+                    onChange={(e) => setRwPath(e.target.value)}
+                    placeholder={t("settings.remote_ws_path_placeholder")}
+                    spellCheck={false}
+                  />
+                  <input
+                    className={styles.select}
+                    style={{ flex: "0 1 120px" }}
+                    value={rwLabel}
+                    onChange={(e) => setRwLabel(e.target.value)}
+                    placeholder={t("settings.remote_ws_label_placeholder")}
+                    spellCheck={false}
+                  />
+                  <button
+                    className={styles.sources_restart_btn}
+                    onClick={handleInstallRca}
+                    disabled={rwInstalling || !rwPath.trim() || !rwConnId}
+                  >
+                    {rwInstalling
+                      ? t("settings.remote_ws_installing")
+                      : t("settings.remote_ws_install_btn")}
+                  </button>
+                </div>
+                {rwSavedConns.length === 0 && (
+                  <div className={styles.row}>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                      {t("settings.remote_ws_no_conns")}
+                    </span>
+                  </div>
+                )}
+
+                {/* Manual pairing-code registration (libp2p transport) */}
+                <div className={styles.section_title} style={{ marginTop: 12 }}>
+                  {t("settings.remote_ws_manual_title")}
+                </div>
                 <div className={styles.row} style={{ flexWrap: "wrap", gap: 6 }}>
                   <input
                     className={styles.select}

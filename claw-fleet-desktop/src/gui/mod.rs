@@ -1783,6 +1783,7 @@ pub fn run() {
             remote::list_ssh_profiles,
             remote::delete_connection,
             remote::connect_remote,
+            remote::install_rca_remote,
             remote::disconnect_remote,
             pick_file,
             get_source_account,
