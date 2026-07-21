@@ -85,7 +85,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 std::process::exit(1);
             }
         },
-        ScheduleCommands::Update { id, at, r#in, prompt } => {
+        ScheduleCommands::Update { id, at, r#in, prompt, model, effort } => {
             let now = now_ms_wall();
             let fire_at = match (at.as_deref(), r#in.as_deref()) {
                 (Some(_), Some(_)) => {
@@ -108,14 +108,20 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 },
                 (None, None) => None,
             };
-            if fire_at.is_none() && prompt.is_none() {
-                eprintln!("Error: nothing to update — pass --at/--in and/or --prompt.");
+            if fire_at.is_none()
+                && prompt.is_none()
+                && model.is_none()
+                && effort.is_none()
+            {
+                eprintln!("Error: nothing to update — pass --at/--in, --prompt, --model and/or --effort.");
                 std::process::exit(2);
             }
             match schedule::update(&schedule::ScheduleUpdate {
                 id: id.clone(),
                 fire_at,
                 prompt,
+                model,
+                effort,
                 ..Default::default()
             }) {
                 Ok(rec) => {
@@ -143,7 +149,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 std::process::exit(1);
             }
         }
-        ScheduleCommands::Create { at, r#in, prompt } => {
+        ScheduleCommands::Create { at, r#in, prompt, model: model_flag, effort: effort_flag } => {
             let now = now_ms_wall();
             // Exactly one of --at / --in.
             let fire_at = match (at.as_deref(), r#in.as_deref()) {
@@ -188,10 +194,18 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 .as_deref()
                 .and_then(claw_fleet_core::session::resolve_session_cwd)
                 .unwrap_or_else(|| shell_cwd.clone());
-            let model = sid
-                .as_deref()
-                .and_then(claw_fleet_core::session::resolve_session_model_spec);
-            let effort = std::env::var("CLAUDE_EFFORT").ok().filter(|e| !e.trim().is_empty());
+            // An explicit --model/--effort flag overrides the value inherited from
+            // the creating session (mirrors handoff's --model/--effort override).
+            let model = model_flag
+                .filter(|m| !m.trim().is_empty())
+                .or_else(|| {
+                    sid.as_deref()
+                        .and_then(claw_fleet_core::session::resolve_session_model_spec)
+                });
+            let effort = effort_flag
+                .filter(|e| !e.trim().is_empty())
+                .or_else(|| std::env::var("CLAUDE_EFFORT").ok())
+                .filter(|e| !e.trim().is_empty());
             let agent_source = std::env::var("FLEET_AGENT_SOURCE")
                 .ok()
                 .map(|s| s.trim().to_string())
