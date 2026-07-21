@@ -31,6 +31,7 @@ const MOCK_SESSIONS_SEED: Array<
     | "pendingMessages"
     | "agentLastActivityMs"
     | "runningSubagentCount"
+    | "fleetSpawned"
   > & { reasoningOutputTokens?: number }
 > = [
   // ── 1. Active main session: "claw-fleet" (this project) — thinking ──
@@ -466,6 +467,8 @@ export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
   compactPostTokens: 0,
   compactCostUsd: 0,
   pendingMessages: [],
+  // Fleet-owned mock sessions: the launchpad seed is all "新会话"-style tasks.
+  fleetSpawned: true,
   // Mocks don't model a live subagent tree, so the aggregate activity just
   // tracks the session's own and nothing is "running".
   agentLastActivityMs: s.lastActivityMs,
@@ -486,6 +489,7 @@ function mkSession(
     ideName: null,
     entrypoint: "claw-fleet-newsession",
     isSubagent: false,
+    fleetSpawned: true,
     parentSessionId: null,
     agentType: null,
     agentDescription: null,
