@@ -166,6 +166,11 @@ enum Commands {
     /// [internal] PRD-context hook — re-injects the workspace's TASKS.md on every UserPromptSubmit
     #[command(hide = true)]
     PrdContext,
+    /// [internal] Event-log hook — appends the hook JSON from stdin to
+    /// ~/.fleet/hooks.jsonl (exec-form replacement for the unix `cat >>`
+    /// one-liner, used on Windows where hooks may run under PowerShell)
+    #[command(name = "hook-event", hide = true)]
+    HookEvent,
     /// Manage the current fleet-managed session (called from inside a Claude session)
     Session {
         #[command(subcommand)]
@@ -796,7 +801,8 @@ fn main() {
             | Commands::Elicitation
             | Commands::Mcp
             | Commands::PlanApproval
-            | Commands::PrdContext => {
+            | Commands::PrdContext
+            | Commands::HookEvent => {
                 eprintln!("Error: --remote is not supported with the '{}' subcommand.",
                     match &cli.command {
                         Commands::Serve { .. } => "serve",
@@ -806,6 +812,7 @@ fn main() {
                         Commands::Mcp => "mcp",
                         Commands::PlanApproval => "plan-approval",
                         Commands::PrdContext => "prd-context",
+                        Commands::HookEvent => "hook-event",
                         _ => unreachable!(),
                     }
                 );
@@ -848,6 +855,11 @@ fn main() {
         Commands::Mcp => commands::guard::cmd_mcp(),
         Commands::PlanApproval => commands::guard::cmd_plan_approval(),
         Commands::PrdContext => commands::prd::cmd_prd_context(),
+        // Best-effort like the unix `cat >>` hook it replaces: a failed append
+        // must not surface as a hook error to Claude Code.
+        Commands::HookEvent => {
+            let _ = claw_fleet_core::hooks::append_hook_event(&mut std::io::stdin().lock());
+        }
         Commands::Session { action } => match action {
             SessionCommands::Idle => commands::session::cmd_session_idle(),
             SessionCommands::Resume => commands::session::cmd_session_resume(),
