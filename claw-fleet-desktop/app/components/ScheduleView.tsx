@@ -37,6 +37,13 @@ function scheduleTemplate(fireLocal: string): string {
 
 // ── Types (mirror the Rust serde camelCase records) ──────────────────────────
 
+// One iteration a loop spawned — mirrors Rust `LoopIteration`. Retained (newest
+// last, capped) so we can list every run under the loop and jump into each.
+interface LoopIteration {
+  sessionId: string;
+  firedAt: number;
+}
+
 interface LoopRecord {
   id: string;
   workspacePath: string;
@@ -48,6 +55,7 @@ interface LoopRecord {
   model?: string;
   agentSource?: string;
   lastSessionId?: string;
+  history?: LoopIteration[];
 }
 
 interface ScheduleRecord {
@@ -142,6 +150,10 @@ export function ScheduleView() {
   const [loaded, setLoaded] = useState(false);
   const [cancelling, setCancelling] = useState<Set<string>>(new Set());
   const requestNewSession = useUIStore((s) => s.requestNewSession);
+  // Loop history rows show a one-line report per run, pulled from the session
+  // scan by id. Subscribe so the report fills in as the scan catches up (the
+  // iteration's session may not be scanned yet the instant it's spawned).
+  const sessions = useSessionsStore((s) => s.sessions);
 
   const load = useCallback(async () => {
     try {
@@ -262,6 +274,21 @@ export function ScheduleView() {
     }
   }, []);
 
+  // One-line report for a loop iteration: the session's last assistant message
+  // (what the run actually concluded with), falling back to its title. `null`
+  // when the session isn't in the current scan — then the row shows just its
+  // time and still clicks through (openFiredSession lands on the list).
+  const reportFor = useCallback(
+    (sessionId: string): string | null => {
+      const s = sessions.find((x) => x.id === sessionId);
+      if (!s) return null;
+      const preview = s.lastMessagePreview?.trim();
+      if (preview) return preview;
+      return s.titleOverride ?? s.aiTitle ?? null;
+    },
+    [sessions],
+  );
+
   return (
     <PageShell
       view="schedule"
@@ -326,6 +353,7 @@ export function ScheduleView() {
                 : undefined
             }
             onOpenSession={openFiredSession}
+            reportFor={reportFor}
           />
         ))}
       </div>
@@ -522,6 +550,7 @@ function TaskRow({
   onRunNow,
   onEdit,
   onOpenSession,
+  reportFor,
 }: {
   task: FutureTask;
   cancelling: boolean;
@@ -531,13 +560,24 @@ function TaskRow({
   onRunNow?: () => void;
   /** Present only for pending schedules — opens the edit form. */
   onEdit?: () => void;
-  /** Jump to the session a fired schedule produced. */
+  /** Jump to the session a fired schedule produced, or a loop iteration. */
   onOpenSession?: (sessionId: string) => void;
+  /** One-line report for a session id (loop iterations only). */
+  reportFor?: (sessionId: string) => string | null;
 }) {
   const { t } = useTranslation();
   const rec = task.rec;
   const isLoop = task.kind === "loop";
   const fired = task.kind === "schedule" && task.rec.status === "fired";
+
+  // Loop run history, newest first. Show a handful; the rest hide behind a toggle.
+  const loopHistory = isLoop ? ((task.rec as LoopRecord).history ?? []) : [];
+  const runsNewestFirst = useMemo(() => [...loopHistory].reverse(), [loopHistory]);
+  const RUNS_COLLAPSED = 5;
+  const [showAllRuns, setShowAllRuns] = useState(false);
+  const visibleRuns = showAllRuns
+    ? runsNewestFirst
+    : runsNewestFirst.slice(0, RUNS_COLLAPSED);
 
   // Prompt can be long; clamp to 2 lines and let the user click to expand.
   const [expanded, setExpanded] = useState(false);
@@ -624,6 +664,43 @@ function TaskRow({
             </>
           )}
         </div>
+        {isLoop && loopHistory.length > 0 && (
+          <div className={styles.runs}>
+            <div className={styles.runs_head}>
+              {t("schedule.runs_head", "执行记录")}
+              <span className={styles.runs_count}>{loopHistory.length}</span>
+            </div>
+            {visibleRuns.map((run) => {
+              const report = reportFor?.(run.sessionId) ?? null;
+              return (
+                <button
+                  key={run.sessionId}
+                  className={styles.run}
+                  onClick={() => onOpenSession?.(run.sessionId)}
+                  title={t("schedule.open_run_tip", "查看这次执行的会话")}
+                >
+                  <span className={styles.run_time}>
+                    {fmtAgo(run.firedAt)} {t("schedule.ago", "前")}
+                  </span>
+                  <span className={report ? styles.run_report : styles.run_report_empty}>
+                    {report ?? t("schedule.run_no_report", "（会话已不在扫描范围）")}
+                  </span>
+                  <ArrowUpRight size={11} strokeWidth={2.2} className={styles.run_arrow} />
+                </button>
+              );
+            })}
+            {runsNewestFirst.length > RUNS_COLLAPSED && (
+              <button
+                className={styles.runs_toggle}
+                onClick={() => setShowAllRuns((v) => !v)}
+              >
+                {showAllRuns
+                  ? t("schedule.runs_collapse", "收起")
+                  : t("schedule.runs_expand", `查看全部 ${runsNewestFirst.length} 次`)}
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <div className={styles.row_actions}>
         {onRunNow && (
