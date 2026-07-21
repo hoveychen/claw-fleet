@@ -49,6 +49,7 @@ const ALL_KEYS = [
   "history-mark-filter",
   "history-workspace-filter",
   "history-active-only",
+  "history-group-handoff",
   "onboarding-dismissed",
   "wizard-completed",
   "hooks-banner-dismissed",

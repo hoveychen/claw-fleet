@@ -186,6 +186,11 @@ interface UIState {
   historyWorkspaceFilter: string;
   historyActiveOnly: boolean;
   historyQuery: string;
+  /** Group handoff-relay sessions (sharing a `handoff.chainId`) into one
+   *  collapsible row in the task list. Default on; lives in the store (not
+   *  component state) for the same unmount reason as the filters above, and is
+   *  written to disk so the choice survives a restart. */
+  historyGroupHandoff: boolean;
   mainViewState: MainViewState;
   updateMainViewState: <K extends keyof MainViewState>(
     view: K,
@@ -195,6 +200,7 @@ interface UIState {
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryActiveOnly: (on: boolean) => void;
   setHistoryQuery: (q: string) => void;
+  setHistoryGroupHandoff: (on: boolean) => void;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
   // Lite-mode hop from the active DecisionPanel into a dedicated decision-
@@ -294,6 +300,9 @@ export const useUIStore = create<UIState>((set) => ({
   historyWorkspaceFilter: getItem("history-workspace-filter") ?? "all",
   historyActiveOnly: getItem("history-active-only") === "true",
   historyQuery: "",
+  // Default on — the empty/absent case yields grouping; only an explicit
+  // "false" opts out. Mirrors the `autoUpdateCheck` default-on idiom.
+  historyGroupHandoff: getItem("history-group-handoff") !== "false",
   mainViewState: DEFAULT_MAIN_VIEW_STATE,
   updateMainViewState: (view, patch) =>
     set((state) => ({
@@ -315,6 +324,10 @@ export const useUIStore = create<UIState>((set) => ({
     set({ historyActiveOnly: on });
   },
   setHistoryQuery: (q) => set({ historyQuery: q }),
+  setHistoryGroupHandoff: (on) => {
+    setItem("history-group-handoff", on ? "true" : "false");
+    set({ historyGroupHandoff: on });
+  },
   liteDecisionHistorySessionId: null,
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   floatingDecisionPanel: getItem("floating-decision-panel") === "true",

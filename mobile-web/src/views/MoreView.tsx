@@ -2,6 +2,7 @@
 // 语言 / 主题、桌面端连接状态、通知开关、重新配对、关于/版本。
 
 import { ChevronRight, FolderGit2, Gauge } from "lucide-react";
+import { useDraft } from "../draft";
 import { useI18n, type Lang } from "../i18n";
 import type { PushState } from "../push";
 import { clearSecret } from "../secretStore";
@@ -43,6 +44,9 @@ export function MoreView({
   const { lang, setLang, t } = useI18n();
   const { setting, setTheme } = useTheme();
   const wakeLock = useWakeLock();
+  // Task-list handoff grouping — same "tasks:groupHandoff" draft the task page
+  // reads on remount. Default on.
+  const [groupHandoff, setGroupHandoff] = useDraft<boolean>("tasks:groupHandoff", true);
 
   const themeChoices: Array<[ThemeSetting, string]> = [
     ["system", t("跟随系统")],
@@ -120,6 +124,26 @@ export function MoreView({
                   {label}
                 </button>
               ))}
+            </div>
+          </div>
+          <div className={styles.divider} />
+          <div className={styles.row}>
+            <span className={styles.rowLabel}>{t("接力会话分组")}</span>
+            <div className={styles.segment}>
+              <button
+                className={styles.segmentButton}
+                data-active={!groupHandoff}
+                onClick={() => setGroupHandoff(false)}
+              >
+                {t("关")}
+              </button>
+              <button
+                className={styles.segmentButton}
+                data-active={groupHandoff}
+                onClick={() => setGroupHandoff(true)}
+              >
+                {t("开")}
+              </button>
             </div>
           </div>
           {wakeLock.supported && (
