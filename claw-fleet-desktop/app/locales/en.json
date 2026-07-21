@@ -529,10 +529,17 @@
     "open_receipt": "View today's spend breakdown"
   },
   "token_receipt": {
-    "title": "Today's spend breakdown",
+    "title": "Spend breakdown",
     "subtitle": "Token receipt",
     "loading": "Tallying…",
     "no_usage": "No usage yet today",
+    "no_usage_range": "No usage in this range",
+    "range_today": "Today",
+    "range_7d": "7 days",
+    "range_30d": "30 days",
+    "range_all": "All",
+    "trend_title": "Daily spend",
+    "codex_note": "Codex has no per-turn detail; its usage is attributed whole to the session's start day, so the trend is approximate",
     "row_input": "Input",
     "row_cache_write": "Cache write",
     "row_cache_read": "Cache read",
@@ -542,7 +549,7 @@
     "split_agent": "Sessions",
     "split_fleet": "Fleet itself",
     "tokens": "tokens",
-    "footnote": "Prices are each model's official $/M rate · cache reads/writes included · same basis as the sidebar counter"
+    "footnote": "Prices are each model's official $/M rate · cache reads/writes included · today matches the sidebar counter"
   },
   "chart": {
     "title": "Token speed",
