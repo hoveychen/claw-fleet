@@ -187,9 +187,13 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const [rwLabel, setRwLabel] = useState("");
   const [rwError, setRwError] = useState("");
   const [rwBusy, setRwBusy] = useState(false);
-  // stdio-over-ssh auto-installer wizard
+  // stdio-over-ssh auto-installer wizard. The ssh-target picker merges three
+  // sources: ~/.ssh/config Host aliases, saved Fleet connections, and a manual
+  // `user@host` entry — all resolved to a RemoteConnection for install_rca_remote.
   const [rwSavedConns, setRwSavedConns] = useState<RemoteConnection[]>([]);
-  const [rwConnId, setRwConnId] = useState("");
+  const [rwSshProfiles, setRwSshProfiles] = useState<string[]>([]);
+  const [rwConnId, setRwConnId] = useState(""); // "saved:<id>" | "profile:<alias>" | "__manual__"
+  const [rwManualTarget, setRwManualTarget] = useState(""); // user@host when __manual__
   const [rwInstalling, setRwInstalling] = useState(false);
 
   useEffect(() => {
@@ -199,11 +203,38 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     invoke<RemoteConnection[]>("list_saved_connections")
       .then((conns) => setRwSavedConns(conns ?? []))
       .catch(() => {});
+    invoke<string[]>("list_ssh_profiles")
+      .then((profiles) => setRwSshProfiles(profiles ?? []))
+      .catch(() => {});
   }, []);
+
+  // Resolve the picker selection to the RemoteConnection install_rca_remote needs.
+  const resolveInstallConn = useCallback((): RemoteConnection | null => {
+    if (rwConnId.startsWith("saved:")) {
+      return rwSavedConns.find((c) => c.id === rwConnId.slice("saved:".length)) ?? null;
+    }
+    if (rwConnId.startsWith("profile:")) {
+      const alias = rwConnId.slice("profile:".length);
+      return {
+        id: rwConnId, label: alias, host: "", port: 22, username: "",
+        identityFile: null, jumpHost: null, sshProfile: alias,
+      };
+    }
+    if (rwConnId === "__manual__") {
+      const t = rwManualTarget.trim();
+      const at = t.indexOf("@");
+      if (at <= 0 || at === t.length - 1) return null; // require user@host
+      return {
+        id: "manual", label: t, host: t.slice(at + 1), port: 22, username: t.slice(0, at),
+        identityFile: null, jumpHost: null, sshProfile: null,
+      };
+    }
+    return null;
+  }, [rwConnId, rwManualTarget, rwSavedConns]);
 
   const handleInstallRca = useCallback(async () => {
     const path = rwPath.trim();
-    const conn = rwSavedConns.find((c) => c.id === rwConnId);
+    const conn = resolveInstallConn();
     if (!path || !conn) return;
     setRwInstalling(true);
     setRwError("");
@@ -217,12 +248,13 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       setRwPath("");
       setRwLabel("");
       setRwConnId("");
+      setRwManualTarget("");
     } catch (e) {
       setRwError(String(e));
     } finally {
       setRwInstalling(false);
     }
-  }, [rwPath, rwLabel, rwConnId, rwSavedConns]);
+  }, [rwPath, rwLabel, resolveInstallConn]);
 
   const handleAddRemoteWorkspace = useCallback(async () => {
     const path = rwPath.trim();
@@ -1541,15 +1573,36 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     style={{ flex: "1 1 180px" }}
                     value={rwConnId}
                     onChange={(e) => setRwConnId(e.target.value)}
-                    disabled={rwSavedConns.length === 0}
                   >
                     <option value="">{t("settings.remote_ws_pick_conn")}</option>
-                    {rwSavedConns.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.label || c.sshProfile || `${c.username}@${c.host}`}
-                      </option>
-                    ))}
+                    {rwSshProfiles.length > 0 && (
+                      <optgroup label={t("settings.remote_ws_src_ssh_config")}>
+                        {rwSshProfiles.map((alias) => (
+                          <option key={`profile:${alias}`} value={`profile:${alias}`}>{alias}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {rwSavedConns.length > 0 && (
+                      <optgroup label={t("settings.remote_ws_src_saved")}>
+                        {rwSavedConns.map((c) => (
+                          <option key={`saved:${c.id}`} value={`saved:${c.id}`}>
+                            {c.label || c.sshProfile || `${c.username}@${c.host}`}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <option value="__manual__">{t("settings.remote_ws_src_manual")}</option>
                   </select>
+                  {rwConnId === "__manual__" && (
+                    <input
+                      className={styles.select}
+                      style={{ flex: "1 1 160px" }}
+                      value={rwManualTarget}
+                      onChange={(e) => setRwManualTarget(e.target.value)}
+                      placeholder="user@host"
+                      spellCheck={false}
+                    />
+                  )}
                   <input
                     className={styles.select}
                     style={{ flex: "1 1 180px" }}
@@ -1569,14 +1622,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   <button
                     className={styles.sources_restart_btn}
                     onClick={handleInstallRca}
-                    disabled={rwInstalling || !rwPath.trim() || !rwConnId}
+                    disabled={rwInstalling || !rwPath.trim() || !resolveInstallConn()}
                   >
                     {rwInstalling
                       ? t("settings.remote_ws_installing")
                       : t("settings.remote_ws_install_btn")}
                   </button>
                 </div>
-                {rwSavedConns.length === 0 && (
+                {rwSavedConns.length === 0 && rwSshProfiles.length === 0 && (
                   <div className={styles.row}>
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                       {t("settings.remote_ws_no_conns")}

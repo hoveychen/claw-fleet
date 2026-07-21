@@ -1724,6 +1724,22 @@ fn install_rca_remote_impl(
     // 1. Probe SSH connectivity.
     ssh_exec(&conn, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
 
+    // 1b. Verify the workspace path is creatable + writable ON THE REMOTE
+    //     (D3). The same-absolute-path constraint means it must exist on both
+    //     machines; `upsert` fails loudly for the local side, this covers the
+    //     remote side up front instead of at first spawn. The path is
+    //     single-quoted; a path containing a single quote is refused (paths
+    //     never legitimately need one and it would break the quoting).
+    if path.contains('\'') {
+        return Err("workspace path must not contain a single quote".to_string());
+    }
+    ssh_exec(&conn, &format!("mkdir -p '{path}' && test -w '{path}'")).map_err(|e| {
+        format!(
+            "remote workspace path '{path}' is not creatable/writable on the remote host: {e} — \
+             pick an absolute path that exists (or can be made) identically on both machines"
+        )
+    })?;
+
     // 2. Detect remote OS/arch → release archive slug.
     let uname = ssh_exec(&conn, "uname -sm").map_err(|e| format!("uname failed: {e}"))?;
     let slug = rca_release_slug(&uname)
