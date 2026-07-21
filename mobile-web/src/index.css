@@ -130,3 +130,10 @@ pre {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* 中文段落首行缩进 2 字。`cjk-indent` 由 markdown 的 rehypeCjkIndent 插件加在
+   首字为 CJK 的 <p> 上（英文段落不加），与桌面 App.css 保持同步。1em ≈ 1 个
+   全角字宽，2em 即 2 个中文字。 */
+.cjk-indent {
+  text-indent: 2em;
+}
