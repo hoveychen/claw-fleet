@@ -11,7 +11,7 @@ import {
   type MarkFilter,
 } from "../store";
 import type { SessionInfo } from "../types";
-import { LIVE_STATUSES, isFleetOwnedEntrypoint, sessionUnread } from "../types";
+import { LIVE_STATUSES, isFleetOwnedTask, sessionUnread } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { getItem, setItem } from "../storage";
@@ -101,9 +101,7 @@ export function LiteApp() {
   // Task list = launchpad adhoc sessions, filtered/sorted exactly like the
   // desktop task page (HistoryView): workspace → active-only → search → mark.
   const { rows, markCounts, workspaces, activeCount, unreadSessions } = useMemo(() => {
-    const adhoc = sessions.filter(
-      (s) => !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint),
-    );
+    const adhoc = sessions.filter(isFleetOwnedTask);
     // Workspace dropdown options (chat workspace is pinned separately below).
     // Mirrors the launcher/History: distinctWorkspaces drops temp cwds and
     // folds worktree checkouts onto their repo root (matchesWorkspaceFilter

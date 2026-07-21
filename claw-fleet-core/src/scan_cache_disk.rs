@@ -19,7 +19,10 @@ use std::io;
 use std::path::PathBuf;
 
 const CACHE_FILE_NAME: &str = "session-cache.json";
-const CACHE_VERSION: u32 = 1;
+// v2: SessionInfo gained `fleet_spawned`. Discarding v1 entries forces a fresh
+// parse so grandfathered sessions get the marker-or-cutoff value instead of the
+// serde default (`false`) a v1 entry would deserialize to.
+const CACHE_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache {
@@ -106,6 +109,7 @@ mod tests {
             ide_name: None,
             entrypoint: None,
             is_subagent: false,
+            fleet_spawned: false,
             parent_session_id: None,
             agent_type: None,
             agent_description: None,

@@ -754,6 +754,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         ide_name: None,
         entrypoint: None,
         is_subagent: false,
+        fleet_spawned: false,
         parent_session_id: None,
         agent_type: None,
         agent_description: None,

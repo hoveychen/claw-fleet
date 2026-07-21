@@ -1600,6 +1600,8 @@ fn build_session_from_sqlite(
         ide_name: source_info.ide_name,
         entrypoint,
         is_subagent: source_info.is_subagent,
+        fleet_spawned: crate::launch_spec::was_fleet_spawned(&thread.id)
+            || created_at_ms < crate::launch_spec::spawn_marker_cutoff_ms(),
         parent_session_id: source_info.parent_thread_id,
         agent_type,
         agent_description: None,
@@ -4241,6 +4243,10 @@ fn parse_codex_session(
 
     let uri = build_uri(rollout_path)?;
 
+    // Computed before the literal so it reads `session_id` before `id:` moves it.
+    let fleet_spawned = crate::launch_spec::was_fleet_spawned(&session_id)
+        || created_at_ms < crate::launch_spec::spawn_marker_cutoff_ms();
+
     Some(SessionInfo {
         id: session_id,
         workspace_path,
@@ -4248,6 +4254,7 @@ fn parse_codex_session(
         ide_name: source_info.ide_name,
         entrypoint,
         is_subagent: source_info.is_subagent,
+        fleet_spawned,
         parent_session_id: source_info.parent_thread_id,
         agent_type,
         agent_description: None,
