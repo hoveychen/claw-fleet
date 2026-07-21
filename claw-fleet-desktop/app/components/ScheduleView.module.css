@@ -71,6 +71,19 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+.prompt_clickable {
+  cursor: pointer;
+}
+.prompt_clickable:hover {
+  color: var(--color-accent);
+}
+.prompt_expanded {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .meta {
   display: flex;
   flex-wrap: wrap;
