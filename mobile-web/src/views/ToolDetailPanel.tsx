@@ -7,7 +7,7 @@
 // stdout/stderr for shell, a subagent card for Agent, a checklist for
 // TodoWrite, link rows for WebSearch, generic input+output otherwise.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { t } from "../i18n";
@@ -138,20 +138,89 @@ function TodoBody({ result }: { result: Record<string, unknown> }) {
   );
 }
 
-function WebSearchBody({ result }: { result: Record<string, unknown> }) {
-  const links = Array.isArray(result.links) ? result.links : [];
+interface SearchLink {
+  title: string;
+  url: string;
+}
+
+/** Flatten the raw WebSearch payload into display links. The `tool_detail`
+ *  reply carries the untouched `toolUseResult`, whose `results[]` interleaves
+ *  narration strings with `{ content: [{ title, url }] }` objects — the same
+ *  shape the desktop's `asWebSearchResult` reads. An already-flattened
+ *  `links[]` (a future/parsed shape) is honoured too, so neither form renders
+ *  an empty card. */
+function webSearchLinks(result: Record<string, unknown>): SearchLink[] {
+  const out: SearchLink[] = [];
+  const push = (v: unknown) => {
+    const rec = asRecord(v);
+    const url = typeof rec?.url === "string" ? rec.url : "";
+    if (!url) return;
+    out.push({ title: typeof rec?.title === "string" ? rec.title : url, url });
+  };
+  if (Array.isArray(result.links)) result.links.forEach(push);
+  if (Array.isArray(result.results)) {
+    for (const item of result.results) {
+      const rec = asRecord(item);
+      if (rec && Array.isArray(rec.content)) rec.content.forEach(push);
+    }
+  }
+  return out;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+/** Favicon for a result row via Google's service; a neutral tile keeps the
+ *  row's gutter aligned when the icon is blocked or the URL is malformed. */
+function SearchFavicon({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  const host = hostOf(url);
+  if (!host || failed) return <span className={styles.faviconFallback} aria-hidden />;
   return (
-    <div className={styles.linkList}>
-      {links.map((l, i) => {
-        const rec = asRecord(l);
-        return (
-          <div key={i} className={styles.linkRow}>
-            <div className={styles.linkTitle}>{String(rec?.title ?? rec?.url ?? "")}</div>
-            {typeof rec?.url === "string" && <div className={styles.linkUrl}>{rec.url}</div>}
-          </div>
-        );
-      })}
-      {links.length === 0 && <div className={styles.empty}>{t("（无输出）")}</div>}
+    <img
+      className={styles.favicon}
+      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/** The returned links in a recessed rounded card — favicon + title + domain per
+ *  row, mirroring the desktop search-card. Overflow scrolls inside the card; a
+ *  bottom gradient (toggled by `searchCardFaded`) hints at more and clears once
+ *  the reader scrolls to the end. */
+function WebSearchBody({ result }: { result: Record<string, unknown> }) {
+  const links = webSearchLinks(result);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [faded, setFaded] = useState(false);
+  const sync = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setFaded(el.scrollHeight - el.clientHeight - el.scrollTop > 1);
+  }, []);
+  useLayoutEffect(sync, [sync, links.length]);
+  if (links.length === 0) return <div className={styles.empty}>{t("（无输出）")}</div>;
+  return (
+    <div className={`${styles.searchCard} ${faded ? styles.searchCardFaded : ""}`}>
+      <div className={styles.linkList} ref={scrollRef} onScroll={sync}>
+        {links.map((l, i) => {
+          const host = hostOf(l.url).replace(/^www\./, "");
+          return (
+            <div key={i} className={styles.linkRow}>
+              <SearchFavicon url={l.url} />
+              <span className={styles.linkTitle}>{l.title}</span>
+              {host && <span className={styles.linkDomain}>{host}</span>}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
