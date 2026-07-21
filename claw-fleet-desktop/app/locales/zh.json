@@ -424,6 +424,7 @@
     "promoting": "移动中…",
     "promote_project": "项目 CLAUDE.md",
     "promote_global": "全局 CLAUDE.md (~/.claude)",
+    "copy_content": "复制内容",
     "search_placeholder": "搜索记忆…",
     "filter_all": "全部",
     "filter_user": "用户",
