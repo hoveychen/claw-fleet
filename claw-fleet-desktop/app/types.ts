@@ -435,15 +435,22 @@ export type PendingDecision =
   | PlanApprovalDecision
   | PermissionPromptDecision;
 
-/** One registered rca-routed remote workspace (`~/.fleet/remote-workspaces.json`). */
+/**
+ * One registered rca-routed remote workspace (`~/.fleet/remote-workspaces.json`).
+ * Exactly one transport is set: `pairingCode` (libp2p) or `sshTarget` (stdio-over-ssh).
+ */
 export interface RemoteWorkspace {
   /** Absolute workspace path — identical on this machine and the remote. */
   path: string;
-  /** The `rca1.…` pairing code printed by `rca serve` on the remote host. */
-  pairingCode: string;
+  /** Pairing-code (libp2p) transport: the `rca1.…` code printed by `rca serve`. */
+  pairingCode?: string;
+  /** stdio-over-ssh transport: the ssh target (`host` alias or `user@host`). */
+  sshTarget?: string;
+  /** stdio transport: rca binary path on the remote host (defaults to `rca` on PATH). */
+  remoteRcaPath?: string;
   /** Display label (e.g. the remote host's name). */
   label?: string;
-  /** Per-workspace override of the rca binary path. */
+  /** Per-workspace override of the LOCAL rca binary path. */
   rcaPath?: string;
 }
 
