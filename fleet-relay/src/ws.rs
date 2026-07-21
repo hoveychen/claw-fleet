@@ -43,8 +43,9 @@ const MIN_SECRET_LEN: usize = 16;
 /// message default; we also raise the *frame* cap to the same 32 MiB (up from
 /// the 16 MiB default) so a large single-frame upload can't trip the per-frame
 /// limit. The relay is generic (no Fleet business deps), so the derivation lives
-/// in this comment rather than importing the constant.
-const MAX_WS_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
+/// in this comment rather than importing the constant. Override via
+/// `RELAY_MAX_WS_MESSAGE_BYTES`.
+pub const DEFAULT_MAX_WS_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 
 pub async fn ws_handler(
     State(state): State<Arc<AppState>>,
@@ -65,8 +66,9 @@ pub async fn ws_handler(
         log::warn!("connection rejected: at capacity (ip={ip:?})");
         return (StatusCode::SERVICE_UNAVAILABLE, "relay at capacity").into_response();
     };
-    ws.max_message_size(MAX_WS_MESSAGE_BYTES)
-        .max_frame_size(MAX_WS_MESSAGE_BYTES)
+    let max_bytes = state.max_ws_message_bytes;
+    ws.max_message_size(max_bytes)
+        .max_frame_size(max_bytes)
         .on_upgrade(move |socket| handle_socket(state, socket, guard))
 }
 
