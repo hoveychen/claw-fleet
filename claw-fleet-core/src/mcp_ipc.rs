@@ -41,6 +41,44 @@ pub struct FleetAskRequest {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub parked: bool,
     pub questions: Vec<FleetAskQuestion>,
+    /// Documents the agent wants the user to review alongside the card — the
+    /// `.md` files or wiki entries it just produced, so the user can read them
+    /// in-panel instead of hunting them down. Card-level (not per-question):
+    /// the desktop renders one tab per doc in the card's side column. Unlike
+    /// `images`, the body is NOT snapshotted here; the frontend fetches it live
+    /// through the backend when the card renders (see `ReviewDoc`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub review_docs: Vec<ReviewDoc>,
+}
+
+/// One document attached to a `fleet__ask` card for the user to review.
+/// Rendered as a tab in the card's side panel; the body is fetched live by the
+/// frontend (via the backend `read_review_doc`) rather than snapshotted into the
+/// request, so the user always sees the current on-disk content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDoc {
+    pub kind: ReviewDocKind,
+    /// For `wiki`: the published wiki slug. For `file`: an absolute path on the
+    /// agent host. Relative paths the agent supplies are resolved against
+    /// `CLAUDE_PROJECT_DIR` (its cwd) at write time by [`resolve_review_docs`],
+    /// so this is always absolute by the time it reaches the frontend.
+    #[serde(rename = "ref")]
+    pub reference: String,
+    /// Tab label. Falls back to the slug / file name when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum ReviewDocKind {
+    /// A wiki doc, addressed by slug (`fleet wiki publish` output).
+    Wiki,
+    /// A file on disk, addressed by path relative to the agent cwd (or absolute).
+    File,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -502,6 +540,33 @@ pub fn normalize_html(req: &mut FleetAskRequest) {
     }
 }
 
+/// Resolve every `file` review-doc reference to an absolute path so the desktop
+/// (a different process, possibly a different cwd) can read it back live.
+///
+/// Runs inside the `fleet mcp` child — the same host and cwd as the agent — so
+/// a relative `ref` is joined against `project_dir` (the agent's
+/// `CLAUDE_PROJECT_DIR`), then the whole thing is canonicalized. Best-effort:
+/// a ref that can't be canonicalized (file since moved, bad path) is left as the
+/// joined absolute path so the card can still show a "couldn't read" tab rather
+/// than silently dropping it. `wiki` refs are slugs, not paths — left untouched.
+pub fn resolve_review_docs(req: &mut FleetAskRequest, project_dir: Option<&Path>) {
+    for doc in &mut req.review_docs {
+        if doc.kind != ReviewDocKind::File {
+            continue;
+        }
+        let raw = Path::new(&doc.reference);
+        let joined = if raw.is_absolute() {
+            raw.to_path_buf()
+        } else if let Some(base) = project_dir {
+            base.join(raw)
+        } else {
+            raw.to_path_buf()
+        };
+        let abs = joined.canonicalize().unwrap_or(joined);
+        doc.reference = abs.to_string_lossy().into_owned();
+    }
+}
+
 /// Build a minimal stacked-image gallery document for questions that ship
 /// `images` but no `html` of their own.
 fn synthesize_gallery(images: &[FleetAskImage]) -> String {
@@ -694,6 +759,29 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                     },
                     "required": ["question", "header", "multiSelect"]
                 }
+            },
+            "reviewDocs": {
+                "type": "array",
+                "description": "OPTIONAL documents for the user to review alongside this card — the `.md` files or wiki entries you just produced. Fleet shows one tab per doc in a side panel next to the card, so the user reads them in place instead of hunting the path down in your prose. Card-level, not per-question. The body is fetched live when the card opens (not snapshotted), so the user always sees the current on-disk content. Use this whenever your answer references a design doc / report / plan file you want signed off.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {
+                            "type": "string",
+                            "enum": ["wiki", "file"],
+                            "description": "`wiki` = a published wiki doc (ref is its slug); `file` = a file on disk (ref is its path)."
+                        },
+                        "ref": {
+                            "type": "string",
+                            "description": "For kind=wiki: the wiki slug (e.g. `arch/overview`). For kind=file: a path to the file, relative to your cwd or absolute (e.g. `docs/design.md`)."
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Optional tab label. Defaults to the slug / file name."
+                        }
+                    },
+                    "required": ["kind", "ref"]
+                }
             }
         },
         "required": ["questions"]
@@ -771,6 +859,7 @@ mod tests {
             workspace_name: String::new(),
             ai_title: None,
             timestamp: String::new(),
+            review_docs: vec![],
             questions: vec![FleetAskQuestion {
                 question: "q".into(),
                 header: "h".into(),
@@ -792,6 +881,7 @@ mod tests {
             workspace_name: String::new(),
             ai_title: None,
             timestamp: String::new(),
+            review_docs: vec![],
             questions: vec![FleetAskQuestion {
                 question: "Pick one".into(),
                 header: "Choice".into(),
@@ -810,6 +900,50 @@ mod tests {
         assert!(!s.contains("\"options\""));
         assert!(!s.contains("\"html\""));
         assert!(!s.contains("\"formFields\""));
+    }
+
+    #[test]
+    fn resolve_review_docs_joins_relative_files_and_leaves_wiki() {
+        let mut req = empty_request("rd1");
+        req.review_docs = vec![
+            ReviewDoc {
+                kind: ReviewDocKind::File,
+                reference: "docs/design.md".into(),
+                title: None,
+            },
+            ReviewDoc {
+                kind: ReviewDocKind::Wiki,
+                reference: "arch/overview".into(),
+                title: Some("Overview".into()),
+            },
+        ];
+        // A cwd that surely exists but under which the file does not — so
+        // canonicalize falls back to the plain join instead of erroring.
+        let base = std::env::temp_dir();
+        resolve_review_docs(&mut req, Some(&base));
+
+        // Relative file ref became absolute (joined onto the base dir).
+        assert!(Path::new(&req.review_docs[0].reference).is_absolute());
+        assert!(req.review_docs[0].reference.ends_with("docs/design.md"));
+        // Wiki slug is left verbatim — it is not a path.
+        assert_eq!(req.review_docs[1].reference, "arch/overview");
+    }
+
+    #[test]
+    fn review_docs_round_trip_uses_ref_key() {
+        let mut req = empty_request("rd2");
+        req.review_docs = vec![ReviewDoc {
+            kind: ReviewDocKind::File,
+            reference: "/abs/x.md".into(),
+            title: None,
+        }];
+        let s = serde_json::to_string(&req).unwrap();
+        // Agent-facing key is `ref` / `reviewDocs`, not the Rust field names.
+        assert!(s.contains("\"reviewDocs\""));
+        assert!(s.contains("\"ref\":\"/abs/x.md\""));
+        assert!(s.contains("\"kind\":\"file\""));
+        let back: FleetAskRequest = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.review_docs[0].reference, "/abs/x.md");
     }
 
     #[test]

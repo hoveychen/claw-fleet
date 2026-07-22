@@ -688,6 +688,7 @@ mod tests {
             workspace_name: "claude-fleet".into(),
             ai_title: None,
             timestamp: "2026-07-13T00:00:00Z".into(),
+            review_docs: vec![],
             questions: vec![crate::mcp_ipc::FleetAskQuestion {
                 question: "要不要保留向后兼容？".into(),
                 header: "兼容性".into(),

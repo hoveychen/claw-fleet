@@ -146,6 +146,8 @@ fn build_bundle() -> String {
         claw_fleet_core::mcp_ipc::FleetAskOption,
         claw_fleet_core::mcp_ipc::FleetAskFormField,
         claw_fleet_core::mcp_ipc::FormFieldKind,
+        claw_fleet_core::mcp_ipc::ReviewDoc,
+        claw_fleet_core::mcp_ipc::ReviewDocKind,
         claw_fleet_core::plan_approval::PlanApprovalRequest,
         claw_fleet_core::mcp_a2ui_ipc::A2uiRenderRequest,
         claw_fleet_core::permission_prompt_ipc::PermissionPromptRequest,

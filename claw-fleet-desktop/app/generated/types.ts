@@ -229,7 +229,8 @@ parked?: boolean, };
 
 export type FleetAskRequest = { id: string, 
 sessionId: string, workspaceName: string, aiTitle?: string | null, timestamp: string, 
-parked?: boolean, questions: Array<FleetAskQuestion>, };
+parked?: boolean, questions: Array<FleetAskQuestion>, 
+reviewDocs?: Array<ReviewDoc>, };
 
 export type FleetAskQuestion = { question: string, header: string, multiSelect: boolean, options?: Array<FleetAskOption>, html?: string | null, formFields?: Array<FleetAskFormField>, 
 images?: Array<FleetAskImage>, };
@@ -244,6 +245,12 @@ export type FleetAskOption = { label: string, description: string, preview?: str
 export type FleetAskFormField = { name: string, kind: FleetAskFormFieldKind, label: string, placeholder?: string | null, options?: Array<string>, required: boolean, default?: unknown, min?: number | null, max?: number | null, step?: number | null, };
 
 export type FleetAskFormFieldKind = "text" | "textarea" | "number" | "select" | "radio" | "checkbox" | "date" | "datetime" | "time" | "range";
+
+export type ReviewDoc = { kind: ReviewDocKind, 
+ref: string, 
+title?: string | null, };
+
+export type ReviewDocKind = "wiki" | "file";
 
 export type PlanApprovalRequest = { id: string, sessionId: string, workspaceName: string, 
 aiTitle?: string | null, 
