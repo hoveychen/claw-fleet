@@ -263,6 +263,7 @@ impl LineAcc {
 /// Fold every finalized assistant turn of one session's JSONL into `by_model`,
 /// keyed by `(source, per-turn model)`. Dedups by message id exactly like
 /// [`crate::session::StatsAcc`] so a re-logged turn isn't double-counted.
+#[cfg(test)]
 fn fold_session_turns(
     jsonl: &str,
     source: &str,
@@ -359,6 +360,7 @@ fn fold_session_turns(
 /// resolves + decompresses + parses it, rather than reading the path directly.
 /// That reuse also keeps the cost here in lock-step with the per-session
 /// `CodexTokenPanel`.
+#[cfg(test)]
 fn fold_codex_session(
     uri: &str,
     by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
@@ -390,17 +392,39 @@ pub fn today_usage_breakdown(sessions: &[SessionInfo]) -> TodayUsageBreakdown {
     let (day_start_ms, day_end_ms, _date) = day_bounds_ms(now_ms);
     let fleet_entries =
         crate::llm_usage::list_usage_entries(day_start_ms.max(0) as u64, day_end_ms as u64);
-    build_breakdown(sessions, &fleet_entries, now_ms)
+    let mut cache = usage_cache().lock().unwrap();
+    cache.retain_sessions(&live_ids(sessions));
+    let out = build_breakdown_cached(sessions, &fleet_entries, now_ms, &mut cache);
+    persist_cache(&mut cache);
+    out
 }
 
-/// Pure core of [`today_usage_breakdown`], with Fleet's own LLM entries injected
-/// so it can be unit-tested without reading `~/.fleet/fleet_llm_usage.jsonl`
-/// (mirrors how [`sum_today_sessions`] is the tested pure helper). Reads each
-/// today-created session's JSONL from disk; the caller controls those paths.
+/// Test-only wrapper: a fresh (empty) cache so each call folds from disk, keeping
+/// the receipt tests hermetic and independent of the process-wide cache.
+#[cfg(test)]
 fn build_breakdown(
     sessions: &[SessionInfo],
     fleet_entries: &[crate::llm_usage::FleetLlmUsageEntry],
     now_ms: i64,
+) -> TodayUsageBreakdown {
+    build_breakdown_cached(
+        sessions,
+        fleet_entries,
+        now_ms,
+        &mut UsageBreakdownCache::default(),
+    )
+}
+
+/// Pure core of [`today_usage_breakdown`], with Fleet's own LLM entries injected
+/// so it can be unit-tested without reading `~/.fleet/fleet_llm_usage.jsonl`
+/// (mirrors how [`sum_today_sessions`] is the tested pure helper). Each
+/// today-created session is projected into cached `(date, model)` cells via
+/// `cache` (folded from disk only on a miss); the today receipt sums every cell.
+fn build_breakdown_cached(
+    sessions: &[SessionInfo],
+    fleet_entries: &[crate::llm_usage::FleetLlmUsageEntry],
+    now_ms: i64,
+    cache: &mut UsageBreakdownCache,
 ) -> TodayUsageBreakdown {
     use std::collections::HashMap;
 
@@ -409,27 +433,17 @@ fn build_breakdown(
 
     let mut by_model: HashMap<(String, String), LineAcc> = HashMap::new();
 
-    // Agent sessions created today (subagents included, each JSONL read once).
+    // Agent sessions created today (subagents included). Codex and Claude are
+    // both projected through the cache — `cells()` dispatches on `agent_source`,
+    // so codex's URI-aware reader is still used and an empty projection (empty
+    // file / zero-usage rollout) simply contributes nothing. The today receipt
+    // sums **every** cell (undated turns included), preserving the sidebar口径.
     for s in sessions {
         if s.created_at_ms < start {
             continue;
         }
-        // Codex rollouts are shaped differently from Claude JSONL (no
-        // `type:"assistant"` turns with a `message.usage`; instead a cumulative
-        // `token_count` event with codex-native field names) AND their stored
-        // `jsonl_path` is a `codex://` URI over a possibly-zstd rollout, not a
-        // readable filesystem path. So `fold_session_turns` + a plain
-        // `read_to_string` would drop every codex agent session from the
-        // receipt. Fold them via the URI-aware codex reader instead.
-        if s.agent_source == "codex" {
-            fold_codex_session(&s.jsonl_path, &mut by_model);
-            continue;
-        }
-        let jsonl = std::fs::read_to_string(&s.jsonl_path).unwrap_or_default();
-        if jsonl.is_empty() {
-            continue;
-        }
-        fold_session_turns(&jsonl, &s.agent_source, &mut by_model);
+        let cells = cache.cells(s);
+        sum_cells_all(cells, &s.agent_source, &mut by_model);
     }
 
     // Fleet's own LLM calls today, folded per model.
@@ -598,6 +612,7 @@ fn parse_iso_ms(s: &str) -> Option<i64> {
 /// map keyed by the turn's local date. Turns without a parseable timestamp are
 /// skipped (they can't be placed on the trend). Model tracking still advances on
 /// skipped turns so a later dated turn that omits `model` resolves correctly.
+#[cfg(test)]
 fn fold_session_turns_range(
     jsonl: &str,
     source: &str,
@@ -705,6 +720,7 @@ fn fold_session_turns_range(
 /// Fold a Codex session into the range breakdown, attributing its whole
 /// cumulative snapshot to `attribute_ms`'s local day (see the module comment on
 /// why Codex can't be split per turn). Returns `true` if it contributed.
+#[cfg(test)]
 fn fold_codex_session_range(
     uri: &str,
     attribute_ms: i64,
@@ -731,11 +747,472 @@ fn fold_codex_session_range(
     true
 }
 
+// ── Cache-ready per-session projection ───────────────────────────────────────
+//
+// Both receipts re-read and re-parse every in-window session's full JSONL on
+// every open. To make that cacheable, one session's spend is projected once into
+// `(date_bucket, model) -> acc` cells — the smallest form from which BOTH
+// receipts reconstruct exactly:
+//   * today  sums **every** cell (undated turns included) → same口径 as
+//     `fold_session_turns` (whole file, for sessions created today).
+//   * range  sums only cells whose non-empty local date is in `[from, to]`,
+//     bucketed per day → same口径 as `fold_session_turns_range`.
+//
+// `date_bucket` is the turn's local `YYYY-MM-DD`, or `""` for a Claude turn with
+// no `timestamp` (transcripts predating the field): today counts it, range drops
+// it — which is precisely what the two folders above already do. Range windows
+// are compared at **date** granularity; that matches the receipt's only caller
+// (day-aligned presets `today` / `7d` / `30d` / `all`, always `to = now`), where
+// `ts_ms >= from_ms` ⇔ `local_date(ts) >= local_date(from_ms)`.
+
+/// One session's usage as `(date_bucket, model) -> acc`. The agent source is
+/// uniform per session, so it is applied at query time and kept out of the key.
+type SessionCells = std::collections::HashMap<(String, String), LineAcc>;
+
+/// Project one Claude session's JSONL into `(date, model)` cells in a single
+/// pass. Turn selection, msg-id dedup, `last_model` tracking and per-turn cost
+/// are identical to [`fold_session_turns`] / [`fold_session_turns_range`]; the
+/// only addition is bucketing each folded turn by its local date (`""` when the
+/// turn carries no timestamp).
+fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
+    use crate::model_cost::{turn_cost_usd, TurnUsage};
+    use std::collections::HashSet;
+
+    let mut cells = SessionCells::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut last_model: Option<String> = None;
+
+    for line in jsonl.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+            continue;
+        }
+        let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
+            continue;
+        };
+        if msg.get("stop_reason").map_or(true, |s| s.is_null()) {
+            continue;
+        }
+        let msg_id = msg.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+        if !msg_id.is_empty() && !seen.insert(msg_id.to_string()) {
+            continue;
+        }
+
+        // Advance model tracking even for undated turns (matches the range folder).
+        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        if let Some(m) = turn_model {
+            last_model = Some(m.to_string());
+        }
+
+        // Empty date bucket = no timestamp: today includes it, range excludes it.
+        let date = v
+            .get("timestamp")
+            .and_then(|t| t.as_str())
+            .and_then(parse_iso_ms)
+            .map(local_date_str)
+            .unwrap_or_default();
+
+        let usage = msg.get("usage");
+        let input = usage
+            .and_then(|u| u.get("input_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let output = usage
+            .and_then(|u| u.get("output_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let cache_creation = usage
+            .and_then(|u| u.get("cache_creation_input_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let cache_read = usage
+            .and_then(|u| u.get("cache_read_input_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let web_search = usage
+            .and_then(|u| u.get("server_tool_use"))
+            .and_then(|s| s.get("web_search_requests"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+
+        let model = turn_model
+            .map(|s| s.to_string())
+            .or_else(|| last_model.clone())
+            .unwrap_or_default();
+        let cost = turn_cost_usd(
+            &model,
+            &TurnUsage {
+                input_tokens: input,
+                output_tokens: output,
+                cache_creation_tokens: cache_creation,
+                cache_read_tokens: cache_read,
+                web_search_requests: web_search,
+            },
+        );
+
+        cells
+            .entry((date, model))
+            .or_default()
+            .add(input, cache_creation, cache_read, output, cost);
+    }
+    cells
+}
+
+/// Project one Codex session into a single `(creation-day, model)` cell. Codex
+/// reports one cumulative snapshot per session (no per-turn split), so the whole
+/// figure attributes to `attribute_ms`'s local day — same as
+/// [`fold_codex_session_range`]. Returns empty cells on error / zero usage.
+fn fold_codex_session_cells(uri: &str, attribute_ms: i64) -> SessionCells {
+    let mut cells = SessionCells::new();
+    let Ok(bd) = crate::codex_source::codex_token_breakdown(uri) else {
+        return cells;
+    };
+    if bd.total_tokens == 0 {
+        return cells;
+    }
+    let model = bd.model.clone().unwrap_or_else(|| "gpt".to_string());
+    cells
+        .entry((local_date_str(attribute_ms), model))
+        .or_default()
+        .add(bd.input_tokens, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
+    cells
+}
+
+/// Sum **all** cells (today口径: undated included) into `by_model` under `source`.
+fn sum_cells_all(
+    cells: &SessionCells,
+    source: &str,
+    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
+) {
+    for ((_, model), acc) in cells {
+        by_model
+            .entry((source.to_string(), model.clone()))
+            .or_default()
+            .add(acc.input, acc.cache_creation, acc.cache_read, acc.output, acc.cost);
+    }
+}
+
+/// Sum cells whose non-empty date is within `[from_date, to_date]` (range口径:
+/// undated dropped) into both `by_model` and the per-day trend `by_day`. Dates
+/// are `YYYY-MM-DD`, so lexicographic comparison is chronological.
+fn sum_cells_window(
+    cells: &SessionCells,
+    source: &str,
+    from_date: &str,
+    to_date: &str,
+    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
+    by_day: &mut std::collections::BTreeMap<String, LineAcc>,
+) {
+    for ((date, model), acc) in cells {
+        if date.is_empty() || date.as_str() < from_date || date.as_str() > to_date {
+            continue;
+        }
+        by_model
+            .entry((source.to_string(), model.clone()))
+            .or_default()
+            .add(acc.input, acc.cache_creation, acc.cache_read, acc.output, acc.cost);
+        by_day
+            .entry(date.clone())
+            .or_default()
+            .add(acc.input, acc.cache_creation, acc.cache_read, acc.output, acc.cost);
+    }
+}
+
+// ── Per-session cell cache ───────────────────────────────────────────────────
+//
+// The receipts used to re-read and re-parse every in-window session's full JSONL
+// on every open / range switch. This cache projects each session into
+// `(date, model)` cells once and reuses them until the session's usage changes,
+// so repeat opens pay only aggregation, not disk + JSON parsing.
+//
+// Invalidation is by a cheap fingerprint taken from the already-scanned
+// `SessionInfo` — `(last_activity_ms, total_input_tokens, total_output_tokens)` —
+// not a filesystem stat: those fields change exactly when a session logs new
+// usage, and a restart recomputes them identically, which lets the on-disk cache
+// (P3) validate a persisted entry against a fresh scan without touching the
+// transcript. Codex rollouts (a `codex://` URI, not a stat-able path) ride the
+// same fingerprint.
+
+/// Fingerprint gating a cached projection: changes iff the session's usage did.
+type Fingerprint = (u64, u64, u64);
+
+struct CacheEntry {
+    fingerprint: Fingerprint,
+    cells: SessionCells,
+}
+
+/// Process-wide projection cache. A fresh (`default`) instance is empty, so every
+/// lookup is a miss that folds from disk — exactly what the hermetic unit tests
+/// want. Production goes through [`usage_cache`], which warm-starts from disk.
+#[derive(Default)]
+struct UsageBreakdownCache {
+    entries: std::collections::HashMap<String, CacheEntry>,
+    /// Set whenever a fold or eviction changed `entries`, so the public entry
+    /// points persist to disk only when there is something new to write.
+    dirty: bool,
+}
+
+impl UsageBreakdownCache {
+    fn fingerprint(s: &SessionInfo) -> Fingerprint {
+        (
+            s.last_activity_ms,
+            s.total_input_tokens,
+            s.total_output_tokens,
+        )
+    }
+
+    /// Cells for `s`, folding its JSONL/rollout only on a miss or a fingerprint
+    /// change. The fold (disk read + JSON parse) is the expensive step this
+    /// cache exists to skip.
+    fn cells(&mut self, s: &SessionInfo) -> &SessionCells {
+        let fp = Self::fingerprint(s);
+        let stale = self.entries.get(&s.id).map_or(true, |e| e.fingerprint != fp);
+        if stale {
+            let cells = fold_session_cells(s);
+            self.entries.insert(
+                s.id.clone(),
+                CacheEntry {
+                    fingerprint: fp,
+                    cells,
+                },
+            );
+            self.dirty = true;
+        }
+        &self.entries.get(&s.id).unwrap().cells
+    }
+
+    /// Drop cached entries for sessions no longer live, bounding the map to the
+    /// current session set (sessions get pruned off disk over time).
+    fn retain_sessions(&mut self, live_ids: &std::collections::HashSet<&str>) {
+        let before = self.entries.len();
+        self.entries.retain(|id, _| live_ids.contains(id.as_str()));
+        if self.entries.len() != before {
+            self.dirty = true;
+        }
+    }
+}
+
+/// Fold one session's JSONL/rollout into cells — the expensive read+parse a cache
+/// hit avoids. Codex uses the URI-aware reader; Claude reads the file directly.
+fn fold_session_cells(s: &SessionInfo) -> SessionCells {
+    if s.agent_source == "codex" {
+        fold_codex_session_cells(&s.jsonl_path, s.created_at_ms as i64)
+    } else {
+        let jsonl = std::fs::read_to_string(&s.jsonl_path).unwrap_or_default();
+        fold_claude_session_cells(&jsonl)
+    }
+}
+
+/// Ids of the sessions currently live, for [`UsageBreakdownCache::retain_sessions`].
+fn live_ids(sessions: &[SessionInfo]) -> std::collections::HashSet<&str> {
+    sessions.iter().map(|s| s.id.as_str()).collect()
+}
+
+// ── On-disk persistence ──────────────────────────────────────────────────────
+//
+// Persisting the cache lets a **cold start** (fresh process, e.g. after a Fleet
+// restart) skip re-parsing every transcript: the first modal open validates each
+// persisted entry's fingerprint against the fresh scan and re-folds only the
+// sessions whose usage actually changed while Fleet was down. The on-disk shape
+// is a flat list of cells (JSON can't key a map by a `(date, model)` tuple) tagged
+// with a schema version; bump [`CACHE_SCHEMA_VERSION`] whenever the cell shape or
+// fold semantics change so stale files are discarded rather than mis-read.
+
+/// Bump when the cell shape or the projection semantics change.
+const CACHE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedCell {
+    date: String,
+    model: String,
+    input: u64,
+    cache_creation: u64,
+    cache_read: u64,
+    output: u64,
+    cost: f64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedEntry {
+    fingerprint: Fingerprint,
+    cells: Vec<PersistedCell>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedCache {
+    version: u32,
+    entries: std::collections::HashMap<String, PersistedEntry>,
+}
+
+impl UsageBreakdownCache {
+    fn to_persisted(&self) -> PersistedCache {
+        let entries = self
+            .entries
+            .iter()
+            .map(|(id, e)| {
+                let cells = e
+                    .cells
+                    .iter()
+                    .map(|((date, model), acc)| PersistedCell {
+                        date: date.clone(),
+                        model: model.clone(),
+                        input: acc.input,
+                        cache_creation: acc.cache_creation,
+                        cache_read: acc.cache_read,
+                        output: acc.output,
+                        cost: acc.cost,
+                    })
+                    .collect();
+                (
+                    id.clone(),
+                    PersistedEntry {
+                        fingerprint: e.fingerprint,
+                        cells,
+                    },
+                )
+            })
+            .collect();
+        PersistedCache {
+            version: CACHE_SCHEMA_VERSION,
+            entries,
+        }
+    }
+
+    fn from_persisted(p: PersistedCache) -> Self {
+        // Version mismatch → start empty so every session re-folds under the
+        // current semantics instead of trusting an incompatible projection.
+        if p.version != CACHE_SCHEMA_VERSION {
+            return Self::default();
+        }
+        let entries = p
+            .entries
+            .into_iter()
+            .map(|(id, e)| {
+                let mut cells = SessionCells::new();
+                for c in e.cells {
+                    let mut acc = LineAcc::default();
+                    acc.add(c.input, c.cache_creation, c.cache_read, c.output, c.cost);
+                    cells.insert((c.date, c.model), acc);
+                }
+                (
+                    id,
+                    CacheEntry {
+                        fingerprint: e.fingerprint,
+                        cells,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            entries,
+            dirty: false,
+        }
+    }
+
+    /// Load the persisted cache, or an empty one when the file is absent, torn,
+    /// or a stale shape — every failure path self-heals into a full re-fold.
+    fn load_from(path: &std::path::Path) -> Self {
+        let Ok(bytes) = std::fs::read(path) else {
+            return Self::default();
+        };
+        serde_json::from_slice::<PersistedCache>(&bytes)
+            .map(Self::from_persisted)
+            .unwrap_or_default()
+    }
+
+    /// Persist atomically (temp file + rename) so a crash mid-write can't leave a
+    /// torn file that would poison the next load.
+    fn store_to(&self, path: &std::path::Path) {
+        let Ok(json) = serde_json::to_vec(&self.to_persisted()) else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = std::fs::rename(&tmp, path);
+        }
+    }
+}
+
+/// `~/.fleet/usage-breakdown-cache.json` — the on-disk projection cache.
+fn cache_path() -> Option<std::path::PathBuf> {
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("usage-breakdown-cache.json"))
+}
+
+/// Flush the cache to disk if a fold or eviction changed it since the last write.
+fn persist_cache(cache: &mut UsageBreakdownCache) {
+    if !cache.dirty {
+        return;
+    }
+    if let Some(p) = cache_path() {
+        cache.store_to(&p);
+    }
+    cache.dirty = false;
+}
+
+/// The process-wide cache backing the public receipt entry points, warm-started
+/// from disk so the first post-restart open skips re-parsing unchanged sessions.
+fn usage_cache() -> &'static std::sync::Mutex<UsageBreakdownCache> {
+    static CACHE: std::sync::LazyLock<std::sync::Mutex<UsageBreakdownCache>> =
+        std::sync::LazyLock::new(|| {
+            let c = cache_path()
+                .map(|p| UsageBreakdownCache::load_from(&p))
+                .unwrap_or_default();
+            std::sync::Mutex::new(c)
+        });
+    &CACHE
+}
+
+/// Guards against overlapping warms: a scan fires every few seconds, but only one
+/// background fold should run at a time.
+static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Pre-fold any new/changed sessions into the cache **off the caller's thread**,
+/// so the first receipt open after a scan finds everything warm instead of paying
+/// the full transcript re-parse. Skips when a warm is already in flight (the next
+/// scan re-warms whatever changed since). Called from the desktop scan loop.
+///
+/// After the on-disk cache (see [`usage_cache`]) this is cheap on every run but
+/// the first-ever one: it re-folds only the sessions whose fingerprint changed.
+pub fn warm_usage_cache(sessions: &[SessionInfo]) {
+    use std::sync::atomic::Ordering;
+    if WARMING.swap(true, Ordering::AcqRel) {
+        return; // a warm is already running
+    }
+    let owned: Vec<SessionInfo> = sessions.to_vec();
+    std::thread::spawn(move || {
+        // Reset the guard even if the fold panics (e.g. a poisoned lock), so a
+        // one-off failure can't wedge warming off permanently.
+        struct WarmGuard;
+        impl Drop for WarmGuard {
+            fn drop(&mut self) {
+                WARMING.store(false, Ordering::Release);
+            }
+        }
+        let _guard = WarmGuard;
+
+        let mut cache = usage_cache().lock().unwrap();
+        cache.retain_sessions(&live_ids(&owned));
+        for s in &owned {
+            let _ = cache.cells(s);
+        }
+        persist_cache(&mut cache);
+    });
+}
+
 /// Per-model receipt + per-day trend over an arbitrary inclusive window.
 ///
-/// `sessions` is the already-scanned session list (no extra scan beyond reading
-/// each in-window session's JSONL). Fleet's own LLM spend in the window is
-/// folded per model from `fleet_llm_usage.jsonl`.
+/// `sessions` is the already-scanned session list; each in-window session is
+/// projected into cached cells (folded from disk only on a miss). Fleet's own LLM
+/// spend in the window is folded per model from `fleet_llm_usage.jsonl`.
 pub fn usage_range_breakdown(
     sessions: &[SessionInfo],
     from_ms: i64,
@@ -743,22 +1220,51 @@ pub fn usage_range_breakdown(
 ) -> UsageRangeBreakdown {
     let fleet_entries =
         crate::llm_usage::list_usage_entries(from_ms.max(0) as u64, to_ms.max(0) as u64);
-    build_range_breakdown(sessions, &fleet_entries, from_ms, to_ms)
+    let mut cache = usage_cache().lock().unwrap();
+    cache.retain_sessions(&live_ids(sessions));
+    let out = build_range_breakdown_cached(sessions, &fleet_entries, from_ms, to_ms, &mut cache);
+    persist_cache(&mut cache);
+    out
 }
 
-/// Pure core of [`usage_range_breakdown`], with Fleet's own LLM entries injected
-/// so it can be unit-tested without reading `~/.fleet/fleet_llm_usage.jsonl`.
+/// Test-only wrapper: fresh (empty) cache, so each call folds from disk and the
+/// range-receipt tests stay hermetic (see [`build_breakdown`]).
+#[cfg(test)]
 fn build_range_breakdown(
     sessions: &[SessionInfo],
     fleet_entries: &[crate::llm_usage::FleetLlmUsageEntry],
     from_ms: i64,
     to_ms: i64,
 ) -> UsageRangeBreakdown {
+    build_range_breakdown_cached(
+        sessions,
+        fleet_entries,
+        from_ms,
+        to_ms,
+        &mut UsageBreakdownCache::default(),
+    )
+}
+
+/// Pure core of [`usage_range_breakdown`], with Fleet's own LLM entries injected
+/// so it can be unit-tested without reading `~/.fleet/fleet_llm_usage.jsonl`.
+/// Each in-window session is projected through `cache` (folded from disk only on
+/// a miss) and summed over the date window `[from, to]`.
+fn build_range_breakdown_cached(
+    sessions: &[SessionInfo],
+    fleet_entries: &[crate::llm_usage::FleetLlmUsageEntry],
+    from_ms: i64,
+    to_ms: i64,
+    cache: &mut UsageBreakdownCache,
+) -> UsageRangeBreakdown {
     use std::collections::{BTreeMap, HashMap};
 
     let mut by_model: HashMap<(String, String), LineAcc> = HashMap::new();
     let mut by_day: BTreeMap<String, LineAcc> = BTreeMap::new();
     let mut has_codex_approximation = false;
+
+    // Date-granularity window bounds; cells carry `YYYY-MM-DD` keys.
+    let from_date = local_date_str(from_ms);
+    let to_date = local_date_str(to_ms);
 
     for s in sessions {
         if s.agent_source == "codex" {
@@ -768,26 +1274,32 @@ fn build_range_breakdown(
             if created < from_ms || created > to_ms {
                 continue;
             }
-            if fold_codex_session_range(&s.jsonl_path, created, &mut by_model, &mut by_day) {
+            let cells = cache.cells(s);
+            if !cells.is_empty() {
                 has_codex_approximation = true;
             }
+            sum_cells_window(
+                cells,
+                &s.agent_source,
+                &from_date,
+                &to_date,
+                &mut by_model,
+                &mut by_day,
+            );
             continue;
         }
         // Claude: prune sessions that cannot overlap the window before the
-        // (expensive) JSONL read — a session with no activity at/after `from_ms`,
-        // or created after `to_ms`, has no in-window turns.
+        // (cache-miss-only) projection — a session with no activity at/after
+        // `from_ms`, or created after `to_ms`, has no in-window turns.
         if (s.last_activity_ms as i64) < from_ms || (s.created_at_ms as i64) > to_ms {
             continue;
         }
-        let jsonl = std::fs::read_to_string(&s.jsonl_path).unwrap_or_default();
-        if jsonl.is_empty() {
-            continue;
-        }
-        fold_session_turns_range(
-            &jsonl,
+        let cells = cache.cells(s);
+        sum_cells_window(
+            cells,
             &s.agent_source,
-            from_ms,
-            to_ms,
+            &from_date,
+            &to_date,
             &mut by_model,
             &mut by_day,
         );
@@ -1264,6 +1776,105 @@ mod range_breakdown_tests {
         })
     }
 
+    /// The projection fold (disk read + JSON parse) must run only when a
+    /// session's usage changed. Seed a distinctive cell for a HIT, prove the
+    /// bogus `jsonl_path` is never read while the fingerprint holds, then bump
+    /// usage and prove the change forces a re-fold (which reads the bogus path →
+    /// empty cells).
+    #[test]
+    fn cache_reuses_on_matching_fingerprint_and_refolds_on_change() {
+        let mut s: SessionInfo =
+            serde_json::from_value(session_skeleton("claude-code", 1000, 2000)).unwrap();
+        s.id = "sess-cache".to_string();
+        s.jsonl_path = "/nonexistent/never-read.jsonl".to_string();
+        s.last_activity_ms = 100;
+        s.total_input_tokens = 5;
+        s.total_output_tokens = 2;
+
+        let mut cache = UsageBreakdownCache::default();
+
+        // Pre-seed a distinctive cell under this session's current fingerprint.
+        let mut seeded = SessionCells::new();
+        let mut acc = LineAcc::default();
+        acc.add(11, 0, 0, 7, 0.25);
+        seeded.insert(("2026-07-21".to_string(), "m".to_string()), acc);
+        cache.entries.insert(
+            s.id.clone(),
+            CacheEntry {
+                fingerprint: UsageBreakdownCache::fingerprint(&s),
+                cells: seeded,
+            },
+        );
+
+        // HIT: fingerprint matches → seeded cell returned, bogus path untouched.
+        {
+            let cells = cache.cells(&s);
+            assert_eq!(cells.len(), 1);
+            assert_eq!(
+                cells
+                    .get(&("2026-07-21".to_string(), "m".to_string()))
+                    .unwrap()
+                    .output,
+                7
+            );
+        }
+
+        // MISS: bump usage → fingerprint changes → re-fold reads the bogus path
+        // → empty cells (a real changed session would re-parse fresh content).
+        s.total_output_tokens = 3;
+        assert!(
+            cache.cells(&s).is_empty(),
+            "a fingerprint change must force a re-fold"
+        );
+    }
+
+    /// The on-disk cache must survive a round-trip byte-for-byte and discard a
+    /// file written under a different schema version.
+    #[test]
+    fn disk_cache_round_trips_and_rejects_version_mismatch() {
+        let mut cache = UsageBreakdownCache::default();
+        let mut cells = SessionCells::new();
+        let mut acc = LineAcc::default();
+        acc.add(100, 5, 50, 20, 1.5);
+        cells.insert(("2026-07-21".to_string(), "claude-opus-4-8".to_string()), acc);
+        cache.entries.insert(
+            "s1".to_string(),
+            CacheEntry {
+                fingerprint: (9, 8, 7),
+                cells,
+            },
+        );
+
+        let dir = std::env::temp_dir().join("fleet-usage-cache-roundtrip");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cache.json");
+        cache.store_to(&path);
+
+        let loaded = UsageBreakdownCache::load_from(&path);
+        let e = loaded.entries.get("s1").expect("entry survived round-trip");
+        assert_eq!(e.fingerprint, (9, 8, 7));
+        let acc = e
+            .cells
+            .get(&("2026-07-21".to_string(), "claude-opus-4-8".to_string()))
+            .expect("cell survived round-trip");
+        assert_eq!(
+            (acc.input, acc.cache_creation, acc.cache_read, acc.output),
+            (100, 5, 50, 20)
+        );
+        assert!((acc.cost - 1.5).abs() < 1e-9);
+
+        // A file tagged with a different schema version invalidates the whole cache.
+        let mut persisted = cache.to_persisted();
+        persisted.version = CACHE_SCHEMA_VERSION + 1;
+        std::fs::write(&path, serde_json::to_vec(&persisted).unwrap()).unwrap();
+        assert!(
+            UsageBreakdownCache::load_from(&path).entries.is_empty(),
+            "version mismatch must invalidate the whole cache"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A Claude session whose JSONL holds `jsonl`, with explicit created /
     /// last-activity so the window prune is exercised realistically.
     fn claude_session(tag: &str, created_ms: i64, last_activity_ms: i64, jsonl: &str) -> SessionInfo {
@@ -1468,5 +2079,101 @@ mod range_breakdown_tests {
         assert_eq!(b.daily.len(), 1);
         assert_eq!(b.daily[0].date, local_date_str(when));
         assert!((b.daily[0].cost_usd - 0.5).abs() < 1e-9);
+    }
+
+    /// The cache-ready `(date, model)` cells must reconstruct BOTH receipts
+    /// bit-for-bit: whole-table sum == today's `fold_session_turns` (undated
+    /// turns counted), date-window sum == range's `fold_session_turns_range`
+    /// (undated turns dropped, per-day trend preserved).
+    #[test]
+    fn session_cells_reproduce_both_receipt_folders() {
+        // Dated turns on two days, one undated turn, a duplicate id, and a
+        // non-finalized turn — every branch the two folders special-case.
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-20T10:00:00.000Z","message":{"id":"a","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":5,"cache_read_input_tokens":50}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-07-21T10:00:00.000Z","message":{"id":"b","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":200,"output_tokens":40,"cache_creation_input_tokens":0,"cache_read_input_tokens":10}}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"id":"c","model":"claude-sonnet-5","stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":3}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-07-21T11:00:00.000Z","message":{"id":"b","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":999,"output_tokens":999}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-07-21T12:00:00.000Z","message":{"id":"d","model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":999,"output_tokens":999}}}"#,
+            "\n",
+        );
+
+        let cells = fold_claude_session_cells(jsonl);
+
+        // today口径: whole-table sum == fold_session_turns.
+        let mut old_today = std::collections::HashMap::new();
+        fold_session_turns(jsonl, "claude-code", &mut old_today);
+        let mut new_today = std::collections::HashMap::new();
+        sum_cells_all(&cells, "claude-code", &mut new_today);
+        assert_eq!(snap(&old_today), snap(&new_today), "today口径 mismatch");
+
+        // range口径: date-window sum == fold_session_turns_range. The window
+        // brackets both dated turns with 2 days of margin each side, so ms- and
+        // date-filtering agree; the undated turn `c` is dropped by both.
+        let from = ts("2026-07-18T00:00:00Z");
+        let to = ts("2026-07-23T00:00:00Z");
+        let mut old_model = std::collections::HashMap::new();
+        let mut old_day = std::collections::BTreeMap::new();
+        fold_session_turns_range(jsonl, "claude-code", from, to, &mut old_model, &mut old_day);
+        let mut new_model = std::collections::HashMap::new();
+        let mut new_day = std::collections::BTreeMap::new();
+        sum_cells_window(
+            &cells,
+            "claude-code",
+            &local_date_str(from),
+            &local_date_str(to),
+            &mut new_model,
+            &mut new_day,
+        );
+        assert_eq!(snap(&old_model), snap(&new_model), "range by_model mismatch");
+        assert_eq!(snap_day(&old_day), snap_day(&new_day), "range by_day mismatch");
+
+        // The undated turn `c` lands in the "" bucket and never reaches the trend.
+        assert!(cells.keys().any(|(d, _)| d.is_empty()), "undated turn not bucketed");
+        assert!(!new_day.keys().any(|d| d.is_empty()), "range trend leaked an undated turn");
+    }
+
+    /// Normalize a `by_model` map to a comparable snapshot (cost → micro-USD int
+    /// so f64 summation order doesn't fail the equality).
+    fn snap(
+        m: &std::collections::HashMap<(String, String), LineAcc>,
+    ) -> std::collections::BTreeMap<(String, String), (u64, u64, u64, u64, i64)> {
+        m.iter()
+            .map(|(k, a)| {
+                (
+                    k.clone(),
+                    (
+                        a.input,
+                        a.cache_creation,
+                        a.cache_read,
+                        a.output,
+                        (a.cost * 1e6).round() as i64,
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    fn snap_day(
+        m: &std::collections::BTreeMap<String, LineAcc>,
+    ) -> std::collections::BTreeMap<String, (u64, u64, u64, u64, i64)> {
+        m.iter()
+            .map(|(k, a)| {
+                (
+                    k.clone(),
+                    (
+                        a.input,
+                        a.cache_creation,
+                        a.cache_read,
+                        a.output,
+                        (a.cost * 1e6).round() as i64,
+                    ),
+                )
+            })
+            .collect()
     }
 }
