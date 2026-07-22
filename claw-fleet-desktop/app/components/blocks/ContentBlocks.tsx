@@ -8,6 +8,8 @@ import type {
   ToolUseBlock,
 } from "../../types";
 import { isDecisionTool } from "../../toolResults";
+import { isFleetTool } from "./fleetTools";
+import { FleetToolCard } from "./FleetToolCard";
 import type { PathLinkContext } from "../../markdown/pathLinks";
 import { TextBlock } from "./TextBlock";
 import { ThinkingBlock } from "./ThinkingBlock";
@@ -173,6 +175,22 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
             result={result}
             meta={metaMap.get(toolBlock.id)}
             records={decisionRecords}
+            isPartial={isPartial && !result}
+          />
+        );
+        i++;
+        continue;
+      }
+
+      // Fleet's MCP control tools (plan/handoff/watch/loop/schedule/wiki) get a
+      // structured card instead of the generic `{"action":…}` key/value blob.
+      // Like the decision card, it keeps full width and stays out of the rail.
+      if (isFleetTool(toolBlock.name)) {
+        elements.push(
+          <FleetToolCard
+            key={i}
+            block={toolBlock}
+            result={result}
             isPartial={isPartial && !result}
           />
         );

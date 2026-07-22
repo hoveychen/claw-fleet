@@ -1399,6 +1399,197 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         usage: { input_tokens: 6600, output_tokens: 60 },
       },
     },
+    // ── Fleet MCP control-tool calls — exercise the FleetToolCard renderer ──
+    {
+      type: "assistant",
+      uuid: "msg-fleet-plan-check",
+      timestamp: new Date(NOW - 8 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-1",
+            name: "mcp__fleet__fleet__plan",
+            input: { action: "check", plan_id: "fleet-tool-cards", task: "P1" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6700, output_tokens: 40 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-plan-check-r",
+      timestamp: new Date(NOW - 8 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-1",
+            content: "ok: checked P1 in fleet-tool-cards",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-plan-list",
+      timestamp: new Date(NOW - 7 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-2",
+            name: "mcp__fleet__fleet__plan",
+            input: { action: "list" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6710, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-plan-list-r",
+      timestamp: new Date(NOW - 7 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-2",
+            content:
+              "fleet-tool-cards [1/5]\nauth-refactor [3/3] — /Users/dev/proj/TASKS.md\nmobile-relay [2/6]",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-plan-get",
+      timestamp: new Date(NOW - 6 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-3",
+            name: "mcp__fleet__fleet__plan",
+            input: { action: "get", plan_id: "fleet-tool-cards" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6720, output_tokens: 35 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-plan-get-r",
+      timestamp: new Date(NOW - 6 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-3",
+            content:
+              "[x] P1 — 桌面端框架 + plan 卡\n[ ] P2 — 其余 5 工具\n[ ] P3 — 移动端框架 + plan\n[ ] P4 — 移动端其余 5 工具\n[ ] P5 — 收尾 + 合并",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-watch-list",
+      timestamp: new Date(NOW - 5 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-4",
+            name: "mcp__fleet__fleet__watch",
+            input: { action: "list" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6730, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-watch-list-r",
+      timestamp: new Date(NOW - 5 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-4",
+            content: JSON.stringify(
+              [
+                {
+                  id: "w-42a1",
+                  sessionId: "sess-fleet-main",
+                  workspacePath: "/Users/dev/proj",
+                  untilCmd: "test -f /tmp/ci-done",
+                  note: "waiting for CI run #4821",
+                  pollSecs: 30,
+                  deadlineAt: NOW + 90 * MIN,
+                  created: NOW - 20 * MIN,
+                  lastPollAt: NOW - 20 * 1000,
+                  generation: 1,
+                },
+              ],
+              null,
+              2,
+            ),
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-wiki-list",
+      timestamp: new Date(NOW - 4 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-5",
+            name: "mcp__fleet__fleet__wiki",
+            input: { action: "list" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6740, output_tokens: 25 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-wiki-list-r",
+      timestamp: new Date(NOW - 4 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-5",
+            content:
+              "arch/overview  [html]  v3  Architecture Overview\npromo/reddit  [md]  v1  Reddit Subreddit Playbook",
+          },
+        ],
+      },
+    },
   ],
 
   // API server session — shorter
