@@ -681,6 +681,8 @@ interface WaitingAlertsState {
   dismissedIds: Set<string>;
   setAlerts: (alerts: WaitingAlert[]) => void;
   dismiss: (sessionId: string) => void;
+  /** Acknowledge every currently-loaded alert at once (same semantics as dismiss) */
+  dismissAll: () => void;
   refresh: () => Promise<void>;
 }
 
@@ -692,6 +694,12 @@ export const useWaitingAlertsStore = create<WaitingAlertsState>((set) => ({
     set((state) => {
       const next = new Set(state.dismissedIds);
       next.add(sessionId);
+      return { dismissedIds: next };
+    }),
+  dismissAll: () =>
+    set((state) => {
+      const next = new Set(state.dismissedIds);
+      for (const a of state.alerts) next.add(a.sessionId);
       return { dismissedIds: next };
     }),
   refresh: async () => {
