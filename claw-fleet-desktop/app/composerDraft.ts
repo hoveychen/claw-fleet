@@ -29,11 +29,21 @@ const EMPTY_DRAFT: ComposerDraft = {
   tool: "",
 };
 
+/** A draft update: either a plain partial to merge, or an updater that receives
+ *  the *latest* draft and returns the partial to merge. The updater form is what
+ *  makes a synchronous loop of writes (multi-file pick, multi-image paste,
+ *  multi-file drag-drop) accumulate correctly — a plain-object write computed
+ *  from a render-time snapshot of `attachments` overwrites each prior addition,
+ *  so only the last file survives. */
+export type ComposerDraftPatch =
+  | Partial<ComposerDraft>
+  | ((prev: ComposerDraft) => Partial<ComposerDraft>);
+
 interface ComposerDraftState {
   /** Drafts keyed by a caller-chosen slot: `"new"` for the new-session form,
    *  the session id for each resumable session's composer. */
   drafts: Record<string, ComposerDraft>;
-  patchDraft: (key: string, patch: Partial<ComposerDraft>) => void;
+  patchDraft: (key: string, patch: ComposerDraftPatch) => void;
   /** Drop a draft, revoking any object-URL previews it still holds so the
    *  blobs can be GC'd (mirrors ChatComposer's per-attachment cleanup). */
   clearDraft: (key: string) => void;
@@ -46,12 +56,16 @@ interface ComposerDraftState {
 export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
   drafts: {},
   patchDraft: (key, patch) =>
-    set((s) => ({
-      drafts: {
-        ...s.drafts,
-        [key]: { ...(s.drafts[key] ?? EMPTY_DRAFT), ...patch },
-      },
-    })),
+    set((s) => {
+      const prev = s.drafts[key] ?? EMPTY_DRAFT;
+      // The updater form reads the *latest* draft, so a synchronous loop of
+      // writes accumulates (multi-file pick / paste / drop) instead of each
+      // write clobbering the last from a stale render snapshot.
+      const delta = typeof patch === "function" ? patch(prev) : patch;
+      return {
+        drafts: { ...s.drafts, [key]: { ...prev, ...delta } },
+      };
+    }),
   clearDraft: (key) => {
     const draft = get().drafts[key];
     if (draft) {
@@ -70,8 +84,11 @@ export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
 
 export interface UseComposerDraft {
   draft: ComposerDraft;
-  /** Merge a partial update into this slot's draft. */
-  patch: (patch: Partial<ComposerDraft>) => void;
+  /** Merge a partial update into this slot's draft. Pass an updater
+   *  `(prev) => partial` when the new value depends on the current draft (e.g.
+   *  appending an attachment) so looped writes accumulate instead of clobbering
+   *  each other. */
+  patch: (patch: ComposerDraftPatch) => void;
   /** Discard this slot's draft (call on successful submit). */
   clear: () => void;
 }
@@ -93,8 +110,17 @@ export function useComposerDraft(
     draft,
     // On the first write for a fresh slot, fold the defaults in so seeded
     // fields (e.g. permissionMode) aren't lost the moment the user types.
+    // Both patch shapes are supported: an updater is wrapped so its result is
+    // still folded over the defaults on that first write.
     patch: (patch) =>
-      patchDraft(key, stored ? patch : { ...EMPTY_DRAFT, ...defaults, ...patch }),
+      patchDraft(
+        key,
+        stored
+          ? patch
+          : typeof patch === "function"
+            ? (prev) => ({ ...EMPTY_DRAFT, ...defaults, ...patch(prev) })
+            : { ...EMPTY_DRAFT, ...defaults, ...patch },
+      ),
     clear: () => clearDraft(key),
   };
 }
