@@ -1,0 +1,228 @@
+/* Inline card for Fleet MCP control tools (plan/handoff/watch/loop/schedule/
+   wiki). Lower visual weight than the decision card (teal, not accent-blue) —
+   these are operation records, not conversation turning points. */
+.root {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-teal);
+  overflow: hidden;
+  margin: 6px 0;
+  font-size: var(--font-size-xs);
+}
+
+.root_error {
+  border-left-color: var(--color-error-fg);
+}
+
+.header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--color-bg-tool);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  min-height: 30px;
+}
+
+.header:hover { background: var(--color-bg-tool-hover); }
+
+.arrow { color: var(--color-text-dim); font-size: 10px; flex-shrink: 0; }
+
+.kind {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-teal);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.spinner {
+  color: var(--color-text-dim);
+  animation: fleet_spin 1s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+@keyframes fleet_spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.error_badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}
+
+.body {
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+/* ── input params ─────────────────────────────────────────────────────────── */
+.params {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.param_row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.param_block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.param_key {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+  min-width: 56px;
+}
+
+.param_val {
+  color: var(--color-text);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.param_block .param_val {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  line-height: 1.5;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-secondary);
+}
+
+/* ── confirmation (mutate `ok: …`) ────────────────────────────────────────── */
+.confirm {
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── plan list (progress bars) ────────────────────────────────────────────── */
+.plan_list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.plan_row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plan_id {
+  flex-shrink: 0;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+
+.progress {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.progress_fill {
+  height: 100%;
+  background: var(--color-teal);
+  border-radius: var(--radius-pill);
+}
+
+.plan_count {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan_src {
+  flex-shrink: 0;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-2xs);
+}
+
+/* ── plan get (checklist) ─────────────────────────────────────────────────── */
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.check_row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--color-text-secondary);
+}
+
+.check_mark {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  font-size: 11px;
+}
+
+.check_done .check_mark { color: var(--color-success); }
+.check_done .check_text { color: var(--color-text); }
+
+.check_text { word-break: break-word; }
+
+/* ── raw / structured fallbacks (P2 refines wiki + records) ───────────────── */
+.raw_text,
+.error_text {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  line-height: 1.5;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.error_text {
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}

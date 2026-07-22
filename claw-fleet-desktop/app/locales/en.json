@@ -1,5 +1,86 @@
 {
   "title": "Claw Fleet",
+  "fleet": {
+    "kind": {
+      "plan": "Plan",
+      "handoff": "Handoff",
+      "watch": "Watch",
+      "loop": "Loop",
+      "schedule": "Schedule",
+      "wiki": "Wiki"
+    },
+    "param": {
+      "plan_id": "Plan",
+      "plan": "Plan",
+      "task": "Task",
+      "title": "Title",
+      "text": "Text",
+      "parent": "Parent",
+      "note": "Note",
+      "next": "Next",
+      "until": "Until",
+      "capture": "Capture",
+      "poll": "Poll",
+      "timeout": "Timeout",
+      "prompt": "Prompt",
+      "interval": "Interval",
+      "max": "Max",
+      "at": "At",
+      "in": "In",
+      "slug": "Slug",
+      "path": "Path",
+      "query": "Query",
+      "version": "Version",
+      "file": "File",
+      "id": "ID",
+      "model": "Model",
+      "effort": "Effort"
+    },
+    "summary": {
+      "plan": {
+        "check": "Check {{task}} · {{plan}}",
+        "uncheck": "Uncheck {{task}} · {{plan}}",
+        "create": "Create plan {{plan}}",
+        "add": "Add task {{task}} · {{plan}}",
+        "resume": "Resume plan {{plan}}",
+        "migrate": "Migrate TASKS.md",
+        "list": "List plans",
+        "get": "View plan {{plan}}"
+      },
+      "handoff": {
+        "register": "Register handoff",
+        "cancel": "Cancel pending handoff",
+        "list": "List handoff chains"
+      },
+      "watch": {
+        "create": "Create watch",
+        "stop": "Stop watch {{id}}",
+        "list": "List watches"
+      },
+      "loop": {
+        "create": "Create loop",
+        "stop": "Stop loop {{id}}",
+        "update": "Update loop {{id}}",
+        "get": "View loop {{id}}",
+        "run": "Run loop {{id}} now",
+        "list": "List loops"
+      },
+      "schedule": {
+        "create": "Create schedule",
+        "cancel": "Cancel schedule {{id}}",
+        "update": "Update schedule {{id}}",
+        "get": "View schedule {{id}}",
+        "run": "Run schedule {{id}} now",
+        "list": "List schedules"
+      },
+      "wiki": {
+        "publish": "Publish {{slug}}",
+        "cat": "View {{slug}}",
+        "list": "List wiki",
+        "search": "Search {{query}}"
+      }
+    }
+  },
   "filter_placeholder": "Filter sessions…",
   "active": "Active",
   "recent": "Recent",

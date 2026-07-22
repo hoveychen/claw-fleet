@@ -1,5 +1,86 @@
 {
   "title": "Claw Fleet",
+  "fleet": {
+    "kind": {
+      "plan": "计划",
+      "handoff": "接力",
+      "watch": "守望",
+      "loop": "循环",
+      "schedule": "定时",
+      "wiki": "知识库"
+    },
+    "param": {
+      "plan_id": "计划",
+      "plan": "计划",
+      "task": "任务",
+      "title": "标题",
+      "text": "内容",
+      "parent": "父计划",
+      "note": "交接",
+      "next": "下一步",
+      "until": "条件",
+      "capture": "捕获",
+      "poll": "轮询",
+      "timeout": "超时",
+      "prompt": "提示",
+      "interval": "间隔",
+      "max": "上限",
+      "at": "时间",
+      "in": "延时",
+      "slug": "slug",
+      "path": "路径",
+      "query": "查询",
+      "version": "版本",
+      "file": "文件",
+      "id": "ID",
+      "model": "模型",
+      "effort": "档位"
+    },
+    "summary": {
+      "plan": {
+        "check": "勾选 {{task}} · {{plan}}",
+        "uncheck": "取消勾选 {{task}} · {{plan}}",
+        "create": "新建计划 {{plan}}",
+        "add": "添加任务 {{task}} · {{plan}}",
+        "resume": "接手计划 {{plan}}",
+        "migrate": "迁移 TASKS.md",
+        "list": "列出计划",
+        "get": "查看计划 {{plan}}"
+      },
+      "handoff": {
+        "register": "登记接力",
+        "cancel": "取消待定接力",
+        "list": "列出接力链"
+      },
+      "watch": {
+        "create": "创建守望",
+        "stop": "停止守望 {{id}}",
+        "list": "列出守望"
+      },
+      "loop": {
+        "create": "创建循环",
+        "stop": "停止循环 {{id}}",
+        "update": "更新循环 {{id}}",
+        "get": "查看循环 {{id}}",
+        "run": "立即运行循环 {{id}}",
+        "list": "列出循环"
+      },
+      "schedule": {
+        "create": "创建定时任务",
+        "cancel": "取消定时任务 {{id}}",
+        "update": "更新定时任务 {{id}}",
+        "get": "查看定时任务 {{id}}",
+        "run": "立即运行定时任务 {{id}}",
+        "list": "列出定时任务"
+      },
+      "wiki": {
+        "publish": "发布 {{slug}}",
+        "cat": "查看 {{slug}}",
+        "list": "列出知识库",
+        "search": "搜索 {{query}}"
+      }
+    }
+  },
   "filter_placeholder": "过滤会话…",
   "active": "活跃",
   "recent": "最近",
