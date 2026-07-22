@@ -1341,7 +1341,8 @@
   },
   "waiting_alerts": {
     "title": "Needs Your Attention",
-    "dismiss_tip": "Click to dismiss"
+    "dismiss_tip": "Click to dismiss",
+    "clear_all": "Clear all ({{n}})"
   },
   "lite": {
     "enter": "Lite portrait mode",

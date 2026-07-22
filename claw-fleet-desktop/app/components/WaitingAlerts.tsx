@@ -74,7 +74,8 @@ function AlertCard({
 }
 
 export function WaitingAlerts() {
-  const { alerts, setAlerts, refresh, dismiss, dismissedIds } = useWaitingAlertsStore();
+  const { t } = useTranslation();
+  const { alerts, setAlerts, refresh, dismiss, dismissAll, dismissedIds } = useWaitingAlertsStore();
   const liteMode = useUIStore((s) => s.liteMode);
   const hasDecision = useDecisionStore((s) => s.decisions.length > 0);
   const openedSession = useDetailStore((s) => s.session);
@@ -135,11 +136,19 @@ export function WaitingAlerts() {
 
   return (
     <div className={`${styles.overlay} ${liteMode ? styles.overlay_lite : ""}`}>
+      {visible.length >= 2 && (
+        <button
+          className={styles.clear_all}
+          onClick={() => dismissAll()}
+        >
+          {t("waiting_alerts.clear_all", { n: visible.length })}
+        </button>
+      )}
       <div className={styles.stack}>
         {shown.map((alert, i) => (
           <div
             key={alert.sessionId}
-            className={styles.stack_layer}
+            className={i === 0 ? styles.stack_front : styles.stack_layer}
             style={{
               zIndex: MAX_STACK - i,
               transform: `translateY(${-i * 6}px) scale(${1 - i * 0.03})`,
