@@ -731,6 +731,183 @@ fn fold_codex_session_range(
     true
 }
 
+// ── Cache-ready per-session projection ───────────────────────────────────────
+//
+// Both receipts re-read and re-parse every in-window session's full JSONL on
+// every open. To make that cacheable, one session's spend is projected once into
+// `(date_bucket, model) -> acc` cells — the smallest form from which BOTH
+// receipts reconstruct exactly:
+//   * today  sums **every** cell (undated turns included) → same口径 as
+//     `fold_session_turns` (whole file, for sessions created today).
+//   * range  sums only cells whose non-empty local date is in `[from, to]`,
+//     bucketed per day → same口径 as `fold_session_turns_range`.
+//
+// `date_bucket` is the turn's local `YYYY-MM-DD`, or `""` for a Claude turn with
+// no `timestamp` (transcripts predating the field): today counts it, range drops
+// it — which is precisely what the two folders above already do. Range windows
+// are compared at **date** granularity; that matches the receipt's only caller
+// (day-aligned presets `today` / `7d` / `30d` / `all`, always `to = now`), where
+// `ts_ms >= from_ms` ⇔ `local_date(ts) >= local_date(from_ms)`.
+
+/// One session's usage as `(date_bucket, model) -> acc`. The agent source is
+/// uniform per session, so it is applied at query time and kept out of the key.
+type SessionCells = std::collections::HashMap<(String, String), LineAcc>;
+
+/// Project one Claude session's JSONL into `(date, model)` cells in a single
+/// pass. Turn selection, msg-id dedup, `last_model` tracking and per-turn cost
+/// are identical to [`fold_session_turns`] / [`fold_session_turns_range`]; the
+/// only addition is bucketing each folded turn by its local date (`""` when the
+/// turn carries no timestamp).
+fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
+    use crate::model_cost::{turn_cost_usd, TurnUsage};
+    use std::collections::HashSet;
+
+    let mut cells = SessionCells::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut last_model: Option<String> = None;
+
+    for line in jsonl.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+            continue;
+        }
+        let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
+            continue;
+        };
+        if msg.get("stop_reason").map_or(true, |s| s.is_null()) {
+            continue;
+        }
+        let msg_id = msg.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+        if !msg_id.is_empty() && !seen.insert(msg_id.to_string()) {
+            continue;
+        }
+
+        // Advance model tracking even for undated turns (matches the range folder).
+        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        if let Some(m) = turn_model {
+            last_model = Some(m.to_string());
+        }
+
+        // Empty date bucket = no timestamp: today includes it, range excludes it.
+        let date = v
+            .get("timestamp")
+            .and_then(|t| t.as_str())
+            .and_then(parse_iso_ms)
+            .map(local_date_str)
+            .unwrap_or_default();
+
+        let usage = msg.get("usage");
+        let input = usage
+            .and_then(|u| u.get("input_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let output = usage
+            .and_then(|u| u.get("output_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let cache_creation = usage
+            .and_then(|u| u.get("cache_creation_input_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let cache_read = usage
+            .and_then(|u| u.get("cache_read_input_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let web_search = usage
+            .and_then(|u| u.get("server_tool_use"))
+            .and_then(|s| s.get("web_search_requests"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+
+        let model = turn_model
+            .map(|s| s.to_string())
+            .or_else(|| last_model.clone())
+            .unwrap_or_default();
+        let cost = turn_cost_usd(
+            &model,
+            &TurnUsage {
+                input_tokens: input,
+                output_tokens: output,
+                cache_creation_tokens: cache_creation,
+                cache_read_tokens: cache_read,
+                web_search_requests: web_search,
+            },
+        );
+
+        cells
+            .entry((date, model))
+            .or_default()
+            .add(input, cache_creation, cache_read, output, cost);
+    }
+    cells
+}
+
+/// Project one Codex session into a single `(creation-day, model)` cell. Codex
+/// reports one cumulative snapshot per session (no per-turn split), so the whole
+/// figure attributes to `attribute_ms`'s local day — same as
+/// [`fold_codex_session_range`]. Returns empty cells on error / zero usage.
+fn fold_codex_session_cells(uri: &str, attribute_ms: i64) -> SessionCells {
+    let mut cells = SessionCells::new();
+    let Ok(bd) = crate::codex_source::codex_token_breakdown(uri) else {
+        return cells;
+    };
+    if bd.total_tokens == 0 {
+        return cells;
+    }
+    let model = bd.model.clone().unwrap_or_else(|| "gpt".to_string());
+    cells
+        .entry((local_date_str(attribute_ms), model))
+        .or_default()
+        .add(bd.input_tokens, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
+    cells
+}
+
+/// Sum **all** cells (today口径: undated included) into `by_model` under `source`.
+fn sum_cells_all(
+    cells: &SessionCells,
+    source: &str,
+    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
+) {
+    for ((_, model), acc) in cells {
+        by_model
+            .entry((source.to_string(), model.clone()))
+            .or_default()
+            .add(acc.input, acc.cache_creation, acc.cache_read, acc.output, acc.cost);
+    }
+}
+
+/// Sum cells whose non-empty date is within `[from_date, to_date]` (range口径:
+/// undated dropped) into both `by_model` and the per-day trend `by_day`. Dates
+/// are `YYYY-MM-DD`, so lexicographic comparison is chronological.
+fn sum_cells_window(
+    cells: &SessionCells,
+    source: &str,
+    from_date: &str,
+    to_date: &str,
+    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
+    by_day: &mut std::collections::BTreeMap<String, LineAcc>,
+) {
+    for ((date, model), acc) in cells {
+        if date.is_empty() || date.as_str() < from_date || date.as_str() > to_date {
+            continue;
+        }
+        by_model
+            .entry((source.to_string(), model.clone()))
+            .or_default()
+            .add(acc.input, acc.cache_creation, acc.cache_read, acc.output, acc.cost);
+        by_day
+            .entry(date.clone())
+            .or_default()
+            .add(acc.input, acc.cache_creation, acc.cache_read, acc.output, acc.cost);
+    }
+}
+
 /// Per-model receipt + per-day trend over an arbitrary inclusive window.
 ///
 /// `sessions` is the already-scanned session list (no extra scan beyond reading
@@ -1468,5 +1645,101 @@ mod range_breakdown_tests {
         assert_eq!(b.daily.len(), 1);
         assert_eq!(b.daily[0].date, local_date_str(when));
         assert!((b.daily[0].cost_usd - 0.5).abs() < 1e-9);
+    }
+
+    /// The cache-ready `(date, model)` cells must reconstruct BOTH receipts
+    /// bit-for-bit: whole-table sum == today's `fold_session_turns` (undated
+    /// turns counted), date-window sum == range's `fold_session_turns_range`
+    /// (undated turns dropped, per-day trend preserved).
+    #[test]
+    fn session_cells_reproduce_both_receipt_folders() {
+        // Dated turns on two days, one undated turn, a duplicate id, and a
+        // non-finalized turn — every branch the two folders special-case.
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-20T10:00:00.000Z","message":{"id":"a","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":5,"cache_read_input_tokens":50}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-07-21T10:00:00.000Z","message":{"id":"b","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":200,"output_tokens":40,"cache_creation_input_tokens":0,"cache_read_input_tokens":10}}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"id":"c","model":"claude-sonnet-5","stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":3}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-07-21T11:00:00.000Z","message":{"id":"b","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":999,"output_tokens":999}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-07-21T12:00:00.000Z","message":{"id":"d","model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":999,"output_tokens":999}}}"#,
+            "\n",
+        );
+
+        let cells = fold_claude_session_cells(jsonl);
+
+        // today口径: whole-table sum == fold_session_turns.
+        let mut old_today = std::collections::HashMap::new();
+        fold_session_turns(jsonl, "claude-code", &mut old_today);
+        let mut new_today = std::collections::HashMap::new();
+        sum_cells_all(&cells, "claude-code", &mut new_today);
+        assert_eq!(snap(&old_today), snap(&new_today), "today口径 mismatch");
+
+        // range口径: date-window sum == fold_session_turns_range. The window
+        // brackets both dated turns with 2 days of margin each side, so ms- and
+        // date-filtering agree; the undated turn `c` is dropped by both.
+        let from = ts("2026-07-18T00:00:00Z");
+        let to = ts("2026-07-23T00:00:00Z");
+        let mut old_model = std::collections::HashMap::new();
+        let mut old_day = std::collections::BTreeMap::new();
+        fold_session_turns_range(jsonl, "claude-code", from, to, &mut old_model, &mut old_day);
+        let mut new_model = std::collections::HashMap::new();
+        let mut new_day = std::collections::BTreeMap::new();
+        sum_cells_window(
+            &cells,
+            "claude-code",
+            &local_date_str(from),
+            &local_date_str(to),
+            &mut new_model,
+            &mut new_day,
+        );
+        assert_eq!(snap(&old_model), snap(&new_model), "range by_model mismatch");
+        assert_eq!(snap_day(&old_day), snap_day(&new_day), "range by_day mismatch");
+
+        // The undated turn `c` lands in the "" bucket and never reaches the trend.
+        assert!(cells.keys().any(|(d, _)| d.is_empty()), "undated turn not bucketed");
+        assert!(!new_day.keys().any(|d| d.is_empty()), "range trend leaked an undated turn");
+    }
+
+    /// Normalize a `by_model` map to a comparable snapshot (cost → micro-USD int
+    /// so f64 summation order doesn't fail the equality).
+    fn snap(
+        m: &std::collections::HashMap<(String, String), LineAcc>,
+    ) -> std::collections::BTreeMap<(String, String), (u64, u64, u64, u64, i64)> {
+        m.iter()
+            .map(|(k, a)| {
+                (
+                    k.clone(),
+                    (
+                        a.input,
+                        a.cache_creation,
+                        a.cache_read,
+                        a.output,
+                        (a.cost * 1e6).round() as i64,
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    fn snap_day(
+        m: &std::collections::BTreeMap<String, LineAcc>,
+    ) -> std::collections::BTreeMap<String, (u64, u64, u64, u64, i64)> {
+        m.iter()
+            .map(|(k, a)| {
+                (
+                    k.clone(),
+                    (
+                        a.input,
+                        a.cache_creation,
+                        a.cache_read,
+                        a.output,
+                        (a.cost * 1e6).round() as i64,
+                    ),
+                )
+            })
+            .collect()
     }
 }
