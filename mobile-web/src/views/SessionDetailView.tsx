@@ -22,9 +22,12 @@ import {
   Search,
   Sparkles,
   Terminal,
+  Waypoints,
   Wrench,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
+import { isFleetTool } from "./fleetTools";
+import { fleetSummary } from "./FleetBody";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { MermaidBlock } from "../markdown/MermaidBlock";
@@ -378,6 +381,7 @@ function railToolIcon(name: string): ReactNode {
   if (AGENT_TOOLS.has(name)) return <Bot />;
   if (PLAN_TOOLS.has(name)) return <ListTodo />;
   if (isDecisionTool(name)) return <CircleHelp />;
+  if (isFleetTool(name)) return <Waypoints />;
   return <Wrench />;
 }
 
@@ -507,7 +511,8 @@ function ToolStep({
 }) {
   const [open, setOpen] = useState(false);
   const name = b.name ?? "";
-  const summary = toolSummary(b);
+  const fleetTool = isFleetTool(name);
+  const summary = fleetTool ? fleetSummary(fleetTool, b.input ?? {}) : toolSummary(b);
   const expandable = !!b.id && !!client && !!jsonlPath;
   return (
     <RailStep icon={railToolIcon(name)}>

@@ -1,0 +1,104 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.confirm {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
+.raw {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.rawErr {
+  color: var(--color-error);
+}
+
+/* ── plan list (progress bars) ────────────────────────────────────────────── */
+.planList {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.planRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.planId {
+  flex-shrink: 0;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.progress {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--color-success);
+  border-radius: 3px;
+}
+
+.planCount {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── plan get (checklist) ─────────────────────────────────────────────────── */
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.checkRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--color-text-secondary);
+}
+
+.checkMark {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}
+
+.checkDone .checkMark {
+  color: var(--color-success);
+}
+
+.checkDone {
+  color: var(--color-text);
+}
