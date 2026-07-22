@@ -2695,30 +2695,31 @@ mod tests {
     }
 
     #[test]
-    fn context_window_inferred_1m_for_opus_4_6() {
-        // Observed a 530K cache_read turn → must be a 1M session.
+    fn context_window_opus_4_6_is_native_1m() {
+        // Opus 4.6 ships 1M as its default, sole window — report it regardless
+        // of observed input, high (530K) or near-zero (50K). There is no 200K
+        // variant to disambiguate, so the old observed-input inference is gone.
         assert_eq!(
             context_window_for_model("claude-opus-4-6", 530_000),
             Some(1_000_000)
         );
-        // Same model but only 50K observed → conservative 200K.
         assert_eq!(
             context_window_for_model("claude-opus-4-6", 50_000),
-            Some(200_000)
+            Some(1_000_000)
         );
     }
 
     #[test]
-    fn context_window_inferred_1m_for_opus_4_7() {
-        // Opus 4.7 also supports 1M; without this, on-disk transcripts that
-        // don't carry the `[1m]` flag would default the denominator to 200K.
+    fn context_window_opus_4_7_is_native_1m() {
+        // Opus 4.7 is native 1M too — a fresh session (low observed input) must
+        // still read 1M, or the ctx-% badge inflates ~5× against a 200K default.
         assert_eq!(
             context_window_for_model("claude-opus-4-7", 530_000),
             Some(1_000_000)
         );
         assert_eq!(
             context_window_for_model("claude-opus-4-7", 50_000),
-            Some(200_000)
+            Some(1_000_000)
         );
     }
 
@@ -2799,9 +2800,9 @@ mod tests {
     }
 
     #[test]
-    fn context_window_inferred_1m_for_opus_4_8_and_future_versions() {
+    fn context_window_opus_4_8_and_future_are_native_1m() {
         // Opus 4.8 (the model that shipped after the hard-coded 4-6/4-7
-        // whitelist) must be recognised as 1M-capable — otherwise its
+        // whitelist) must be recognised as native 1M — otherwise its
         // denominator defaults to 200K and the UI shows a fake "ctx 100%".
         assert_eq!(
             context_window_for_model("claude-opus-4-8", 530_000),
@@ -2827,10 +2828,11 @@ mod tests {
             context_window_for_model("claude-sonnet-5-0", 530_000),
             Some(1_000_000)
         );
-        // Below-threshold observed input still yields the conservative 200K.
+        // A fresh session (low observed input) must also read 1M — native-1M
+        // families have no 200K variant to fall back to.
         assert_eq!(
             context_window_for_model("claude-opus-4-8", 50_000),
-            Some(200_000)
+            Some(1_000_000)
         );
     }
 
