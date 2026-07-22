@@ -1171,6 +1171,43 @@ fn usage_cache() -> &'static std::sync::Mutex<UsageBreakdownCache> {
     &CACHE
 }
 
+/// Guards against overlapping warms: a scan fires every few seconds, but only one
+/// background fold should run at a time.
+static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Pre-fold any new/changed sessions into the cache **off the caller's thread**,
+/// so the first receipt open after a scan finds everything warm instead of paying
+/// the full transcript re-parse. Skips when a warm is already in flight (the next
+/// scan re-warms whatever changed since). Called from the desktop scan loop.
+///
+/// After the on-disk cache (see [`usage_cache`]) this is cheap on every run but
+/// the first-ever one: it re-folds only the sessions whose fingerprint changed.
+pub fn warm_usage_cache(sessions: &[SessionInfo]) {
+    use std::sync::atomic::Ordering;
+    if WARMING.swap(true, Ordering::AcqRel) {
+        return; // a warm is already running
+    }
+    let owned: Vec<SessionInfo> = sessions.to_vec();
+    std::thread::spawn(move || {
+        // Reset the guard even if the fold panics (e.g. a poisoned lock), so a
+        // one-off failure can't wedge warming off permanently.
+        struct WarmGuard;
+        impl Drop for WarmGuard {
+            fn drop(&mut self) {
+                WARMING.store(false, Ordering::Release);
+            }
+        }
+        let _guard = WarmGuard;
+
+        let mut cache = usage_cache().lock().unwrap();
+        cache.retain_sessions(&live_ids(&owned));
+        for s in &owned {
+            let _ = cache.cells(s);
+        }
+        persist_cache(&mut cache);
+    });
+}
+
 /// Per-model receipt + per-day trend over an arbitrary inclusive window.
 ///
 /// `sessions` is the already-scanned session list; each in-window session is

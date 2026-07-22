@@ -1491,6 +1491,8 @@ fn rescan_and_emit(
     let _ = app.emit("sessions-updated", &s);
     crate::update_tray(app, &s);
     publish_mobile_sessions(&s);
+    // Pre-fold changed sessions so the cost-breakdown modal opens warm.
+    claw_fleet_core::today_usage::warm_usage_cache(&s);
 }
 
 /// Build the session list an incremental rescan should produce: keep the
@@ -1576,6 +1578,8 @@ fn incremental_rescan_and_emit(
     let _ = app.emit("sessions-updated", &s);
     crate::update_tray(app, &s);
     publish_mobile_sessions(&s);
+    // Pre-fold changed sessions so the cost-breakdown modal opens warm.
+    claw_fleet_core::today_usage::warm_usage_cache(&s);
 }
 
 /// Returns true when `path` resides inside a known memory directory.
