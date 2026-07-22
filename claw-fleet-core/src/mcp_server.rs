@@ -307,6 +307,14 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     let request_id = crate::guard::new_request_id();
     let workspace_name = project_dir_workspace_name();
 
+    // Optional review docs (`.md` files / wiki entries to show next to the card).
+    // A malformed array is non-fatal: drop it rather than failing the whole ask.
+    let review_docs: Vec<crate::mcp_ipc::ReviewDoc> = args
+        .get("reviewDocs")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
     let mut req = crate::mcp_ipc::FleetAskRequest {
         id: request_id.clone(),
         session_id,
@@ -315,7 +323,13 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         timestamp: chrono::Utc::now().to_rfc3339(),
         parked: false,
         questions,
+        review_docs,
     };
+
+    // Resolve `file` doc refs against the agent's cwd so the desktop (a separate
+    // process) can read them back live when the card renders.
+    let project_dir = std::env::var("CLAUDE_PROJECT_DIR").ok();
+    crate::mcp_ipc::resolve_review_docs(&mut req, project_dir.as_deref().map(std::path::Path::new));
 
     // Give every `html` preview the height-reporting script before it is staged
     // anywhere, so the card's sandboxed iframe can size itself to the content

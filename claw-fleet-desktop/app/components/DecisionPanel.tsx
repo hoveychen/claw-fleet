@@ -33,6 +33,7 @@ import { StructuredCommandView } from "./StructuredCommandView";
 import { useAutoFlip } from "./useAutoFlip";
 import { decisionAssetUrl } from "../decisionAssets";
 import { AutoHeightFrame } from "./AutoHeightFrame";
+import { ReviewDocsColumn } from "./ReviewDocsColumn";
 import styles from "./DecisionPanel.module.css";
 
 function shortId(id: string): string {
@@ -1900,6 +1901,11 @@ export function DecisionPanel({
   );
   const sessionsList = useSessionsStore((s) => s.sessions);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Review docs the agent attached to a fleet__ask card — shown as tabs in the
+  // side column (same slot as the inline SessionDetail). Open by default so the
+  // user sees them the moment the card arrives; the two share the column, so
+  // opening one closes the other.
+  const [docsOpen, setDocsOpen] = useState(true);
 
   // Escape key: block the active guard / permission-prompt decision.
   const { respond } = useDecisionStore();
@@ -2009,14 +2015,29 @@ export function DecisionPanel({
     [sessionsList, activeSessionId],
   );
 
+  // Review docs attached to the active fleet__ask card (empty for other kinds).
+  const reviewDocs =
+    active?.kind === "fleet-ask" ? active.request.reviewDocs ?? [] : [];
+  const hasReviewDocs = reviewDocs.length > 0;
+
+  // Reset the side column to "docs open" whenever a card with docs becomes
+  // active; cards without docs leave it closed so history behaves as before.
+  useEffect(() => {
+    setDocsOpen(hasReviewDocs);
+  }, [active?.id, hasReviewDocs]);
+
   // Inline detail column is normal-mode only; lite has its own chip flow.
   // SessionDetail in standalone mode owns its own state (no shared global
   // store), so two detail views can coexist on different sessions.
   const inlineDetailActive = !compact && historyOpen && !!activeSessionInfo;
+  const docsColumnActive = !compact && docsOpen && hasReviewDocs;
+  // The docs panel and the SessionDetail history share the one side column;
+  // docs win when both would be open (they reset closed on card change).
+  const sideColumnActive = docsColumnActive || inlineDetailActive;
 
   useEffect(() => {
-    onInlineDetailChange?.(inlineDetailActive);
-  }, [inlineDetailActive, onInlineDetailChange]);
+    onInlineDetailChange?.(sideColumnActive);
+  }, [sideColumnActive, onInlineDetailChange]);
 
   // Bump tier when the card area overflows vertically, until no overflow or
   // we hit the maximum tier.
@@ -2088,7 +2109,7 @@ export function DecisionPanel({
   // Detail column adds a fixed slab to the panel's overall width; clamp the
   // combined size to the viewport so the panel never escapes the screen.
   const DETAIL_COLUMN_WIDTH = 640;
-  const targetTotalWidth = inlineDetailActive
+  const targetTotalWidth = sideColumnActive
     ? DETAIL_COLUMN_WIDTH + currentWidth
     : currentWidth;
   const vpClamp =
@@ -2097,12 +2118,19 @@ export function DecisionPanel({
 
   return (
     <div
-      className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${float ? styles.panel_float : ""} ${peeking ? styles.panel_peeking : ""} ${inlineDetailActive ? styles.panel_with_detail : ""}`}
+      className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${float ? styles.panel_float : ""} ${peeking ? styles.panel_peeking : ""} ${sideColumnActive ? styles.panel_with_detail : ""}`}
       style={compact || float ? undefined : { width: `${panelWidth}px` }}
     >
-      {inlineDetailActive && (
+      {sideColumnActive && (
         <div className={styles.detail_column}>
-          <SessionDetail inline sessionInfo={activeSessionInfo} />
+          {docsColumnActive ? (
+            <ReviewDocsColumn
+              docs={reviewDocs}
+              sessionId={active.request.sessionId}
+            />
+          ) : (
+            <SessionDetail inline sessionInfo={activeSessionInfo} />
+          )}
         </div>
       )}
       <div className={styles.main_column}>
@@ -2125,6 +2153,27 @@ export function DecisionPanel({
               </svg>
             </button>
             <span className={styles.panel_toolbar_spacer} />
+            {/* Review-docs toggle: the agent attached `.md` / wiki docs to this
+             *  card. Opening docs closes history (they share the side column). */}
+            {hasReviewDocs && (
+              <button
+                type="button"
+                className={`${styles.review_docs_toggle} ${docsColumnActive ? styles.review_docs_toggle_active : ""}`}
+                onClick={() =>
+                  setDocsOpen((v) => {
+                    const next = !v;
+                    if (next) setHistoryOpen(false);
+                    return next;
+                  })
+                }
+                title={t("review_docs.toggle", "Review documents")}
+                aria-pressed={docsColumnActive}
+              >
+                {t("review_docs.chip", "📄 Docs · {{count}}", {
+                  count: reviewDocs.length,
+                })}
+              </button>
+            )}
             {/* History toggle opens the inline SessionDetail column. Neutral
              *  chip styling (no red alarm badge) since it's context, not alert. */}
             {active.request.sessionId && (
@@ -2132,7 +2181,13 @@ export function DecisionPanel({
                 key={active.id}
                 sessionId={active.request.sessionId}
                 expanded={historyOpen}
-                onToggle={() => setHistoryOpen((v) => !v)}
+                onToggle={() =>
+                  setHistoryOpen((v) => {
+                    const next = !v;
+                    if (next) setDocsOpen(false);
+                    return next;
+                  })
+                }
               />
             )}
           </div>
