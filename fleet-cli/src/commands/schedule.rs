@@ -196,38 +196,19 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
             // fable-5 codex session fires on fable-5 codex, in the session's real
             // cwd (not a worktree that may later be removed).
             let sid = read_fleet_session_id();
-            let shell_cwd = std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                .to_string_lossy()
-                .to_string();
-            let ws = sid
-                .as_deref()
-                .and_then(claw_fleet_core::session::resolve_session_cwd)
-                .unwrap_or_else(|| shell_cwd.clone());
+            let ctx = claw_fleet_core::session::inherit_launch_context(sid.as_deref());
             // An explicit --model/--effort flag overrides the value inherited from
             // the creating session (mirrors handoff's --model/--effort override).
-            let model = model_flag
-                .filter(|m| !m.trim().is_empty())
-                .or_else(|| {
-                    sid.as_deref()
-                        .and_then(claw_fleet_core::session::resolve_session_model_spec)
-                });
-            let effort = effort_flag
-                .filter(|e| !e.trim().is_empty())
-                .or_else(|| std::env::var("CLAUDE_EFFORT").ok())
-                .filter(|e| !e.trim().is_empty());
-            let agent_source = std::env::var("FLEET_AGENT_SOURCE")
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
+            let model = model_flag.filter(|m| !m.trim().is_empty()).or(ctx.model);
+            let effort = effort_flag.filter(|e| !e.trim().is_empty()).or(ctx.effort);
 
             match schedule::create(
-                &ws,
+                &ctx.workspace,
                 prompt,
                 fire_at,
                 model.as_deref(),
                 effort.as_deref(),
-                agent_source.as_deref(),
+                ctx.source.as_deref(),
                 sid.as_deref(),
             ) {
                 Ok(rec) => match schedule::arm_timer(&rec) {

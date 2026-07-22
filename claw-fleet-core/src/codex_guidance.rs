@@ -163,6 +163,14 @@ that file up to date.\n\
 \n\
 - When you decompose a task into 2+ subtasks, write it to \
 `<workspace_root>/TASKS.md` BEFORE starting P1.\n\
+- **If your tool list includes the `fleet__plan` / `fleet__handoff` / \
+`fleet__watch` / `fleet__loop` / `fleet__schedule` / `fleet__wiki` MCP tools \
+(under codex they appear as `mcp__fleet__fleet__plan` etc.), prefer them over \
+the `fleet …` CLI below — call `fleet__plan` with an `action` parameter \
+(e.g. `action=\"check\"`), one-to-one with the CLI subcommands. In an rca \
+remote workspace session a shell `fleet …` is routed to a remote executor with \
+no `fleet` and fails; the MCP tools always reach local Fleet state. Fall back \
+to the CLI only when those tools are absent.**\n\
 - Update plans with the **`fleet plan`** subcommands, not by hand-editing \
 markdown — they make the same file change AND attribute your session to the \
 plan (so Fleet's UI shows your current P):\n\
@@ -450,6 +458,12 @@ pub fn render_codex_wiki_block(locale: &str) -> String {
 \n\
 ```\nfleet wiki publish <path> [--slug <slug>] [--title \"<标题>\"]\n```\n\
 \n\
+> **若工具列表里有 `fleet__wiki`(codex 下为 `mcp__fleet__fleet__wiki`)MCP \
+工具,优先用它(`action=\"publish\"/\"cat\"/\"list\"/\"search\"`)而不是 `fleet wiki` \
+CLI——远端会话里 shell 跑 `fleet wiki` 会失败。注意 `publish` 读**本地**文件,\
+远端会话里文件可能在远端 fs 上,那种情况仍用 CLI 或先取回本地。工具不可用时\
+才退回 CLI。**\n\
+\n\
 - `<path>` 可以是单个 `.html` / `.md` 文件,或含 `index.html` 的目录(目录会\
 连同相对引用的 js/css/图片一起入库)。\n\
 - 同一份文档迭代**复用同一个 slug** 重新 publish——生成新版本、旧版保留可回看;\
@@ -497,6 +511,13 @@ visualizations…), archive it into the Fleet wiki when done instead of leaving 
 it in the workdir:\n\
 \n\
 ```\nfleet wiki publish <path> [--slug <slug>] [--title \"<title>\"]\n```\n\
+\n\
+> **If your tool list includes the `fleet__wiki` MCP tool (under codex it \
+appears as `mcp__fleet__fleet__wiki`), prefer it \
+(`action=\"publish\"/\"cat\"/\"list\"/\"search\"`) over the `fleet wiki` CLI — in \
+an rca remote session a shell `fleet wiki` fails. Note `publish` reads a \
+**local** file path; if the file lives on the remote fs, use the CLI or fetch \
+it locally first. Fall back to the CLI only when the tool is absent.**\n\
 \n\
 - `<path>` is a single `.html` / `.md` file, or a directory with an \
 `index.html` entry (its relatively-referenced js/css/images are archived too).\n\
