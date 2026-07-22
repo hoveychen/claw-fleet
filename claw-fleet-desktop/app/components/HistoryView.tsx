@@ -359,6 +359,27 @@ export function buildRenderItems(rows: SessionInfo[], group: boolean): RenderIte
 }
 
 /**
+ * Which sessions a dwell-read on the active session should clear. A collapsed
+ * relay-group header shows an aggregate unread dot over its *whole* chain (see
+ * the header's `unread` prop, which is `full.some(sessionUnread)`), yet clicking
+ * the header only opens the tip. So dwelling on it must mark every chain member
+ * read — otherwise a still-unread non-tip hop keeps the group's dot lit after
+ * the user has plainly opened it. A standalone row, an expanded group's child,
+ * or any ungrouped row marks only itself.
+ *
+ * `groupTips` maps a currently-rendered group header's tip id → that group's
+ * full chain membership; ids absent from it (singles / children) fall back to
+ * the lone session.
+ */
+export function dwellReadTargets(
+  active: SessionInfo,
+  groupTips: Map<string, SessionInfo[]>,
+): SessionInfo[] {
+  const chain = groupTips.get(active.id);
+  return chain && chain.length > 0 ? chain : [active];
+}
+
+/**
  * The mark-all toggle on a group header. Same pending/done axis as MarkControl,
  * but it fans the `set_session_mark` call out across every member of the chain
  * (`members` = the full membership, not just the visible hops). Reads as done
@@ -836,6 +857,22 @@ export function HistoryView() {
     return m;
   }, [adhocSessions]);
 
+  // Tip id → full chain membership, but only for chains currently rendered as a
+  // collapsed group header. Backs dwell-read (see `dwellReadTargets`): opening a
+  // group header must clear the whole chain's aggregate unread dot, not just the
+  // tip — which is all the header click actually opens. Singles and expanded
+  // children are absent from the map, so they fall back to marking only
+  // themselves.
+  const groupHeaderChains = useMemo(() => {
+    const m = new Map<string, SessionInfo[]>();
+    for (const it of displayItems) {
+      if (it.kind === "group") {
+        m.set(it.tip.id, chainMembersAll.get(it.chainId) ?? it.members);
+      }
+    }
+    return m;
+  }, [displayItems, chainMembersAll]);
+
   // Which chains are expanded, and how many hops each has paged in beyond the
   // initial GROUP_VISIBLE. Local state: default-collapsed is the right reset
   // whenever the page remounts.
@@ -1204,18 +1241,24 @@ export function HistoryView() {
     [tabItems, activeId],
   );
   // Read at fire time so the timer isn't re-armed by every scan that refreshes
-  // the session object, which would keep pushing the 2s dwell out.
+  // the session object, which would keep pushing the 2s dwell out. Same reason
+  // `groupHeaderChains` is read through a ref: it's rebuilt on every scan, so a
+  // dep on it would reset the dwell timer each tick.
   const activeSessionRef = useRef(activeSession);
   activeSessionRef.current = activeSession;
+  const groupHeaderChainsRef = useRef(groupHeaderChains);
+  groupHeaderChainsRef.current = groupHeaderChains;
   useEffect(() => {
     // The draft tab has no session to mark read; only real session tabs dwell.
     if (!activeId || activeId === DRAFT_TAB_ID) return;
     const id = setTimeout(() => {
       const target = activeSessionRef.current;
-      if (target) markRead(target);
+      // A group header aggregates unread over the whole chain, so dwelling on it
+      // clears every member — not just the tip the click opened.
+      if (target) markManyRead(dwellReadTargets(target, groupHeaderChainsRef.current));
     }, 2000);
     return () => clearTimeout(id);
-  }, [activeId, markRead]);
+  }, [activeId, markManyRead]);
 
   // One session row — shared by standalone rows and the members inside an
   // expanded handoff group, so both stay pixel-identical and pick up the same

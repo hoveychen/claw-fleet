@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildRenderItems, CHAT_HIDDEN, CHAT_ONLY, matchesWorkspaceFilter } from "./TasksView";
+import {
+  buildRenderItems,
+  CHAT_HIDDEN,
+  CHAT_ONLY,
+  groupOpenReadTargets,
+  matchesWorkspaceFilter,
+} from "./TasksView";
 import type { SessionInfo } from "../types";
 
 /**
@@ -98,5 +104,43 @@ describe("buildRenderItems", () => {
     const rows = [chainSession("x", { chainId: "c", hop: 1, chainLen: 1 })];
     const items = buildRenderItems(rows, true);
     expect(items[0].kind).toBe("single");
+  });
+});
+
+/**
+ * A collapsed relay group's header aggregates its unread dot over the whole
+ * chain, but opening the header only navigates to (and dwells) the tip. The
+ * other hops never get a detail dwell of their own, so `groupOpenReadTargets`
+ * clears them on open — otherwise a non-tip unread hop keeps the group's dot
+ * lit after the user plainly opened it (the bug this covers). The tip itself is
+ * excluded so its own detail dwell still governs it.
+ */
+function readState(id: string, unread: boolean): SessionInfo {
+  // isSessionUnread(s) = s.lastActivityMs > (s.lastReadMs ?? 0)
+  return {
+    id,
+    workspacePath: "/w",
+    workspaceName: "w",
+    lastActivityMs: 100,
+    lastReadMs: unread ? 0 : 100,
+  } as unknown as SessionInfo;
+}
+
+describe("groupOpenReadTargets", () => {
+  it("returns the unread non-tip hops, excluding the tip and already-read hops", () => {
+    const tip = readState("tip", true);
+    const chain = [tip, readState("hop2", true), readState("hop1", false)];
+    expect(groupOpenReadTargets(tip, chain).map((m) => m.id)).toEqual(["hop2"]);
+  });
+
+  it("returns nothing when only the tip is unread", () => {
+    const tip = readState("tip", true);
+    const chain = [tip, readState("hop2", false), readState("hop1", false)];
+    expect(groupOpenReadTargets(tip, chain)).toEqual([]);
+  });
+
+  it("returns nothing when the whole chain is already read", () => {
+    const tip = readState("tip", false);
+    expect(groupOpenReadTargets(tip, [tip, readState("hop2", false)])).toEqual([]);
   });
 });
