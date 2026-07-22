@@ -148,40 +148,23 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 eprintln!("Error: --prompt is required.");
                 std::process::exit(2);
             }
-            // Inherit the creating session's workspace / model / effort, exactly
-            // like handoff — so a loop created from a fable-5 session keeps
+            // Inherit the creating session's workspace / model / effort / source,
+            // exactly like handoff — so a loop created from a fable-5 session keeps
             // running on fable-5, in the session's real cwd (not a worktree that
-            // may later be removed).
+            // may later be removed). `FLEET_AGENT_SOURCE` absent → None, which
+            // `fire_once` resolves to the claude source, so a loop created from a
+            // codex session wakes up as codex.
             let sid = read_fleet_session_id();
-            let shell_cwd = std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                .to_string_lossy()
-                .to_string();
-            let ws = sid
-                .as_deref()
-                .and_then(claw_fleet_core::session::resolve_session_cwd)
-                .unwrap_or_else(|| shell_cwd.clone());
-            let model = sid
-                .as_deref()
-                .and_then(claw_fleet_core::session::resolve_session_model_spec);
-            let effort = std::env::var("CLAUDE_EFFORT").ok().filter(|e| !e.trim().is_empty());
-            // Fleet stamps `FLEET_AGENT_SOURCE` on the sessions it launches
-            // (codex sets it to "codex"; claude sessions have no stamp). Absent →
-            // None, which `fire_once` resolves to the claude source — so a loop
-            // created from a codex session wakes up as codex, matching handoff.
-            let agent_source = std::env::var("FLEET_AGENT_SOURCE")
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
+            let ctx = claw_fleet_core::session::inherit_launch_context(sid.as_deref());
 
             match agent_loop::create(
-                &ws,
+                &ctx.workspace,
                 prompt,
                 interval_secs,
                 max,
-                model.as_deref(),
-                effort.as_deref(),
-                agent_source.as_deref(),
+                ctx.model.as_deref(),
+                ctx.effort.as_deref(),
+                ctx.source.as_deref(),
                 sid.as_deref(),
             ) {
                 Ok(rec) => {

@@ -85,6 +85,7 @@ pub mod paths {
     }
 }
 pub mod plan_approval;
+pub mod plan_ops;
 pub mod plugins;
 pub mod prd_discipline;
 pub mod prd_tasks;
