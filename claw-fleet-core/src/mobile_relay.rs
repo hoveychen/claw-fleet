@@ -4396,6 +4396,18 @@ mod tests {
         assert!(rows.len() <= 289, "24h must fit in 5-min buckets, got {}", rows.len());
     }
 
+    /// Pins the relay wiring for the codex occupancy frame: the method is
+    /// dispatched and yields a JSON array, never an error. The store logic is
+    /// tested in `codex_usage_history`; a `[0, 1]` window guarantees an empty
+    /// array regardless of what's on disk, so this stays deterministic in CI.
+    #[test]
+    fn codex_usage_history_dispatch_returns_empty_array_for_ancient_window() {
+        let v = serve_request("codex_usage_history", &json!({ "fromMs": 0, "toMs": 1 }))
+            .expect("codex_usage_history dispatches");
+        let rows = v.as_array().expect("an array");
+        assert!(rows.is_empty(), "no codex points fall in [0, 1] ms");
+    }
+
     /// The real `account_usage` path, driven the way the ws loop drives it:
     /// inside `spawn_blocking` on a multi-thread runtime. This is the
     /// nested-runtime guard — `fetch_account_info_blocking` builds its own tokio
