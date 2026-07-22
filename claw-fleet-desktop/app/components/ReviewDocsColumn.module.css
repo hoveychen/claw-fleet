@@ -1,0 +1,97 @@
+/* Review-docs side column for a fleet__ask card: a tab bar over one live-
+ * fetched document body. Mirrors `.detail_column`'s stretch-to-panel layout so
+ * it sits in the same slot the inline SessionDetail uses. */
+.column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  background: var(--color-bg-card, rgba(0, 0, 0, 0.02));
+}
+
+.tabbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 8px 8px 0;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted, #888);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: var(--radius-sm, 6px) var(--radius-sm, 6px) 0 0;
+  border-bottom: 2px solid transparent;
+}
+
+.tab:hover {
+  background: var(--color-bg-hover, rgba(0, 0, 0, 0.04));
+  color: var(--color-text, #222);
+}
+
+.tab_active {
+  color: var(--color-text, #222);
+  font-weight: 600;
+  border-bottom-color: var(--color-accent, #c0552d);
+  background: var(--color-bg-field, rgba(0, 0, 0, 0.03));
+}
+
+.tab_kind {
+  flex: 0 0 auto;
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.tab_label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
+}
+
+.markdown {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text, #222);
+  word-break: break-word;
+}
+
+.html_frame {
+  width: 100%;
+  border: none;
+}
+
+.status {
+  color: var(--color-text-muted, #888);
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+.error {
+  color: var(--color-error, #c0392b);
+  font-size: 13px;
+}
+
+.error_detail {
+  margin-top: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--color-text-dim, #999);
+  word-break: break-all;
+}

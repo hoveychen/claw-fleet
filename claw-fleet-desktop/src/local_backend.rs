@@ -2186,6 +2186,13 @@ impl Backend for LocalBackend {
         crate::mcp_ipc::read_decision_asset(id, qidx, relpath)
     }
 
+    fn read_review_doc(
+        &self,
+        doc: &crate::mcp_ipc::ReviewDoc,
+    ) -> Result<crate::mcp_ipc::ReviewDocContent, String> {
+        crate::mcp_ipc::read_review_doc(doc)
+    }
+
     fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
         crate::wiki::delete_doc(slug)
     }

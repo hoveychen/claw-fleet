@@ -569,6 +569,15 @@ pub trait Backend: Send + Sync {
         relpath: &str,
     ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String>;
 
+    /// Resolve a [`crate::mcp_ipc::ReviewDoc`] (a `.md` file or wiki entry the
+    /// agent attached to a `fleet__ask` card) to its current body, so the card's
+    /// side panel can render it. Fetched live rather than snapshotted, so it must
+    /// work for both local and remote backends.
+    fn read_review_doc(
+        &self,
+        doc: &crate::mcp_ipc::ReviewDoc,
+    ) -> Result<crate::mcp_ipc::ReviewDocContent, String>;
+
     // ── TASKS.md plans ─────────────────────────────────────────────────────────
     /// PRD plans (with full task items) visible to a session whose workspace
     /// root is `workspace_path` — scans the same source set the `fleet

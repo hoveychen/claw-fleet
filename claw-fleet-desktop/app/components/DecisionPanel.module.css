@@ -164,6 +164,31 @@
   height: 14px;
 }
 
+/* Review-docs toggle chip in the panel toolbar. Neutral until active, then
+ * accented to signal the side column is showing docs. */
+.review_docs_toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.review_docs_toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.review_docs_toggle_active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
 /* Collapsed bar: replaces the full panel when the user collapses it. Same
  * bottom-center anchor as `.panel`, but only a slim pill with icon + label. */
 .panel_collapsed_bar {

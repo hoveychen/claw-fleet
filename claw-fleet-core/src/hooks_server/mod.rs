@@ -709,6 +709,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::DECISION_ASSET => route_decision_asset(ctx, request, &query, json_header, path),
 
+            crate::routes::REVIEW_DOC if request.method() == &tiny_http::Method::Post => route_review_doc(ctx, request, &query, json_header, path),
+
             crate::routes::WIKI_SEARCH => route_wiki_search(ctx, request, &query, json_header, path),
 
             crate::routes::WIKI_EXPORT => route_wiki_export(ctx, request, &query, json_header, path),
