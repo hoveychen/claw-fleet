@@ -80,6 +80,15 @@ export interface SessionInfo {
   titleOverride?: string | null;
   status: SessionStatus;
   isSubagent: boolean;
+  /** Subagent drill-down: on a subagent row (id `agent-<uuid>`, isSubagent),
+   *  the owning main session's id — the phone attaches the subagent under it and
+   *  the parent breadcrumb links back. Absent on main sessions. */
+  parentSessionId?: string | null;
+  /** Subagent kind (e.g. "Explore", "general-purpose"), from the agent's
+   *  meta.json; used as the subagent detail header / scope label. */
+  agentType?: string | null;
+  /** Live subagent count rolled up onto a main session. */
+  runningSubagentCount?: number;
   /** Ground truth that Fleet actually spawned this session (a spawn marker, or a
    *  grandfather for sessions predating the marker). Absent on payloads from a
    *  relay that predates the field — treated as "not a leak" so those don't
@@ -215,6 +224,9 @@ export interface ToolDigest {
   stderrLines?: number;
   interrupted?: boolean;
   agentStatus?: string;
+  /** The subagent's session id tail (`agent-<agentId>` in the session array);
+   *  the "打开子代理" button uses it to look the subagent up and drill in. */
+  agentId?: string;
   durationMs?: number;
   tokens?: number;
   toolUses?: number;

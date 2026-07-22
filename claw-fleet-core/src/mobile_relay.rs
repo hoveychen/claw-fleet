@@ -595,6 +595,14 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "titleOverride",
     "status",
     "isSubagent",
+    // Subagent drill-down: the phone keeps subagent rows (id `agent-<uuid>`) in
+    // its session array purely as a lookup table for "打开子代理" navigation, so
+    // it needs the parent link to attach them and the type/count to label them.
+    // The Tasks list still hides them via `!isSubagent`, so these never surface
+    // as tasks. Absent (skipped) on every non-subagent row.
+    "parentSessionId",
+    "agentType",
+    "runningSubagentCount",
     // Ground truth for "Fleet spawned this" — the phone's Tasks list ANDs it with
     // the entrypoint check so a `claude -p` child that only inherited a Fleet
     // CLAUDE_CODE_ENTRYPOINT stops showing up as a task (mirrors desktop).
@@ -748,22 +756,42 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
     let Some(list) = sessions.as_array() else {
         return Value::Array(Vec::new());
     };
-    let mut kept: Vec<&Value> = list
+    let is_subagent =
+        |s: &&Value| s.get("isSubagent").and_then(Value::as_bool).unwrap_or(false);
+    // Main (non-subagent) Fleet-owned sessions: sorted most-recent-first and
+    // capped, exactly as before. The cap is spent only on tasks the phone can
+    // actually show — subagents must not evict a visible task from a slot.
+    let mut mains: Vec<&Value> = list
         .iter()
-        .filter(|s| !s.get("isSubagent").and_then(Value::as_bool).unwrap_or(false))
+        .filter(|s| !is_subagent(s))
         .filter(|s| {
             crate::session_launch::is_fleet_owned_entrypoint(
                 s.get("entrypoint").and_then(Value::as_str),
             )
         })
         .collect();
-    kept.sort_by_key(|s| {
+    mains.sort_by_key(|s| {
         std::cmp::Reverse(s.get("lastActivityMs").and_then(Value::as_u64).unwrap_or(0))
     });
-    kept.truncate(SNAPSHOT_MAX_SESSIONS);
+    mains.truncate(SNAPSHOT_MAX_SESSIONS);
 
-    let slimmed: Vec<Value> = kept
-        .into_iter()
+    // Append subagent rows whose parent survived the cap, so the phone can drill
+    // into them (`agent-<uuid>` lookup) without them ever leaking into the task
+    // list. `scan.rs` flattens direct + workflow-fanout subagents to point their
+    // `parentSessionId` at the owning main session, so matching against kept
+    // main ids covers every subagent — there is no deeper nesting to chase.
+    let kept_ids: std::collections::HashSet<&str> =
+        mains.iter().filter_map(|s| s.get("id").and_then(Value::as_str)).collect();
+    let subagents = list.iter().filter(is_subagent).filter(|s| {
+        s.get("parentSessionId")
+            .and_then(Value::as_str)
+            .is_some_and(|p| kept_ids.contains(p))
+    });
+
+    let slimmed: Vec<Value> = mains
+        .iter()
+        .copied()
+        .chain(subagents)
         .map(|s| {
             let mut out = serde_json::Map::new();
             for &key in SNAPSHOT_FIELDS {
@@ -951,6 +979,12 @@ fn tool_result_digest(meta: &Value) -> Option<Value> {
     // Agent subagent run totals.
     if let Some(status) = obj.get("status").and_then(Value::as_str) {
         d.insert("agentStatus".into(), status.into());
+        // The subagent's session id (`agent-<uuid>` is scanned from `agentId`);
+        // it's the only handle the phone's "打开子代理" button has to look the
+        // subagent up in the session array and drill into its transcript.
+        if let Some(id) = obj.get("agentId").and_then(Value::as_str) {
+            d.insert("agentId".into(), id.into());
+        }
         for (src, dst) in [
             ("totalDurationMs", "durationMs"),
             ("totalTokens", "tokens"),
@@ -4002,6 +4036,55 @@ mod tests {
         let preview = list[0]["lastMessagePreview"].as_str().unwrap();
         assert_eq!(preview.chars().count(), SNAPSHOT_PREVIEW_CHARS + 1);
         assert!(preview.ends_with('…'));
+    }
+
+    #[test]
+    fn slim_snapshot_keeps_subagent_of_kept_parent() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        let sessions = json!([
+            {
+                "id": "main", "isSubagent": false, "lastActivityMs": 100,
+                "workspaceName": "w", "entrypoint": NEW_SESSION_ENTRYPOINT
+            },
+            // Subagent of a kept main → survives, carries the drill-down fields.
+            {
+                "id": "agent-abc", "isSubagent": true, "parentSessionId": "main",
+                "agentType": "Explore", "runningSubagentCount": 0,
+                "lastActivityMs": 90, "jsonlPath": "/p/subagents/agent-abc.jsonl",
+                "workspaceName": "w", "entrypoint": NEW_SESSION_ENTRYPOINT
+            },
+            // Subagent whose parent is absent → dropped (no orphan rows).
+            {
+                "id": "agent-orphan", "isSubagent": true, "parentSessionId": "gone",
+                "lastActivityMs": 95, "workspaceName": "w",
+                "entrypoint": NEW_SESSION_ENTRYPOINT
+            },
+        ]);
+        let slim = slim_sessions_snapshot(&sessions);
+        let list = slim.as_array().expect("array");
+        let ids: Vec<&str> = list.iter().filter_map(|s| s["id"].as_str()).collect();
+        assert!(ids.contains(&"main"));
+        assert!(ids.contains(&"agent-abc"), "subagent of kept parent survives");
+        assert!(!ids.contains(&"agent-orphan"), "orphan subagent dropped");
+        let sub = list.iter().find(|s| s["id"] == "agent-abc").unwrap();
+        assert_eq!(sub["parentSessionId"], "main");
+        assert_eq!(sub["agentType"], "Explore");
+        assert_eq!(sub["jsonlPath"], "/p/subagents/agent-abc.jsonl");
+    }
+
+    #[test]
+    fn tool_result_digest_carries_agent_id() {
+        // The Agent toolUseResult shape: status + the subagent's agentId, which
+        // the phone's "打开子代理" button needs to look the subagent up.
+        let meta = json!({
+            "status": "completed",
+            "agentId": "abc-123",
+            "totalToolUseCount": 7
+        });
+        let d = tool_result_digest(&meta).expect("digest");
+        assert_eq!(d["agentStatus"], "completed");
+        assert_eq!(d["agentId"], "abc-123");
+        assert_eq!(d["toolUses"], 7);
     }
 
     #[test]
