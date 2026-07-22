@@ -124,9 +124,10 @@ export function WaitingAlerts() {
   const visible = alerts.filter((a) => !dismissedIds.has(a.sessionId));
 
   if (visible.length === 0) return null;
-  // Lite mode body view delegates to MascotAlertBubble (speech bubble on the
-  // mascot). Lite sub-views without the mascot (DecisionPanel, SessionDetail)
-  // fall back to the bottom toast so alerts stay visible there too.
+  // In lite mode the body is the mobile-style task page (LiteApp), which
+  // surfaces waiting sessions inline as row status dots — so suppress the
+  // bottom toast there to avoid overlaying it. Lite sub-views (DecisionPanel,
+  // SessionDetail) still fall back to the bottom toast so alerts stay visible.
   const liteBodyView = liteMode && !hasDecision && !openedSession;
   if (liteBodyView) return null;
 
