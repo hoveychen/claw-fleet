@@ -2,8 +2,6 @@
 // 单独拆出来是为了能直接单测——SVG 元素本身没什么好测的，容易出错的是坐标映射。
 // 不引图表库：桌面端那张图用 recharts，手机上只要两条折线，手写更省一个依赖。
 
-import type { UsageHistoryPoint } from "./types";
-
 /** 画布坐标系（SVG viewBox 的用户单位）与时间窗。 */
 export interface ChartBox {
   width: number;
@@ -12,14 +10,16 @@ export interface ChartBox {
   toMs: number;
 }
 
-/** 从一个采样点里取某条曲线的值；该窗口当次没数据时返回 null。 */
-export type PickMetric = (p: UsageHistoryPoint) => number | null;
+/** 从一个采样点里取某条曲线的值（**0–1** 归一后）；该窗口当次没数据时返回 null。
+ *  泛型化后 Claude（`UsageHistoryPoint`）与 codex（`CodexUsageHistoryPoint`，pick 里 /100）
+ *  两种采样点共用同一套几何。 */
+export type PickMetric<T extends { ts: number }> = (p: T) => number | null;
 
 /** 折线 path。采样点不足两个（连不成线）返回空串。
  *  null 采样直接跳过、两侧点直连——与桌面端 recharts 的 connectNulls 同行为。 */
-export function linePath(
-  points: UsageHistoryPoint[],
-  pick: PickMetric,
+export function linePath<T extends { ts: number }>(
+  points: T[],
+  pick: PickMetric<T>,
   box: ChartBox,
 ): string {
   const span = Math.max(1, box.toMs - box.fromMs);
