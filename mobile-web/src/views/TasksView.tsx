@@ -217,6 +217,24 @@ export function buildRenderItems(rows: SessionInfo[], group: boolean): RenderIte
   });
 }
 
+/**
+ * When a collapsed relay-group header is opened, which of its members to mark
+ * read immediately. The header aggregates its unread dot over the whole chain
+ * (`markMembers.some(isSessionUnread)`), but opening it only navigates to the
+ * tip's detail — where the existing dwell clears just the tip. The *other* hops
+ * of a collapsed group never get a detail dwell of their own, so without this
+ * they'd keep the group's dot lit forever after the user has plainly opened it.
+ * The tip is excluded so its own 2s detail dwell still governs it (a quick
+ * glance that backs out shouldn't clear the tip). Already-read members are
+ * skipped so we don't re-stamp them.
+ */
+export function groupOpenReadTargets(
+  tip: SessionInfo,
+  markMembers: SessionInfo[],
+): SessionInfo[] {
+  return markMembers.filter((m) => m.id !== tip.id && isSessionUnread(m));
+}
+
 interface Props {
   sessions: SessionInfo[];
   client: RelayClient | null;
@@ -568,7 +586,20 @@ export function TasksView({
     const snippet = search.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined;
     const live = LIVE.includes(s.status);
     return (
-      <div key={s.id} className={styles.card} onClick={() => onOpenSession(s)}>
+      <div
+        key={s.id}
+        className={styles.card}
+        onClick={() => {
+          onOpenSession(s);
+          // A group header aggregates unread over the whole chain, but opening
+          // it only dwells the tip — clear the other unread hops here so the
+          // group's dot doesn't linger after the user opened it.
+          if (group) {
+            const rest = groupOpenReadTargets(s, group.markMembers);
+            if (rest.length > 0) onMarkRead(rest);
+          }
+        }}
+      >
         <div className={styles.cardHead}>
           {tone && <span className={styles.statusDot} data-tone={tone} />}
           <span className={styles.sourceIcon} title={s.agentSource || "claude-code"}>

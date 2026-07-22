@@ -4,6 +4,7 @@ import {
   chainBarColor,
   CHAT_HIDDEN,
   CHAT_ONLY,
+  dwellReadTargets,
   matchesWorkspaceFilter,
   sessionPaneStyle,
   sessionEq,
@@ -77,6 +78,42 @@ describe("chainBarColor (collapsed relay-group header liveness)", () => {
 
   it("prefers a running member (green) over a waiting one (amber)", () => {
     expect(chainBarColor([member("waitingInput", 1), member("executing", 2)])).toBe(SUCCESS);
+  });
+});
+
+/**
+ * A collapsed relay group's header aggregates its unread dot over the *whole*
+ * chain, but clicking the header only opens the tip. `dwellReadTargets` is what
+ * makes the 2s dwell-read clear the whole chain for a group header, so a
+ * non-tip unread hop can't keep the group lit after the user opened it — the
+ * exact bug this covers. Singles (and expanded-group children, which are not in
+ * the `groupTips` map) must still mark only themselves.
+ */
+describe("dwellReadTargets", () => {
+  const s = (id: string): SessionInfo => ({ ...base(), id }) as SessionInfo;
+
+  it("marks the whole chain when the active session is a group header (tip)", () => {
+    const tip = s("tip");
+    const chain = [tip, s("hop2"), s("hop1")];
+    const groupTips = new Map([["tip", chain]]);
+    // The tip alone is idle-unread-clear; the reason the group is lit is hop2,
+    // so the targets must cover every member, not just the tip.
+    expect(dwellReadTargets(tip, groupTips).map((m) => m.id)).toEqual([
+      "tip",
+      "hop2",
+      "hop1",
+    ]);
+  });
+
+  it("marks only itself for a standalone row (id absent from the group map)", () => {
+    const solo = s("solo");
+    expect(dwellReadTargets(solo, new Map()).map((m) => m.id)).toEqual(["solo"]);
+  });
+
+  it("marks only itself for an expanded group's child (a non-tip hop)", () => {
+    // Only the tip id keys the map; a child row's dwell must not sweep the chain.
+    const groupTips = new Map([["tip", [s("tip"), s("child")]]]);
+    expect(dwellReadTargets(s("child"), groupTips).map((m) => m.id)).toEqual(["child"]);
   });
 });
 
