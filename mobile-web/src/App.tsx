@@ -151,7 +151,9 @@ export function App() {
   // Sub-state below "granted": the user can turn notifications off even while
   // the browser permission stays granted. Persisted so it survives reloads.
   const [pushOptedOut, setPushOptedOut] = useState<boolean>(isPushOptedOut);
-  const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
+  // 会话详情是一条下钻链而不是单页：从 Agent 卡「打开子代理」往上叠一层子代理会话，
+  // 返回逐层退回（和知识库 wikiStack 同一套栈式浮层模型）。栈顶 id 解析出当前详情。
+  const [detailStack, setDetailStack] = useState<string[]>([]);
   // 知识库文档是一条链而不是单页：`[[slug]]` 站内跳转往上叠一篇，返回逐篇退回。
   const [wikiStack, setWikiStack] = useState<WikiDoc[]>([]);
   const [showRepo, setShowRepo] = useState(false);
@@ -486,10 +488,19 @@ export function App() {
   }, [mergedSessions]);
 
   // The detail page re-derives its session from the live snapshot so status /
-  // plan chips stay fresh while it is open.
-  const detailSession = useMemo(
-    () => (detailSessionId ? mergedSessions.find((s) => s.id === detailSessionId) ?? null : null),
-    [mergedSessions, detailSessionId],
+  // plan chips stay fresh while it is open. Top of the drill-down stack wins.
+  const detailSession = useMemo(() => {
+    const topId = detailStack[detailStack.length - 1];
+    return topId ? (mergedSessions.find((s) => s.id === topId) ?? null) : null;
+  }, [mergedSessions, detailStack]);
+
+  // Open a session as a fresh root detail (from the tasks / decisions lists).
+  const openSessionRoot = useCallback((id: string) => setDetailStack([id]), []);
+  // Drill into a subagent from within a detail view — push another layer so the
+  // back button returns to the opener. `AgentNav.open` prefixes `agent-`.
+  const openSessionById = useCallback(
+    (id: string) => setDetailStack((s) => [...s, id]),
+    [],
   );
 
   if (!secret) {
@@ -605,7 +616,7 @@ export function App() {
             decisionsLoaded={decisionsLoaded}
             workspaceOf={workspaceOf}
             onAnswered={markAnswered}
-            onOpenSession={setDetailSessionId}
+            onOpenSession={openSessionRoot}
           />
         ) : tab === "tasks" ? (
           <TasksView
@@ -614,7 +625,7 @@ export function App() {
             connected={connected}
             agentOnline={agentOnline}
             sessionsLoaded={sessionsLoaded}
-            onOpenSession={(s) => setDetailSessionId(s.id)}
+            onOpenSession={(s) => openSessionRoot(s.id)}
             onMarkRead={markRead}
           />
         ) : tab === "wiki" ? (
@@ -638,16 +649,19 @@ export function App() {
           也只占一条历史），再返回才轮到栈底的退出确认。挂在浮层之前，保证浮层始终压在它上面。 */}
       {tab !== "decisions" && <HistoryLayer onBack={() => setTab("decisions")} />}
 
+      {/* 每一层下钻占一层历史，但只渲染栈顶那层详情——底下几层不必挂着重复拉 tail。 */}
+      {detailStack.map((_, i) => (
+        <HistoryLayer key={i} onBack={() => setDetailStack((s) => s.slice(0, i))} />
+      ))}
       {detailSession && (
-        <>
-          <HistoryLayer onBack={() => setDetailSessionId(null)} />
-          <SessionDetailView
-            session={detailSession}
-            client={clientRef.current}
-            onBack={() => setDetailSessionId(null)}
-            onDwellRead={() => markRead([detailSession])}
-          />
-        </>
+        <SessionDetailView
+          session={detailSession}
+          sessions={mergedSessions}
+          client={clientRef.current}
+          onBack={() => setDetailStack((s) => s.slice(0, -1))}
+          onOpenSessionId={openSessionById}
+          onDwellRead={() => markRead([detailSession])}
+        />
       )}
 
       {/* 每篇文档占一层，但只渲染栈顶那篇——底下几篇不必挂着重复拉正文/渲 mermaid。 */}

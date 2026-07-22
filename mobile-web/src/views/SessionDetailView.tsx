@@ -63,6 +63,7 @@ import { toolSummary } from "./toolSummary";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { ToolDigest } from "../types";
+import { AgentNavProvider, useAgentNav } from "./AgentNavContext";
 import styles from "./SessionDetailView.module.css";
 
 const TAIL_POLL_MS = 2500;
@@ -301,8 +302,13 @@ const TABS: Array<[DetailTab, string]> = [
 
 interface Props {
   session: SessionInfo;
+  /** The full live session array — the lookup table for subagent drill-down
+   *  (`agent-<id>` rows) and the parent breadcrumb. */
+  sessions: SessionInfo[];
   client: RelayClient | null;
   onBack: () => void;
+  /** Push a session id as a new drill-down layer (subagent / parent nav). */
+  onOpenSessionId: (id: string) => void;
   /** Fired after a 2s dwell — marks the session read (same as the desktop). */
   onDwellRead?: () => void;
 }
@@ -510,10 +516,15 @@ function ToolStep({
   meta?: ToolMeta;
 }) {
   const [open, setOpen] = useState(false);
+  const nav = useAgentNav();
   const name = b.name ?? "";
   const fleetTool = isFleetTool(name);
   const summary = fleetTool ? fleetSummary(fleetTool, b.input ?? {}) : toolSummary(b);
   const expandable = !!b.id && !!client && !!jsonlPath;
+  // "打开子代理": an Agent tool whose result carries the subagent's id and whose
+  // transcript the snapshot has surfaced (`agent-<id>` row present).
+  const agentId = AGENT_TOOLS.has(name) ? meta?.digest?.agentId : undefined;
+  const canOpenAgent = !!agentId && !!nav?.has(agentId);
   return (
     <RailStep icon={railToolIcon(name)}>
       <div
@@ -526,6 +537,18 @@ function ToolStep({
         </div>
         {meta && <DigestChips meta={meta} />}
       </div>
+      {canOpenAgent && (
+        <button
+          type="button"
+          className={styles.openSubagent}
+          onClick={(e) => {
+            e.stopPropagation();
+            nav!.open(agentId!);
+          }}
+        >
+          {t("打开子代理")} →
+        </button>
+      )}
       {meta?.thumbs && <ThumbRow srcs={meta.thumbs} />}
       {open && expandable && (
         <ToolDetailPanel
@@ -823,9 +846,33 @@ const MessageRow = memo(function MessageRow({
   toolMetaEqual(prev.toolMeta, next.toolMeta) &&
   JSON.stringify(prev.turnUsage ?? null) === JSON.stringify(next.turnUsage ?? null));
 
-export function SessionDetailView({ session, client, onBack, onDwellRead }: Props) {
+export function SessionDetailView({
+  session,
+  sessions,
+  client,
+  onBack,
+  onOpenSessionId,
+  onDwellRead,
+}: Props) {
   const [tab, setTab] = useState<DetailTab>("messages");
   const dwellFired = useRef(false);
+  // Subagent drill-down nav (same table-lookup model as the desktop): resolve
+  // `agent-<id>` in the live session array; `open` pushes it as a new layer.
+  const nav = useMemo(
+    () => ({
+      open: (agentId: string) => onOpenSessionId(`agent-${agentId}`),
+      has: (agentId: string) => sessions.some((s) => s.id === `agent-${agentId}`),
+    }),
+    [sessions, onOpenSessionId],
+  );
+  // When viewing a subagent, the owning main session (for the parent breadcrumb).
+  const parentSession = useMemo(
+    () =>
+      session.isSubagent && session.parentSessionId
+        ? (sessions.find((s) => s.id === session.parentSessionId) ?? null)
+        : null,
+    [session.isSubagent, session.parentSessionId, sessions],
+  );
 
   useEffect(() => {
     dwellFired.current = false;
@@ -1062,6 +1109,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
   );
 
   return (
+    <AgentNavProvider nav={nav}>
     <div className={styles.page}>
       <header className={styles.header}>
         <button className={styles.backButton} onClick={onBack}>
@@ -1070,12 +1118,32 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
         </button>
         <div className={styles.headerText}>
           <div className={styles.headerTitle}>
+            {session.isSubagent && (
+              <span className={styles.subagentBadge}>⎇ {session.agentType || t("子代理")}</span>
+            )}
             {session.titleOverride || session.aiTitle || session.slug || t("会话")}
           </div>
           <div className={styles.headerSub}>{session.workspaceName}</div>
         </div>
         <span className={styles.statusDot} data-working={working} />
       </header>
+
+      {session.isSubagent && (
+        <button
+          type="button"
+          className={styles.parentCrumb}
+          disabled={!parentSession}
+          onClick={() => session.parentSessionId && onOpenSessionId(session.parentSessionId)}
+        >
+          ↑ {t("来自")}{" "}
+          {parentSession
+            ? parentSession.titleOverride ||
+              parentSession.aiTitle ||
+              parentSession.slug ||
+              t("父会话")
+            : t("父会话")}
+        </button>
+      )}
 
       <nav className={styles.tabBar}>
         {TABS.map(([key, label]) => (
@@ -1212,5 +1280,6 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
         />
       )}
     </div>
+    </AgentNavProvider>
   );
 }
