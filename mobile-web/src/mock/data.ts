@@ -524,6 +524,45 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
         ],
       },
     },
+    {
+      type: "assistant",
+      uuid: "am-fleet",
+      timestamp: new Date(NOW - 5 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-8",
+        content: [
+          { type: "tool_use", id: "fp1", name: "mcp__fleet__fleet__plan", input: { action: "check", plan_id: "fleet-tool-cards", task: "P3" } },
+          { type: "tool_use", id: "fp2", name: "mcp__fleet__fleet__plan", input: { action: "list" } },
+          { type: "tool_use", id: "fp3", name: "mcp__fleet__fleet__plan", input: { action: "get", plan_id: "fleet-tool-cards" } },
+          { type: "tool_use", id: "fp4", name: "mcp__fleet__fleet__watch", input: { action: "list" } },
+          { type: "tool_use", id: "fp5", name: "mcp__fleet__fleet__wiki", input: { action: "list" } },
+          { type: "tool_use", id: "fp6", name: "mcp__fleet__fleet__handoff", input: { action: "list" } },
+          { type: "tool_use", id: "fp7", name: "mcp__fleet__fleet__loop", input: { action: "list" } },
+          { type: "tool_use", id: "fp8", name: "mcp__fleet__fleet__schedule", input: { action: "list" } },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 9000, output_tokens: 60 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "am-fleet-r",
+      timestamp: new Date(NOW - 5 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "fp1" },
+          { type: "tool_result", tool_use_id: "fp2" },
+          { type: "tool_result", tool_use_id: "fp3" },
+          { type: "tool_result", tool_use_id: "fp4" },
+          { type: "tool_result", tool_use_id: "fp5" },
+          { type: "tool_result", tool_use_id: "fp6" },
+          { type: "tool_result", tool_use_id: "fp7" },
+          { type: "tool_result", tool_use_id: "fp8" },
+        ],
+      },
+    },
   ],
   // Live-band fixture: the session status is `executing`, so this tail run
   // renders as the working tail — band auto-open, headline shimmer, no Done.
@@ -613,6 +652,106 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
 /** `tool_detail` replies keyed by tool_use_id — what tapping a tool line
  *  fetches. Shapes mirror serve_tool_detail (mobile_relay.rs). */
 export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
+  // Fleet MCP control tools — content is the tool's return text (four shapes:
+  // confirm / line-text / json-records / file body), the FleetBody classifier's
+  // input.
+  fp1: {
+    name: "mcp__fleet__fleet__plan",
+    input: { action: "check", plan_id: "fleet-tool-cards", task: "P3" },
+    content: "ok: checked P3 in fleet-tool-cards",
+  },
+  fp2: {
+    name: "mcp__fleet__fleet__plan",
+    input: { action: "list" },
+    content: "fleet-tool-cards [2/5]\nauth-refactor [3/3] — /Users/dev/proj/TASKS.md\nmobile-relay [2/6]",
+  },
+  fp3: {
+    name: "mcp__fleet__fleet__plan",
+    input: { action: "get", plan_id: "fleet-tool-cards" },
+    content:
+      "[x] P1 — 桌面端框架 + plan 卡\n[x] P2 — 桌面端其余 5 工具\n[ ] P3 — 移动端框架 + plan\n[ ] P4 — 移动端其余 5 工具\n[ ] P5 — 收尾 + 合并",
+  },
+  fp4: {
+    name: "mcp__fleet__fleet__watch",
+    input: { action: "list" },
+    content: JSON.stringify(
+      [
+        {
+          id: "w-42a1",
+          sessionId: "sess-api-main",
+          untilCmd: "test -f /tmp/ci-done",
+          note: "waiting for CI run #4821",
+          pollSecs: 30,
+          deadlineAt: NOW + 90 * MIN,
+          created: NOW - 20 * MIN,
+        },
+      ],
+      null,
+      2,
+    ),
+  },
+  fp5: {
+    name: "mcp__fleet__fleet__wiki",
+    input: { action: "list" },
+    content: "arch/overview  [html]  v3  Architecture Overview\npromo/reddit  [md]  v1  Reddit Subreddit Playbook",
+  },
+  fp6: {
+    name: "mcp__fleet__fleet__handoff",
+    input: { action: "list" },
+    content: JSON.stringify(
+      [
+        {
+          chainId: "chain-7f3a",
+          workspacePath: "/Users/dev/proj",
+          planId: "fleet-tool-cards",
+          links: [
+            { fromSessionId: "sess-a", toSessionId: "sess-b", note: "P1 done, start P2", handedAt: NOW - 40 * MIN },
+            { fromSessionId: "sess-b", toSessionId: "sess-c", note: "P2 done, moving to mobile", handedAt: NOW - 15 * MIN },
+          ],
+        },
+      ],
+      null,
+      2,
+    ),
+  },
+  fp7: {
+    name: "mcp__fleet__fleet__loop",
+    input: { action: "list" },
+    content: JSON.stringify(
+      [
+        {
+          id: "loop-3c9d",
+          prompt: "Check the deploy status and report any regressions",
+          intervalSecs: 300,
+          nextFireAt: NOW + 4 * MIN,
+          iterationsDone: 7,
+          maxIterations: 20,
+          created: NOW - 35 * MIN,
+        },
+      ],
+      null,
+      2,
+    ),
+  },
+  fp8: {
+    name: "mcp__fleet__fleet__schedule",
+    input: { action: "list" },
+    content: JSON.stringify(
+      [
+        { id: "sched-9a2b", prompt: "Run the weekly report generator", fireAt: NOW + 2 * 60 * MIN, status: "pending", created: NOW - 10 * MIN },
+        {
+          id: "sched-4b1c",
+          prompt: "Nightly cache warm",
+          fireAt: NOW - 3 * 60 * MIN,
+          status: "fired",
+          firedAt: NOW - 3 * 60 * MIN + 5000,
+          created: NOW - 26 * 60 * MIN,
+        },
+      ],
+      null,
+      2,
+    ),
+  },
   // WebSearch as the relay ships it: the untouched `toolUseResult`, whose
   // `results[]` interleaves narration strings with `{content:[{title,url}]}`
   // objects. Exercises the favicon result-card body + the flatten path.
