@@ -420,10 +420,25 @@
 }
 
 .wfLabel {
+  flex: 1;
+  min-width: 0;
   color: var(--color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Drillable workflow-agent row: opens the subagent's transcript. */
+.wfAgent[data-open] {
+  cursor: pointer;
+}
+.wfAgent[data-open]:active {
+  opacity: 0.6;
+}
+.wfChevron {
+  margin-left: auto;
+  color: var(--color-accent);
+  flex-shrink: 0;
 }
 
 /* ── Handoff ── */

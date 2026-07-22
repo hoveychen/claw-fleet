@@ -55,6 +55,32 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     lastReadMs: null,
   },
   {
+    // Subagent of sess-api-main. Kept in the snapshot purely as a drill-down
+    // lookup row (isSubagent → hidden from the tasks list); the Agent card in
+    // the parent's transcript opens it via agentId "explore-1" → id below.
+    id: "agent-explore-1",
+    workspacePath: "/Users/demo/workspace/api-server",
+    workspaceName: "api-server",
+    aiTitle: "审计 issuer 读取点",
+    slug: null,
+    status: "waitingInput",
+    isSubagent: true,
+    parentSessionId: "sess-api-main",
+    agentType: "Explore",
+    lastMessagePreview: "Found 6 issuer read sites across src + tests.",
+    lastActivityMs: NOW - 22 * MIN,
+    createdAtMs: NOW - 22 * MIN,
+    jsonlPath: "/Users/demo/.claude/projects/api-server/sess-api-main/subagents/agent-explore-1.jsonl",
+    model: "claude-opus-4-8",
+    entrypoint: "claw-fleet-newsession",
+    pid: 4400,
+    pidPrecise: false,
+    procAlive: false,
+    contextPercent: 0.18,
+    totalCostUsd: 0.42,
+    lastReadMs: null,
+  },
+  {
     // Fleet-spawned Codex session, turn ended → shows the Codex mark and is
     // resumable (entrypoint carries Codex's originator "fleet").
     id: "sess-codex-refactor",
@@ -503,6 +529,22 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
         ],
       },
     },
+    // A subagent (Task/Agent) run: the completed card carries agentId in its
+    // digest, which drives the "打开子代理 →" button (→ agent-explore-1 below).
+    {
+      type: "assistant",
+      uuid: "am-agent",
+      timestamp: new Date(NOW - 22 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-8",
+        stop_reason: "tool_use",
+        usage: { input_tokens: 14200, output_tokens: 70 },
+        content: [
+          { type: "tool_use", id: "aa1", name: "Agent", input: { description: "审计 issuer 读取点", subagent_type: "Explore", prompt: "Find every place the JWT issuer claim is read or asserted across the codebase (src + tests)." } },
+        ],
+      },
+    },
     // Tool results as the relay ships them: a user record the renderable filter
     // hides, carrying the per-tool `_digest` stats (and result thumbnails) that
     // feed the chips on the matching tool lines above.
@@ -521,6 +563,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_result", tool_use_id: "at6", _digest: { todoDone: 2, todoTotal: 3 } },
           { type: "tool_result", tool_use_id: "at7", _digest: { links: 9 } },
           { type: "tool_result", tool_use_id: "at8", _digest: { httpCode: 200, bytes: 48210 } },
+          { type: "tool_result", tool_use_id: "aa1", _digest: { agentStatus: "completed", agentId: "explore-1", tokens: 48200, toolUses: 12 } },
         ],
       },
     },
@@ -560,6 +603,61 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_result", tool_use_id: "fp6" },
           { type: "tool_result", tool_use_id: "fp7" },
           { type: "tool_result", tool_use_id: "fp8" },
+        ],
+      },
+    },
+  ],
+  // Subagent transcript (opened via the parent's Agent card "打开子代理"). Its
+  // own tail is fetched by jsonlPath just like any session — no special path.
+  "/Users/demo/.claude/projects/api-server/sess-api-main/subagents/agent-explore-1.jsonl": [
+    {
+      type: "user",
+      uuid: "sub1",
+      timestamp: new Date(NOW - 22 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: "Find every place the JWT issuer claim is read or asserted across the codebase (src + tests).",
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "sub2",
+      timestamp: new Date(NOW - 22 * MIN + 20000).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-8",
+        stop_reason: "tool_use",
+        usage: { input_tokens: 8200, output_tokens: 90 },
+        content: [
+          { type: "thinking", thinking: "Grep for the issuer claim key and the literal issuer strings, then confirm which are reads vs asserts." },
+          { type: "tool_use", id: "sat1", name: "Grep", input: { pattern: "iss|issuer", path: "src" } },
+          { type: "tool_use", id: "sat2", name: "Grep", input: { pattern: "api-server(-v2)?", path: "test" } },
+        ],
+      },
+    },
+    {
+      type: "user",
+      uuid: "sub2r",
+      timestamp: new Date(NOW - 22 * MIN + 25000).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "sat1", _digest: { files: 3, matches: 4 } },
+          { type: "tool_result", tool_use_id: "sat2", _digest: { files: 2, matches: 2 } },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "sub3",
+      timestamp: new Date(NOW - 22 * MIN + 40000).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-8",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 8600, output_tokens: 140 },
+        content: [
+          { type: "text", text: "6 issuer read sites: `middleware/auth.ts` (verify opts), `auth/verify.ts` (assert), and 4 test fixtures pinning `api-server`. Only `auth.ts` gates requests; the tests will need the dual-issuer value once the middleware accepts both." },
         ],
       },
     },
