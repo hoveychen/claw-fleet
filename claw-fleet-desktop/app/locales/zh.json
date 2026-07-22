@@ -79,6 +79,33 @@
         "list": "列出知识库",
         "search": "搜索 {{query}}"
       }
+    },
+    "rec": {
+      "until": "条件",
+      "poll": "轮询",
+      "deadline": "截止",
+      "interval": "间隔",
+      "iterations": "已运行",
+      "next": "下次",
+      "fire": "触发",
+      "fired": "已触发",
+      "hops": "接力",
+      "hops_n": "{{n}} 棒",
+      "note": "交接"
+    },
+    "time": {
+      "in_m": "{{n}}分钟后",
+      "in_h": "{{n}}小时后",
+      "in_d": "{{n}}天后"
+    },
+    "dur": {
+      "s": "{{n}}秒",
+      "m": "{{n}}分钟",
+      "h": "{{n}}小时"
+    },
+    "status": {
+      "pending": "待触发",
+      "fired": "已触发"
     }
   },
   "filter_placeholder": "过滤会话…",

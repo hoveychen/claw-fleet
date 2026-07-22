@@ -79,6 +79,33 @@
         "list": "List wiki",
         "search": "Search {{query}}"
       }
+    },
+    "rec": {
+      "until": "Until",
+      "poll": "Poll",
+      "deadline": "Deadline",
+      "interval": "Interval",
+      "iterations": "Runs",
+      "next": "Next",
+      "fire": "Fires",
+      "fired": "Fired",
+      "hops": "Relay",
+      "hops_n": "{{n}} hops",
+      "note": "Note"
+    },
+    "time": {
+      "in_m": "in {{n}}m",
+      "in_h": "in {{n}}h",
+      "in_d": "in {{n}}d"
+    },
+    "dur": {
+      "s": "{{n}}s",
+      "m": "{{n}}m",
+      "h": "{{n}}h"
+    },
+    "status": {
+      "pending": "Pending",
+      "fired": "Fired"
     }
   },
   "filter_placeholder": "Filter sessions…",
