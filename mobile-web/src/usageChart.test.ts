@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { linePath, timeTicks, type ChartBox } from "./usageChart";
-import type { UsageHistoryPoint } from "./types";
+import type { CodexUsageHistoryPoint, UsageHistoryPoint } from "./types";
 
 const BOX: ChartBox = { width: 100, height: 50, fromMs: 0, toMs: 1000 };
 
@@ -37,6 +37,23 @@ describe("linePath", () => {
 
   it("sorts samples that arrive out of order", () => {
     const path = linePath([pt(1000, 1), pt(0, 0)], (p) => p.fiveHour, BOX);
+    expect(path).toBe("M0,50L100,0");
+  });
+
+  it("accepts codex-shaped points with a /100 pick (0–100 ints → 0–1)", () => {
+    // codex 百分比是 0–100 整数：0% → 左下角，100% → 右上角，与 Claude 同一几何。
+    const cx = (ts: number, primaryPct: number | null): CodexUsageHistoryPoint => ({
+      ts,
+      primaryPct,
+      secondaryPct: null,
+      primaryWindowMins: 300,
+      secondaryWindowMins: null,
+    });
+    const path = linePath(
+      [cx(0, 0), cx(1000, 100)],
+      (p) => (p.primaryPct === null ? null : p.primaryPct / 100),
+      BOX,
+    );
     expect(path).toBe("M0,50L100,0");
   });
 });
