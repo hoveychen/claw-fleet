@@ -544,6 +544,19 @@ pub(crate) fn extract_last_text(last_lines: &[Value]) -> Option<String> {
         if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
             continue;
         }
+        // Skip CC-injected control/error turns (model `<synthetic>`, e.g.
+        // "No response requested." or "Failed to authenticate. API Error: 403").
+        // They are not real assistant output, so they must not become the
+        // preview — which feeds the task-card title fallback. Mirrors the
+        // `<synthetic>` skip already in `extract_model`.
+        if msg
+            .get("message")
+            .and_then(|m| m.get("model"))
+            .and_then(|m| m.as_str())
+            == Some("<synthetic>")
+        {
+            continue;
+        }
         let Some(content) = msg
             .get("message")
             .and_then(|m| m.get("content"))
@@ -785,4 +798,49 @@ pub fn parse_session_info(
         pending_messages: Vec::new(),
     })
     .map(|info| (info, state))
+}
+
+#[cfg(test)]
+mod extract_last_text_tests {
+    use super::extract_last_text;
+    use serde_json::json;
+
+    fn assistant(model: &str, text: &str) -> serde_json::Value {
+        json!({
+            "type": "assistant",
+            "message": {
+                "model": model,
+                "content": [{"type": "text", "text": text}],
+            },
+        })
+    }
+
+    #[test]
+    fn skips_synthetic_control_messages() {
+        // A real assistant reply followed by CC-injected `<synthetic>` control
+        // messages (the 403 error and the "No response requested." filler).
+        // The preview — which feeds the task-card title fallback — must reflect
+        // the last *real* assistant text, never the synthetic noise.
+        let lines = vec![
+            assistant("claude-opus-4-8", "Design is clear, implementing now."),
+            assistant("<synthetic>", "Failed to authenticate. API Error: 403 Request not allowed"),
+            assistant("<synthetic>", "No response requested."),
+        ];
+        assert_eq!(
+            extract_last_text(&lines).as_deref(),
+            Some("Design is clear, implementing now."),
+        );
+    }
+
+    #[test]
+    fn returns_none_when_only_synthetic() {
+        // A handoff successor that died immediately: nothing but synthetic
+        // turns. Better to fall through to "（无标题）" than title the card
+        // with a control message.
+        let lines = vec![
+            assistant("<synthetic>", "Failed to authenticate. API Error: 403 Request not allowed"),
+            assistant("<synthetic>", "No response requested."),
+        ];
+        assert_eq!(extract_last_text(&lines), None);
+    }
 }
