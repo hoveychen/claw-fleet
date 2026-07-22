@@ -1427,6 +1427,7 @@ mod tests {
             workspace_name: "claude-fleet".into(),
             ai_title: Some("v2 test".into()),
             timestamp: "2026-05-28T00:00:00Z".into(),
+            review_docs: vec![],
             questions: vec![FleetAskQuestion {
                 question: "Pick or fill?".into(),
                 header: "Mix".into(),
@@ -1560,6 +1561,7 @@ mod tests {
             workspace_name: "claude-fleet".into(),
             ai_title: None,
             timestamp: "2026-05-28T00:00:02Z".into(),
+            review_docs: vec![],
             questions: vec![],
         };
         let fa_rec = build_fleet_ask_record(

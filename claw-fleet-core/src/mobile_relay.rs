@@ -2748,6 +2748,7 @@ mod tests {
             ai_title: None,
             timestamp: "2026-07-14T00:00:00Z".into(),
             parked: false,
+            review_docs: vec![],
             questions: vec![crate::mcp_ipc::FleetAskQuestion {
                 question: "保留兼容？".into(),
                 header: "兼容".into(),
