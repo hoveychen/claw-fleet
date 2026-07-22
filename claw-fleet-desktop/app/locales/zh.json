@@ -1338,7 +1338,8 @@
   },
   "waiting_alerts": {
     "title": "需要你的关注",
-    "dismiss_tip": "点击忽略"
+    "dismiss_tip": "点击忽略",
+    "clear_all": "全部清空 ({{n}})"
   },
   "lite": {
     "enter": "竖屏精简模式",
