@@ -84,48 +84,35 @@ pub(crate) fn cmd_handoff(
             std::process::exit(1);
         }
     }
-    let shell_cwd = cwd.to_string_lossy().to_string();
-    // Spawn the successor where the *session* runs, not where the agent's shell
-    // happens to stand. Under the Rule-3 worktree workflow the Bash cwd sits in
-    // `<repo>/.worktrees/<task>` for most of a session — and that worktree is
-    // removed when the plan merges, which would delete the successor's own cwd
-    // and hide it from the session scan. The transcript's `cwd` is authoritative;
-    // fall back to the shell cwd only when there is no transcript to read.
-    let ws = claw_fleet_core::session::resolve_session_cwd(&sid).unwrap_or_else(|| shell_cwd.clone());
-    // The successor continues this session's work, so it must continue on this
-    // session's model and effort rather than the CLI default. An explicit
-    // `--model` / `--effort` flag wins; otherwise we auto-resolve. The model is
-    // recovered from Fleet's launch-spec when Fleet launched the session, else
-    // reconstructed from the transcript (Claude Code exports no model env var) —
-    // the latter is unreliable when the last turn ran on a rate-limit fallback,
-    // which is exactly why the flag override exists. Effort otherwise comes from
-    // CLAUDE_EFFORT, handed to us directly.
+    // Spawn the successor where the *session* runs, on the same model / effort /
+    // agent tool — the shared inheritance the CLI and the `fleet__*` MCP tools
+    // both use (see `session::inherit_launch_context`). Under the Rule-3 worktree
+    // workflow the Bash cwd sits in `<repo>/.worktrees/<task>` for most of a
+    // session — and that worktree is removed when the plan merges, which would
+    // delete the successor's own cwd; the resolved workspace reads the
+    // transcript's authoritative cwd instead, falling back to the shell cwd.
+    let ctx = claw_fleet_core::session::inherit_launch_context(Some(&sid));
+    // An explicit `--model` / `--effort` flag wins over the inherited value. The
+    // model override matters because the auto-resolved value is unreliable when
+    // the last turn ran on a rate-limit fallback — exactly why the flag exists.
     let model = model
         .map(str::trim)
         .filter(|m| !m.is_empty())
         .map(str::to_string)
-        .or_else(|| claw_fleet_core::session::resolve_session_model_spec(&sid));
+        .or(ctx.model);
     let effort = effort
         .map(str::trim)
         .filter(|e| !e.is_empty())
         .map(str::to_string)
-        .or_else(|| {
-            std::env::var("CLAUDE_EFFORT")
-                .ok()
-                .filter(|e| !e.trim().is_empty())
-        });
+        .or(ctx.effort);
     // Fleet stamps `FLEET_AGENT_SOURCE` on the sessions it launches (Codex sets
     // it to "codex"; Claude sessions have no stamp). Absent → "claude-code", the
     // historical default, so the successor is relayed on the same tool.
-    let agent_source = std::env::var("FLEET_AGENT_SOURCE")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "claude-code".to_string());
+    let agent_source = ctx.source.unwrap_or_else(|| "claude-code".to_string());
     match claw_fleet_core::handoff::register(
         &sid,
-        &ws,
-        Some(&shell_cwd),
+        &ctx.workspace,
+        Some(&ctx.shell_cwd),
         note,
         plan,
         next,

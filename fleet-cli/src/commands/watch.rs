@@ -145,29 +145,19 @@ fn create(
     // Inherit the session's real cwd (not a worktree that may later be removed),
     // model, effort, and agent source — exactly like `fleet loop` / handoff, so a
     // fable-5 codex session resumes as fable-5 codex.
-    let shell_cwd = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .to_string_lossy()
-        .to_string();
-    let ws = claw_fleet_core::session::resolve_session_cwd(&sid).unwrap_or(shell_cwd);
-    let model = claw_fleet_core::session::resolve_session_model_spec(&sid);
-    let effort = std::env::var("CLAUDE_EFFORT").ok().filter(|e| !e.trim().is_empty());
-    let agent_source = std::env::var("FLEET_AGENT_SOURCE")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let ctx = claw_fleet_core::session::inherit_launch_context(Some(&sid));
 
     match watch::create(
         &sid,
-        &ws,
+        &ctx.workspace,
         until,
         capture.as_deref(),
         note.as_deref(),
         poll_secs,
         timeout_secs,
-        model.as_deref(),
-        effort.as_deref(),
-        agent_source.as_deref(),
+        ctx.model.as_deref(),
+        ctx.effort.as_deref(),
+        ctx.source.as_deref(),
     ) {
         Ok(rec) => {
             // Arm the detached timer so the watch actually polls. A create that

@@ -519,6 +519,67 @@ pub fn resolve_session_model_spec(session_id: &str) -> Option<String> {
     Some(reconcile_model_spec(&model, configured_model_spec().as_deref()))
 }
 
+/// The launch context a relayed / scheduled / looped / watched successor
+/// inherits from the session that created it: where it runs, on what model and
+/// effort, and via which agent tool. Extracted from the four CLI call sites
+/// (`fleet handoff` / `watch` / `loop` / `schedule`) that each reconstructed it
+/// verbatim, so the `fleet__*` MCP tools can inherit context identically.
+///
+/// This carries only the values inherited from the session and its environment.
+/// A caller-supplied `--model` / `--effort` flag override is applied by the
+/// caller ON TOP of this (`flag.or(ctx.model)`) — handoff and schedule do so;
+/// watch and loop have no such flags.
+#[derive(Clone, Debug, Default)]
+pub struct LaunchContext {
+    /// The agent's raw shell cwd (`current_dir`). Used as the workspace fallback
+    /// and passed to `handoff::register` as the shell-cwd hint.
+    pub shell_cwd: String,
+    /// The session's authoritative cwd (transcript-resolved via
+    /// [`resolve_session_cwd`]), or `shell_cwd` when there is no transcript to
+    /// read — where the successor should actually run.
+    pub workspace: String,
+    /// Model spec inherited from the session's launch-spec / transcript
+    /// ([`resolve_session_model_spec`]), if resolvable.
+    pub model: Option<String>,
+    /// Effort inherited from `CLAUDE_EFFORT`, if set and non-empty.
+    pub effort: Option<String>,
+    /// Agent tool inherited from `FLEET_AGENT_SOURCE`, if set and non-empty.
+    pub source: Option<String>,
+}
+
+/// Resolve the [`LaunchContext`] for a successor created from `session_id`.
+///
+/// `session_id` is `Option` because `fleet loop` / `schedule` accept being run
+/// outside a session (the successor then runs in the shell cwd on CLI defaults);
+/// `fleet handoff` / `watch` require an id and pass `Some`. Reads `current_dir`,
+/// the session transcript, and the `CLAUDE_EFFORT` / `FLEET_AGENT_SOURCE` env
+/// the MCP server and CLI both inherit — so it is the single source of truth for
+/// "run the successor the same way this session runs".
+pub fn inherit_launch_context(session_id: Option<&str>) -> LaunchContext {
+    let shell_cwd = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
+    let workspace = session_id
+        .and_then(resolve_session_cwd)
+        .unwrap_or_else(|| shell_cwd.clone());
+    let model = session_id.and_then(resolve_session_model_spec);
+    let effort = std::env::var("CLAUDE_EFFORT")
+        .ok()
+        .filter(|e| !e.trim().is_empty());
+    let source = std::env::var("FLEET_AGENT_SOURCE")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    LaunchContext {
+        shell_cwd,
+        workspace,
+        model,
+        effort,
+        source,
+    }
+}
+
 pub(crate) fn has_thinking_blocks(last_lines: &[Value]) -> bool {
     for msg in last_lines.iter() {
         if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
