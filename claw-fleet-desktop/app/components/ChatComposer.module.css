@@ -13,6 +13,30 @@
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
+/* While an OS file drag hovers the composer, highlight the drop target. */
+.drag_active {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+/* Overlay hint shown over the composer during a hovering file drag. Covers the
+   whole box (position:relative on .composer) and ignores pointer events so it
+   never eats the drop. */
+.drop_overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
 /* Bare mode: drop the outer rounded box so a host wrapper can supply its own framing. */
 .bare {
   padding: 0;

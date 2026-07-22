@@ -1836,6 +1836,7 @@
     "lightbox_close": "关闭",
     "attach_failed": "附件上传失败",
     "attach_too_large": "附件过大（上限 50 MiB）",
+    "drop_hint": "松开以添加附件",
     "send": "发送（Enter）"
   },
   "planApproval": {
