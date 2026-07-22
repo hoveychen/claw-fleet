@@ -334,8 +334,12 @@ and do NOT retry the tool or hunt for another card entry point \
 takes `{{ \"questions\": Question[] }}` — 1 \
 to 4 questions, each with 2–4 `options` (do NOT add an \"Other\" option; the \
 UI appends one). It is a superset of a plain question card and also supports \
-`html` previews, `images`, and `formFields` — reach for those only when a \
-rich preview or structured input is genuinely the better answer.\n\
+`html` previews, `images`, `formFields`, and `reviewDocs` — reach for those \
+only when a rich preview or structured input is genuinely the better answer. \
+Use `reviewDocs` (an array of `{{ \"kind\": \"wiki\"|\"file\", \"ref\": \
+\"<slug-or-path>\", \"title\"? }}`) whenever your card references a design doc \
+/ report / plan file you produced: Fleet renders each as a tab beside the \
+card so {title} reads it in place instead of hunting down the path.\n\
 \n\
 ## Session title\n\
 \n\
