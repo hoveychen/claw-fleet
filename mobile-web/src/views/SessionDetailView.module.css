@@ -623,3 +623,56 @@
   max-height: 40vh;
   overflow-y: auto;
 }
+
+/* ── Subagent drill-down ──────────────────────────────────────────────────── */
+
+/* "打开子代理 →" link under an Agent tool card. */
+.openSubagent {
+  display: inline-flex;
+  align-items: center;
+  margin: 2px 0 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.openSubagent:active {
+  opacity: 0.6;
+}
+
+/* Inline "⎇ <type>" badge before a subagent session's title. */
+.subagentBadge {
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* "↑ 来自 <父会话>" breadcrumb bar under the header of a subagent detail. */
+.parentCrumb {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 16px;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-accent);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.parentCrumb:disabled {
+  color: var(--color-text-dim);
+  cursor: default;
+}
+.parentCrumb:not(:disabled):active {
+  opacity: 0.6;
+}

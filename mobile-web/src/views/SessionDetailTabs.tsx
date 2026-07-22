@@ -18,6 +18,7 @@ import type {
   TokenBreakdown,
   WorkflowTree,
 } from "../types";
+import { useAgentNav } from "./AgentNavContext";
 import styles from "./SessionDetailTabs.module.css";
 
 /** One-shot fetch helper: "loading" → data | "error". */
@@ -447,6 +448,7 @@ export function WorkflowTab({
   session: SessionInfo;
   client: RelayClient | null;
 }) {
+  const nav = useAgentNav();
   const data = useRelayData<WorkflowTree[]>(client, "workflow_trees", {
     path: session.jsonlPath,
   });
@@ -462,14 +464,26 @@ export function WorkflowTab({
         <div key={tree.runId} className={styles.planCard}>
           <div className={styles.planTitle}>{tree.name || tree.runId}</div>
           {tree.description && <div className={styles.dimNote}>{tree.description}</div>}
-          {tree.agents.map((a, i) => (
-            <div key={a.agentId ?? i} className={styles.wfAgent}>
-              <span className={styles.wfStatus} data-status={a.status}>
-                {t(AGENT_STATUS_LABEL[a.status ?? ""] ?? a.status ?? "?")}
-              </span>
-              <span className={styles.wfLabel}>{a.label || a.prompt || a.agentId}</span>
-            </div>
-          ))}
+          {tree.agents.map((a, i) => {
+            // Drillable when the snapshot surfaced this workflow agent's
+            // transcript (`agent-<id>` row present). Same nav as the Agent card.
+            const canOpen = !!a.agentId && !!nav?.has(a.agentId);
+            return (
+              <div
+                key={a.agentId ?? i}
+                className={styles.wfAgent}
+                data-open={canOpen || undefined}
+                role={canOpen ? "button" : undefined}
+                onClick={canOpen ? () => nav!.open(a.agentId!) : undefined}
+              >
+                <span className={styles.wfStatus} data-status={a.status}>
+                  {t(AGENT_STATUS_LABEL[a.status ?? ""] ?? a.status ?? "?")}
+                </span>
+                <span className={styles.wfLabel}>{a.label || a.prompt || a.agentId}</span>
+                {canOpen && <ChevronRight size={14} className={styles.wfChevron} />}
+              </div>
+            );
+          })}
         </div>
       ))}
     </div>
