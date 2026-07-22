@@ -1035,6 +1035,39 @@ mod tests {
     }
 
     #[test]
+    fn read_review_doc_reads_a_real_markdown_file() {
+        // Write a real .md into a temp dir, resolve + read it back through the
+        // same path the desktop uses — proving the file branch end to end.
+        let dir = std::env::temp_dir().join(format!("fleet-rdc-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("design.md");
+        fs::write(&file, "# Title\n\nbody line").unwrap();
+
+        let doc = ReviewDoc {
+            kind: ReviewDocKind::File,
+            reference: file.to_string_lossy().into_owned(),
+            title: None,
+        };
+        let content = read_review_doc(&doc).expect("read file review doc");
+        assert!(matches!(content.format, ReviewDocFormat::Markdown));
+        assert_eq!(content.body, "# Title\n\nbody line");
+        // Title falls back to the file name when the agent gives none.
+        assert_eq!(content.title, "design.md");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_review_doc_errors_on_missing_file() {
+        let doc = ReviewDoc {
+            kind: ReviewDocKind::File,
+            reference: "/no/such/path/nope.md".into(),
+            title: None,
+        };
+        assert!(read_review_doc(&doc).is_err());
+    }
+
+    #[test]
     fn request_carries_session_envelope() {
         let mut req = empty_request("e1");
         req.session_id = "sess-123".into();
