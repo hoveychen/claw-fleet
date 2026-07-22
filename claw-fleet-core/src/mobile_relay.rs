@@ -1535,6 +1535,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "today_usage_breakdown" => serve_today_usage_breakdown(params),
         "account_usage" => serve_account_usage(params),
         "usage_history" => serve_usage_history(params),
+        "codex_usage_history" => serve_codex_usage_history(params),
         "skill_history" => serve_skill_history(params),
         "guard_analyze" => serve_guard_analyze(params),
         "session_search" => serve_session_search(params),
@@ -1897,6 +1898,24 @@ fn serve_usage_history(params: &Value) -> Result<Value, String> {
         })
         .collect();
     Ok(Value::Array(points))
+}
+
+// Codex occupancy time series — the codex parallel of `serve_usage_history`.
+// Pure disk read of the snapshots `codex_source` persists on every usage fetch
+// (`codex_usage_history::record_snapshot`), so it stays on this thread too. The
+// points are already camelCase-`Serialize` with 0–100 percentages (no ×100 on
+// the wire, unlike Claude's 0–1 fractions), so we serialize them verbatim; the
+// mobile chart does the /100 normalization the same way the desktop chart reads
+// them raw. Window defaults to the last 24h.
+fn serve_codex_usage_history(params: &Value) -> Result<Value, String> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let from_ms = params
+        .get("fromMs")
+        .and_then(Value::as_i64)
+        .unwrap_or(now_ms - 24 * 3_600_000);
+    let to_ms = params.get("toMs").and_then(Value::as_i64).unwrap_or(now_ms);
+    let points = crate::codex_usage_history::load_codex_usage_history(from_ms, to_ms);
+    serde_json::to_value(points).map_err(|e| e.to_string())
 }
 
 // Main-session invocations plus subagent sidecars, sorted by timestamp
