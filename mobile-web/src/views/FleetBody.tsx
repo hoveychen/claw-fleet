@@ -3,6 +3,9 @@
 // rail line uses `fleetSummary`; the expanded panel uses `FleetBody`. Parsing
 // is shared with the desktop through the copied `fleetTools.ts`.
 
+import type { ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { t } from "../i18n";
 import { classifyResult, type FleetResult, type FleetTool } from "./fleetTools";
 import styles from "./FleetBody.module.css";
@@ -69,6 +72,162 @@ export function fleetSummary(tool: FleetTool, input: Record<string, unknown>): s
   return action || tool;
 }
 
+function recStr(rec: Record<string, unknown>, key: string): string | undefined {
+  const v = rec[key];
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return undefined;
+}
+function recNum(rec: Record<string, unknown>, key: string): number | undefined {
+  const v = rec[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/** Relative time — past reuses TasksView's `{0} 分钟前` keys, future adds `…后`. */
+function relWhen(ms: number): string {
+  const diff = ms - Date.now();
+  const abs = Math.abs(diff);
+  const future = diff > 0;
+  if (abs < 60_000) return t("刚刚");
+  if (abs < 3_600_000) {
+    const n = Math.floor(abs / 60_000);
+    return future ? t("{0} 分钟后", n) : t("{0} 分钟前", n);
+  }
+  if (abs < 86_400_000) {
+    const n = Math.floor(abs / 3_600_000);
+    return future ? t("{0} 小时后", n) : t("{0} 小时前", n);
+  }
+  const n = Math.floor(abs / 86_400_000);
+  return future ? t("{0} 天后", n) : t("{0} 天前", n);
+}
+
+function fmtDur(secs: number): string {
+  if (secs < 60) return t("{0} 秒", secs);
+  if (secs < 3600) return t("{0} 分钟", Math.round(secs / 60));
+  return t("{0} 小时", Math.round(secs / 3600));
+}
+
+function Field({ label, children, mono }: { label: string; children: ReactNode; mono?: boolean }) {
+  return (
+    <div className={styles.field}>
+      <span className={styles.fieldKey}>{label}</span>
+      <span className={mono ? styles.fieldValMono : styles.fieldVal}>{children}</span>
+    </div>
+  );
+}
+
+function RecordCard({ title, badge, children }: { title: string; badge?: ReactNode; children: ReactNode }) {
+  return (
+    <div className={styles.rec}>
+      <div className={styles.recHead}>
+        <span className={styles.recTitle}>{title}</span>
+        {badge}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function WatchRecords({ records }: { records: Record<string, unknown>[] }) {
+  return (
+    <div className={styles.recs}>
+      {records.map((r, i) => {
+        const until = recStr(r, "untilCmd");
+        const note = recStr(r, "note");
+        const poll = recNum(r, "pollSecs");
+        const deadline = recNum(r, "deadlineAt");
+        return (
+          <RecordCard key={i} title={note ?? until ?? recStr(r, "id") ?? "watch"}>
+            {until && <Field label={t("条件")} mono>{until}</Field>}
+            {poll !== undefined && <Field label={t("轮询")}>{fmtDur(poll)}</Field>}
+            {deadline !== undefined && <Field label={t("截止")}>{relWhen(deadline)}</Field>}
+          </RecordCard>
+        );
+      })}
+    </div>
+  );
+}
+
+function LoopRecords({ records }: { records: Record<string, unknown>[] }) {
+  return (
+    <div className={styles.recs}>
+      {records.map((r, i) => {
+        const prompt = recStr(r, "prompt");
+        const interval = recNum(r, "intervalSecs");
+        const done = recNum(r, "iterationsDone");
+        const max = recNum(r, "maxIterations");
+        const next = recNum(r, "nextFireAt");
+        return (
+          <RecordCard key={i} title={prompt ?? recStr(r, "id") ?? "loop"}>
+            {interval !== undefined && <Field label={t("间隔")}>{fmtDur(interval)}</Field>}
+            {done !== undefined && (
+              <Field label={t("已运行")}>{max !== undefined ? `${done}/${max}` : `${done}/∞`}</Field>
+            )}
+            {next !== undefined && <Field label={t("下次")}>{relWhen(next)}</Field>}
+          </RecordCard>
+        );
+      })}
+    </div>
+  );
+}
+
+function ScheduleRecords({ records }: { records: Record<string, unknown>[] }) {
+  return (
+    <div className={styles.recs}>
+      {records.map((r, i) => {
+        const prompt = recStr(r, "prompt");
+        const status = recStr(r, "status");
+        const fireAt = recNum(r, "fireAt");
+        const firedAt = recNum(r, "firedAt");
+        const fired = status === "fired";
+        const badge = status ? (
+          <span className={`${styles.statusBadge} ${fired ? styles.statusFired : styles.statusPending}`}>
+            {fired ? t("已触发") : t("待触发")}
+          </span>
+        ) : undefined;
+        return (
+          <RecordCard key={i} title={prompt ?? recStr(r, "id") ?? "schedule"} badge={badge}>
+            {fired && firedAt !== undefined ? (
+              <Field label={t("触发于")}>{relWhen(firedAt)}</Field>
+            ) : (
+              fireAt !== undefined && <Field label={t("触发")}>{relWhen(fireAt)}</Field>
+            )}
+          </RecordCard>
+        );
+      })}
+    </div>
+  );
+}
+
+function HandoffRecords({ records }: { records: Record<string, unknown>[] }) {
+  return (
+    <div className={styles.recs}>
+      {records.map((r, i) => {
+        const chainId = recStr(r, "chainId");
+        const planId = recStr(r, "planId");
+        const links = Array.isArray(r.links) ? (r.links as Record<string, unknown>[]) : [];
+        const lastNote = links.length ? recStr(links[links.length - 1], "note") : undefined;
+        return (
+          <RecordCard key={i} title={planId ?? chainId ?? "chain"}>
+            <Field label={t("接力")}>{t("{0} 棒", links.length + 1)}</Field>
+            {lastNote && <Field label={t("交接")}>{lastNote}</Field>}
+          </RecordCard>
+        );
+      })}
+    </div>
+  );
+}
+
+function RecordsBody({ tool, records }: { tool: FleetTool; records: Record<string, unknown>[] }) {
+  switch (tool) {
+    case "watch": return <WatchRecords records={records} />;
+    case "loop": return <LoopRecords records={records} />;
+    case "schedule": return <ScheduleRecords records={records} />;
+    case "handoff": return <HandoffRecords records={records} />;
+    default: return <pre className={styles.raw}>{JSON.stringify(records, null, 2)}</pre>;
+  }
+}
+
 function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   return (
@@ -78,7 +237,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-function ResultView({ result }: { result: FleetResult }) {
+function ResultView({ result, tool }: { result: FleetResult; tool: FleetTool }) {
   switch (result.kind) {
     case "none":
       return null;
@@ -111,23 +270,41 @@ function ResultView({ result }: { result: FleetResult }) {
           ))}
         </div>
       );
-    // P4 精化:wiki-* / records 目前以文本兜底,绝不丢数据。
     case "wiki-list":
       return (
-        <pre className={styles.raw}>
-          {result.docs.map((d) => `${d.slug}  [${d.kind}]  ${d.versions}  ${d.title}`).join("\n")}
-        </pre>
+        <div className={styles.wikiList}>
+          {result.docs.map((d, i) => (
+            <div key={i} className={styles.wikiRow}>
+              <span className={styles.wikiSlug}>{d.slug}</span>
+              <span className={styles.wikiKind}>{d.kind}</span>
+              <span className={styles.wikiVer}>{d.versions}</span>
+              <span className={styles.wikiTitle}>{d.title}</span>
+            </div>
+          ))}
+        </div>
       );
     case "wiki-search":
       return (
-        <pre className={styles.raw}>
-          {result.hits.map((h) => `${h.slug}  [${h.field}]  ${h.matched}`).join("\n")}
-        </pre>
+        <div className={styles.wikiList}>
+          {result.hits.map((h, i) => (
+            <div key={i} className={styles.wikiRow}>
+              <span className={styles.wikiSlug}>{h.slug}</span>
+              <span className={styles.wikiKind}>{h.field}</span>
+              <span className={styles.wikiTitle}>{h.matched}</span>
+            </div>
+          ))}
+        </div>
       );
     case "wiki-cat":
-      return <pre className={styles.raw}>{result.body}</pre>;
+      return (
+        <div className={styles.markdown}>
+          <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>
+            {result.body}
+          </ReactMarkdown>
+        </div>
+      );
     case "records":
-      return <pre className={styles.raw}>{JSON.stringify(result.records, null, 2)}</pre>;
+      return <RecordsBody tool={tool} records={result.records} />;
     case "raw":
       return <pre className={styles.raw}>{result.text}</pre>;
     default:
@@ -150,7 +327,7 @@ export function FleetBody({
   const result = classifyResult(tool, action, content, isError ?? false);
   return (
     <div className={styles.body}>
-      <ResultView result={result} />
+      <ResultView result={result} tool={tool} />
     </div>
   );
 }
