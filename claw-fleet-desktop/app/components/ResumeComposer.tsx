@@ -95,8 +95,14 @@ export function ResumeComposer({
   }, []);
 
   const addAttachmentEntry = (entry: ChatComposerAttachment) => {
-    if (attachments.some((a) => a.path === entry.path)) return;
-    patch({ attachments: [...attachments, entry] });
+    // Updater form (not the render-time `attachments` snapshot): picking or
+    // dropping several files fires this in a synchronous loop, and a snapshot
+    // write would let each addition overwrite the last so only one survived.
+    patch((d) =>
+      d.attachments.some((a) => a.path === entry.path)
+        ? {}
+        : { attachments: [...d.attachments, entry] },
+    );
   };
 
   const handleAddAttachment = async (s: ChatComposerStagedAttachment) => {
@@ -109,14 +115,19 @@ export function ResumeComposer({
     patch({ attachments: attachments.filter((a) => a.path !== path) });
   };
 
-  const pickFiles = async () => {
-    const picked = await openDialog({ multiple: true, directory: false });
-    if (picked == null) return;
-    const arr = Array.isArray(picked) ? picked : [picked];
-    for (const p of arr) {
+  // Shared by the native file picker and OS drag-drop: both surface absolute
+  // paths. addAttachmentEntry now accumulates across a loop (see its comment).
+  const addPaths = (paths: string[]) => {
+    for (const p of paths) {
       const path = typeof p === "string" ? p : String(p);
       addAttachmentEntry({ path, name: basename(path) });
     }
+  };
+
+  const pickFiles = async () => {
+    const picked = await openDialog({ multiple: true, directory: false });
+    if (picked == null) return;
+    addPaths(Array.isArray(picked) ? picked : [picked]);
   };
 
   const pickDirectory = async () => {
@@ -193,6 +204,7 @@ export function ResumeComposer({
         attachments={attachments}
         onAddAttachment={handleAddAttachment}
         onRemoveAttachment={handleRemoveAttachment}
+        onDropFiles={addPaths}
         onAttachmentError={setError}
         onSubmit={handleSubmit}
         submitting={submitting}
