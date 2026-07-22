@@ -183,6 +183,15 @@ TASKS.md。\n\
 一个 TASKS.md，桌面端也能显示*你*当前的计划和 P（Fleet 知道你的\
 `FLEET_SESSION_ID`；你自己读不到墙上时钟）。命令：\n\
 \n\
+> **若你的工具列表里有 `fleet__plan` / `fleet__handoff` / `fleet__watch` / \
+`fleet__loop` / `fleet__schedule` / `fleet__wiki` 这些 MCP 工具（Fleet 启动的\
+会话都会有），一律优先用它们而不是下面的 `fleet …` 命令行——调 `fleet__plan` \
+传 `action` 参数（如 `action=\"check\"`）即可，语义与 CLI 子命令一一对应。远端\
+（rca）workspace 会话里用 Bash 跑 `fleet …` 会被按 cwd 路由到没有 fleet 的远端\
+executor 而失败（exit 127），而 MCP 工具是 JSON-RPC 打到本地常驻的 `fleet mcp` \
+server、总能触达本地 Fleet 状态。仅当这些工具不在列表里（用户手起、非 Fleet \
+的会话）时，才退回 `fleet …` CLI。**\n\
+\n\
 - `fleet plan create <id> --title \"...\" [--parent <parent-id>]` —— 新增一个\
   v2 计划块**并**把本会话记录为它的执行者。创建计划就是开始它，故无需另行声明。\
   当新计划是**你在父计划中途分出的旁支工作**（一个你必须返回的岔路）时传\
@@ -628,6 +637,17 @@ They make the same file change **and** record which session is working which \
 plan/P, with a timestamp — so the desktop app can show *your* current plan and \
 P even when several sessions share one TASKS.md (Fleet knows your \
 `FLEET_SESSION_ID`; you can't read the wall clock yourself). Commands:\n\
+\n\
+> **If your tool list includes the `fleet__plan` / `fleet__handoff` / \
+`fleet__watch` / `fleet__loop` / `fleet__schedule` / `fleet__wiki` MCP tools \
+(every Fleet-launched session has them), always prefer them over the `fleet …` \
+CLI below — call `fleet__plan` with an `action` parameter (e.g. \
+`action=\"check\"`), one-to-one with the CLI subcommands. In an rca remote \
+workspace session a Bash `fleet …` is routed by cwd to a remote executor that \
+has no `fleet` and fails (exit 127); the MCP tools are JSON-RPC to the local \
+`fleet mcp` server and always reach local Fleet state. Fall back to the \
+`fleet …` CLI only when those tools are absent (a user's hand-launched, \
+non-Fleet session).**\n\
 \n\
 - `fleet plan create <id> --title \"...\" [--parent <parent-id>]` — add a new \
   v2 plan block **and** record this session as its executor. Creating a plan is \
