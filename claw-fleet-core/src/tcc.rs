@@ -1,28 +1,51 @@
 //! macOS TCC (Transparency, Consent, and Control) path guards.
 //!
-//! On macOS, accessing certain directories (~/Music, ~/Pictures, ~/Documents,
-//! ~/Desktop, ~/Downloads, ~/Movies) triggers system permission dialogs.
-//! This module provides utilities to avoid stat'ing these paths.
+//! On macOS, accessing certain directories triggers system permission dialogs:
+//! the user folders (~/Music, ~/Pictures, ~/Documents, ~/Desktop, ~/Downloads,
+//! ~/Movies) and other apps' data containers (~/Library/Containers/<bundle>,
+//! ~/Library/Group Containers/<group> — the "access data from other apps"
+//! prompt). This module provides utilities to avoid stat'ing these paths.
 
 use std::path::Path;
 
 /// TCC-protected directories under the user's home.
+///
+/// Two families, both of which fire a macOS permission dialog on `stat`/`read_dir`:
+/// - The user media/document folders (`kTCCServiceSystemPolicyDesktopFolder` etc.).
+/// - App-data containers (`kTCCServiceSystemPolicyAppData`, "access data from
+///   other apps"): reading INTO another app's `~/Library/Containers/<bundle>/`
+///   or `~/Library/Group Containers/<group>/` prompts. The greedy projects-dir
+///   decoder (`session::paths::read_level_dirs`) walks arbitrary encoded paths,
+///   so without this it `read_dir`s into whatever container a stale project name
+///   decodes to. Entries may be multi-segment; `home.join(..)` handles that.
 #[cfg(target_os = "macos")]
 const TCC_PROTECTED_DIRS: &[&str] = &[
-    "Desktop", "Documents", "Downloads", "Music", "Pictures", "Movies",
+    "Desktop",
+    "Documents",
+    "Downloads",
+    "Music",
+    "Pictures",
+    "Movies",
+    "Library/Containers",
+    "Library/Group Containers",
 ];
+
+/// Pure predicate: is `path` at or below one of the [`TCC_PROTECTED_DIRS`]
+/// resolved against `home`? Split out from [`check_tcc_path`] so the boundary is
+/// unit-testable without a real `$HOME`.
+#[cfg(target_os = "macos")]
+fn is_protected_under_home(path: &Path, home: &Path) -> bool {
+    TCC_PROTECTED_DIRS.iter().any(|dir_name| {
+        let protected = home.join(dir_name);
+        path == protected || path.starts_with(&protected)
+    })
+}
 
 /// Check if a path is inside a macOS TCC-protected directory.
 #[cfg(target_os = "macos")]
 fn check_tcc_path(path: &Path) -> bool {
     let Some(home) = crate::session::real_home_dir() else { return false };
-    for dir_name in TCC_PROTECTED_DIRS {
-        let protected = home.join(dir_name);
-        if path == protected || path.starts_with(&protected) {
-            return true;
-        }
-    }
-    false
+    is_protected_under_home(path, &home)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -194,6 +217,33 @@ mod tests {
         // plain file: not a dir
         let file = root.join("file.txt");
         assert!(!readdir_is_followable_dir(ft(&file), &file, &is_protected));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn app_containers_are_protected() {
+        let home = Path::new("/Users/x");
+        // Regression: reading INTO another app's container fires the macOS
+        // "access data from other apps" prompt (kTCCServiceSystemPolicyAppData).
+        // The greedy projects-dir decoder (`session::paths::read_level_dirs`)
+        // would otherwise `read_dir` straight into it.
+        assert!(is_protected_under_home(
+            &home.join("Library/Containers/com.foo.bar/Data"),
+            home
+        ));
+        assert!(is_protected_under_home(&home.join("Library/Containers"), home));
+        assert!(is_protected_under_home(
+            &home.join("Library/Group Containers/group.foo.bar"),
+            home
+        ));
+        // Sibling Library subtrees stay accessible (not app-data containers).
+        assert!(!is_protected_under_home(
+            &home.join("Library/Application Support/foo"),
+            home
+        ));
+        // Existing user-folder protection is unaffected.
+        assert!(is_protected_under_home(&home.join("Downloads/x"), home));
+        assert!(!is_protected_under_home(&home.join("workspace/repo"), home));
     }
 
     fn err(errno: i32) -> std::io::Error {
