@@ -38,9 +38,15 @@ use crate::session::{
 /// command prompt so `fleet guard` becomes the sole audit gate.  The other
 /// patterns smooth out incidental prompts the user already trusts Fleet to
 /// orchestrate (file IO, web fetch, skills, monitoring, workflows). The two
-/// `mcp__fleet__*` rules pre-authorise Fleet's own MCP tools (`fleet__ask` /
-/// `fleet__render_a2ui`) so Claude Code stops prompting on every invocation now
-/// that the desktop already renders + audits them via the Decision Panel.
+/// `mcp__fleet__*` rules pre-authorise Fleet's own MCP tools so Claude Code
+/// stops prompting on every invocation now that the desktop already renders +
+/// audits them via the Decision Panel. Two families: the UI tools (`fleet__ask`
+/// / `fleet__render_a2ui`) and the six control tools (`fleet__plan` / `handoff`
+/// / `watch` / `loop` / `schedule` / `wiki`) registered for Fleet-owned
+/// sessions — without the latter, an rca remote session would trade a Bash
+/// `fleet` 127 for a per-call permission prompt. The control-tool rules are kept
+/// in sync with [`crate::mcp_control::CONTROL_TOOL_NAMES`] by
+/// `inject_rules_preauthorise_every_control_tool`.
 pub const INJECT_RULES: &[&str] = &[
     "Bash(*)",
     "Read(*)",
@@ -53,6 +59,12 @@ pub const INJECT_RULES: &[&str] = &[
     "Workflow(*)",
     "mcp__fleet__fleet__ask",
     "mcp__fleet__fleet__render_a2ui",
+    "mcp__fleet__fleet__plan",
+    "mcp__fleet__fleet__handoff",
+    "mcp__fleet__fleet__watch",
+    "mcp__fleet__fleet__loop",
+    "mcp__fleet__fleet__schedule",
+    "mcp__fleet__fleet__wiki",
 ];
 
 const LOCK_FILE_NAME: &str = "permissions-lock.json";
@@ -536,6 +548,24 @@ mod tests {
         assert!(!lock.original_existed);
         assert!(!lock.original_had_permissions);
         assert!(lock.original_allow.is_empty());
+    }
+
+    /// Regression: every MCP control tool `mcp_control` registers for
+    /// Fleet-owned sessions must be pre-authorised in INJECT_RULES. Otherwise
+    /// Claude Code prompts on every `mcp__fleet__fleet__plan` call — the exact
+    /// permission-card popup a Fleet session hit after the control tools shipped
+    /// but before they were added to the allow-list. Driven off
+    /// `CONTROL_TOOL_NAMES` so adding a future control tool without an allow rule
+    /// fails here rather than in production.
+    #[test]
+    fn inject_rules_preauthorise_every_control_tool() {
+        for name in crate::mcp_control::CONTROL_TOOL_NAMES {
+            let rule = format!("mcp__fleet__{name}");
+            assert!(
+                INJECT_RULES.contains(&rule.as_str()),
+                "control tool {name} not pre-authorised (expected rule {rule} in INJECT_RULES)"
+            );
+        }
     }
 
     #[test]
