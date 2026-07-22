@@ -394,7 +394,9 @@ pub fn today_usage_breakdown(sessions: &[SessionInfo]) -> TodayUsageBreakdown {
         crate::llm_usage::list_usage_entries(day_start_ms.max(0) as u64, day_end_ms as u64);
     let mut cache = usage_cache().lock().unwrap();
     cache.retain_sessions(&live_ids(sessions));
-    build_breakdown_cached(sessions, &fleet_entries, now_ms, &mut cache)
+    let out = build_breakdown_cached(sessions, &fleet_entries, now_ms, &mut cache);
+    persist_cache(&mut cache);
+    out
 }
 
 /// Test-only wrapper: a fresh (empty) cache so each call folds from disk, keeping
@@ -947,10 +949,13 @@ struct CacheEntry {
 
 /// Process-wide projection cache. A fresh (`default`) instance is empty, so every
 /// lookup is a miss that folds from disk — exactly what the hermetic unit tests
-/// want. Production goes through [`usage_cache`].
+/// want. Production goes through [`usage_cache`], which warm-starts from disk.
 #[derive(Default)]
 struct UsageBreakdownCache {
     entries: std::collections::HashMap<String, CacheEntry>,
+    /// Set whenever a fold or eviction changed `entries`, so the public entry
+    /// points persist to disk only when there is something new to write.
+    dirty: bool,
 }
 
 impl UsageBreakdownCache {
@@ -977,6 +982,7 @@ impl UsageBreakdownCache {
                     cells,
                 },
             );
+            self.dirty = true;
         }
         &self.entries.get(&s.id).unwrap().cells
     }
@@ -984,7 +990,11 @@ impl UsageBreakdownCache {
     /// Drop cached entries for sessions no longer live, bounding the map to the
     /// current session set (sessions get pruned off disk over time).
     fn retain_sessions(&mut self, live_ids: &std::collections::HashSet<&str>) {
+        let before = self.entries.len();
         self.entries.retain(|id, _| live_ids.contains(id.as_str()));
+        if self.entries.len() != before {
+            self.dirty = true;
+        }
     }
 }
 
@@ -1004,10 +1014,160 @@ fn live_ids(sessions: &[SessionInfo]) -> std::collections::HashSet<&str> {
     sessions.iter().map(|s| s.id.as_str()).collect()
 }
 
-/// The process-wide cache backing the public receipt entry points.
+// ── On-disk persistence ──────────────────────────────────────────────────────
+//
+// Persisting the cache lets a **cold start** (fresh process, e.g. after a Fleet
+// restart) skip re-parsing every transcript: the first modal open validates each
+// persisted entry's fingerprint against the fresh scan and re-folds only the
+// sessions whose usage actually changed while Fleet was down. The on-disk shape
+// is a flat list of cells (JSON can't key a map by a `(date, model)` tuple) tagged
+// with a schema version; bump [`CACHE_SCHEMA_VERSION`] whenever the cell shape or
+// fold semantics change so stale files are discarded rather than mis-read.
+
+/// Bump when the cell shape or the projection semantics change.
+const CACHE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedCell {
+    date: String,
+    model: String,
+    input: u64,
+    cache_creation: u64,
+    cache_read: u64,
+    output: u64,
+    cost: f64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedEntry {
+    fingerprint: Fingerprint,
+    cells: Vec<PersistedCell>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedCache {
+    version: u32,
+    entries: std::collections::HashMap<String, PersistedEntry>,
+}
+
+impl UsageBreakdownCache {
+    fn to_persisted(&self) -> PersistedCache {
+        let entries = self
+            .entries
+            .iter()
+            .map(|(id, e)| {
+                let cells = e
+                    .cells
+                    .iter()
+                    .map(|((date, model), acc)| PersistedCell {
+                        date: date.clone(),
+                        model: model.clone(),
+                        input: acc.input,
+                        cache_creation: acc.cache_creation,
+                        cache_read: acc.cache_read,
+                        output: acc.output,
+                        cost: acc.cost,
+                    })
+                    .collect();
+                (
+                    id.clone(),
+                    PersistedEntry {
+                        fingerprint: e.fingerprint,
+                        cells,
+                    },
+                )
+            })
+            .collect();
+        PersistedCache {
+            version: CACHE_SCHEMA_VERSION,
+            entries,
+        }
+    }
+
+    fn from_persisted(p: PersistedCache) -> Self {
+        // Version mismatch → start empty so every session re-folds under the
+        // current semantics instead of trusting an incompatible projection.
+        if p.version != CACHE_SCHEMA_VERSION {
+            return Self::default();
+        }
+        let entries = p
+            .entries
+            .into_iter()
+            .map(|(id, e)| {
+                let mut cells = SessionCells::new();
+                for c in e.cells {
+                    let mut acc = LineAcc::default();
+                    acc.add(c.input, c.cache_creation, c.cache_read, c.output, c.cost);
+                    cells.insert((c.date, c.model), acc);
+                }
+                (
+                    id,
+                    CacheEntry {
+                        fingerprint: e.fingerprint,
+                        cells,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            entries,
+            dirty: false,
+        }
+    }
+
+    /// Load the persisted cache, or an empty one when the file is absent, torn,
+    /// or a stale shape — every failure path self-heals into a full re-fold.
+    fn load_from(path: &std::path::Path) -> Self {
+        let Ok(bytes) = std::fs::read(path) else {
+            return Self::default();
+        };
+        serde_json::from_slice::<PersistedCache>(&bytes)
+            .map(Self::from_persisted)
+            .unwrap_or_default()
+    }
+
+    /// Persist atomically (temp file + rename) so a crash mid-write can't leave a
+    /// torn file that would poison the next load.
+    fn store_to(&self, path: &std::path::Path) {
+        let Ok(json) = serde_json::to_vec(&self.to_persisted()) else {
+            return;
+        };
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = std::fs::rename(&tmp, path);
+        }
+    }
+}
+
+/// `~/.fleet/usage-breakdown-cache.json` — the on-disk projection cache.
+fn cache_path() -> Option<std::path::PathBuf> {
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("usage-breakdown-cache.json"))
+}
+
+/// Flush the cache to disk if a fold or eviction changed it since the last write.
+fn persist_cache(cache: &mut UsageBreakdownCache) {
+    if !cache.dirty {
+        return;
+    }
+    if let Some(p) = cache_path() {
+        cache.store_to(&p);
+    }
+    cache.dirty = false;
+}
+
+/// The process-wide cache backing the public receipt entry points, warm-started
+/// from disk so the first post-restart open skips re-parsing unchanged sessions.
 fn usage_cache() -> &'static std::sync::Mutex<UsageBreakdownCache> {
     static CACHE: std::sync::LazyLock<std::sync::Mutex<UsageBreakdownCache>> =
-        std::sync::LazyLock::new(|| std::sync::Mutex::new(UsageBreakdownCache::default()));
+        std::sync::LazyLock::new(|| {
+            let c = cache_path()
+                .map(|p| UsageBreakdownCache::load_from(&p))
+                .unwrap_or_default();
+            std::sync::Mutex::new(c)
+        });
     &CACHE
 }
 
@@ -1025,7 +1185,9 @@ pub fn usage_range_breakdown(
         crate::llm_usage::list_usage_entries(from_ms.max(0) as u64, to_ms.max(0) as u64);
     let mut cache = usage_cache().lock().unwrap();
     cache.retain_sessions(&live_ids(sessions));
-    build_range_breakdown_cached(sessions, &fleet_entries, from_ms, to_ms, &mut cache)
+    let out = build_range_breakdown_cached(sessions, &fleet_entries, from_ms, to_ms, &mut cache);
+    persist_cache(&mut cache);
+    out
 }
 
 /// Test-only wrapper: fresh (empty) cache, so each call folds from disk and the
@@ -1627,6 +1789,53 @@ mod range_breakdown_tests {
             cache.cells(&s).is_empty(),
             "a fingerprint change must force a re-fold"
         );
+    }
+
+    /// The on-disk cache must survive a round-trip byte-for-byte and discard a
+    /// file written under a different schema version.
+    #[test]
+    fn disk_cache_round_trips_and_rejects_version_mismatch() {
+        let mut cache = UsageBreakdownCache::default();
+        let mut cells = SessionCells::new();
+        let mut acc = LineAcc::default();
+        acc.add(100, 5, 50, 20, 1.5);
+        cells.insert(("2026-07-21".to_string(), "claude-opus-4-8".to_string()), acc);
+        cache.entries.insert(
+            "s1".to_string(),
+            CacheEntry {
+                fingerprint: (9, 8, 7),
+                cells,
+            },
+        );
+
+        let dir = std::env::temp_dir().join("fleet-usage-cache-roundtrip");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cache.json");
+        cache.store_to(&path);
+
+        let loaded = UsageBreakdownCache::load_from(&path);
+        let e = loaded.entries.get("s1").expect("entry survived round-trip");
+        assert_eq!(e.fingerprint, (9, 8, 7));
+        let acc = e
+            .cells
+            .get(&("2026-07-21".to_string(), "claude-opus-4-8".to_string()))
+            .expect("cell survived round-trip");
+        assert_eq!(
+            (acc.input, acc.cache_creation, acc.cache_read, acc.output),
+            (100, 5, 50, 20)
+        );
+        assert!((acc.cost - 1.5).abs() < 1e-9);
+
+        // A file tagged with a different schema version invalidates the whole cache.
+        let mut persisted = cache.to_persisted();
+        persisted.version = CACHE_SCHEMA_VERSION + 1;
+        std::fs::write(&path, serde_json::to_vec(&persisted).unwrap()).unwrap();
+        assert!(
+            UsageBreakdownCache::load_from(&path).entries.is_empty(),
+            "version mismatch must invalidate the whole cache"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A Claude session whose JSONL holds `jsonl`, with explicit created /
