@@ -10,6 +10,7 @@ import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { AccountUsage, TodayUsage, UsageBar } from "../types";
 import { UsageChart } from "./UsageChart";
+import { CodexUsageChart } from "./CodexUsageChart";
 import styles from "./UsageView.module.css";
 
 interface Props {
@@ -243,6 +244,14 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
                 </div>
               ) : (
                 <div className={styles.hint}>{t("这个来源没有限流数据。")}</div>
+              )}
+              {/* codex 近 24h 占用率曲线（对应桌面端 codex 账号区的历史图）。 */}
+              {s.source === "codex" && (
+                <>
+                  <div className={styles.divider} />
+                  <div className={styles.sectionLabel}>{t("占用率变化 · 近 24 小时")}</div>
+                  <CodexUsageChart key={reloadKey} client={client} />
+                </>
               )}
             </div>
           </div>

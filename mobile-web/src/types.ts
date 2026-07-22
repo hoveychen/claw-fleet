@@ -445,6 +445,18 @@ export interface UsageHistoryPoint {
   sevenDaySonnet: number | null;
 }
 
+/** `codex_usage_history` 回包的一个采样点。镜像
+ *  `claw_fleet_core::codex_usage_history::CodexUsageHistoryPoint`：与 Claude 的
+ *  `UsageHistoryPoint` 不同，百分比是 codex app-server 直接给的 **0–100 整数**
+ *  （画图前要 /100），窗口时长用来给两条线打 session/weekly 标签。某窗口当次没数据时为 null。 */
+export interface CodexUsageHistoryPoint {
+  ts: number;
+  primaryPct: number | null;
+  secondaryPct: number | null;
+  primaryWindowMins: number | null;
+  secondaryWindowMins: number | null;
+}
+
 /** `browse_dir` 回包里的一个子目录。镜像 claw-fleet-core/src/workspace_browse.rs。 */
 export interface BrowseEntry {
   name: string;
