@@ -570,6 +570,37 @@ pub(crate) fn route_decision_asset(
                 }
             }
 
+pub(crate) fn route_review_doc(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                let resolved = serde_json::from_slice::<crate::mcp_ipc::ReviewDoc>(&body_bytes)
+                    .map_err(|e| format!("bad /review_doc body: {e}"))
+                    .and_then(|doc| crate::mcp_ipc::read_review_doc(&doc));
+                match resolved {
+                    Ok(content) => {
+                        let body = serde_json::to_string(&content).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
 pub(crate) fn route_task_plans(
     ctx: &ServeCtx,
     request: tiny_http::Request,

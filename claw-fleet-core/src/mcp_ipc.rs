@@ -81,6 +81,94 @@ pub enum ReviewDocKind {
     File,
 }
 
+/// Resolved body of a [`ReviewDoc`], fetched live by the frontend through the
+/// backend (`read_review_doc`) so it renders the current on-disk content. Crosses
+/// the probe HTTP boundary, hence `Serialize` + `Deserialize`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDocContent {
+    /// How the frontend should render `body`: markdown (ReactMarkdown) or html
+    /// (sandboxed iframe).
+    pub format: ReviewDocFormat,
+    /// The document text — markdown source or raw html.
+    pub body: String,
+    /// Resolved tab label (the doc's own title / slug / file name).
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum ReviewDocFormat {
+    Markdown,
+    Html,
+}
+
+/// Max review-doc size fetched into the card — a design doc, not a data dump.
+const REVIEW_DOC_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Resolve a [`ReviewDoc`] to its current body. The single source of truth for
+/// both `LocalBackend::read_review_doc` (desktop) and the `fleet serve`
+/// `/review_doc` endpoint (remote), so the two paths render identically. Reads
+/// wiki entries and local files off the same host the serving process runs on.
+pub fn read_review_doc(doc: &ReviewDoc) -> Result<ReviewDocContent, String> {
+    match doc.kind {
+        ReviewDocKind::File => read_review_file(&doc.reference, doc.title.as_deref()),
+        ReviewDocKind::Wiki => {
+            let wdoc = crate::wiki::get_doc(&doc.reference)?;
+            let bytes = crate::wiki::get_file(&doc.reference, "current", &wdoc.entry)?;
+            let body = String::from_utf8(bytes.bytes)
+                .map_err(|_| format!("wiki doc '{}' entry is not UTF-8", doc.reference))?;
+            let format = if wdoc.kind == "markdown" {
+                ReviewDocFormat::Markdown
+            } else {
+                ReviewDocFormat::Html
+            };
+            let title = doc
+                .title
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(wdoc.title);
+            Ok(ReviewDocContent { format, body, title })
+        }
+    }
+}
+
+/// Read a `file`-kind review doc off disk into a [`ReviewDocContent`]. Shared by
+/// [`read_review_doc`] and reused directly for the `file` branch so both apply
+/// the same size cap and UTF-8 / title handling. `path` is the absolute path
+/// [`resolve_review_docs`] produced; `title` is the agent-supplied override.
+pub fn read_review_file(path: &str, title: Option<&str>) -> Result<ReviewDocContent, String> {
+    let p = Path::new(path);
+    let meta = fs::metadata(p).map_err(|e| format!("cannot read '{path}': {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("'{path}' is not a file"));
+    }
+    if meta.len() > REVIEW_DOC_MAX_BYTES {
+        return Err(format!(
+            "'{path}' is too large to preview ({} bytes)",
+            meta.len()
+        ));
+    }
+    let bytes = fs::read(p).map_err(|e| format!("cannot read '{path}': {e}"))?;
+    let body = String::from_utf8(bytes).map_err(|_| format!("'{path}' is not valid UTF-8"))?;
+    let title = title
+        .map(str::to_string)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| path.to_string());
+    Ok(ReviewDocContent {
+        format: ReviewDocFormat::Markdown,
+        body,
+        title,
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]

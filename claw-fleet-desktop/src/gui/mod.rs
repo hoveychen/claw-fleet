@@ -1902,6 +1902,7 @@ pub fn run() {
             set_notification_mode,
             get_decision_panel_config,
             set_decision_panel_config,
+            read_review_doc,
             get_permissions_config,
             set_permissions_config,
             get_user_title,

@@ -782,6 +782,13 @@ impl crate::backend::Backend for RemoteBackend {
         Ok(crate::mcp_ipc::DecisionAssetBytes { bytes, mime })
     }
 
+    fn read_review_doc(
+        &self,
+        doc: &crate::mcp_ipc::ReviewDoc,
+    ) -> Result<crate::mcp_ipc::ReviewDocContent, String> {
+        self.probe.post_json(claw_fleet_core::routes::REVIEW_DOC, doc)
+    }
+
     fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
         self.probe.post_ok(&format!("{}?slug={}", claw_fleet_core::routes::WIKI_DELETE, encode_path(slug)))
     }
