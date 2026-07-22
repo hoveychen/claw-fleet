@@ -351,14 +351,19 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
     patch({ attachments: attachments.filter((a) => a.path !== path) });
   };
 
-  const pickFiles = async () => {
-    const picked = await openDialog({ multiple: true, directory: false });
-    if (picked == null) return;
-    const arr = Array.isArray(picked) ? picked : [picked];
-    for (const p of arr) {
+  // Shared by the native file picker and OS drag-drop: both surface absolute
+  // paths. addAttachmentEntry now accumulates across a loop (see its comment).
+  const addPaths = (paths: string[]) => {
+    for (const p of paths) {
       const path = typeof p === "string" ? p : String(p);
       addAttachmentEntry({ path, name: basename(path) });
     }
+  };
+
+  const pickFiles = async () => {
+    const picked = await openDialog({ multiple: true, directory: false });
+    if (picked == null) return;
+    addPaths(Array.isArray(picked) ? picked : [picked]);
   };
 
   const pickDirectory = async () => {
@@ -547,6 +552,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
         attachments={attachments}
         onAddAttachment={handleAddAttachment}
         onRemoveAttachment={handleRemoveAttachment}
+        onDropFiles={addPaths}
         onAttachmentError={setError}
         onSubmit={handleSubmit}
         submitting={submitting}

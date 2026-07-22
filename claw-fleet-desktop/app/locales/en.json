@@ -1839,6 +1839,7 @@
     "lightbox_close": "Close",
     "attach_failed": "Attachment upload failed",
     "attach_too_large": "Attachment is too large (max 50 MiB)",
+    "drop_hint": "Drop to attach",
     "send": "Send (Enter)"
   },
   "planApproval": {

@@ -56,6 +56,22 @@ function basename(p: string): string {
   return slash >= 0 ? normalized.slice(slash + 1) : normalized;
 }
 
+/** True when a Tauri drag-drop position lands inside a client rect. Tauri
+ *  reports drop coordinates as *physical* pixels relative to the webview's
+ *  top-left; `getBoundingClientRect` is *logical* (CSS) pixels from the same
+ *  origin, so divide by the device pixel ratio before comparing (on a 2× retina
+ *  display a drop at logical (100,100) arrives as physical (200,200)). */
+export function dropWithinRect(
+  position: { x: number; y: number },
+  rect: { left: number; top: number; right: number; bottom: number },
+  devicePixelRatio: number,
+): boolean {
+  const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  const x = position.x / dpr;
+  const y = position.y / dpr;
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
 export interface ChatComposerAttachment {
   path: string;
   name: string;
@@ -90,6 +106,10 @@ export interface ChatComposerProps {
   attachments: ChatComposerAttachment[];
   onAddAttachment: (a: ChatComposerStagedAttachment) => void | Promise<void>;
   onRemoveAttachment: (path: string) => void;
+  /** Provide to accept OS files dragged onto the composer. Receives the dropped
+   *  absolute paths (already filtered by the OS to real files). Path-based like
+   *  the native picker — the host adds them the same way it adds picked files. */
+  onDropFiles?: (paths: string[]) => void;
   onAttachmentError?: (msg: string) => void;
   /** Provide to render a send arrow on the right; Enter submits, Shift+Enter inserts a newline. */
   onSubmit?: () => void;
@@ -130,6 +150,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     attachments,
     onAddAttachment,
     onRemoveAttachment,
+    onDropFiles,
     onAttachmentError,
     onSubmit,
     submitting,
@@ -154,6 +175,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuSide = useAutoFlip(menuOpen, "above", menuRef, menuWrapRef);
   const [previewing, setPreviewing] = useState<{ src: string; alt: string } | null>(null);
+  const composerRootRef = useRef<HTMLDivElement | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  // Latest values read from inside the once-registered drag listener, so the
+  // listener needn't re-subscribe every render (onDropFiles is a fresh closure
+  // on each parent render).
+  const onDropFilesRef = useRef(onDropFiles);
+  onDropFilesRef.current = onDropFiles;
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
 
   useImperativeHandle(
     ref,
@@ -208,6 +238,53 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [menuOpen]);
+
+  // Accept OS files dragged onto the composer. Tauri intercepts the webview's
+  // native HTML5 drop (dragDropEnabled defaults true), so a plain `onDrop`
+  // handler never fires — the file paths arrive through the window-level
+  // `onDragDropEvent` instead. We hit-test the drop position against this
+  // composer's box so a drop only lands here when it's actually over it, and
+  // highlight while hovering. Registered once; guarded to real Tauri webviews
+  // (browser/mock/jsdom lack `__TAURI_INTERNALS__`, so this is a no-op there).
+  useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    const isOver = (position: { x: number; y: number }) => {
+      const el = composerRootRef.current;
+      return el ? dropWithinRect(position, el.getBoundingClientRect(), window.devicePixelRatio) : false;
+    };
+    (async () => {
+      try {
+        const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+        const un = await getCurrentWebview().onDragDropEvent((event) => {
+          if (!onDropFilesRef.current) return; // composer doesn't accept drops
+          const p = event.payload;
+          if (p.type === "enter" || p.type === "over") {
+            setDragActive(isOver(p.position));
+          } else if (p.type === "leave") {
+            setDragActive(false);
+          } else if (p.type === "drop") {
+            const over = isOver(p.position);
+            setDragActive(false);
+            if (over && !disabledRef.current && p.paths?.length) {
+              onDropFilesRef.current(p.paths);
+            }
+          }
+        });
+        if (disposed) un();
+        else unlisten = un;
+      } catch {
+        // Not a Tauri webview or the drag-drop plugin is unavailable — dragging
+        // simply won't add attachments here.
+      }
+    })();
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const mentions = useWikiMentions(Boolean(wikiMentions), value, onChange, textareaRef);
 
@@ -438,7 +515,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     emptyTrailingControl && !value.trim() ? emptyTrailingControl : sendControl;
 
   return (
-    <div className={`${styles.composer} ${bare ? styles.bare : ""} ${className ?? ""}`}>
+    <div
+      ref={composerRootRef}
+      className={`${styles.composer} ${bare ? styles.bare : ""} ${dragActive ? styles.drag_active : ""} ${className ?? ""}`}
+    >
+      {dragActive && (
+        <div className={styles.drop_overlay}>
+          {t("composer.drop_hint", "松开以添加附件")}
+        </div>
+      )}
       {mentions.menu}
       {contextSlot && <div className={styles.context_row}>{contextSlot}</div>}
       {attachments.length > 0 && (
