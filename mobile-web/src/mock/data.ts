@@ -537,6 +537,9 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_use", id: "fp3", name: "mcp__fleet__fleet__plan", input: { action: "get", plan_id: "fleet-tool-cards" } },
           { type: "tool_use", id: "fp4", name: "mcp__fleet__fleet__watch", input: { action: "list" } },
           { type: "tool_use", id: "fp5", name: "mcp__fleet__fleet__wiki", input: { action: "list" } },
+          { type: "tool_use", id: "fp6", name: "mcp__fleet__fleet__handoff", input: { action: "list" } },
+          { type: "tool_use", id: "fp7", name: "mcp__fleet__fleet__loop", input: { action: "list" } },
+          { type: "tool_use", id: "fp8", name: "mcp__fleet__fleet__schedule", input: { action: "list" } },
         ],
         stop_reason: "tool_use",
         usage: { input_tokens: 9000, output_tokens: 60 },
@@ -554,6 +557,9 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_result", tool_use_id: "fp3" },
           { type: "tool_result", tool_use_id: "fp4" },
           { type: "tool_result", tool_use_id: "fp5" },
+          { type: "tool_result", tool_use_id: "fp6" },
+          { type: "tool_result", tool_use_id: "fp7" },
+          { type: "tool_result", tool_use_id: "fp8" },
         ],
       },
     },
@@ -688,6 +694,63 @@ export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
     name: "mcp__fleet__fleet__wiki",
     input: { action: "list" },
     content: "arch/overview  [html]  v3  Architecture Overview\npromo/reddit  [md]  v1  Reddit Subreddit Playbook",
+  },
+  fp6: {
+    name: "mcp__fleet__fleet__handoff",
+    input: { action: "list" },
+    content: JSON.stringify(
+      [
+        {
+          chainId: "chain-7f3a",
+          workspacePath: "/Users/dev/proj",
+          planId: "fleet-tool-cards",
+          links: [
+            { fromSessionId: "sess-a", toSessionId: "sess-b", note: "P1 done, start P2", handedAt: NOW - 40 * MIN },
+            { fromSessionId: "sess-b", toSessionId: "sess-c", note: "P2 done, moving to mobile", handedAt: NOW - 15 * MIN },
+          ],
+        },
+      ],
+      null,
+      2,
+    ),
+  },
+  fp7: {
+    name: "mcp__fleet__fleet__loop",
+    input: { action: "list" },
+    content: JSON.stringify(
+      [
+        {
+          id: "loop-3c9d",
+          prompt: "Check the deploy status and report any regressions",
+          intervalSecs: 300,
+          nextFireAt: NOW + 4 * MIN,
+          iterationsDone: 7,
+          maxIterations: 20,
+          created: NOW - 35 * MIN,
+        },
+      ],
+      null,
+      2,
+    ),
+  },
+  fp8: {
+    name: "mcp__fleet__fleet__schedule",
+    input: { action: "list" },
+    content: JSON.stringify(
+      [
+        { id: "sched-9a2b", prompt: "Run the weekly report generator", fireAt: NOW + 2 * 60 * MIN, status: "pending", created: NOW - 10 * MIN },
+        {
+          id: "sched-4b1c",
+          prompt: "Nightly cache warm",
+          fireAt: NOW - 3 * 60 * MIN,
+          status: "fired",
+          firedAt: NOW - 3 * 60 * MIN + 5000,
+          created: NOW - 26 * 60 * MIN,
+        },
+      ],
+      null,
+      2,
+    ),
   },
   // WebSearch as the relay ships it: the untouched `toolUseResult`, whose
   // `results[]` interleaves narration strings with `{content:[{title,url}]}`
