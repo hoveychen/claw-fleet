@@ -25,7 +25,7 @@ describe("linePath", () => {
   });
 
   it("returns an empty path when fewer than two samples have data", () => {
-    expect(linePath([], (p) => p.fiveHour, BOX)).toBe("");
+    expect(linePath([] as UsageHistoryPoint[], (p) => p.fiveHour, BOX)).toBe("");
     expect(linePath([pt(0, 0.4)], (p) => p.fiveHour, BOX)).toBe("");
     expect(linePath([pt(0, 0.4), pt(500, null)], (p) => p.fiveHour, BOX)).toBe("");
   });
