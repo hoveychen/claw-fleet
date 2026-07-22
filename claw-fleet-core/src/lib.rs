@@ -43,6 +43,7 @@ pub mod launchd;
 pub mod live_thinking;
 pub mod llm_provider;
 pub mod llm_usage;
+pub mod mcp_control;
 pub mod mcp_injector;
 pub mod mcp_ipc;
 pub mod mcp_a2ui_ipc;
@@ -85,6 +86,7 @@ pub mod paths {
     }
 }
 pub mod plan_approval;
+pub mod plan_ops;
 pub mod plugins;
 pub mod prd_discipline;
 pub mod prd_tasks;

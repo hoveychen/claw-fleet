@@ -40,6 +40,12 @@ pub fn render_guidance(locale: &str) -> String {
 \n\
 ```\nfleet wiki publish <path> [--slug <slug>] [--title \"<标题>\"]\n```\n\
 \n\
+> **若工具列表里有 `fleet__wiki` MCP 工具(Fleet 启动的会话都有),优先用它\
+(`action=\"publish\"/\"cat\"/\"list\"/\"search\"`)而不是 `fleet wiki` CLI——远端\
+(rca)会话里 Bash 跑 `fleet wiki` 会被路由到没有 fleet 的远端而失败。\
+注意 `publish` 读的是**本地**文件路径,远端会话里 agent 写的文件可能在远端 fs \
+上;这种情况仍需用 CLI 或先把文件取到本地。工具不可用时才退回 CLI。**\n\
+\n\
 - `<path>` 可以是单个 `.html` / `.md` 文件,或包含 `index.html` 的目录\
 (目录会连同相对引用的 js/css/图片一起入库)。\n\
 - 同一份文档迭代时**复用同一个 slug** 重新 publish——会生成新版本,\
@@ -103,6 +109,14 @@ visualizations…), archive it into the Fleet wiki when done instead of leaving 
 it in the workdir:\n\
 \n\
 ```\nfleet wiki publish <path> [--slug <slug>] [--title \"<title>\"]\n```\n\
+\n\
+> **If your tool list includes the `fleet__wiki` MCP tool (every Fleet-launched \
+session has it), prefer it (`action=\"publish\"/\"cat\"/\"list\"/\"search\"`) over \
+the `fleet wiki` CLI — in an rca remote session a Bash `fleet wiki` is routed to \
+a remote executor with no `fleet` and fails. Note `publish` reads a **local** \
+file path; in a remote session the file the agent wrote may live on the remote \
+fs, in which case use the CLI or fetch the file locally first. Fall back to the \
+CLI only when the tool is absent.**\n\
 \n\
 - `<path>` is a single `.html` / `.md` file, or a directory with an \
 `index.html` entry (the directory's relatively-referenced js/css/images are \

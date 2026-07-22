@@ -97,20 +97,35 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
                 "version": env!("CARGO_PKG_VERSION"),
             },
         })),
-        "tools/list" => Ok(json!({
-            "tools": [
-                fleet_ask_tool_def(),
-                a2ui_render_tool_def(),
-                set_session_title_tool_def(),
-                permission_prompt_tool_def()
-            ]
-        })),
+        "tools/list" => Ok(tools_list_result(session_is_fleet_owned())),
         "tools/call" => handle_tool_call(params),
         other => Err(JsonRpcError {
             code: -32601,
             message: format!("Method not found: {}", other),
         }),
     }
+}
+
+/// Build the `tools/list` result. The four UI tools are always present; the six
+/// control tools (plan / handoff / watch / loop / schedule / wiki) are appended
+/// ONLY for Fleet-owned sessions — a user's hand-launched `claude` never sees
+/// them and keeps using the `fleet` CLI. This makes "Fleet sessions go through
+/// MCP, non-Fleet through the CLI" hold at the tool-visibility layer, and is
+/// what lets rca remote-workspace sessions drive these commands (a Bash
+/// `fleet …` is routed to a remote executor with no `fleet`; an MCP call reaches
+/// this local server that owns the local state). Split from `dispatch` so the
+/// gating is testable without mutating process env.
+fn tools_list_result(fleet_owned: bool) -> Value {
+    let mut tools = vec![
+        fleet_ask_tool_def(),
+        a2ui_render_tool_def(),
+        set_session_title_tool_def(),
+        permission_prompt_tool_def(),
+    ];
+    if fleet_owned {
+        tools.extend(crate::mcp_control::control_tool_defs());
+    }
+    json!({ "tools": tools })
 }
 
 fn fleet_ask_tool_def() -> Value {
@@ -175,10 +190,51 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
         "fleet__render_a2ui" => handle_a2ui_render_call(params),
         "fleet__set_session_title" => handle_set_session_title_call(params),
         "fleet__permission_prompt" => handle_permission_prompt_call(params),
+        n if crate::mcp_control::is_control_tool(n) => handle_control_tool_call(n, params),
         other => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", other),
         }),
+    }
+}
+
+/// True when the invoking session was spawned by Fleet — the gate for exposing
+/// and running the control tools. Reads the session id from the same env the UI
+/// tools use ([`current_session_id`]); an unresolvable id is treated as
+/// not-Fleet-owned (the tools stay hidden and refuse), which is the safe default.
+fn session_is_fleet_owned() -> bool {
+    let sid = current_session_id();
+    !sid.is_empty() && crate::launch_spec::was_fleet_spawned(&sid)
+}
+
+/// Bridge a control-tool `tools/call` to [`crate::mcp_control::handle`]. Resolves
+/// the session id and workspace cwd the same way the UI handlers do, then maps
+/// its `Ok(text)` / `Err(text)` onto the MCP tool-result envelope. Defense in
+/// depth: even though the tool is hidden from non-Fleet sessions, a direct call
+/// is refused unless the session is Fleet-owned.
+fn handle_control_tool_call(name: &str, params: &Value) -> Result<Value, JsonRpcError> {
+    if !session_is_fleet_owned() {
+        return Ok(tool_error(format!(
+            "{name} is only available in Fleet-launched sessions; use the `fleet` CLI instead."
+        )));
+    }
+    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let sid = current_session_id();
+    let session_id = (!sid.is_empty()).then_some(sid.as_str());
+    // Workspace: the agent's CLAUDE_PROJECT_DIR (what the UI handlers chip on),
+    // falling back to the server's cwd (Fleet spawns claude with
+    // `.current_dir(workspace)`, which the MCP child inherits).
+    let cwd = std::env::var("CLAUDE_PROJECT_DIR")
+        .ok()
+        .filter(|d| !d.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    match crate::mcp_control::handle(name, &args, session_id, &cwd) {
+        Ok(text) => Ok(json!({
+            "content": [{ "type": "text", "text": text }],
+            "isError": false,
+        })),
+        Err(text) => Ok(tool_error(text)),
     }
 }
 
@@ -727,10 +783,12 @@ mod tests {
 
     #[test]
     fn tools_list_returns_all_tools() {
-        let resp = call(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#)
-            .expect("response");
-        let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 4, "expected all Fleet MCP tools");
+        // Non-Fleet session: only the four UI tools, regardless of ambient env
+        // (the JSON-RPC path gates on `session_is_fleet_owned`, but the pure
+        // builder lets us assert deterministically).
+        let result = tools_list_result(false);
+        let tools = result["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 4, "non-Fleet session sees only the UI tools");
         let names: Vec<&str> = tools
             .iter()
             .map(|t| t["name"].as_str().unwrap())
@@ -768,6 +826,21 @@ mod tests {
             set_title["inputSchema"]["properties"]["title"]["type"],
             "string"
         );
+    }
+
+    #[test]
+    fn fleet_owned_session_also_sees_the_control_tools() {
+        // Conditional registration: a Fleet-owned session gets the four UI tools
+        // PLUS the six control tools; a non-Fleet session (tested above) does not.
+        let result = tools_list_result(true);
+        let tools = result["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 10, "Fleet-owned session sees UI + control tools");
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        for control in crate::mcp_control::CONTROL_TOOL_NAMES {
+            assert!(names.contains(&control), "{control} must be advertised to Fleet sessions");
+        }
+        // The UI tools remain present alongside them.
+        assert!(names.contains(&"fleet__ask"));
     }
 
     #[test]
