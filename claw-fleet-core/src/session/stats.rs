@@ -44,31 +44,35 @@ fn claude_model_supports_1m(model_lower: &str) -> bool {
     false
 }
 
-/// Claude families that ship a 1M window on **every** release, with no 200K
-/// variant. Unlike the opus/sonnet version gate (whose 1M is only *inferred*
-/// once a turn's observed input exceeds 200K — Claude Code never writes the
-/// `[1m]` flag to JSONL), these report 1M unconditionally, from the first turn:
+/// Claude families whose id carries no parseable `family + major.minor`
+/// version, but which nonetheless ship a 1M window — so the opus/sonnet
+/// version gate can't recognise them and they're matched by family substring:
 ///   * Claude Fable 5 (`claude-fable-5`) — always 1M.
 ///   * Mythos / Mythos research preview (Project Glasswing) — always 1M.
+///
+/// Every native-1M family (these plus opus/sonnet 4.6+) now reports 1M
+/// unconditionally from the first turn; see [`context_window_for_model`].
 fn claude_model_always_1m(model_lower: &str) -> bool {
     model_lower.contains("fable") || model_lower.contains("mythos")
 }
 
 /// Best-effort lookup of a model's input-context-window size (in tokens).
 ///
-/// `observed_max_input_tokens` is the max `input + cache_creation + cache_read`
-/// seen across all assistant turns in the session. We use it as a fallback
-/// signal because Claude Code **never writes the `[1m]` flag to the on-disk
-/// transcript** — it lives only in the running process. So if a session has
-/// any turn whose total input clearly exceeds the 200K window AND the model
-/// is from a 1M-capable family, we know it must be a 1M session.
-///
-/// Pass `0` if you don't have this information; you'll get the conservative
-/// 200K window.
+/// `_observed_max_input_tokens` (the max `input + cache_creation + cache_read`
+/// seen across the session's turns) is **no longer consulted** — it's retained
+/// only to keep the signature stable for callers that still thread it through
+/// [`compute_context_percent`]. It used to gate an "inferred 1M" fallback back
+/// when a `claude-opus-4-6`/`4-7`/`4-8` id on disk was ambiguous between a 200K
+/// and a 1M session (Claude Code never writes the `[1m]` flag to JSONL). That
+/// ambiguity is gone: every 1M-capable Claude family (Opus/Sonnet 4.6+, 5.x,
+/// Fable, Mythos) ships 1M as its **default and only** window — there is no
+/// 200K variant to disambiguate — so they report 1M from the first turn. The
+/// old fallback under-reported a fresh native-1M session as 200K and inflated
+/// the ctx-% badge ~5×.
 ///
 /// Returns `None` when the model family is unrecognised so the caller can
 /// decide whether to fall back to a default or skip the computation entirely.
-pub fn context_window_for_model(model: &str, observed_max_input_tokens: u64) -> Option<u64> {
+pub fn context_window_for_model(model: &str, _observed_max_input_tokens: u64) -> Option<u64> {
     let m = model.to_lowercase();
 
     // ── Anthropic / Claude ──────────────────────────────────────────────
@@ -78,25 +82,15 @@ pub fn context_window_for_model(model: &str, observed_max_input_tokens: u64) -> 
         || m == "haiku"
         || claude_model_always_1m(&m)
     {
-        // Explicit `[1m]` suffix — the canonical Claude Code marker.
-        // Doesn't appear in JSONL today, but kept for correctness if that
-        // ever changes.
-        if m.contains("[1m]") {
+        // Native-1M families — Opus/Sonnet 4.6+ and every later major, plus the
+        // always-1M families (Fable, Mythos), plus the explicit `[1m]` suffix
+        // marker. All ship 1M as their default, sole window (no 200K variant),
+        // so report it unconditionally, from the very first turn.
+        if m.contains("[1m]") || claude_model_always_1m(&m) || claude_model_supports_1m(&m) {
             return Some(1_000_000);
         }
-        // Always-1M families (Fable, Mythos) have no 200K variant — report 1M
-        // unconditionally so a fresh session doesn't briefly read 200K.
-        if claude_model_always_1m(&m) {
-            return Some(1_000_000);
-        }
-        // Inferred 1M: a turn's total input exceeds the 200K window. Only
-        // valid for families that actually support 1M; others stay at 200K
-        // (and the over-200K reading would itself indicate a bug elsewhere).
-        // Threshold is a hair under 200K to absorb tokenizer rounding.
-        if observed_max_input_tokens > 195_000 && claude_model_supports_1m(&m) {
-            return Some(1_000_000);
-        }
-        // All other Claude 3 / 3.5 / 4.x models: 200 000 input tokens.
+        // Everything else — Opus/Sonnet ≤4.5, all Haiku, Claude 3.x — is a
+        // genuine 200K model.
         return Some(200_000);
     }
 
@@ -139,10 +133,10 @@ pub fn context_window_for_model(model: &str, observed_max_input_tokens: u64) -> 
 
 /// Compute context-window utilisation (0.0 – 1.0) from raw token counts.
 ///
-/// `observed_max_input_tokens` is the largest single-turn total input
-/// (`input + cache_creation + cache_read`) seen across the session. It feeds
-/// the 1M-context inference in [`context_window_for_model`]. Pass `0` if
-/// unknown; the result will use the conservative 200K window for Claude.
+/// `observed_max_input_tokens` (the largest single-turn total input seen across
+/// the session) is forwarded to [`context_window_for_model`] for signature
+/// compatibility but is no longer consulted — the window is now determined by
+/// model family alone. Pass `0` when unknown.
 ///
 /// Returns `None` when the model is unrecognised.
 pub fn compute_context_percent(
@@ -488,6 +482,65 @@ mod input_accumulation_tests {
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         let stats = compute_session_stats(&refs);
         assert_eq!(stats.total_input_tokens, 1000, "dedup by msg id");
+    }
+}
+
+#[cfg(test)]
+mod context_window_tests {
+    use super::*;
+
+    // Native-1M families (Opus/Sonnet 4.6+, 5.x) ship 1M as the *only* window —
+    // there is no 200K variant to disambiguate. So the reported window must be
+    // 1M from the first turn, with NO observed-input evidence
+    // (`observed_max_input_tokens = 0`). This is the regression the ctx% badge
+    // exposed: an Opus 4.8 session under 195K input was read as a 200K window,
+    // inflating utilisation ~5×.
+    #[test]
+    fn native_1m_families_report_1m_without_observed_input() {
+        for model in [
+            "claude-opus-4-8",
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-4-6",
+            "claude-opus-4-8[1m]",
+        ] {
+            assert_eq!(
+                context_window_for_model(model, 0),
+                Some(1_000_000),
+                "{model} is native 1M and must report 1M with zero observed input",
+            );
+        }
+    }
+
+    // The ctx% for the reported session: ~188K last-turn input against Opus
+    // 4.8's true 1M window is ~19%, not the 94% a 200K denominator produced.
+    #[test]
+    fn opus_4_8_context_percent_uses_1m_denominator() {
+        let pct = compute_context_percent(188_000, Some("claude-opus-4-8"), 0).unwrap();
+        assert!(
+            (0.15..0.25).contains(&pct),
+            "expected ~0.19 against a 1M window, got {pct}",
+        );
+    }
+
+    // Guard the boundary: models that genuinely default to 200K must stay 200K,
+    // so the fix doesn't over-reach. Opus/Sonnet ≤4.5, all Haiku, Claude 3.x.
+    #[test]
+    fn pre_4_6_and_haiku_stay_200k() {
+        for model in [
+            "claude-opus-4-5",
+            "claude-sonnet-4-5",
+            "claude-sonnet-4-0",
+            "claude-haiku-4-5",
+            "claude-3-5-haiku-20241022",
+        ] {
+            assert_eq!(
+                context_window_for_model(model, 0),
+                Some(200_000),
+                "{model} defaults to a 200K window",
+            );
+        }
     }
 }
 
