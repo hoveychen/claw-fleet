@@ -1590,6 +1590,174 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         ],
       },
     },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-handoff-list",
+      timestamp: new Date(NOW - 3 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-6",
+            name: "mcp__fleet__fleet__handoff",
+            input: { action: "list" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6750, output_tokens: 28 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-handoff-list-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-6",
+            content: JSON.stringify(
+              [
+                {
+                  chainId: "chain-7f3a",
+                  workspacePath: "/Users/dev/proj",
+                  planId: "fleet-tool-cards",
+                  links: [
+                    {
+                      fromSessionId: "sess-a",
+                      toSessionId: "sess-b",
+                      note: "P1 done, start P2",
+                      planId: "fleet-tool-cards",
+                      nextTask: "P2",
+                      handedAt: NOW - 40 * MIN,
+                    },
+                    {
+                      fromSessionId: "sess-b",
+                      toSessionId: "sess-c",
+                      note: "P2 done, moving to mobile",
+                      planId: "fleet-tool-cards",
+                      nextTask: "P3",
+                      handedAt: NOW - 15 * MIN,
+                    },
+                  ],
+                },
+              ],
+              null,
+              2,
+            ),
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-loop-list",
+      timestamp: new Date(NOW - 2 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-7",
+            name: "mcp__fleet__fleet__loop",
+            input: { action: "list" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6760, output_tokens: 26 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-loop-list-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-7",
+            content: JSON.stringify(
+              [
+                {
+                  id: "loop-3c9d",
+                  workspacePath: "/Users/dev/proj",
+                  prompt: "Check the deploy status and report any regressions",
+                  intervalSecs: 300,
+                  nextFireAt: NOW + 4 * MIN,
+                  iterationsDone: 7,
+                  maxIterations: 20,
+                  generation: 1,
+                  created: NOW - 35 * MIN,
+                },
+              ],
+              null,
+              2,
+            ),
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-schedule-list",
+      timestamp: new Date(NOW - 1 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-8",
+            name: "mcp__fleet__fleet__schedule",
+            input: { action: "list" },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6770, output_tokens: 30 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-schedule-list-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-8",
+            content: JSON.stringify(
+              [
+                {
+                  id: "sched-9a2b",
+                  workspacePath: "/Users/dev/proj",
+                  prompt: "Run the weekly report generator",
+                  fireAt: NOW + 2 * 60 * MIN,
+                  status: "pending",
+                  generation: 1,
+                  created: NOW - 10 * MIN,
+                },
+                {
+                  id: "sched-4b1c",
+                  workspacePath: "/Users/dev/proj",
+                  prompt: "Nightly cache warm",
+                  fireAt: NOW - 3 * 60 * MIN,
+                  status: "fired",
+                  firedAt: NOW - 3 * 60 * MIN + 5000,
+                  firedSessionId: "sess-warm",
+                  generation: 1,
+                  created: NOW - 26 * 60 * MIN,
+                },
+              ],
+              null,
+              2,
+            ),
+          },
+        ],
+      },
+    },
   ],
 
   // API server session — shorter
