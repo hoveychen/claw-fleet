@@ -26,6 +26,16 @@
   font-size: 11px;
 }
 
+.failed_error {
+  margin: 0;
+  padding: 0 10px 6px;
+  color: var(--color-error);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .failed_source {
   margin: 0;
   padding: 10px;

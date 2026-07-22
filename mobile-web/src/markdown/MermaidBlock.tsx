@@ -46,8 +46,13 @@ export function MermaidBlock({ code }: { code: string }) {
         setError(null);
       } catch (e) {
         if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        // Surface the real cause: this same fence renders fine in Chromium, so
+        // a failure here is environment-specific (chunk load / MIME, engine
+        // parse, or a render-time DOM gap) and the message tells them apart.
+        console.error("mermaid render failed:", e);
         setSvg(null);
-        setError(e instanceof Error ? e.message : String(e));
+        setError(msg);
       }
     })();
     return () => {
@@ -59,6 +64,7 @@ export function MermaidBlock({ code }: { code: string }) {
     return (
       <div className={styles.failed}>
         <div className={styles.failed_label}>mermaid 渲染失败</div>
+        <pre className={styles.failed_error}>{error}</pre>
         <pre className={styles.failed_source}>{code}</pre>
       </div>
     );
