@@ -12,6 +12,8 @@ import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
+import { isFleetTool } from "./fleetTools";
+import { FleetBody } from "./FleetBody";
 import styles from "./ToolDetailPanel.module.css";
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
@@ -313,6 +315,10 @@ function DetailBody({ detail, isError }: { detail: ToolDetail; isError?: boolean
   if (name === "WebSearch" && result) return <WebSearchBody result={result} />;
   if (name === "WebFetch" && result) {
     return <WebFetchBody result={result} input={detail.input} fallback={fallback} />;
+  }
+  const fleetTool = isFleetTool(name);
+  if (fleetTool) {
+    return <FleetBody tool={fleetTool} input={detail.input ?? {}} content={fallback} />;
   }
   return <GenericBody detail={detail} />;
 }
