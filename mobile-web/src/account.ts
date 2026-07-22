@@ -3,7 +3,7 @@
 // 为 header 轮询 `today_usage`，页面直接复用那份数据，不重复扫会话。
 
 import type { RelayClient } from "./relay";
-import type { AccountUsage, UsageHistoryPoint } from "./types";
+import type { AccountUsage, CodexUsageHistoryPoint, UsageHistoryPoint } from "./types";
 
 /** Claude 账号档案 + 各源限流用量。桌面端会真去打 Anthropic / codex 的接口。 */
 export function fetchAccountUsage(client: RelayClient): Promise<AccountUsage> {
@@ -17,6 +17,16 @@ export function fetchUsageHistory(
   toMs: number,
 ): Promise<UsageHistoryPoint[]> {
   return client.request<UsageHistoryPoint[]>("usage_history", { fromMs, toMs });
+}
+
+/** codex 占用率采样序列（默认近 24h）。与 `usage_history` 同为纯读盘，只是数据来自
+ *  codex 那份快照，百分比是 0–100 整数（画图时 /100）。 */
+export function fetchCodexUsageHistory(
+  client: RelayClient,
+  fromMs: number,
+  toMs: number,
+): Promise<CodexUsageHistoryPoint[]> {
+  return client.request<CodexUsageHistoryPoint[]>("codex_usage_history", { fromMs, toMs });
 }
 
 /** 桌面端要打网络（甚至读钥匙串），默认超时不够用。 */
