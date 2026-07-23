@@ -20,6 +20,10 @@ pub(crate) fn route_resume_session(
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
                 match serde_json::from_str::<crate::auto_resume::ResumeSessionRequest>(&buf) {
                     Ok(req) => {
+                        // A "done" task resumed by a remote client (RemoteBackend)
+                        // is active again — drop the done mark on the host where it
+                        // lives so it re-surfaces as needs-review.
+                        crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
                         // Route by source: codex sessions resume via
                         // `codex exec resume`, claude via `claude --resume`.
                         // Manual resume is untracked → no-op on_exit box.
