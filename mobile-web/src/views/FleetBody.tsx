@@ -14,8 +14,29 @@ function str(input: Record<string, unknown>, k: string): string {
   return typeof input[k] === "string" ? (input[k] as string) : "";
 }
 
-/** Collapsed one-line summary shown beside the rail icon. */
+/**
+ * Free-text "intent" (note → prompt → text, first non-empty) — the human-
+ * readable fields NOT already interpolated into the summary label. Appended to
+ * the rail line so the reader sees *what* an op is for without expanding.
+ * Mirrors the desktop FleetToolCard's `intentText`.
+ */
+function intentText(input: Record<string, unknown>): string {
+  for (const k of ["note", "prompt", "text"] as const) {
+    const v = input[k];
+    if (typeof v === "string" && v.trim() !== "") return v.trim();
+  }
+  return "";
+}
+
+/** Collapsed one-line summary shown beside the rail icon: the action label plus
+ *  the intent preview (` · …`) when the call carries free-text. */
 export function fleetSummary(tool: FleetTool, input: Record<string, unknown>): string {
+  const label = fleetSummaryLabel(tool, input);
+  const intent = intentText(input);
+  return intent ? `${label} · ${intent}` : label;
+}
+
+function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): string {
   const action = typeof input.action === "string" ? input.action : "";
   const plan = str(input, "plan_id") || str(input, "plan");
   const task = str(input, "task");
