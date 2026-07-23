@@ -538,4 +538,36 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     expect((err as RelayRequestError).remote).toBe(false);
     expect((await answerReqIds(ws)).length).toBe(2);
   });
+
+  it("旧桌面回 unknown method → 回退到即发即忘 answer(),resolve", async () => {
+    // A desktop that predates decision_answer rejects it as an unknown method.
+    // A new phone must still be able to answer it: fall back to the legacy
+    // fire-and-forget `answer` frame (no worse than that old desktop's behaviour)
+    // rather than stranding the card — and must NOT keep resending the req.
+    const { client, ws } = await connected(clients);
+    const p = client.answerViaReq(
+      "elicitation",
+      "d-oldserver",
+      { declined: false, answers: {} },
+      { attempts: 3, timeoutMs: 1000 },
+    );
+    await waitAnswerReqCount(ws, 1);
+    const reqId = (await answerReqIds(ws))[0];
+    ws.deliver(
+      await sealedMsg({
+        event: "reply",
+        req_id: reqId,
+        ok: false,
+        error: "unknown method: decision_answer",
+      }),
+    );
+    // Resolves (best-effort fallback sent), not rejects.
+    await expect(p).resolves.toBeUndefined();
+    // Exactly one decision_answer req (no resend), plus a legacy `answer` frame.
+    expect((await answerReqIds(ws)).length).toBe(1);
+    const legacy = (await openSent(ws)).find((f) => f.event === "answer");
+    expect(legacy).toBeTruthy();
+    expect(legacy!.kind).toBe("elicitation");
+    expect(legacy!.id).toBe("d-oldserver");
+  });
 });
