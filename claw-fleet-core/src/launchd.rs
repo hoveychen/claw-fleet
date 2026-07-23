@@ -31,14 +31,14 @@ pub fn token_file_path() -> Option<PathBuf> {
 /// directory anymore, so it is pure legacy. Called best-effort on desktop
 /// startup; a failure (including the dir simply not existing) is not fatal.
 pub fn remove_legacy_fleet_dir() -> std::io::Result<()> {
-    match real_home_dir() {
-        Some(home) => remove_legacy_fleet_dir_at(&home),
+    match crate::session::get_claude_dir() {
+        Some(claude_dir) => remove_legacy_fleet_dir_at(&claude_dir),
         None => Ok(()),
     }
 }
 
-fn remove_legacy_fleet_dir_at(home: &std::path::Path) -> std::io::Result<()> {
-    let dir = home.join(".claude").join("fleet");
+fn remove_legacy_fleet_dir_at(claude_dir: &std::path::Path) -> std::io::Result<()> {
+    let dir = claude_dir.join("fleet");
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
     }
@@ -52,17 +52,17 @@ mod tests {
     #[test]
     fn removes_legacy_dir_and_is_noop_when_absent() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let home = tmp.path();
-        let legacy = home.join(".claude").join("fleet");
+        let claude_dir = tmp.path().join(".claude");
+        let legacy = claude_dir.join("fleet");
         std::fs::create_dir_all(legacy.join("bin")).unwrap();
         std::fs::write(legacy.join("hooks.jsonl"), b"stale").unwrap();
         std::fs::write(legacy.join("port"), b"1").unwrap();
         assert!(legacy.exists());
 
-        remove_legacy_fleet_dir_at(home).unwrap();
+        remove_legacy_fleet_dir_at(&claude_dir).unwrap();
         assert!(!legacy.exists(), "legacy dir must be removed");
 
         // Idempotent: a second call on an absent dir is a clean no-op.
-        remove_legacy_fleet_dir_at(home).unwrap();
+        remove_legacy_fleet_dir_at(&claude_dir).unwrap();
     }
 }

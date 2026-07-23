@@ -98,7 +98,7 @@ pub struct HookEvent {
 // ── Paths ────────────────────────────────────────────────────────────────────
 
 fn settings_path() -> Option<PathBuf> {
-    crate::session::real_home_dir().map(|h| h.join(".claude").join("settings.json"))
+    crate::session::get_claude_dir().map(|d| d.join("settings.json"))
 }
 
 pub fn hooks_events_path() -> Option<PathBuf> {

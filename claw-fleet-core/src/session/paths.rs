@@ -33,8 +33,43 @@ pub fn real_home_dir() -> Option<PathBuf> {
     dirs::home_dir()
 }
 
+/// Claude Code's config directory: `$CLAUDE_CONFIG_DIR` if set (Claude Code
+/// honours it — every `~/.claude` path relocates under it), else `~/.claude`.
+///
+/// Mirrors [`get_codex_dir`]'s `$CODEX_HOME` handling. `FLEET_HOME` is honoured
+/// transitively through [`real_home_dir`] for test isolation. The env value is
+/// used verbatim (`PathBuf::from`) — Claude Code does not expand a leading `~`
+/// (verified: a literal `~/x` value is treated as a relative path), so neither
+/// do we; real users set an absolute path.
 pub fn get_claude_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+        let path = PathBuf::from(dir);
+        if !path.as_os_str().is_empty() {
+            return Some(path);
+        }
+    }
     real_home_dir().map(|h| h.join(".claude"))
+}
+
+/// Path to Claude Code's `.claude.json` (MCP server config + project history).
+///
+/// **Asymmetric** with [`get_claude_dir`]: `.claude.json` sits at the *root* of
+/// the config location, not inside a `.claude/` subdir.
+/// - `$CLAUDE_CONFIG_DIR` set → `$CLAUDE_CONFIG_DIR/.claude.json`
+/// - unset → `$HOME/.claude.json` (home root, *outside* `~/.claude/`)
+///
+/// Verified by isolating `HOME` + `CLAUDE_CONFIG_DIR`: with the var set, Claude
+/// Code writes `<var>/.claude.json`; unset, it writes `~/.claude.json`. Cross-
+/// checked against Claude Code docs ("every ~/.claude path lives under that
+/// directory instead") and Fleet's pre-existing `~/.claude.json` usage.
+pub fn get_claude_config_json() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+        let path = PathBuf::from(dir);
+        if !path.as_os_str().is_empty() {
+            return Some(path.join(".claude.json"));
+        }
+    }
+    real_home_dir().map(|h| h.join(".claude.json"))
 }
 
 /// Fleet's own data directory: `~/.fleet/`.
@@ -552,6 +587,58 @@ mod workspace_name_win_tests {
     #[test]
     fn windows_worktree_uses_repo_name() {
         assert_eq!(workspace_name("C:\\code\\repo\\.worktrees\\task-1"), "repo");
+    }
+}
+
+#[cfg(test)]
+mod claude_config_dir_tests {
+    use super::{get_claude_config_json, get_claude_dir, real_home_dir};
+    use std::path::PathBuf;
+
+    /// Restores `CLAUDE_CONFIG_DIR` to its captured value on drop, so a panic
+    /// mid-assert can't leak the test's override into other tests.
+    struct CfgGuard(Option<std::ffi::OsString>);
+    impl Drop for CfgGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.0 {
+                    Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+                    None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+                }
+            }
+        }
+    }
+
+    // One serial test (not several parallel #[test]s) because it mutates the
+    // process-global `CLAUDE_CONFIG_DIR`. Only that single new var is touched —
+    // nothing else reads it — so cross-test interference is effectively nil.
+    #[test]
+    fn resolves_config_dir_and_json_with_and_without_env() {
+        let _g = CfgGuard(std::env::var_os("CLAUDE_CONFIG_DIR"));
+
+        // Set → used verbatim; .claude.json sits at the config-dir root.
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", "/tmp/fleet-cfg-honor-test") };
+        assert_eq!(
+            get_claude_dir(),
+            Some(PathBuf::from("/tmp/fleet-cfg-honor-test"))
+        );
+        assert_eq!(
+            get_claude_config_json(),
+            Some(PathBuf::from("/tmp/fleet-cfg-honor-test/.claude.json"))
+        );
+
+        // Empty value is ignored (treated as unset).
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", "") };
+        assert_eq!(get_claude_dir(), real_home_dir().map(|h| h.join(".claude")));
+
+        // Unset → fall back to ~/.claude, and .claude.json to the home ROOT
+        // (outside .claude/) — the verified asymmetry.
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+        assert_eq!(get_claude_dir(), real_home_dir().map(|h| h.join(".claude")));
+        assert_eq!(
+            get_claude_config_json(),
+            real_home_dir().map(|h| h.join(".claude.json"))
+        );
     }
 }
 
