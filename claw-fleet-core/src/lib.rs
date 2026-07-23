@@ -263,3 +263,70 @@ pub const SKILL_TARGETS: &[(&str, &str, &str)] = &[
     ("GitHub Copilot", ".copilot", ".copilot/skills"),
     ("Gemini CLI", ".gemini", ".gemini/skills"),
 ];
+
+/// Resolve a [`SKILL_TARGETS`] entry to absolute `(detect_dir, skills_dir)`.
+///
+/// Claude Code and Codex relocate their whole config dir via `$CLAUDE_CONFIG_DIR`
+/// / `$CODEX_HOME`, so the table's relative `.claude` / `.codex` paths must defer
+/// to those env vars — otherwise skill detection/install targets the wrong dir
+/// for a relocated setup. Other tools resolve under `home` as before.
+pub fn resolve_skill_target(
+    name: &str,
+    detect_dir: &str,
+    skills_dir: &str,
+    home: &std::path::Path,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    match name {
+        "Claude Code" => {
+            if let Some(d) = crate::session::get_claude_dir() {
+                let skills = d.join("skills");
+                return (d, skills);
+            }
+        }
+        "Codex" => {
+            if let Some(d) = crate::session::get_codex_dir() {
+                let skills = d.join("skills");
+                return (d, skills);
+            }
+        }
+        _ => {}
+    }
+    (home.join(detect_dir), home.join(skills_dir))
+}
+
+#[cfg(test)]
+mod resolve_skill_target_tests {
+    use super::resolve_skill_target;
+    use std::path::{Path, PathBuf};
+
+    /// Restores `CLAUDE_CONFIG_DIR` on drop so a panic can't leak the override.
+    struct CfgGuard(Option<std::ffi::OsString>);
+    impl Drop for CfgGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.0 {
+                    Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+                    None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn claude_row_honors_config_dir_others_use_home() {
+        let _g = CfgGuard(std::env::var_os("CLAUDE_CONFIG_DIR"));
+        let home = Path::new("/home/x");
+
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", "/relocated/agents") };
+        let (detect, skills) =
+            resolve_skill_target("Claude Code", ".claude", ".claude/skills", home);
+        assert_eq!(detect, PathBuf::from("/relocated/agents"));
+        assert_eq!(skills, PathBuf::from("/relocated/agents/skills"));
+
+        // Non-Claude/Codex tools ignore the env and resolve under `home`.
+        let (detect, skills) =
+            resolve_skill_target("GitHub Copilot", ".copilot", ".copilot/skills", home);
+        assert_eq!(detect, PathBuf::from("/home/x/.copilot"));
+        assert_eq!(skills, PathBuf::from("/home/x/.copilot/skills"));
+    }
+}
