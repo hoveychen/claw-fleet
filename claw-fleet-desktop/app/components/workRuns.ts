@@ -109,7 +109,7 @@ const EXPLORE_TOOLS = new Set(["Read", "Grep", "Glob", "Explore", "LSP", "TodoWr
 export function runCategory(toolNames: string[]): WorkRunCategory {
   if (toolNames.length === 0) return "think";
   if (toolNames.some((n) => EDIT_TOOLS.has(n))) return "edit";
-  if (toolNames.some((n) => n === "Bash")) return "run";
+  if (toolNames.some((n) => n === "Bash" || n === "PowerShell")) return "run";
   if (toolNames.every((n) => WEB_TOOLS.has(n))) return "web";
   if (toolNames.every((n) => EXPLORE_TOOLS.has(n) || WEB_TOOLS.has(n))) return "explore";
   return "work";

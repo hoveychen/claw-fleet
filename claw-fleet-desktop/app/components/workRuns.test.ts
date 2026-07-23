@@ -109,6 +109,13 @@ describe("runCategory", () => {
     expect(runCategory([])).toBe("think");
     expect(runCategory(["Agent", "Read"])).toBe("work");
   });
+
+  it("treats the Windows PowerShell tool as a command run", () => {
+    // Claude Code names the Windows shell tool `PowerShell`, not `Bash`; a run
+    // that drives it must still classify as "run", not fall through to "work".
+    expect(runCategory(["Read", "PowerShell"])).toBe("run");
+    expect(runCategory(["PowerShell"])).toBe("run");
+  });
 });
 
 describe("firstSentence", () => {
