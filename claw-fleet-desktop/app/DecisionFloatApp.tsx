@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./fonts";
 import "./App.css";
 import { DecisionPanel } from "./components/DecisionPanel";
@@ -78,18 +79,37 @@ export default function DecisionFloatApp() {
       .catch(() => {});
   }, []);
 
-  // Theme + language sync across windows.
+  // Theme + language sync across windows. The float is its own webview, so it
+  // must stamp the resolved theme onto its own <html> — App.css maps a missing
+  // data-theme to the dark palette (`:root, [data-theme="dark"]` share it), so
+  // without this the float renders dark even while the main window is light.
+  // Every sibling window (main/tray/preview/settings) already does this; the
+  // float was the only one calling resolveTheme() and discarding the result.
   useEffect(() => {
-    resolveTheme(useUIStore.getState().theme);
+    const applyTheme = (theme: "dark" | "light" | "system") => {
+      const resolved = resolveTheme(theme);
+      document.documentElement.setAttribute("data-theme", resolved);
+      getCurrentWindow()
+        .setTheme(resolved === "dark" ? "dark" : "light")
+        .catch(() => {});
+    };
+    applyTheme(useUIStore.getState().theme);
+    // Follow the OS when the user's choice is "system".
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSystem = () => {
+      if (useUIStore.getState().theme === "system") applyTheme("system");
+    };
+    mq.addEventListener("change", onSystem);
     const unThemePromise = listen<string>("overlay-theme-changed", (e) => {
       const next = e.payload as "dark" | "light" | "system";
       useUIStore.setState({ theme: next });
-      resolveTheme(next);
+      applyTheme(next);
     });
     const unLangPromise = listen<string>("overlay-lang-changed", (e) => {
       if (i18n.language !== e.payload) i18n.changeLanguage(e.payload);
     });
     return () => {
+      mq.removeEventListener("change", onSystem);
       unThemePromise.then((fn) => fn());
       unLangPromise.then((fn) => fn());
     };
