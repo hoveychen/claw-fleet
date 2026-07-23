@@ -44,6 +44,7 @@ const App: React.FC = () => {
             compositionHeight={1080}
             controls
             loop
+            numberOfSharedAudioTags={8}
             style={{ width: "100%", height: "100%" }}
           />
         ) : (
@@ -57,6 +58,7 @@ const App: React.FC = () => {
             compositionHeight={1920}
             controls
             loop
+            numberOfSharedAudioTags={8}
             style={{ width: "100%", height: "100%" }}
           />
         )}

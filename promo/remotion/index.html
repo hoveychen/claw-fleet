@@ -19,8 +19,10 @@
     .format-switch button { border: 0; border-bottom: 3px solid transparent; background: transparent; color: #858783; padding: 10px 14px 9px; cursor: pointer; }
     .format-switch button.active { color: #f4f1e8; border-bottom-color: #e26445; }
     .stage { overflow: hidden; background: #090a0b; box-shadow: 0 28px 90px rgba(0,0,0,.38); }
-    .shell--horizontal .stage { width: 100%; aspect-ratio: 16 / 9; }
-    .shell--vertical .stage { width: min(470px, 100%); aspect-ratio: 9 / 16; margin: 0 auto; }
+    /* Cap width so height (= width * 9/16) never exceeds the viewport, otherwise
+       the bottom of the video — including the Player controls — is clipped. */
+    .shell--horizontal .stage { width: min(100%, (100dvh - 160px) * 16 / 9); aspect-ratio: 16 / 9; margin: 0 auto; }
+    .shell--vertical .stage { width: min(470px, 100%, (100dvh - 240px) * 9 / 16); aspect-ratio: 9 / 16; margin: 0 auto; }
     .episode-rail { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); margin-top: 20px; border-top: 1px solid #383a38; }
     .episode-rail button { min-width: 0; border: 0; border-top: 3px solid transparent; background: transparent; color: #898b87; padding: 13px 6px 10px; font-size: 11px; text-transform: uppercase; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .episode-rail button span { display: block; margin-bottom: 5px; color: #e26445; font-size: 9px; }

@@ -33,21 +33,32 @@ const bgmVolume = (frame: number, cues: VoiceCue[], fps: number, idle = 0.34, du
   return lerp(idle, ducked, duck);
 };
 
-const VoiceTracks: React.FC<{ cues: VoiceCue[] }> = ({ cues }) => (
-  <>
-    {cues.map((cue) => (
-      <Sequence key={cue.file} from={cue.startFrame}>
-        <Audio src={staticFile(`audio/vo-2026/${cue.file}.mp3`)} volume={0.96} />
-      </Sequence>
-    ))}
-  </>
-);
+// Each <Audio> must live in a Sequence with an explicit durationInFrames so the
+// tag UNMOUNTS once the clip finishes. Without a duration the Sequence runs to
+// the end of the composition, keeping every audio tag mounted; they accumulate
+// past the Player's numberOfSharedAudioTags limit and it renders "⚠️".
+const VoiceTracks: React.FC<{ cues: VoiceCue[] }> = ({ cues }) => {
+  const { fps } = useVideoConfig();
+  return (
+    <>
+      {cues.map((cue) => (
+        <Sequence key={cue.file} from={cue.startFrame} durationInFrames={Math.ceil(cue.measuredSeconds * fps) + 15}>
+          <Audio src={staticFile(`audio/vo-2026/${cue.file}.mp3`)} volume={0.96} />
+        </Sequence>
+      ))}
+    </>
+  );
+};
 
-const SoundCue: React.FC<{ file: "alert" | "click" | "success" | "whoosh"; frame: number; volume?: number }> = ({ file, frame, volume = 0.55 }) => (
-  <Sequence from={frame}>
-    <Audio src={staticFile(`audio/sfx/${file}.wav`)} volume={volume} />
-  </Sequence>
-);
+// SFX are all < 0.6s; 1s of mount comfortably covers the longest without cutting.
+const SoundCue: React.FC<{ file: "alert" | "click" | "success" | "whoosh"; frame: number; volume?: number }> = ({ file, frame, volume = 0.55 }) => {
+  const { fps } = useVideoConfig();
+  return (
+    <Sequence from={frame} durationInFrames={fps}>
+      <Audio src={staticFile(`audio/sfx/${file}.wav`)} volume={volume} />
+    </Sequence>
+  );
+};
 
 const Brand: React.FC<{ compact?: boolean }> = ({ compact }) => (
   <div style={{ display: "flex", alignItems: "center", gap: compact ? 14 : 20 }}>
