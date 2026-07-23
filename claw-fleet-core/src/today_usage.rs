@@ -1249,6 +1249,89 @@ fn build_range_breakdown(
 /// so it can be unit-tested without reading `~/.fleet/fleet_llm_usage.jsonl`.
 /// Each in-window session is projected through `cache` (folded from disk only on
 /// a miss) and summed over the date window `[from, to]`.
+/// Infer the agent-source label for a report-sourced receipt line from its
+/// model id. The daily-report DB keys usage by model, not by source, so we map
+/// gpt/codex model ids to Codex and everything else to Claude Code. (Fleet's own
+/// guard/audit LLM overhead is never recorded in daily reports, so it simply
+/// does not appear on report-sourced days — a negligible $1–5/day omission.)
+fn infer_report_source(model: &str) -> String {
+    let m = model.to_ascii_lowercase();
+    if m.contains("gpt") || m.contains("codex") {
+        "codex".to_string()
+    } else {
+        "claude-code".to_string()
+    }
+}
+
+/// Backfill `by_model` / `by_day` from the durable daily-report DB for dates in
+/// `[from_date, upto_exclusive)` — the window portion older than the live 7-day
+/// session pool. The live scan drops transcripts whose mtime ages past 7 days
+/// (`session::parse_session_info`), so without this every multi-day range folded
+/// the same ~7-day pool and undercounted historical spend by design. The report
+/// DB, in contrast, persists each day's per-model tokens+cost back to install
+/// time regardless of transcript retention.
+///
+/// Per-model cost uses the report's stored `cost_usd` when present (exact, cache
+/// included); for pre-cost (v0) reports it recomputes token×price so ancient
+/// days still show an approximate input+output-only figure instead of $0.
+fn fold_report_days(
+    from_date: &str,
+    upto_exclusive: &str,
+    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
+    by_day: &mut std::collections::BTreeMap<String, LineAcc>,
+) {
+    use crate::model_cost::{turn_cost_usd, TurnUsage};
+    if from_date >= upto_exclusive {
+        return; // live pool already covers the whole requested window
+    }
+    let Ok(store) = crate::daily_report::ReportStore::open() else {
+        return;
+    };
+    let Ok(dates) = store.list_dates() else {
+        return;
+    };
+    for date in dates {
+        let d = date.as_str();
+        if d < from_date || d >= upto_exclusive {
+            continue;
+        }
+        let Ok(Some(report)) = store.get_report(d) else {
+            continue;
+        };
+        for (model, mt) in &report.metrics.model_breakdown {
+            let cost = if mt.cost_usd > 0.0 {
+                mt.cost_usd
+            } else {
+                turn_cost_usd(
+                    model,
+                    &TurnUsage {
+                        input_tokens: mt.input_tokens,
+                        output_tokens: mt.output_tokens,
+                        cache_creation_tokens: mt.cache_creation_tokens,
+                        cache_read_tokens: mt.cache_read_tokens,
+                        web_search_requests: 0,
+                    },
+                )
+            };
+            let source = infer_report_source(model);
+            by_model.entry((source, model.clone())).or_default().add(
+                mt.input_tokens,
+                mt.cache_creation_tokens,
+                mt.cache_read_tokens,
+                mt.output_tokens,
+                cost,
+            );
+            by_day.entry(date.clone()).or_default().add(
+                mt.input_tokens,
+                mt.cache_creation_tokens,
+                mt.cache_read_tokens,
+                mt.output_tokens,
+                cost,
+            );
+        }
+    }
+}
+
 fn build_range_breakdown_cached(
     sessions: &[SessionInfo],
     fleet_entries: &[crate::llm_usage::FleetLlmUsageEntry],
@@ -1266,6 +1349,19 @@ fn build_range_breakdown_cached(
     let from_date = local_date_str(from_ms);
     let to_date = local_date_str(to_ms);
 
+    // The live session pool only reliably covers the last ~7 days: any transcript
+    // whose mtime ages past 7 days is dropped by `session::parse_session_info`,
+    // so folding live sessions can only answer for `[live_floor_date, to_date]`.
+    // Days older than that are served from the durable daily-report DB below.
+    // `live_from_date` clamps the live fold to whichever of the two floors is
+    // later, so the live and report halves stay date-disjoint (no double-count).
+    let live_floor_date = local_date_str(to_ms - 7 * 86_400_000);
+    let live_from_date = if from_date.as_str() > live_floor_date.as_str() {
+        from_date.clone()
+    } else {
+        live_floor_date.clone()
+    };
+
     for s in sessions {
         if s.agent_source == "codex" {
             // Whole-session attribution to the creation day; include only if
@@ -1281,7 +1377,7 @@ fn build_range_breakdown_cached(
             sum_cells_window(
                 cells,
                 &s.agent_source,
-                &from_date,
+                &live_from_date,
                 &to_date,
                 &mut by_model,
                 &mut by_day,
@@ -1298,16 +1394,22 @@ fn build_range_breakdown_cached(
         sum_cells_window(
             cells,
             &s.agent_source,
-            &from_date,
+            &live_from_date,
             &to_date,
             &mut by_model,
             &mut by_day,
         );
     }
 
-    // Fleet's own LLM calls in the window (already timestamp-filtered), folded
-    // per model and per day.
+    // Fleet's own LLM calls, folded per model and per day — but only within the
+    // live window `[live_from_date, to_date]`. Older days are served whole from
+    // the report DB (which excludes Fleet overhead), so counting stray older
+    // Fleet entries there would mix口径; the omitted amount is a few $/day.
     for e in fleet_entries {
+        let edate = local_date_str(e.timestamp_ms as i64);
+        if edate.as_str() < live_from_date.as_str() {
+            continue;
+        }
         by_model
             .entry(("fleet".to_string(), e.model.clone()))
             .or_default()
@@ -1318,17 +1420,19 @@ fn build_range_breakdown_cached(
                 e.output_tokens,
                 e.cost_usd,
             );
-        by_day
-            .entry(local_date_str(e.timestamp_ms as i64))
-            .or_default()
-            .add(
-                e.input_tokens,
-                e.cache_creation_tokens,
-                e.cache_read_tokens,
-                e.output_tokens,
-                e.cost_usd,
-            );
+        by_day.entry(edate).or_default().add(
+            e.input_tokens,
+            e.cache_creation_tokens,
+            e.cache_read_tokens,
+            e.output_tokens,
+            e.cost_usd,
+        );
     }
+
+    // Backfill the pre-live-window portion `[from_date, live_from_date)` from the
+    // durable daily-report DB. No-op for the today/7d presets (whose `from_date`
+    // is already at or after the live floor).
+    fold_report_days(&from_date, &live_from_date, &mut by_model, &mut by_day);
 
     let lines = build_lines(by_model);
 
@@ -1350,6 +1454,16 @@ fn build_range_breakdown_cached(
         }
     }
 
+    // Header `from_date` = the earliest day we actually have data for, not the
+    // raw requested lower bound. The "全部" preset requests `from_ms = 0`, which
+    // would otherwise render a misleading `1970-01-01`; the real floor is the
+    // first day present in the trend (report-backfilled or live).
+    let actual_from_date = by_day
+        .keys()
+        .next()
+        .cloned()
+        .unwrap_or_else(|| from_date.clone());
+
     // BTreeMap iterates ascending by date, so the trend is already ordered.
     let daily: Vec<DailyUsagePoint> = by_day
         .into_iter()
@@ -1364,8 +1478,8 @@ fn build_range_breakdown_cached(
         .collect();
 
     UsageRangeBreakdown {
-        from_date: local_date_str(from_ms),
-        to_date: local_date_str(to_ms),
+        from_date: actual_from_date,
+        to_date,
         lines,
         daily,
         total_input_tokens: total_input,

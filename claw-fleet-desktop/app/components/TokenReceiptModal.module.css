@@ -107,6 +107,12 @@
   margin-bottom: 6px;
 }
 
+.chart_scale_hint {
+  margin-left: 6px;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
 .chart_svg {
   display: block;
   width: 100%;

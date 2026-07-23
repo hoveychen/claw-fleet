@@ -650,6 +650,7 @@
     "range_30d": "30 days",
     "range_all": "All",
     "trend_title": "Daily spend",
+    "trend_scale_hint": "√ scale",
     "codex_note": "Codex has no per-turn detail; its usage is attributed whole to the session's start day, so the trend is approximate",
     "row_input": "Input",
     "row_cache_write": "Cache write",
