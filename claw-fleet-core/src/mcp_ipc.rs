@@ -176,8 +176,20 @@ pub fn read_review_file(path: &str, title: Option<&str>) -> Result<ReviewDocCont
                 .map(str::to_string)
         })
         .unwrap_or_else(|| path.to_string());
+    // An `.html`/`.htm` file is meant to render, not to be shown as raw markdown
+    // source. Flag it Html so the card frames it in the sandboxed iframe;
+    // `read_review_doc` then injects the height-reporting script for it.
+    let format = match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("html") | Some("htm") => ReviewDocFormat::Html,
+        _ => ReviewDocFormat::Markdown,
+    };
     Ok(ReviewDocContent {
-        format: ReviewDocFormat::Markdown,
+        format,
         body,
         title,
     })
@@ -1111,6 +1123,36 @@ mod tests {
         };
         autoheight_review_content(&mut content);
         assert_eq!(content.body, "# Title\n\nbody");
+    }
+
+    #[test]
+    fn html_file_review_doc_renders_as_html_with_autoheight() {
+        // A `.html` file review doc must render in the sandboxed iframe (Html
+        // format) and carry the height-reporting script — same as a wiki HTML
+        // doc — not be shown as raw markdown source in a collapsed frame.
+        let dir = std::env::temp_dir().join(format!("fleet-rdc-html-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("plan.html");
+        fs::write(&file, "<div style=\"height:900px\">tall</div>").unwrap();
+
+        let doc = ReviewDoc {
+            kind: ReviewDocKind::File,
+            reference: file.to_string_lossy().into_owned(),
+            title: None,
+        };
+        let content = read_review_doc(&doc).expect("read html file review doc");
+        assert!(
+            matches!(content.format, ReviewDocFormat::Html),
+            "a .html file must be flagged Html, got {:?}",
+            content.format
+        );
+        assert!(
+            content.body.contains(AUTOHEIGHT_MARKER),
+            "html file review doc must report its height: {}",
+            content.body
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
