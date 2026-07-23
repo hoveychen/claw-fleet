@@ -427,12 +427,24 @@ Fleet 会话里悄悄空转、什么都不 spawn。真正会跨回合边界触�
 结束回合——Fleet 在后台轮询，条件一触发就 `claude --resume` *这个*会话，把捕获\
 的结果喂给你的下一回合。`fleet watch stop <id>` 取消它。\n\
 \n\
-相关能力：`fleet schedule` 与 `fleet loop` 也接受一个可选的 `--until <shell 命令>` \
-作为**非 LLM 前置条件**——用 exit 0 作为 spawn 的门。schedule 到点后按 `--poll` \
-轮询该命令、`--timeout` 内仍不满足则放弃（不 spawn，记为超时历史）；loop 在每个 \
-interval tick 检查一次，不满足就跳过本次迭代（不 spawn、不计入 iteration，进位到下个 \
-interval）。用于「时间到 *且* 某条件满足才执行」的场景；纯粹等一个外部事件、之后要\
-接着干活的，仍用上面的 `fleet watch`。\n\
+**Fleet 的定时/调度机制——按*需求*挑，别只盯着名字带 cron 的：**\n\
+- **周期性重复跑一件事（cron 语义）→ `fleet loop`**（CLI 别名 `fleet cron`）。\
+Fleet 托管、durable，每个 interval spawn 一个全新的**本地** detached 会话（所以\
+本地凭证如 muveectl 都在），不随本会话消亡。凡是「每 N 分钟 / 每小时 / 每天 / \
+定期做 X」都归它——别因为它叫 loop 就以为是那个在 headless `-p` 里静默失效的 \
+`/loop`；`fleet loop` 恰恰相反，是活得过回合的那个。\n\
+- **未来某个绝对时刻只跑一次 → `fleet schedule`**（`--at`/`--in`，一次性）。\n\
+- **等一个外部条件满足后再继续*本*会话 → `fleet watch`**（上面那段）。\n\
+- **把工作交给一个全新后继者继续 → `fleet handoff`**。\n\
+\n\
+`fleet loop` 与 `fleet schedule` 都接受一个可选的 `--until <shell 命令>` 作为\
+**廉价的非 LLM 门**：每个 tick（schedule 是到点后）先跑这条便宜探测，\
+**只有它退出 0 才 spawn 会花钱的 LLM 会话**，否则跳过（loop 不计入 iteration、\
+进位下个 interval；schedule 在 `--timeout` 内按 `--poll` 轮询，仍不满足则放弃\
+记为超时历史）。这正是「高频轮询、只在真有活时才烧 LLM」的省钱模式——例如让 loop \
+每 12h 跑一条 `limit:0` 廉价探测，只有真检测到新数据（探测退出 0）才起 LLM 会话去\
+处理。别默认每个 tick 都起一个 LLM 会话。纯粹等一个外部事件、之后要接着干活的，\
+仍用上面的 `fleet watch`。\n\
 \n\
 ## Rule 6 —— 需求保真：别把不存在的需求写进计划\n\
 \n\
@@ -960,6 +972,30 @@ done>' --capture '<shell cmd whose stdout you want reported>' --note '<what you 
 are waiting for>'`, then end the turn — Fleet polls in the background and \
 `claude --resume`s THIS session the moment the condition fires, feeding the \
 captured result to your next turn. `fleet watch stop <id>` cancels it.\n\
+\n\
+**Pick the scheduling relay by *need*, not by which name says \"cron\":**\n\
+- **Repeat something periodically (cron semantics) → `fleet loop`** (CLI alias \
+`fleet cron`). Fleet-managed, durable, spawns a fresh **local** detached \
+session each interval (so local creds like muveectl are present) and outlives \
+this session. Anything \"every N minutes / hourly / daily / on a schedule\" is \
+this — don't let the name `loop` fool you into thinking it's the `/loop` that \
+silently dies in a headless `-p` turn; `fleet loop` is the opposite, the one \
+that survives.\n\
+- **Fire ONCE at an absolute future time → `fleet schedule`** (`--at`/`--in`).\n\
+- **Continue *this* session after an external condition holds → `fleet watch`** \
+(above).\n\
+- **Hand the work to a fresh successor → `fleet handoff`**.\n\
+\n\
+Both `fleet loop` and `fleet schedule` take an optional `--until <shell cmd>` \
+as a **cheap non-LLM gate**: each tick (or once due) a cheap shell probe runs \
+first and the **paid LLM session spawns only when it exits 0**, else the tick \
+is skipped (loop consumes no iteration and carries to the next interval; a \
+schedule polls per `--poll` within `--timeout`, then abandons as timed-out \
+history). This is the money-saver — poll often, pay for an LLM only when there \
+is real work: e.g. a loop that runs a cheap `limit:0` probe every 12h and only \
+spawns an LLM session when it actually detects new data (probe exits 0). Do \
+NOT default to spawning an LLM session every tick. For purely waiting on an \
+event then continuing, use `fleet watch` above.\n\
 \n\
 ## Rule 6 — Requirement fidelity: don't plan hallucinated scope\n\
 \n\
