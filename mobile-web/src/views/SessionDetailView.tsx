@@ -945,6 +945,11 @@ export function SessionDetailView({
     };
 
     const poll = async () => {
+      // Paused while the tab is hidden: no point waking the CPU every few
+      // seconds to tail a view nobody is looking at. Returning without
+      // rescheduling stops the timer chain entirely; `onVisible` restarts it on
+      // return to the foreground. (Matches the visibility gate in App.tsx.)
+      if (document.visibilityState !== "visible") return;
       // A resume/enqueue submit is on the wire — don't fire a competing tail on
       // the single serialized WS; the optimistic echo already shows the user's
       // message, so a skipped tick costs nothing. Retry on the next interval.
@@ -982,10 +987,17 @@ export function SessionDetailView({
     };
 
     offsetRef.current = null; // path / window size changed → re-bootstrap
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      window.clearTimeout(timer); // drop any stray timer → single chain
+      void poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     void poll();
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, session.jsonlPath, tailN, tab]);
@@ -999,6 +1011,10 @@ export function SessionDetailView({
     let cancelled = false;
     let timer = 0;
     const poll = async () => {
+      // Paused while hidden — see the tail poller above. This is the tightest
+      // loop in the app (1.2s), so gating it on visibility is the biggest
+      // single battery win. `onVisible` restarts it on foreground.
+      if (document.visibilityState !== "visible") return;
       // Same yield as the tail poller: hold off while a submit is in flight.
       if (submitInFlightRef.current) {
         if (!cancelled) timer = window.setTimeout(poll, LIVE_THINKING_POLL_MS);
@@ -1014,10 +1030,17 @@ export function SessionDetailView({
       }
       if (!cancelled) timer = window.setTimeout(poll, LIVE_THINKING_POLL_MS);
     };
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      window.clearTimeout(timer); // drop any stray timer → single chain
+      void poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     void poll();
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [client, session.id, working, tab]);
 
