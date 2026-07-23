@@ -276,20 +276,20 @@ pub fn resolve_skill_target(
     skills_dir: &str,
     home: &std::path::Path,
 ) -> (std::path::PathBuf, std::path::PathBuf) {
-    match name {
-        "Claude Code" => {
-            if let Some(d) = crate::session::get_claude_dir() {
-                let skills = d.join("skills");
-                return (d, skills);
-            }
+    // Only an *explicitly set* env var relocates the dir; unset falls back to
+    // `home.join(rel)` (the original behaviour), so callers that pass a scoped
+    // `home` for isolation keep it.
+    let env_dir = match name {
+        "Claude Code" => std::env::var_os("CLAUDE_CONFIG_DIR"),
+        "Codex" => std::env::var_os("CODEX_HOME"),
+        _ => None,
+    };
+    if let Some(dir) = env_dir {
+        let d = std::path::PathBuf::from(dir);
+        if !d.as_os_str().is_empty() {
+            let skills = d.join("skills");
+            return (d, skills);
         }
-        "Codex" => {
-            if let Some(d) = crate::session::get_codex_dir() {
-                let skills = d.join("skills");
-                return (d, skills);
-            }
-        }
-        _ => {}
     }
     (home.join(detect_dir), home.join(skills_dir))
 }
