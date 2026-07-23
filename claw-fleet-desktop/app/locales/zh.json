@@ -647,6 +647,7 @@
     "range_30d": "近 30 天",
     "range_all": "全部",
     "trend_title": "每日花费",
+    "trend_scale_hint": "√ 刻度",
     "codex_note": "Codex 无逐轮明细,其用量整体归到会话起始日,趋势为近似",
     "row_input": "输入",
     "row_cache_write": "缓存写入",
