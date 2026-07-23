@@ -97,7 +97,10 @@ export class HttpFleetCloudClient implements FleetCloudClient {
     signal: AbortSignal,
   ): Promise<void> {
     let cursor = Math.max(0, after);
+    const baseDelay = this.config.reconnectDelayMs ?? 750;
+    let delay = baseDelay;
     while (!signal.aborted) {
+      let progressed = false;
       try {
         const response = await this.fetcher(
           this.url(`/v1/tasks/${encodeURIComponent(taskId)}/events?after=${cursor}`),
@@ -127,6 +130,7 @@ export class HttpFleetCloudClient implements FleetCloudClient {
               const event = JSON.parse(data) as TaskEvent;
               if (event.sequence > cursor) {
                 cursor = event.sequence;
+                progressed = true;
                 onEvent(event);
               }
             }
@@ -141,7 +145,13 @@ export class HttpFleetCloudClient implements FleetCloudClient {
         }
       }
       if (!signal.aborted) {
-        await waitForReconnect(this.config.reconnectDelayMs ?? 750, signal);
+        // A stream that delivered at least one event was healthy → reconnect at
+        // the base delay. One that opened and closed without progress (server
+        // flapping / immediate EOF) would otherwise busy-loop every 750ms and
+        // drain the battery, so back off exponentially until it recovers.
+        if (progressed) delay = baseDelay;
+        await waitForReconnect(delay, signal);
+        if (!progressed) delay = Math.min(delay * 2, 15_000);
       }
     }
   }
