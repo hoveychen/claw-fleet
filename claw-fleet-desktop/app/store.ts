@@ -3,6 +3,7 @@ import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
 import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import { isFleetOwnedTask } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -241,6 +242,21 @@ interface UIState {
   newSessionNav: NewSessionNavRequest | null;
   requestNewSession: (req: Omit<NewSessionNavRequest, "nonce">) => void;
   clearNewSessionNav: () => void;
+  /** Notification / tray click on a Fleet-spawned session → hop to the 任务
+   *  (history) view and open that session in its inline tab strip, instead of
+   *  the global session-detail drawer. Consumed by HistoryView. See
+   *  `navigateToSessionDetail` for the routing decision. */
+  openTaskNav: OpenTaskNavRequest | null;
+  requestOpenTask: (sessionId: string) => void;
+  clearOpenTaskNav: () => void;
+}
+
+export interface OpenTaskNavRequest {
+  /** Session id to open in the 任务 page's inline tab strip. */
+  sessionId: string;
+  /** Bumped on every request so clicking the same session twice re-navigates
+   *  even when the id is unchanged. */
+  nonce: number;
 }
 
 export interface FileNavRequest {
@@ -391,6 +407,18 @@ export const useUIStore = create<UIState>((set) => ({
       };
     }),
   clearNewSessionNav: () => set({ newSessionNav: null }),
+  openTaskNav: null,
+  requestOpenTask: (sessionId) =>
+    set((s) => {
+      // Hop to the 任务 (history) page, persisting the view like setViewMode so
+      // it survives a relaunch, then bump the nonce for HistoryView to consume.
+      setItem("viewMode", "history");
+      return {
+        viewMode: "history",
+        openTaskNav: { sessionId, nonce: (s.openTaskNav?.nonce ?? 0) + 1 },
+      };
+    }),
+  clearOpenTaskNav: () => set({ openTaskNav: null }),
   setSidebarCollapsed: (on) => {
     setItem("sidebar-collapsed", on ? "true" : "false");
     set({ sidebarCollapsed: on });
@@ -672,6 +700,21 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     });
   },
 }));
+
+/** Route a notification / tray click to the right session detail. A
+ *  Fleet-spawned session (the ones the 任务 page lists) opens in that page's
+ *  inline tab strip; every other session keeps the old behaviour — the global
+ *  detail drawer on the 会话 page. `isFleetOwnedTask` is the exact gate
+ *  HistoryView filters `adhocSessions` by, so "would this appear on the 任务
+ *  page" and "route it there" stay in lockstep. */
+export function navigateToSessionDetail(session: SessionInfo) {
+  if (isFleetOwnedTask(session)) {
+    useUIStore.getState().requestOpenTask(session.id);
+  } else {
+    useUIStore.getState().setViewMode("list");
+    useDetailStore.getState().open(session);
+  }
+}
 
 // ── Waiting alerts store ────────────────────────────────────────────────────
 

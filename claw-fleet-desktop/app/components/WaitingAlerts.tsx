@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import type { WaitingAlert } from "../types";
-import { useDecisionStore, useDetailStore, useSessionsStore, useUIStore, useWaitingAlertsStore } from "../store";
+import { navigateToSessionDetail, useDecisionStore, useDetailStore, useSessionsStore, useUIStore, useWaitingAlertsStore } from "../store";
 import { getItem } from "../storage";
 import { playAlertSound, type TtsMode } from "../audio";
 import styles from "./WaitingAlerts.module.css";
@@ -14,12 +14,13 @@ function timeAgo(ms: number, t: (key: string, opts?: Record<string, unknown>) =>
   return t("m_ago", { n: mins });
 }
 
-/** Navigate to a session by jsonlPath: switch to list view and open the session detail */
+/** Navigate to a session by jsonlPath. Fleet-spawned sessions open in the 任务
+ *  page's inline detail; everything else keeps the 会话-page drawer. The routing
+ *  lives in `navigateToSessionDetail` so the tray path (App.tsx) stays in sync. */
 function navigateToSession(jsonlPath: string) {
   const session = useSessionsStore.getState().sessions.find((s) => s.jsonlPath === jsonlPath);
   if (session) {
-    useUIStore.getState().setViewMode("list");
-    useDetailStore.getState().open(session);
+    navigateToSessionDetail(session);
   }
 }
 

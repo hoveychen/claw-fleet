@@ -17,7 +17,7 @@ import { Wizard } from "./components/Wizard";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
-import { type Connection, resolveTheme, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
+import { type Connection, navigateToSessionDetail, resolveTheme, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
@@ -200,6 +200,8 @@ function App() {
   }, [setTheme, setLiteMode, setViewMode]);
 
   // Open a session detail when the user clicks an agent in the tray menu.
+  // Fleet-spawned sessions route to the 任务 page's inline detail; others keep
+  // the 会话-page drawer (see navigateToSessionDetail).
   useEffect(() => {
     const unlisten = listen<string>("open-session", (event) => {
       const jsonlPath = event.payload;
@@ -207,7 +209,7 @@ function App() {
         (s) => s.jsonlPath === jsonlPath,
       );
       if (session) {
-        useDetailStore.getState().open(session);
+        navigateToSessionDetail(session);
       }
     });
     return () => {
