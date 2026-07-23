@@ -323,6 +323,57 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Decision ids whose answer we've already delivered this process, mapped to when
+/// (ms). Guards the idempotent-resend case for the robust `decision_answer` req:
+/// the phone now resends the answer when its reply frame was lost (same
+/// best-effort relay as spawn). Without this, a resend of a *live* card whose
+/// response file the producer already consumed would get `write_response`'s
+/// "no pending request" Err — indistinguishable from "never landed" — and a
+/// resend of a *parked* card racing the first `discard` could `claude --resume`
+/// twice. Short-circuiting on this map makes both a clean idempotent Ok. Keyed on
+/// the decision id (a uuid); pruned by age so the map can't grow unbounded.
+static ANSWERED_DECISIONS: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+
+/// How long a delivered decision id stays in the dedup map — comfortably longer
+/// than the phone's bounded resend window, short enough to self-clean.
+const ANSWER_DEDUP_TTL_MS: u64 = 5 * 60 * 1000;
+
+/// Whether `id`'s answer was already delivered recently (a dedup hit). Prunes
+/// expired entries as a side effect so the map stays bounded.
+fn decision_already_answered(id: &str) -> bool {
+    let now = now_ms();
+    let mut guard = ANSWERED_DECISIONS.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.retain(|_, at| now.saturating_sub(*at) < ANSWER_DEDUP_TTL_MS);
+    map.contains_key(id)
+}
+
+/// Record that `id`'s answer was delivered, so a later resend short-circuits.
+fn record_decision_answered(id: &str) {
+    if id.trim().is_empty() {
+        return;
+    }
+    ANSWERED_DECISIONS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(id.to_string(), now_ms());
+}
+
+/// Deliver a mobile answer with idempotent-resend dedup, shared by the legacy
+/// fire-and-forget `answer` event and the robust `decision_answer` req. A resend
+/// for an id already delivered this process is a no-op success, so an old client
+/// and a new client (or a new client's own retries) can't double-deliver.
+fn deliver_decision_answer_deduped(payload: &Value) -> Result<(), String> {
+    let id = payload.get("id").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    if !id.is_empty() && decision_already_answered(&id) {
+        return Ok(());
+    }
+    deliver_decision_answer(payload)?;
+    record_decision_answered(&id);
+    Ok(())
+}
+
 /// Record (or refresh) a client from its `client_hello` payload. First sighting
 /// stamps `connected_at_ms`; later ones only bump `last_seen_ms` and metadata.
 fn upsert_client(payload: &Value) {
@@ -1360,6 +1411,7 @@ fn is_ackable_method(method: &str) -> bool {
             | "stop_workspace"
             | "session_mark"
             | "upload_attachment"
+            | "decision_answer"
     )
 }
 
@@ -1412,7 +1464,16 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
 /// its `<id>.response.json`, and a parked one (whose producer is long gone)
 /// resumes the session with the answer instead.
 fn handle_answer(payload: &Value) -> Result<(), String> {
-    deliver_decision_answer(payload)
+    deliver_decision_answer_deduped(payload)
+}
+
+/// `req`-channel form of a decision answer — the phone's robust path. Unlike the
+/// fire-and-forget `answer` event, this rides req/reply so the phone gets a
+/// delivery verdict and resends on loss; the dedup in
+/// [`deliver_decision_answer_deduped`] is what makes that resend safe. Returns a
+/// null reply body on success (the phone only acts on `ok`).
+fn serve_decision_answer(params: &Value) -> Result<Value, String> {
+    deliver_decision_answer_deduped(params).map(|()| Value::Null)
 }
 
 /// Deliver a normalized decision response through the same live/parked path
@@ -1590,6 +1651,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "stop_workspace" => serve_stop_workspace(params),
         "session_mark" => serve_session_mark(params),
         "upload_attachment" => serve_upload_attachment(params),
+        "decision_answer" => serve_decision_answer(params),
         "attachments_exist" => serve_attachments_exist(params),
         "session_read" => serve_session_read(params),
         // ── Repository "仓库" surface ─────────────────────────────────────
@@ -2672,6 +2734,7 @@ mod tests {
             "stop_workspace",
             "session_mark",
             "upload_attachment",
+            "decision_answer",
         ] {
             assert!(is_ackable_method(m), "{m} should be ackable");
         }
@@ -2702,6 +2765,35 @@ mod tests {
         let f = ack_frame(&json!("abc-7"));
         assert_eq!(f["event"], "ack");
         assert_eq!(f["req_id"], "abc-7");
+    }
+
+    // ── decision_answer idempotent-resend dedup (弱网答复重传去重) ────────────
+
+    #[test]
+    fn decision_answer_dedup_primitive_records_and_isolates() {
+        // Before recording, an id is not a dedup hit; after recording it is, and an
+        // unrelated id is unaffected. This is the primitive the resend safety rests
+        // on — a no-op stub (record does nothing) fails the middle assertion.
+        let id = "dedup-decision-primitive-1";
+        assert!(!decision_already_answered(id));
+        record_decision_answered(id);
+        assert!(decision_already_answered(id));
+        assert!(!decision_already_answered("dedup-decision-primitive-unrelated"));
+    }
+
+    #[test]
+    fn decision_answer_resend_short_circuits_to_ok() {
+        // The phone resends the answer req when a reply frame is lost. Once the
+        // first answer was delivered (recorded), the resend must short-circuit to
+        // Ok — NOT fall through to deliver → write_response's "no pending request"
+        // Err (which a no-op dedup stub would surface, failing this test).
+        let id = "dedup-decision-resend-2";
+        record_decision_answered(id);
+        let params = json!({ "kind": "elicitation", "id": id, "answers": {} });
+        assert!(
+            serve_decision_answer(&params).is_ok(),
+            "a resend of an already-delivered answer must be an idempotent Ok"
+        );
     }
 
     #[test]

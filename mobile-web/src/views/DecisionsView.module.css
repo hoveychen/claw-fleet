@@ -1016,6 +1016,35 @@
   font-weight: 600;
 }
 
+/* Answer in flight (answerViaReq awaiting the desktop's delivery verdict): the
+   card stays put, dimmed and non-interactive, until it confirms or fails —
+   never removed optimistically. Colour/border only, same as `.parkedBanner`. */
+.cardBusy {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.sendingBanner {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.sendFailBanner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-warning);
+  border-radius: 8px;
+  color: var(--color-warning);
+  font-size: 12px;
+}
+
 .parkedHint {
   color: var(--color-text-secondary);
   font-size: 12px;
