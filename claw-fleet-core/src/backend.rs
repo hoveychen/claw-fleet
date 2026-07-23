@@ -178,11 +178,11 @@ impl SourceUsageSummary {
                 resets_at: Some(sd.resets_at.clone()),
             });
         }
-        if let Some(ref ss) = info.seven_day_sonnet {
+        for sc in &info.seven_day_scoped {
             bars.push(UsageBar {
-                label: "7d Sonnet".into(),
-                utilization: ss.utilization,
-                resets_at: Some(ss.resets_at.clone()),
+                label: format!("7d {}", sc.model_label),
+                utilization: sc.utilization,
+                resets_at: Some(sc.resets_at.clone()),
             });
         }
         SourceUsageSummary {
@@ -1047,7 +1047,7 @@ pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024; // 50 MiB
 mod tests {
     use super::*;
     use serde_json::json;
-    use crate::account::{AccountInfo, UsageStats};
+    use crate::account::{AccountInfo, ScopedUsage, UsageStats};
 
     // ── SourceUsageSummary::from_claude tests ───────────────────────────────
 
@@ -1188,7 +1188,12 @@ mod tests {
             plan: "Max 5x".into(),
             five_hour: Some(UsageStats { utilization: 0.3, resets_at: "2026-01-01T00:00:00Z".into(), prev_utilization: None }),
             seven_day: Some(UsageStats { utilization: 0.7, resets_at: "2026-01-07T00:00:00Z".into(), prev_utilization: None }),
-            seven_day_sonnet: Some(UsageStats { utilization: 0.1, resets_at: "2026-01-07T00:00:00Z".into(), prev_utilization: None }),
+            seven_day_scoped: vec![ScopedUsage {
+                model_label: "Fable".into(),
+                utilization: 0.1,
+                resets_at: "2026-01-07T00:00:00Z".into(),
+                prev_utilization: None,
+            }],
             ..Default::default()
         };
         let s = SourceUsageSummary::from_claude(&info);
@@ -1198,7 +1203,7 @@ mod tests {
         assert_eq!(s.bars[0].label, "5h");
         assert!((s.bars[0].utilization - 0.3).abs() < f64::EPSILON);
         assert_eq!(s.bars[1].label, "7d Opus");
-        assert_eq!(s.bars[2].label, "7d Sonnet");
+        assert_eq!(s.bars[2].label, "7d Fable");
     }
 
     #[test]

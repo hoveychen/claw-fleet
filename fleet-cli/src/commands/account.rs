@@ -41,7 +41,7 @@ fn print_account(info: &AccountInfo) {
 
     let has_usage = info.five_hour.is_some()
         || info.seven_day.is_some()
-        || info.seven_day_sonnet.is_some();
+        || !info.seven_day_scoped.is_empty();
 
     if has_usage {
         println!();
@@ -67,8 +67,13 @@ fn print_account(info: &AccountInfo) {
         if let Some(ref s) = info.seven_day {
             print_stat("7d window:", s);
         }
-        if let Some(ref s) = info.seven_day_sonnet {
-            print_stat("7d Sonnet:", s);
+        for sc in &info.seven_day_scoped {
+            let stat = UsageStats {
+                utilization: sc.utilization,
+                resets_at: sc.resets_at.clone(),
+                prev_utilization: sc.prev_utilization,
+            };
+            print_stat(&format!("7d {}:", sc.model_label), &stat);
         }
     } else {
         println!();

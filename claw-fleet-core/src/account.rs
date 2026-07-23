@@ -10,6 +10,22 @@ pub struct UsageStats {
     pub prev_utilization: Option<f64>,
 }
 
+/// One per-model weekly-scoped usage window, parsed from the usage API's
+/// `limits[]` array (entries with `kind == "weekly_scoped"`). `model_label` is
+/// the scope's `display_name` — e.g. "Fable". This replaces the old fixed
+/// `seven_day_sonnet` slot: Anthropic now returns that top-level field null and
+/// expresses every model-scoped weekly cap through `limits[]` instead, so the
+/// scoped model can be Fable (or several) rather than always Sonnet.
+/// `utilization` is the 0–1 fraction (the API hands back an integer `percent`;
+/// we divide by 100 to match `UsageStats`).
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct ScopedUsage {
+    pub model_label: String,
+    pub utilization: f64,
+    pub resets_at: String,
+    pub prev_utilization: Option<f64>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct AccountInfo {
     pub email: String,
@@ -19,7 +35,11 @@ pub struct AccountInfo {
     pub auth_method: String,
     pub five_hour: Option<UsageStats>,
     pub seven_day: Option<UsageStats>,
-    pub seven_day_sonnet: Option<UsageStats>,
+    /// Per-model weekly-scoped windows (from `limits[]`). Replaces the old
+    /// `seven_day_sonnet` field. `#[serde(default)]` keeps older serialized
+    /// payloads (which lacked this field) deserializable.
+    #[serde(default)]
+    pub seven_day_scoped: Vec<ScopedUsage>,
     /// Where the usage numbers came from: "foxy-switcher" when read from a
     /// running foxy daemon's local API, "anthropic" when fetched directly.
     /// `#[serde(default)]` keeps older serialized payloads deserializable.
@@ -35,12 +55,31 @@ struct MetricSnap {
     resets_at: String,
 }
 
+/// One scoped-model window inside a persisted snapshot, keyed by the model's
+/// display name so `find_prev_utilization` can match periods per model.
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct ScopedSnap {
+    model_label: String,
+    snap: MetricSnap,
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct SnapshotEntry {
     ts: i64,
     five_hour: Option<MetricSnap>,
     seven_day: Option<MetricSnap>,
+    /// Retained so the `UsageHistoryPoint` that auto-resume reads keeps its
+    /// `seven_day_sonnet` field. Anthropic no longer populates a Sonnet-specific
+    /// weekly window (scoped models moved to `limits[]` → `seven_day_scoped`),
+    /// so new samples always write `None` here; the field stays for old on-disk
+    /// snapshots and for auto-resume's `SonnetLimit` recovery path, which keys
+    /// off rate-limit *error text* and is out of scope for the scoped-usage
+    /// display work.
+    #[serde(default)]
     seven_day_sonnet: Option<MetricSnap>,
+    /// Per-model weekly-scoped windows sampled from `limits[]`.
+    #[serde(default)]
+    seven_day_scoped: Vec<ScopedSnap>,
 }
 
 /// Snapshots older than this are dropped on each write. Kept at 8 days so the
@@ -93,6 +132,11 @@ fn load_snapshots() -> Vec<SnapshotEntry> {
             five_hour: e.five_hour.map(normalize_snap),
             seven_day: e.seven_day.map(normalize_snap),
             seven_day_sonnet: e.seven_day_sonnet.map(normalize_snap),
+            seven_day_scoped: e
+                .seven_day_scoped
+                .into_iter()
+                .map(|s| ScopedSnap { model_label: s.model_label, snap: normalize_snap(s.snap) })
+                .collect(),
         })
         .collect()
 }
@@ -127,21 +171,53 @@ fn get_metric_snap<'a>(entry: &'a SnapshotEntry, metric: &str) -> Option<&'a Met
     }
 }
 
+/// The weekly-scoped snapshot for `model_label` within one entry, if present.
+fn get_scoped_snap<'a>(entry: &'a SnapshotEntry, model_label: &str) -> Option<&'a MetricSnap> {
+    entry
+        .seven_day_scoped
+        .iter()
+        .find(|s| s.model_label == model_label)
+        .map(|s| &s.snap)
+}
+
+/// Find the previous period's utilization at the same point in its cycle, for a
+/// metric identified by a fixed string key (`five_hour` / `seven_day` / …).
 fn find_prev_utilization(
     history: &[SnapshotEntry],
     metric: &str,
     current_resets_at: &str,
     now_ms: i64,
 ) -> Option<f64> {
+    find_prev_utilization_by(
+        history,
+        |e| get_metric_snap(e, metric),
+        period_ms(metric),
+        current_resets_at,
+        now_ms,
+    )
+}
+
+/// Core of the "vs previous period" comparison, generic over how each snapshot
+/// exposes the metric of interest. `accessor` pulls the relevant `MetricSnap`
+/// out of a snapshot (fixed field for the built-in metrics, label lookup for
+/// scoped models); `pms` is the window length in ms. Factored out so the scoped
+/// per-model windows reuse the exact same period-alignment logic as the fixed
+/// five-hour / seven-day metrics.
+fn find_prev_utilization_by<'a>(
+    history: &'a [SnapshotEntry],
+    accessor: impl Fn(&'a SnapshotEntry) -> Option<&'a MetricSnap>,
+    pms: i64,
+    current_resets_at: &str,
+    now_ms: i64,
+) -> Option<f64> {
     let current_reset_ms = parse_ts_ms(current_resets_at)?;
-    let pms = period_ms(metric);
     let current_start_ms = current_reset_ms - pms;
     let current_frac =
         ((now_ms - current_start_ms) as f64 / pms as f64).clamp(0.0, 1.0);
 
     let mut prev_resets: Vec<String> = history
         .iter()
-        .filter_map(|e| get_metric_snap(e, metric))
+        .filter_map(|e| accessor(e))
         .filter(|m| m.resets_at != current_resets_at)
         .filter(|m| {
             parse_ts_ms(&m.resets_at)
@@ -160,7 +236,7 @@ fn find_prev_utilization(
     history
         .iter()
         .filter_map(|e| {
-            let snap = get_metric_snap(e, metric)?;
+            let snap = accessor(e)?;
             if &snap.resets_at != prev_resets_at {
                 return None;
             }
@@ -309,6 +385,42 @@ fn parse_usage(v: &Value) -> Option<UsageStats> {
     Some(UsageStats { utilization, resets_at, prev_utilization: None })
 }
 
+/// Extract per-model weekly-scoped usage from the usage API's `limits[]` array.
+/// Each `kind == "weekly_scoped"` entry carries the model it caps under
+/// `scope.model.display_name` (e.g. "Fable") and an integer `percent`. This is
+/// where Anthropic moved the model-scoped weekly caps that used to surface as
+/// the top-level `seven_day_sonnet` field (now always null). Entries without a
+/// model display name or percent are skipped. `is_active` is deliberately not
+/// filtered on — the old fixed bars showed regardless of which window was the
+/// currently-binding one, and the utilization is meaningful either way.
+pub(crate) fn parse_scoped_limits(v: &Value) -> Vec<ScopedUsage> {
+    let Some(limits) = v.get("limits").and_then(|l| l.as_array()) else {
+        return Vec::new();
+    };
+    limits
+        .iter()
+        .filter(|e| e.get("kind").and_then(|k| k.as_str()) == Some("weekly_scoped"))
+        .filter_map(|e| {
+            let model_label = e
+                .pointer("/scope/model/display_name")
+                .and_then(|d| d.as_str())?
+                .to_string();
+            let percent = e.get("percent").and_then(|p| p.as_f64())?;
+            let resets_at = e
+                .get("resets_at")
+                .and_then(|r| r.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some(ScopedUsage {
+                model_label,
+                utilization: percent / 100.0,
+                resets_at,
+                prev_utilization: None,
+            })
+        })
+        .collect()
+}
+
 // ── Account info fetch ────────────────────────────────────────────────────────
 
 /// Raw account fields before snapshot/prev-utilization processing. Shared
@@ -321,7 +433,7 @@ type RawAccount = (
     String,             // plan
     Option<UsageStats>, // five_hour
     Option<UsageStats>, // seven_day
-    Option<UsageStats>, // seven_day_sonnet
+    Vec<ScopedUsage>,   // seven_day_scoped (per-model weekly caps from limits[])
 );
 
 /// Direct path: read keychain credentials and fetch profile + usage straight
@@ -413,9 +525,9 @@ async fn fetch_via_anthropic() -> Result<RawAccount, String> {
 
     let five_hour = usage_body.get("five_hour").and_then(|v| parse_usage(v));
     let seven_day = usage_body.get("seven_day").and_then(|v| parse_usage(v));
-    let seven_day_sonnet = usage_body.get("seven_day_sonnet").and_then(|v| parse_usage(v));
+    let seven_day_scoped = parse_scoped_limits(&usage_body);
 
-    Ok((email, full_name, org_name, plan, five_hour, seven_day, seven_day_sonnet))
+    Ok((email, full_name, org_name, plan, five_hour, seven_day, seven_day_scoped))
 }
 
 pub async fn fetch_account_info() -> Result<AccountInfo, String> {
@@ -424,11 +536,11 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
     // avoids a redundant Anthropic call (and the rate limits that come with it).
     // foxy only exposes email + plan, so full_name falls back to the email and
     // organization_name is left blank. Any failure falls back to the direct API.
-    let (usage_source, (email, full_name, organization_name, plan, mut five_hour, mut seven_day, mut seven_day_sonnet)) =
+    let (usage_source, (email, full_name, organization_name, plan, mut five_hour, mut seven_day, mut seven_day_scoped)) =
         if let Some(f) = crate::foxy::fetch_in_use_account().await {
             (
                 "foxy-switcher".to_string(),
-                (f.email.clone(), f.email, String::new(), f.plan, f.five_hour, f.seven_day, f.seven_day_sonnet),
+                (f.email.clone(), f.email, String::new(), f.plan, f.five_hour, f.seven_day, f.seven_day_scoped),
             )
         } else {
             ("anthropic".to_string(), fetch_via_anthropic().await?)
@@ -446,10 +558,16 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
             utilization: s.utilization,
             resets_at: s.resets_at.clone(),
         }),
-        seven_day_sonnet: seven_day_sonnet.as_ref().map(|s| MetricSnap {
-            utilization: s.utilization,
-            resets_at: s.resets_at.clone(),
-        }),
+        // Sonnet-specific weekly window no longer exists in the API; scoped
+        // models are sampled into `seven_day_scoped` below.
+        seven_day_sonnet: None,
+        seven_day_scoped: seven_day_scoped
+            .iter()
+            .map(|s| ScopedSnap {
+                model_label: s.model_label.clone(),
+                snap: MetricSnap { utilization: s.utilization, resets_at: s.resets_at.clone() },
+            })
+            .collect(),
     });
     prune_old_snapshots(&mut history, now_ms);
     save_snapshots(&history);
@@ -462,9 +580,16 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
         let ra = s.resets_at.clone();
         s.prev_utilization = find_prev_utilization(&history, "seven_day", &ra, now_ms);
     }
-    if let Some(ref mut s) = seven_day_sonnet {
-        let ra = s.resets_at.clone();
-        s.prev_utilization = find_prev_utilization(&history, "seven_day_sonnet", &ra, now_ms);
+    for sc in seven_day_scoped.iter_mut() {
+        let ra = sc.resets_at.clone();
+        let label = sc.model_label.clone();
+        sc.prev_utilization = find_prev_utilization_by(
+            &history,
+            |e| get_scoped_snap(e, &label),
+            period_ms("seven_day"),
+            &ra,
+            now_ms,
+        );
     }
 
     Ok(AccountInfo {
@@ -475,7 +600,7 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
         auth_method: "claudeai".to_string(),
         five_hour,
         seven_day,
-        seven_day_sonnet,
+        seven_day_scoped,
         usage_source,
     })
 }
@@ -571,6 +696,7 @@ mod tests {
             five_hour: Some(MetricSnap { utilization: 0.5, resets_at: String::new() }),
             seven_day: None,
             seven_day_sonnet: None,
+            seven_day_scoped: Vec::new(),
         }
     }
 
@@ -619,5 +745,79 @@ mod tests {
         let mut history = vec![snap_at(now - 7 * day), snap_at(now)];
         prune_old_snapshots(&mut history, now);
         assert_eq!(history.len(), 2, "a 7-day-old snapshot must be retained");
+    }
+
+    /// The real `/api/oauth/usage` shape as of 2026-07: scoped models live in
+    /// `limits[]` (kind `weekly_scoped`, model under `scope.model.display_name`),
+    /// while the top-level `seven_day_sonnet` field is null.
+    #[test]
+    fn parse_scoped_limits_extracts_weekly_scoped_models() {
+        let body = serde_json::json!({
+            "five_hour": { "utilization": 42.0, "resets_at": "2026-07-23T06:50:00+00:00" },
+            "seven_day": { "utilization": 16.0, "resets_at": "2026-07-27T10:59:59+00:00" },
+            "seven_day_sonnet": null,
+            "limits": [
+                { "kind": "session", "percent": 42, "resets_at": "2026-07-23T06:50:00+00:00", "scope": null },
+                { "kind": "weekly_all", "percent": 16, "resets_at": "2026-07-27T10:59:59+00:00", "scope": null },
+                { "kind": "weekly_scoped", "percent": 4, "resets_at": "2026-07-27T10:59:59+00:00",
+                  "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null } }
+            ]
+        });
+        let scoped = parse_scoped_limits(&body);
+        assert_eq!(scoped.len(), 1, "only the weekly_scoped entry counts");
+        assert_eq!(scoped[0].model_label, "Fable");
+        assert!((scoped[0].utilization - 0.04).abs() < 1e-9, "4 percent → 0.04 fraction");
+        assert_eq!(scoped[0].resets_at, "2026-07-27T10:59:59+00:00");
+    }
+
+    #[test]
+    fn parse_scoped_limits_absent_or_empty_yields_empty() {
+        assert!(parse_scoped_limits(&serde_json::json!({})).is_empty());
+        assert!(parse_scoped_limits(&serde_json::json!({ "limits": [] })).is_empty());
+        // A weekly_scoped entry missing its model display name is skipped.
+        let no_model = serde_json::json!({
+            "limits": [{ "kind": "weekly_scoped", "percent": 9, "scope": { "model": {} } }]
+        });
+        assert!(parse_scoped_limits(&no_model).is_empty());
+    }
+
+    /// A scoped model's prev-period utilization is matched by model label
+    /// through the same period-alignment logic as the fixed metrics.
+    #[test]
+    fn scoped_prev_utilization_matches_by_label() {
+        let day = 24 * 3600 * 1000;
+        let now = 100 * day;
+        let prev_reset = "2026-01-08T00:00:00+00:00";
+        let cur_reset = "2026-01-15T00:00:00+00:00";
+        let prev_reset_ms = parse_ts_ms(prev_reset).unwrap();
+        let cur_reset_ms = parse_ts_ms(cur_reset).unwrap();
+        let week = period_ms("seven_day");
+        // Two samples in the previous Fable window, one in the current window.
+        let mk = |ts: i64, resets: &str, util: f64| SnapshotEntry {
+            ts,
+            five_hour: None,
+            seven_day: None,
+            seven_day_sonnet: None,
+            seven_day_scoped: vec![ScopedSnap {
+                model_label: "Fable".into(),
+                snap: MetricSnap { utilization: util, resets_at: resets.into() },
+            }],
+        };
+        // Current sample sits ~2 days into its window.
+        let now2 = cur_reset_ms - week + 2 * day;
+        let history = vec![
+            mk(prev_reset_ms - week + 2 * day, prev_reset, 0.30), // prev, same cycle phase
+            mk(prev_reset_ms - week + 5 * day, prev_reset, 0.55),
+            mk(now2, cur_reset, 0.10),
+        ];
+        let prev = find_prev_utilization_by(
+            &history,
+            |e| get_scoped_snap(e, "Fable"),
+            week,
+            cur_reset,
+            now2,
+        );
+        assert_eq!(prev, Some(0.30), "closest prev-window phase match");
+        let _ = now;
     }
 }
