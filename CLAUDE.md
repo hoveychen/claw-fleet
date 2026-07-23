@@ -13,7 +13,7 @@ New features must always support both LocalBackend (local file system) and Remot
 
 ## Permissions injector
 
-Fleet injects rules into `~/.claude/settings.json`'s `permissions.allow` so `fleet guard` is the sole audit gate for Bash commands (no double-prompting against Claude Code's native permission layer). Implementation: `claw-fleet-core/src/permissions_injector.rs`, lock file `~/.fleet/permissions-lock.json`, toggle config `~/.fleet/permissions-config.json`.
+Fleet injects rules into `~/.claude/settings.json`'s `permissions.allow` so `fleet guard` is the sole audit gate for shell commands — `Bash` on macOS/Linux/Windows-with-Git-Bash and `PowerShell` on Windows-without-Git-Bash (no double-prompting against Claude Code's native permission layer). Both the injected allow rules (`Bash(*)` + `PowerShell(*)`) and the guard hook matcher (`Bash|PowerShell`) must name both tools. Implementation: `claw-fleet-core/src/permissions_injector.rs`, lock file `~/.fleet/permissions-lock.json`, toggle config `~/.fleet/permissions-config.json`.
 
 Any new long-lived Fleet process that should participate in this contract must:
 - On startup: `if claw_fleet_core::permissions_injector::load_config().enabled { acquire(std::process::id()) }`
