@@ -264,9 +264,8 @@ pub fn read_keychain_credentials() -> Result<(String, String), String> {
     let raw = if out.status.success() {
         String::from_utf8(out.stdout).map_err(|e| e.to_string())?
     } else {
-        let cred_path = crate::session::real_home_dir()
+        let cred_path = crate::session::get_claude_dir()
             .ok_or("No home dir")?
-            .join(".claude")
             .join(".credentials.json");
         std::fs::read_to_string(&cred_path)
             .map_err(|_| "Credentials not found in keychain or file".to_string())?
@@ -299,9 +298,8 @@ pub fn read_keychain_credentials() -> Result<(String, String), String> {
         return Ok(creds);
     }
 
-    let cred_path = crate::session::real_home_dir()
+    let cred_path = crate::session::get_claude_dir()
         .ok_or("No home dir")?
-        .join(".claude")
         .join(".credentials.json");
     let raw = std::fs::read_to_string(&cred_path)
         .map_err(|e| format!("{e} (tried: {})", cred_path.display()))?;

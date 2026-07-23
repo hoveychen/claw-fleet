@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::session::{get_claude_dir, get_codex_dir, get_fleet_dir, real_home_dir};
+use crate::session::{get_claude_dir, get_codex_dir, get_fleet_dir};
 
 const SKILL_FILE: &str = "SKILL.md";
 const COPY_MARKER: &str = ".fleet-managed.json";
@@ -97,12 +97,12 @@ struct Roots {
 }
 
 fn roots() -> Result<Roots, String> {
-    let home = real_home_dir().ok_or_else(|| "cannot determine user home".to_string())?;
+    let claude = get_claude_dir().ok_or_else(|| "cannot determine Claude directory".to_string())?;
     let fleet = get_fleet_dir().ok_or_else(|| "cannot determine Fleet directory".to_string())?;
     let codex = get_codex_dir().ok_or_else(|| "cannot determine Codex directory".to_string())?;
     Ok(Roots {
         canonical: fleet.join("skills"),
-        claude: home.join(".claude").join("skills"),
+        claude: claude.join("skills"),
         // Codex discovers skills from `$CODEX_HOME/skills` (default
         // `~/.codex/skills`) — per Codex's own skill-installer — NOT the legacy
         // `~/.agents/skills`.

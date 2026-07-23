@@ -236,10 +236,10 @@ impl DiskBaseline {
 
     pub fn load(project_root: Option<&Path>, claude_projects_encoded_dir: Option<&Path>) -> Self {
         let mut b = Self::default();
-        if let Some(home) = dirs::home_dir() {
-            b.user_claudemd = read_file_tokens(&home.join(".claude").join("CLAUDE.md"));
-            let interaction = read_file_tokens(&home.join(".claude").join("fleet-interaction-mode.md"));
-            let prd = read_file_tokens(&home.join(".claude").join("fleet-prd-discipline.md"));
+        if let Some(claude_dir) = crate::session::get_claude_dir() {
+            b.user_claudemd = read_file_tokens(&claude_dir.join("CLAUDE.md"));
+            let interaction = read_file_tokens(&claude_dir.join("fleet-interaction-mode.md"));
+            let prd = read_file_tokens(&claude_dir.join("fleet-prd-discipline.md"));
             b.fleet_reminders = interaction + prd;
         }
         if let Some(root) = project_root {
@@ -271,8 +271,8 @@ fn read_file_tokens(path: &Path) -> u64 {
 /// installed skill SKILL.md.
 fn scan_skills_manifest_tokens() -> u64 {
     let mut total = 0u64;
-    let Some(home) = dirs::home_dir() else { return 0 };
-    let skill_root = home.join(".claude").join("skills");
+    let Some(claude_dir) = crate::session::get_claude_dir() else { return 0 };
+    let skill_root = claude_dir.join("skills");
     let Ok(dir) = fs::read_dir(&skill_root) else { return 0 };
     for entry in dir.flatten() {
         let skill_md = entry.path().join("SKILL.md");

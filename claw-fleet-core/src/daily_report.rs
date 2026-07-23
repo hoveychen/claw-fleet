@@ -1033,8 +1033,8 @@ fn collect_existing_rules(workspace_paths: &[String]) -> String {
     };
 
     // 1. Global ~/.claude/CLAUDE.md
-    if let Some(home) = crate::session::real_home_dir() {
-        let global = home.join(".claude").join("CLAUDE.md");
+    if let Some(claude_dir) = crate::session::get_claude_dir() {
+        let global = claude_dir.join("CLAUDE.md");
         if let Ok(content) = std::fs::read_to_string(&global) {
             if !content.trim().is_empty() {
                 sections.push(format!("[~/.claude/CLAUDE.md]\n{}", truncate(&content)));
@@ -1343,11 +1343,10 @@ pub fn append_lesson_to_claude_md(lesson: &Lesson) -> Result<(), String> {
 pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
     use crate::session::decode_workspace_path_with_parts;
 
-    let home = match crate::session::real_home_dir() {
-        Some(h) => h,
+    let projects_dir = match crate::session::get_claude_dir() {
+        Some(d) => d.join("projects"),
         None => return vec![],
     };
-    let projects_dir = home.join(".claude").join("projects");
     let Ok(workspace_entries) = std::fs::read_dir(&projects_dir) else {
         return vec![];
     };
