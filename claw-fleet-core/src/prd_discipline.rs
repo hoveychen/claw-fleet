@@ -427,6 +427,13 @@ Fleet 会话里悄悄空转、什么都不 spawn。真正会跨回合边界触�
 结束回合——Fleet 在后台轮询，条件一触发就 `claude --resume` *这个*会话，把捕获\
 的结果喂给你的下一回合。`fleet watch stop <id>` 取消它。\n\
 \n\
+相关能力：`fleet schedule` 与 `fleet loop` 也接受一个可选的 `--until <shell 命令>` \
+作为**非 LLM 前置条件**——用 exit 0 作为 spawn 的门。schedule 到点后按 `--poll` \
+轮询该命令、`--timeout` 内仍不满足则放弃（不 spawn，记为超时历史）；loop 在每个 \
+interval tick 检查一次，不满足就跳过本次迭代（不 spawn、不计入 iteration，进位到下个 \
+interval）。用于「时间到 *且* 某条件满足才执行」的场景；纯粹等一个外部事件、之后要\
+接着干活的，仍用上面的 `fleet watch`。\n\
+\n\
 ## Rule 6 —— 需求保真：别把不存在的需求写进计划\n\
 \n\
 Rule 1/2/4 管执行期的纪律，本规则管它们的上游——把{title}的请求变成计划的那一刻。长程计划最贵的失败不是做得慢，而是**做歪**：计划里混进了{title}从没要求的需求，实现又和这些幻觉需求强耦合，最后重构比重写还贵。本规则锁死这个失败模式。\n\
