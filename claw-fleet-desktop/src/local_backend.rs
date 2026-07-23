@@ -2091,8 +2091,8 @@ impl Backend for LocalBackend {
 
     fn check_setup(&self) -> crate::backend::SetupStatus {
         let (cli_installed, cli_path) = crate::check_cli_installed();
-        let claude_dir_exists = crate::session::real_home_dir()
-            .map(|h| h.join(".claude").is_dir())
+        let claude_dir_exists = crate::session::get_claude_dir()
+            .map(|d| d.is_dir())
             .unwrap_or(false);
         let sessions = self.sessions.lock().unwrap().clone();
         let detected_tools = crate::detect_installed_tools(&sessions);

@@ -343,14 +343,13 @@ pub fn get_sources_config_local() -> Vec<SourceInfo> {
 
     let all_sources: Vec<(&str, bool)> = vec![
         ("claude-code", {
-            let home = crate::session::real_home_dir();
             let cli_exists = {
                 #[cfg(unix)]
                 { crate::process_util::command("which").arg("claude").output().map_or(false, |o| o.status.success()) }
                 #[cfg(not(unix))]
                 { crate::process_util::command("where").arg("claude").output().map_or(false, |o| o.status.success()) }
             };
-            cli_exists || home.as_ref().map_or(false, |h| h.join(".claude").is_dir())
+            cli_exists || crate::session::get_claude_dir().map_or(false, |d| d.is_dir())
         }),
         ("codex", {
             let home = crate::session::real_home_dir();
