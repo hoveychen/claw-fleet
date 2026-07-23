@@ -35,7 +35,9 @@ import styles from "./Rail.module.css";
  */
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch"]);
-const SHELL_TOOLS = new Set(["Bash", "exec", "exec_command", "write_stdin"]);
+// "PowerShell" is Claude Code's separate shell tool on Windows without Git Bash
+// (tool name `PowerShell`, not `Bash`); it gets the same Terminal icon.
+const SHELL_TOOLS = new Set(["Bash", "PowerShell", "exec", "exec_command", "write_stdin"]);
 const WEB_TOOLS = new Set(["WebSearch", "WebFetch"]);
 const SEARCH_TOOLS = new Set(["Grep", "Glob", "Explore", "LSP"]);
 const AGENT_TOOLS = new Set(["Agent", "spawn_agent", "wait_agent"]);
