@@ -35,7 +35,13 @@ use crate::session::{
 /// The full set of tool patterns Fleet injects into `permissions.allow`.
 ///
 /// `Bash(*)` is the load-bearing one — it suppresses Claude Code's built-in
-/// command prompt so `fleet guard` becomes the sole audit gate.  The other
+/// command prompt so `fleet guard` becomes the sole audit gate. `PowerShell(*)`
+/// is its Windows sibling: Claude Code drives a separate `PowerShell` tool on
+/// Windows without Git Bash (enabled automatically there), and its permission
+/// rule namespace is `PowerShell(...)`, not `Bash(...)`. Without it a Windows
+/// PowerShell command would hit Claude Code's native permission prompt — the
+/// exact double-prompt / headless-stall this injector exists to remove. The
+/// other
 /// patterns smooth out incidental prompts the user already trusts Fleet to
 /// orchestrate (file IO, web fetch, skills, monitoring, workflows). The two
 /// `mcp__fleet__*` rules pre-authorise Fleet's own MCP tools so Claude Code
@@ -49,6 +55,7 @@ use crate::session::{
 /// `inject_rules_preauthorise_every_control_tool`.
 pub const INJECT_RULES: &[&str] = &[
     "Bash(*)",
+    "PowerShell(*)",
     "Read(*)",
     "Write(*)",
     "Edit(*)",
@@ -566,6 +573,19 @@ mod tests {
                 "control tool {name} not pre-authorised (expected rule {rule} in INJECT_RULES)"
             );
         }
+    }
+
+    /// Regression: the Windows `PowerShell` tool has its own permission-rule
+    /// namespace (`PowerShell(...)`), so `Bash(*)` alone does not pre-authorise
+    /// it. Dropping `PowerShell(*)` would make a Windows-without-Git-Bash
+    /// session hit Claude Code's native prompt on every command — or stall a
+    /// detached headless session that has no prompt UI to answer it.
+    #[test]
+    fn inject_rules_preauthorise_powershell_tool() {
+        assert!(
+            INJECT_RULES.contains(&"PowerShell(*)"),
+            "PowerShell(*) must be injected so the Windows PowerShell tool is pre-authorised"
+        );
     }
 
     #[test]
