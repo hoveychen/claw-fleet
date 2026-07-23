@@ -928,4 +928,71 @@ mod tests {
         // Answering a card that was never parked is an error, not a panic.
         assert!(answer("nope", &json!({})).is_err());
     }
+
+    /// Real-process end-to-end for the liveness gate the watch/auto-resume fixes
+    /// depend on: a live process named `claude --resume <id>` must be *found* by
+    /// `session_pid`/`session_alive` and *killed* by `interrupt_session`. The
+    /// unit tests mock this seam; this exercises the real `scan_cli_processes`
+    /// (name=="claude" + argv `--resume`) and SIGINT path against a genuine OS
+    /// process. Ignored by default: it shells out to `cc` and spawns a process.
+    ///   cargo test -p claw-fleet-core parked::tests::live_ -- --ignored --nocapture
+    #[test]
+    #[ignore = "compiles a helper with cc and spawns a real process; run with --ignored"]
+    fn live_interrupt_kills_a_real_claude_named_session() {
+        use std::time::{Duration, Instant};
+
+        // A binary literally named `claude` (scan_cli_processes matches on the
+        // process name) that ignores its argv and blocks forever.
+        let dir = std::env::temp_dir().join(format!("fleet-live-gate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("blk.c");
+        std::fs::write(&src, "#include <unistd.h>\nint main(){for(;;)pause();return 0;}\n").unwrap();
+        let bin = dir.join("claude");
+        let cc = std::process::Command::new("cc")
+            .arg("-o")
+            .arg(&bin)
+            .arg(&src)
+            .status()
+            .expect("run cc");
+        assert!(cc.success(), "cc must compile the blocking helper");
+
+        // A session id no real session would carry, so the scan can only match
+        // the process we spawn here.
+        let sid = format!("live-gate-{}-{}", std::process::id(), 42);
+        let child = std::process::Command::new(&bin)
+            .arg("--resume")
+            .arg(&sid)
+            .current_dir(&dir)
+            .spawn()
+            .expect("spawn fake claude session");
+        // Reap in the background: a SIGINT'd child of *this* test process would
+        // otherwise linger as an unreaped zombie, which `is_process_alive`
+        // (kill(pid,0)) still reports as alive — making `wait_for_exit` time out.
+        // In production the resumed CLI is detached and reaped by init, so this
+        // is purely a test-harness concern, not something the gate has to handle.
+        let reaper = std::thread::spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+        });
+
+        // The gate must SEE it as live.
+        let mut found = false;
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            if session_alive(&sid) {
+                found = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(found, "session_pid/session_alive must find the live claude --resume process");
+
+        // The gate must KILL it (this is what watch::interrupt_if_live calls).
+        let interrupted = interrupt_session(&sid);
+        assert!(interrupted, "interrupt_session must SIGINT the live session and see it exit");
+        assert_eq!(session_pid(&sid), None, "no live process should remain after interrupt");
+
+        let _ = reaper.join();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
