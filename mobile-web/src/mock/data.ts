@@ -578,6 +578,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_use", id: "fp1", name: "mcp__fleet__fleet__plan", input: { action: "check", plan_id: "fleet-tool-cards", task: "P3" } },
           { type: "tool_use", id: "fp2", name: "mcp__fleet__fleet__plan", input: { action: "list" } },
           { type: "tool_use", id: "fp3", name: "mcp__fleet__fleet__plan", input: { action: "get", plan_id: "fleet-tool-cards" } },
+          { type: "tool_use", id: "fp3b", name: "mcp__fleet__fleet__watch", input: { action: "create", note: "等 muvee 拉起 backfill 版镜像（运行镜像 Created 从 05:10:08 变化）；触发时抓容器日志确认补了多少条历史 Tripo 花费", until: "test -f /tmp/ci-done", capture: "muveectl projects logs pixel-portrait --tail 300", poll: 120, timeout: 3600 } },
           { type: "tool_use", id: "fp4", name: "mcp__fleet__fleet__watch", input: { action: "list" } },
           { type: "tool_use", id: "fp5", name: "mcp__fleet__fleet__wiki", input: { action: "list" } },
           { type: "tool_use", id: "fp6", name: "mcp__fleet__fleet__handoff", input: { action: "list" } },
