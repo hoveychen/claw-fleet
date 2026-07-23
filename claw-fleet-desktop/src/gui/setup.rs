@@ -11,8 +11,8 @@ pub(crate) async fn check_setup_status(state: tauri::State<'_, AppState>) -> Res
         b.list_sessions()
     };
     let (cli_installed, cli_path) = check_cli_installed();
-    let claude_dir_exists = session::real_home_dir()
-        .map(|h| h.join(".claude").is_dir())
+    let claude_dir_exists = session::get_claude_dir()
+        .map(|d| d.is_dir())
         .unwrap_or(false);
     let detected_tools = detect_installed_tools(&sessions);
     let logged_in = account::read_keychain_credentials().is_ok();

@@ -51,7 +51,7 @@ pub struct ManagedLesson {
 // ── Paths ────────────────────────────────────────────────────────────────────
 
 fn claude_dir() -> Option<PathBuf> {
-    crate::session::real_home_dir().map(|h| h.join(".claude"))
+    crate::session::get_claude_dir()
 }
 
 fn lessons_file_path() -> Option<PathBuf> {
