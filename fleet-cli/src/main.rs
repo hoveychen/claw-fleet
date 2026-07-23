@@ -350,6 +350,12 @@ pub(crate) enum LoopCommands {
         /// at 500).
         #[arg(long)]
         max: Option<u32>,
+        /// Optional non-LLM gate: a shell command checked at each interval tick.
+        /// The iteration spawns only when it exits 0; otherwise the tick is
+        /// skipped (no session, no iteration consumed) and re-checked next
+        /// interval. E.g. `test -f /tmp/ready`.
+        #[arg(long)]
+        until: Option<String>,
     },
     /// List all registered loops.
     #[command(alias = "ls")]
@@ -477,6 +483,20 @@ pub(crate) enum ScheduleCommands {
         /// `max`, or codex `minimal`..`high`). Overrides the inherited value.
         #[arg(long)]
         effort: Option<String>,
+        /// Optional non-LLM gate: once the schedule is due, this shell command is
+        /// polled and the session spawns only when it exits 0. If the gate never
+        /// passes within --timeout, the schedule is abandoned (no session). E.g.
+        /// `gh run view 123 --json status -q .status | grep -qx completed`.
+        #[arg(long)]
+        until: Option<String>,
+        /// Seconds between gate polls once due, e.g. `30s`, `2m` (min 5s, default
+        /// 30s). Only meaningful with --until.
+        #[arg(long)]
+        poll: Option<String>,
+        /// Give up on an unmet gate after this long past the due time, e.g.
+        /// `30m`, `2h` (default 2h, max 7d). Only meaningful with --until.
+        #[arg(long)]
+        timeout: Option<String>,
     },
     /// List all registered schedules (pending + fired history).
     #[command(alias = "ls")]

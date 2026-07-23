@@ -159,7 +159,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 std::process::exit(1);
             }
         },
-        ScheduleCommands::Create { at, r#in, prompt, model: model_flag, effort: effort_flag } => {
+        ScheduleCommands::Create { at, r#in, prompt, model: model_flag, effort: effort_flag, until, poll, timeout } => {
             let now = now_ms_wall();
             // Exactly one of --at / --in.
             let fire_at = match (at.as_deref(), r#in.as_deref()) {
@@ -201,6 +201,44 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
             // the creating session (mirrors handoff's --model/--effort override).
             let model = model_flag.filter(|m| !m.trim().is_empty()).or(ctx.model);
             let effort = effort_flag.filter(|e| !e.trim().is_empty()).or(ctx.effort);
+            // Optional non-LLM gate. --poll/--timeout are only meaningful with
+            // --until; reuse `fleet watch`'s duration grammar and floors so the
+            // two features accept identical values.
+            let until = until.filter(|c| !c.trim().is_empty());
+            if until.is_none() && (poll.is_some() || timeout.is_some()) {
+                eprintln!("Error: --poll / --timeout require --until.");
+                std::process::exit(2);
+            }
+            let gate = match &until {
+                None => None,
+                Some(cmd) => {
+                    let poll_secs = match poll.as_deref() {
+                        Some(s) => match claw_fleet_core::watch::parse_poll(s) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                eprintln!("Error: --poll {e}");
+                                std::process::exit(2);
+                            }
+                        },
+                        None => claw_fleet_core::schedule::DEFAULT_GATE_POLL_SECS,
+                    };
+                    let timeout_secs = match timeout.as_deref() {
+                        Some(s) => match claw_fleet_core::watch::parse_timeout(s) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                eprintln!("Error: --timeout {e}");
+                                std::process::exit(2);
+                            }
+                        },
+                        None => claw_fleet_core::schedule::DEFAULT_GATE_TIMEOUT_SECS,
+                    };
+                    Some(schedule::ScheduleGate {
+                        until_cmd: cmd.clone(),
+                        poll_secs,
+                        timeout_secs,
+                    })
+                }
+            };
 
             match schedule::create(
                 &ctx.workspace,
@@ -210,16 +248,24 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 effort.as_deref(),
                 ctx.source.as_deref(),
                 sid.as_deref(),
-                None, // gate wired in P3
+                gate,
             ) {
                 Ok(rec) => match schedule::arm_timer(&rec) {
                     Ok(pid) => println!(
-                        "ok: schedule {} created — fires {} (in {}), model={}. \
+                        "ok: schedule {} created — fires {} (in {}), model={}.{} \
                          计时器已启动 (pid {})。取消用 `fleet schedule cancel {}`。",
                         rec.id,
                         fmt_local(rec.fire_at),
                         fmt_duration_ms(rec.due_in_ms(now)),
                         rec.model.as_deref().unwrap_or("<CLI 默认>"),
+                        match &rec.until_cmd {
+                            Some(c) => format!(
+                                " gate=`{c}`(到点每 {}s 轮询,{}s 内未满足则放弃)。",
+                                rec.gate_poll_secs(),
+                                rec.gate_timeout_secs.unwrap_or(0),
+                            ),
+                            None => String::new(),
+                        },
                         pid,
                         rec.id,
                     ),
