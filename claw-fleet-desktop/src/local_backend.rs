@@ -1822,6 +1822,11 @@ impl Backend for LocalBackend {
         permission_mode: Option<String>,
         agent_source: String,
     ) -> Result<(), String> {
+        // Resuming a task the human marked "done" means it's active again — drop
+        // the done mark so it re-surfaces as needs-review, then re-emit so the
+        // task page updates instantly rather than waiting for the rescan below.
+        claw_fleet_core::session_mark::clear_done_on_resume(&session_id, &workspace_path);
+        self.restamp_marks_and_emit();
         resume_session_impl(
             &session_id,
             &workspace_path,
