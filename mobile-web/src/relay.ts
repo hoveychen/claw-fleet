@@ -126,6 +126,10 @@ const REQUEST_TIMEOUT_MS = 15_000;
  *  These give the payload a realistic window instead. */
 export const ASSET_REQUEST_TIMEOUT_MS = 60_000;
 export const UPLOAD_REQUEST_TIMEOUT_MS = 120_000;
+/** How many times `answerViaReq` sends the answer before giving up. The desktop
+ *  dedups by decision id, so a resend after a lost reply is idempotent; this
+ *  bounds how long a weak link is retried before the card reverts to retry. */
+export const ANSWER_MAX_ATTEMPTS = 3;
 /** How often the phone re-announces itself. The desktop drops a device ~40s
  *  after its last hello, so this must stay comfortably under that. */
 const HELLO_INTERVAL_MS = 15_000;
@@ -448,9 +452,44 @@ export class RelayClient {
     return true;
   }
 
-  /** Answer a decision — mirrors mobile_relay::handle_answer's shapes. */
+  /** Answer a decision — mirrors mobile_relay::handle_answer's shapes.
+   *  Fire-and-forget: the boolean only reports the socket looked OPEN, NOT that
+   *  the desktop received the answer. Kept for callers that don't need a verdict;
+   *  the decision UI uses `answerViaReq` so a lost frame can't strand the card. */
   answer(kind: DecisionKind, id: string, fields: Record<string, unknown>): boolean {
     return this.sendPayload({ event: "answer", kind, id, ...fields });
+  }
+
+  /** Robust answer path: send the decision answer over the req/reply channel so
+   *  the phone gets a real delivery verdict, and resend on a lost frame (the
+   *  desktop dedups by decision id, so a resend is idempotent). Resolves once the
+   *  desktop confirms delivery; rejects only after the resend budget is spent, or
+   *  immediately on a desktop verdict (`ok:false`, e.g. the card already expired)
+   *  — either way the caller keeps the card and lets the user retry rather than
+   *  removing it optimistically the way `answer` used to force. */
+  async answerViaReq(
+    kind: DecisionKind,
+    id: string,
+    fields: Record<string, unknown>,
+    opts?: { attempts?: number; timeoutMs?: number },
+  ): Promise<void> {
+    const attempts = Math.max(1, opts?.attempts ?? ANSWER_MAX_ATTEMPTS);
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        await this.request("decision_answer", { kind, id, ...fields }, opts?.timeoutMs);
+        return; // desktop confirmed delivery
+      } catch (e) {
+        lastErr = e;
+        // A desktop verdict (ok:false — e.g. the card already expired) can't be
+        // changed by resending, so surface it now. Only a lost frame / timeout /
+        // disconnect (remote === false) is worth resending; the desktop dedups
+        // by decision id, so a resend that races a delivered first attempt is an
+        // idempotent no-op.
+        if (isDesktopRejection(e)) throw e;
+      }
+    }
+    throw lastErr;
   }
 
   /** Data request to the agent (pending_snapshot / task_plans / …).
