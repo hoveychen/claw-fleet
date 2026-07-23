@@ -295,16 +295,27 @@ fn open_settings_window(
     }
     let window = builder.build().map_err(|e| e.to_string())?;
 
-    // Hide on close instead of destroying the WKWebView: tearing down a secondary
-    // webview races with delayed WebKit main-thread work items (observed crash in
-    // WebPageProxy::dispatchSetObscuredContentInsets on macOS 26.3.1).
-    let hide_target = window.clone();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-            let _ = hide_target.hide();
-        }
-    });
+    // macOS only: hide on close instead of destroying the WKWebView. Tearing down
+    // a secondary webview races with delayed WebKit main-thread work items (observed
+    // crash in WebPageProxy::dispatchSetObscuredContentInsets on macOS 26.3.1).
+    //
+    // On Windows/Linux this MUST NOT run: hide-on-close leaves a zombie window whose
+    // WebView2/WebKitGTK process may have died (e.g. a white-screen load failure).
+    // The reuse branch above then only show()s that dead window and never rebuilds,
+    // so "settings won't open" becomes permanent. Letting the window destroy on close
+    // makes each reopen rebuild a fresh webview.
+    #[cfg(target_os = "macos")]
+    {
+        let hide_target = window.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = hide_target.hide();
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
 
     Ok(())
 }
