@@ -266,7 +266,7 @@
     "usage": "用量",
     "five_hour": "会话 (5小时)",
     "seven_day": "每周 (7天)",
-    "seven_day_sonnet": "每周 Sonnet",
+    "seven_day_scoped": "每周 {{model}}",
     "codex_session": "会话",
     "codex_weekly": "每周",
     "occupancy_title": "占用率变化 · 最近 24 小时",

@@ -13,7 +13,7 @@ interface AccountInfoData {
   usage_source: string;
   five_hour: unknown;
   seven_day: unknown;
-  seven_day_sonnet: unknown;
+  seven_day_scoped: unknown;
 }
 
 interface CodexUsageData {
