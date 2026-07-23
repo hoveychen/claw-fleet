@@ -41,12 +41,27 @@
 }
 
 .summary {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text-secondary);
+}
+
+/* Free-text intent preview (note/prompt/text) shown after the summary label on
+   the collapsed header. Takes the remaining row width and truncates. */
+.intent {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-dim);
+}
+
+.intent::before {
+  content: "· ";
 }
 
 .spinner {
