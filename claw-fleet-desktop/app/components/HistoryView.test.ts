@@ -5,9 +5,9 @@ import {
   CHAT_ONLY,
   matchesWorkspaceFilter,
   sessionPaneStyle,
-  sessionEq,
 } from "./HistoryView";
 import { chainBarColor, dwellReadTargets } from "./sessionGroups";
+import { sessionEq } from "./SessionRow";
 import type { SessionInfo, SessionStatus } from "../types";
 
 /**
