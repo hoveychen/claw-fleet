@@ -37,7 +37,6 @@ use crate::session::{
 
 const LOCK_FILE_NAME: &str = "mcp-lock.json";
 const CONFIG_FILE_NAME: &str = "mcp-config.json";
-const CLAUDE_JSON_FILE: &str = ".claude.json";
 /// Key under `mcpServers` that Fleet owns. Picking a stable name (rather
 /// than e.g. `fleet-${pid}`) lets the restore step recognise our entry even
 /// after a crash leaves a stale `mcp-lock.json` pointing at a dead holder.
@@ -74,7 +73,7 @@ fn lock_path() -> Option<PathBuf> {
 }
 
 fn claude_json_path() -> Option<PathBuf> {
-    real_home_dir().map(|h| h.join(CLAUDE_JSON_FILE))
+    crate::session::get_claude_config_json()
 }
 
 pub fn load_config() -> McpInjectorConfig {

@@ -291,10 +291,9 @@ fn scan_contributions(plugin_dir: &Path) -> PluginContributions {
 // ── Sidecar files: enabledPlugins + install counts ───────────────────────────
 
 fn read_enabled_plugins() -> BTreeMap<String, bool> {
-    let Some(home) = dirs::home_dir() else {
+    let Some(path) = crate::session::get_claude_config_json() else {
         return BTreeMap::new();
     };
-    let path = home.join(".claude.json");
     let Ok(raw) = fs::read_to_string(&path) else {
         return BTreeMap::new();
     };
