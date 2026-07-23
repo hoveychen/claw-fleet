@@ -315,7 +315,26 @@ pub(crate) fn resolve_fleet_binary() -> Option<String> {
     crate::fleet_cli::resolve_fleet_binary().map(|p| p.to_string_lossy().to_string())
 }
 
-/// Install the guard hook (synchronous PreToolUse for Bash) into settings.json.
+/// PreToolUse matcher for the guard hook. Pipe alternation fires the group for
+/// **either** shell tool Claude Code can drive — `Bash` and `PowerShell` — so
+/// both are audited by the single guard group. See [`apply_guard_hook`] for why
+/// omitting `PowerShell` would leave Windows-without-Git-Bash sessions running
+/// un-audited.
+pub(crate) const GUARD_MATCHER: &str = "Bash|PowerShell";
+
+/// Install the guard hook (synchronous PreToolUse for shell tools) into
+/// settings.json.
+///
+/// The matcher covers **both** shell tools Claude Code can drive: `Bash`
+/// (macOS/Linux, and Windows with Git Bash) and `PowerShell` (Windows without
+/// Git Bash, where it is enabled automatically, plus opt-in elsewhere). Pipe
+/// alternation in a PreToolUse matcher fires the group for either tool, so a
+/// single group audits both — without `PowerShell`, a Windows session with no
+/// Git Bash would run every shell command un-audited (the guard is the sole
+/// gate now that the permissions injector suppresses Claude Code's native
+/// prompt). The `PowerShell` tool carries its command under the same
+/// `tool_input.command` field as `Bash`, so `fleet guard` needs no per-tool
+/// parsing branch.
 pub fn apply_guard_hook() -> Result<(), String> {
     let fleet_bin = resolve_fleet_binary()
         .ok_or("Cannot find fleet binary — install fleet CLI first")?;
@@ -334,7 +353,7 @@ pub fn apply_guard_hook() -> Result<(), String> {
     let mut guard_hook = fleet_subcommand_hook(&fleet_bin, "guard");
     guard_hook["timeout"] = json!(120000);
     let guard_group = json!({
-        "matcher": "Bash",
+        "matcher": GUARD_MATCHER,
         "hooks": [guard_hook]
     });
 
@@ -1186,7 +1205,7 @@ mod tests {
     // Builds the same group JSON as `apply_guard_hook` would emit.
     fn guard_group_for(bin: &str) -> Value {
         json!({
-            "matcher": "Bash",
+            "matcher": GUARD_MATCHER,
             "hooks": [{
                 "type": "command",
                 "command": fault_tolerant_command(bin, "guard"),
@@ -1346,6 +1365,20 @@ mod tests {
             is_guard_group(&group),
             "is_guard_group must recognise the command actually produced by \
              fault_tolerant_command"
+        );
+    }
+
+    /// Regression: the guard matcher must fire for the Windows `PowerShell`
+    /// tool as well as `Bash`. Reverting to a `Bash`-only matcher would leave a
+    /// Windows-without-Git-Bash session running every shell command past the
+    /// audit gate, because Claude Code names that tool `PowerShell`, not `Bash`.
+    #[test]
+    fn guard_matcher_covers_bash_and_powershell() {
+        let alts: Vec<&str> = GUARD_MATCHER.split('|').collect();
+        assert!(alts.contains(&"Bash"), "guard matcher must cover the Bash tool");
+        assert!(
+            alts.contains(&"PowerShell"),
+            "guard matcher must cover the Windows PowerShell tool"
         );
     }
 
