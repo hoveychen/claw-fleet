@@ -107,7 +107,7 @@ pub fn run_checks() -> Vec<DiagnosticCheck> {
 /// `None` if the file / object / key is missing / not a string. Kept pure
 /// so `check_mcp_injection` can be unit-tested without filesystem state.
 fn read_mcp_fleet_command() -> Option<String> {
-    let path = crate::session::real_home_dir()?.join(".claude.json");
+    let path = crate::session::get_claude_config_json()?;
     let raw = fs::read_to_string(&path).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
     v.get("mcpServers")?
@@ -118,8 +118,7 @@ fn read_mcp_fleet_command() -> Option<String> {
 }
 
 fn read_guidance_file() -> Option<String> {
-    let path = crate::session::real_home_dir()?
-        .join(".claude")
+    let path = crate::session::get_claude_dir()?
         .join("fleet-interaction-mode.md");
     fs::read_to_string(&path).ok()
 }
