@@ -129,6 +129,12 @@ export const UPLOAD_REQUEST_TIMEOUT_MS = 120_000;
 /** How often the phone re-announces itself. The desktop drops a device ~40s
  *  after its last hello, so this must stay comfortably under that. */
 const HELLO_INTERVAL_MS = 15_000;
+/** A connection that stayed authed at least this long before dropping was
+ *  genuinely healthy, so we reconnect fast (reset backoff to base). Shorter
+ *  than this ⇒ the socket is flapping (auth → immediate drop), and resetting
+ *  the backoff on every such auth would busy-loop reconnects once per second
+ *  on a weak link. Keeping the backoff growing across flaps is the fix. */
+const STABLE_CONNECTION_MS = 30_000;
 
 export class RelayClient {
   private ws: WebSocket | null = null;
@@ -161,6 +167,9 @@ export class RelayClient {
     }
   >();
   private reconnectDelay = 1000;
+  /** Epoch ms of the last successful auth, or 0 if never/again unauthed. Used
+   *  to tell a healthy long-lived connection from a flapping one on close. */
+  private authedAt = 0;
   private closed = false;
   private authed = false;
   // End-to-end encryption keys derived from the pairing secret (方案A). The
@@ -256,8 +265,9 @@ export class RelayClient {
       this.handleFrame(frame);
     };
     ws.onclose = () => {
-      const wasAuthed = this.authed;
+      const stableMs = this.authed ? Date.now() - this.authedAt : 0;
       this.authed = false;
+      this.authedAt = 0;
       this.stopHello();
       this.handlers.onStatus?.(false);
       this.failPending(t("连接已断开"));
@@ -265,7 +275,12 @@ export class RelayClient {
       // A drop that triggers a reconnect (not an intentional close) — surface it
       // as a congestion signal. Frequent reconnects ⇒ a flaky/weak link.
       this.handlers.onReconnect?.();
-      const delay = wasAuthed ? 1000 : this.reconnectDelay;
+      // Only a connection that held for a while was genuinely healthy → reconnect
+      // fast. A short-lived one is flapping; let the backoff keep growing so we
+      // don't hammer a weak link once per second (the old `wasAuthed ? 1000`
+      // reset did exactly that on every auth→drop cycle).
+      if (stableMs >= STABLE_CONNECTION_MS) this.reconnectDelay = 1000;
+      const delay = this.reconnectDelay;
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
       window.setTimeout(() => void this.open(), delay);
     };
@@ -278,7 +293,10 @@ export class RelayClient {
     switch (frame.type) {
       case "authed":
         this.authed = true;
-        this.reconnectDelay = 1000;
+        this.authedAt = Date.now();
+        // NB: don't reset reconnectDelay here — a flapping socket auths every
+        // cycle, so resetting on auth would defeat the backoff. The reset now
+        // lives in onclose, gated on how long the connection actually held.
         this.handlers.onStatus?.(true);
         this.handlers.onAgentOnline?.(Boolean(frame.agent_online));
         this.startHello();
