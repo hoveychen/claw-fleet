@@ -124,7 +124,7 @@ fn watch_tool_def() -> Value {
 fn loop_tool_def() -> Value {
     json!({
         "name": "fleet__loop",
-        "description": "A recurring prompt Fleet re-runs on an interval by spawning a fresh detached session each time. Use this instead of the `fleet loop` CLI. Actions: create (--prompt and --interval required; --max/--until optional), stop, list, update, get, run.",
+        "description": "A recurring / cron-style scheduler (CLI alias: `fleet cron`): re-runs a prompt on an interval by spawning a fresh detached LOCAL session each time. Reach for this for any 'do X every N minutes / hourly / daily / periodically / on a schedule' need. Durable — survives the session, unlike Claude Code's own `/loop`, ScheduleWakeup, or CronCreate, which silently die in a headless `claude -p` turn. Because each tick is a local session, local creds (e.g. muveectl) are present. Tip: `until` is a cheap non-LLM gate — a shell probe run each tick that only spawns the (paid) LLM session when it exits 0, so you can poll often yet pay for an LLM only when there is real work. Use this instead of the `fleet loop` CLI. Actions: create (--prompt and --interval required; --max/--until optional), stop, list, update, get, run.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -144,7 +144,7 @@ fn loop_tool_def() -> Value {
 fn schedule_tool_def() -> Value {
     json!({
         "name": "fleet__schedule",
-        "description": "A one-shot prompt Fleet fires at an absolute future time by spawning a fresh detached session. Use this instead of the `fleet schedule` CLI. Actions: create (--prompt required, exactly one of --at/--in; --model/--effort/--until optional), cancel, list, update, get, run.",
+        "description": "A one-shot scheduler: fires a prompt ONCE at an absolute future time by spawning a fresh detached session — for recurring / periodic runs use `fleet__loop` instead. Durable — survives the session, unlike Claude Code's ScheduleWakeup / CronCreate. Tip: `until` is a cheap non-LLM gate — once due, a shell probe is polled and the (paid) LLM session spawns only when it exits 0. Use this instead of the `fleet schedule` CLI. Actions: create (--prompt required, exactly one of --at/--in; --model/--effort/--until optional), cancel, list, update, get, run.",
         "inputSchema": {
             "type": "object",
             "properties": {
