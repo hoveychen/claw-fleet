@@ -18,11 +18,12 @@ pub(crate) fn cmd_skill_install() {
     let mut any = false;
 
     for (name, detect_dir, skills_dir) in SKILL_TARGETS {
-        let tool_home = home.join(detect_dir);
-        if !tool_home.exists() {
+        let (detect, skills) =
+            claw_fleet_core::resolve_skill_target(name, detect_dir, skills_dir, &home);
+        if !detect.exists() {
             continue;
         }
-        let skill_dir = home.join(skills_dir).join("fleet");
+        let skill_dir = skills.join("fleet");
         let skill_path = skill_dir.join("SKILL.md");
         match std::fs::create_dir_all(&skill_dir)
             .and_then(|_| std::fs::write(&skill_path, FLEET_SKILL_MD))
