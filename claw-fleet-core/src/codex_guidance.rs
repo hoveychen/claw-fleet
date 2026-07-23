@@ -299,13 +299,20 @@ fleet watch create --until \"<shell cmd that exits 0 when done>\" --capture \"<s
 THIS session and hands the captured output to your next turn. `fleet watch \
 stop <id>` cancels. It inherits this session's model / effort / source, so a \
 codex session resumes as codex.\n\
-- Related: `fleet schedule` and `fleet loop` also take an optional `--until \
-<shell cmd>` as a non-LLM precondition — exit 0 gates the spawn. A schedule, \
-once due, polls it every `--poll` and abandons after `--timeout` if never met \
-(no session spawned); a loop checks it once per interval tick and skips that \
-tick when unmet (no session, no iteration consumed). Use it for \"fire only \
-when the time has come *and* a condition holds\"; for purely waiting on an \
-event and then continuing work, use `fleet watch` above.\n\
+- Pick the scheduling relay by *need*, not by the name: **repeat periodically \
+(cron) → `fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns \
+a fresh LOCAL session each interval so local creds are present — don't mistake \
+it for the `/loop` that dies in a headless turn); **fire once at a future time \
+→ `fleet schedule`** (`--at`/`--in`); **wait for an event then continue → \
+`fleet watch`** (above).\n\
+- Both `fleet loop` and `fleet schedule` take an optional `--until <shell cmd>` \
+as a **cheap non-LLM gate** — a cheap probe run each tick (or once due) that \
+spawns the paid LLM session only when it exits 0. This is the money-saver: \
+poll often, pay for an LLM only when there is real work (e.g. a loop running a \
+cheap `limit:0` probe every 12h that only spawns an LLM when it detects new \
+data). A schedule polls per `--poll` within `--timeout` then abandons; a loop \
+skips the tick (no iteration consumed). Do NOT default to an LLM session every \
+tick.\n\
 \n\
 ## Rule 7 — One-line summary comment atop every `exec`\n\
 \n\
