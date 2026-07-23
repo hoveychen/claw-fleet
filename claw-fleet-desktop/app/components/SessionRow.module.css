@@ -263,3 +263,36 @@
 .group_chevron[data-open="true"] {
   transform: rotate(90deg);
 }
+
+/* Pending/done toggle — the manual "finished?" axis, orthogonal to the top-left
+   unread dot and the left run-status bar. Always visible: a hollow circle for
+   pending, a filled green check for done. The glyph itself is a lucide icon
+   rendered by MarkControl / GroupMarkControl (which import this module); this
+   styles the button box + colour. `data-done` drives the colour so both the
+   single-row and whole-chain mark toggles share it. */
+.mark_toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--color-text-dim);
+  transition:
+    color 0.15s,
+    transform 0.1s;
+}
+
+.mark_toggle:hover {
+  transform: scale(1.12);
+  color: var(--color-text);
+}
+
+.mark_toggle[data-done="true"] {
+  color: var(--color-success); /* green — finished */
+}

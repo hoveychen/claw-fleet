@@ -236,78 +236,9 @@
    only .mark_toggle (also used by MarkControl) and the relay-group wrappers
    (.group_wrap / .group_children / .group_more) rendered by SessionRail. */
 
-/* Pending/done toggle — the manual "finished?" axis, orthogonal to the top-left
-   unread dot and the left run-status bar. Always visible (unlike the old review
-   dot): a hollow circle for pending, a filled green check for done. The glyph
-   itself is a lucide icon rendered by MarkControl; this styles the button box +
-   colour. `data-done` drives the colour so MarkControl (which imports this
-   module) and the rows share it. */
-.mark_toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  background: none;
-  border-radius: 50%;
-  cursor: pointer;
-  color: var(--color-text-dim);
-  transition:
-    color 0.15s,
-    transform 0.1s;
-}
-
-.mark_toggle:hover {
-  transform: scale(1.12);
-  color: var(--color-text);
-}
-
-.mark_toggle[data-done="true"] {
-  color: var(--color-success); /* green — finished */
-}
-
-/* ── Handoff-relay group ─────────────────────────────────────────────────────
-   A collapsed relay chain: a header row (tip session, click to expand) over an
-   indented list of the chain's other hops. The header row itself and its expand
-   chevron are SessionRow (see SessionRow.module.css); these classes only add the
-   group wrapper, the left rail, and the child inset so a group reads as one unit
-   rather than a run of look-alike rows. */
-.group_wrap {
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-
-/* The children hang off a faint rail so the chain reads as one group. The inset
-   clears the header's chevron gutter. */
-.group_children {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 2px 0 2px 14px;
-  padding-left: 8px;
-  border-left: 1.5px solid var(--color-border);
-}
-
-.group_more {
-  align-self: flex-start;
-  margin-left: 18px;
-  padding: 3px 8px;
-  border: none;
-  background: none;
-  border-radius: 6px;
-  font-size: 11px;
-  color: var(--color-accent);
-  cursor: pointer;
-  transition: background 0.14s;
-}
-
-.group_more:hover {
-  background: var(--color-bg-card-hover);
-}
+/* Relay-group wrappers (.group_wrap / .group_children / .group_more) and
+   .mark_toggle moved to SessionRail.module.css / SessionRow.module.css so the
+   grouped rail is shared with LiteApp. */
 
 /* ── Inline detail column ────────────────────────────────────────────────── */
 
