@@ -131,4 +131,52 @@ describe("HttpFleetCloudClient", () => {
       "https://cloud.fleet.test/v1/tasks/task-1/events?after=8",
     ]);
   });
+
+  it("backs off exponentially when the stream opens but delivers no events", async () => {
+    vi.useFakeTimers();
+    try {
+      // A stream that accepts the connection then immediately closes with no
+      // data — the flapping-server busy-loop we're guarding against.
+      const emptyStream = () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      const fetcher = vi.fn(async () => emptyStream());
+      const client = new HttpFleetCloudClient({ ...config, reconnectDelayMs: 750 }, fetcher);
+      const controller = new AbortController();
+      const done = client.streamTaskEvents("task-1", 0, () => {}, controller.signal);
+
+      // 1st attempt fires immediately.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+
+      // Empty → base delay (750ms) before the 2nd attempt, not sooner.
+      await vi.advanceTimersByTimeAsync(749);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+
+      // Still empty → the wait doubles to 1500ms.
+      await vi.advanceTimersByTimeAsync(1499);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetcher).toHaveBeenCalledTimes(3);
+
+      // …and doubles again to 3000ms (proves it's not a fixed-interval loop).
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetcher).toHaveBeenCalledTimes(4);
+
+      controller.abort();
+      await done;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
