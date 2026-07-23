@@ -111,6 +111,15 @@ pub struct LoopRecord {
     /// records written before loop history existed (deserializes to empty).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<LoopIteration>,
+    /// Optional non-LLM gate command (`--until`): on each interval tick the loop
+    /// spawns an iteration only if this exits 0. When it fails, the tick is
+    /// **skipped** — the schedule advances to the next interval without spawning
+    /// an LLM session or consuming an iteration. `None` = fire every tick (the
+    /// classic behaviour). Unlike a schedule gate there is no per-tick poll or
+    /// timeout: the interval *is* the poll cadence, and the loop's own expiry
+    /// bounds how long it keeps skipping.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub until_cmd: Option<String>,
 }
 
 impl LoopRecord {
@@ -134,6 +143,11 @@ impl LoopRecord {
 
     pub fn is_due(&self, now: u64) -> bool {
         self.next_fire_at <= now
+    }
+
+    /// Whether a non-LLM gate must pass before an iteration spawns on a tick.
+    pub fn has_gate(&self) -> bool {
+        self.until_cmd.is_some()
     }
 }
 
@@ -205,6 +219,7 @@ pub fn create(
     effort: Option<&str>,
     agent_source: Option<&str>,
     created_by_session: Option<&str>,
+    until_cmd: Option<&str>,
 ) -> Result<LoopRecord, String> {
     let dir = loops_dir().ok_or("cannot determine home dir")?;
     create_in(
@@ -217,6 +232,7 @@ pub fn create(
         effort,
         agent_source,
         created_by_session,
+        until_cmd,
         &uuid::Uuid::new_v4().to_string()[..8],
         now_ms(),
     )
@@ -233,6 +249,7 @@ fn create_in(
     effort: Option<&str>,
     agent_source: Option<&str>,
     created_by_session: Option<&str>,
+    until_cmd: Option<&str>,
     id: &str,
     now: u64,
 ) -> Result<LoopRecord, String> {
@@ -265,6 +282,8 @@ fn create_in(
         agent_source: agent_source.filter(|s| !blank(s)).map(str::to_string),
         last_session_id: None,
         history: Vec::new(),
+        // A blank gate command is no gate — fire every tick.
+        until_cmd: until_cmd.filter(|c| !blank(c)).map(str::to_string),
     };
     write_record(dir, &rec)?;
     Ok(rec)
@@ -471,6 +490,47 @@ fn claim_fire_in(
         // Final iteration — retire the record so no timer re-arms on it.
         stop_in(dir, id);
     }
+    Ok(rec)
+}
+
+/// Skip this tick: the `--until` gate was not met, so no iteration spawns.
+///
+/// Advances `next_fire_at` one interval and bumps `generation` (so a racing
+/// timer that also decided to skip is refused and exactly one advance happens),
+/// but does **not** increment `iterations_done` — a skipped tick is not an
+/// iteration, so it neither counts against `max_iterations` nor retires the
+/// loop. The record is never removed here; the loop's own expiry (measured from
+/// `created`) still bounds how long a never-satisfied gate keeps skipping.
+pub fn claim_skip(id: &str, generation: u64) -> Result<LoopRecord, ClaimError> {
+    let dir = loops_dir().ok_or(ClaimError::Gone)?;
+    claim_skip_in(&dir, id, generation, now_ms())
+}
+
+fn claim_skip_in(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    now: u64,
+) -> Result<LoopRecord, ClaimError> {
+    let mut rec = get_in(dir, id).ok_or(ClaimError::Gone)?;
+    if rec.generation != generation {
+        return Err(ClaimError::StaleGeneration {
+            expected: generation,
+            found: rec.generation,
+        });
+    }
+    if !rec.is_due(now) {
+        return Err(ClaimError::NotDue {
+            due_in_ms: rec.due_in_ms(now),
+        });
+    }
+    if !rec.is_live(now) {
+        return Err(ClaimError::Exhausted);
+    }
+    rec.generation += 1;
+    // Schedule from `now`, matching claim_fire — a late skip doesn't burst.
+    rec.next_fire_at = now + rec.interval_secs * 1000;
+    write_record(dir, &rec).map_err(|_| ClaimError::Gone)?;
     Ok(rec)
 }
 
@@ -690,45 +750,113 @@ fn run_now_in(dir: &Path, id: &str, spawn: &SpawnFn<'_>) -> Result<Option<String
 /// spanning a laptop suspend.
 const POLL_CAP: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// What the timer should do this tick. Pure decision, split out so the
+/// nap/fire/skip/exit logic is unit-testable without spawning subprocesses or
+/// sleeping. `gate_met` is evaluated lazily — only once the loop is live and
+/// due — so the shell poll runs at most once per due tick and never for a
+/// stale/expired timer. Without a gate a due tick always fires.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoopStep {
+    /// Superseded (stale generation) or exhausted/expired — timer exits.
+    Exit,
+    /// Fire an iteration now.
+    Fire,
+    /// Gate not met — advance to the next interval without spawning.
+    Skip,
+    /// Not due yet — nap this many ms and re-check.
+    Nap { ms: u64 },
+}
+
+fn decide(
+    rec: &LoopRecord,
+    generation: u64,
+    now: u64,
+    gate_met: impl FnOnce() -> bool,
+) -> LoopStep {
+    if rec.generation != generation {
+        return LoopStep::Exit;
+    }
+    if !rec.is_live(now) {
+        return LoopStep::Exit;
+    }
+    let wait = rec.due_in_ms(now);
+    if wait > 0 {
+        let cap_ms = POLL_CAP.as_millis() as u64;
+        return LoopStep::Nap { ms: cap_ms.min(wait) };
+    }
+    // Due. No gate ⇒ always fire. Gated ⇒ fire only if the gate passes, else
+    // skip this tick (the interval is the poll cadence).
+    if !rec.has_gate() {
+        return LoopStep::Fire;
+    }
+    if gate_met() {
+        LoopStep::Fire
+    } else {
+        LoopStep::Skip
+    }
+}
+
 /// The blocking timer loop — the body of `fleet loop fire <id> <gen>`. Sleeps
-/// until the loop is due, fires one iteration, then continues with the new
-/// generation the fire produced. Returns when the loop is stopped, exhausted, or
-/// superseded by another timer (stale generation). Never re-arms via a new
-/// process: a single detached timer drives every iteration by looping here.
+/// until the loop is due, then (if gated) checks the `--until` gate: fires one
+/// iteration when it passes, or skips to the next interval when it doesn't, then
+/// continues with the new generation. Returns when the loop is stopped,
+/// exhausted, or superseded by another timer (stale generation). Never re-arms
+/// via a new process: a single detached timer drives every tick by looping here.
 ///
-/// Thin by design — every branch delegates to the unit-tested [`claim_fire`] /
-/// [`fire_once`] beneath it; only the real `sleep` lives here.
+/// Thin by design — every branch delegates to the unit-tested [`decide`] /
+/// [`fire_once`] / [`claim_skip`] beneath it; only the real `sleep` and the gate
+/// poll live here.
 pub fn run_timer_blocking(id: &str, mut generation: u64) {
     loop {
         let Some(rec) = get(id) else {
             crate::log_debug(&format!("loop {id}: record gone, timer exiting"));
             return;
         };
-        if rec.generation != generation {
-            crate::log_debug(&format!(
-                "loop {id}: timer superseded (held gen {generation}, record at {}), exiting",
-                rec.generation
-            ));
-            return;
-        }
-        if !rec.is_live(now_ms()) {
-            crate::log_debug(&format!("loop {id}: exhausted/expired, timer exiting"));
-            let _ = stop(id);
-            return;
-        }
-        let wait = rec.due_in_ms(now_ms());
-        if wait > 0 {
-            let nap = POLL_CAP.min(std::time::Duration::from_millis(wait));
-            std::thread::sleep(nap);
-            continue;
-        }
-        match fire_once(id, generation) {
-            Ok(claimed) => generation = claimed.generation,
-            Err(ClaimError::NotDue { .. }) => continue,
-            Err(e) => {
-                crate::log_debug(&format!("loop {id}: timer stopping ({e})"));
+        let step = decide(&rec, generation, now_ms(), || {
+            rec.until_cmd
+                .as_deref()
+                .map(crate::process_util::gate_met)
+                .unwrap_or(false)
+        });
+        match step {
+            LoopStep::Exit => {
+                if rec.generation != generation {
+                    crate::log_debug(&format!(
+                        "loop {id}: timer superseded (held gen {generation}, record at {}), exiting",
+                        rec.generation
+                    ));
+                } else {
+                    crate::log_debug(&format!("loop {id}: exhausted/expired, timer exiting"));
+                    let _ = stop(id);
+                }
                 return;
             }
+            LoopStep::Nap { ms } => {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                continue;
+            }
+            LoopStep::Fire => match fire_once(id, generation) {
+                Ok(claimed) => generation = claimed.generation,
+                Err(ClaimError::NotDue { .. }) => continue,
+                Err(e) => {
+                    crate::log_debug(&format!("loop {id}: timer stopping ({e})"));
+                    return;
+                }
+            },
+            LoopStep::Skip => match claim_skip(id, generation) {
+                Ok(claimed) => {
+                    generation = claimed.generation;
+                    crate::log_debug(&format!(
+                        "loop {id}: gate not met, tick skipped -> next fire at {}",
+                        claimed.next_fire_at
+                    ));
+                }
+                Err(ClaimError::NotDue { .. }) => continue,
+                Err(e) => {
+                    crate::log_debug(&format!("loop {id}: timer stopping ({e})"));
+                    return;
+                }
+            },
         }
     }
 }
@@ -828,7 +956,7 @@ mod tests {
     }
 
     fn make(d: &Path, id: &str, now: u64) -> LoopRecord {
-        create_in(d, "/ws", "check the deploy", 300, None, None, None, None, Some("s1"), id, now)
+        create_in(d, "/ws", "check the deploy", 300, None, None, None, None, Some("s1"), None, id, now)
             .unwrap()
     }
 
@@ -869,11 +997,11 @@ mod tests {
     #[test]
     fn create_rejects_empty_prompt_and_zero_iterations() {
         let d = dir();
-        assert!(create_in(d.path(), "/ws", "  ", 300, None, None, None, None, None, "x", 1)
+        assert!(create_in(d.path(), "/ws", "  ", 300, None, None, None, None, None, None, "x", 1)
             .unwrap_err()
             .contains("prompt is required"));
         assert!(
-            create_in(d.path(), "/ws", "p", 300, Some(0), None, None, None, None, "x", 1)
+            create_in(d.path(), "/ws", "p", 300, Some(0), None, None, None, None, None, "x", 1)
                 .unwrap_err()
                 .contains("at least 1")
         );
@@ -999,7 +1127,7 @@ mod tests {
     #[test]
     fn a_bounded_loop_retires_itself_on_the_final_iteration() {
         let d = dir();
-        create_in(d.path(), "/ws", "twice", 60, Some(2), None, None, None, None, "l1", 0).unwrap();
+        create_in(d.path(), "/ws", "twice", 60, Some(2), None, None, None, None, None, "l1", 0).unwrap();
         let first = claim_fire_in(d.path(), "l1", 0, 60_000).unwrap();
         assert_eq!(first.iterations_done, 1);
         assert!(get_in(d.path(), "l1").is_some(), "one iteration left");
@@ -1019,7 +1147,7 @@ mod tests {
     fn max_iterations_is_clamped_to_the_hard_ceiling() {
         let d = dir();
         let rec =
-            create_in(d.path(), "/ws", "p", 60, Some(99_999), None, None, None, None, "l1", 0).unwrap();
+            create_in(d.path(), "/ws", "p", 60, Some(99_999), None, None, None, None, None, "l1", 0).unwrap();
         assert_eq!(rec.max_iterations, Some(MAX_ITERATIONS));
     }
 
@@ -1035,7 +1163,7 @@ mod tests {
     fn due_loops_selects_only_live_and_due() {
         let d = dir();
         make(d.path(), "soon", 0); // due at 300_000
-        create_in(d.path(), "/ws", "p", 3600, None, None, None, None, None, "later", 0).unwrap();
+        create_in(d.path(), "/ws", "p", 3600, None, None, None, None, None, None, "later", 0).unwrap();
         let due = due_loops_in(d.path(), 400_000);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, "soon");
@@ -1079,7 +1207,7 @@ mod tests {
         let d = dir();
         create_in(
             d.path(), "/ws", "check the deploy", 300, None,
-            Some("claude-fable-5"), Some("high"), None, None, "l1", 0,
+            Some("claude-fable-5"), Some("high"), None, None, None, "l1", 0,
         )
         .unwrap();
 
@@ -1114,7 +1242,7 @@ mod tests {
     fn history_accumulates_and_caps_at_max() {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path();
-        create_in(dir, "/ws", "p", 60, None, None, None, None, None, "l1", 0).unwrap();
+        create_in(dir, "/ws", "p", 60, None, None, None, None, None, None, "l1", 0).unwrap();
 
         // Record more runs than the cap; each with a distinct id and timestamp.
         let total = MAX_HISTORY + 5;
@@ -1179,7 +1307,7 @@ mod tests {
     fn reconcile_rearms_only_stranded_loops() {
         let d = dir();
         // "healthy": due in the future — a timer is presumably driving it
-        create_in(d.path(), "/ws", "p", 300, None, None, None, None, None, "healthy", 1_000_000).unwrap();
+        create_in(d.path(), "/ws", "p", 300, None, None, None, None, None, None, "healthy", 1_000_000).unwrap();
         // "napping": due, but only just — inside the grace window, timer likely mid-nap
         let mut napping = make(d.path(), "napping", 0);
         napping.next_fire_at = 1_000_000 - 10_000; // 10s overdue < grace
@@ -1201,7 +1329,7 @@ mod tests {
         let d = dir();
         // exhausted: max 1 iteration, already done — overdue but must not re-arm
         let mut done =
-            create_in(d.path(), "/ws", "p", 60, Some(1), None, None, None, None, "done", 0).unwrap();
+            create_in(d.path(), "/ws", "p", 60, Some(1), None, None, None, None, None, "done", 0).unwrap();
         done.iterations_done = 1;
         done.next_fire_at = 0; // very overdue
         write_record(d.path(), &done).unwrap();
@@ -1234,6 +1362,7 @@ mod tests {
             Some("high"),
             None,
             None,
+            None,
             "l1",
             0,
         )
@@ -1241,7 +1370,7 @@ mod tests {
         assert_eq!(rec.model.as_deref(), Some("claude-fable-5"));
         assert_eq!(rec.effort.as_deref(), Some("high"));
         // blank strings are not a model
-        let rec = create_in(d.path(), "/ws", "p", 300, None, Some("  "), Some(""), None, None, "l2", 0)
+        let rec = create_in(d.path(), "/ws", "p", 300, None, Some("  "), Some(""), None, None, None, "l2", 0)
             .unwrap();
         assert_eq!(rec.model, None);
         assert_eq!(rec.effort, None);
@@ -1254,7 +1383,7 @@ mod tests {
     #[test]
     fn codex_loop_fires_iterations_on_codex_source() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", 60, None, None, None, Some("codex"), None, "cx", 0)
+        create_in(d.path(), "/ws", "p", 60, None, None, None, Some("codex"), None, None, "cx", 0)
             .unwrap();
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cx", 0, 300_000, &ok_spawner(&calls, "cx-sid")).unwrap();
@@ -1268,7 +1397,7 @@ mod tests {
     #[test]
     fn loop_without_source_defaults_to_claude() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", 60, None, None, None, None, None, "cl", 0).unwrap();
+        create_in(d.path(), "/ws", "p", 60, None, None, None, None, None, None, "cl", 0).unwrap();
         assert_eq!(get_in(d.path(), "cl").unwrap().agent_source, None, "no source stored");
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cl", 0, 300_000, &ok_spawner(&calls, "cl-sid")).unwrap();
@@ -1306,5 +1435,106 @@ mod tests {
         let err = run_now_in(d.path(), "nope", &ok_spawner(&calls, "x")).unwrap_err();
         assert!(err.contains("no loop with id nope"), "got: {err}");
         assert_eq!(calls.into_inner().len(), 0, "no spawn for a missing loop");
+    }
+
+    // ── gate (--until) ───────────────────────────────────────────────────────
+
+    /// The gate command is stamped; a blank one is dropped (no gate). It
+    /// survives the JSON round-trip in camelCase.
+    #[test]
+    fn create_stamps_until_cmd_and_drops_blank() {
+        let d = dir();
+        let rec = create_in(
+            d.path(), "/ws", "p", 60, None, None, None, None, None,
+            Some("test -f /tmp/ready"), "g1", 0,
+        )
+        .unwrap();
+        assert!(rec.has_gate());
+        assert_eq!(rec.until_cmd.as_deref(), Some("test -f /tmp/ready"));
+        let raw = fs::read_to_string(record_path(d.path(), "g1")).unwrap();
+        assert!(raw.contains("\"untilCmd\""));
+
+        let rec = create_in(
+            d.path(), "/ws", "p", 60, None, None, None, None, None, Some("   "), "g2", 0,
+        )
+        .unwrap();
+        assert!(!rec.has_gate(), "blank gate command ⇒ no gate");
+    }
+
+    /// No gate: a due tick always fires; the gate closure is never consulted.
+    #[test]
+    fn decide_without_gate_fires_when_due() {
+        let d = dir();
+        let rec = make(d.path(), "l1", 0); // due at 300_000
+        assert_eq!(
+            decide(&rec, 0, 100_000, || panic!("gate must not be polled")),
+            LoopStep::Nap { ms: 30_000 }
+        );
+        assert_eq!(decide(&rec, 0, 300_000, || panic!("gate must not be polled")), LoopStep::Fire);
+    }
+
+    /// Gated + due: fire when the gate passes, skip when it doesn't. Not due ⇒
+    /// nap without polling the gate.
+    #[test]
+    fn decide_gated_fires_when_met_skips_when_unmet() {
+        let d = dir();
+        let rec = create_in(
+            d.path(), "/ws", "p", 300, None, None, None, None, None, Some("gate"), "g1", 0,
+        )
+        .unwrap(); // due at 300_000
+        assert_eq!(decide(&rec, 0, 300_000, || true), LoopStep::Fire);
+        assert_eq!(decide(&rec, 0, 300_000, || false), LoopStep::Skip);
+        assert_eq!(
+            decide(&rec, 0, 100_000, || panic!("early: no poll")),
+            LoopStep::Nap { ms: 30_000 }
+        );
+    }
+
+    /// A skip advances one interval and bumps generation but does NOT consume an
+    /// iteration — so it neither counts against `max_iterations` nor spawns.
+    #[test]
+    fn claim_skip_advances_without_consuming_iteration() {
+        let d = dir();
+        make(d.path(), "l1", 0); // interval 300, due at 300_000, iterations_done 0
+        let skipped = claim_skip_in(d.path(), "l1", 0, 300_000).unwrap();
+        assert_eq!(skipped.iterations_done, 0, "skip is not an iteration");
+        assert_eq!(skipped.generation, 1, "generation bumps so racing timers can't double-advance");
+        assert_eq!(skipped.next_fire_at, 300_000 + 300_000, "advanced one interval from now");
+        // persisted, still present (not retired)
+        let on_disk = get_in(d.path(), "l1").unwrap();
+        assert_eq!(on_disk.generation, 1);
+        assert_eq!(on_disk.iterations_done, 0);
+    }
+
+    /// A bounded (max=1) loop that keeps skipping stays alive — a skip must not
+    /// exhaust the loop the way a real iteration does.
+    #[test]
+    fn skipping_does_not_exhaust_a_bounded_loop() {
+        let d = dir();
+        create_in(d.path(), "/ws", "p", 60, Some(1), None, None, None, None, Some("gate"), "l1", 0)
+            .unwrap();
+        // skip several ticks; each advances gen + next_fire but leaves the single
+        // iteration unspent, so the loop is never retired.
+        let mut gen = 0;
+        let mut now = 60_000;
+        for _ in 0..3 {
+            let r = claim_skip_in(d.path(), "l1", gen, now).unwrap();
+            gen = r.generation;
+            now = r.next_fire_at;
+        }
+        let rec = get_in(d.path(), "l1").unwrap();
+        assert_eq!(rec.iterations_done, 0, "no iteration consumed by skips");
+        assert!(rec.is_live(now), "still live: its one iteration is unspent");
+    }
+
+    /// Two timers that both decide to skip: the second (stale generation) is
+    /// refused, so the schedule advances exactly once.
+    #[test]
+    fn a_stale_skip_is_refused() {
+        let d = dir();
+        make(d.path(), "l1", 0);
+        assert!(claim_skip_in(d.path(), "l1", 0, 300_000).is_ok());
+        let err = claim_skip_in(d.path(), "l1", 0, 300_000).unwrap_err();
+        assert_eq!(err, ClaimError::StaleGeneration { expected: 0, found: 1 });
     }
 }

@@ -166,6 +166,7 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 ctx.effort.as_deref(),
                 ctx.source.as_deref(),
                 sid.as_deref(),
+                None, // gate wired in P3
             ) {
                 Ok(rec) => {
                     // Arm the detached timer so the loop actually fires. A create
