@@ -5,10 +5,12 @@ import type { Components } from "react-markdown";
 import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
 import { normalizeSvgBlankLines } from "../../markdown/plugins";
 import {
+  decisionTerminalOutcome,
   normalizeAnswer,
   parseAnswersFromResultText,
   summarizeQuestion,
   type DecisionAnswer,
+  type DecisionTerminalOutcome,
 } from "../../decisionText";
 import {
   asAskUserQuestionResult,
@@ -132,6 +134,14 @@ function matchRecord(
   );
 }
 
+/** i18n key for each resolved-but-not-answered outcome chip. */
+const TERMINAL_OUTCOME_KEY: Record<DecisionTerminalOutcome, string> = {
+  declined: "detail.decision_declined",
+  timeout: "detail.decision_timeout",
+  cancelled: "detail.decision_cancelled",
+  "heartbeat-lost": "detail.decision_heartbeat_lost",
+};
+
 interface Props {
   block: ToolUseBlockType;
   result?: ToolResultBlock;
@@ -174,6 +184,16 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
     ? normalizeAnswer(answers[first.question], (first.options ?? []).map((o) => o.label))
     : null;
 
+  // A card that resolved without an answer (declined / timed-out / cancelled /
+  // heartbeat-lost) is *done* — show its real outcome instead of leaving it
+  // forever 「未回答」. Without this a card whose turn was SIGINT'd (parked on
+  // timeout, or two turns collided on one session) has no tool_result to parse
+  // and would otherwise read as still-pending.
+  const terminalOutcome: DecisionTerminalOutcome | null = decisionTerminalOutcome(
+    record,
+    !!firstAnswer,
+  );
+
   // Both AskUserQuestion and the fleet__ask MCP variant are "the agent asked a
   // question" — label them identically rather than leaking the raw tool name.
   const kindLabel = t("detail.decision_ask");
@@ -194,11 +214,16 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
             {firstAnswer.other ? t("detail.decision_answered_other") : firstAnswer.label}
           </span>
         )}
-        {!open && !firstAnswer && !isPartial && !errorMessage && (
+        {!open && !firstAnswer && terminalOutcome && (
+          <span className={styles.outcome_chip}>
+            {t(TERMINAL_OUTCOME_KEY[terminalOutcome])}
+          </span>
+        )}
+        {!open && !firstAnswer && !terminalOutcome && !isPartial && !errorMessage && (
           <span className={styles.pending_chip}>{t("detail.decision_unanswered")}</span>
         )}
         {isPartial && !result && <span className={styles.spinner}>⟳</span>}
-        {errorMessage && <span className={styles.error_badge}>error</span>}
+        {errorMessage && !terminalOutcome && <span className={styles.error_badge}>error</span>}
         {questions.length > 1 && (
           <span className={styles.count}>{questions.length}</span>
         )}

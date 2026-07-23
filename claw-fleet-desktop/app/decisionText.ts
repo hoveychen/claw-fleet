@@ -10,6 +10,35 @@
  */
 
 import type { AskQuestion } from "./toolResults";
+import type { DecisionHistoryRecord } from "./types";
+
+/** The four ways a decision card resolves without being answered. */
+export type DecisionTerminalOutcome =
+  | "declined"
+  | "timeout"
+  | "cancelled"
+  | "heartbeat-lost";
+
+/**
+ * The resolved-but-not-answered state of a decision card, or `null` when it was
+ * answered / is still pending / has no history record.
+ *
+ * A declined, timed-out, cancelled or heartbeat-lost card is *done* — it must
+ * not keep showing as 「未回答」 (unanswered). That stale-pending state used to
+ * appear whenever the `tool_result` never reached the transcript: when the turn
+ * was SIGINT'd (e.g. a card parked on timeout, or two turns collided on one
+ * session) the `AskUserQuestion` call was interrupted with no result to parse,
+ * so the only surviving signal is the history record's `outcome`. Read it.
+ */
+export function decisionTerminalOutcome(
+  record: DecisionHistoryRecord | null | undefined,
+  hasAnswer: boolean,
+): DecisionTerminalOutcome | null {
+  // An answer in hand always wins over whatever a stale record says.
+  if (hasAnswer || !record) return null;
+  if (record.kind !== "elicitation" && record.kind !== "fleet-ask") return null;
+  return record.outcome === "answered" ? null : record.outcome;
+}
 
 /**
  * Fleet's interaction mode asks every question body to carry a "speech summary

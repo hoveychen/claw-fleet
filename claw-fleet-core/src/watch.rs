@@ -491,11 +491,26 @@ fn fire_in(
     generation: u64,
     timed_out: bool,
     capture: &dyn Fn(&WatchRecord) -> String,
+    interrupt_if_live: &dyn Fn(&str) -> bool,
     resume: &ResumeFn<'_>,
 ) -> Result<WatchRecord, ClaimError> {
     let rec = claim_fire_in(dir, id, generation)?;
     let event_text = if timed_out { String::new() } else { capture(&rec) };
     let prompt = compose_resume_prompt(&rec, &event_text, timed_out);
+    // A watch resumes on the assumption its session already died (a headless
+    // `-p` turn that ended). But a condition can fire while the session is
+    // still live — most often it is blocked on a decision card, whose hook
+    // keeps the CLI process alive for its full wait window (up to 600s).
+    // Resuming then would put a *second* `claude` on the same transcript, which
+    // is exactly how a session gets corrupted; `parked::answer_with` guards the
+    // same way before every resume. Interrupt the live turn first so only one
+    // turn ever runs on the transcript.
+    if interrupt_if_live(&rec.session_id) {
+        crate::log_debug(&format!(
+            "watch {id}: session {} still live at fire time; interrupted it before resuming",
+            rec.session_id
+        ));
+    }
     match resume(&rec, &prompt) {
         Ok(()) => crate::log_debug(&format!(
             "watch {id}: fired ({}) -> resumed session {}",
@@ -528,11 +543,29 @@ fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
     )
 }
 
+/// SIGINT the session if a Fleet-owned CLI is still running it, returning
+/// whether it interrupted anything. Shared shape with `parked::answer_with`'s
+/// pre-resume guard: never launch a resume while the original turn can still be
+/// appending to the same transcript.
+fn interrupt_if_live(session_id: &str) -> bool {
+    if crate::parked::session_alive(session_id) {
+        crate::parked::interrupt_session(session_id)
+    } else {
+        false
+    }
+}
+
 fn fire_real(id: &str, generation: u64, timed_out: bool) -> Result<WatchRecord, ClaimError> {
     let dir = watches_dir().ok_or(ClaimError::Gone)?;
-    fire_in(&dir, id, generation, timed_out, &capture_event, &|rec, prompt| {
-        spawn_resume(rec, prompt)
-    })
+    fire_in(
+        &dir,
+        id,
+        generation,
+        timed_out,
+        &capture_event,
+        &interrupt_if_live,
+        &|rec, prompt| spawn_resume(rec, prompt),
+    )
 }
 
 /// The blocking timer loop — the body of `fleet watch fire <id> <gen>`. Polls the
@@ -945,6 +978,12 @@ mod tests {
 
     use std::cell::RefCell;
 
+    /// Stand-in for `interrupt_if_live` in tests that don't care about the
+    /// liveness gate: the session is dead, so nothing is interrupted.
+    fn dead(_session_id: &str) -> bool {
+        false
+    }
+
     /// A fire claims the slot, composes the prompt, and resumes exactly once; the
     /// record is retired so a racing second fire resumes nothing.
     #[test]
@@ -957,7 +996,8 @@ mod tests {
             seen.borrow_mut().push((r.session_id.clone(), prompt.to_string()));
             Ok(())
         };
-        let claimed = fire_in(d.path(), "w1", 0, false, &capture, &resume).unwrap();
+        let claimed =
+            fire_in(d.path(), "w1", 0, false, &capture, &dead, &resume).unwrap();
         assert_eq!(claimed.session_id, "sess-1");
         assert!(get_in(d.path(), "w1").is_none(), "fire retires the record");
 
@@ -968,7 +1008,7 @@ mod tests {
         assert!(seen[0].1.contains("触发了"));
 
         // a racing second fire finds the record gone and resumes nothing
-        let err = fire_in(d.path(), "w1", 0, false, &capture, &|_, _| {
+        let err = fire_in(d.path(), "w1", 0, false, &capture, &dead, &|_, _| {
             panic!("must not resume after the record is consumed")
         })
         .unwrap_err();
@@ -991,10 +1031,61 @@ mod tests {
             *last.borrow_mut() = prompt.to_string();
             Ok(())
         };
-        fire_in(d.path(), "w1", 0, true, &capture, &resume).unwrap();
+        fire_in(d.path(), "w1", 0, true, &capture, &dead, &resume).unwrap();
         assert!(!*captured.borrow(), "timeout fire must not run the capture command");
         assert!(last.borrow().contains("已超时"));
         assert!(!last.borrow().contains("should-not-run"));
+    }
+
+    /// A watch whose session is still live when the condition fires must SIGINT
+    /// that turn *before* resuming — two `claude` processes on one transcript is
+    /// how the "decision card stuck unanswered + duplicate card" corruption
+    /// happened (a `fleet watch` resumed a session still blocked on an
+    /// AskUserQuestion). The interrupt must land before the resume, not after.
+    #[test]
+    fn fire_interrupts_live_session_before_resume() {
+        let d = dir();
+        make(d.path(), "w1", 0);
+        // Ordered log of side effects so we can assert interrupt-then-resume.
+        let events: RefCell<Vec<String>> = RefCell::new(Vec::new());
+        let capture = |_r: &WatchRecord| String::new();
+        let interrupt = |sid: &str| {
+            events.borrow_mut().push(format!("interrupt:{sid}"));
+            true // the session was live and we stopped it
+        };
+        let resume = |r: &WatchRecord, _p: &str| {
+            events.borrow_mut().push(format!("resume:{}", r.session_id));
+            Ok(())
+        };
+        fire_in(d.path(), "w1", 0, false, &capture, &interrupt, &resume).unwrap();
+        assert_eq!(
+            events.into_inner(),
+            vec!["interrupt:sess-1".to_string(), "resume:sess-1".to_string()],
+            "a live session must be interrupted before the resume, not left to run concurrently",
+        );
+    }
+
+    /// The common case: the session already died, so nothing is interrupted and
+    /// the resume proceeds exactly as before.
+    #[test]
+    fn fire_skips_interrupt_when_session_dead() {
+        let d = dir();
+        make(d.path(), "w1", 0);
+        let interrupted = RefCell::new(false);
+        let resumed = RefCell::new(false);
+        let capture = |_r: &WatchRecord| String::new();
+        let interrupt = |_sid: &str| {
+            *interrupted.borrow_mut() = true;
+            false
+        };
+        let resume = |_r: &WatchRecord, _p: &str| {
+            *resumed.borrow_mut() = true;
+            Ok(())
+        };
+        fire_in(d.path(), "w1", 0, false, &capture, &interrupt, &resume).unwrap();
+        // `interrupt_if_live` is still *consulted* (it is what reports liveness),
+        // but it reports dead, so no SIGINT and a normal resume.
+        assert!(*resumed.borrow(), "a dead session still gets resumed");
     }
 
     /// A resume failure is swallowed: the record is already consumed, so the fire
@@ -1005,7 +1096,7 @@ mod tests {
         make(d.path(), "w1", 0);
         let capture = |_r: &WatchRecord| String::new();
         let resume = |_r: &WatchRecord, _p: &str| Err("claude --resume boom".to_string());
-        let claimed = fire_in(d.path(), "w1", 0, false, &capture, &resume);
+        let claimed = fire_in(d.path(), "w1", 0, false, &capture, &dead, &resume);
         assert!(claimed.is_ok(), "fire returns Ok even when resume fails");
         assert!(get_in(d.path(), "w1").is_none(), "record still retired");
     }
@@ -1024,6 +1115,7 @@ mod tests {
             4,
             false,
             &|_r| String::new(),
+            &dead,
             &|_r, _p| panic!("stale timer must not resume"),
         )
         .unwrap_err();
