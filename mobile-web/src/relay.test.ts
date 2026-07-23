@@ -433,3 +433,109 @@ describe("RelayClient client_hello 携带构建 commit", () => {
     expect(hello!.appCommit).toBe("abc1234");
   });
 });
+
+// answerViaReq:决策卡答复走 req/reply(而非旧的即发即忘 answer 帧),弱网下要么拿到
+// 桌面送达确认、要么重发、要么最终失败让调用方保留卡片。这是「弱网答复了、卡片却消失
+// 且 app 端仍在等」这个 bug 的修复面——绝不在拿到送达确认前把卡当成已答。
+describe("RelayClient.answerViaReq 弱网送达确认", () => {
+  const clients: RelayClient[] = [];
+  beforeEach(() => {
+    FakeWs.instances = [];
+    (globalThis as unknown as { window: unknown }).window = windowShim();
+    (globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWs;
+  });
+  afterEach(() => {
+    for (const c of clients.splice(0)) c.close();
+  });
+
+  /** 解出某连接发出的所有 decision_answer req 帧的 req_id(按发出顺序)。 */
+  async function answerReqIds(ws: FakeWs): Promise<string[]> {
+    const out: string[] = [];
+    for (const p of await openSent(ws)) {
+      if (p.event === "req" && p.method === "decision_answer") out.push(String(p.req_id));
+    }
+    return out;
+  }
+  async function waitAnswerReqCount(ws: FakeWs, n: number): Promise<void> {
+    for (let i = 0; i < 400; i++) {
+      if ((await answerReqIds(ws)).length >= n) return;
+      await tick(1);
+    }
+    throw new Error(`未在预期时间内发出 ${n} 个 decision_answer req`);
+  }
+
+  it("发出 decision_answer req,收到 ok:true reply 后 resolve", async () => {
+    const { client, ws } = await connected(clients);
+    const p = client.answerViaReq(
+      "elicitation",
+      "d-confirm",
+      { declined: false, answers: { q1: "a" } },
+      { attempts: 3, timeoutMs: 1000 },
+    );
+    p.catch(() => {});
+    await waitAnswerReqCount(ws, 1);
+    const frame = (await openSent(ws)).find(
+      (f) => f.event === "req" && f.method === "decision_answer",
+    );
+    expect(frame).toBeTruthy();
+    const params = frame!.params as Record<string, unknown>;
+    expect(params.kind).toBe("elicitation");
+    expect(params.id).toBe("d-confirm");
+    expect((params.answers as Record<string, unknown>).q1).toBe("a");
+
+    const reqId = (await answerReqIds(ws))[0];
+    ws.deliver(await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: null }));
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("reply 丢失(无裁决)→ 重发,第二次 ok:true 才 resolve", async () => {
+    const { client, ws } = await connected(clients);
+    const p = client.answerViaReq(
+      "fleet-ask",
+      "d-resend",
+      { cancelled: false, answers: {} },
+      { attempts: 2, timeoutMs: 50 },
+    );
+    p.catch(() => {});
+    // 第一帧超时(50ms,不投递)后应自动发第二帧。
+    await waitAnswerReqCount(ws, 2);
+    const reqs = await answerReqIds(ws);
+    expect(reqs.length).toBe(2);
+    // 给第二帧回 ok:true → 整体 resolve(重发被桌面幂等去重,安全)。
+    ws.deliver(await sealedMsg({ event: "reply", req_id: reqs[1], ok: true, data: null }));
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("桌面裁决 ok:false → 不重发,立即 reject(remote)", async () => {
+    const { client, ws } = await connected(clients);
+    const p = client.answerViaReq(
+      "elicitation",
+      "d-verdict",
+      { declined: false, answers: {} },
+      { attempts: 3, timeoutMs: 1000 },
+    );
+    await waitAnswerReqCount(ws, 1);
+    const reqId = (await answerReqIds(ws))[0];
+    ws.deliver(
+      await sealedMsg({ event: "reply", req_id: reqId, ok: false, error: "no pending request" }),
+    );
+    const err = await p.catch((e) => e);
+    expect(isDesktopRejection(err)).toBe(true);
+    // 明确裁决不该触发重发:只发了一帧。
+    expect((await answerReqIds(ws)).length).toBe(1);
+  });
+
+  it("耗尽重发预算仍无裁决 → reject(非 remote)", async () => {
+    const { client, ws } = await connected(clients);
+    const p = client.answerViaReq(
+      "elicitation",
+      "d-exhaust",
+      { declined: false, answers: {} },
+      { attempts: 2, timeoutMs: 5 },
+    );
+    const err = await p.catch((e) => e);
+    expect(err).toBeInstanceOf(RelayRequestError);
+    expect((err as RelayRequestError).remote).toBe(false);
+    expect((await answerReqIds(ws)).length).toBe(2);
+  });
+});

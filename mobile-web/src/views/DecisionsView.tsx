@@ -203,18 +203,34 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered, onOpenSession
   // drops back to the raw first-prompt ai_title.
   const aiTitle = req.aiTitle || session?.titleOverride || session?.aiTitle;
 
+  // Answering over the robust req/reply path: the card is removed only once the
+  // desktop confirms delivery (answerViaReq resolves). Under a weak link the old
+  // fire-and-forget `answer` would drop the frame, yet the card was removed
+  // optimistically — so the desktop stayed blocked while the card vanished. Here
+  // a lost frame is resent, and a final failure keeps the card so the boss can
+  // retry rather than silently losing the answer.
+  const [sending, setSending] = useState(false);
+  const [sendFailed, setSendFailed] = useState(false);
   const submit = useCallback(
     (fields: Record<string, unknown>) => {
-      if (!client) return;
-      if (client.answer(decision.kind, decision.id, fields)) {
-        onAnswered(decision.id);
-      }
+      if (!client || sending) return;
+      setSending(true);
+      setSendFailed(false);
+      client
+        .answerViaReq(decision.kind, decision.id, fields)
+        .then(() => onAnswered(decision.id))
+        .catch(() => {
+          // No delivery verdict (or the desktop rejected): never mark answered
+          // without confirmation — that is the bug. Keep the card and surface it.
+          setSending(false);
+          setSendFailed(true);
+        });
     },
-    [client, decision.kind, decision.id, onAnswered],
+    [client, decision.kind, decision.id, onAnswered, sending],
   );
 
   return (
-    <div className={styles.card}>
+    <div className={`${styles.card} ${sending ? styles.cardBusy : ""}`} aria-busy={sending}>
       <div className={styles.cardHead}>
         <span className={styles.kindChip} data-kind={decision.kind}>
           {t(KIND_LABEL[decision.kind] ?? decision.kind)}
@@ -243,6 +259,17 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered, onOpenSession
               "等待超时，Fleet 已经掐掉那一轮并把问题留了下来。回复后会带着你的答复唤醒会话继续。",
             )}
           </span>
+        </div>
+      )}
+      {sending && (
+        <div className={styles.sendingBanner} role="status">
+          {t("发送中…等待桌面端确认收到")}
+        </div>
+      )}
+      {sendFailed && (
+        <div className={styles.sendFailBanner} role="alert">
+          <CloudOff size={13} />
+          <span>{t("发送失败,答复未送达,卡片已保留,请重试")}</span>
         </div>
       )}
       {decision.kind === "guard" && (
