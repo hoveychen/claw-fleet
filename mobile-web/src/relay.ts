@@ -481,12 +481,23 @@ export class RelayClient {
         return; // desktop confirmed delivery
       } catch (e) {
         lastErr = e;
-        // A desktop verdict (ok:false — e.g. the card already expired) can't be
-        // changed by resending, so surface it now. Only a lost frame / timeout /
-        // disconnect (remote === false) is worth resending; the desktop dedups
-        // by decision id, so a resend that races a delivered first attempt is an
-        // idempotent no-op.
-        if (isDesktopRejection(e)) throw e;
+        // A desktop verdict (ok:false) can't be changed by resending, so don't
+        // resend. Only a lost frame / timeout / disconnect (remote === false) is
+        // worth resending; the desktop dedups by decision id, so a resend that
+        // races a delivered first attempt is an idempotent no-op.
+        if (isDesktopRejection(e)) {
+          // Forward-compat: a desktop that predates `decision_answer` rejects it
+          // as an unknown method. Fall back to the legacy fire-and-forget `answer`
+          // frame so a new phone can still answer an un-updated desktop — that
+          // desktop only understands the old path anyway, so this is no worse
+          // than its own behaviour, not a regression. Any other verdict (e.g. the
+          // card already expired) is real: surface it. If even the fallback can't
+          // send (socket down), keep the original error so the card is retained.
+          if (/unknown method/i.test(e instanceof Error ? e.message : String(e))) {
+            if (this.answer(kind, id, fields)) return;
+          }
+          throw e;
+        }
       }
     }
     throw lastErr;
