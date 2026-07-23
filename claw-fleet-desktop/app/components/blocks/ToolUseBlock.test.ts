@@ -189,6 +189,26 @@ describe("claudeToolSummary", () => {
     expect(claudeToolSummary("Bash", { command: "ls" }, t)).toBeNull();
     expect(claudeToolSummary("Read", { file_path: "a.ts" }, t)).toBeNull();
   });
+
+  it("ToolSearch select: → lists the tools being loaded (not the raw query)", () => {
+    expect(claudeToolSummary("ToolSearch", { query: "select:AskUserQuestion" }, t)).toBe(
+      'detail.tool_search_load|{"names":"AskUserQuestion"}',
+    );
+    expect(
+      claudeToolSummary("ToolSearch", { query: "select:Read, Edit ,Grep", max_results: 3 }, t),
+    ).toBe('detail.tool_search_load|{"names":"Read, Edit, Grep"}');
+  });
+
+  it("ToolSearch keyword query → a search label carrying the query", () => {
+    expect(claudeToolSummary("ToolSearch", { query: "notebook jupyter" }, t)).toBe(
+      'detail.tool_search_query|{"query":"notebook jupyter"}',
+    );
+  });
+
+  it("ToolSearch with no usable query → the bare key", () => {
+    expect(claudeToolSummary("ToolSearch", { max_results: 5 }, t)).toBe("detail.tool_search");
+    expect(claudeToolSummary("ToolSearch", { query: "select:" }, t)).toBe("detail.tool_search");
+  });
 });
 
 describe("parseExecCommand", () => {
