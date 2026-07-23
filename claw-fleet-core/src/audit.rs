@@ -1496,11 +1496,38 @@ fn parse_js_string(s: &str, quote: u8) -> Option<String> {
     None
 }
 
+/// Map a tool_use block's `name` + its `command` input to the concrete shell
+/// command(s) to audit, plus the tool label to record on the resulting event.
+///
+/// Both shell tools Claude Code can drive are covered: `Bash`
+/// (macOS/Linux/Windows-with-Git-Bash) and `PowerShell` (Windows without Git
+/// Bash, where Claude Code drives a separate `PowerShell` tool — same
+/// `input.command` field, distinct `name`). Without the `PowerShell` arm, a
+/// Windows PowerShell command would produce no audit event at all, leaving the
+/// risk classifier and audit trail blind on that platform. Codex code-mode
+/// `exec` wrappers keep recording under the `Bash` label so all shell activity
+/// stays in one audit category regardless of agent.
+///
+/// Returns `(commands, event_tool_name)`; an empty command vec means the block
+/// is not an audited shell call.
+fn shell_commands_for(tool_name: &str, input_command: &str) -> (Vec<String>, &'static str) {
+    match tool_name {
+        "Bash" if !input_command.is_empty() => (vec![input_command.to_string()], "Bash"),
+        "PowerShell" if !input_command.is_empty() => {
+            (vec![input_command.to_string()], "PowerShell")
+        }
+        "exec" if !input_command.is_empty() => {
+            (extract_codex_exec_commands(input_command), "Bash")
+        }
+        _ => (Vec::new(), ""),
+    }
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /// Extract audit events from a single session's messages.
-/// Bash blocks and concrete shell calls inside Codex code-mode `exec` wrappers
-/// are inspected; read-only/non-shell tools are ignored.
+/// Bash / PowerShell blocks and concrete shell calls inside Codex code-mode
+/// `exec` wrappers are inspected; read-only/non-shell tools are ignored.
 pub fn extract_audit_events(
     messages: &[Value],
     session: &SessionInfo,
@@ -1534,11 +1561,7 @@ pub fn extract_audit_events(
                 .and_then(|i| i.get("command"))
                 .and_then(|c| c.as_str())
                 .unwrap_or("");
-            let commands = match tool_name {
-                "Bash" if !input_command.is_empty() => vec![input_command.to_string()],
-                "exec" if !input_command.is_empty() => extract_codex_exec_commands(input_command),
-                _ => Vec::new(),
-            };
+            let (commands, event_tool_name) = shell_commands_for(tool_name, input_command);
             for cmd in commands {
                 if let Some((level, tags)) = classify_bash_command(&cmd) {
                     events.push(AuditEvent {
@@ -1546,7 +1569,7 @@ pub fn extract_audit_events(
                         workspace_name: session.workspace_name.clone(),
                         workspace_path: session.workspace_path.clone(),
                         agent_source: session.agent_source.clone(),
-                        tool_name: "Bash".to_string(),
+                        tool_name: event_tool_name.to_string(),
                         command_summary: truncate(&cmd, 120),
                         full_command: cmd,
                         risk_level: level,
@@ -1724,6 +1747,31 @@ mod tests {
             jsonl_path: "/tmp/x.jsonl".into(),
         };
         assert_eq!(ev.dedup_key(), "sess-1|2026-06-06T00:00:00Z|Bash");
+    }
+
+    /// Regression: the Windows `PowerShell` tool must feed the audit pipeline
+    /// too. Before the fix `shell_commands_for` matched only `Bash`/`exec`, so a
+    /// PowerShell command produced no audited command at all — the risk
+    /// classifier and audit trail were blind on Windows-without-Git-Bash. The
+    /// recorded label is `PowerShell` (accurate), while `exec` keeps its `Bash`
+    /// label so all shell activity stays in one audit category.
+    #[test]
+    fn shell_commands_for_covers_bash_powershell_and_exec_labelling() {
+        let (bash, bash_label) = shell_commands_for("Bash", "rm -rf /tmp/x");
+        assert_eq!(bash, vec!["rm -rf /tmp/x".to_string()]);
+        assert_eq!(bash_label, "Bash");
+
+        let (ps, ps_label) = shell_commands_for("PowerShell", "Remove-Item C:\\tmp\\x");
+        assert_eq!(
+            ps,
+            vec!["Remove-Item C:\\tmp\\x".to_string()],
+            "PowerShell command must be extracted for auditing"
+        );
+        assert_eq!(ps_label, "PowerShell", "PowerShell events must be labelled PowerShell");
+
+        // Non-shell / read-only tools and empty commands yield nothing.
+        assert!(shell_commands_for("Read", "").0.is_empty());
+        assert!(shell_commands_for("Bash", "").0.is_empty());
     }
 
     // ── Regression: CJK truncate must not panic on UTF-8 boundaries ────────
