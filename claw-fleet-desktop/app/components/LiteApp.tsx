@@ -158,9 +158,11 @@ export function LiteApp() {
   return (
     <div className={styles.lite}>
       <div className={styles.drag_bar} data-tauri-drag-region>
-        <span className={styles.drag_title} data-tauri-drag-region>
-          {t("title")}
-        </span>
+        {/* No app title here: the 340px lite strip has no room for it (it wraps
+            to two lines next to the usage badge + icon buttons). An empty
+            flex-grow spacer keeps the drag region and pushes the controls
+            right. */}
+        <div className={styles.drag_spacer} data-tauri-drag-region />
         <TodayUsageBadge inline />
         <button
           className={styles.icon_btn}

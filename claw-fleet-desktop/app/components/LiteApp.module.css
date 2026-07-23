@@ -33,14 +33,11 @@
   padding-right: calc(8px + var(--win-caption-inset-x));
 }
 
-.drag_title {
+/* Empty flex-grow drag region where the app title used to be — removed because
+   the 340px lite strip has no horizontal room for it (see LiteApp.tsx). */
+.drag_spacer {
   flex: 1;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-dim);
-  text-align: center;
-  letter-spacing: 0.04em;
-  cursor: default;
+  align-self: stretch;
 }
 
 .icon_btn {
