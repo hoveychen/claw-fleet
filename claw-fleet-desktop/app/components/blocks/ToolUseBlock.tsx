@@ -323,6 +323,24 @@ export function claudeToolSummary(
     case "KillShell":
     case "KillBash":
       return t("detail.tool_kill_shell");
+    // { query, max_results } — loads deferred tool schemas. The raw query is
+    // opaque to readers ("select:AskUserQuestion", "notebook jupyter", "+slack
+    // send"); surface a readable label instead. "select:A,B" lists the tools
+    // being loaded; anything else is a keyword search over deferred tools.
+    case "ToolSearch": {
+      const query = typeof input.query === "string" ? input.query.trim() : "";
+      if (!query) return t("detail.tool_search");
+      const sel = query.match(/^select:(.*)$/i);
+      if (sel) {
+        const names = sel[1]
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .join(", ");
+        return names ? t("detail.tool_search_load", { names }) : t("detail.tool_search");
+      }
+      return t("detail.tool_search_query", { query });
+    }
     default:
       return null;
   }
