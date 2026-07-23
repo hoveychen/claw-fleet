@@ -867,7 +867,17 @@ fn resolve_backtrack_in(
 
 // ── Rendering (hook) ──────────────────────────────────────────────────────────
 
-/// Render the deduped blocks for the hook injection.
+/// Render the deduped blocks for the hook injection. Each active plan is
+/// compacted to two lines — a heading (`## Plan: <id>[ — <title>] (<done>/<total>)`
+/// plus a `— source:` suffix for worktree blocks) and its first still-pending
+/// task (`- [ ] **Pn** — …`). The full checklist and per-task progress notes
+/// stay in the source TASKS.md, which the hook header points the agent at;
+/// keeping only the frontier here caps the per-prompt injection cost regardless
+/// of how much history a plan's completed tasks accumulate.
+///
+/// A lone legacy anonymous block (no `id`) is still returned verbatim: those
+/// predate the checkbox convention and may use the body as a free-form PRD
+/// document, so compacting could drop content that has no `## Plan:` header.
 pub fn render_with_sources(blocks: &[SourcedBlock], main_root: Option<&Path>) -> String {
     if blocks.len() == 1 && blocks[0].id.is_none() {
         return blocks[0].body.trim().to_string();
@@ -876,17 +886,32 @@ pub fn render_with_sources(blocks: &[SourcedBlock], main_root: Option<&Path>) ->
     let mut out = String::new();
     for (i, b) in blocks.iter().enumerate() {
         if i > 0 {
-            out.push_str("\n\n---\n\n");
+            out.push_str("\n\n");
         }
-        let label = b.id.as_deref().unwrap_or("(anonymous)");
         let tag = display_source(&b.source, main_root, primary.as_deref());
-        match tag {
-            Some(s) => out.push_str(&format!("## Plan: {label} — source: {s}\n\n")),
-            None => out.push_str(&format!("## Plan: {label}\n\n")),
-        }
-        out.push_str(b.body.trim());
+        out.push_str(&render_compact_block(b, tag));
     }
     out
+}
+
+/// One plan compacted to its heading (`## Plan: <id>[ — <title>] (<done>/<total>)`
+/// with an optional `— source: <s>` suffix) plus its first still-pending task
+/// on the next line. See [`render_with_sources`].
+fn render_compact_block(b: &SourcedBlock, tag: Option<String>) -> String {
+    let label = b.id.as_deref().unwrap_or("(anonymous)");
+    let (done, total) = count_tasks(&b.body);
+    let mut head = format!("## Plan: {label}");
+    if let Some(title) = extract_plan_name(&b.body) {
+        head.push_str(&format!(" — {title}"));
+    }
+    head.push_str(&format!(" ({done}/{total})"));
+    if let Some(s) = tag {
+        head.push_str(&format!(" — source: {s}"));
+    }
+    match first_pending_task(&b.body) {
+        Some(task) => format!("{head}\n- [ ] {task}"),
+        None => head,
+    }
 }
 
 /// `None` when `source` is the main TASKS.md (the implicit norm — no
@@ -1204,6 +1229,8 @@ The workspace `TASKS.md` (re-injected on every prompt by Fleet PRD \
 Discipline mode) holds {n} active {plan_word} below — merged across the \
 main checkout and any sibling worktrees. This file is the durable macro \
 plan — defer to it over your in-context memory of which P-tasks are done. \
+Only each plan's title, progress, and next pending task appear below — read \
+the source file shown for the full checklist and per-task progress notes. \
 After each P-task, update the checkbox in the source file shown for that \
 plan. Only modify the block whose `id` matches the plan you are working \
 on; treat every other block as another agent's in-flight work. When the \
@@ -1404,16 +1431,19 @@ trailing notes outside\n";
     #[test]
     fn render_multiple_blocks_get_plan_headings() {
         let main = PathBuf::from("/repo");
+        let a = "**Plan:** Alpha work\n- [x] **P1** — done\n- [ ] **P2** — next A\n";
+        let b = "**Plan:** Beta work\n- [ ] **P1** — next B\n";
         let blocks = vec![
-            sb(Some("a"), "A body\n", &main.join("TASKS.md"), UNIX_EPOCH),
-            sb(Some("b"), "B body\n", &main.join("TASKS.md"), UNIX_EPOCH),
+            sb(Some("a"), a, &main.join("TASKS.md"), UNIX_EPOCH),
+            sb(Some("b"), b, &main.join("TASKS.md"), UNIX_EPOCH),
         ];
         let out = render_with_sources(&blocks, Some(&main));
-        assert!(out.contains("## Plan: a"));
-        assert!(out.contains("## Plan: b"));
-        assert!(out.contains("A body"));
-        assert!(out.contains("B body"));
-        assert!(out.contains("---"));
+        assert!(out.contains("## Plan: a — Alpha work (1/2)"));
+        assert!(out.contains("## Plan: b — Beta work (0/1)"));
+        // Only the first pending task per plan survives — not the whole checklist.
+        assert!(out.contains("- [ ] **P2** — next A"));
+        assert!(out.contains("- [ ] **P1** — next B"));
+        assert!(!out.contains("**P1** — done"));
         assert!(!out.contains("source:"));
     }
 
@@ -1421,13 +1451,32 @@ trailing notes outside\n";
     fn render_worktree_blocks_get_source_suffix() {
         let main = PathBuf::from("/repo");
         let wt_path = main.join(".worktrees").join("featX").join("TASKS.md");
+        let a = "**Plan:** Alpha\n- [ ] **P1** — a next\n";
+        let z = "**Plan:** Zed\n- [ ] **P1** — z next\n";
         let blocks = vec![
-            sb(Some("a"), "A body\n", &main.join("TASKS.md"), UNIX_EPOCH),
-            sb(Some("z"), "Z body\n", &wt_path, UNIX_EPOCH),
+            sb(Some("a"), a, &main.join("TASKS.md"), UNIX_EPOCH),
+            sb(Some("z"), z, &wt_path, UNIX_EPOCH),
         ];
         let out = render_with_sources(&blocks, Some(&main));
-        assert!(out.contains("## Plan: a\n"));
-        assert!(out.contains("## Plan: z — source: .worktrees/featX/TASKS.md"));
+        assert!(out.contains("## Plan: a — Alpha (0/1)\n"));
+        assert!(out.contains("## Plan: z — Zed (0/1) — source: .worktrees/featX/TASKS.md"));
+    }
+
+    #[test]
+    fn render_compacts_to_heading_plus_next_task() {
+        let main = PathBuf::from("/repo");
+        let body = "**Plan:** Big plan\n\
+- [x] **P1** — done one\n\
+  - sub bullet with long progress notes that must not appear\n\
+- [x] **P2** — done two\n\
+- [ ] **P3** — the next thing\n\
+- [ ] **P4** — later\n";
+        let blocks = vec![sb(Some("big"), body, &main.join("TASKS.md"), UNIX_EPOCH)];
+        let out = render_with_sources(&blocks, Some(&main));
+        assert_eq!(out, "## Plan: big — Big plan (2/4)\n- [ ] **P3** — the next thing");
+        assert!(!out.contains("sub bullet"));
+        assert!(!out.contains("P4"));
+        assert!(!out.contains("done one"));
     }
 
     #[test]
