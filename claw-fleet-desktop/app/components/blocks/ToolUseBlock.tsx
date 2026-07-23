@@ -77,7 +77,9 @@ function formatInput(input: Record<string, unknown>, name?: string): string {
   // Agent has no compact field so it used to fall through to JSON.stringify.
   // The full command / prompt still shows in the expanded body (BashBody /
   // AgentBody). Fall back when no description was recorded (older transcripts).
-  if (name === "Bash" || name === "Agent") {
+  // PowerShell is the Windows shell tool (same `description`/`command` shape as
+  // Bash); treat it identically so the collapsed row shows the summary line.
+  if (name === "Bash" || name === "PowerShell" || name === "Agent") {
     const desc = typeof input.description === "string" ? input.description.trim() : "";
     if (desc) return desc;
   }

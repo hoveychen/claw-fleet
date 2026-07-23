@@ -83,9 +83,9 @@ export function headerStats(
 ): ReactNode {
   if (meta === undefined) return null;
 
-  if (block.name === "Bash") {
-    // Bash records no exit code on success; a failure spells it out in the
-    // error string, which is the only place it appears at all.
+  if (block.name === "Bash" || block.name === "PowerShell") {
+    // Bash / PowerShell record no exit code on success; a failure spells it out
+    // in the error string, which is the only place it appears at all.
     if (result?.is_error) {
       const code = bashExitCode(asErrorMessage(meta) ?? "");
       return code === null ? null : <span className={styles.chip_err}>exit {code}</span>;
