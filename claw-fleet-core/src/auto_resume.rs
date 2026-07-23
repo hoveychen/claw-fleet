@@ -233,6 +233,13 @@ pub fn select_resume_candidates(
     sessions
         .iter()
         .filter(|s| should_auto_resume(s, config, now, usage))
+        // Never resume a session whose CLI is still live: a rate-limit status
+        // can lag behind a session that already recovered (or a resume already
+        // in flight), and firing `claude --resume` on a live turn puts a second
+        // process on the same transcript — the corruption the watch gate guards
+        // against. The server-error retry path skips `proc_alive` in its caller
+        // closure; centralise it here so both schedulers (local + remote) get it.
+        .filter(|s| !s.proc_alive)
         .filter(|s| !skip(&s.id))
         .take(slots)
         .map(|s| (s.id.clone(), s.workspace_path.clone()))
@@ -799,6 +806,30 @@ mod tests {
         assert_eq!(picked.len(), 2, "must not exceed available slots");
         assert_eq!(picked[0].0, "s0");
         assert_eq!(picked[1].0, "s1");
+    }
+
+    /// A rate-limited session whose CLI is still alive must NOT be auto-resumed:
+    /// firing `claude --resume` on a live session puts a second turn on the same
+    /// transcript (the same corruption the watch gate prevents). The
+    /// server-error retry path already skips `proc_alive` sessions; the
+    /// rate-limit path must too. Guard lives inside `select_resume_candidates`
+    /// so both the local and remote schedulers inherit it.
+    #[test]
+    fn select_skips_live_sessions() {
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
+        let mut live = mk_eligible_with_id("alive");
+        live.proc_alive = true;
+        let dead = mk_eligible_with_id("dead");
+        let picked = select_resume_candidates(
+            &[live, dead],
+            &cfg,
+            Utc::now(),
+            None,
+            |_| false,
+            5,
+        );
+        let ids: Vec<&str> = picked.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["dead"], "a still-live rate-limited session must be skipped");
     }
 
     #[test]
