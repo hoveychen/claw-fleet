@@ -27,6 +27,7 @@ export function SessionOptionPills({
   onToolChange,
   toolChoices = AGENT_TOOL_CHOICES,
   showPermission = true,
+  compact = false,
 }: {
   model: string;
   effort: string;
@@ -55,6 +56,11 @@ export function SessionOptionPills({
    *  monitored sources by the host. Defaults to the full catalog. When only one
    *  tool remains the pill is hidden — there is nothing to switch between. */
   toolChoices?: { value: string; label: string }[];
+  /** Narrow-host (lite) mode: tighter pills and prefix-less default labels
+   *  ("默认" instead of "模型：默认") so the row fits without wrapping to a
+   *  third line. Only affects the *default* labels; a chosen model/effort keeps
+   *  its own already-short label. */
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const isCodex = tool === "codex";
@@ -63,16 +69,18 @@ export function SessionOptionPills({
   const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : CLAUDE_EFFORT_CHOICES;
   const modelLabel =
     modelChoices.find((m) => m.value === model)?.label ??
-    t("new_session.model_pill_default");
-  const effortLabel = effort || t("new_session.effort_pill_default");
+    t(compact ? "new_session.model_pill_default_compact" : "new_session.model_pill_default");
+  const effortLabel =
+    effort || t(compact ? "new_session.effort_pill_default_compact" : "new_session.effort_pill_default");
   const permissionLabel = permissionMode
     ? t(`new_session.permission_${permissionMode}`)
-    : t("new_session.permission_pill_default");
+    : t(compact ? "new_session.permission_pill_default_compact" : "new_session.permission_pill_default");
   return (
     <>
       {onToolChange && toolChoices.length > 1 && (
         <PillMenu
           placement={placement}
+          compact={compact}
           label={toolLabel}
           title={t("new_session.tool")}
           disabled={disabled}
@@ -86,6 +94,7 @@ export function SessionOptionPills({
       )}
       <PillMenu
         placement={placement}
+        compact={compact}
         label={modelLabel}
         title={t("new_session.model")}
         disabled={disabled}
@@ -106,6 +115,7 @@ export function SessionOptionPills({
       />
       <PillMenu
         placement={placement}
+        compact={compact}
         label={effortLabel}
         title={t("new_session.effort")}
         disabled={disabled}
@@ -130,6 +140,7 @@ export function SessionOptionPills({
       {showPermission && !isCodex && (
         <PillMenu
           placement={placement}
+          compact={compact}
           label={permissionLabel}
           title={t("new_session.permission")}
           disabled={disabled}

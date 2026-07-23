@@ -207,7 +207,7 @@ export function LiteApp() {
 
       {composing ? (
         <div className={styles.detail_area}>
-          <NewSessionForm onCreated={onCreated} onCancel={() => setComposing(false)} />
+          <NewSessionForm compact onCreated={onCreated} onCancel={() => setComposing(false)} />
         </div>
       ) : liteDecisionHistorySessionId ? (
         <div className={styles.detail_area}>

@@ -42,6 +42,9 @@ export interface PillMenuProps {
    */
   menuHeader?: (close: () => void) => ReactNode;
   className?: string;
+  /** Tighter padding / smaller font for narrow hosts (e.g. lite mode's 340px
+   *  strip) where the full-size pill row would wrap to three lines. */
+  compact?: boolean;
 }
 
 export function PillMenu({
@@ -54,6 +57,7 @@ export function PillMenu({
   footerItems,
   menuHeader,
   className,
+  compact,
 }: PillMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -106,7 +110,7 @@ export function PillMenu({
     <div className={`${styles.menu_wrap} ${className ?? ""}`} ref={wrapRef}>
       <button
         type="button"
-        className={styles.ghost_pill}
+        className={`${styles.ghost_pill} ${compact ? styles.ghost_pill_compact : ""}`}
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
         title={title}

@@ -22,6 +22,15 @@
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
+/* Narrow-host variant: tighter padding + smaller text so the option row fits
+   without wrapping to a third line in the 340px lite strip. */
+.ghost_pill_compact {
+  gap: 3px;
+  max-width: 160px;
+  padding: 2px 5px;
+  font-size: 11px;
+}
+
 .ghost_pill:hover:not(:disabled) {
   background: var(--color-bg-card-hover);
   color: var(--color-text);
