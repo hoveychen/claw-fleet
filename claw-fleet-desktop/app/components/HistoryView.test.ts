@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFrozenOrder,
-  chainBarColor,
   CHAT_HIDDEN,
   CHAT_ONLY,
-  dwellReadTargets,
   matchesWorkspaceFilter,
   sessionPaneStyle,
   sessionEq,
 } from "./HistoryView";
+import { chainBarColor, dwellReadTargets } from "./sessionGroups";
 import type { SessionInfo, SessionStatus } from "../types";
 
 /**
