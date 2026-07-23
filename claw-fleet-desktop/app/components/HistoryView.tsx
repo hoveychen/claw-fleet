@@ -1187,6 +1187,22 @@ export function HistoryView() {
     clearNewSessionNav();
   }, [newSessionNav, applyTabs, clearNewSessionNav]);
 
+  // A notification / tray click on a Fleet-spawned session routes here (the
+  // store hop to "history" mounts this view); open the session in the inline
+  // tab strip. Tabs are kept as ids and resolved against the live scan, so we
+  // only need the id — the sender already gated on isFleetOwnedTask, i.e. the
+  // session is one of ours and appears in adhocSessions. React to the nonce once.
+  const openTaskNav = useUIStore((s) => s.openTaskNav);
+  const clearOpenTaskNav = useUIStore((s) => s.clearOpenTaskNav);
+  const handledOpenTaskNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!openTaskNav) return;
+    if (handledOpenTaskNonce.current === openTaskNav.nonce) return;
+    handledOpenTaskNonce.current = openTaskNav.nonce;
+    applyTabs((st) => openTabState(st, openTaskNav.sessionId));
+    clearOpenTaskNav();
+  }, [openTaskNav, applyTabs, clearOpenTaskNav]);
+
   // Form spawned the process: flip the draft tab's pane to the "starting…"
   // spinner and start polling for the session. Snapshot the ad-hoc session ids
   // that exist *now* so the poller can tell the new session apart from the
