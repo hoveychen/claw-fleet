@@ -39,6 +39,9 @@ export interface NewSessionFormProps {
   onCreated: (info: NewSessionCreated) => void;
   /** Fired when the user backs out of the form without creating a session. */
   onCancel: () => void;
+  /** Narrow-host (lite mode) rendering: compact option pills so the toolbar
+   *  fits the 340px strip without wrapping to a third line. */
+  compact?: boolean;
 }
 
 function basename(p: string): string {
@@ -213,7 +216,7 @@ export function defaultWorkspace(
  *  session's live SessionDetail. Styled in the composer design language: ghost
  *  pills and custom popovers instead of labeled form rows and native
  *  <select>s. */
-export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
+export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const { connection } = useConnectionStore();
@@ -524,6 +527,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
       onEffortChange={setEffort}
       onPermissionModeChange={setPermissionMode}
       disabled={submitting}
+      compact={compact}
     />
   );
 
