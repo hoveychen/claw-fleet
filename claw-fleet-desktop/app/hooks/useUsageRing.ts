@@ -37,11 +37,13 @@ export function useUsageRing(): UsageRingData | null {
   return useMemo(() => {
     const sources: UsageRingSource[] = [];
 
-    // Claude Code: 5h / 7d Opus / 7d Sonnet
+    // Claude Code: 5h / 7d Opus / 7d <scoped model(s)> (e.g. Fable)
     const claudeBars: UsageRingBar[] = [];
     pushBar(claudeBars, "5h", claude?.five_hour?.utilization, 100, claude?.five_hour?.resets_at);
     pushBar(claudeBars, "7d Opus", claude?.seven_day?.utilization, 100, claude?.seven_day?.resets_at);
-    pushBar(claudeBars, "7d Sonnet", claude?.seven_day_sonnet?.utilization, 100, claude?.seven_day_sonnet?.resets_at);
+    for (const sc of claude?.seven_day_scoped ?? []) {
+      pushBar(claudeBars, `7d ${sc.model_label}`, sc.utilization, 100, sc.resets_at);
+    }
     if (claudeBars.length > 0) {
       sources.push({
         name: "Claude Code",

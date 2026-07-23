@@ -17,6 +17,15 @@ export interface UsageStats {
   prev_utilization: number | null;
 }
 
+/** One per-model weekly-scoped window (from the API's `limits[]`), e.g. Fable.
+ *  Replaces the old fixed `seven_day_sonnet` slot. */
+export interface ScopedUsage {
+  model_label: string;
+  utilization: number;
+  resets_at: string;
+  prev_utilization: number | null;
+}
+
 export interface AccountInfoData {
   email: string;
   full_name: string;
@@ -26,7 +35,7 @@ export interface AccountInfoData {
   usage_source: string;
   five_hour: UsageStats | null;
   seven_day: UsageStats | null;
-  seven_day_sonnet: UsageStats | null;
+  seven_day_scoped: ScopedUsage[];
 }
 
 export interface CodexRateLimitWindow {

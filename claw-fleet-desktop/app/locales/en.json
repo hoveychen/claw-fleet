@@ -266,7 +266,7 @@
     "usage": "Usage",
     "five_hour": "Session (5hr)",
     "seven_day": "Weekly (7 day)",
-    "seven_day_sonnet": "Weekly Sonnet",
+    "seven_day_scoped": "Weekly {{model}}",
     "codex_session": "Session",
     "codex_weekly": "Weekly",
     "occupancy_title": "Occupancy trend · last 24h",
