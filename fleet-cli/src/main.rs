@@ -234,12 +234,18 @@ enum Commands {
         #[command(subcommand)]
         action: ModelGuidanceCommands,
     },
-    /// Manage agent loops: a prompt Fleet re-runs on an interval by spawning a
-    /// fresh session each time. Unlike Claude Code's own CronCreate /
-    /// ScheduleWakeup / `/loop` — in-process timers that silently die with a
-    /// headless `claude -p` session — a Fleet loop survives the turn boundary,
-    /// because each iteration is a brand-new detached session. Create reads
+    /// Recurring / cron-style scheduler: run something periodically. A prompt
+    /// Fleet re-runs on an interval by spawning a fresh session each time — reach
+    /// for this for any "do X every N minutes / hourly / daily / on a schedule"
+    /// need. Unlike Claude Code's own CronCreate / ScheduleWakeup / `/loop` —
+    /// in-process timers that silently die with a headless `claude -p` session —
+    /// a Fleet loop is durable (survives the turn boundary; each iteration is a
+    /// brand-new detached LOCAL session, so local creds like muveectl are
+    /// present). Tip: `--until` is a cheap non-LLM gate — a shell probe checked
+    /// each tick that only spawns the LLM session when it exits 0, so you can
+    /// poll often but pay for an LLM only when there is real work. Create reads
     /// FLEET_SESSION_ID to inherit the current session's workspace/model/effort.
+    #[command(alias = "cron")]
     Loop {
         #[command(subcommand)]
         action: LoopCommands,
