@@ -59,16 +59,10 @@ import {
 } from "../sessionTabs";
 import { getItem, setItem } from "../storage";
 import { canControl, stopMode, performStop } from "./StopControl";
-import { SessionRow } from "./SessionRow";
+import { SessionRail } from "./SessionRail";
 import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./ContextMenu";
 import { RenameSessionDialog } from "./RenameSessionDialog";
-import {
-  buildRenderItems,
-  chainBarColor,
-  dwellReadTargets,
-  GROUP_LOAD_STEP,
-  GROUP_VISIBLE,
-} from "./sessionGroups";
+import { buildRenderItems, dwellReadTargets } from "./sessionGroups";
 import styles from "./HistoryView.module.css";
 
 /** A session spawned but not yet discovered by the scanner. We poll the session
@@ -209,75 +203,8 @@ export function applyFrozenOrder(
 // dwellReadTargets / GROUP_VISIBLE / GROUP_LOAD_STEP / chainTip) lives in
 // ./sessionGroups so LiteApp's rail can reuse it without importing this file.
 
-/**
- * The mark-all toggle on a group header. Same pending/done axis as MarkControl,
- * but it fans the `set_session_mark` call out across every member of the chain
- * (`members` = the full membership, not just the visible hops). Reads as done
- * only when *all* members are done; clicking marks the whole chain, clicking
- * again clears it. The double-check glyph distinguishes it from a single row's
- * mark. Optimistic like MarkControl; the override is dropped once the scan
- * converges on the same aggregate state.
- */
-function GroupMarkControl({ members }: { members: SessionInfo[] }) {
-  const { t } = useTranslation();
-  const [busy, setBusy] = useState(false);
-  const [override, setOverride] = useState<boolean | undefined>(undefined);
-  const allDone = members.length > 0 && members.every((m) => m.userMark === "done");
-  const isDone = override !== undefined ? override : allDone;
-
-  useEffect(() => {
-    if (override !== undefined && override === allDone) setOverride(undefined);
-  }, [allDone, override]);
-
-  const onClick = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (busy) return;
-    const next = !isDone;
-    setBusy(true);
-    setOverride(next);
-    try {
-      await Promise.all(
-        members.map((m) =>
-          invoke("set_session_mark", {
-            sessionId: m.id,
-            workspacePath: m.workspacePath,
-            mark: next ? "done" : null,
-          }),
-        ),
-      );
-    } catch {
-      setOverride(!next); // revert the optimistic flip on failure
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const title = isDone
-    ? t("history.group_toggle_done", "整条接力链已完成 — 点击全部改回进行中")
-    : t("history.group_toggle_pending", "点击把整条接力链标为已完成");
-
-  return (
-    <button
-      type="button"
-      className={styles.mark_toggle}
-      data-done={isDone ? "true" : "false"}
-      onClick={onClick}
-      title={title}
-      aria-label={title}
-      aria-pressed={isDone}
-    >
-      {/* Same hollow-circle / filled-check glyph as a single row's MarkControl —
-          the whole-chain semantics are already carried by the chevron, the 接力
-          badge and this button's tooltip, so the mark itself stays visually
-          identical to every other row's rather than a distinct double-check. */}
-      {isDone ? (
-        <CheckCircle2 size={15} strokeWidth={1.8} />
-      ) : (
-        <Circle size={14} strokeWidth={1.8} />
-      )}
-    </button>
-  );
-}
+// GroupMarkControl (relay-chain mark-all) moved to ./MarkControl alongside the
+// single-row MarkControl; SessionRail renders it inside group headers.
 
 
 /**
@@ -520,25 +447,7 @@ export function HistoryView() {
     return m;
   }, [displayItems, chainMembersAll]);
 
-  // Which chains are expanded, and how many hops each has paged in beyond the
-  // initial GROUP_VISIBLE. Local state: default-collapsed is the right reset
-  // whenever the page remounts.
-  const [expandedChains, setExpandedChains] = useState<Set<string>>(() => new Set());
-  const [chainLoadMore, setChainLoadMore] = useState<Record<string, number>>({});
-  const toggleChain = useCallback((cid: string) => {
-    setExpandedChains((prev) => {
-      const next = new Set(prev);
-      if (next.has(cid)) next.delete(cid);
-      else next.add(cid);
-      return next;
-    });
-  }, []);
-  const loadMoreChain = useCallback((cid: string) => {
-    setChainLoadMore((prev) => ({
-      ...prev,
-      [cid]: (prev[cid] ?? GROUP_VISIBLE) + GROUP_LOAD_STEP,
-    }));
-  }, []);
+  // Chain expand / page-in state now lives inside <SessionRail>.
 
   const freezeSort = useCallback(() => {
     setFrozenOrder((prev) => prev ?? rowsRef.current.map((s) => s.id));
@@ -926,20 +835,12 @@ export function HistoryView() {
   // One session row — shared by standalone rows and the members inside an
   // expanded handoff group, so both stay pixel-identical and pick up the same
   // memoisation.
-  const renderSessionRow = (s: SessionInfo) => (
-    <SessionRow
-      key={s.jsonlPath}
-      session={s}
-      snippet={query.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined}
-      isSelected={activeId === s.id}
-      isOpen={activeId !== s.id && tabIds.includes(s.id)}
-      unread={sessionUnread(s, readOverrides[s.id])}
-      nowTick={nowTick}
-      showSource={multiSource}
-      onClick={handleRowClick}
-      onContextMenu={openRowMenu}
-    />
-  );
+  // Fold this page's query threshold, read overrides and open-tab set into the
+  // shape <SessionRail> takes, so the shared rail stays agnostic of the stores.
+  const railSnippetFor = (jsonlPath: string) =>
+    query.trim().length >= 2 ? snippetByPath.get(jsonlPath) : undefined;
+  const railIsUnread = (s: SessionInfo) => sessionUnread(s, readOverrides[s.id]);
+  const openTabIds = useMemo(() => new Set(tabIds), [tabIds]);
 
   return (
     <PageShell
@@ -1070,65 +971,18 @@ export function HistoryView() {
                 : t("history.no_match", "没有匹配的会话")}
             </div>
           ) : (
-            displayItems.map((item) => {
-              if (item.kind === "single") return renderSessionRow(item.session);
-              const { chainId, tip, members, key } = item;
-              // Full chain for the mark-all + aggregate state; falls back to the
-              // present members if the scan hasn't indexed the chain yet.
-              const full = chainMembersAll.get(chainId) ?? members;
-              const expanded = expandedChains.has(chainId);
-              const limit = chainLoadMore[chainId] ?? GROUP_VISIBLE;
-              // The header *is* the tip session (latest hop), so the expanded
-              // list shows only the chain's *other* hops — never the tip again.
-              const rest = members.filter((m) => m.id !== tip.id);
-              const shown = expanded ? rest.slice(0, limit) : [];
-              const hidden = rest.length - shown.length;
-              return (
-                <div key={key} className={styles.group_wrap}>
-                  {/* Header = the tip rendered as an ordinary clickable row (opens
-                      its detail), plus a chevron that reveals the earlier hops and
-                      a whole-chain mark toggle. */}
-                  <SessionRow
-                    session={tip}
-                    snippet={
-                      query.trim().length >= 2 ? snippetByPath.get(tip.jsonlPath) : undefined
-                    }
-                    isSelected={activeId === tip.id}
-                    isOpen={activeId !== tip.id && tabIds.includes(tip.id)}
-                    // Bold (unread) and the run-status dot represent the whole
-                    // collapsed chain, not just the tip: the group is sorted to
-                    // the top by its most-recently-active member, so its header
-                    // must show that member's live/unread state or it reads as
-                    // stale. `full` is the chain's complete membership.
-                    unread={full.some((m) => sessionUnread(m, readOverrides[m.id]))}
-                    runColorOverride={chainBarColor(full)}
-                    nowTick={nowTick}
-                    showSource={multiSource}
-                    onClick={handleRowClick}
-                    onContextMenu={openRowMenu}
-                    expandable={{
-                      expanded,
-                      onToggle: () => toggleChain(chainId),
-                      markControl: <GroupMarkControl members={full} />,
-                    }}
-                  />
-                  {expanded && (
-                    <div className={styles.group_children}>
-                      {shown.map((m) => renderSessionRow(m))}
-                      {hidden > 0 && (
-                        <button
-                          type="button"
-                          className={styles.group_more}
-                          onClick={() => loadMoreChain(chainId)}
-                        >
-                          {t("history.group_load_more", "显示更早的 {{n}} 棒", { n: hidden })}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })
+            <SessionRail
+              items={displayItems}
+              chainMembersAll={chainMembersAll}
+              activeId={activeId}
+              openIds={openTabIds}
+              snippetFor={railSnippetFor}
+              isUnread={railIsUnread}
+              nowTick={nowTick}
+              showSource={multiSource}
+              onRowClick={handleRowClick}
+              onContextMenu={openRowMenu}
+            />
           )}
           {menuAnchor && menuSession && (
             <ContextMenu
