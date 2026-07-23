@@ -299,6 +299,13 @@ fleet watch create --until \"<shell cmd that exits 0 when done>\" --capture \"<s
 THIS session and hands the captured output to your next turn. `fleet watch \
 stop <id>` cancels. It inherits this session's model / effort / source, so a \
 codex session resumes as codex.\n\
+- Related: `fleet schedule` and `fleet loop` also take an optional `--until \
+<shell cmd>` as a non-LLM precondition — exit 0 gates the spawn. A schedule, \
+once due, polls it every `--poll` and abandons after `--timeout` if never met \
+(no session spawned); a loop checks it once per interval tick and skips that \
+tick when unmet (no session, no iteration consumed). Use it for \"fire only \
+when the time has come *and* a condition holds\"; for purely waiting on an \
+event and then continuing work, use `fleet watch` above.\n\
 \n\
 ## Rule 7 — One-line summary comment atop every `exec`\n\
 \n\
