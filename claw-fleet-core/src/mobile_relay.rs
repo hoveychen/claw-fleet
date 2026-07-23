@@ -2370,8 +2370,13 @@ fn claude_account_json(info: &crate::account::AccountInfo) -> Value {
     if let Some(ref s) = info.seven_day {
         bars.push(bar("7d Opus", s));
     }
-    if let Some(ref s) = info.seven_day_sonnet {
-        bars.push(bar("7d Sonnet", s));
+    for sc in &info.seven_day_scoped {
+        bars.push(json!({
+            "label": format!("7d {}", sc.model_label),
+            "utilization": sc.utilization,
+            "resetsAt": sc.resets_at,
+            "prevUtilization": sc.prev_utilization,
+        }));
     }
     json!({
         "email": info.email,
@@ -4383,7 +4388,7 @@ mod tests {
     /// fraction is passed through untouched (the mobile page multiplies by 100).
     #[test]
     fn claude_account_json_emits_one_bar_per_present_window() {
-        use crate::account::{AccountInfo, UsageStats};
+        use crate::account::{AccountInfo, ScopedUsage, UsageStats};
         let info = AccountInfo {
             email: "boss@example.com".into(),
             plan: "Claude Max".into(),
@@ -4394,11 +4399,12 @@ mod tests {
                 prev_utilization: Some(0.31),
             }),
             // seven_day absent → must not produce a bar.
-            seven_day_sonnet: Some(UsageStats {
+            seven_day_scoped: vec![ScopedUsage {
+                model_label: "Fable".into(),
                 utilization: 0.07,
                 resets_at: "2026-07-19T00:00:00Z".into(),
                 prev_utilization: None,
-            }),
+            }],
             ..Default::default()
         };
 
@@ -4413,7 +4419,8 @@ mod tests {
         assert_eq!(bars[0]["utilization"], 0.42);
         assert_eq!(bars[0]["prevUtilization"], 0.31);
         assert_eq!(bars[0]["resetsAt"], "2026-07-13T10:00:00Z");
-        assert_eq!(bars[1]["label"], "7d Sonnet");
+        assert_eq!(bars[1]["label"], "7d Fable");
+        assert_eq!(bars[1]["utilization"], 0.07);
         assert!(bars[1]["prevUtilization"].is_null(), "no previous period → null");
     }
 

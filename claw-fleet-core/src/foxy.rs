@@ -11,7 +11,7 @@
 //! means "foxy not available", and the caller falls back to the direct
 //! Anthropic path. See `account::fetch_account_info`.
 
-use crate::account::UsageStats;
+use crate::account::{ScopedUsage, UsageStats};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -24,7 +24,15 @@ pub struct FoxyAccount {
     pub plan: String,
     pub five_hour: Option<UsageStats>,
     pub seven_day: Option<UsageStats>,
-    pub seven_day_sonnet: Option<UsageStats>,
+    /// Per-model weekly-scoped windows. Best-effort: foxy re-serves Anthropic's
+    /// usage numbers in its own transformed shape, and whether it passes through
+    /// the `limits[]` array (where scoped models like Fable now live) is not
+    /// verified here — foxy is a separate product. When foxy exposes a
+    /// `limits[]` array on the account we parse it with the same
+    /// `account::parse_scoped_limits`; otherwise this is empty and foxy users
+    /// simply see no scoped bar (five_hour / seven_day are unaffected). The
+    /// direct-Anthropic path is where scoped usage is authoritative.
+    pub seven_day_scoped: Vec<ScopedUsage>,
 }
 
 /// foxy's data directory: `$FOXY_DATA_DIR` if set and non-empty, else
@@ -73,7 +81,9 @@ fn map_in_use(accounts_body: &Value, managed_id: i64) -> Option<FoxyAccount> {
         plan: acct.get("plan").and_then(|x| x.as_str()).unwrap_or("").to_string(),
         five_hour: acct.get("five_hour").and_then(parse_window),
         seven_day: acct.get("seven_day").and_then(parse_window),
-        seven_day_sonnet: acct.get("seven_day_sonnet").and_then(parse_window),
+        // Best-effort: parse scoped models if foxy passes through Anthropic's
+        // `limits[]`; empty otherwise (see `FoxyAccount::seven_day_scoped`).
+        seven_day_scoped: crate::account::parse_scoped_limits(acct),
     })
 }
 
@@ -124,7 +134,10 @@ mod tests {
                     "plan": "Claude Max 20x",
                     "five_hour":        { "utilization": 42, "resets_at": "2026-05-27T08:20:00.868404+00:00" },
                     "seven_day":        { "utilization": 5,  "resets_at": "2026-06-03T02:00:00.868427+00:00" },
-                    "seven_day_sonnet": { "utilization": 0,  "resets_at": "2026-06-03T02:00:00.868436+00:00" }
+                    "limits": [
+                        { "kind": "weekly_scoped", "percent": 7, "resets_at": "2026-06-03T02:00:00.868436+00:00",
+                          "scope": { "model": { "display_name": "Fable" } } }
+                    ]
                 },
                 {
                     "id": 2,
@@ -151,7 +164,16 @@ mod tests {
         let a = map_in_use(&sample_accounts(), 1).unwrap();
         assert!((a.five_hour.unwrap().utilization - 0.42).abs() < 1e-9);
         assert!((a.seven_day.unwrap().utilization - 0.05).abs() < 1e-9);
-        assert_eq!(a.seven_day_sonnet.unwrap().utilization, 0.0);
+    }
+
+    #[test]
+    fn parses_scoped_models_from_limits_when_present() {
+        // When foxy passes through Anthropic's `limits[]`, the scoped model is
+        // parsed just like the direct path (7 percent → 0.07 fraction).
+        let a = map_in_use(&sample_accounts(), 1).unwrap();
+        assert_eq!(a.seven_day_scoped.len(), 1);
+        assert_eq!(a.seven_day_scoped[0].model_label, "Fable");
+        assert!((a.seven_day_scoped[0].utilization - 0.07).abs() < 1e-9);
     }
 
     #[test]
@@ -177,6 +199,6 @@ mod tests {
         let a = map_in_use(&body, 1).unwrap();
         assert!(a.five_hour.is_some());
         assert!(a.seven_day.is_none());
-        assert!(a.seven_day_sonnet.is_none());
+        assert!(a.seven_day_scoped.is_empty());
     }
 }
