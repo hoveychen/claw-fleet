@@ -69,6 +69,29 @@ pub fn shell_command(script: &str) -> Command {
     cmd
 }
 
+/// Run a gate command (`--until`) through the platform shell; exit status 0 ⇒
+/// the condition is met. stdin/stdout/stderr are nulled — only the exit code
+/// matters. A spawn failure (shell missing, command unrunnable) reads as "not
+/// met" and is logged, so a watch/schedule/loop stuck on a broken gate is
+/// diagnosable from the debug log rather than silently waiting forever.
+///
+/// Shared by `watch` (`--until`), `schedule` (`--until` gate) and `agent_loop`
+/// (`--until` per-tick gate) so all three evaluate a gate identically.
+pub fn gate_met(cmd: &str) -> bool {
+    match shell_command(cmd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(s) => s.success(),
+        Err(e) => {
+            crate::log_debug(&format!("gate poll: cannot run until-command ({e}): {cmd}"));
+            false
+        }
+    }
+}
+
 /// Put the child in its own process group (Unix), no-op on Windows.
 ///
 /// For long-lived agent children only (claude / codex sessions). A child left

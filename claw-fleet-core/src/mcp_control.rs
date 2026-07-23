@@ -124,7 +124,7 @@ fn watch_tool_def() -> Value {
 fn loop_tool_def() -> Value {
     json!({
         "name": "fleet__loop",
-        "description": "A recurring prompt Fleet re-runs on an interval by spawning a fresh detached session each time. Use this instead of the `fleet loop` CLI. Actions: create (--prompt and --interval required; --max optional), stop, list, update, get, run.",
+        "description": "A recurring prompt Fleet re-runs on an interval by spawning a fresh detached session each time. Use this instead of the `fleet loop` CLI. Actions: create (--prompt and --interval required; --max/--until optional), stop, list, update, get, run.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -132,6 +132,7 @@ fn loop_tool_def() -> Value {
                 "prompt": {"type": "string", "description": "The prompt to re-run each interval. Required for create."},
                 "interval": {"type": "string", "description": "Interval between runs, e.g. 5m / 1h. Required for create."},
                 "max": {"type": "integer", "description": "Optional cap on iterations."},
+                "until": {"type": "string", "description": "Optional non-LLM gate: a shell command checked at each interval tick. The iteration spawns only when it exits 0; otherwise the tick is skipped (no session, no iteration consumed) and re-checked next interval."},
                 "id": {"type": "string", "description": "Loop id. Required for stop/update/get/run."}
             },
             "required": ["action"],
@@ -143,7 +144,7 @@ fn loop_tool_def() -> Value {
 fn schedule_tool_def() -> Value {
     json!({
         "name": "fleet__schedule",
-        "description": "A one-shot prompt Fleet fires at an absolute future time by spawning a fresh detached session. Use this instead of the `fleet schedule` CLI. Actions: create (--prompt required, exactly one of --at/--in; --model/--effort optional), cancel, list, update, get, run.",
+        "description": "A one-shot prompt Fleet fires at an absolute future time by spawning a fresh detached session. Use this instead of the `fleet schedule` CLI. Actions: create (--prompt required, exactly one of --at/--in; --model/--effort/--until optional), cancel, list, update, get, run.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -153,6 +154,9 @@ fn schedule_tool_def() -> Value {
                 "in": {"type": "string", "description": "Relative delay, e.g. 5d."},
                 "model": {"type": "string", "description": "Override model (else inherits this session's)."},
                 "effort": {"type": "string", "description": "Override effort."},
+                "until": {"type": "string", "description": "Optional non-LLM gate: once due, this shell command is polled and the session spawns only when it exits 0. If it never passes within the timeout the schedule is abandoned (no session)."},
+                "poll": {"type": "string", "description": "Seconds between gate polls once due, e.g. 30s / 2m (min 5s, default 30s). Only with `until`."},
+                "timeout": {"type": "string", "description": "Give up on an unmet gate after this long past due, e.g. 30m / 2h (default 2h, max 7d). Only with `until`."},
                 "id": {"type": "string", "description": "Schedule id. Required for cancel/update/get/run."}
             },
             "required": ["action"],
@@ -461,6 +465,7 @@ fn handle_loop(args: &Value, sid: Option<&str>) -> Result<String, String> {
             let interval_secs =
                 agent_loop::parse_interval(&req(args, "interval")?).map_err(|e| e.to_string())?;
             let max = args.get("max").and_then(Value::as_u64).map(|v| v as u32);
+            let until = arg(args, "until").filter(|c| !c.trim().is_empty());
             let ctx = crate::session::inherit_launch_context(sid);
             let rec = agent_loop::create(
                 &ctx.workspace,
@@ -471,6 +476,7 @@ fn handle_loop(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 ctx.effort.as_deref(),
                 ctx.source.as_deref(),
                 sid,
+                until.as_deref(),
             )?;
             let armed = match agent_loop::arm_timer(&rec) {
                 Ok(pid) => format!("计时器已启动 (pid {pid})"),
@@ -548,6 +554,35 @@ fn resolve_fire_at(args: &Value, require: bool) -> Result<Option<u64>, String> {
     }
 }
 
+/// Build the optional `--until` gate from the `until` / `poll` / `timeout`
+/// args, reusing [`crate::watch`]'s duration grammar/floors so the schedule gate
+/// and `fleet watch` accept identical values. `poll` / `timeout` without
+/// `until` is an error. Returns `Ok(None)` when there's no gate.
+fn build_schedule_gate(args: &Value) -> Result<Option<crate::schedule::ScheduleGate>, String> {
+    let until = arg(args, "until").filter(|c| !c.trim().is_empty());
+    let poll = arg(args, "poll");
+    let timeout = arg(args, "timeout");
+    let Some(until_cmd) = until else {
+        if poll.is_some() || timeout.is_some() {
+            return Err("`poll` / `timeout` require `until`.".to_string());
+        }
+        return Ok(None);
+    };
+    let poll_secs = match poll.as_deref() {
+        Some(s) => crate::watch::parse_poll(s).map_err(|e| format!("poll: {e}"))?,
+        None => crate::schedule::DEFAULT_GATE_POLL_SECS,
+    };
+    let timeout_secs = match timeout.as_deref() {
+        Some(s) => crate::watch::parse_timeout(s).map_err(|e| format!("timeout: {e}"))?,
+        None => crate::schedule::DEFAULT_GATE_TIMEOUT_SECS,
+    };
+    Ok(Some(crate::schedule::ScheduleGate {
+        until_cmd,
+        poll_secs,
+        timeout_secs,
+    }))
+}
+
 fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
     use crate::schedule;
     let action = action_of(args)?;
@@ -558,6 +593,7 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
             let ctx = crate::session::inherit_launch_context(sid);
             let model = arg(args, "model").or(ctx.model);
             let effort = arg(args, "effort").or(ctx.effort);
+            let gate = build_schedule_gate(args)?;
             let rec = schedule::create(
                 &ctx.workspace,
                 &prompt,
@@ -566,6 +602,7 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 effort.as_deref(),
                 ctx.source.as_deref(),
                 sid,
+                gate,
             )?;
             let armed = match schedule::arm_timer(&rec) {
                 Ok(pid) => format!("计时器已启动 (pid {pid})"),
@@ -856,5 +893,35 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("unknown plan action"));
+    }
+
+    #[test]
+    fn build_schedule_gate_absent_is_none() {
+        assert_eq!(build_schedule_gate(&json!({"action": "create"})).unwrap(), None);
+        // blank until ⇒ no gate
+        assert_eq!(build_schedule_gate(&json!({"until": "   "})).unwrap(), None);
+    }
+
+    #[test]
+    fn build_schedule_gate_defaults_and_parses() {
+        // until alone ⇒ defaults for poll/timeout
+        let g = build_schedule_gate(&json!({"until": "test -f /tmp/x"})).unwrap().unwrap();
+        assert_eq!(g.until_cmd, "test -f /tmp/x");
+        assert_eq!(g.poll_secs, crate::schedule::DEFAULT_GATE_POLL_SECS);
+        assert_eq!(g.timeout_secs, crate::schedule::DEFAULT_GATE_TIMEOUT_SECS);
+        // explicit poll/timeout parsed via the watch grammar
+        let g = build_schedule_gate(&json!({"until": "true", "poll": "10s", "timeout": "45m"}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(g.poll_secs, 10);
+        assert_eq!(g.timeout_secs, 45 * 60);
+    }
+
+    #[test]
+    fn build_schedule_gate_poll_without_until_errors() {
+        let err = build_schedule_gate(&json!({"poll": "10s"})).unwrap_err();
+        assert!(err.contains("require"));
+        let err = build_schedule_gate(&json!({"timeout": "1h"})).unwrap_err();
+        assert!(err.contains("require"));
     }
 }

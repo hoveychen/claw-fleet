@@ -135,6 +135,7 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
             interval,
             prompt,
             max,
+            until,
         } => {
             let interval_secs = match agent_loop::parse_interval(&interval) {
                 Ok(s) => s,
@@ -156,6 +157,7 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
             // codex session wakes up as codex.
             let sid = read_fleet_session_id();
             let ctx = claw_fleet_core::session::inherit_launch_context(sid.as_deref());
+            let until = until.as_deref().filter(|c| !c.trim().is_empty());
 
             match agent_loop::create(
                 &ctx.workspace,
@@ -166,19 +168,25 @@ pub(crate) fn cmd_loop(action: LoopCommands) {
                 ctx.effort.as_deref(),
                 ctx.source.as_deref(),
                 sid.as_deref(),
+                until,
             ) {
                 Ok(rec) => {
+                    let gate = match &rec.until_cmd {
+                        Some(c) => format!(" gate=`{c}`(未满足则跳过本次迭代)。"),
+                        None => String::new(),
+                    };
                     // Arm the detached timer so the loop actually fires. A create
                     // that can't arm still leaves the record, and the Stop-hook
                     // reconcile will pick it up — so warn, don't fail.
                     match agent_loop::arm_timer(&rec) {
                         Ok(pid) => println!(
-                            "ok: loop {} created — every {}, next in {}, model={}. \
+                            "ok: loop {} created — every {}, next in {}, model={}.{} \
                              计时器已启动 (pid {})。停止用 `fleet loop stop {}`。",
                             rec.id,
                             fmt_interval_secs(rec.interval_secs),
                             fmt_interval_secs(rec.interval_secs),
                             rec.model.as_deref().unwrap_or("<CLI 默认>"),
+                            gate,
                             pid,
                             rec.id,
                         ),

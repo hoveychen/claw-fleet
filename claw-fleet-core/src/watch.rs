@@ -421,25 +421,12 @@ fn decide(
     TimerStep::Nap { ms: nap }
 }
 
-/// Run the `until` command; exit status 0 ⇒ the condition is met. stdout/stderr
-/// are suppressed — only the exit code matters here (the event text comes from
-/// the separate `capture` command).
+/// Run the `until` command; exit status 0 ⇒ the condition is met. Delegates to
+/// the shared [`crate::process_util::gate_met`] so watch / schedule / loop all
+/// evaluate a `--until` gate identically (exit code only; spawn failure ⇒ not
+/// met + logged). The event text comes from the separate `capture` command.
 fn poll_met(cmd: &str) -> bool {
-    match crate::process_util::shell_command(cmd)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-    {
-        Ok(s) => s.success(),
-        Err(e) => {
-            // A spawn failure (shell missing, command unrunnable) would
-            // otherwise read as "condition not met" forever — make the watch
-            // running to timeout diagnosable from the debug log.
-            crate::log_debug(&format!("watch poll: cannot run until-command ({e}): {cmd}"));
-            false
-        }
-    }
+    crate::process_util::gate_met(cmd)
 }
 
 /// Run the `capture` command; its trimmed stdout becomes the event text handed to

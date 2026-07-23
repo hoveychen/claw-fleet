@@ -43,6 +43,25 @@ use serde::{Deserialize, Serialize};
 /// against a fat-fingered epoch that would park a timer for a decade.
 pub const MAX_HORIZON_MS: u64 = 365 * 24 * 60 * 60 * 1000;
 
+/// A non-LLM precondition on a schedule's fire: once the schedule is due, the
+/// `--until` shell command is polled every `poll_secs` and the session spawns
+/// only when it exits 0. If `timeout_secs` elapses past the due time with the
+/// gate never met, the schedule is abandoned (marked fired, timed-out, **no**
+/// session spawned) — the chosen semantics over watch's "fire a timeout
+/// notice". Mirrors `fleet watch --until`, but gates a *spawn* instead of a
+/// *resume*. Reuses [`crate::watch`]'s poll/timeout grammar and floors so
+/// `--poll` / `--timeout` mean the same across both features.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleGate {
+    /// Shell command polled once the schedule is due; exit 0 ⇒ fire.
+    pub until_cmd: String,
+    /// Seconds between gate polls (already clamped to the watch poll floor).
+    pub poll_secs: u64,
+    /// Seconds after the due time to keep polling before abandoning.
+    pub timeout_secs: u64,
+}
+
 /// Lifecycle of a schedule. `Cancelled` is not a stored state — cancelling
 /// deletes the file; the enum has two variants so a fired schedule stays visible
 /// in `list` as history.
@@ -99,7 +118,33 @@ pub struct ScheduleRecord {
     /// The session the fire produced, for `fleet schedule list`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub fired_session_id: Option<String>,
+    /// Optional non-LLM gate command (`--until`): once due, the schedule only
+    /// fires when this exits 0. `None` = fire the moment it's due (the classic
+    /// behaviour). See [`ScheduleGate`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub until_cmd: Option<String>,
+    /// Seconds between gate polls once due. `None` (or when there's no gate) =
+    /// [`DEFAULT_GATE_POLL_SECS`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub poll_secs: Option<u64>,
+    /// Seconds past the due time to keep polling the gate before abandoning.
+    /// `None` (or when there's no gate) = [`DEFAULT_GATE_TIMEOUT_SECS`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub gate_timeout_secs: Option<u64>,
+    /// Stamped `true` when a gated schedule was abandoned because its gate never
+    /// met within the timeout — it is `Fired` (history) but spawned nothing, so
+    /// `fleet schedule list` can tell an abandoned schedule from one that ran.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gate_timed_out: bool,
 }
+
+/// Default seconds between gate polls once a gated schedule is due. Same value
+/// as [`crate::watch::DEFAULT_POLL_SECS`].
+pub const DEFAULT_GATE_POLL_SECS: u64 = crate::watch::DEFAULT_POLL_SECS;
+
+/// Default give-up window (seconds past the due time) for a gated schedule when
+/// `--timeout` is omitted. Same value as [`crate::watch::DEFAULT_TIMEOUT_SECS`].
+pub const DEFAULT_GATE_TIMEOUT_SECS: u64 = crate::watch::DEFAULT_TIMEOUT_SECS;
 
 impl ScheduleRecord {
     pub fn is_pending(&self) -> bool {
@@ -120,6 +165,28 @@ impl ScheduleRecord {
     /// still fire whenever Fleet next notices it.
     pub fn is_claimable(&self, now: u64) -> bool {
         self.is_pending() && self.is_due(now)
+    }
+
+    /// Whether a non-LLM gate must be satisfied before this schedule fires.
+    pub fn has_gate(&self) -> bool {
+        self.until_cmd.is_some()
+    }
+
+    /// Seconds between gate polls (defaulted).
+    pub fn gate_poll_secs(&self) -> u64 {
+        self.poll_secs.unwrap_or(DEFAULT_GATE_POLL_SECS)
+    }
+
+    /// Absolute epoch-ms after which a still-unmet gate is abandoned. `None`
+    /// when the schedule has no gate. Measured from the due time (`fire_at`), so
+    /// the give-up window is "this long after it became due", not after it was
+    /// created.
+    pub fn gate_deadline(&self) -> Option<u64> {
+        if !self.has_gate() {
+            return None;
+        }
+        let timeout = self.gate_timeout_secs.unwrap_or(DEFAULT_GATE_TIMEOUT_SECS);
+        Some(self.fire_at.saturating_add(timeout.saturating_mul(1000)))
     }
 }
 
@@ -224,6 +291,7 @@ pub fn create(
     effort: Option<&str>,
     agent_source: Option<&str>,
     created_by_session: Option<&str>,
+    gate: Option<ScheduleGate>,
 ) -> Result<ScheduleRecord, String> {
     let dir = schedules_dir().ok_or("cannot determine home dir")?;
     create_in(
@@ -235,6 +303,7 @@ pub fn create(
         effort,
         agent_source,
         created_by_session,
+        gate,
         &uuid::Uuid::new_v4().to_string()[..8],
         now_ms(),
     )
@@ -250,6 +319,7 @@ fn create_in(
     effort: Option<&str>,
     agent_source: Option<&str>,
     created_by_session: Option<&str>,
+    gate: Option<ScheduleGate>,
     id: &str,
     now: u64,
 ) -> Result<ScheduleRecord, String> {
@@ -267,6 +337,9 @@ fn create_in(
         ));
     }
     let blank = |s: &str| s.trim().is_empty();
+    // A gate whose command is blank is no gate at all — drop it so the schedule
+    // fires the moment it's due rather than polling an empty string forever.
+    let gate = gate.filter(|g| !blank(&g.until_cmd));
     let rec = ScheduleRecord {
         id: id.to_string(),
         workspace_path: workspace_path.to_string(),
@@ -281,6 +354,10 @@ fn create_in(
         created_by_session: created_by_session.map(str::to_string),
         agent_source: agent_source.filter(|s| !blank(s)).map(str::to_string),
         fired_session_id: None,
+        until_cmd: gate.as_ref().map(|g| g.until_cmd.trim().to_string()),
+        poll_secs: gate.as_ref().map(|g| g.poll_secs.max(crate::watch::MIN_POLL_SECS)),
+        gate_timeout_secs: gate.as_ref().map(|g| g.timeout_secs),
+        gate_timed_out: false,
     };
     write_record(dir, &rec)?;
     Ok(rec)
@@ -465,6 +542,22 @@ fn claim_fire_in(
     generation: u64,
     now: u64,
 ) -> Result<ScheduleRecord, ClaimError> {
+    claim_transition_in(dir, id, generation, now, false)
+}
+
+/// The single serialization point for both firing and abandoning: flips a
+/// still-`Pending`, due, current-generation schedule to `Fired`. `timed_out`
+/// stamps [`ScheduleRecord::gate_timed_out`] — `true` for the abandon path (gate
+/// never met within the window; caller spawns nothing), `false` for a normal
+/// fire. Refuses an already-fired record or a stale generation so a schedule
+/// transitions exactly once regardless of how many timers race.
+fn claim_transition_in(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    now: u64,
+    timed_out: bool,
+) -> Result<ScheduleRecord, ClaimError> {
     let mut rec = get_in(dir, id).ok_or(ClaimError::Gone)?;
     if rec.status == ScheduleStatus::Fired {
         return Err(ClaimError::AlreadyFired);
@@ -483,9 +576,33 @@ fn claim_fire_in(
 
     rec.status = ScheduleStatus::Fired;
     rec.fired_at = Some(now);
+    rec.gate_timed_out = timed_out;
     rec.generation += 1;
     write_record(dir, &rec).map_err(|_| ClaimError::Gone)?;
     Ok(rec)
+}
+
+/// Abandon a gated schedule whose gate never met within its timeout window:
+/// claim it (flipping to `Fired` with `gate_timed_out = true`) and spawn
+/// nothing. Returns the abandoned record. The chosen timeout semantics — the
+/// schedule is retained as history so `fleet schedule list` shows it timed out,
+/// but no session runs.
+pub fn abandon_on_timeout(id: &str, generation: u64) -> Result<ScheduleRecord, ClaimError> {
+    let dir = schedules_dir().ok_or(ClaimError::Gone)?;
+    abandon_on_timeout_in(&dir, id, generation, now_ms())
+}
+
+fn abandon_on_timeout_in(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    now: u64,
+) -> Result<ScheduleRecord, ClaimError> {
+    let claimed = claim_transition_in(dir, id, generation, now, true)?;
+    crate::log_debug(&format!(
+        "schedule {id}: gate timed out, abandoned (marked fired, no session spawned)"
+    ));
+    Ok(claimed)
 }
 
 /// Stamp the session a fire produced onto the (already `Fired`) record, so
@@ -699,46 +816,132 @@ fn run_now_in(dir: &Path, id: &str, spawn: &SpawnFn<'_>) -> Result<Option<String
 /// spanning a laptop suspend. Same value/rationale as `agent_loop`'s POLL_CAP.
 const POLL_CAP: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// What the timer should do this iteration. Pure decision, split out so the
+/// nap/fire/abandon/exit logic is unit-testable without spawning subprocesses or
+/// sleeping. Mirrors [`crate::watch::TimerStep`], with an `Abandon` step for the
+/// gate-timed-out path (fire a *nothing*, unlike watch's timeout-resume).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchedStep {
+    /// Record superseded (stale generation) or already fired — timer exits.
+    Exit,
+    /// Fire now (spawn the session).
+    Fire,
+    /// Gate never met within its window — mark fired/timed-out, spawn nothing.
+    Abandon,
+    /// Not yet — nap this many ms and re-check.
+    Nap { ms: u64 },
+}
+
+/// Decide the timer's next move. `gate_met` is evaluated lazily — only after the
+/// generation / pending / due / deadline checks pass — so the shell poll runs no
+/// more than once per wake, never before the schedule is due, and never for an
+/// already-stale timer. Without a gate a due schedule fires immediately (the
+/// classic behaviour).
+fn decide(
+    rec: &ScheduleRecord,
+    generation: u64,
+    now: u64,
+    gate_met: impl FnOnce() -> bool,
+) -> SchedStep {
+    let cap_ms = POLL_CAP.as_millis() as u64;
+    if rec.generation != generation {
+        return SchedStep::Exit;
+    }
+    if !rec.is_pending() {
+        return SchedStep::Exit;
+    }
+    if !rec.is_due(now) {
+        // Nap until due, capped so cancel is noticed within POLL_CAP.
+        return SchedStep::Nap {
+            ms: cap_ms.min(rec.due_in_ms(now).max(1)),
+        };
+    }
+    // Due. No gate ⇒ fire straight away.
+    if !rec.has_gate() {
+        return SchedStep::Fire;
+    }
+    // Gated: abandon once the give-up window has elapsed; else poll the gate.
+    if let Some(deadline) = rec.gate_deadline() {
+        if now >= deadline {
+            return SchedStep::Abandon;
+        }
+    }
+    if gate_met() {
+        return SchedStep::Fire;
+    }
+    // Poll again: at most one poll interval, never past POLL_CAP, never past the
+    // give-up deadline (so the abandon lands on time, not a poll-cap late).
+    let remaining = rec
+        .gate_deadline()
+        .map(|d| d.saturating_sub(now))
+        .unwrap_or(u64::MAX);
+    let nap = rec
+        .gate_poll_secs()
+        .saturating_mul(1000)
+        .min(cap_ms)
+        .min(remaining.max(1));
+    SchedStep::Nap { ms: nap }
+}
+
 /// The blocking timer loop — the body of `fleet schedule fire <id> <gen>`. Sleeps
-/// until the schedule is due, fires it once, then returns. One-shot: it never
-/// re-arms. Returns early if the schedule is cancelled, already fired, or the
-/// timer was superseded (stale generation).
+/// until the schedule is due, then (if gated) polls the `--until` gate until it
+/// is met or the give-up window elapses, then fires once (or abandons) and
+/// returns. One-shot: it never re-arms. Returns early if the schedule is
+/// cancelled, already fired, or the timer was superseded (stale generation).
 ///
-/// Thin by design — every branch delegates to the unit-tested [`claim_fire`] /
-/// [`fire_once`] beneath it; only the real `sleep` lives here.
+/// Thin by design — every branch delegates to the unit-tested [`decide`] /
+/// [`fire_once`] / [`abandon_on_timeout`] beneath it; only the real `sleep`
+/// and the gate poll live here.
 pub fn run_timer_blocking(id: &str, generation: u64) {
     loop {
         let Some(rec) = get(id) else {
             crate::log_debug(&format!("schedule {id}: record gone, timer exiting"));
             return;
         };
-        if rec.generation != generation {
-            crate::log_debug(&format!(
-                "schedule {id}: timer superseded (held gen {generation}, record at {}), exiting",
-                rec.generation
-            ));
-            return;
-        }
-        if !rec.is_pending() {
-            crate::log_debug(&format!("schedule {id}: already fired, timer exiting"));
-            return;
-        }
-        let wait = rec.due_in_ms(now_ms());
-        if wait > 0 {
-            let nap = POLL_CAP.min(std::time::Duration::from_millis(wait));
-            std::thread::sleep(nap);
-            continue;
-        }
-        match fire_once(id, generation) {
-            Ok(_) => {
-                crate::log_debug(&format!("schedule {id}: fired, timer done"));
+        let step = decide(&rec, generation, now_ms(), || {
+            rec.until_cmd
+                .as_deref()
+                .map(crate::process_util::gate_met)
+                .unwrap_or(false)
+        });
+        match step {
+            SchedStep::Exit => {
+                if rec.generation != generation {
+                    crate::log_debug(&format!(
+                        "schedule {id}: timer superseded (held gen {generation}, record at {}), exiting",
+                        rec.generation
+                    ));
+                } else {
+                    crate::log_debug(&format!("schedule {id}: already fired, timer exiting"));
+                }
                 return;
             }
-            Err(ClaimError::NotDue { .. }) => continue,
-            Err(e) => {
-                crate::log_debug(&format!("schedule {id}: timer stopping ({e})"));
-                return;
+            SchedStep::Nap { ms } => {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                continue;
             }
+            SchedStep::Fire => match fire_once(id, generation) {
+                Ok(_) => {
+                    crate::log_debug(&format!("schedule {id}: fired, timer done"));
+                    return;
+                }
+                Err(ClaimError::NotDue { .. }) => continue,
+                Err(e) => {
+                    crate::log_debug(&format!("schedule {id}: timer stopping ({e})"));
+                    return;
+                }
+            },
+            SchedStep::Abandon => match abandon_on_timeout(id, generation) {
+                Ok(_) => {
+                    crate::log_debug(&format!("schedule {id}: gate timed out, timer done"));
+                    return;
+                }
+                Err(ClaimError::NotDue { .. }) => continue,
+                Err(e) => {
+                    crate::log_debug(&format!("schedule {id}: timer stopping ({e})"));
+                    return;
+                }
+            },
         }
     }
 }
@@ -842,10 +1045,20 @@ mod tests {
             None,
             None,
             Some("s1"),
+            None,
             id,
             now,
         )
         .unwrap()
+    }
+
+    /// Build a resolved gate for tests (poll/timeout in seconds).
+    fn gate(until: &str, poll: u64, timeout: u64) -> ScheduleGate {
+        ScheduleGate {
+            until_cmd: until.to_string(),
+            poll_secs: poll,
+            timeout_secs: timeout,
+        }
     }
 
     #[test]
@@ -863,20 +1076,20 @@ mod tests {
     #[test]
     fn create_rejects_empty_prompt_past_time_and_beyond_horizon() {
         let d = dir();
-        assert!(create_in(d.path(), "/ws", "  ", 2_000, None, None, None, None, "x", 1_000)
+        assert!(create_in(d.path(), "/ws", "  ", 2_000, None, None, None, None, None, "x", 1_000)
             .unwrap_err()
             .contains("prompt is required"));
         // in the past
-        assert!(create_in(d.path(), "/ws", "p", 500, None, None, None, None, "x", 1_000)
+        assert!(create_in(d.path(), "/ws", "p", 500, None, None, None, None, None, "x", 1_000)
             .unwrap_err()
             .contains("in the past"));
         // exactly now is still the past (must be strictly future)
-        assert!(create_in(d.path(), "/ws", "p", 1_000, None, None, None, None, "x", 1_000)
+        assert!(create_in(d.path(), "/ws", "p", 1_000, None, None, None, None, None, "x", 1_000)
             .unwrap_err()
             .contains("in the past"));
         // beyond the 365-day horizon
         let too_far = 1_000 + MAX_HORIZON_MS + 1;
-        assert!(create_in(d.path(), "/ws", "p", too_far, None, None, None, None, "x", 1_000)
+        assert!(create_in(d.path(), "/ws", "p", too_far, None, None, None, None, None, "x", 1_000)
             .unwrap_err()
             .contains("horizon"));
     }
@@ -1031,6 +1244,7 @@ mod tests {
             Some("high"),
             None,
             None,
+            None,
             "s1",
             0,
         )
@@ -1084,7 +1298,7 @@ mod tests {
     #[test]
     fn codex_schedule_fires_on_codex_source() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", 300_000, None, None, Some("codex"), None, "cx", 0).unwrap();
+        create_in(d.path(), "/ws", "p", 300_000, None, None, Some("codex"), None, None, "cx", 0).unwrap();
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cx", 0, 300_000, &ok_spawner(&calls, "cx-sid")).unwrap();
         assert_eq!(calls.into_inner()[0].agent_source, "codex");
@@ -1093,7 +1307,7 @@ mod tests {
     #[test]
     fn schedule_without_source_defaults_to_claude() {
         let d = dir();
-        create_in(d.path(), "/ws", "p", 300_000, None, None, None, None, "cl", 0).unwrap();
+        create_in(d.path(), "/ws", "p", 300_000, None, None, None, None, None, "cl", 0).unwrap();
         let calls = RefCell::new(Vec::new());
         fire_once_in(d.path(), "cl", 0, 300_000, &ok_spawner(&calls, "cl-sid")).unwrap();
         assert_eq!(calls.into_inner()[0].agent_source, "claude");
@@ -1198,6 +1412,7 @@ mod tests {
             Some("claude-opus-4-8"),
             Some("high"),
             Some("claude"),
+            None,
             None,
             "s1",
             0,
@@ -1339,6 +1554,7 @@ mod tests {
             Some("high"),
             None,
             None,
+            None,
             "s1",
             0,
         )
@@ -1346,7 +1562,7 @@ mod tests {
         assert_eq!(rec.model.as_deref(), Some("claude-fable-5"));
         assert_eq!(rec.effort.as_deref(), Some("high"));
         // blank strings are not a model
-        let rec = create_in(d.path(), "/ws", "p", 300_000, Some("  "), Some(""), None, None, "s2", 0)
+        let rec = create_in(d.path(), "/ws", "p", 300_000, Some("  "), Some(""), None, None, None, "s2", 0)
             .unwrap();
         assert_eq!(rec.model, None);
         assert_eq!(rec.effort, None);
@@ -1385,5 +1601,130 @@ mod tests {
         let err = run_now_in(d.path(), "nope", &ok_spawner(&calls, "x")).unwrap_err();
         assert!(err.contains("no schedule with id nope"), "got: {err}");
         assert_eq!(calls.into_inner().len(), 0, "no spawn for a missing schedule");
+    }
+
+    // ── gate (--until) ───────────────────────────────────────────────────────
+
+    /// A gate is stamped onto the record; its poll floor is applied; a blank
+    /// gate command is dropped (no gate at all).
+    #[test]
+    fn create_stamps_gate_and_clamps_poll_floor() {
+        let d = dir();
+        let rec = create_in(
+            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            Some(gate("test -f /tmp/ready", 1, 3600)), // poll below the 5s floor
+            "g1", 0,
+        )
+        .unwrap();
+        assert!(rec.has_gate());
+        assert_eq!(rec.until_cmd.as_deref(), Some("test -f /tmp/ready"));
+        assert_eq!(rec.poll_secs, Some(crate::watch::MIN_POLL_SECS), "poll clamps up to floor");
+        assert_eq!(rec.gate_timeout_secs, Some(3600));
+        // give-up deadline is measured from the due time
+        assert_eq!(rec.gate_deadline(), Some(300_000 + 3600 * 1000));
+
+        // a blank gate command ⇒ no gate
+        let rec = create_in(
+            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            Some(gate("   ", 30, 3600)), "g2", 0,
+        )
+        .unwrap();
+        assert!(!rec.has_gate());
+        assert_eq!(rec.gate_deadline(), None);
+    }
+
+    /// gate fields survive the JSON round-trip in camelCase.
+    #[test]
+    fn gate_fields_serialize_camelcase() {
+        let d = dir();
+        create_in(
+            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            Some(gate("true", 30, 3600)), "g1", 0,
+        )
+        .unwrap();
+        let raw = fs::read_to_string(record_path(d.path(), "g1")).unwrap();
+        assert!(raw.contains("\"untilCmd\""));
+        assert!(raw.contains("\"pollSecs\""));
+        assert!(raw.contains("\"gateTimeoutSecs\""));
+        // gate_timed_out is false by default and skipped from the wire
+        assert!(!raw.contains("gateTimedOut"));
+    }
+
+    /// No gate: a due schedule fires immediately (classic behaviour); the gate
+    /// closure is never even consulted.
+    #[test]
+    fn decide_without_gate_fires_when_due() {
+        let d = dir();
+        let rec = make(d.path(), "s1", 0, 300_000);
+        // not due ⇒ nap toward the due time, capped at POLL_CAP (30s)
+        assert_eq!(decide(&rec, 0, 100_000, || panic!("gate must not be polled")), SchedStep::Nap { ms: 30_000 });
+        // due ⇒ fire, gate never consulted
+        assert_eq!(decide(&rec, 0, 300_000, || panic!("gate must not be polled")), SchedStep::Fire);
+    }
+
+    /// Gated + due: naps while the gate is unmet, fires the moment it's met. The
+    /// nap is bounded by the poll interval.
+    #[test]
+    fn decide_gated_naps_until_met_then_fires() {
+        let d = dir();
+        let rec = create_in(
+            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            Some(gate("gate", 30, 3600)), "g1", 0,
+        )
+        .unwrap();
+        // due, gate not met ⇒ nap one poll interval (30s), never past deadline
+        assert_eq!(decide(&rec, 0, 300_000, || false), SchedStep::Nap { ms: 30_000 });
+        // due, gate met ⇒ fire
+        assert_eq!(decide(&rec, 0, 300_000, || true), SchedStep::Fire);
+        // not due yet ⇒ nap to due, gate never polled
+        assert_eq!(decide(&rec, 0, 100_000, || panic!("early: no poll")), SchedStep::Nap { ms: 30_000 });
+    }
+
+    /// Gated: once the give-up window has elapsed past the due time, abandon —
+    /// even if the gate could be met, the deadline check comes first.
+    #[test]
+    fn decide_gated_abandons_past_deadline() {
+        let d = dir();
+        let rec = create_in(
+            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            Some(gate("gate", 30, 60)), "g1", 0, // 60s window past due (300_000)
+        )
+        .unwrap();
+        let deadline = 300_000 + 60_000;
+        // just before the deadline, still polling
+        assert_eq!(decide(&rec, 0, deadline - 1, || false), SchedStep::Nap { ms: 1 });
+        // at/after the deadline, abandon regardless of gate
+        assert_eq!(decide(&rec, 0, deadline, || true), SchedStep::Abandon);
+        assert_eq!(decide(&rec, 0, deadline + 5_000, || false), SchedStep::Abandon);
+    }
+
+    /// The abandon path claims the schedule (flips Fired) and stamps
+    /// `gate_timed_out`, but spawns nothing — the chosen timeout semantics.
+    #[test]
+    fn abandon_marks_fired_timed_out() {
+        let d = dir();
+        create_in(
+            d.path(), "/ws", "p", 300_000, None, None, None, None,
+            Some(gate("gate", 30, 60)), "g1", 0,
+        )
+        .unwrap();
+        let claimed = abandon_on_timeout_in(d.path(), "g1", 0, 400_000).unwrap();
+        assert_eq!(claimed.status, ScheduleStatus::Fired);
+        assert!(claimed.gate_timed_out, "abandoned schedule is stamped timed-out");
+        assert!(claimed.fired_session_id.is_none(), "abandon spawns nothing");
+        // persisted, kept as history
+        let on_disk = get_in(d.path(), "g1").unwrap();
+        assert!(on_disk.gate_timed_out);
+        assert_eq!(on_disk.status, ScheduleStatus::Fired);
+    }
+
+    /// A normal fire leaves `gate_timed_out` false, distinguishing it in history
+    /// from an abandoned one.
+    #[test]
+    fn a_normal_fire_is_not_timed_out() {
+        let d = dir();
+        make(d.path(), "s1", 0, 300_000);
+        let claimed = claim_fire_in(d.path(), "s1", 0, 300_000).unwrap();
+        assert!(!claimed.gate_timed_out);
     }
 }
