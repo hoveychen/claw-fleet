@@ -54,6 +54,25 @@ export function toolSummary(block: ContentBlock): string {
     }
   }
 
+  // ToolSearch loads deferred tool schemas; its raw query ("select:AskUserQuestion",
+  // "notebook jupyter") is opaque, so relabel it the same way the desktop does.
+  if (block.name === "ToolSearch") {
+    const query = typeof input.query === "string" ? input.query.trim() : "";
+    if (query) {
+      const sel = query.match(/^select:(.*)$/i);
+      if (sel) {
+        const names = sel[1]
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .join(", ");
+        if (names) return t("加载工具 {0}", names);
+      } else {
+        return t("搜索工具：{0}", query);
+      }
+    }
+  }
+
   for (const field of TOOL_SUMMARY_FIELDS) {
     const value = input[field];
     if (typeof value === "string" && value) return value;

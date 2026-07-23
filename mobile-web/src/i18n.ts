@@ -303,6 +303,8 @@ const DICT: Record<string, string> = {
   "编辑 {0}": "Editing {0}",
   "删除 {0}": "Deleting {0}",
   "编辑 {0} 个文件": "Patching {0} files",
+  "加载工具 {0}": "Loading tools {0}",
+  "搜索工具：{0}": "Searching tools: {0}",
 
   // ── SessionDetailTabs ──
   问题请示: "Question",
