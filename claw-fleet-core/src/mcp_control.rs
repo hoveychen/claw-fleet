@@ -566,6 +566,7 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 effort.as_deref(),
                 ctx.source.as_deref(),
                 sid,
+                None, // gate wired in P4
             )?;
             let armed = match schedule::arm_timer(&rec) {
                 Ok(pid) => format!("计时器已启动 (pid {pid})"),

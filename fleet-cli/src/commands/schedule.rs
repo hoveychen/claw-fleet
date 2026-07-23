@@ -210,6 +210,7 @@ pub(crate) fn cmd_schedule(action: ScheduleCommands) {
                 effort.as_deref(),
                 ctx.source.as_deref(),
                 sid.as_deref(),
+                None, // gate wired in P3
             ) {
                 Ok(rec) => match schedule::arm_timer(&rec) {
                     Ok(pid) => println!(
