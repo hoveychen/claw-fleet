@@ -1506,6 +1506,46 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
     },
     {
       type: "assistant",
+      uuid: "msg-fleet-watch-create",
+      timestamp: new Date(NOW - 6 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-3b",
+            name: "mcp__fleet__fleet__watch",
+            input: {
+              action: "create",
+              note: "等 muvee 拉起 backfill 版镜像（运行镜像 Created 从 05:10:08 变化）；触发时抓容器日志确认补了多少条历史 Tripo 花费",
+              until: "test -f /tmp/ci-done",
+              capture: "muveectl projects logs pixel-portrait --tail 300",
+              poll: 120,
+              timeout: 3600,
+            },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6720, output_tokens: 40 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-watch-create-r",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-3b",
+            content: "ok: watch created (id w-42a1)",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
       uuid: "msg-fleet-watch-list",
       timestamp: new Date(NOW - 5 * MIN).toISOString(),
       message: {

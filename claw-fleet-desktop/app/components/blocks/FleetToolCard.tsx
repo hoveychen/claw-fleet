@@ -40,6 +40,21 @@ function paramRows(input: Record<string, unknown>): Array<{ key: string; value: 
   });
 }
 
+/**
+ * Free-text "intent" surfaced on the collapsed header, right after the summary
+ * label, so the reader sees *what* an op is for without expanding the card.
+ * These are exactly the human-readable fields NOT already interpolated into the
+ * summary via `summaryVars` (note → watch/handoff, prompt → loop/schedule,
+ * text → plan add). First non-empty wins.
+ */
+function intentText(input: Record<string, unknown>): string {
+  for (const k of ["note", "prompt", "text"] as const) {
+    const v = input[k];
+    if (typeof v === "string" && v.trim() !== "") return v.trim();
+  }
+  return "";
+}
+
 /** Interpolation vars for the collapsed-header summary line. */
 function summaryVars(input: Record<string, unknown>): Record<string, string> {
   const s = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : "");
@@ -370,6 +385,7 @@ export function FleetToolCard({ block, result, isPartial }: Props) {
     ...summaryVars(view.input),
     defaultValue: view.action || tool,
   });
+  const intent = intentText(view.input);
 
   return (
     <div className={`${styles.root} ${isError ? styles.root_error : ""}`}>
@@ -377,6 +393,7 @@ export function FleetToolCard({ block, result, isPartial }: Props) {
         <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
         <span className={styles.kind}>{kindLabel}</span>
         <span className={styles.summary}>{summary}</span>
+        {intent && <span className={styles.intent} title={intent}>{intent}</span>}
         {isPartial && !result && <span className={styles.spinner}>⟳</span>}
         {isError && <span className={styles.error_badge}>error</span>}
       </button>
