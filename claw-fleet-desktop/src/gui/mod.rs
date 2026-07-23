@@ -385,16 +385,27 @@ fn open_preview_window(
 
     let window = builder.build().map_err(|e| e.to_string())?;
 
-    // Same WKWebView teardown-race workaround as the settings window: hide
-    // instead of destroying so queued WebKit work items can't dereference a
-    // freed WebPageProxy.
-    let hide_target = window.clone();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-            let _ = hide_target.hide();
-        }
-    });
+    // macOS only: same WKWebView teardown-race workaround as the settings window
+    // — hide instead of destroying so queued WebKit work items can't dereference
+    // a freed WebPageProxy.
+    //
+    // On Windows/Linux this MUST NOT run: hide-on-close leaves a zombie window
+    // whose WebView2/WebKitGTK process may have died (e.g. a white-screen load
+    // failure). The reuse branch above then only emit()s an update to that dead
+    // window and never rebuilds, so the preview "won't open" becomes permanent.
+    // Letting the window destroy on close makes each reopen rebuild a fresh webview.
+    #[cfg(target_os = "macos")]
+    {
+        let hide_target = window.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = hide_target.hide();
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
 
     Ok(())
 }
