@@ -471,6 +471,7 @@ fn handle_loop(args: &Value, sid: Option<&str>) -> Result<String, String> {
                 ctx.effort.as_deref(),
                 ctx.source.as_deref(),
                 sid,
+                None, // gate wired in P4
             )?;
             let armed = match agent_loop::arm_timer(&rec) {
                 Ok(pid) => format!("计时器已启动 (pid {pid})"),
