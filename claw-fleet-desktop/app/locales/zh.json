@@ -1465,7 +1465,10 @@
     "close": "关闭",
     "close_others": "关闭其他",
     "close_right": "关闭右侧",
-    "close_all": "全部关闭"
+    "close_all": "全部关闭",
+    "overflow": "所有标签",
+    "search": "搜索标签…",
+    "no_match": "无匹配标签"
   },
   "detail": {
     "triggered_by_schedule": "由计划 {{id}} 触发",
