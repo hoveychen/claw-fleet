@@ -89,6 +89,19 @@ pub fn read(session_id: &str) -> Option<SessionMark> {
     read_in(&mark_dir()?, session_id).map(|r| r.mark)
 }
 
+/// Clear a `Done` mark when a session is resumed by the human. A task the human
+/// marked "truly complete" is no longer complete once it's running again, so it
+/// should fall back to *unmarked* / needs-review — exactly what toggling the
+/// done control off does. Only `Done` is cleared: a `Pending` mark ("seen, not
+/// finished") stays, and an unmarked session is a no-op. Called from the
+/// user-initiated resume entry points (desktop `resume_session`, `fleet serve`
+/// `/resume_session`, mobile relay `resume_session`), never from the automatic
+/// resume paths (auto-resume / watch / pending-message drain).
+pub fn clear_done_on_resume(session_id: &str, workspace_path: &str) {
+    let Some(dir) = mark_dir() else { return };
+    clear_done_on_resume_in(&dir, session_id, workspace_path);
+}
+
 /// Stamp each session's `user_mark` from the on-disk marks. Mirrors
 /// `handoff::enrich_sessions`: one directory scan into an index, then a map over
 /// the sessions — cheaper than a file read per session.
@@ -146,6 +159,16 @@ pub(crate) fn set_mark_in(
 pub(crate) fn read_in(dir: &std::path::Path, session_id: &str) -> Option<SessionMarkRecord> {
     let s = fs::read_to_string(dir.join(format!("{session_id}.json"))).ok()?;
     serde_json::from_str(&s).ok()
+}
+
+pub(crate) fn clear_done_on_resume_in(
+    dir: &std::path::Path,
+    session_id: &str,
+    workspace_path: &str,
+) {
+    if read_in(dir, session_id).map(|r| r.mark) == Some(SessionMark::Done) {
+        let _ = set_mark_in(dir, session_id, workspace_path, None);
+    }
 }
 
 /// Read the whole `session-mark/` directory into `session_id → mark`. Malformed
@@ -227,6 +250,28 @@ mod tests {
         enrich_sessions_in(dir.path(), &mut sessions);
         assert_eq!(sessions[0].user_mark, Some(SessionMark::Done));
         assert_eq!(sessions[1].user_mark, None, "unmarked stays unmarked");
+    }
+
+    #[test]
+    fn resume_clears_done_but_leaves_pending_and_unmarked() {
+        let dir = tempfile::tempdir().unwrap();
+        // Done → cleared to unmarked (mirrors toggling the done control off).
+        set_mark_in(dir.path(), "done-sess", "/ws", Some(SessionMark::Done)).unwrap();
+        clear_done_on_resume_in(dir.path(), "done-sess", "/ws");
+        assert!(read_in(dir.path(), "done-sess").is_none(), "done cleared on resume");
+
+        // Pending → untouched ("seen, not finished" is still true after resume).
+        set_mark_in(dir.path(), "pending-sess", "/ws", Some(SessionMark::Pending)).unwrap();
+        clear_done_on_resume_in(dir.path(), "pending-sess", "/ws");
+        assert_eq!(
+            read_in(dir.path(), "pending-sess").unwrap().mark,
+            SessionMark::Pending,
+            "pending left alone"
+        );
+
+        // Unmarked → no-op, no file created.
+        clear_done_on_resume_in(dir.path(), "unmarked-sess", "/ws");
+        assert!(read_in(dir.path(), "unmarked-sess").is_none(), "unmarked stays unmarked");
     }
 
     /// Un-marking the *last* done session empties the index. Enrich must still

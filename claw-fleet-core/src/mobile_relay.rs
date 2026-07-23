@@ -2155,6 +2155,9 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
     let req: crate::auto_resume::ResumeSessionRequest =
         serde_json::from_value(params.clone())
             .map_err(|e| format!("bad resume_session params: {e}"))?;
+    // A "done" task resumed from mobile is active again — drop the done mark so
+    // it re-surfaces as needs-review (next snapshot re-enriches user_mark).
+    crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
     // Route by source (blank → claude); manual resume is untracked → no-op box.
     crate::agent_source::resume_session(
         &req.agent_source,
