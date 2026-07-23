@@ -17,7 +17,7 @@ const BEGIN_MARKER: &str = "<!-- fleet:wiki-guidance:begin -->";
 const END_MARKER: &str = "<!-- fleet:wiki-guidance:end -->";
 
 fn claude_dir() -> Option<PathBuf> {
-    crate::session::real_home_dir().map(|h| h.join(".claude"))
+    crate::session::get_claude_dir()
 }
 
 fn guidance_file_path() -> Option<PathBuf> {
