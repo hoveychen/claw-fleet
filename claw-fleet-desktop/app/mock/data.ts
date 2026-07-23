@@ -1968,11 +1968,14 @@ export const MOCK_ACCOUNT_INFO = {
     resets_at: new Date(NOW + 3 * 24 * HOUR).toISOString(),
     prev_utilization: 0.58,
   },
-  seven_day_sonnet: {
-    utilization: 0.31,
-    resets_at: new Date(NOW + 3 * 24 * HOUR).toISOString(),
-    prev_utilization: 0.26,
-  },
+  seven_day_scoped: [
+    {
+      model_label: "Fable",
+      utilization: 0.31,
+      resets_at: new Date(NOW + 3 * 24 * HOUR).toISOString(),
+      prev_utilization: 0.26,
+    },
+  ],
 };
 
 export const MOCK_CODEX_USAGE = {

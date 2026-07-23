@@ -200,7 +200,8 @@ function ClaudeUsageSection() {
 
   const refresh = () => { load("claude"); };
 
-  const hasUsage = info && (info.five_hour || info.seven_day || info.seven_day_sonnet);
+  const scoped = info?.seven_day_scoped ?? [];
+  const hasUsage = info && (info.five_hour || info.seven_day || scoped.length > 0);
 
   return (
     <div className={styles.tool_section}>
@@ -224,7 +225,13 @@ function ClaudeUsageSection() {
         <div className={styles.bars}>
           <UsageBar label={t("account.five_hour")} stats={info.five_hour} />
           <UsageBar label={t("account.seven_day")} stats={info.seven_day} />
-          <UsageBar label={t("account.seven_day_sonnet")} stats={info.seven_day_sonnet} />
+          {scoped.map((sc) => (
+            <UsageBar
+              key={sc.model_label}
+              label={t("account.seven_day_scoped", { model: sc.model_label })}
+              stats={sc}
+            />
+          ))}
         </div>
       )}
       {info && !hasUsage && <p className={styles.dim}>No usage data</p>}
