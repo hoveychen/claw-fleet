@@ -17,14 +17,20 @@ import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { getItem, setItem } from "../storage";
 import { CHAT_HIDDEN, CHAT_ONLY, matchesWorkspaceFilter } from "./HistoryView";
 import { LiteDecisionHistory } from "./LiteDecisionHistory";
-import { LiteSessionCard } from "./LiteSessionCard";
-import { MarkControl } from "./MarkControl";
+import { SessionRail } from "./SessionRail";
+import { useMultiSource } from "./SessionCard";
+import { buildRenderItems, dwellReadTargets } from "./sessionGroups";
 import { NewSessionForm, distinctWorkspaces, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
 import { TodayUsageBadge } from "./TodayUsageBadge";
 import styles from "./LiteApp.module.css";
 
 const MARK_SEGMENTS: MarkFilter[] = ["all", "pending", "done"];
+
+// Lite mode has no background tabs and no row context menu. Module-level so the
+// identities stay stable across renders and don't defeat <SessionRow>'s memo.
+const EMPTY_OPEN_IDS: Set<string> = new Set();
+const NOOP_CONTEXT_MENU = () => {};
 
 /** Which mark bucket a session falls in — mirrors HistoryView.markBucket. */
 function markBucket(s: SessionInfo): "pending" | "done" {
@@ -96,11 +102,22 @@ export function LiteApp() {
     }
   }, [spawnedId, sessions, open]);
 
-  const { ftsMatchPaths } = useSessionSearch(query);
+  const { ftsMatchPaths, snippetByPath } = useSessionSearch(query);
+  // Show the agent-source glyph on each row only when sources actually mix.
+  const multiSource = useMultiSource();
+  // Bumped every 30s so <SessionRow>'s relative times keep advancing even when
+  // no scan lands — same ticker HistoryView runs.
+  const [nowTick, setNowTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Task list = launchpad adhoc sessions, filtered/sorted exactly like the
-  // desktop task page (HistoryView): workspace → active-only → search → mark.
-  const { rows, markCounts, workspaces, activeCount, unreadSessions } = useMemo(() => {
+  // desktop task page (HistoryView): workspace → active-only → search → mark,
+  // then folded into render items (singles + collapsed relay chains) for the
+  // shared <SessionRail>.
+  const { rows, items, chainMembersAll, groupHeaderChains, markCounts, workspaces, activeCount, unreadSessions } = useMemo(() => {
     const adhoc = sessions.filter(isFleetOwnedTask);
     // Workspace dropdown options (chat workspace is pinned separately below).
     // Mirrors the launcher/History: distinctWorkspaces drops temp cwds and
@@ -132,8 +149,38 @@ export function LiteApp() {
     const rows = preMark
       .filter((s) => markFilter === "all" || markBucket(s) === markFilter)
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
-    return { rows, markCounts: counts, workspaces, activeCount, unreadSessions };
+    // Fold into render items (collapsing handoff-relay chains) for <SessionRail>,
+    // exactly like the desktop task page.
+    const items = buildRenderItems(rows, true);
+    // Full membership of every relay chain over ALL adhoc sessions (not just the
+    // filtered rows), so a group header's aggregate liveness/unread/mark-all
+    // covers the whole chain even when a filter hides some hops.
+    const chainMembersAll = new Map<string, SessionInfo[]>();
+    for (const s of adhoc) {
+      if (s.handoff && s.handoff.chainLen > 1) {
+        const arr = chainMembersAll.get(s.handoff.chainId);
+        if (arr) arr.push(s);
+        else chainMembersAll.set(s.handoff.chainId, [s]);
+      }
+    }
+    // Tip id → full chain membership, for chains currently rendered as a
+    // collapsed group header — backs dwell-read (opening a header clears the
+    // whole chain's aggregate unread dot, not just the tip).
+    const groupHeaderChains = new Map<string, SessionInfo[]>();
+    for (const it of items) {
+      if (it.kind === "group") {
+        groupHeaderChains.set(it.tip.id, chainMembersAll.get(it.chainId) ?? it.members);
+      }
+    }
+    return { rows, items, chainMembersAll, groupHeaderChains, markCounts: counts, workspaces, activeCount, unreadSessions };
   }, [sessions, query, ftsMatchPaths, markFilter, workspaceFilter, activeOnly, chatPath, readOverrides]);
+
+  // Opening a row also clears its unread (and its whole relay chain's, for a
+  // group header) — same dwell-read the desktop rail does on click.
+  const onRowClick = (s: SessionInfo) => {
+    open(s).catch(() => {});
+    markManyRead(dwellReadTargets(s, groupHeaderChains));
+  };
 
   // A workspace filter naming a directory whose sessions have all aged out would
   // strand an empty list behind a blank select — fall back to "all".
@@ -298,7 +345,8 @@ export function LiteApp() {
             <span>{t("new_session.button")}</span>
           </button>
 
-          {/* Task list — launchpad adhoc sessions with inline stop/mark. */}
+          {/* Task list — the same grouped <SessionRail> the desktop task page
+              renders, so lite stays pixel-identical to the 二级侧边栏. */}
           <div className={styles.list}>
             {rows.length === 0 ? (
               <p className={styles.empty}>
@@ -307,14 +355,22 @@ export function LiteApp() {
                   : t("history.empty_hint", "还没有会话，点上方新建一个")}
               </p>
             ) : (
-              rows.map((s) => (
-                <div key={s.jsonlPath} className={styles.task_row}>
-                  <LiteSessionCard session={s} onClick={() => open(s).catch(() => {})} />
-                  <div className={styles.task_actions}>
-                    <MarkControl session={s} />
-                  </div>
-                </div>
-              ))
+              <SessionRail
+                items={items}
+                chainMembersAll={chainMembersAll}
+                // The list only renders when no detail is open, so no row is
+                // ever the active/selected one here.
+                activeId={null}
+                openIds={EMPTY_OPEN_IDS}
+                snippetFor={(jsonlPath) =>
+                  query.trim().length >= 2 ? snippetByPath.get(jsonlPath) : undefined
+                }
+                isUnread={(s) => sessionUnread(s, readOverrides[s.id])}
+                nowTick={nowTick}
+                showSource={multiSource}
+                onRowClick={onRowClick}
+                onContextMenu={NOOP_CONTEXT_MENU}
+              />
             )}
           </div>
         </div>
