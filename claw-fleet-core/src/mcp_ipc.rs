@@ -113,8 +113,8 @@ const REVIEW_DOC_MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// `/review_doc` endpoint (remote), so the two paths render identically. Reads
 /// wiki entries and local files off the same host the serving process runs on.
 pub fn read_review_doc(doc: &ReviewDoc) -> Result<ReviewDocContent, String> {
-    match doc.kind {
-        ReviewDocKind::File => read_review_file(&doc.reference, doc.title.as_deref()),
+    let mut content = match doc.kind {
+        ReviewDocKind::File => read_review_file(&doc.reference, doc.title.as_deref())?,
         ReviewDocKind::Wiki => {
             let wdoc = crate::wiki::get_doc(&doc.reference)?;
             let bytes = crate::wiki::get_file(&doc.reference, "current", &wdoc.entry)?;
@@ -130,8 +130,22 @@ pub fn read_review_doc(doc: &ReviewDoc) -> Result<ReviewDocContent, String> {
                 .clone()
                 .filter(|s| !s.is_empty())
                 .unwrap_or(wdoc.title);
-            Ok(ReviewDocContent { format, body, title })
+            ReviewDocContent { format, body, title }
         }
+    };
+    autoheight_review_content(&mut content);
+    Ok(content)
+}
+
+/// An HTML review doc renders in the same sandboxed, self-sizing iframe
+/// (`AutoHeightFrame`) as the inline `html` field, so it needs the same
+/// height-reporting script injected — without it the frame is stuck at its
+/// min-height and a tall doc shows only its top, the rest a blank strip. This
+/// mirrors what [`normalize_html`] does for the inline `html` preview. Markdown
+/// is rendered by the app (ReactMarkdown), not framed, so it is left untouched.
+fn autoheight_review_content(content: &mut ReviewDocContent) {
+    if content.format == ReviewDocFormat::Html {
+        content.body = with_autoheight(&content.body);
     }
 }
 
@@ -1065,6 +1079,38 @@ mod tests {
             title: None,
         };
         assert!(read_review_doc(&doc).is_err());
+    }
+
+    #[test]
+    fn html_review_doc_gets_autoheight_script() {
+        // The "Docs" panel frames an HTML review doc in the same sandboxed,
+        // self-sizing iframe as the inline preview. Without the height-reporting
+        // script the frame collapses to its min-height and a tall doc shows only
+        // its top — the empty-strip bug. read_review_doc must inject it.
+        let mut content = ReviewDocContent {
+            format: ReviewDocFormat::Html,
+            body: "<div style=\"height:900px\">tall</div>".into(),
+            title: "plan".into(),
+        };
+        autoheight_review_content(&mut content);
+        assert!(
+            content.body.contains(AUTOHEIGHT_MARKER),
+            "html review doc must report its height: {}",
+            content.body
+        );
+    }
+
+    #[test]
+    fn markdown_review_doc_left_untouched() {
+        // Markdown is rendered by the app, not framed — injecting a <script>
+        // would corrupt the source, so it must pass through verbatim.
+        let mut content = ReviewDocContent {
+            format: ReviewDocFormat::Markdown,
+            body: "# Title\n\nbody".into(),
+            title: "notes".into(),
+        };
+        autoheight_review_content(&mut content);
+        assert_eq!(content.body, "# Title\n\nbody");
     }
 
     #[test]
