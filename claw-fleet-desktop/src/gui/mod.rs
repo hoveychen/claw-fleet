@@ -203,14 +203,29 @@ fn show_main_window(app: tauri::AppHandle) {
     }
 }
 
-/// Clamp the main window to the monitor's work area (taskbar / menu-bar / Dock
-/// excluded) and re-center it. The configured size in tauri.conf.json (1280×820)
-/// is larger than the usable area on smaller displays — a 1366×768 laptop, or a
-/// high-DPI panel at 125–150% scaling — so at launch the bottom edge, and on
-/// Windows the custom caption buttons (decorations are off there), got pushed
-/// under the taskbar or off-screen. A no-op when the window already fits, so
-/// tauri.conf.json's `center: true` still governs on roomy displays.
+/// Size and place the main window inside the monitor's work area (taskbar /
+/// menu-bar / Dock excluded) at launch.
+///
+/// tauri.conf.json's fixed 1280×820 + `center: true` is unsafe on smaller or
+/// high-DPI displays: `center: true` centers on the *full monitor* (taskbar
+/// strip included), so when the window is nearly as tall as the monitor its top
+/// edge — and on Windows the custom caption buttons, since decorations are off
+/// there — get pushed off the top of the screen. We therefore clamp the size to
+/// the work area and center *within the work area*, clamping the offset to ≥ 0
+/// so the top-left corner is always on-screen.
+///
+/// The target size is taken from the configured constants rather than
+/// `inner_size()` because at `setup()` time the reported size is not yet
+/// reliable across platforms.
 fn fit_main_window_to_work_area(w: &tauri::WebviewWindow) {
+    // Keep in sync with tauri.conf.json `app.windows[0]`.
+    const CONF_W: f64 = 1280.0;
+    const CONF_H: f64 = 820.0;
+    const MIN_W: f64 = 900.0;
+    const MIN_H: f64 = 600.0;
+    // Small inset so the window isn't flush against the work-area edges.
+    const MARGIN: f64 = 24.0;
+
     let Ok(Some(monitor)) = w.current_monitor() else {
         return;
     };
@@ -221,26 +236,17 @@ fn fit_main_window_to_work_area(w: &tauri::WebviewWindow) {
     let area_x = area.position.x as f64 / scale;
     let area_y = area.position.y as f64 / scale;
 
-    let Ok(cur) = w.inner_size() else {
-        return;
-    };
-    let cur_w = cur.width as f64 / scale;
-    let cur_h = cur.height as f64 / scale;
+    // Fit the configured size into the work area, but never below the min size:
+    // on a tiny work area a slight overflow beats breaking the layout.
+    let new_w = CONF_W.min((area_w - MARGIN).max(0.0)).max(MIN_W);
+    let new_h = CONF_H.min((area_h - MARGIN).max(0.0)).max(MIN_H);
 
-    // Small inset so the window isn't flush against the work-area edges.
-    const MARGIN: f64 = 24.0;
-    // Never shrink below the configured min size (900×600): on a tiny work area
-    // a slight overflow beats breaking the layout.
-    let new_w = cur_w.min((area_w - MARGIN).max(0.0)).max(900.0);
-    let new_h = cur_h.min((area_h - MARGIN).max(0.0)).max(600.0);
-
-    if (new_w - cur_w).abs() < 1.0 && (new_h - cur_h).abs() < 1.0 {
-        return; // already fits — leave conf's center:true alone
-    }
-
-    let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(new_w, new_h)));
+    // Center within the work area; clamp the offset to ≥ 0 so the top-left stays
+    // on-screen even when the window is taller/wider than the work area.
     let x = area_x + ((area_w - new_w) / 2.0).max(0.0);
     let y = area_y + ((area_h - new_h) / 2.0).max(0.0);
+
+    let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(new_w, new_h)));
     let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
 }
 
