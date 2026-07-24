@@ -15,6 +15,9 @@ import {
   setFeatureState,
   resolveFeatureState,
   featureDefault,
+  getModeSelection,
+  setModeSelection,
+  modeDefault,
   type OnboardingFeatureId,
   type FeatureState,
 } from "../storage";
@@ -429,28 +432,32 @@ function AppearanceCard() {
 type TtsMode = "chime_and_speech" | "chime_only" | "off";
 
 function NotificationSettingsCard({
-  notifMode,
+  notifSelection,
   onNotifModeChange,
-  ttsMode,
+  ttsSelection,
   onTtsModeChange,
-  chimePreset,
+  chimeSelection,
   onChimeChange,
   personalizedMascotValue,
   onPersonalizedMascotChange,
   userTitle,
   onUserTitleChange,
 }: {
-  notifMode: NotificationMode;
-  onNotifModeChange: (mode: NotificationMode) => void;
-  ttsMode: TtsMode;
-  onTtsModeChange: (mode: TtsMode) => void;
-  chimePreset: ChimePreset;
-  onChimeChange: (preset: ChimePreset) => void;
+  notifSelection: NotificationMode | "default";
+  onNotifModeChange: (sel: NotificationMode | "default") => void;
+  ttsSelection: TtsMode | "default";
+  onTtsModeChange: (sel: TtsMode | "default") => void;
+  chimeSelection: ChimePreset | "default";
+  onChimeChange: (sel: ChimePreset | "default") => void;
   personalizedMascotValue: FeatureState;
   onPersonalizedMascotChange: (state: FeatureState) => void;
   userTitle: string;
   onUserTitleChange: (title: string) => void;
 }) {
+  const ttsEffective: TtsMode =
+    ttsSelection === "default" ? (modeDefault("tts-mode") as TtsMode) : ttsSelection;
+  const chimeEffective: ChimePreset =
+    chimeSelection === "default" ? (modeDefault("chime-sound") as ChimePreset) : chimeSelection;
   const { t } = useTranslation();
 
   return (
@@ -469,7 +476,7 @@ function NotificationSettingsCard({
             <input
               type="radio"
               name="onboard-notif-mode"
-              checked={notifMode === mode}
+              checked={notifSelection === mode}
               onChange={() => onNotifModeChange(mode)}
             />
             <div>
@@ -478,6 +485,22 @@ function NotificationSettingsCard({
             </div>
           </label>
         ))}
+        <label className={styles.radio_item} key="default">
+          <input
+            type="radio"
+            name="onboard-notif-mode"
+            checked={notifSelection === "default"}
+            onChange={() => onNotifModeChange("default")}
+          />
+          <div>
+            <span className={styles.radio_title}>{t("settings.mode_default_title")}</span>
+            <span className={styles.hint}>
+              {t("settings.mode_default_desc", {
+                value: t(`settings.notify_${modeDefault("notification-mode")}`),
+              })}
+            </span>
+          </div>
+        </label>
       </div>
 
       {/* Alert sound */}
@@ -488,7 +511,7 @@ function NotificationSettingsCard({
             <input
               type="radio"
               name="onboard-tts-mode"
-              checked={ttsMode === mode}
+              checked={ttsSelection === mode}
               onChange={() => onTtsModeChange(mode)}
             />
             <div>
@@ -497,21 +520,42 @@ function NotificationSettingsCard({
             </div>
           </label>
         ))}
-        {ttsMode !== "off" && (
+        <label className={styles.radio_item} key="default">
+          <input
+            type="radio"
+            name="onboard-tts-mode"
+            checked={ttsSelection === "default"}
+            onChange={() => onTtsModeChange("default")}
+          />
+          <div>
+            <span className={styles.radio_title}>{t("settings.mode_default_title")}</span>
+            <span className={styles.hint}>
+              {t("settings.mode_default_desc", {
+                value: t(`settings.tts_${modeDefault("tts-mode")}`),
+              })}
+            </span>
+          </div>
+        </label>
+        {ttsEffective !== "off" && (
           <div className={styles.chime_row}>
             <span className={styles.hint}>{t("settings.chime_sound")}</span>
             <select
               className={styles.chime_select}
-              value={chimePreset}
-              onChange={(e) => onChimeChange(e.target.value as ChimePreset)}
+              value={chimeSelection}
+              onChange={(e) => onChimeChange(e.target.value as ChimePreset | "default")}
             >
+              <option value="default">
+                {t("settings.mode_default_option", {
+                  value: t(`settings.chime_${modeDefault("chime-sound")}`),
+                })}
+              </option>
               {CHIME_PRESETS.map((p) => (
                 <option key={p} value={p}>{t(`settings.chime_${p}`)}</option>
               ))}
             </select>
             <button
               className={styles.preview_btn}
-              onClick={() => playChime(chimePreset)}
+              onClick={() => playChime(chimeEffective)}
               type="button"
             >
               &#x25B6;
@@ -1205,43 +1249,46 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, []);
 
-  // ── Notification state ──────────────────────────────────────────────────
-  const [notifMode, setNotifMode] = useState<NotificationMode>(
-    () => (getItem("notification-mode") as NotificationMode) || "user_action",
+  // ── Notification state (tristate: concrete mode or "default") ───────────
+  const [notifSelection, setNotifSelection] = useState<NotificationMode | "default">(
+    () => getModeSelection("notification-mode") as NotificationMode | "default",
   );
 
   // OS notification permission is requested only when the user opts into a
   // notifying mode — never on mount, so the first launch isn't interrupted
   // by a system dialog before the user knows what the app does.
-  const handleNotifModeChange = useCallback((mode: NotificationMode) => {
-    setNotifMode(mode);
-    setItem("notification-mode", mode);
-    invoke("set_notification_mode", { mode }).catch(() => {});
-    if (mode !== "none") {
+  const handleNotifModeChange = useCallback((sel: NotificationMode | "default") => {
+    setNotifSelection(sel);
+    setModeSelection("notification-mode", sel);
+    const effective =
+      sel === "default" ? (modeDefault("notification-mode") as NotificationMode) : sel;
+    invoke("set_notification_mode", { mode: effective }).catch(() => {});
+    if (effective !== "none") {
       isPermissionGranted().then((granted) => {
         if (!granted) requestPermission().catch(() => {});
       }).catch(() => {});
     }
   }, []);
 
-  // ── TTS / chime state ──────────────────────────────────────────────────
-  const [ttsMode, setTtsMode] = useState<TtsMode>(
-    () => (getItem("tts-mode") as TtsMode) || "chime_and_speech",
+  // ── TTS / chime state (tristate: concrete value or "default") ───────────
+  const [ttsSelection, setTtsSelection] = useState<TtsMode | "default">(
+    () => getModeSelection("tts-mode") as TtsMode | "default",
   );
 
-  const handleTtsModeChange = useCallback((mode: TtsMode) => {
-    setTtsMode(mode);
-    setItem("tts-mode", mode);
+  const handleTtsModeChange = useCallback((sel: TtsMode | "default") => {
+    setTtsSelection(sel);
+    setModeSelection("tts-mode", sel);
   }, []);
 
-  const [chimePreset, setChimePreset] = useState<ChimePreset>(
-    () => (getItem("chime-sound") as ChimePreset) || "ding_dong",
+  const [chimeSelection, setChimeSelection] = useState<ChimePreset | "default">(
+    () => getModeSelection("chime-sound") as ChimePreset | "default",
   );
 
-  const handleChimeChange = useCallback((preset: ChimePreset) => {
-    setChimePreset(preset);
-    setItem("chime-sound", preset);
-    playChime(preset);
+  const handleChimeChange = useCallback((sel: ChimePreset | "default") => {
+    setChimeSelection(sel);
+    setModeSelection("chime-sound", sel);
+    const effective = sel === "default" ? (modeDefault("chime-sound") as ChimePreset) : sel;
+    playChime(effective);
   }, []);
 
   // ── User title state ────────────────────────────────────────────────────
@@ -1426,11 +1473,11 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
           {unseenFeatures.has("notifications") && (
             <div className={styles.cards}>
               <NotificationSettingsCard
-                notifMode={notifMode}
+                notifSelection={notifSelection}
                 onNotifModeChange={handleNotifModeChange}
-                ttsMode={ttsMode}
+                ttsSelection={ttsSelection}
                 onTtsModeChange={handleTtsModeChange}
-                chimePreset={chimePreset}
+                chimeSelection={chimeSelection}
                 onChimeChange={handleChimeChange}
                 personalizedMascotValue={personalizedMascotState}
                 onPersonalizedMascotChange={handleTogglePersonalizedMascot}
@@ -1618,11 +1665,11 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                     <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
                   )}
                   <NotificationSettingsCard
-                    notifMode={notifMode}
+                    notifSelection={notifSelection}
                     onNotifModeChange={handleNotifModeChange}
-                    ttsMode={ttsMode}
+                    ttsSelection={ttsSelection}
                     onTtsModeChange={handleTtsModeChange}
-                    chimePreset={chimePreset}
+                    chimeSelection={chimeSelection}
                     onChimeChange={handleChimeChange}
                     personalizedMascotValue={personalizedMascotState}
                     onPersonalizedMascotChange={handleTogglePersonalizedMascot}
