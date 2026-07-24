@@ -1,0 +1,200 @@
+/* Global decision drawer. Two mutually-exclusive presentations:
+   • .peek  — collapsed compact bar, floats just above the tab bar so the boss
+              can still navigate; auto-rises when a card arrives.
+   • .sheet — expanded bottom sheet over a scrim, body scrolls.
+   Layering: scrim 44 < sheet/peek 45. Above detail overlays (30) and the new
+   session composer (40); below the DirPicker (50) and the image Lightbox (100)
+   so tap-to-zoom inside a card still opens above the sheet. */
+
+.peek {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: calc(54px + var(--safe-bottom));
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid var(--color-accent);
+  border-radius: 14px;
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  text-align: left;
+  animation: peekIn 200ms ease-out;
+}
+
+.peek:active {
+  background: var(--color-accent-soft);
+}
+
+.peekDot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: peekPulse 1.6s ease-in-out infinite;
+}
+
+.peekMain {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.peekKind {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.peekWs {
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peekCount {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--color-accent);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+.peekChevron {
+  flex-shrink: 0;
+  color: var(--color-accent);
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  background: rgba(0, 0, 0, 0.4);
+  animation: scrimIn 200ms ease-out;
+}
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  max-height: 86dvh;
+  background: var(--color-bg-card);
+  border-top: 1px solid var(--color-border);
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.28);
+  animation: sheetIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.grabberRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0 2px;
+  background: transparent;
+  border: none;
+}
+
+.grabber {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-border-strong);
+}
+
+.sheetHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 16px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sheetTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.collapseBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 8px;
+}
+
+.collapseBtn:active {
+  background: var(--color-bg-secondary);
+}
+
+.sheetBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 12px calc(16px + var(--safe-bottom));
+}
+
+@keyframes peekIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheetIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes scrimIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes peekPulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .peek,
+  .sheet,
+  .scrim,
+  .peekDot {
+    animation: none;
+  }
+}
