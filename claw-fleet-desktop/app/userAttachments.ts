@@ -46,8 +46,12 @@ export async function resolveStagedAttachment(
  * against the raw path because that path is all history has: it was frozen into
  * the transcript (`Context files:`) or the decision record (`@<path>`) at send
  * time, and the home dir it sits under may be a *remote* home we never see.
+ *
+ * Separators are `[\\/]`: on Windows + LocalBackend the agent runs on the same
+ * machine and `PathBuf::join` freezes a backslash path into the transcript. A
+ * forward-slash-only match dropped those to a bare path chip.
  */
-const STORE_RE = /(?:^|\/)\.fleet\/user-attachments\/([^/]+)\/([^/]+)$/;
+const STORE_RE = /(?:^|[\\/])\.fleet[\\/]user-attachments[\\/]([^\\/]+)[\\/]([^\\/]+)$/;
 
 /**
  * Pastes from before the store existed were staged in `$TMPDIR/fleet-pasted/`,
@@ -55,7 +59,7 @@ const STORE_RE = /(?:^|\/)\.fleet\/user-attachments\/([^/]+)\/([^/]+)$/;
  * reserved key while the files last — see `LEGACY_PASTED_KEY`. Without this,
  * every history predating the store would show a chip where the screenshot is.
  */
-const LEGACY_PASTED_RE = /(?:^|\/)fleet-pasted\/([^/]+)$/;
+const LEGACY_PASTED_RE = /(?:^|[\\/])fleet-pasted[\\/]([^\\/]+)$/;
 const LEGACY_PASTED_KEY = "_pasted";
 
 /** True when `path` names a file in the persistent user-attachment store. */
@@ -95,7 +99,7 @@ export function isRenderableImage(name: string): boolean {
 
 /** Filename component of a path, for labelling a thumbnail. */
 export function attachmentName(path: string): string {
-  const parts = path.split("/");
+  const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] || path;
 }
 
