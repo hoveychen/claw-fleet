@@ -1,7 +1,8 @@
 //! Interaction Mode — injects a guidance block into `~/.claude/CLAUDE.md`
 //! that steers Claude Code to route all terminal-level final output through
-//! the `AskUserQuestion` tool, so Fleet can route every wait-for-user moment
-//! into its decision panel.
+//! the `fleet__ask` MCP tool (falling back to the built-in `AskUserQuestion`
+//! only when `fleet__ask` is absent), so Fleet can route every wait-for-user
+//! moment into its decision panel.
 //!
 //! Install strategy:
 //!   1. Render a guidance markdown file at `~/.claude/fleet-interaction-mode.md`
@@ -32,7 +33,7 @@ fn claude_md_path() -> Option<PathBuf> {
 /// Build the guidance markdown, with user title & locale interpolated.
 ///
 /// Style cues are borrowed from `claude_analyze::build_prompt` so the resulting
-/// AskUserQuestion calls match the notification summary tone (loyal junior-dev
+/// fleet__ask calls match the notification summary tone (loyal junior-dev
 /// voice, user-addressed honorific, locale-aware).
 pub fn render_guidance(user_title: &str, locale: &str) -> String {
     let (title_en, title_zh) = if user_title.is_empty() {
@@ -52,71 +53,32 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
         return format!(
             "# Fleet 交互模式 (managed by Claw Fleet — do not edit)\n\
 \n\
-当本会话中 `AskUserQuestion` 工具可用时，每一个原本会通过纯文本输出把控制权\
-交回用户的回合，都**必须**改为通过 `AskUserQuestion` 递交。文本仍可用于回合\
+当本会话中 `fleet__ask` 工具可用时，每一个原本会通过纯文本输出把控制权\
+交回用户的回合，都**必须**改为通过 `fleet__ask` 递交。文本仍可用于回合\
 中途的状态更新（工具调用前的一句话、工具调用之间的进度说明），但用户在一个\
 回合里最终看到的界面必须是一张决策卡。\n\
 \n\
-**「可用」包含 deferred（延迟加载）。**如果 `AskUserQuestion` 出现在本会话的\
-延迟工具清单里（只列出名字、schema 未预加载），它仍然算可用。不要因为该工具被\
-标为 deferred 就退回纯文本——这正是本模式要防的失败模式。\n\
+`fleet__ask` 是 Fleet 经 MCP 注册的决策卡工具（~/.claude.json 里的 \
+mcpServers.fleet）。它**不是** deferred——在会话启动时就注册好，schema 从\
+第 1 回合起就是活的，**无需** `ToolSearch` 预加载即可直接调用。它是本模式的\
+**唯一首选**决策卡工具；内置的 `AskUserQuestion` **只**在 `fleet__ask` 缺席时\
+才作为兜底使用（见文末「兜底」一节），平时一律不用它。\n\
 \n\
-**本会话首次调用 `AskUserQuestion` 前，你必须先用 `ToolSearch` 以\
-`select:AskUserQuestion` 加载它的 schema。**下方的 schema 区块只是给人看的\
-参考文档，不是运行时注册的 schema——只靠它会触发 `InputValidationError: \
-questions expected array but provided as string`，因为运行时工具清单里没有\
-JSONSchema，harness 无法把 `questions` 强制转成数组。每会话加载一次即可，同一\
-会话后续的 `AskUserQuestion` 调用复用已加载的 schema。\n\
-\n\
-### `AskUserQuestion` schema（参考——调用前务必先用 `ToolSearch` 加载）\n\
-\n\
-顶层：`{{ \"questions\": Question[] }}`——每次调用 1 到 4 个问题。\n\
-\n\
-`Question`（除标注外均必填）：\n\
-- `question`（string）：完整的提示正文；可用 markdown；澄清型问题以 `?` 结尾，\
-  Case A 则以报告正文结尾。\n\
-- `header`（string，≤12 字符）：UI 上显示的短标签（chip）。\n\
-- `multiSelect`（boolean）：单选为 `false`，选项互不排斥时为 `true`。\n\
-- `options`（Option[]，长度 2–4）：候选答案。不要自己加 \"Other\" 选项——\
-  UI 会自动追加。\n\
-\n\
-`Option`：\n\
-- `label`（string，必填，1–5 词）：具体的动作/答案。当你有明确推荐时，给第一个\
-  选项的 label 追加 \" (Recommended)\"。\n\
-- `description`（string，必填）：取舍、范围、副作用。\n\
-- `preview`（string，可选）：该选项聚焦时在并排面板里渲染的 markdown。仅单选\
-  可用；除非要对比具体产物（UI 草图、代码片段、图示），否则不用。\n\
-\n\
-最小示例：\n\
-```json\n\
-{{\n\
-  \"questions\": [{{\n\
-    \"question\": \"Which approach should I take?\",\n\
-    \"header\": \"Approach\",\n\
-    \"multiSelect\": false,\n\
-    \"options\": [\n\
-      {{\"label\": \"Option A (Recommended)\", \"description\": \"Fast but couples modules.\"}},\n\
-      {{\"label\": \"Option B\", \"description\": \"Slower, keeps boundaries clean.\"}}\n\
-    ]\n\
-  }}]\n\
-}}\n\
-```\n\
-\n\
-这就是用户（称呼为「{title_zh}」）希望他的 Fleet 应用统一排队、管理每一个\
-「等待输入」时刻的方式。\n\
+Claude Code 里这个工具的规范名是 `mcp__fleet__ask`（有的环境显示为 \
+`fleet__ask`）；两者指同一个工具。\n\
 \n\
 ## 适用范围\n\
 \n\
-- 仅当 `AskUserQuestion` 列在你的可用工具里时适用。若该工具不存在（例如：\
-  subagent 上下文、非 Claude-Code 的 harness），完全忽略本文件，照常用文本\
-  回复。\n\
+- 仅当 `fleet__ask` 列在你的可用工具里时，本首选规则适用。若 `fleet__ask` \
+  缺席但 `AskUserQuestion` 在，见文末「兜底」；两者都不在，见「当决策卡工具\
+  都缺席时」。\n\
 - 只作用于助手回合的*终端*输出：你即将停止调用工具、把控制权交出去的那一刻。\
   不要包裹回合中途的叙述。\n\
 - `ExitPlanMode` 有自己的决策面板桥接（Onboarding 里的「Plan Approval」开关）。\
   开关开启时，该工具调用会被 Fleet 拦截，批准/编辑/拒绝的界面渲染成决策卡——\
-  你无需自己把方案审批包进 `AskUserQuestion`。开关关闭时，`ExitPlanMode` 回退到\
+  你无需自己把方案审批包进 `fleet__ask`。开关关闭时，`ExitPlanMode` 回退到\
   Claude Code 原生的方案审批对话框，同样绕过本模式。无论哪种，都别把方案审批\
-  硬塞进 `AskUserQuestion`。\n\
+  硬塞进 `fleet__ask`。\n\
 \n\
 ## 语气与语言\n\
 \n\
@@ -126,9 +88,9 @@ JSONSchema，harness 无法把 `questions` 强制转成数组。每会话加载�
 - `header` chip 标签保持 ≤12 字符。选项 `label` 保持 1–5 词；细节放进\
   `description`。\n\
 \n\
-## 把你的输出映射进 `AskUserQuestion`\n\
+## 把你的输出映射进 `fleet__ask`\n\
 \n\
-`AskUserQuestion` 工具每次调用接受 1–4 个问题，每个 2–4 个选项。「Other」由\
+`fleet__ask` 工具每次调用接受 1–4 个问题，每个 2–4 个选项。「Other」由\
 系统自动提供以支持自由文本输入——不要自己加「让我自由输入」这样的选项。\n\
 \n\
 ### Case A —— 纯报告 / 状态（没有待用户决策的事项）\n\
@@ -141,7 +103,7 @@ JSONSchema，harness 无法把 `questions` 强制转成数组。每会话加载�
 ### Case B —— 报告 + 待决策事项\n\
 \n\
 如果你原本既要报告结果、又要请用户解决 N 个后续问题，把它们打包进一次\
-`AskUserQuestion` 调用：\n\
+`fleet__ask` 调用：\n\
 - Q1：`question` = 报告正文，然后拼接上第一个决策提示。选项 = 该决策的候选解法。\n\
 - Q2..Qmin(N+1,4)：其余每个决策各自成一个问题，配自己的选项。\n\
 \n\
@@ -202,26 +164,59 @@ Fleet 的决策面板会为每张新卡片播一段简短的 TTS 播报。前端
 ## 终止 / 循环安全\n\
 \n\
 用户作答后，若答案明确指派你去执行（例如他们选了一个具体动作），就在同一回合\
-里执行那个动作。不要把那个执行回合再包进另一个 `AskUserQuestion`，除非你又抵达\
+里执行那个动作。不要把那个执行回合再包进另一个 `fleet__ask`，除非你又抵达\
 了一个真正的「等待输入」界面。\n\
 \n\
 **会话结束豁免。**当用户选了明显结束对话的选项（如「任务结束」「下班」「收工」，\
 或任何等价于「我们完事了」的表达），本回合以一行纯文本致意结束，而不是再来一个\
-`AskUserQuestion`。这是本文件顶部「每回合都要问」规则的唯一字面豁免；不要追加\
+`fleet__ask`。这是本文件顶部「每回合都要问」规则的唯一字面豁免；不要追加\
 取舍说明——上述规则已明确授权这里的纯文本收尾，所以没有需要点出的冲突。\n\
 \n\
-## 当该工具缺席时\n\
+## `fleet__ask` schema（参考）\n\
 \n\
-如果本回合 `AskUserQuestion` 不在你的工具集里——既没直接列出、也不在延迟工具\
-清单里——本文件即失效，你就像没有本指引时那样用纯文本回复。被延迟列出**不**\
-等于缺席；见开头一节。\n\
+顶层：`{{ \"questions\": Question[] }}`——每次调用 1 到 4 个问题。因为它经 MCP \
+注册，schema 从第 1 回合起就是活的，直接调用即可，**无需** `ToolSearch` \
+预加载。\n\
 \n\
-## 扩展：`fleet__ask`（MCP 工具变体）\n\
+`Question`（除标注外均必填）：\n\
+- `question`（string）：完整的提示正文；可用 markdown；澄清型问题以 `?` 结尾，\
+  Case A 则以报告正文结尾。\n\
+- `header`（string，≤12 字符）：UI 上显示的短标签（chip）。\n\
+- `multiSelect`（boolean）：单选为 `false`，选项互不排斥时为 `true`。\n\
+- `options`（Option[]，长度 2–4，**可选**）：候选答案。不要自己加 \"Other\" \
+  选项——UI 会自动追加。卡片是纯表单或纯 html 时可整个省略。\n\
+- `html` / `images` / `formFields`——三个每问题可选的扩展字段，详见下方\
+  「扩展字段」。\n\
 \n\
-Fleet 运行时，Claude Code 还会看到第二个工具——`fleet__ask`——经 MCP 注册\
-（~/.claude.json 里的 mcpServers.fleet）。它是 `AskUserQuestion` 的*超集*：凡是\
-你能放进 `AskUserQuestion` 的，都能放进 `fleet__ask`，外加三个新的、每问题可选\
-的字段：\n\
+`Option`：\n\
+- `label`（string，必填，1–5 词）：具体的动作/答案。当你有明确推荐时，给第一个\
+  选项的 label 追加 \" (Recommended)\"。\n\
+- `description`（string，必填）：取舍、范围、副作用。\n\
+- `preview`（string，可选）：该选项聚焦时在并排面板里渲染的 markdown。仅单选\
+  可用；除非要对比具体产物（UI 草图、代码片段、图示），否则不用。\n\
+\n\
+最小示例：\n\
+```json\n\
+{{\n\
+  \"questions\": [{{\n\
+    \"question\": \"Which approach should I take?\",\n\
+    \"header\": \"Approach\",\n\
+    \"multiSelect\": false,\n\
+    \"options\": [\n\
+      {{\"label\": \"Option A (Recommended)\", \"description\": \"Fast but couples modules.\"}},\n\
+      {{\"label\": \"Option B\", \"description\": \"Slower, keeps boundaries clean.\"}}\n\
+    ]\n\
+  }}]\n\
+}}\n\
+```\n\
+\n\
+这就是用户（称呼为「{title_zh}」）希望他的 Fleet 应用统一排队、管理每一个\
+「等待输入」时刻的方式。\n\
+\n\
+### 扩展字段（`fleet__ask` 独有）\n\
+\n\
+`fleet__ask` 是内置 `AskUserQuestion` 的*超集*：凡是 `AskUserQuestion` 能放的\
+它都能放，外加三个每问题可选的字段：\n\
 \n\
 - `html`（string）：静态 HTML 预览。Fleet 在问题正文和作答控件之间用沙箱化\
   `<iframe sandbox=\"\">` 渲染它——无脚本、无同源、无表单、无顶层导航、无弹窗。\
@@ -244,45 +239,6 @@ Fleet 运行时，Claude Code 还会看到第二个工具——`fleet__ask`—�
   / `checkbox` / `date` / `datetime` / `time` / `range` 之一。用户的答案按字段\
   name 回传。\n\
 \n\
-**与 `AskUserQuestion` 的差异。**\n\
-- `AskUserQuestion` 是延迟的——首次调用前须用 `ToolSearch select:AskUserQuestion` \
-  加载 schema。`fleet__ask` *不*延迟——它在会话启动时经 MCP 注册，从第 1 回合起\
-  schema 就是活的。\n\
-- `AskUserQuestion` 按问题返回选中的选项 label。`fleet__ask` 返回一个扁平的\
-  `answers` map，问题文本 → 选项 label 和字段 name → 值两类条目共存。\n\
-- `fleet__ask` 与 `AskUserQuestion` 共用同一决策卡界面、同一语音摘要分隔符规则、\
-  同一语气与语言规则。把它当作 `AskUserQuestion` 加上扩展钩子。\n\
-\n\
-**何时用哪个。**\n\
-\n\
-| 场景 | 工具 |\n\
-|-----------|------|\n\
-| 纯偏好 / 分支选择，2–4 个文本选项 | `AskUserQuestion` |\n\
-| 状态报告 + 1–4 个后续决策，全为选项式 | `AskUserQuestion` |\n\
-| 需要渲染 HTML 预览（diff 表、格式化产物、截图网格） | 带 `html` 的 `fleet__ask` |\n\
-| 需要展示一张或多张本地图片（截图、图表、生成的图） | 带 `images` 的 `fleet__ask`（绝不在 `html` 里 base64） |\n\
-| 需要结构化表单输入（commit 信息、滑块、日期/时间选择、多个类型化字段） | 带 `formFields` 的 `fleet__ask` |\n\
-| 三者混合（预览 + 表单 + 选项）于一张卡 | `fleet__ask`（复合） |\n\
-| 视觉渲染本身就是交付物——一幅画、图表、带样式的产物，任何「好看」是诉求一部分的东西——哪怕纯文本技术上也能传达同样信息 | 带 `html` 的 `fleet__ask`（或 `render_a2ui`） |\n\
-\n\
-对上文记录的那些例行「等待输入」时刻，默认用 `AskUserQuestion`。当你确实需要\
-html 预览或结构化表单时，才伸手去拿 `fleet__ask`。判据*不是*「纯文本能否表达\
-这个？」——文本几乎能表达任何东西，所以这个问题永远答「能」，并悄悄把你引回\
-更便宜的工具。判据是「更丰富的渲染对{title_zh}是不是更好的答案？」：当视觉呈现\
-本身就是{title_zh}所求的一部分——一幅画、带样式的 diff、一张图表，任何「怎么看」\
-才是重点的东西——就直接上 `fleet__ask`/`render_a2ui`，别退回 ASCII 或裸\
-markdown。两个工具都在同一决策面板里渲染，所以{title_zh}看不到 UX 接缝。\n\
-\n\
-### `fleet__ask` schema（参考）\n\
-\n\
-顶层：`{{ \"questions\": Question[] }}`——每次调用 1 到 4 个问题。\n\
-\n\
-`Question`（字段同 `AskUserQuestion`，外加三个可选）：\n\
-- `question`、`header`、`multiSelect`——与 `AskUserQuestion` 相同。\n\
-- `options`（Option[]，这里**可选**）：形状同 `AskUserQuestion`；卡片是纯表单或\
-  纯 html 时整个省略。\n\
-- `html` / `images` / `formFields`——即上文那三个扩展字段；`formFields` 详见下方。\n\
-\n\
 `FormField`：\n\
 - `name`（string，必填）：answers map 将使用的标识符。\n\
 - `kind`（string，必填）：`text` | `textarea` | `number` | `select` | `radio` | `checkbox` | `date` | `datetime` | `time` | `range`。\n\
@@ -301,6 +257,15 @@ markdown。两个工具都在同一决策面板里渲染，所以{title_zh}看�
 - `datetime` → `\"YYYY-MM-DDTHH:MM\"`（HTML5 `datetime-local` 形状，无时区）。\n\
 - `time` → `\"HH:MM\"`（24 小时制）。\n\
 - `range` → `[min, max]` 内、按 `step` 对齐的数字字符串。\n\
+\n\
+**何时用扩展字段。**判据*不是*「纯文本能否表达这个？」——文本几乎能表达任何\
+东西，所以这个问题永远答「能」，并悄悄把你引回纯选项卡。判据是「更丰富的渲染\
+对{title_zh}是不是更好的答案？」：需要 diff 表 / 截图网格 / 格式化产物 → `html`；\
+需要展示本地图片 → `images`（绝不在 `html` 里 base64）；需要结构化输入（commit \
+信息、滑块、日期/时间、多个类型化字段）→ `formFields`；三者可在一张卡上复合。\
+当视觉呈现本身就是{title_zh}所求的一部分——一幅画、带样式的 diff、一张图表，\
+任何「怎么看」才是重点的东西——就大方用 `html`（或下方 `render_a2ui`），别退回 \
+ASCII 或裸 markdown。\n\
 \n\
 **用法示例（复合：html 预览 + 表单 + 选项；纯 html 或纯表单时对应省略字段）。**\n\
 ```json\n\
@@ -356,6 +321,51 @@ Fleet 把每个值字符串化，所以线上是 `Record<String, String>`（形�
 **示例。**一个评分+评论卡：`surfaceUpdate` 里挂一棵 `root` 组件树（`Card` 内含\
 `Text`/`Slider`/`TextField`/`Button`），`Button` 带 `action.name`；用户拖滑块、\
 打字、点 Submit 后 Fleet 回 `{{ \"actionName\": \"submit\", \"actionContext\": {{ \"score\": \"7\", \"note\": \"…\" }} }}`。\n\
+\n\
+## 兜底：`fleet__ask` 缺席时用 `AskUserQuestion`\n\
+\n\
+如果本会话 `fleet__ask` 不在你的工具集里（例如 Fleet 的 MCP toggle 被关掉、\
+或这是非 Fleet 起的会话），但内置的 `AskUserQuestion` 在，就退回用 \
+`AskUserQuestion` 承载决策卡——上面所有关于 Case A/B/C、语音分隔符、语气语言、\
+选项质量、终止安全的规则原样适用，只是把工具换成 `AskUserQuestion`。只要 \
+`fleet__ask` 在，就永远优先用 `fleet__ask`，不要用 `AskUserQuestion`。\n\
+\n\
+`AskUserQuestion` 与 `fleet__ask` 有两点关键差异，用它兜底时务必注意：\n\
+\n\
+- **它是 deferred（延迟加载）。**如果 `AskUserQuestion` 出现在本会话的\
+  延迟工具清单里（只列出名字、schema 未预加载），它仍然算可用——延迟列出**不**\
+  等于缺席，不要因为它被标为 deferred 就退回纯文本。\n\
+- **首次调用前必须先加载 schema。**本会话首次调用 `AskUserQuestion` 前，你\
+  必须先用 `ToolSearch` 以 `select:AskUserQuestion` 加载它的 schema。只靠下方\
+  参考文档会触发 `InputValidationError: questions expected array but provided \
+  as string`，因为运行时工具清单里没有 JSONSchema，harness 无法把 `questions` \
+  强制转成数组。每会话加载一次即可，同一会话后续的 `AskUserQuestion` 调用复用\
+  已加载的 schema。\n\
+\n\
+`AskUserQuestion` **不支持** `fleet__ask` 的 `html` / `images` / `formFields` \
+扩展字段；只用它承载纯选项/纯文本决策卡。需要富渲染而 `fleet__ask` 缺席时，\
+退回纯选项卡即可。\n\
+\n\
+### `AskUserQuestion` schema（兜底参考——调用前务必先用 `ToolSearch` 加载）\n\
+\n\
+顶层：`{{ \"questions\": Question[] }}`——每次调用 1 到 4 个问题。\n\
+\n\
+`Question`（除标注外均必填）：\n\
+- `question`（string）：完整的提示正文；可用 markdown。\n\
+- `header`（string，≤12 字符）：UI 上显示的短标签（chip）。\n\
+- `multiSelect`（boolean）：单选为 `false`，选项互不排斥时为 `true`。\n\
+- `options`（Option[]，长度 2–4）：候选答案。不要自己加 \"Other\" 选项——\
+  UI 会自动追加。\n\
+\n\
+`Option` 形状与 `fleet__ask` 相同（`label` / `description` / 可选 `preview`），\
+但没有 `html` / `images` / `formFields`。\n\
+\n\
+## 当决策卡工具都缺席时\n\
+\n\
+如果本回合 `fleet__ask` 和 `AskUserQuestion` 都不在你的工具集里——既没直接\
+列出、也不在延迟工具清单里（例如 subagent 上下文、非 Claude-Code 的 harness）\
+——本文件即失效，你就像没有本指引时那样用纯文本回复。被延迟列出**不**\
+等于缺席；deferred listing does NOT qualify as absent。\n\
 ",
             title_zh = title_zh,
             language_line = language_line,
@@ -365,81 +375,39 @@ Fleet 把每个值字符串化，所以线上是 `Record<String, String>`（形�
     format!(
         "# Fleet Interaction Mode (managed by Claw Fleet — do not edit)\n\
 \n\
-When the `AskUserQuestion` tool is available in this session, every turn that \
+When the `fleet__ask` tool is available in this session, every turn that \
 would otherwise hand control back to the user via plain text output MUST be \
-delivered through `AskUserQuestion` instead. Text remains allowed for \
+delivered through `fleet__ask` instead. Text remains allowed for \
 mid-turn status updates (the one-sentence line before a tool call, progress \
 notes between tool calls), but the final surface a user sees in a turn must \
 be a decision card.\n\
 \n\
-**\"Available\" includes deferred.** If `AskUserQuestion` appears in the \
-session's deferred-tool list (its name is listed but its schema is not \
-preloaded), it still counts as available. Do NOT fall through to plain text \
-just because the tool was listed as deferred — that is the exact failure \
-mode this mode is designed to prevent.\n\
+`fleet__ask` is Fleet's decision-card tool, registered via MCP \
+(mcpServers.fleet in ~/.claude.json). It is **NOT deferred** — it is \
+registered at session start, so its schema is live from turn 1 and you can \
+call it directly with **no** `ToolSearch` preload. It is this mode's \
+**sole preferred** decision-card tool; the built-in `AskUserQuestion` is used \
+**only** as a fallback when `fleet__ask` is absent (see the \"Fallback\" \
+section at the end) — otherwise never reach for it.\n\
 \n\
-**Before the first `AskUserQuestion` call this session, you MUST first load \
-its schema via `ToolSearch` with query `select:AskUserQuestion`.** The \
-schema block below is human-readable reference documentation, not a \
-runtime-registered schema — relying on it alone has caused \
-`InputValidationError: questions expected array but provided as string`, \
-because without the JSONSchema in the runtime tool list the harness cannot \
-coerce the array. One `ToolSearch` load per session is enough; subsequent \
-`AskUserQuestion` calls in the same session reuse the loaded schema.\n\
-\n\
-### `AskUserQuestion` schema (reference — always load via `ToolSearch` before calling)\n\
-\n\
-Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
-\n\
-`Question` (all fields required unless noted):\n\
-- `question` (string): the full prompt body; markdown allowed; end with `?` \
-  for clarifying questions or with the report body for Case A.\n\
-- `header` (string, ≤12 chars): short chip label shown in the UI.\n\
-- `multiSelect` (boolean): `false` for single-choice, `true` when options are \
-  not mutually exclusive.\n\
-- `options` (Option[], length 2–4): candidate answers. Do NOT add an \"Other\" \
-  option — the UI appends one automatically.\n\
-\n\
-`Option`:\n\
-- `label` (string, required, 1–5 words): concrete action/answer. Append \
-  \" (Recommended)\" to the first option when you have a clear recommendation.\n\
-- `description` (string, required): trade-offs, scope, side-effects.\n\
-- `preview` (string, optional): markdown rendered in a side-by-side panel \
-  when this option is focused. Single-select only; skip unless comparing \
-  concrete artifacts (UI mockups, code snippets, diagrams).\n\
-\n\
-Minimal example:\n\
-```json\n\
-{{\n\
-  \"questions\": [{{\n\
-    \"question\": \"Which approach should I take?\",\n\
-    \"header\": \"Approach\",\n\
-    \"multiSelect\": false,\n\
-    \"options\": [\n\
-      {{\"label\": \"Option A (Recommended)\", \"description\": \"Fast but couples modules.\"}},\n\
-      {{\"label\": \"Option B\", \"description\": \"Slower, keeps boundaries clean.\"}}\n\
-    ]\n\
-  }}]\n\
-}}\n\
-```\n\
-\n\
-This is how the user (addressed as \"{title_zh}\" / \"{title_en}\") wants their \
-Fleet app to queue and manage every wait-for-input moment uniformly.\n\
+Claude Code's canonical name for this tool is `mcp__fleet__ask` (some \
+environments show it as `fleet__ask`); both refer to the same tool.\n\
 \n\
 ## Scope\n\
 \n\
-- Applies only when `AskUserQuestion` is listed in your available tools. If \
-  the tool is not present (for example: subagent contexts, non-Claude-Code \
-  harnesses), ignore this file entirely and respond normally with text.\n\
+- This preferred rule applies only when `fleet__ask` is listed in your \
+  available tools. If `fleet__ask` is absent but `AskUserQuestion` is \
+  present, see \"Fallback\" at the end; if both are absent, see \"When both \
+  decision-card tools are absent\".\n\
 - Applies to the *terminal* output of an assistant turn: the moment you would \
   stop calling tools and yield control. Do NOT wrap mid-turn narration.\n\
 - `ExitPlanMode` has its own decision-panel bridge (the \"Plan Approval\" \
   toggle in Onboarding). When that toggle is on, the tool call is intercepted \
   by Fleet and the approve / edit / reject surface renders as a decision \
-  card — you do NOT need to wrap plan approval in `AskUserQuestion` yourself. \
+  card — you do NOT need to wrap plan approval in `fleet__ask` yourself. \
   When the toggle is off, `ExitPlanMode` falls back to Claude Code's native \
   plan-approval dialog, which also bypasses this mode. Either way, do not \
-  shoehorn plan approvals into `AskUserQuestion`.\n\
+  shoehorn plan approvals into `fleet__ask`.\n\
 \n\
 ## Tone & Language\n\
 \n\
@@ -450,9 +418,9 @@ Fleet app to queue and manage every wait-for-input moment uniformly.\n\
 - Keep `header` chip labels to ≤12 characters. Keep option `label` to 1–5 \
   words; put nuance in `description`.\n\
 \n\
-## Mapping Your Output Into `AskUserQuestion`\n\
+## Mapping Your Output Into `fleet__ask`\n\
 \n\
-The `AskUserQuestion` tool accepts 1–4 questions per call, each with 2–4 \
+The `fleet__ask` tool accepts 1–4 questions per call, each with 2–4 \
 options. \"Other\" is automatically provided by the system for free-text \
 input — do NOT add a \"let me type freely\" option yourself.\n\
 \n\
@@ -466,7 +434,7 @@ Options (aim for 2–4 total):\n\
 ### Case B — Report + pending decisions\n\
 \n\
 If you would have reported results AND asked the user to resolve N follow-up \
-issues, pack them into a single `AskUserQuestion` call:\n\
+issues, pack them into a single `fleet__ask` call:\n\
 - Q1: `question` = the report body, then the first decision prompt concatenated. Options = candidate resolutions for that first decision.\n\
 - Q2..Qmin(N+1,4): each remaining decision as its own question with its own options.\n\
 \n\
@@ -542,30 +510,66 @@ Hard rules for the pre-divider line:\n\
 \n\
 After the user answers, if the answer clearly dispatches you to execute \
 (e.g., they picked a concrete action), carry out that action in the same \
-turn. Do NOT re-wrap that executing turn in another `AskUserQuestion` unless \
+turn. Do NOT re-wrap that executing turn in another `fleet__ask` unless \
 you again reach a genuine wait-for-input surface.\n\
 \n\
 **Session-end exemption.** When the user picks an option that clearly closes \
 the conversation (e.g. \"任务结束\", \"下班\", \"收工\", or anything \
 equivalently meaning \"we are done\"), this turn ends with a one-line \
-plain-text acknowledgement instead of another `AskUserQuestion`. This is the \
+plain-text acknowledgement instead of another `fleet__ask`. This is the \
 only literal exemption to the every-turn-asks rule at the top of this file; \
 do not append a trade-off explanation — the rules above explicitly authorize \
 the plain-text close-out here, so there is no conflict to surface.\n\
 \n\
-## When The Tool Is Absent\n\
+## `fleet__ask` schema (reference)\n\
 \n\
-If `AskUserQuestion` is not in your toolset this turn — neither directly \
-listed nor present in the deferred-tool list — this file is inert and you \
-respond with plain text exactly as you would without this guidance. A \
-deferred listing does NOT qualify as absent; see the opening section.\n\
+Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call. \
+Because it is MCP-registered, its schema is live from turn 1 — call it \
+directly, with **no** `ToolSearch` preload.\n\
 \n\
-## Extended: `fleet__ask` (MCP-tool variant)\n\
+`Question` (all fields required unless noted):\n\
+- `question` (string): the full prompt body; markdown allowed; end with `?` \
+  for clarifying questions or with the report body for Case A.\n\
+- `header` (string, ≤12 chars): short chip label shown in the UI.\n\
+- `multiSelect` (boolean): `false` for single-choice, `true` when options are \
+  not mutually exclusive.\n\
+- `options` (Option[], length 2–4, **optional**): candidate answers. Do NOT \
+  add an \"Other\" option — the UI appends one automatically. Omit entirely \
+  when the card is form-only or html-only.\n\
+- `html` / `images` / `formFields` — three optional per-question extension \
+  fields, detailed below under \"Extension fields\".\n\
 \n\
-When Fleet is running, Claude Code also sees a second tool — `fleet__ask` — \
-registered via MCP (mcpServers.fleet in ~/.claude.json). It is a *superset* \
-of `AskUserQuestion`: anything you could put in `AskUserQuestion`, you can \
-put in `fleet__ask`, plus three new optional per-question fields:\n\
+`Option`:\n\
+- `label` (string, required, 1–5 words): concrete action/answer. Append \
+  \" (Recommended)\" to the first option when you have a clear recommendation.\n\
+- `description` (string, required): trade-offs, scope, side-effects.\n\
+- `preview` (string, optional): markdown rendered in a side-by-side panel \
+  when this option is focused. Single-select only; skip unless comparing \
+  concrete artifacts (UI mockups, code snippets, diagrams).\n\
+\n\
+Minimal example:\n\
+```json\n\
+{{\n\
+  \"questions\": [{{\n\
+    \"question\": \"Which approach should I take?\",\n\
+    \"header\": \"Approach\",\n\
+    \"multiSelect\": false,\n\
+    \"options\": [\n\
+      {{\"label\": \"Option A (Recommended)\", \"description\": \"Fast but couples modules.\"}},\n\
+      {{\"label\": \"Option B\", \"description\": \"Slower, keeps boundaries clean.\"}}\n\
+    ]\n\
+  }}]\n\
+}}\n\
+```\n\
+\n\
+This is how the user (addressed as \"{title_zh}\" / \"{title_en}\") wants their \
+Fleet app to queue and manage every wait-for-input moment uniformly.\n\
+\n\
+### Extension fields (`fleet__ask`-only)\n\
+\n\
+`fleet__ask` is a *superset* of the built-in `AskUserQuestion`: anything you \
+could put in `AskUserQuestion`, you can put in `fleet__ask`, plus three \
+optional per-question fields:\n\
 \n\
 - `html` (string): a static HTML preview. Fleet renders it in a sandboxed \
   `<iframe sandbox=\"\">` between the question body and the answer controls — \
@@ -594,53 +598,6 @@ put in `fleet__ask`, plus three new optional per-question fields:\n\
   `number` / `select` / `radio` / `checkbox` / `date` / `datetime` / `time` \
   / `range`. The user's answers come back keyed by field name.\n\
 \n\
-**Differences from `AskUserQuestion`.**\n\
-- `AskUserQuestion` is deferred — its schema must be loaded with \
-  `ToolSearch select:AskUserQuestion` before the first call. \
-  `fleet__ask` is *not* deferred — it is registered through MCP at session \
-  start, so its schema is live from turn 1.\n\
-- `AskUserQuestion` returns selected option labels per question. \
-  `fleet__ask` returns a flat `answers` map where both question-text → \
-  option-label entries and form-field-name → value entries coexist.\n\
-- `fleet__ask` shares the same Decision Card surface as `AskUserQuestion`, \
-  the same Speech Summary Divider rule, the same Tone & Language rules. \
-  Treat it as `AskUserQuestion` plus the extension hooks.\n\
-\n\
-**When to use which.**\n\
-\n\
-| Situation | Tool |\n\
-|-----------|------|\n\
-| Pure preference / branch choice with 2–4 textual options | `AskUserQuestion` |\n\
-| Status report + 1–4 follow-up decisions, all option-based | `AskUserQuestion` |\n\
-| Needs a rendered HTML preview (diff table, formatted artefact, screenshot grid) | `fleet__ask` with `html` |\n\
-| Needs to show one or more local images (screenshots, charts, generated art) | `fleet__ask` with `images` (never base64 in `html`) |\n\
-| Needs structured form input (commit message, slider, date/time picker, multiple typed fields) | `fleet__ask` with `formFields` |\n\
-| Mix of all three (preview + form + options) on one card | `fleet__ask` (composite) |\n\
-| The visual rendering itself is the deliverable — a drawing, chart, styled artefact, anything where \"looks good\" is part of the ask — even when plain text could technically convey the same information | `fleet__ask` with `html` (or `render_a2ui`) |\n\
-\n\
-Default to `AskUserQuestion` for the routine wait-for-input moments \
-documented above. Reach for `fleet__ask` when you genuinely need the html \
-preview or structured form. The deciding test is NOT \"can plain text express \
-this?\" — text can express almost anything, so that question always answers \
-yes and quietly steers you back to the cheaper tool. The test is \"would a \
-richer rendering be the better answer for {title_en}?\": when the visual \
-presentation itself is part of what {title_en} asked for — a drawing, a styled \
-diff, a chart, anything where how it looks is the point — go straight to \
-`fleet__ask`/`render_a2ui` instead of falling back to ASCII or bare markdown. \
-Both tools render in the same Decision Panel, so {title_en} doesn't see a UX \
-seam.\n\
-\n\
-### `fleet__ask` schema (reference)\n\
-\n\
-Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
-\n\
-`Question` (same fields as `AskUserQuestion`, plus three optional):\n\
-- `question`, `header`, `multiSelect` — identical to `AskUserQuestion`.\n\
-- `options` (Option[], **optional** here): same Option shape; omit entirely \
-  when the card is form-only or html-only.\n\
-- `html` / `images` / `formFields` — the three extension fields described \
-  above; `formFields` detailed below.\n\
-\n\
 `FormField`:\n\
 - `name` (string, required): identifier the answers map will use.\n\
 - `kind` (string, required): `text` | `textarea` | `number` | `select` | `radio` | `checkbox` | `date` | `datetime` | `time` | `range`.\n\
@@ -659,6 +616,18 @@ Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
 - `datetime` → `\"YYYY-MM-DDTHH:MM\"` (HTML5 `datetime-local` shape, no timezone).\n\
 - `time` → `\"HH:MM\"` (24-hour).\n\
 - `range` → numeric string within `[min, max]` snapped to `step`.\n\
+\n\
+**When to use the extension fields.** The deciding test is NOT \"can plain \
+text express this?\" — text can express almost anything, so that question \
+always answers yes and quietly steers you back to a bare option card. The \
+test is \"would a richer rendering be the better answer for {title_en}?\": \
+need a diff table / screenshot grid / formatted artefact → `html`; need to \
+show local images → `images` (never base64 in `html`); need structured input \
+(commit message, slider, date/time, multiple typed fields) → `formFields`; \
+all three can be composed on one card. When the visual presentation itself is \
+part of what {title_en} asked for — a drawing, a styled diff, a chart, \
+anything where how it looks is the point — go ahead and use `html` (or \
+`render_a2ui` below) instead of falling back to ASCII or bare markdown.\n\
 \n\
 **Usage example (composite: html preview + form + options; omit the matching field for html-only or form-only).**\n\
 ```json\n\
@@ -721,6 +690,60 @@ JSON-stringified.\n\
 `Card` holding `Text`/`Slider`/`TextField`/`Button`), the `Button` carrying \
 `action.name`; the user drags the slider, types a note, clicks Submit → Fleet \
 replies with `{{ \"actionName\": \"submit\", \"actionContext\": {{ \"score\": \"7\", \"note\": \"…\" }} }}`.\n\
+\n\
+## Fallback: use `AskUserQuestion` when `fleet__ask` is absent\n\
+\n\
+If `fleet__ask` is not in your toolset this session (for example: Fleet's MCP \
+toggle is off, or this is a non-Fleet-launched session) but the built-in \
+`AskUserQuestion` is, fall back to `AskUserQuestion` to carry the decision \
+card — all the rules above (Cases A/B/C, the speech divider, tone & language, \
+option quality, termination safety) apply verbatim, just with the tool \
+swapped to `AskUserQuestion`. Whenever `fleet__ask` IS present, always prefer \
+it and never reach for `AskUserQuestion`.\n\
+\n\
+`AskUserQuestion` differs from `fleet__ask` in two ways that matter when you \
+fall back to it:\n\
+\n\
+- **It is deferred.** If `AskUserQuestion` appears in the session's \
+  deferred-tool list (its name is listed but its schema is not preloaded), it \
+  still counts as available. Do NOT fall through to plain text just because \
+  the tool was listed as deferred.\n\
+- **Its schema must be loaded before the first call.** Before the first \
+  `AskUserQuestion` call this session, you MUST first load its schema via \
+  `ToolSearch` with query `select:AskUserQuestion`. Relying on the reference \
+  block below alone has caused `InputValidationError: questions expected \
+  array but provided as string`, because without the JSONSchema in the \
+  runtime tool list the harness cannot coerce the array. One `ToolSearch` \
+  load per session is enough; subsequent `AskUserQuestion` calls in the same \
+  session reuse the loaded schema.\n\
+\n\
+`AskUserQuestion` does **not** support `fleet__ask`'s `html` / `images` / \
+`formFields` extension fields; use it only for pure-option / pure-text \
+decision cards. When you need rich rendering but `fleet__ask` is absent, fall \
+back to a bare option card.\n\
+\n\
+### `AskUserQuestion` schema (fallback reference — always load via `ToolSearch` before calling)\n\
+\n\
+Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
+\n\
+`Question` (all fields required unless noted):\n\
+- `question` (string): the full prompt body; markdown allowed.\n\
+- `header` (string, ≤12 chars): short chip label shown in the UI.\n\
+- `multiSelect` (boolean): `false` for single-choice, `true` when options are \
+  not mutually exclusive.\n\
+- `options` (Option[], length 2–4): candidate answers. Do NOT add an \"Other\" \
+  option — the UI appends one automatically.\n\
+\n\
+`Option` has the same shape as in `fleet__ask` (`label` / `description` / \
+optional `preview`), but without `html` / `images` / `formFields`.\n\
+\n\
+## When both decision-card tools are absent\n\
+\n\
+If neither `fleet__ask` nor `AskUserQuestion` is in your toolset this turn — \
+neither directly listed nor present in the deferred-tool list (for example: \
+subagent contexts, non-Claude-Code harnesses) — this file is inert and you \
+respond with plain text exactly as you would without this guidance. A \
+deferred listing does NOT qualify as absent.\n\
 ",
         title_en = title_en,
         title_zh = title_zh,
@@ -900,6 +923,41 @@ mod tests {
         assert!(
             g.contains("InputValidationError"),
             "guidance must cite the concrete failure mode (InputValidationError) so the rule's purpose is clear"
+        );
+    }
+
+    #[test]
+    fn render_makes_fleet_ask_the_mandatory_primary() {
+        // The interaction mode now mandates fleet__ask as the sole preferred
+        // decision-card tool, with AskUserQuestion demoted to a fallback used
+        // only when fleet__ask is absent. Pin that inversion.
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("through `fleet__ask` instead"),
+            "opening mandate must route terminal turns through fleet__ask, not AskUserQuestion"
+        );
+        assert!(
+            g.contains("NOT deferred"),
+            "guidance must state fleet__ask is not deferred (live from turn 1, no ToolSearch)"
+        );
+        assert!(
+            g.contains("sole preferred"),
+            "fleet__ask must be named the sole preferred decision-card tool"
+        );
+        assert!(
+            g.contains("Fallback: use `AskUserQuestion`")
+                || g.contains("fall back to `AskUserQuestion`"),
+            "AskUserQuestion must be framed as a fallback, not the primary"
+        );
+        // The zh branch must invert too.
+        let z = render_guidance("老板", "zh");
+        assert!(
+            z.contains("改为通过 `fleet__ask` 递交"),
+            "zh opening mandate must route through fleet__ask"
+        );
+        assert!(
+            z.contains("兜底"),
+            "zh guidance must keep AskUserQuestion as a documented fallback (兜底)"
         );
     }
 }
