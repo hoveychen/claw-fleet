@@ -313,6 +313,78 @@ fn list_in(dir: &Path) -> Vec<WatchRecord> {
     out
 }
 
+// ── session enrichment ────────────────────────────────────────────────────────
+
+/// Lightweight per-session view of an active watch, embedded into `SessionInfo`
+/// so the session card can render "👁 watch · 已过 Xm · N 次" without an extra
+/// round-trip. Elapsed is derived frontend-side from `created` (like every other
+/// timestamp on the card), so it isn't duplicated here. Only *active* watches are
+/// ever summarized — a fired or stopped watch has already deleted its record.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct WatchSummary {
+    pub id: String,
+    /// What the session is waiting for, if it gave a `--note`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub note: Option<String>,
+    /// Epoch ms the watch was registered — the frontend derives elapsed from this.
+    pub created: u64,
+    /// Seconds between condition polls.
+    pub poll_secs: u64,
+    /// Epoch ms after which the watch gives up and fires a timeout resume.
+    pub deadline_at: u64,
+    /// Condition polls run so far (see [`WatchRecord::poll_count`]).
+    pub poll_count: u64,
+}
+
+impl From<&WatchRecord> for WatchSummary {
+    fn from(r: &WatchRecord) -> Self {
+        Self {
+            id: r.id.clone(),
+            note: r.note.clone(),
+            created: r.created,
+            poll_secs: r.poll_secs,
+            deadline_at: r.deadline_at,
+            poll_count: r.poll_count,
+        }
+    }
+}
+
+/// Session-id → its active watches. Built once per scanner pass so per-session
+/// enrichment stays O(1). A session almost always has zero or one watch.
+fn session_watch_index_in(dir: &Path) -> std::collections::HashMap<String, Vec<WatchSummary>> {
+    let mut map: std::collections::HashMap<String, Vec<WatchSummary>> = Default::default();
+    for rec in list_in(dir) {
+        map.entry(rec.session_id.clone())
+            .or_default()
+            .push(WatchSummary::from(&rec));
+    }
+    map
+}
+
+/// Stamp active-watch summaries onto scanned sessions. Called at scan-aggregation
+/// time (not inside the mtime-cached per-session parse) because a watch's poll
+/// count and very existence change while the waiting session's jsonl doesn't.
+pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
+    let Some(dir) = watches_dir() else {
+        return;
+    };
+    enrich_sessions_in(&dir, sessions);
+}
+
+pub(crate) fn enrich_sessions_in(dir: &Path, sessions: &mut [crate::session::SessionInfo]) {
+    let idx = session_watch_index_in(dir);
+    if idx.is_empty() {
+        return;
+    }
+    for s in sessions.iter_mut() {
+        if let Some(w) = idx.get(&s.id) {
+            s.watches = w.clone();
+        }
+    }
+}
+
 /// Stop a watch. Idempotent — returns whether a record was actually removed.
 ///
 /// Any timer already napping on this watch finds the record gone on its next wake
@@ -1172,6 +1244,43 @@ mod tests {
         // wrong generation: neither the heartbeat nor the count moves
         touch_in(d.path(), "w1", 9, 140_000);
         assert_eq!(get_in(d.path(), "w1").unwrap().poll_count, 3);
+    }
+
+    /// Enrichment joins each active watch onto its registering session and carries
+    /// the poll count through into the summary; a session with no watch is left
+    /// with an empty list.
+    #[test]
+    fn enrich_stamps_active_watches_onto_matching_sessions() {
+        let d = dir();
+        make(d.path(), "w1", 1_000); // session_id = sess-1
+        touch_in(d.path(), "w1", 0, 2_000);
+        touch_in(d.path(), "w1", 0, 3_000); // poll_count = 2
+        create_in(
+            d.path(), "sess-2", "/ws", "true", None, Some("other thing"), 30, 60, None, None, None,
+            "w2", 1_000,
+        )
+        .unwrap();
+
+        let mk = |id: &str| {
+            let mut s = crate::session::SessionInfo::default();
+            s.id = id.to_string();
+            s
+        };
+        let mut sessions = vec![mk("sess-1"), mk("sess-2"), mk("sess-3")];
+        enrich_sessions_in(d.path(), &mut sessions);
+
+        assert_eq!(sessions[0].watches.len(), 1);
+        assert_eq!(sessions[0].watches[0].id, "w1");
+        assert_eq!(
+            sessions[0].watches[0].poll_count, 2,
+            "poll count flows into the summary"
+        );
+        assert_eq!(sessions[1].watches.len(), 1);
+        assert_eq!(sessions[1].watches[0].note.as_deref(), Some("other thing"));
+        assert!(
+            sessions[2].watches.is_empty(),
+            "a session with no watch is left empty"
+        );
     }
 
     /// Only a watch whose heartbeat is older than the grace window is re-armed;
