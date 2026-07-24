@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Circle,
   Clock,
+  Eye,
   Folder,
   Inbox,
   Loader2,
@@ -89,6 +90,16 @@ function formatRunning(ms: number): string {
   if (diff < 3_600_000) return t("运行 {0} 分", Math.floor(diff / 60_000));
   if (diff < 86_400_000) return t("运行 {0} 时", Math.floor(diff / 3_600_000));
   return t("运行 {0} 天", Math.floor(diff / 86_400_000));
+}
+
+/** Elapsed since a watch was registered, single-unit and counting up — mirrors
+ *  formatRunning but with "已过" (waited) wording for the watch chip. */
+function formatWatchElapsed(ms: number): string {
+  const diff = Math.max(0, Date.now() - ms);
+  if (diff < 60_000) return t("已过 {0} 秒", Math.floor(diff / 1_000));
+  if (diff < 3_600_000) return t("已过 {0} 分", Math.floor(diff / 60_000));
+  if (diff < 86_400_000) return t("已过 {0} 时", Math.floor(diff / 3_600_000));
+  return t("已过 {0} 天", Math.floor(diff / 86_400_000));
 }
 
 type StopMode = "interrupt" | "stop" | "spent";
@@ -634,6 +645,16 @@ export function TasksView({
               {s.handoff.hop}/{s.handoff.chainLen}
             </span>
           )}
+          {s.watches?.map((w) => (
+            <span
+              key={w.id}
+              className={styles.handoff}
+              title={w.note ?? undefined}
+            >
+              <Eye size={11} />
+              {formatWatchElapsed(w.created)} · {t("轮询 {0} 次", w.pollCount)}
+            </span>
+          ))}
           {live && (
             <span className={styles.runtime} data-tone={tone ?? undefined}>
               <Clock size={11} />
