@@ -133,45 +133,23 @@ fn normalize_entries(entries: Vec<SnapshotEntry>) -> Vec<SnapshotEntry> {
         .collect()
 }
 
-/// Outcome of reading the on-disk snapshot history.
+/// Outcome of reading the on-disk snapshot history — a thin projection of
+/// [`crate::atomic_json::JsonLoad`] onto the two states `append_sample` cares
+/// about: a readable history to append to, or an unreadable file to leave alone.
+/// Missing/Corrupt collapse to an empty `Loaded` (a corrupt file's bytes are
+/// preserved to `.corrupt-*` by `atomic_json::load_preserving` before we get
+/// here).
 enum SnapshotLoad {
-    /// File absent, or present and successfully parsed (possibly empty).
     Loaded(Vec<SnapshotEntry>),
-    /// File present but could not be *read* (a transient I/O error, not a missing
-    /// file). The bytes on disk may be perfectly intact, so the write path must
-    /// NOT overwrite them this round — treating this as empty is what once let a
-    /// single bad read wipe the whole history.
     Unreadable,
 }
 
-/// Preserve a corrupt (present but unparseable) history file by renaming it aside
-/// with a timestamped `.corrupt-*` suffix, so genuine on-disk corruption stays
-/// recoverable instead of being silently overwritten by the next sample.
-fn backup_corrupt_snapshot(path: &std::path::Path) {
-    let stamp = chrono::Utc::now().timestamp_millis();
-    let mut bak = path.as_os_str().to_owned();
-    bak.push(format!(".corrupt-{stamp}"));
-    let _ = std::fs::rename(path, std::path::PathBuf::from(bak));
-}
-
 fn load_snapshots_result_from(path: &std::path::Path) -> SnapshotLoad {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return SnapshotLoad::Loaded(Vec::new());
-        }
-        // Read failed for a reason other than "no file" — don't pretend it's
-        // empty, or the caller will clobber a file it merely failed to read.
-        Err(_) => return SnapshotLoad::Unreadable,
-    };
-    match serde_json::from_str::<Vec<SnapshotEntry>>(&raw) {
-        Ok(entries) => SnapshotLoad::Loaded(normalize_entries(entries)),
-        Err(_) => {
-            // Readable but not valid JSON — genuine corruption. Keep the bytes
-            // for recovery, then continue from empty.
-            backup_corrupt_snapshot(path);
-            SnapshotLoad::Loaded(Vec::new())
-        }
+    use crate::atomic_json::JsonLoad;
+    match crate::atomic_json::load_preserving::<Vec<SnapshotEntry>>(path) {
+        JsonLoad::Loaded(entries) => SnapshotLoad::Loaded(normalize_entries(entries)),
+        JsonLoad::Missing | JsonLoad::Corrupt => SnapshotLoad::Loaded(Vec::new()),
+        JsonLoad::Unreadable => SnapshotLoad::Unreadable,
     }
 }
 
@@ -189,34 +167,9 @@ fn load_snapshots() -> Vec<SnapshotEntry> {
     }
 }
 
-/// Per-process, per-call unique suffix for temp files so two concurrent saves
-/// (sampler thread + a Tauri command thread) never race on the same temp path.
-static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// Persist the history atomically: write to a unique temp file, then rename it
-/// over the target. `rename(2)` is atomic on POSIX, so a concurrent reader never
-/// observes a half-written file — the torn read that once wiped the 8-day
-/// history when a reader caught a non-atomic `fs::write` mid-flight.
 fn save_snapshots_to(path: &std::path::Path, entries: &[SnapshotEntry]) {
-    let json = match serde_json::to_string(entries) {
-        Ok(j) => j,
-        Err(_) => return,
-    };
-    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let mut tmp_name = path.as_os_str().to_owned();
-    tmp_name.push(format!(".tmp.{}.{}", std::process::id(), seq));
-    let tmp = std::path::PathBuf::from(tmp_name);
-    if std::fs::write(&tmp, json.as_bytes()).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-        return;
-    }
-    if std::fs::rename(&tmp, path).is_err() {
-        // Platforms that can't rename onto an existing file (Windows): drop the
-        // old file first, then retry. Still far narrower than a full truncate.
-        let _ = std::fs::remove_file(path);
-        if std::fs::rename(&tmp, path).is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
+    if let Ok(json) = serde_json::to_vec(entries) {
+        let _ = crate::atomic_json::write_atomic(path, &json);
     }
 }
 
