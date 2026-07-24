@@ -1208,27 +1208,26 @@ export function SessionDetailView({
         </button>
         <div className={styles.headerText}>
           <div className={styles.headerTitle}>
-            {/* When the session has a switchable family, the scope bar below
-                carries the ⎇ identity — drop the redundant title badge. */}
-            {session.isSubagent && family.length === 0 && (
+            {/* Scope switcher sits inline before the title (no extra row — the
+                phone is tight on vertical space); it carries the ⎇/◈ identity,
+                so the static badge only appears when there's no family. */}
+            {family.length > 0 ? (
+              <AgentScopeSwitcher
+                family={family}
+                current={session}
+                onOpen={(s) => onOpenSessionId(s.id)}
+              />
+            ) : session.isSubagent ? (
               <span className={styles.subagentBadge}>⎇ {session.agentType || t("子代理")}</span>
-            )}
-            {session.titleOverride || session.aiTitle || session.slug || t("会话")}
+            ) : null}
+            <span className={styles.headerTitleText}>
+              {session.titleOverride || session.aiTitle || session.slug || t("会话")}
+            </span>
           </div>
           <div className={styles.headerSub}>{session.workspaceName}</div>
         </div>
         <span className={styles.statusDot} data-working={working} />
       </header>
-
-      {family.length > 0 && (
-        <div className={styles.scopeBar}>
-          <AgentScopeSwitcher
-            family={family}
-            current={session}
-            onOpen={(s) => onOpenSessionId(s.id)}
-          />
-        </div>
-      )}
 
       {session.isSubagent && (
         <button

@@ -36,8 +36,18 @@
 }
 
 .headerTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 14px;
   font-weight: 600;
+  /* overflow stays visible so the scope dropdown isn't clipped; the title text
+     itself ellipsizes via .headerTitleText. */
+}
+.headerTitleText {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -680,19 +690,11 @@
 
 /* ── Agent scope switcher (main ⇄ subagents), ported from desktop ─────────── */
 
-/* The bar under the header that hosts the scope trigger. */
-.scopeBar {
-  display: flex;
-  align-items: center;
-  padding: 6px 16px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
-}
-
-/* Positioning context for the drop-down menu. */
+/* Positioning context for the drop-down menu; sits inline in the title row. */
 .scopeWrap {
   position: relative;
   display: inline-flex;
+  flex-shrink: 0;
 }
 
 .scopeTrigger {
