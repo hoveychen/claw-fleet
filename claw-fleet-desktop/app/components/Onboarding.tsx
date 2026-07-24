@@ -4,7 +4,24 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSessionsStore } from "../store";
-import { getItem, setItem, getSeenFeatures, markFeaturesSeen, ONBOARDING_FEATURES, type OnboardingFeatureId } from "../storage";
+import {
+  getItem,
+  setItem,
+  getSeenFeatures,
+  markFeaturesSeen,
+  ONBOARDING_FEATURES,
+  resolveFeature,
+  getFeatureState,
+  setFeatureState,
+  resolveFeatureState,
+  featureDefault,
+  getModeSelection,
+  setModeSelection,
+  modeDefault,
+  type OnboardingFeatureId,
+  type FeatureState,
+} from "../storage";
+import { TriStateToggle } from "./TriStateToggle";
 import { type ChimePreset, CHIME_PRESETS, playChime } from "../audio";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageSwitcher } from "./LanguageSwitcher";
@@ -415,28 +432,32 @@ function AppearanceCard() {
 type TtsMode = "chime_and_speech" | "chime_only" | "off";
 
 function NotificationSettingsCard({
-  notifMode,
+  notifSelection,
   onNotifModeChange,
-  ttsMode,
+  ttsSelection,
   onTtsModeChange,
-  chimePreset,
+  chimeSelection,
   onChimeChange,
-  personalizedMascot,
-  onTogglePersonalizedMascot,
+  personalizedMascotValue,
+  onPersonalizedMascotChange,
   userTitle,
   onUserTitleChange,
 }: {
-  notifMode: NotificationMode;
-  onNotifModeChange: (mode: NotificationMode) => void;
-  ttsMode: TtsMode;
-  onTtsModeChange: (mode: TtsMode) => void;
-  chimePreset: ChimePreset;
-  onChimeChange: (preset: ChimePreset) => void;
-  personalizedMascot: boolean;
-  onTogglePersonalizedMascot: (enabled: boolean) => void;
+  notifSelection: NotificationMode | "default";
+  onNotifModeChange: (sel: NotificationMode | "default") => void;
+  ttsSelection: TtsMode | "default";
+  onTtsModeChange: (sel: TtsMode | "default") => void;
+  chimeSelection: ChimePreset | "default";
+  onChimeChange: (sel: ChimePreset | "default") => void;
+  personalizedMascotValue: FeatureState;
+  onPersonalizedMascotChange: (state: FeatureState) => void;
   userTitle: string;
   onUserTitleChange: (title: string) => void;
 }) {
+  const ttsEffective: TtsMode =
+    ttsSelection === "default" ? (modeDefault("tts-mode") as TtsMode) : ttsSelection;
+  const chimeEffective: ChimePreset =
+    chimeSelection === "default" ? (modeDefault("chime-sound") as ChimePreset) : chimeSelection;
   const { t } = useTranslation();
 
   return (
@@ -455,7 +476,7 @@ function NotificationSettingsCard({
             <input
               type="radio"
               name="onboard-notif-mode"
-              checked={notifMode === mode}
+              checked={notifSelection === mode}
               onChange={() => onNotifModeChange(mode)}
             />
             <div>
@@ -464,6 +485,22 @@ function NotificationSettingsCard({
             </div>
           </label>
         ))}
+        <label className={styles.radio_item} key="default">
+          <input
+            type="radio"
+            name="onboard-notif-mode"
+            checked={notifSelection === "default"}
+            onChange={() => onNotifModeChange("default")}
+          />
+          <div>
+            <span className={styles.radio_title}>{t("settings.mode_default_title")}</span>
+            <span className={styles.hint}>
+              {t("settings.mode_default_desc", {
+                value: t(`settings.notify_${modeDefault("notification-mode")}`),
+              })}
+            </span>
+          </div>
+        </label>
       </div>
 
       {/* Alert sound */}
@@ -474,7 +511,7 @@ function NotificationSettingsCard({
             <input
               type="radio"
               name="onboard-tts-mode"
-              checked={ttsMode === mode}
+              checked={ttsSelection === mode}
               onChange={() => onTtsModeChange(mode)}
             />
             <div>
@@ -483,21 +520,42 @@ function NotificationSettingsCard({
             </div>
           </label>
         ))}
-        {ttsMode !== "off" && (
+        <label className={styles.radio_item} key="default">
+          <input
+            type="radio"
+            name="onboard-tts-mode"
+            checked={ttsSelection === "default"}
+            onChange={() => onTtsModeChange("default")}
+          />
+          <div>
+            <span className={styles.radio_title}>{t("settings.mode_default_title")}</span>
+            <span className={styles.hint}>
+              {t("settings.mode_default_desc", {
+                value: t(`settings.tts_${modeDefault("tts-mode")}`),
+              })}
+            </span>
+          </div>
+        </label>
+        {ttsEffective !== "off" && (
           <div className={styles.chime_row}>
             <span className={styles.hint}>{t("settings.chime_sound")}</span>
             <select
               className={styles.chime_select}
-              value={chimePreset}
-              onChange={(e) => onChimeChange(e.target.value as ChimePreset)}
+              value={chimeSelection}
+              onChange={(e) => onChimeChange(e.target.value as ChimePreset | "default")}
             >
+              <option value="default">
+                {t("settings.mode_default_option", {
+                  value: t(`settings.chime_${modeDefault("chime-sound")}`),
+                })}
+              </option>
               {CHIME_PRESETS.map((p) => (
                 <option key={p} value={p}>{t(`settings.chime_${p}`)}</option>
               ))}
             </select>
             <button
               className={styles.preview_btn}
-              onClick={() => playChime(chimePreset)}
+              onClick={() => playChime(chimeEffective)}
               type="button"
             >
               &#x25B6;
@@ -530,15 +588,14 @@ function NotificationSettingsCard({
       {/* Mascot */}
       <div className={styles.settings_group}>
         <span className={styles.settings_label}>{t("onboarding.settings_notif.mascot_title")}</span>
-        <label className={styles.toggle_item}>
+        <div className={styles.toggle_item}>
           <span>{t("settings.personalized_mascot")}</span>
-          <input
-            type="checkbox"
-            checked={personalizedMascot}
-            onChange={(e) => onTogglePersonalizedMascot(e.target.checked)}
-            className={styles.source_checkbox}
+          <TriStateToggle
+            value={personalizedMascotValue}
+            defaultOn={featureDefault("personalized-mascot")}
+            onChange={onPersonalizedMascotChange}
           />
-        </label>
+        </div>
         <span className={styles.hint}>{t("settings.personalized_mascot_desc")}</span>
       </div>
     </div>
@@ -650,11 +707,13 @@ function MockGlobalAskPreview() {
 }
 
 function PrdModeCard({
-  enabled,
-  onToggle,
+  value,
+  defaultOn,
+  onChange,
 }: {
-  enabled: boolean;
-  onToggle: (enabled: boolean) => void;
+  value: FeatureState;
+  defaultOn: boolean;
+  onChange: (state: FeatureState) => void;
 }) {
   const { t } = useTranslation();
 
@@ -671,14 +730,7 @@ function PrdModeCard({
           <div className={styles.hook_feature_text}>
             <span className={styles.settings_label}>{t("settings.prd_mode_enabled")}</span>
           </div>
-          <label className={styles.hook_feature_toggle}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => onToggle(e.target.checked)}
-              className={styles.source_checkbox}
-            />
-          </label>
+          <TriStateToggle value={value} defaultOn={defaultOn} onChange={onChange} />
         </div>
       </div>
     </div>
@@ -686,11 +738,13 @@ function PrdModeCard({
 }
 
 function ModelGuidanceCard({
-  enabled,
-  onToggle,
+  value,
+  defaultOn,
+  onChange,
 }: {
-  enabled: boolean;
-  onToggle: (enabled: boolean) => void;
+  value: FeatureState;
+  defaultOn: boolean;
+  onChange: (state: FeatureState) => void;
 }) {
   const { t } = useTranslation();
 
@@ -707,14 +761,7 @@ function ModelGuidanceCard({
           <div className={styles.hook_feature_text}>
             <span className={styles.settings_label}>{t("settings.model_guidance_enabled")}</span>
           </div>
-          <label className={styles.hook_feature_toggle}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => onToggle(e.target.checked)}
-              className={styles.source_checkbox}
-            />
-          </label>
+          <TriStateToggle value={value} defaultOn={defaultOn} onChange={onChange} />
         </div>
       </div>
     </div>
@@ -772,11 +819,13 @@ function SkillInteropCard({
 }
 
 function WikiGuidanceCard({
-  enabled,
-  onToggle,
+  value,
+  defaultOn,
+  onChange,
 }: {
-  enabled: boolean;
-  onToggle: (enabled: boolean) => void;
+  value: FeatureState;
+  defaultOn: boolean;
+  onChange: (state: FeatureState) => void;
 }) {
   const { t } = useTranslation();
 
@@ -793,14 +842,7 @@ function WikiGuidanceCard({
           <div className={styles.hook_feature_text}>
             <span className={styles.settings_label}>{t("settings.wiki_guidance_enabled")}</span>
           </div>
-          <label className={styles.hook_feature_toggle}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => onToggle(e.target.checked)}
-              className={styles.source_checkbox}
-            />
-          </label>
+          <TriStateToggle value={value} defaultOn={defaultOn} onChange={onChange} />
         </div>
       </div>
     </div>
@@ -808,12 +850,14 @@ function WikiGuidanceCard({
 }
 
 function InteractionModeCard({
-  enabled,
-  onToggle,
+  value,
+  defaultOn,
+  onChange,
   elicitationEnabled,
 }: {
-  enabled: boolean;
-  onToggle: (enabled: boolean) => void;
+  value: FeatureState;
+  defaultOn: boolean;
+  onChange: (state: FeatureState) => void;
   elicitationEnabled: boolean;
 }) {
   const { t } = useTranslation();
@@ -834,15 +878,12 @@ function InteractionModeCard({
               <p className={styles.hint}>{t("settings.interaction_mode_requires_elicitation")}</p>
             )}
           </div>
-          <label className={styles.hook_feature_toggle}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              disabled={!elicitationEnabled}
-              onChange={(e) => onToggle(e.target.checked)}
-              className={styles.source_checkbox}
-            />
-          </label>
+          <TriStateToggle
+            value={value}
+            defaultOn={defaultOn}
+            disabled={!elicitationEnabled}
+            onChange={onChange}
+          />
         </div>
         <div className={styles.hook_feature_preview}>
           <span className={styles.preview_caption}>{t("onboarding.preview_caption")}</span>
@@ -860,23 +901,23 @@ function HooksSetupCard({
   onInstall,
   status,
   errorMsg,
-  guardEnabled,
-  onToggleGuard,
-  elicitationEnabled,
-  onToggleElicitation,
-  planApprovalEnabled,
-  onTogglePlanApproval,
+  guardValue,
+  onGuardChange,
+  elicitationValue,
+  onElicitationChange,
+  planApprovalValue,
+  onPlanApprovalChange,
 }: {
   hooksPlan: HookSetupPlan;
   onInstall: () => void;
   status: "idle" | "installing" | "success" | "error";
   errorMsg: string;
-  guardEnabled: boolean;
-  onToggleGuard: (enabled: boolean) => void;
-  elicitationEnabled: boolean;
-  onToggleElicitation: (enabled: boolean) => void;
-  planApprovalEnabled: boolean;
-  onTogglePlanApproval: (enabled: boolean) => void;
+  guardValue: FeatureState;
+  onGuardChange: (state: FeatureState) => void;
+  elicitationValue: FeatureState;
+  onElicitationChange: (state: FeatureState) => void;
+  planApprovalValue: FeatureState;
+  onPlanApprovalChange: (state: FeatureState) => void;
 }) {
   const { t } = useTranslation();
   const hooksReady = hooksPlan.alreadyInstalled || status === "success";
@@ -918,14 +959,11 @@ function HooksSetupCard({
             <span className={styles.settings_label}>{t("settings.guard")}</span>
             <p className={styles.hint}>{t("onboarding.hooks_setup.guard_desc")}</p>
           </div>
-          <label className={styles.hook_feature_toggle}>
-            <input
-              type="checkbox"
-              checked={guardEnabled}
-              onChange={(e) => onToggleGuard(e.target.checked)}
-              className={styles.source_checkbox}
-            />
-          </label>
+          <TriStateToggle
+            value={guardValue}
+            defaultOn={featureDefault("guard-enabled")}
+            onChange={onGuardChange}
+          />
         </div>
         <div className={styles.hook_feature_preview}>
           <span className={styles.preview_caption}>{t("onboarding.preview_caption")}</span>
@@ -940,14 +978,11 @@ function HooksSetupCard({
             <span className={styles.settings_label}>{t("settings.elicitation")}</span>
             <p className={styles.hint}>{t("onboarding.hooks_setup.elicitation_desc")}</p>
           </div>
-          <label className={styles.hook_feature_toggle}>
-            <input
-              type="checkbox"
-              checked={elicitationEnabled}
-              onChange={(e) => onToggleElicitation(e.target.checked)}
-              className={styles.source_checkbox}
-            />
-          </label>
+          <TriStateToggle
+            value={elicitationValue}
+            defaultOn={featureDefault("elicitation-enabled")}
+            onChange={onElicitationChange}
+          />
         </div>
         <div className={styles.hook_feature_preview}>
           <span className={styles.preview_caption}>{t("onboarding.preview_caption")}</span>
@@ -962,14 +997,11 @@ function HooksSetupCard({
             <span className={styles.settings_label}>{t("settings.plan_approval")}</span>
             <p className={styles.hint}>{t("settings.plan_approval_desc")}</p>
           </div>
-          <label className={styles.hook_feature_toggle}>
-            <input
-              type="checkbox"
-              checked={planApprovalEnabled}
-              onChange={(e) => onTogglePlanApproval(e.target.checked)}
-              className={styles.source_checkbox}
-            />
-          </label>
+          <TriStateToggle
+            value={planApprovalValue}
+            defaultOn={featureDefault("plan-approval-enabled")}
+            onChange={onPlanApprovalChange}
+          />
         </div>
         <div className={styles.hook_feature_preview}>
           <span className={styles.preview_caption}>{t("onboarding.preview_caption")}</span>
@@ -1040,13 +1072,15 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, []);
 
   // ── Guard state ─────────────────────────────────────────────────────────
-  const [guardEnabled, setGuardEnabled] = useState(
-    () => getItem("guard-enabled") !== "false",
+  const [guardState, setGuardState] = useState<FeatureState>(
+    () => getFeatureState("guard-enabled"),
   );
+  const guardEnabled = resolveFeatureState(guardState, "guard-enabled");
 
-  const handleToggleGuard = useCallback(async (enabled: boolean) => {
-    setGuardEnabled(enabled);
-    setItem("guard-enabled", enabled ? "true" : "false");
+  const handleToggleGuard = useCallback(async (state: FeatureState) => {
+    setGuardState(state);
+    setFeatureState("guard-enabled", state);
+    const enabled = resolveFeatureState(state, "guard-enabled");
     try {
       if (enabled) {
         await invoke("apply_guard_hook");
@@ -1060,21 +1094,25 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, []);
 
   // ── Elicitation state ──────────────────────────────────────────────────
-  const [elicitationEnabled, setElicitationEnabled] = useState(
-    () => getItem("elicitation-enabled") !== "false",
+  const [elicitationState, setElicitationState] = useState<FeatureState>(
+    () => getFeatureState("elicitation-enabled"),
   );
+  const elicitationEnabled = resolveFeatureState(elicitationState, "elicitation-enabled");
 
-  const handleToggleElicitation = useCallback(async (enabled: boolean) => {
-    setElicitationEnabled(enabled);
-    setItem("elicitation-enabled", enabled ? "true" : "false");
+  const handleToggleElicitation = useCallback(async (state: FeatureState) => {
+    setElicitationState(state);
+    setFeatureState("elicitation-enabled", state);
+    const enabled = resolveFeatureState(state, "elicitation-enabled");
     try {
       if (enabled) {
         await invoke("apply_elicitation_hook");
       } else {
         await invoke("remove_elicitation_hook");
-        if (getItem("interaction-mode-enabled") !== "false") {
-          setInteractionModeEnabled(false);
-          setItem("interaction-mode-enabled", "false");
+        // Interaction mode depends on elicitation; force it explicitly off so it
+        // can't follow a default-on back to enabled while elicitation is gone.
+        if (resolveFeature("interaction-mode-enabled")) {
+          setInteractionModeState("off");
+          setFeatureState("interaction-mode-enabled", "off");
           await invoke("remove_interaction_mode").catch(() => {});
         }
       }
@@ -1085,13 +1123,15 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, []);
 
   // ── Plan approval (ExitPlanMode) state — default on ────────────────────
-  const [planApprovalEnabled, setPlanApprovalEnabled] = useState(
-    () => getItem("plan-approval-enabled") !== "false",
+  const [planApprovalState, setPlanApprovalState] = useState<FeatureState>(
+    () => getFeatureState("plan-approval-enabled"),
   );
+  const planApprovalEnabled = resolveFeatureState(planApprovalState, "plan-approval-enabled");
 
-  const handleTogglePlanApproval = useCallback(async (enabled: boolean) => {
-    setPlanApprovalEnabled(enabled);
-    setItem("plan-approval-enabled", enabled ? "true" : "false");
+  const handleTogglePlanApproval = useCallback(async (state: FeatureState) => {
+    setPlanApprovalState(state);
+    setFeatureState("plan-approval-enabled", state);
+    const enabled = resolveFeatureState(state, "plan-approval-enabled");
     try {
       if (enabled) {
         await invoke("apply_plan_approval_hook");
@@ -1105,13 +1145,18 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, []);
 
   // ── Interaction mode (global AskUserQuestion) state — default on ───────
-  const [interactionModeEnabled, setInteractionModeEnabled] = useState(
-    () => getItem("interaction-mode-enabled") !== "false",
+  const [interactionModeState, setInteractionModeState] = useState<FeatureState>(
+    () => getFeatureState("interaction-mode-enabled"),
+  );
+  const interactionModeEnabled = resolveFeatureState(
+    interactionModeState,
+    "interaction-mode-enabled",
   );
 
-  const handleToggleInteractionMode = useCallback(async (enabled: boolean) => {
-    setInteractionModeEnabled(enabled);
-    setItem("interaction-mode-enabled", enabled ? "true" : "false");
+  const handleToggleInteractionMode = useCallback(async (state: FeatureState) => {
+    setInteractionModeState(state);
+    setFeatureState("interaction-mode-enabled", state);
+    const enabled = resolveFeatureState(state, "interaction-mode-enabled");
     try {
       if (enabled) {
         await invoke("apply_interaction_mode");
@@ -1125,13 +1170,15 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, []);
 
   // ── PRD discipline mode state — default on ─────────────────────────────
-  const [prdModeEnabled, setPrdModeEnabled] = useState(
-    () => getItem("prd-mode-enabled") !== "false",
+  const [prdModeState, setPrdModeState] = useState<FeatureState>(
+    () => getFeatureState("prd-mode-enabled"),
   );
+  const prdModeEnabled = resolveFeatureState(prdModeState, "prd-mode-enabled");
 
-  const handleTogglePrdMode = useCallback(async (enabled: boolean) => {
-    setPrdModeEnabled(enabled);
-    setItem("prd-mode-enabled", enabled ? "true" : "false");
+  const handleTogglePrdMode = useCallback(async (state: FeatureState) => {
+    setPrdModeState(state);
+    setFeatureState("prd-mode-enabled", state);
+    const enabled = resolveFeatureState(state, "prd-mode-enabled");
     try {
       if (enabled) {
         await invoke("apply_prd_mode");
@@ -1145,13 +1192,15 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, []);
 
   // ── Model guidance state — default on ──────────────────────────────────
-  const [modelGuidanceEnabled, setModelGuidanceEnabled] = useState(
-    () => getItem("model-guidance-enabled") !== "false",
+  const [modelGuidanceState, setModelGuidanceState] = useState<FeatureState>(
+    () => getFeatureState("model-guidance-enabled"),
   );
+  const modelGuidanceEnabled = resolveFeatureState(modelGuidanceState, "model-guidance-enabled");
 
-  const handleToggleModelGuidance = useCallback(async (enabled: boolean) => {
-    setModelGuidanceEnabled(enabled);
-    setItem("model-guidance-enabled", enabled ? "true" : "false");
+  const handleToggleModelGuidance = useCallback(async (state: FeatureState) => {
+    setModelGuidanceState(state);
+    setFeatureState("model-guidance-enabled", state);
+    const enabled = resolveFeatureState(state, "model-guidance-enabled");
     try {
       if (enabled) {
         await invoke("apply_model_guidance");
@@ -1179,13 +1228,15 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, []);
 
   // ── Wiki guidance state — default on ───────────────────────────────────
-  const [wikiGuidanceEnabled, setWikiGuidanceEnabled] = useState(
-    () => getItem("wiki-guidance-enabled") !== "false",
+  const [wikiGuidanceState, setWikiGuidanceState] = useState<FeatureState>(
+    () => getFeatureState("wiki-guidance-enabled"),
   );
+  const wikiGuidanceEnabled = resolveFeatureState(wikiGuidanceState, "wiki-guidance-enabled");
 
-  const handleToggleWikiGuidance = useCallback(async (enabled: boolean) => {
-    setWikiGuidanceEnabled(enabled);
-    setItem("wiki-guidance-enabled", enabled ? "true" : "false");
+  const handleToggleWikiGuidance = useCallback(async (state: FeatureState) => {
+    setWikiGuidanceState(state);
+    setFeatureState("wiki-guidance-enabled", state);
+    const enabled = resolveFeatureState(state, "wiki-guidance-enabled");
     try {
       if (enabled) {
         await invoke("apply_wiki_guidance");
@@ -1198,43 +1249,46 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, []);
 
-  // ── Notification state ──────────────────────────────────────────────────
-  const [notifMode, setNotifMode] = useState<NotificationMode>(
-    () => (getItem("notification-mode") as NotificationMode) || "user_action",
+  // ── Notification state (tristate: concrete mode or "default") ───────────
+  const [notifSelection, setNotifSelection] = useState<NotificationMode | "default">(
+    () => getModeSelection("notification-mode") as NotificationMode | "default",
   );
 
   // OS notification permission is requested only when the user opts into a
   // notifying mode — never on mount, so the first launch isn't interrupted
   // by a system dialog before the user knows what the app does.
-  const handleNotifModeChange = useCallback((mode: NotificationMode) => {
-    setNotifMode(mode);
-    setItem("notification-mode", mode);
-    invoke("set_notification_mode", { mode }).catch(() => {});
-    if (mode !== "none") {
+  const handleNotifModeChange = useCallback((sel: NotificationMode | "default") => {
+    setNotifSelection(sel);
+    setModeSelection("notification-mode", sel);
+    const effective =
+      sel === "default" ? (modeDefault("notification-mode") as NotificationMode) : sel;
+    invoke("set_notification_mode", { mode: effective }).catch(() => {});
+    if (effective !== "none") {
       isPermissionGranted().then((granted) => {
         if (!granted) requestPermission().catch(() => {});
       }).catch(() => {});
     }
   }, []);
 
-  // ── TTS / chime state ──────────────────────────────────────────────────
-  const [ttsMode, setTtsMode] = useState<TtsMode>(
-    () => (getItem("tts-mode") as TtsMode) || "chime_and_speech",
+  // ── TTS / chime state (tristate: concrete value or "default") ───────────
+  const [ttsSelection, setTtsSelection] = useState<TtsMode | "default">(
+    () => getModeSelection("tts-mode") as TtsMode | "default",
   );
 
-  const handleTtsModeChange = useCallback((mode: TtsMode) => {
-    setTtsMode(mode);
-    setItem("tts-mode", mode);
+  const handleTtsModeChange = useCallback((sel: TtsMode | "default") => {
+    setTtsSelection(sel);
+    setModeSelection("tts-mode", sel);
   }, []);
 
-  const [chimePreset, setChimePreset] = useState<ChimePreset>(
-    () => (getItem("chime-sound") as ChimePreset) || "ding_dong",
+  const [chimeSelection, setChimeSelection] = useState<ChimePreset | "default">(
+    () => getModeSelection("chime-sound") as ChimePreset | "default",
   );
 
-  const handleChimeChange = useCallback((preset: ChimePreset) => {
-    setChimePreset(preset);
-    setItem("chime-sound", preset);
-    playChime(preset);
+  const handleChimeChange = useCallback((sel: ChimePreset | "default") => {
+    setChimeSelection(sel);
+    setModeSelection("chime-sound", sel);
+    const effective = sel === "default" ? (modeDefault("chime-sound") as ChimePreset) : sel;
+    playChime(effective);
   }, []);
 
   // ── User title state ────────────────────────────────────────────────────
@@ -1247,13 +1301,13 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }, []);
 
   // ── Mascot state ────────────────────────────────────────────────────────
-  const [personalizedMascot, setPersonalizedMascot] = useState(
-    () => getItem("personalized-mascot") === "true",
+  const [personalizedMascotState, setPersonalizedMascotState] = useState<FeatureState>(
+    () => getFeatureState("personalized-mascot"),
   );
 
-  const handleTogglePersonalizedMascot = useCallback((enabled: boolean) => {
-    setPersonalizedMascot(enabled);
-    setItem("personalized-mascot", enabled ? "true" : "false");
+  const handleTogglePersonalizedMascot = useCallback((state: FeatureState) => {
+    setPersonalizedMascotState(state);
+    setFeatureState("personalized-mascot", state);
   }, []);
 
   // Show source selection only when there are multiple source types detected
@@ -1419,14 +1473,14 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
           {unseenFeatures.has("notifications") && (
             <div className={styles.cards}>
               <NotificationSettingsCard
-                notifMode={notifMode}
+                notifSelection={notifSelection}
                 onNotifModeChange={handleNotifModeChange}
-                ttsMode={ttsMode}
+                ttsSelection={ttsSelection}
                 onTtsModeChange={handleTtsModeChange}
-                chimePreset={chimePreset}
+                chimeSelection={chimeSelection}
                 onChimeChange={handleChimeChange}
-                personalizedMascot={personalizedMascot}
-                onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
+                personalizedMascotValue={personalizedMascotState}
+                onPersonalizedMascotChange={handleTogglePersonalizedMascot}
                 userTitle={userTitle}
                 onUserTitleChange={handleUserTitleChange}
               />
@@ -1440,12 +1494,12 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                 onInstall={handleInstallHooks}
                 status={hooksStatus}
                 errorMsg={hooksError}
-                guardEnabled={guardEnabled}
-                onToggleGuard={handleToggleGuard}
-                elicitationEnabled={elicitationEnabled}
-                onToggleElicitation={handleToggleElicitation}
-                planApprovalEnabled={planApprovalEnabled}
-                onTogglePlanApproval={handleTogglePlanApproval}
+                guardValue={guardState}
+                onGuardChange={handleToggleGuard}
+                elicitationValue={elicitationState}
+                onElicitationChange={handleToggleElicitation}
+                planApprovalValue={planApprovalState}
+                onPlanApprovalChange={handleTogglePlanApproval}
               />
             </div>
           )}
@@ -1453,8 +1507,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
           {unseenFeatures.has("global_ask") && (
             <div className={styles.cards}>
               <InteractionModeCard
-                enabled={interactionModeEnabled}
-                onToggle={handleToggleInteractionMode}
+                value={interactionModeState}
+                defaultOn={featureDefault("interaction-mode-enabled")}
+                onChange={handleToggleInteractionMode}
                 elicitationEnabled={elicitationEnabled}
               />
             </div>
@@ -1463,8 +1518,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
           {unseenFeatures.has("prd_discipline") && (
             <div className={styles.cards}>
               <PrdModeCard
-                enabled={prdModeEnabled}
-                onToggle={handleTogglePrdMode}
+                value={prdModeState}
+                defaultOn={featureDefault("prd-mode-enabled")}
+                onChange={handleTogglePrdMode}
               />
             </div>
           )}
@@ -1472,8 +1528,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
           {unseenFeatures.has("wiki_guidance") && (
             <div className={styles.cards}>
               <WikiGuidanceCard
-                enabled={wikiGuidanceEnabled}
-                onToggle={handleToggleWikiGuidance}
+                value={wikiGuidanceState}
+                defaultOn={featureDefault("wiki-guidance-enabled")}
+                onChange={handleToggleWikiGuidance}
               />
             </div>
           )}
@@ -1481,8 +1538,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
           {unseenFeatures.has("model_guidance") && (
             <div className={styles.cards}>
               <ModelGuidanceCard
-                enabled={modelGuidanceEnabled}
-                onToggle={handleToggleModelGuidance}
+                value={modelGuidanceState}
+                defaultOn={featureDefault("model-guidance-enabled")}
+                onChange={handleToggleModelGuidance}
               />
             </div>
           )}
@@ -1607,14 +1665,14 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                     <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
                   )}
                   <NotificationSettingsCard
-                    notifMode={notifMode}
+                    notifSelection={notifSelection}
                     onNotifModeChange={handleNotifModeChange}
-                    ttsMode={ttsMode}
+                    ttsSelection={ttsSelection}
                     onTtsModeChange={handleTtsModeChange}
-                    chimePreset={chimePreset}
+                    chimeSelection={chimeSelection}
                     onChimeChange={handleChimeChange}
-                    personalizedMascot={personalizedMascot}
-                    onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
+                    personalizedMascotValue={personalizedMascotState}
+                    onPersonalizedMascotChange={handleTogglePersonalizedMascot}
                     userTitle={userTitle}
                     onUserTitleChange={handleUserTitleChange}
                   />
@@ -1624,37 +1682,41 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                       onInstall={handleInstallHooks}
                       status={hooksStatus}
                       errorMsg={hooksError}
-                      guardEnabled={guardEnabled}
-                      onToggleGuard={handleToggleGuard}
-                      elicitationEnabled={elicitationEnabled}
-                      onToggleElicitation={handleToggleElicitation}
-                      planApprovalEnabled={planApprovalEnabled}
-                      onTogglePlanApproval={handleTogglePlanApproval}
+                      guardValue={guardState}
+                      onGuardChange={handleToggleGuard}
+                      elicitationValue={elicitationState}
+                      onElicitationChange={handleToggleElicitation}
+                      planApprovalValue={planApprovalState}
+                      onPlanApprovalChange={handleTogglePlanApproval}
                     />
                   )}
                   {hasClaudeCode && (
                     <InteractionModeCard
-                      enabled={interactionModeEnabled}
-                      onToggle={handleToggleInteractionMode}
+                      value={interactionModeState}
+                      defaultOn={featureDefault("interaction-mode-enabled")}
+                      onChange={handleToggleInteractionMode}
                       elicitationEnabled={elicitationEnabled}
                     />
                   )}
                   {hasClaudeCode && (
                     <PrdModeCard
-                      enabled={prdModeEnabled}
-                      onToggle={handleTogglePrdMode}
+                      value={prdModeState}
+                      defaultOn={featureDefault("prd-mode-enabled")}
+                      onChange={handleTogglePrdMode}
                     />
                   )}
                   {hasClaudeCode && (
                     <WikiGuidanceCard
-                      enabled={wikiGuidanceEnabled}
-                      onToggle={handleToggleWikiGuidance}
+                      value={wikiGuidanceState}
+                      defaultOn={featureDefault("wiki-guidance-enabled")}
+                      onChange={handleToggleWikiGuidance}
                     />
                   )}
                   {hasClaudeCode && (
                     <ModelGuidanceCard
-                      enabled={modelGuidanceEnabled}
-                      onToggle={handleToggleModelGuidance}
+                      value={modelGuidanceState}
+                      defaultOn={featureDefault("model-guidance-enabled")}
+                      onChange={handleToggleModelGuidance}
                     />
                   )}
                   {shouldShowSkillInterop(hasClaudeCode, status?.detected_tools) && (

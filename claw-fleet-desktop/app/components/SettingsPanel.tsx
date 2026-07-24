@@ -4,7 +4,20 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useConnectionStore, useDetailStore, useUIStore } from "../store";
 import { useKeepAwake } from "../hooks/useKeepAwake";
-import { getItem, setItem } from "../storage";
+import {
+  getItem,
+  setItem,
+  resolveFeature,
+  getFeatureState,
+  setFeatureState,
+  resolveFeatureState,
+  featureDefault,
+  getModeSelection,
+  setModeSelection,
+  modeDefault,
+  type FeatureState,
+} from "../storage";
+import { TriStateToggle } from "./TriStateToggle";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
 import { AccountInfo } from "./AccountInfo";
 import { LanguageSwitcher } from "./LanguageSwitcher";
@@ -325,12 +338,12 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       setHooksPlan(plan);
       // Auto-apply hooks that the UI shows as enabled but were never actually installed
       // (e.g. user dismissed onboarding without toggling the default-on checkboxes)
-      if (getItem("guard-enabled") !== "false" && !plan.guardInstalled) {
+      if (resolveFeature("guard-enabled") && !plan.guardInstalled) {
         invoke("apply_guard_hook").catch((e: unknown) =>
           console.error("auto-apply guard hook:", e),
         );
       }
-      if (getItem("elicitation-enabled") !== "false" && !plan.elicitationInstalled) {
+      if (resolveFeature("elicitation-enabled") && !plan.elicitationInstalled) {
         invoke("apply_elicitation_hook").catch((e: unknown) =>
           console.error("auto-apply elicitation hook:", e),
         );
@@ -343,37 +356,27 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       // the guard/elicitation pattern above; we deliberately do NOT write the
       // key back from disk, which would strand the default-on the moment disk
       // showed not-yet-installed.
-      const interactionOn = getItem("interaction-mode-enabled") !== "false";
-      setInteractionModeEnabled(interactionOn);
-      if (interactionOn) {
+      if (resolveFeature("interaction-mode-enabled")) {
         invoke("apply_interaction_mode").catch((e: unknown) =>
           console.error("auto-apply interaction mode:", e),
         );
       }
-      const planApprovalOn = getItem("plan-approval-enabled") !== "false";
-      setPlanApprovalEnabled(planApprovalOn);
-      if (planApprovalOn && !plan.planApprovalInstalled) {
+      if (resolveFeature("plan-approval-enabled") && !plan.planApprovalInstalled) {
         invoke("apply_plan_approval_hook").catch((e: unknown) =>
           console.error("auto-apply plan approval:", e),
         );
       }
-      const prdOn = getItem("prd-mode-enabled") !== "false";
-      setPrdModeEnabled(prdOn);
-      if (prdOn) {
+      if (resolveFeature("prd-mode-enabled")) {
         invoke("apply_prd_mode").catch((e: unknown) =>
           console.error("auto-apply prd mode:", e),
         );
       }
-      const wikiOn = getItem("wiki-guidance-enabled") !== "false";
-      setWikiGuidanceEnabled(wikiOn);
-      if (wikiOn) {
+      if (resolveFeature("wiki-guidance-enabled")) {
         invoke("apply_wiki_guidance").catch((e: unknown) =>
           console.error("auto-apply wiki guidance:", e),
         );
       }
-      const modelOn = getItem("model-guidance-enabled") !== "false";
-      setModelGuidanceEnabled(modelOn);
-      if (modelOn) {
+      if (resolveFeature("model-guidance-enabled")) {
         invoke("apply_model_guidance").catch((e: unknown) =>
           console.error("auto-apply model guidance:", e),
         );
@@ -402,16 +405,18 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   }, []);
 
   // ── Guard state ────────────────────────────────────────────────────────
-  const [guardEnabled, setGuardEnabled] = useState(
-    () => getItem("guard-enabled") !== "false",
+  const [guardState, setGuardState] = useState<FeatureState>(
+    () => getFeatureState("guard-enabled"),
   );
-  const [guardLlmAnalysis, setGuardLlmAnalysis] = useState(
-    () => getItem("guard-llm-analysis") !== "false",
+  const guardEnabled = resolveFeatureState(guardState, "guard-enabled");
+  const [guardLlmState, setGuardLlmState] = useState<FeatureState>(
+    () => getFeatureState("guard-llm-analysis"),
   );
 
-  const handleToggleGuard = useCallback(async (enabled: boolean) => {
-    setGuardEnabled(enabled);
-    setItem("guard-enabled", enabled ? "true" : "false");
+  const handleToggleGuard = useCallback(async (state: FeatureState) => {
+    setGuardState(state);
+    setFeatureState("guard-enabled", state);
+    const enabled = resolveFeatureState(state, "guard-enabled");
     try {
       if (enabled) {
         await invoke("apply_guard_hook");
@@ -425,9 +430,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, []);
 
-  const handleToggleGuardLlm = useCallback((enabled: boolean) => {
-    setGuardLlmAnalysis(enabled);
-    setItem("guard-llm-analysis", enabled ? "true" : "false");
+  const handleToggleGuardLlm = useCallback((state: FeatureState) => {
+    setGuardLlmState(state);
+    setFeatureState("guard-llm-analysis", state);
   }, []);
 
   // ── Permissions bypass state (cross-process, persists to ~/.fleet) ────
@@ -457,13 +462,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   }, []);
 
   // ── Elicitation state ─────────────────────────────────────────────────
-  const [elicitationEnabled, setElicitationEnabled] = useState(
-    () => getItem("elicitation-enabled") !== "false",
+  const [elicitationState, setElicitationState] = useState<FeatureState>(
+    () => getFeatureState("elicitation-enabled"),
   );
+  const elicitationEnabled = resolveFeatureState(elicitationState, "elicitation-enabled");
 
   // ── Interaction mode state (default on) ───────────────────────────────
-  const [interactionModeEnabled, setInteractionModeEnabled] = useState(
-    () => getItem("interaction-mode-enabled") !== "false",
+  const [interactionModeState, setInteractionModeState] = useState<FeatureState>(
+    () => getFeatureState("interaction-mode-enabled"),
   );
 
   // Mirror the Claude-side concept toggles onto codex's ~/.codex/AGENTS.md.
@@ -477,9 +483,10 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     );
   }, []);
 
-  const handleToggleInteractionMode = useCallback(async (enabled: boolean) => {
-    setInteractionModeEnabled(enabled);
-    setItem("interaction-mode-enabled", enabled ? "true" : "false");
+  const handleToggleInteractionMode = useCallback(async (state: FeatureState) => {
+    setInteractionModeState(state);
+    setFeatureState("interaction-mode-enabled", state);
+    const enabled = resolveFeatureState(state, "interaction-mode-enabled");
     try {
       if (enabled) {
         await invoke("apply_interaction_mode");
@@ -494,13 +501,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   }, [reconcileCodexGuidance]);
 
   // ── PRD discipline mode state (default on) ────────────────────────────
-  const [prdModeEnabled, setPrdModeEnabled] = useState(
-    () => getItem("prd-mode-enabled") !== "false",
+  const [prdModeState, setPrdModeState] = useState<FeatureState>(
+    () => getFeatureState("prd-mode-enabled"),
   );
 
-  const handleTogglePrdMode = useCallback(async (enabled: boolean) => {
-    setPrdModeEnabled(enabled);
-    setItem("prd-mode-enabled", enabled ? "true" : "false");
+  const handleTogglePrdMode = useCallback(async (state: FeatureState) => {
+    setPrdModeState(state);
+    setFeatureState("prd-mode-enabled", state);
+    const enabled = resolveFeatureState(state, "prd-mode-enabled");
     try {
       if (enabled) {
         await invoke("apply_prd_mode");
@@ -515,13 +523,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   }, [reconcileCodexGuidance]);
 
   // ── Wiki guidance state (default on) ───────────────────────────────────
-  const [wikiGuidanceEnabled, setWikiGuidanceEnabled] = useState(
-    () => getItem("wiki-guidance-enabled") !== "false",
+  const [wikiGuidanceState, setWikiGuidanceState] = useState<FeatureState>(
+    () => getFeatureState("wiki-guidance-enabled"),
   );
 
-  const handleToggleWikiGuidance = useCallback(async (enabled: boolean) => {
-    setWikiGuidanceEnabled(enabled);
-    setItem("wiki-guidance-enabled", enabled ? "true" : "false");
+  const handleToggleWikiGuidance = useCallback(async (state: FeatureState) => {
+    setWikiGuidanceState(state);
+    setFeatureState("wiki-guidance-enabled", state);
+    const enabled = resolveFeatureState(state, "wiki-guidance-enabled");
     try {
       if (enabled) {
         await invoke("apply_wiki_guidance");
@@ -536,13 +545,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   }, [reconcileCodexGuidance]);
 
   // ── Model guidance state (default on) ──────────────────────────────────
-  const [modelGuidanceEnabled, setModelGuidanceEnabled] = useState(
-    () => getItem("model-guidance-enabled") !== "false",
+  const [modelGuidanceState, setModelGuidanceState] = useState<FeatureState>(
+    () => getFeatureState("model-guidance-enabled"),
   );
 
-  const handleToggleModelGuidance = useCallback(async (enabled: boolean) => {
-    setModelGuidanceEnabled(enabled);
-    setItem("model-guidance-enabled", enabled ? "true" : "false");
+  const handleToggleModelGuidance = useCallback(async (state: FeatureState) => {
+    setModelGuidanceState(state);
+    setFeatureState("model-guidance-enabled", state);
+    const enabled = resolveFeatureState(state, "model-guidance-enabled");
     try {
       if (enabled) {
         await invoke("apply_model_guidance");
@@ -556,19 +566,22 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, [reconcileCodexGuidance]);
 
-  const handleToggleElicitation = useCallback(async (enabled: boolean) => {
-    setElicitationEnabled(enabled);
-    setItem("elicitation-enabled", enabled ? "true" : "false");
+  const handleToggleElicitation = useCallback(async (state: FeatureState) => {
+    setElicitationState(state);
+    setFeatureState("elicitation-enabled", state);
+    const enabled = resolveFeatureState(state, "elicitation-enabled");
     try {
       if (enabled) {
         await invoke("apply_elicitation_hook");
       } else {
         await invoke("remove_elicitation_hook");
         // Interaction mode depends on elicitation; disable it together — and
-        // mirror the removal onto codex so its interaction block goes too.
-        if (getItem("interaction-mode-enabled") !== "false") {
-          setInteractionModeEnabled(false);
-          setItem("interaction-mode-enabled", "false");
+        // mirror the removal onto codex so its interaction block goes too. Force
+        // an explicit "off" (not "default") so it can't silently follow a
+        // default-on back to enabled while elicitation is gone.
+        if (resolveFeature("interaction-mode-enabled")) {
+          setInteractionModeState("off");
+          setFeatureState("interaction-mode-enabled", "off");
           await invoke("remove_interaction_mode").catch(() => {});
           await reconcileCodexGuidance();
         }
@@ -580,13 +593,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   }, [reconcileCodexGuidance]);
 
   // ── Plan approval state (default on) ──────────────────────────────────
-  const [planApprovalEnabled, setPlanApprovalEnabled] = useState(
-    () => getItem("plan-approval-enabled") !== "false",
+  const [planApprovalState, setPlanApprovalState] = useState<FeatureState>(
+    () => getFeatureState("plan-approval-enabled"),
   );
 
-  const handleTogglePlanApproval = useCallback(async (enabled: boolean) => {
-    setPlanApprovalEnabled(enabled);
-    setItem("plan-approval-enabled", enabled ? "true" : "false");
+  const handleTogglePlanApproval = useCallback(async (state: FeatureState) => {
+    setPlanApprovalState(state);
+    setFeatureState("plan-approval-enabled", state);
+    const enabled = resolveFeatureState(state, "plan-approval-enabled");
     try {
       if (enabled) {
         await invoke("apply_plan_approval_hook");
@@ -828,20 +842,26 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const statusIcon = (s: DiagnosticCheck["status"]) =>
     s === "pass" ? "✅" : s === "warn" ? "⚠️" : s === "fail" ? "❌" : "❓";
 
-  // ── Notifications state ─────────────────────────────────────────────────
-  const [notifMode, setNotifMode] = useState<NotificationMode>(
-    () => (getItem("notification-mode") as NotificationMode) || "user_action",
+  // ── Notifications state (tristate: concrete mode or "default") ──────────
+  const [notifSelection, setNotifSelection] = useState<NotificationMode | "default">(
+    () => getModeSelection("notification-mode") as NotificationMode | "default",
   );
+  const notifMode: NotificationMode =
+    notifSelection === "default"
+      ? (modeDefault("notification-mode") as NotificationMode)
+      : notifSelection;
   const [notifPermission, setNotifPermission] = useState<boolean | null>(null);
 
   useEffect(() => {
     isPermissionGranted().then(setNotifPermission).catch(() => {});
   }, []);
 
-  const handleNotifModeChange = useCallback((mode: NotificationMode) => {
-    setNotifMode(mode);
-    setItem("notification-mode", mode);
-    invoke("set_notification_mode", { mode }).catch(() => {});
+  const handleNotifModeChange = useCallback((sel: NotificationMode | "default") => {
+    setNotifSelection(sel);
+    setModeSelection("notification-mode", sel);
+    const effective =
+      sel === "default" ? (modeDefault("notification-mode") as NotificationMode) : sel;
+    invoke("set_notification_mode", { mode: effective }).catch(() => {});
   }, []);
 
   const handleRequestPermission = useCallback(async () => {
@@ -854,14 +874,16 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, []);
 
-  // ── TTS state ──────────────────────────────────────────────────────────
-  const [ttsMode, setTtsMode] = useState<TtsMode>(
-    () => (getItem("tts-mode") as TtsMode) || "chime_and_speech",
+  // ── TTS state (tristate: concrete mode or "default") ────────────────────
+  const [ttsSelection, setTtsSelection] = useState<TtsMode | "default">(
+    () => getModeSelection("tts-mode") as TtsMode | "default",
   );
+  const ttsMode: TtsMode =
+    ttsSelection === "default" ? (modeDefault("tts-mode") as TtsMode) : ttsSelection;
 
-  const handleTtsModeChange = useCallback((mode: TtsMode) => {
-    setTtsMode(mode);
-    setItem("tts-mode", mode);
+  const handleTtsModeChange = useCallback((sel: TtsMode | "default") => {
+    setTtsSelection(sel);
+    setModeSelection("tts-mode", sel);
   }, []);
 
   // ── Master mute ───────────────────────────────────────────────────────
@@ -871,22 +893,28 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   // UI — only the Lite-mode top-bar button — which is why "I turned sound
   // off but the decision panel still spoke" happened. Surface it here as the
   // single master switch.
-  const [ttsMuted, setTtsMuted] = useState(() => getItem("tts-muted") === "true");
-
-  const handleTtsMutedChange = useCallback((muted: boolean) => {
-    setTtsMuted(muted);
-    setItem("tts-muted", muted ? "true" : "false");
-  }, []);
-
-  // ── Chime preset state ────────────────────────────────────────────────
-  const [chimePreset, setChimePreset] = useState<ChimePreset>(
-    () => (getItem("chime-sound") as ChimePreset) || "ding_dong",
+  const [ttsMutedState, setTtsMutedState] = useState<FeatureState>(
+    () => getFeatureState("tts-muted"),
   );
 
-  const handleChimeChange = useCallback((preset: ChimePreset) => {
-    setChimePreset(preset);
-    setItem("chime-sound", preset);
-    playChime(preset);
+  const handleTtsMutedChange = useCallback((state: FeatureState) => {
+    setTtsMutedState(state);
+    setFeatureState("tts-muted", state);
+  }, []);
+
+  // ── Chime preset state (tristate: concrete preset or "default") ─────────
+  const [chimeSelection, setChimeSelection] = useState<ChimePreset | "default">(
+    () => getModeSelection("chime-sound") as ChimePreset | "default",
+  );
+  const chimePreset: ChimePreset =
+    chimeSelection === "default" ? (modeDefault("chime-sound") as ChimePreset) : chimeSelection;
+
+  const handleChimeChange = useCallback((sel: ChimePreset | "default") => {
+    setChimeSelection(sel);
+    setModeSelection("chime-sound", sel);
+    const effective =
+      sel === "default" ? (modeDefault("chime-sound") as ChimePreset) : sel;
+    playChime(effective);
   }, []);
 
   // ── TTS voice state ───────────────────────────────────────────────────
@@ -917,47 +945,50 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   }, []);
 
   // ── Personalized mascot state ──────────────────────────────────────────
-  const [personalizedMascot, setPersonalizedMascot] = useState(
-    () => getItem("personalized-mascot") === "true",
+  const [personalizedMascotState, setPersonalizedMascotState] = useState<FeatureState>(
+    () => getFeatureState("personalized-mascot"),
   );
 
-  const handleTogglePersonalizedMascot = useCallback((enabled: boolean) => {
-    setPersonalizedMascot(enabled);
-    setItem("personalized-mascot", enabled ? "true" : "false");
+  const handleTogglePersonalizedMascot = useCallback((state: FeatureState) => {
+    setPersonalizedMascotState(state);
+    setFeatureState("personalized-mascot", state);
   }, []);
 
   // ── Mascot visibility state ────────────────────────────────────────────
-  const [mascotVisible, setMascotVisibleLocal] = useState(
-    () => getItem("mascot-visible") === "true",
+  const [mascotVisibleState, setMascotVisibleState] = useState<FeatureState>(
+    () => getFeatureState("mascot-visible"),
   );
+  const mascotVisible = resolveFeatureState(mascotVisibleState, "mascot-visible");
 
-  const handleToggleMascotVisible = useCallback(async (enabled: boolean) => {
-    setMascotVisibleLocal(enabled);
-    setItem("mascot-visible", enabled ? "true" : "false");
+  const handleToggleMascotVisible = useCallback(async (state: FeatureState) => {
+    setMascotVisibleState(state);
+    setFeatureState("mascot-visible", state);
+    const enabled = resolveFeatureState(state, "mascot-visible");
     const { emit } = await import("@tauri-apps/api/event");
     await emit("overlay-mascot-visible-changed", enabled).catch(() => {});
   }, []);
 
   // ── Floating decision panel state ──────────────────────────────────────
-  const [floatingDecisionPanel, setFloatingDecisionPanelLocal] = useState(
-    () => getItem("floating-decision-panel") === "true",
+  const [floatingDecisionPanelState, setFloatingDecisionPanelState] = useState<FeatureState>(
+    () => getFeatureState("floating-decision-panel"),
   );
 
-  const handleToggleFloatingDecisionPanel = useCallback(async (enabled: boolean) => {
-    setFloatingDecisionPanelLocal(enabled);
-    setItem("floating-decision-panel", enabled ? "true" : "false");
+  const handleToggleFloatingDecisionPanel = useCallback(async (state: FeatureState) => {
+    setFloatingDecisionPanelState(state);
+    setFeatureState("floating-decision-panel", state);
+    const enabled = resolveFeatureState(state, "floating-decision-panel");
     const { emit } = await import("@tauri-apps/api/event");
     await emit("overlay-floating-decision-panel-changed", enabled).catch(() => {});
   }, []);
 
   // ── Auto update check state ────────────────────────────────────────────
-  const [autoUpdateCheck, setAutoUpdateCheck] = useState(
-    () => getItem("auto-update-check") !== "false",
+  const [autoUpdateCheckState, setAutoUpdateCheckState] = useState<FeatureState>(
+    () => getFeatureState("auto-update-check"),
   );
 
-  const handleToggleAutoUpdateCheck = useCallback((enabled: boolean) => {
-    setAutoUpdateCheck(enabled);
-    setItem("auto-update-check", enabled ? "true" : "false");
+  const handleToggleAutoUpdateCheck = useCallback((state: FeatureState) => {
+    setAutoUpdateCheckState(state);
+    setFeatureState("auto-update-check", state);
   }, []);
 
   // ── Group handoff-relay sessions ───────────────────────────────────────────
@@ -1129,14 +1160,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       {t("settings.auto_update_check_desc")}
                     </span>
                   </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={autoUpdateCheck}
-                      onChange={(e) => handleToggleAutoUpdateCheck(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={autoUpdateCheckState}
+                    defaultOn={featureDefault("auto-update-check")}
+                    onChange={handleToggleAutoUpdateCheck}
+                  />
                 </div>
 
                 <div className={styles.row}>
@@ -1332,14 +1360,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       {t("settings.mascot_visible_desc")}
                     </span>
                   </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={mascotVisible}
-                      onChange={(e) => handleToggleMascotVisible(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={mascotVisibleState}
+                    defaultOn={featureDefault("mascot-visible")}
+                    onChange={handleToggleMascotVisible}
+                  />
                 </div>
                 {mascotVisible && (
                   <div className={styles.row}>
@@ -1349,14 +1374,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                         {t("settings.personalized_mascot_desc")}
                       </span>
                     </div>
-                    <label className={styles.toggle}>
-                      <input
-                        type="checkbox"
-                        checked={personalizedMascot}
-                        onChange={(e) => handleTogglePersonalizedMascot(e.target.checked)}
-                      />
-                      <span className={styles.toggle_slider} />
-                    </label>
+                    <TriStateToggle
+                      value={personalizedMascotState}
+                      defaultOn={featureDefault("personalized-mascot")}
+                      onChange={handleTogglePersonalizedMascot}
+                    />
                   </div>
                 )}
               </div>
@@ -1745,14 +1767,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.elicitation_enabled")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={elicitationEnabled}
-                      onChange={(e) => handleToggleElicitation(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={elicitationState}
+                    defaultOn={featureDefault("elicitation-enabled")}
+                    onChange={handleToggleElicitation}
+                  />
                 </div>
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.plan_approval")}</div>
@@ -1763,14 +1782,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.plan_approval_enabled")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={planApprovalEnabled}
-                      onChange={(e) => handleTogglePlanApproval(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={planApprovalState}
+                    defaultOn={featureDefault("plan-approval-enabled")}
+                    onChange={handleTogglePlanApproval}
+                  />
                 </div>
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.interaction_mode")}</div>
@@ -1788,15 +1804,12 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       </span>
                     )}
                   </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={interactionModeEnabled}
-                      disabled={!elicitationEnabled}
-                      onChange={(e) => handleToggleInteractionMode(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={interactionModeState}
+                    defaultOn={featureDefault("interaction-mode-enabled")}
+                    disabled={!elicitationEnabled}
+                    onChange={handleToggleInteractionMode}
+                  />
                 </div>
               </div>
 
@@ -1810,26 +1823,20 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.guard_enabled")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={guardEnabled}
-                      onChange={(e) => handleToggleGuard(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={guardState}
+                    defaultOn={featureDefault("guard-enabled")}
+                    onChange={handleToggleGuard}
+                  />
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.guard_llm_analysis")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={guardLlmAnalysis}
-                      disabled={!guardEnabled}
-                      onChange={(e) => handleToggleGuardLlm(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={guardLlmState}
+                    defaultOn={featureDefault("guard-llm-analysis")}
+                    disabled={!guardEnabled}
+                    onChange={handleToggleGuardLlm}
+                  />
                 </div>
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.permissions_bypass")}</div>
@@ -1839,7 +1846,12 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </span>
                 </div>
                 <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.permissions_bypass_enabled")}</span>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.permissions_bypass_enabled")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.permissions_bypass_recommended")}
+                    </span>
+                  </div>
                   <label className={styles.toggle}>
                     <input
                       type="checkbox"
@@ -2103,14 +2115,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.prd_mode_enabled")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={prdModeEnabled}
-                      onChange={(e) => handleTogglePrdMode(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={prdModeState}
+                    defaultOn={featureDefault("prd-mode-enabled")}
+                    onChange={handleTogglePrdMode}
+                  />
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
@@ -2119,14 +2128,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.wiki_guidance_enabled")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={wikiGuidanceEnabled}
-                      onChange={(e) => handleToggleWikiGuidance(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={wikiGuidanceState}
+                    defaultOn={featureDefault("wiki-guidance-enabled")}
+                    onChange={handleToggleWikiGuidance}
+                  />
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
@@ -2135,14 +2141,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.model_guidance_enabled")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={modelGuidanceEnabled}
-                      onChange={(e) => handleToggleModelGuidance(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={modelGuidanceState}
+                    defaultOn={featureDefault("model-guidance-enabled")}
+                    onChange={handleToggleModelGuidance}
+                  />
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
@@ -2298,14 +2301,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       {t("settings.mute_all_desc")}
                     </span>
                   </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={ttsMuted}
-                      onChange={(e) => handleTtsMutedChange(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={ttsMutedState}
+                    defaultOn={featureDefault("tts-muted")}
+                    onChange={handleTtsMutedChange}
+                  />
                 </div>
 
                 {/* Visual — floating decision panel */}
@@ -2317,14 +2317,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       {t("settings.floating_decision_panel_desc")}
                     </span>
                   </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={floatingDecisionPanel}
-                      onChange={(e) => handleToggleFloatingDecisionPanel(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <TriStateToggle
+                    value={floatingDecisionPanelState}
+                    defaultOn={featureDefault("floating-decision-panel")}
+                    onChange={handleToggleFloatingDecisionPanel}
+                  />
                 </div>
 
                 {/* System notifications */}
@@ -2334,7 +2331,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <input
                       type="radio"
                       name="notif-mode"
-                      checked={notifMode === mode}
+                      checked={notifSelection === mode}
                       onChange={() => handleNotifModeChange(mode)}
                       className={styles.radio_input}
                     />
@@ -2348,6 +2345,23 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     </div>
                   </label>
                 ))}
+                <label className={styles.radio_row} key="default">
+                  <input
+                    type="radio"
+                    name="notif-mode"
+                    checked={notifSelection === "default"}
+                    onChange={() => handleNotifModeChange("default")}
+                    className={styles.radio_input}
+                  />
+                  <div className={styles.radio_label}>
+                    <span className={styles.radio_title}>{t("settings.mode_default_title")}</span>
+                    <span className={styles.radio_desc}>
+                      {t("settings.mode_default_desc", {
+                        value: t(`settings.notify_${modeDefault("notification-mode")}`),
+                      })}
+                    </span>
+                  </div>
+                </label>
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>
                   {t("settings.notification_permission")}
@@ -2389,7 +2403,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <input
                       type="radio"
                       name="tts-mode"
-                      checked={ttsMode === mode}
+                      checked={ttsSelection === mode}
                       onChange={() => handleTtsModeChange(mode)}
                       className={styles.radio_input}
                     />
@@ -2403,6 +2417,23 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     </div>
                   </label>
                 ))}
+                <label className={styles.radio_row} key="default">
+                  <input
+                    type="radio"
+                    name="tts-mode"
+                    checked={ttsSelection === "default"}
+                    onChange={() => handleTtsModeChange("default")}
+                    className={styles.radio_input}
+                  />
+                  <div className={styles.radio_label}>
+                    <span className={styles.radio_title}>{t("settings.mode_default_title")}</span>
+                    <span className={styles.radio_desc}>
+                      {t("settings.mode_default_desc", {
+                        value: t(`settings.tts_${modeDefault("tts-mode")}`),
+                      })}
+                    </span>
+                  </div>
+                </label>
 
                 {ttsMode !== "off" && (
                   <>
@@ -2412,9 +2443,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <div className={styles.row}>
                       <select
                         className={styles.select}
-                        value={chimePreset}
-                        onChange={(e) => handleChimeChange(e.target.value as ChimePreset)}
+                        value={chimeSelection}
+                        onChange={(e) => handleChimeChange(e.target.value as ChimePreset | "default")}
                       >
+                        <option value="default">
+                          {t("settings.mode_default_option", {
+                            value: t(`settings.chime_${modeDefault("chime-sound")}`),
+                          })}
+                        </option>
                         {CHIME_PRESETS.map((p) => (
                           <option key={p} value={p}>{t(`settings.chime_${p}`)}</option>
                         ))}
