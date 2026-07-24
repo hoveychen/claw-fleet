@@ -305,6 +305,14 @@ const DICT: Record<string, string> = {
   "编辑 {0} 个文件": "Patching {0} files",
   "加载工具 {0}": "Loading tools {0}",
   "搜索工具：{0}": "Searching tools: {0}",
+  // Fleet MCP tool labels for the ToolSearch load line. 决策卡/计划/交接/知识库
+  // already exist in this dict (reused here — do NOT re-add, duplicate keys
+  // silently override existing translations); only the new ones are declared.
+  富交互卡: "Interactive card",
+  守望: "Watch",
+  循环: "Loop",
+  定时: "Schedule",
+  设置标题: "Set title",
 
   // ── SessionDetailTabs ──
   问题请示: "Question",

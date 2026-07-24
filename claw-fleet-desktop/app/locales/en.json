@@ -1553,6 +1553,17 @@
     "tool_search": "Loading tools",
     "tool_search_load": "Loading tools {{names}}",
     "tool_search_query": "Searching tools: {{query}}",
+    "fleet_tool": {
+      "ask": "Decision card",
+      "render_a2ui": "Interactive card",
+      "plan": "Plan",
+      "handoff": "Handoff",
+      "watch": "Watch",
+      "loop": "Loop",
+      "schedule": "Schedule",
+      "wiki": "Wiki",
+      "set_session_title": "Set title"
+    },
     "tool_patch_add": "Creating {{path}}",
     "tool_patch_update": "Editing {{path}}",
     "tool_patch_delete": "Deleting {{path}}",

@@ -36,6 +36,42 @@ export function patchToolSummary(command: string, tr: Translate = t): string | n
   return tr(action, basename(file.path));
 }
 
+/**
+ * Human-readable label (i18n source string) for each Fleet MCP tool, keyed by
+ * the tail of its wire name (`mcp__fleet__fleet__<tail>`). Mirrors the desktop
+ * `FLEET_TOOL_LABEL_KEYS` map.
+ */
+const FLEET_TOOL_LABELS: Record<string, string> = {
+  ask: "决策卡",
+  render_a2ui: "富交互卡",
+  plan: "计划",
+  handoff: "交接",
+  watch: "守望",
+  loop: "循环",
+  schedule: "定时",
+  wiki: "知识库",
+  set_session_title: "设置标题",
+};
+
+/**
+ * Friendly label for a raw tool id in a ToolSearch `select:` list. Fleet MCP
+ * tools (`mcp__fleet__fleet__ask`, …) map to a translated label; any other MCP
+ * tool (`mcp__<server>__<tool>`) drops the `mcp__server__` prefix and renders
+ * `server·tool`; a plain tool name passes through unchanged. Mirrors the
+ * desktop `friendlyToolName`.
+ */
+export function friendlyToolName(rawId: string, tr: Translate = t): string {
+  const id = rawId.trim();
+  for (const [tail, label] of Object.entries(FLEET_TOOL_LABELS)) {
+    if (id === `fleet__${tail}` || id.endsWith(`fleet__fleet__${tail}`)) return tr(label);
+  }
+  if (id.startsWith("mcp__")) {
+    const parts = id.split("__");
+    if (parts.length >= 3) return `${parts[1]}·${parts.slice(2).join("__")}`;
+  }
+  return id;
+}
+
 /** The readable one-line label shown beside a mobile transcript tool icon. */
 export function toolSummary(block: ContentBlock): string {
   const input = block.input;
@@ -65,6 +101,7 @@ export function toolSummary(block: ContentBlock): string {
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean)
+          .map((n) => friendlyToolName(n))
           .join(", ");
         if (names) return t("加载工具 {0}", names);
       } else {

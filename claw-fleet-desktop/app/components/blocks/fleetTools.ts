@@ -41,6 +41,45 @@ export function isFleetTool(name: string): FleetTool | null {
   return null;
 }
 
+/**
+ * i18n key for a Fleet MCP tool's human-readable label, keyed by the tail
+ * segment of its wire name (`mcp__fleet__fleet__<tail>`). Covers the six
+ * control tools plus `ask` / `render_a2ui` / `set_session_title`. Used to
+ * relabel the raw `mcp__fleet__fleet__…` id wherever it would otherwise leak
+ * verbatim — e.g. the ToolSearch "loading tools" summary, where a tool is just
+ * a string in the `select:` query and never reaches its dedicated card.
+ */
+export const FLEET_TOOL_LABEL_KEYS: Record<string, string> = {
+  ask: "detail.fleet_tool.ask",
+  render_a2ui: "detail.fleet_tool.render_a2ui",
+  plan: "detail.fleet_tool.plan",
+  handoff: "detail.fleet_tool.handoff",
+  watch: "detail.fleet_tool.watch",
+  loop: "detail.fleet_tool.loop",
+  schedule: "detail.fleet_tool.schedule",
+  wiki: "detail.fleet_tool.wiki",
+  set_session_title: "detail.fleet_tool.set_session_title",
+};
+
+/**
+ * Human-friendly label for a raw tool id (as it appears in a ToolSearch
+ * `select:` list). Fleet's MCP tools (`mcp__fleet__fleet__ask`, …) map to a
+ * translated label; any other MCP tool (`mcp__<server>__<tool>`) drops the
+ * `mcp__server__` prefix and renders `server·tool`; a plain non-MCP tool name
+ * passes through unchanged.
+ */
+export function friendlyToolName(rawId: string, t: (key: string) => string): string {
+  const id = rawId.trim();
+  for (const [tail, key] of Object.entries(FLEET_TOOL_LABEL_KEYS)) {
+    if (id === `fleet__${tail}` || id.endsWith(`fleet__fleet__${tail}`)) return t(key);
+  }
+  if (id.startsWith("mcp__")) {
+    const parts = id.split("__");
+    if (parts.length >= 3) return `${parts[1]}·${parts.slice(2).join("__")}`;
+  }
+  return id;
+}
+
 // ── Result shapes ────────────────────────────────────────────────────────────
 
 export interface PlanListItem {
