@@ -464,3 +464,16 @@ html.os-windows::-webkit-scrollbar-thumb:hover,
    首字为 CJK 的 <p> 上（英文段落不加），所以只有中文正文段落缩进。1em ≈ 1 个
    全角字宽，2em 即 2 个中文字。 */
 .cjk-indent { text-indent: 2em; }
+
+/* ── In-app Cmd+F find highlights ──────────────────────────────────────
+   Painted via the CSS Custom Highlight API from useFindController, so no
+   <mark> wrappers touch the DOM. `find-match` is every hit; `find-current`
+   is the active one the find bar has scrolled to. */
+::highlight(find-match) {
+  background-color: rgba(250, 204, 21, 0.4);
+  color: inherit;
+}
+::highlight(find-current) {
+  background-color: #facc15;
+  color: #000;
+}
