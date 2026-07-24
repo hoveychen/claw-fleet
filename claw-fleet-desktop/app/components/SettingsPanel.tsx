@@ -12,6 +12,9 @@ import {
   setFeatureState,
   resolveFeatureState,
   featureDefault,
+  getModeSelection,
+  setModeSelection,
+  modeDefault,
   type FeatureState,
 } from "../storage";
 import { TriStateToggle } from "./TriStateToggle";
@@ -839,20 +842,26 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const statusIcon = (s: DiagnosticCheck["status"]) =>
     s === "pass" ? "✅" : s === "warn" ? "⚠️" : s === "fail" ? "❌" : "❓";
 
-  // ── Notifications state ─────────────────────────────────────────────────
-  const [notifMode, setNotifMode] = useState<NotificationMode>(
-    () => (getItem("notification-mode") as NotificationMode) || "user_action",
+  // ── Notifications state (tristate: concrete mode or "default") ──────────
+  const [notifSelection, setNotifSelection] = useState<NotificationMode | "default">(
+    () => getModeSelection("notification-mode") as NotificationMode | "default",
   );
+  const notifMode: NotificationMode =
+    notifSelection === "default"
+      ? (modeDefault("notification-mode") as NotificationMode)
+      : notifSelection;
   const [notifPermission, setNotifPermission] = useState<boolean | null>(null);
 
   useEffect(() => {
     isPermissionGranted().then(setNotifPermission).catch(() => {});
   }, []);
 
-  const handleNotifModeChange = useCallback((mode: NotificationMode) => {
-    setNotifMode(mode);
-    setItem("notification-mode", mode);
-    invoke("set_notification_mode", { mode }).catch(() => {});
+  const handleNotifModeChange = useCallback((sel: NotificationMode | "default") => {
+    setNotifSelection(sel);
+    setModeSelection("notification-mode", sel);
+    const effective =
+      sel === "default" ? (modeDefault("notification-mode") as NotificationMode) : sel;
+    invoke("set_notification_mode", { mode: effective }).catch(() => {});
   }, []);
 
   const handleRequestPermission = useCallback(async () => {
@@ -865,14 +874,16 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, []);
 
-  // ── TTS state ──────────────────────────────────────────────────────────
-  const [ttsMode, setTtsMode] = useState<TtsMode>(
-    () => (getItem("tts-mode") as TtsMode) || "chime_and_speech",
+  // ── TTS state (tristate: concrete mode or "default") ────────────────────
+  const [ttsSelection, setTtsSelection] = useState<TtsMode | "default">(
+    () => getModeSelection("tts-mode") as TtsMode | "default",
   );
+  const ttsMode: TtsMode =
+    ttsSelection === "default" ? (modeDefault("tts-mode") as TtsMode) : ttsSelection;
 
-  const handleTtsModeChange = useCallback((mode: TtsMode) => {
-    setTtsMode(mode);
-    setItem("tts-mode", mode);
+  const handleTtsModeChange = useCallback((sel: TtsMode | "default") => {
+    setTtsSelection(sel);
+    setModeSelection("tts-mode", sel);
   }, []);
 
   // ── Master mute ───────────────────────────────────────────────────────
@@ -891,15 +902,19 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     setFeatureState("tts-muted", state);
   }, []);
 
-  // ── Chime preset state ────────────────────────────────────────────────
-  const [chimePreset, setChimePreset] = useState<ChimePreset>(
-    () => (getItem("chime-sound") as ChimePreset) || "ding_dong",
+  // ── Chime preset state (tristate: concrete preset or "default") ─────────
+  const [chimeSelection, setChimeSelection] = useState<ChimePreset | "default">(
+    () => getModeSelection("chime-sound") as ChimePreset | "default",
   );
+  const chimePreset: ChimePreset =
+    chimeSelection === "default" ? (modeDefault("chime-sound") as ChimePreset) : chimeSelection;
 
-  const handleChimeChange = useCallback((preset: ChimePreset) => {
-    setChimePreset(preset);
-    setItem("chime-sound", preset);
-    playChime(preset);
+  const handleChimeChange = useCallback((sel: ChimePreset | "default") => {
+    setChimeSelection(sel);
+    setModeSelection("chime-sound", sel);
+    const effective =
+      sel === "default" ? (modeDefault("chime-sound") as ChimePreset) : sel;
+    playChime(effective);
   }, []);
 
   // ── TTS voice state ───────────────────────────────────────────────────
@@ -1831,7 +1846,12 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </span>
                 </div>
                 <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.permissions_bypass_enabled")}</span>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.permissions_bypass_enabled")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.permissions_bypass_recommended")}
+                    </span>
+                  </div>
                   <label className={styles.toggle}>
                     <input
                       type="checkbox"
@@ -2311,7 +2331,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <input
                       type="radio"
                       name="notif-mode"
-                      checked={notifMode === mode}
+                      checked={notifSelection === mode}
                       onChange={() => handleNotifModeChange(mode)}
                       className={styles.radio_input}
                     />
@@ -2325,6 +2345,23 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     </div>
                   </label>
                 ))}
+                <label className={styles.radio_row} key="default">
+                  <input
+                    type="radio"
+                    name="notif-mode"
+                    checked={notifSelection === "default"}
+                    onChange={() => handleNotifModeChange("default")}
+                    className={styles.radio_input}
+                  />
+                  <div className={styles.radio_label}>
+                    <span className={styles.radio_title}>{t("settings.mode_default_title")}</span>
+                    <span className={styles.radio_desc}>
+                      {t("settings.mode_default_desc", {
+                        value: t(`settings.notify_${modeDefault("notification-mode")}`),
+                      })}
+                    </span>
+                  </div>
+                </label>
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>
                   {t("settings.notification_permission")}
@@ -2366,7 +2403,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <input
                       type="radio"
                       name="tts-mode"
-                      checked={ttsMode === mode}
+                      checked={ttsSelection === mode}
                       onChange={() => handleTtsModeChange(mode)}
                       className={styles.radio_input}
                     />
@@ -2380,6 +2417,23 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     </div>
                   </label>
                 ))}
+                <label className={styles.radio_row} key="default">
+                  <input
+                    type="radio"
+                    name="tts-mode"
+                    checked={ttsSelection === "default"}
+                    onChange={() => handleTtsModeChange("default")}
+                    className={styles.radio_input}
+                  />
+                  <div className={styles.radio_label}>
+                    <span className={styles.radio_title}>{t("settings.mode_default_title")}</span>
+                    <span className={styles.radio_desc}>
+                      {t("settings.mode_default_desc", {
+                        value: t(`settings.tts_${modeDefault("tts-mode")}`),
+                      })}
+                    </span>
+                  </div>
+                </label>
 
                 {ttsMode !== "off" && (
                   <>
@@ -2389,9 +2443,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <div className={styles.row}>
                       <select
                         className={styles.select}
-                        value={chimePreset}
-                        onChange={(e) => handleChimeChange(e.target.value as ChimePreset)}
+                        value={chimeSelection}
+                        onChange={(e) => handleChimeChange(e.target.value as ChimePreset | "default")}
                       >
+                        <option value="default">
+                          {t("settings.mode_default_option", {
+                            value: t(`settings.chime_${modeDefault("chime-sound")}`),
+                          })}
+                        </option>
                         {CHIME_PRESETS.map((p) => (
                           <option key={p} value={p}>{t(`settings.chime_${p}`)}</option>
                         ))}

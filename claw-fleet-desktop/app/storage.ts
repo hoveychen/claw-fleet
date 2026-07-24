@@ -218,6 +218,43 @@ export const FEATURE_DEFAULTS: Record<string, boolean> = {
 
 export type FeatureState = "on" | "off" | "default";
 
+// ── Tristate mode selectors (enum-valued, with a "default" that follows the
+// central recommended value) ────────────────────────────────────────────────
+//
+// The enum equivalent of FEATURE_DEFAULTS: mode selectors (notification / TTS /
+// chime) each have a recommended value here. Selecting "default" in the UI
+// stores NO value (removeItem), so the mode follows MODE_DEFAULTS and any future
+// change to it — same zero-migration philosophy as the boolean toggles above.
+export const MODE_DEFAULTS: Record<string, string> = {
+  "notification-mode": "user_action",
+  "tts-mode": "chime_and_speech",
+  "chime-sound": "ding_dong",
+};
+
+/** The recommended value (from MODE_DEFAULTS) for a mode key. */
+export function modeDefault(key: string): string {
+  return MODE_DEFAULTS[key] ?? "";
+}
+
+/** The raw UI selection for a mode key: the stored concrete value, or the
+ *  "default" sentinel when no value is stored (follow MODE_DEFAULTS). */
+export function getModeSelection(key: string): string {
+  return getItem(key) ?? "default";
+}
+
+/** Resolve a mode key to its concrete effective value: the stored choice if
+ *  any, otherwise the central default. */
+export function resolveMode(key: string): string {
+  return getItem(key) ?? modeDefault(key);
+}
+
+/** Persist a mode selection. "default" clears the key so the mode follows
+ *  MODE_DEFAULTS (and any future change to it). */
+export function setModeSelection(key: string, sel: string): void {
+  if (sel === "default") removeItem(key);
+  else setItem(key, sel);
+}
+
 /** The recommended default (from FEATURE_DEFAULTS) for a feature key. */
 export function featureDefault(key: string): boolean {
   return FEATURE_DEFAULTS[key] ?? false;
