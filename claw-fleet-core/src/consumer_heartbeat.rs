@@ -199,7 +199,7 @@ fn classify(content: &str, now_ms: u128, stale_after_ms: u128) -> ConsumerStatus
 }
 
 #[cfg(unix)]
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
@@ -210,7 +210,7 @@ fn process_alive(pid: u32) -> bool {
 }
 
 #[cfg(windows)]
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
