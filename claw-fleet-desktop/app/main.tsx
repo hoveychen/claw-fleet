@@ -27,10 +27,15 @@ async function boot() {
     triggerMockQaScenario = mocks.triggerMockQaScenario;
   }
 
-  const { initStorage, setItem } = await import("./storage");
+  const { initStorage, setItem, migrateSessionViewDefault } = await import("./storage");
 
   // Load persisted settings into memory before anything reads them.
   await initStorage();
+
+  // Roll out gallery as the default session view for existing users whose disk
+  // still carries a stale "list". Must run before the UIStore is constructed
+  // (i.e. before ./App is imported below), same window as the ?lite pre-flip.
+  migrateSessionViewDefault();
 
   // `?lite` — pre-flip the lite-mode flag so UIStore picks it up at construction.
   // Mock-only shortcut so we can iterate on the portrait UI without tauri dev.
