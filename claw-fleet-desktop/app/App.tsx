@@ -318,7 +318,11 @@ function App() {
       <WindowsFrameOverlay />
       {onboardingMode && <Onboarding mode={onboardingMode} onDismiss={finishOnboarding} />}
       {showWizard && <Wizard onDone={dismissWizard} />}
-      <div className="app_main">
+      {/* data-find-content scopes the Cmd+F find bar to the active page's
+          content; the sidebar nav lives inside here too but is skipped by tag
+          (<aside>/<nav>/<button>), and everything outside app_main (onboarding,
+          decision panel, alerts) is excluded by not being tagged. */}
+      <div className="app_main" data-find-content>
         <SessionList />
         {isSessionView && <SessionDetail />}
       </div>
