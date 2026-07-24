@@ -1,16 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { findMatches, type FindMatch } from "./domSearch";
+import {
+  frameClear,
+  frameGoto,
+  frameSearch,
+  listSearchableFrames,
+  parseFindResult,
+} from "./iframeBridge";
 
 /**
- * Drives the in-app Cmd+F find bar for the main document.
+ * Drives the in-app Cmd+F find bar across the main document AND sandboxed
+ * preview iframes.
  *
- * Highlighting uses the CSS Custom Highlight API (`CSS.highlights` +
- * `::highlight()`), so matches are painted without mutating the DOM — no
- * `<mark>` wrappers to confuse React's reconciler. Two named highlights are
- * registered: `find-match` for every hit and `find-current` for the active one.
+ * Main-document highlighting uses the CSS Custom Highlight API (`CSS.highlights`
+ * + `::highlight()`), so matches are painted without mutating the DOM — no
+ * `<mark>` wrappers to confuse React's reconciler. Iframe previews are opaque to
+ * the parent, so they search themselves via an injected handler
+ * (`mcp_ipc::FIND_SCRIPT`) and report their counts back (see iframeBridge).
  *
- * P1 scope: the main document only. The iframe bridge (P3) layers sandboxed
- * previews on top via the same open/query state.
+ * Navigation is unified: every main-document match and every iframe match folds
+ * into one list ordered by vertical position, so ↑/↓ walks the page top-to-bottom
+ * regardless of which side of the sandbox a match lives on.
  */
 
 const HL_ALL = "find-match";
@@ -28,7 +38,7 @@ function highlightRegistry(): Map<string, Highlight> | null {
   return CSS.highlights as unknown as Map<string, Highlight>;
 }
 
-function clearHighlights() {
+function clearMainHighlights() {
   const reg = highlightRegistry();
   if (!reg) return;
   reg.delete(HL_ALL);
@@ -53,12 +63,23 @@ function rangeFor(m: FindMatch): Range {
   return r;
 }
 
+/** A frame that has reported at least one match. */
+interface FrameEntry {
+  frame: HTMLIFrameElement;
+  count: number;
+}
+
+/** One entry in the unified, vertically-ordered navigation list. */
+type OrderEntry =
+  | { kind: "main"; mainIdx: number }
+  | { kind: "frame"; frameIdx: number; localIdx: number };
+
 export interface FindController {
   open: boolean;
   query: string;
-  /** Number of matches in the main document. */
+  /** Total matches across the main document and all preview iframes. */
   total: number;
-  /** 0-based index of the active match, or -1 when there are none. */
+  /** 0-based index of the active match in the unified order, or -1 when none. */
   activeIndex: number;
   supported: boolean;
   setQuery: (q: string) => void;
@@ -74,80 +95,144 @@ export function useFindController(): FindController {
   const [total, setTotal] = useState(0);
   const [activeIndex, setActiveIndex] = useState(-1);
 
-  const matchesRef = useRef<FindMatch[]>([]);
+  const mainRef = useRef<FindMatch[]>([]);
+  const framesRef = useRef<FrameEntry[]>([]);
+  const orderRef = useRef<OrderEntry[]>([]);
+  const activeRef = useRef(-1);
 
-  const paintCurrent = useCallback((index: number) => {
+  const paintMainAll = useCallback(() => {
     const reg = highlightRegistry();
     if (!reg) return;
-    const matches = matchesRef.current;
-    if (index < 0 || index >= matches.length) {
-      reg.delete(HL_CURRENT);
-      return;
-    }
-    const current = rangeFor(matches[index]);
-    reg.set(HL_CURRENT, new Highlight(current));
-    matches[index].node.parentElement?.scrollIntoView({ block: "center" });
+    const matches = mainRef.current;
+    if (matches.length) reg.set(HL_ALL, new Highlight(...matches.map(rangeFor)));
+    else reg.delete(HL_ALL);
   }, []);
 
-  const recompute = useCallback(
-    (q: string) => {
-      const reg = highlightRegistry();
-      const matches = q ? findMatches(document.body, q, shouldSkip) : [];
-      matchesRef.current = matches;
-      setTotal(matches.length);
-      if (reg) {
-        if (matches.length) {
-          reg.set(HL_ALL, new Highlight(...matches.map(rangeFor)));
-        } else {
-          reg.delete(HL_ALL);
-        }
+  // Rebuild the unified order from current main matches + frame counts, sorting
+  // by each match's vertical position so ↑/↓ moves down the page. An iframe's
+  // matches all sort at the iframe element's top (we can't see inside), forming
+  // a contiguous block ordered by the iframe's own local index.
+  const rebuildOrder = useCallback(() => {
+    const anchored: { top: number; sub: number; entry: OrderEntry }[] = [];
+    mainRef.current.forEach((m, i) => {
+      let top = 0;
+      try {
+        top = rangeFor(m).getBoundingClientRect().top;
+      } catch {
+        /* detached node — sort it to the top */
       }
-      const nextActive = matches.length ? 0 : -1;
-      setActiveIndex(nextActive);
-      paintCurrent(nextActive);
+      anchored.push({ top, sub: 0, entry: { kind: "main", mainIdx: i } });
+    });
+    framesRef.current.forEach((f, fi) => {
+      if (f.count <= 0) return;
+      const top = f.frame.getBoundingClientRect().top;
+      for (let k = 0; k < f.count; k++) {
+        anchored.push({ top, sub: k, entry: { kind: "frame", frameIdx: fi, localIdx: k } });
+      }
+    });
+    anchored.sort((a, b) => a.top - b.top || a.sub - b.sub);
+    orderRef.current = anchored.map((a) => a.entry);
+    setTotal(orderRef.current.length);
+  }, []);
+
+  // Move the active mark to global index `idx`: clear every current mark (main +
+  // all frames), then set the one the target lives in and scroll it into view.
+  const applyActive = useCallback((idx: number) => {
+    const reg = highlightRegistry();
+    reg?.delete(HL_CURRENT);
+    framesRef.current.forEach((f) => frameGoto(f.frame, -1));
+
+    activeRef.current = idx;
+    setActiveIndex(idx);
+
+    const entry = orderRef.current[idx];
+    if (!entry) return;
+    if (entry.kind === "main") {
+      const m = mainRef.current[entry.mainIdx];
+      if (m && reg) reg.set(HL_CURRENT, new Highlight(rangeFor(m)));
+      m?.node.parentElement?.scrollIntoView({ block: "center" });
+    } else {
+      const f = framesRef.current[entry.frameIdx];
+      if (f) {
+        f.frame.scrollIntoView({ block: "center" });
+        frameGoto(f.frame, entry.localIdx);
+      }
+    }
+  }, []);
+
+  const runSearch = useCallback(
+    (q: string) => {
+      mainRef.current = q ? findMatches(document.body, q, shouldSkip) : [];
+      paintMainAll();
+
+      // Reset frame bookkeeping and (re)issue the search to every candidate; the
+      // ones carrying the handler reply with a count, the rest stay at 0.
+      const frames = listSearchableFrames().map((frame) => ({ frame, count: 0 }));
+      framesRef.current = frames;
+      if (q) frames.forEach((f) => frameSearch(f.frame, q));
+      else frames.forEach((f) => frameClear(f.frame));
+
+      rebuildOrder();
+      applyActive(orderRef.current.length ? 0 : -1);
     },
-    [paintCurrent],
+    [paintMainAll, rebuildOrder, applyActive],
   );
 
   const setQuery = useCallback(
     (q: string) => {
       setQueryState(q);
-      recompute(q);
+      runSearch(q);
     },
-    [recompute],
+    [runSearch],
   );
 
   const step = useCallback(
     (delta: number) => {
-      const n = matchesRef.current.length;
+      const n = orderRef.current.length;
       if (!n) return;
-      setActiveIndex((cur) => {
-        const next = (cur + delta + n) % n;
-        paintCurrent(next);
-        return next;
-      });
+      applyActive((activeRef.current + delta + n) % n);
     },
-    [paintCurrent],
+    [applyActive],
   );
 
   const next = useCallback(() => step(1), [step]);
   const prev = useCallback(() => step(-1), [step]);
 
-  const openBar = useCallback(() => {
-    setOpen(true);
-  }, []);
+  const openBar = useCallback(() => setOpen(true), []);
 
   const close = useCallback(() => {
     setOpen(false);
     setQueryState("");
-    matchesRef.current = [];
+    mainRef.current = [];
+    framesRef.current.forEach((f) => frameClear(f.frame));
+    framesRef.current = [];
+    orderRef.current = [];
+    activeRef.current = -1;
     setTotal(0);
     setActiveIndex(-1);
-    clearHighlights();
+    clearMainHighlights();
   }, []);
 
+  // Collect match counts as preview iframes reply, then re-fold the order. An
+  // iframe on an opaque origin reports `e.origin === "null"`, so we match on
+  // `e.source` (its window) rather than origin.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const result = parseFindResult(e.data);
+      if (!result) return;
+      const entry = framesRef.current.find((f) => f.frame.contentWindow === e.source);
+      if (!entry) return;
+      entry.count = result.count;
+      rebuildOrder();
+      // First real match after a search that had none? Land the active mark.
+      if (activeRef.current < 0 && orderRef.current.length) applyActive(0);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [rebuildOrder, applyActive]);
+
   // Cmd/Ctrl+F opens the bar; Escape (when open) closes it. Capture phase so we
-  // beat any component-level handlers, and preventDefault stops the webview's own
+  // beat component-level handlers, and preventDefault stops the webview's own
   // (non-functional) find affordance.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -163,7 +248,7 @@ export function useFindController(): FindController {
   }, [open, close]);
 
   // Clear paint if the component tree tears down while matches are live.
-  useEffect(() => () => clearHighlights(), []);
+  useEffect(() => () => clearMainHighlights(), []);
 
   return {
     open,
