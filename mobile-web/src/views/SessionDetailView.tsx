@@ -59,7 +59,7 @@ import {
 import { parseSkillInjection } from "../skillInjection";
 import { groupMetaRuns } from "./metaGrouping";
 import { countSteps, groupWorkRuns, isDecisionTool, workRunTitle } from "./workRuns";
-import { toolSummary } from "./toolSummary";
+import { friendlyToolName, toolSummary } from "./toolSummary";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { ToolDigest } from "../types";
@@ -533,7 +533,7 @@ function ToolStep({
         role={expandable ? "button" : undefined}
       >
         <div className={styles.toolLine} title={name}>
-          {summary || name}
+          {summary || friendlyToolName(name)}
         </div>
         {meta && <DigestChips meta={meta} />}
       </div>

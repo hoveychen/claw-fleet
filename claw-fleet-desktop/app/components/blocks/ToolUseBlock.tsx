@@ -1089,7 +1089,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
         title={rail ? block.name : undefined}
       >
         {!rail && <span className={styles.arrow}>{open ? "▾" : "▸"}</span>}
-        {!rail && <span className={styles.tool_name}>{block.name}</span>}
+        {!rail && <span className={styles.tool_name}>{friendlyToolName(block.name, t)}</span>}
         {(rail || !open) && fileIconPath && (
           <span className={styles.file_icon} aria-hidden>
             {fileExtIcon(fileIconPath)}
