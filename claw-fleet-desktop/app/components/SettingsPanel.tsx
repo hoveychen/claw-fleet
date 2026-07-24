@@ -335,49 +335,45 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
           console.error("auto-apply elicitation hook:", e),
         );
       }
-      // Sync the toggle to actual disk state — localStorage gets wiped on
-      // reinstall/cache-clear, but the sentinel block in ~/.claude/CLAUDE.md
-      // is the source of truth.
-      setInteractionModeEnabled(plan.interactionModeInstalled);
-      setItem(
-        "interaction-mode-enabled",
-        plan.interactionModeInstalled ? "true" : "false",
-      );
-      // Plan approval: opt-in, so disk is the source of truth (same as
-      // interaction mode). No auto-apply on mount.
-      setPlanApprovalEnabled(plan.planApprovalInstalled);
-      setItem(
-        "plan-approval-enabled",
-        plan.planApprovalInstalled ? "true" : "false",
-      );
-      // Re-apply on startup if installed, to pick up any title/locale changes
-      // made while Fleet was closed.
-      if (plan.interactionModeInstalled) {
+      // These are default-ON: the localStorage checkbox is the source of truth
+      // for the user's choice (absent → on), and disk is healed to match. Apply
+      // is idempotent, so it installs the sentinel when missing and refreshes
+      // title/locale when present. A stored "false" means the user explicitly
+      // turned it off in Settings — respected here (no auto-apply). This mirrors
+      // the guard/elicitation pattern above; we deliberately do NOT write the
+      // key back from disk, which would strand the default-on the moment disk
+      // showed not-yet-installed.
+      const interactionOn = getItem("interaction-mode-enabled") !== "false";
+      setInteractionModeEnabled(interactionOn);
+      if (interactionOn) {
         invoke("apply_interaction_mode").catch((e: unknown) =>
           console.error("auto-apply interaction mode:", e),
         );
       }
-      // PRD discipline: opt-in, disk is the source of truth.
-      const prdInstalled = plan.prdDisciplineInstalled && plan.prdContextInstalled;
-      setPrdModeEnabled(prdInstalled);
-      setItem("prd-mode-enabled", prdInstalled ? "true" : "false");
-      if (prdInstalled) {
+      const planApprovalOn = getItem("plan-approval-enabled") !== "false";
+      setPlanApprovalEnabled(planApprovalOn);
+      if (planApprovalOn && !plan.planApprovalInstalled) {
+        invoke("apply_plan_approval_hook").catch((e: unknown) =>
+          console.error("auto-apply plan approval:", e),
+        );
+      }
+      const prdOn = getItem("prd-mode-enabled") !== "false";
+      setPrdModeEnabled(prdOn);
+      if (prdOn) {
         invoke("apply_prd_mode").catch((e: unknown) =>
           console.error("auto-apply prd mode:", e),
         );
       }
-      // Wiki guidance: opt-in, disk is the source of truth.
-      setWikiGuidanceEnabled(plan.wikiGuidanceInstalled);
-      setItem("wiki-guidance-enabled", plan.wikiGuidanceInstalled ? "true" : "false");
-      if (plan.wikiGuidanceInstalled) {
+      const wikiOn = getItem("wiki-guidance-enabled") !== "false";
+      setWikiGuidanceEnabled(wikiOn);
+      if (wikiOn) {
         invoke("apply_wiki_guidance").catch((e: unknown) =>
           console.error("auto-apply wiki guidance:", e),
         );
       }
-      // Model guidance: opt-in, disk is the source of truth.
-      setModelGuidanceEnabled(plan.modelGuidanceInstalled);
-      setItem("model-guidance-enabled", plan.modelGuidanceInstalled ? "true" : "false");
-      if (plan.modelGuidanceInstalled) {
+      const modelOn = getItem("model-guidance-enabled") !== "false";
+      setModelGuidanceEnabled(modelOn);
+      if (modelOn) {
         invoke("apply_model_guidance").catch((e: unknown) =>
           console.error("auto-apply model guidance:", e),
         );
@@ -465,9 +461,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     () => getItem("elicitation-enabled") !== "false",
   );
 
-  // ── Interaction mode state ────────────────────────────────────────────
+  // ── Interaction mode state (default on) ───────────────────────────────
   const [interactionModeEnabled, setInteractionModeEnabled] = useState(
-    () => getItem("interaction-mode-enabled") === "true",
+    () => getItem("interaction-mode-enabled") !== "false",
   );
 
   // Mirror the Claude-side concept toggles onto codex's ~/.codex/AGENTS.md.
@@ -497,9 +493,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, [reconcileCodexGuidance]);
 
-  // ── PRD discipline mode state (default off) ───────────────────────────
+  // ── PRD discipline mode state (default on) ────────────────────────────
   const [prdModeEnabled, setPrdModeEnabled] = useState(
-    () => getItem("prd-mode-enabled") === "true",
+    () => getItem("prd-mode-enabled") !== "false",
   );
 
   const handleTogglePrdMode = useCallback(async (enabled: boolean) => {
@@ -518,9 +514,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, [reconcileCodexGuidance]);
 
-  // ── Wiki guidance state (default off) ──────────────────────────────────
+  // ── Wiki guidance state (default on) ───────────────────────────────────
   const [wikiGuidanceEnabled, setWikiGuidanceEnabled] = useState(
-    () => getItem("wiki-guidance-enabled") === "true",
+    () => getItem("wiki-guidance-enabled") !== "false",
   );
 
   const handleToggleWikiGuidance = useCallback(async (enabled: boolean) => {
@@ -539,9 +535,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, [reconcileCodexGuidance]);
 
-  // ── Model guidance state (default off) ─────────────────────────────────
+  // ── Model guidance state (default on) ──────────────────────────────────
   const [modelGuidanceEnabled, setModelGuidanceEnabled] = useState(
-    () => getItem("model-guidance-enabled") === "true",
+    () => getItem("model-guidance-enabled") !== "false",
   );
 
   const handleToggleModelGuidance = useCallback(async (enabled: boolean) => {
@@ -570,7 +566,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
         await invoke("remove_elicitation_hook");
         // Interaction mode depends on elicitation; disable it together — and
         // mirror the removal onto codex so its interaction block goes too.
-        if (getItem("interaction-mode-enabled") === "true") {
+        if (getItem("interaction-mode-enabled") !== "false") {
           setInteractionModeEnabled(false);
           setItem("interaction-mode-enabled", "false");
           await invoke("remove_interaction_mode").catch(() => {});
@@ -583,9 +579,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, [reconcileCodexGuidance]);
 
-  // ── Plan approval state (default off) ─────────────────────────────────
+  // ── Plan approval state (default on) ──────────────────────────────────
   const [planApprovalEnabled, setPlanApprovalEnabled] = useState(
-    () => getItem("plan-approval-enabled") === "true",
+    () => getItem("plan-approval-enabled") !== "false",
   );
 
   const handleTogglePlanApproval = useCallback(async (enabled: boolean) => {
@@ -860,7 +856,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
 
   // ── TTS state ──────────────────────────────────────────────────────────
   const [ttsMode, setTtsMode] = useState<TtsMode>(
-    () => (getItem("tts-mode") as TtsMode) || "off",
+    () => (getItem("tts-mode") as TtsMode) || "chime_and_speech",
   );
 
   const handleTtsModeChange = useCallback((mode: TtsMode) => {
