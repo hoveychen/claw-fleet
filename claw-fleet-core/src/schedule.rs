@@ -651,7 +651,10 @@ pub fn compose_fire_prompt(rec: &ScheduleRecord) -> String {
     out.push_str(&format!(
         "（这是 Fleet 定时任务 `{}`：你在 {} 注册它、约定 {} 触发，现在到点了。\
          这是一次性任务，触发后已自动归档为历史，无需你注册任何 cron 或 wakeup——\
-         那些在 headless 会话里不会触发。用 `fleet schedule list` 看历史。）",
+         那些在 headless 会话里不会触发。用 `fleet schedule list` 看历史。\
+         本会话是**无人值守**的自动触发，背后没有人能回答决策卡：完成后请直接\
+         以纯文本收尾结束回合，**不要**调用 `fleet__ask`/`AskUserQuestion` 交回\
+         控制权（交互模式对本回合豁免）。）",
         rec.id,
         fmt_local(rec.created),
         fmt_local(rec.fire_at),
@@ -1321,6 +1324,11 @@ mod tests {
         assert!(p.contains("check the deploy"));
         assert!(p.contains("abc123"));
         assert!(p.contains("fleet schedule list"));
+        // The fired session is unattended — the footer must tell the agent to
+        // finish silently instead of popping an unanswerable decision card.
+        assert!(p.contains("无人值守"));
+        assert!(p.contains("不要"));
+        assert!(p.contains("fleet__ask"));
     }
 
     /// reconcile re-arms a pending schedule the machine slept through (overdue
@@ -1585,6 +1593,9 @@ mod tests {
         assert_eq!(calls[0].entrypoint, SCHEDULE_ENTRYPOINT);
         assert!(calls[0].prompt.contains("check the deploy"));
         assert!(calls[0].prompt.contains("手动运行"), "run-now footer");
+        // A manual run has 老板 present — it is NOT exempt from the decision
+        // card, so its footer must NOT carry the unattended marker.
+        assert!(!calls[0].prompt.contains("无人值守"), "manual run stays interactive");
 
         // the record is byte-for-byte unchanged: still pending, no generation
         // bump, no fired stamp — the scheduled fire is untouched.

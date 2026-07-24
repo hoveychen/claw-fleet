@@ -566,7 +566,10 @@ pub fn compose_iteration_prompt(rec: &LoopRecord) -> String {
     out.push_str(&format!(
         "（这是 Fleet 循环 `{}` 的第 {} 次迭代，每 {} 触发一次。\
          Fleet 会在 {} 后自动拉起下一次，你不需要注册任何 cron 或 wakeup——\
-         那些在 headless 会话里不会触发。要停止这个循环用 `fleet loop stop {}`。）",
+         那些在 headless 会话里不会触发。要停止这个循环用 `fleet loop stop {}`。\
+         本会话是**无人值守**的自动触发，背后没有人能回答决策卡：完成后请直接\
+         以纯文本收尾结束回合，**不要**调用 `fleet__ask`/`AskUserQuestion` 交回\
+         控制权（交互模式对本回合豁免）。）",
         rec.id,
         rec.iterations_done,
         humanize_secs(rec.interval_secs),
@@ -1301,6 +1304,10 @@ mod tests {
         assert!(p.contains("第 3 次"));
         assert!(p.contains("5m"));
         assert!(p.contains("fleet loop stop abc123"));
+        // Auto iterations are unattended — footer must direct silent completion.
+        assert!(p.contains("无人值守"));
+        assert!(p.contains("不要"));
+        assert!(p.contains("fleet__ask"));
     }
 
     #[test]
@@ -1421,6 +1428,8 @@ mod tests {
         assert_eq!(calls[0].entrypoint, LOOP_ENTRYPOINT);
         assert!(calls[0].prompt.contains("check the deploy"));
         assert!(calls[0].prompt.contains("手动运行"), "run-now footer");
+        // Manual run has a human present — not exempt, no unattended marker.
+        assert!(!calls[0].prompt.contains("无人值守"), "manual run stays interactive");
 
         // next_fire_at / iterations_done / generation all unchanged — the
         // recurring schedule is untouched by a manual run.
