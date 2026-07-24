@@ -15,6 +15,7 @@ import { ImageThumb } from "./ImageThumb";
 import { resultHasTrimmedImage } from "../../imageData";
 import { TextBlock } from "./TextBlock";
 import { AgentInput, ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
+import { friendlyToolName } from "./fleetTools";
 import { useFullToolResult, useToolResultFetch } from "./toolResultFetch";
 import styles from "./ToolUseBlock.module.css";
 
@@ -342,6 +343,7 @@ export function claudeToolSummary(
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean)
+          .map((n) => friendlyToolName(n, t))
           .join(", ");
         return names ? t("detail.tool_search_load", { names }) : t("detail.tool_search");
       }
