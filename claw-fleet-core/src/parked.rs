@@ -254,22 +254,100 @@ pub fn is_parked(id: &str) -> bool {
 // belt-and-braces second line: a second live process asking on a session that
 // already has an in-flight ask bails instead of stacking a duplicate card.
 
+#[derive(Serialize, Deserialize)]
+struct InflightMarker {
+    session_id: String,
+    request_id: String,
+    pid: u32,
+    at_ms: u64,
+}
+
+fn inflight_dir() -> Option<PathBuf> {
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("fleet-ask-inflight"))
+}
+
+/// One marker file per session. Session ids are uuids / hex thread ids, but
+/// sanitize defensively so no id can escape the directory.
+fn inflight_path(session_id: &str) -> Option<PathBuf> {
+    let safe: String = session_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    inflight_dir().map(|d| d.join(format!("{safe}.json")))
+}
+
+fn now_ms() -> u64 {
+    chrono::Utc::now().timestamp_millis().max(0) as u64
+}
+
+/// A marker older than this with a dead owner is stale. Comfortably past the
+/// `fleet__ask` wait window (a live card either gets answered or parks — which
+/// clears the marker — well within it), so only a crashed producer leaves one
+/// behind this long.
+fn inflight_ttl_ms() -> u64 {
+    crate::decision_panel_config::load().wait_duration().as_millis() as u64 + 60_000
+}
+
+/// A marker is live (still holds the session) when its owning process is alive
+/// and it has not aged past the wait window. Either condition failing = stale =
+/// free to overwrite, so a `kill -9`'d or hung producer self-heals.
+fn inflight_marker_is_live(m: &InflightMarker) -> bool {
+    crate::consumer_heartbeat::process_alive(m.pid)
+        && now_ms().saturating_sub(m.at_ms) < inflight_ttl_ms()
+}
+
+fn read_inflight_marker(session_id: &str) -> Option<InflightMarker> {
+    let path = inflight_path(session_id)?;
+    serde_json::from_str(&fs::read_to_string(&path).ok()?).ok()
+}
+
 /// Register this process as the in-flight `fleet__ask`/elicitation owner for
 /// `session_id`. Returns `false` when a *live* marker owned by a different,
 /// still-running process already exists — the caller must bail rather than
 /// stack a second card. A stale marker (owning pid dead, or older than the
 /// wait window) is treated as free and overwritten, so a crashed producer
-/// self-heals. **P3 stub — real body lands in P4.** Currently always returns
-/// `true` (the pre-fix behavior: no in-flight guard), so the P3 test's
-/// second-owner assertion fails red.
-pub fn register_inflight_ask(_session_id: &str, _request_id: &str) -> bool {
+/// self-heals. When the home dir can't be resolved we fail open (return `true`)
+/// rather than wedge the ask.
+pub fn register_inflight_ask(session_id: &str, request_id: &str) -> bool {
+    if session_id.trim().is_empty() {
+        return true;
+    }
+    let Some(path) = inflight_path(session_id) else {
+        return true;
+    };
+    if let Some(existing) = read_inflight_marker(session_id) {
+        if existing.request_id != request_id && inflight_marker_is_live(&existing) {
+            return false;
+        }
+        // Stale, or a re-register by the same owner → fall through and (over)write.
+    }
+    let marker = InflightMarker {
+        session_id: session_id.to_string(),
+        request_id: request_id.to_string(),
+        pid: std::process::id(),
+        at_ms: now_ms(),
+    };
+    if let Some(dir) = inflight_dir() {
+        let _ = fs::create_dir_all(&dir);
+    }
+    if let Ok(json) = serde_json::to_string(&marker) {
+        let _ = fs::write(&path, json);
+    }
     true
 }
 
 /// Clear the in-flight marker for `session_id` iff it is ours (`request_id`
-/// matches), so a different process's marker is never cleared. **P3 stub — real
-/// body lands in P4.**
-pub fn clear_inflight_ask(_session_id: &str, _request_id: &str) {}
+/// matches), so a different process's marker is never cleared.
+pub fn clear_inflight_ask(session_id: &str, request_id: &str) {
+    let Some(path) = inflight_path(session_id) else {
+        return;
+    };
+    if let Some(existing) = read_inflight_marker(session_id) {
+        if existing.request_id == request_id {
+            let _ = fs::remove_file(&path);
+        }
+    }
+}
 
 /// Drop a parked card without resuming anything — the user dismissed the
 /// question rather than answering it.
