@@ -436,6 +436,54 @@ type RawAccount = (
 
 /// Direct path: read keychain credentials and fetch profile + usage straight
 /// from Anthropic. Used as the fallback when foxy-switcher isn't reachable.
+/// Map the `/api/oauth/profile` response (plus the credential's raw
+/// `subscription_type`) to a human-readable plan label.
+///
+/// Personal plans come from `account.has_claude_max` / `has_claude_pro`.
+/// Org-level plans come from `organization.organization_type` ("claude_team");
+/// within a Team org, `organization.rate_limit_tier` distinguishes Premium
+/// (Max-parity quota, tier contains "claude_max") from the standard tier.
+/// Keep in sync with foxy-switcher's `anthropic.DerivePlan`.
+fn derive_plan(profile_body: &Value, subscription_type: &str) -> String {
+    let has_max = profile_body
+        .pointer("/account/has_claude_max")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let has_pro = profile_body
+        .pointer("/account/has_claude_pro")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let org_type = profile_body
+        .pointer("/organization/organization_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let rate_tier = profile_body
+        .pointer("/organization/rate_limit_tier")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if has_max {
+        // rate_limit_tier is the only field that splits personal Max 5x from
+        // Max 20x — has_claude_max is true for both.
+        match rate_tier {
+            "default_claude_max_20x" => "Claude Max 20x".to_string(),
+            "default_claude_max_5x" => "Claude Max 5x".to_string(),
+            _ => "Claude Max".to_string(),
+        }
+    } else if has_pro || subscription_type == "pro" {
+        "Claude Pro".to_string()
+    } else if org_type == "claude_team" {
+        // Premium gets Max-parity rate limits (tier contains "claude_max");
+        // the standard Team tier reports pro-level limits.
+        if rate_tier.contains("claude_max") {
+            "Claude Team Premium".to_string()
+        } else {
+            "Claude Team".to_string()
+        }
+    } else {
+        "API / Free".to_string()
+    }
+}
+
 async fn fetch_via_anthropic() -> Result<RawAccount, String> {
     let (token, subscription_type) = read_keychain_credentials()?;
 
@@ -505,21 +553,7 @@ async fn fetch_via_anthropic() -> Result<RawAccount, String> {
         .unwrap_or("")
         .to_string();
 
-    let has_max = profile_body
-        .pointer("/account/has_claude_max")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let has_pro = profile_body
-        .pointer("/account/has_claude_pro")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let plan = if has_max {
-        "Claude Max".to_string()
-    } else if has_pro || subscription_type == "pro" {
-        "Claude Pro".to_string()
-    } else {
-        "API / Free".to_string()
-    };
+    let plan = derive_plan(&profile_body, &subscription_type);
 
     let five_hour = usage_body.get("five_hour").and_then(|v| parse_usage(v));
     let seven_day = usage_body.get("seven_day").and_then(|v| parse_usage(v));
@@ -766,6 +800,46 @@ mod tests {
         assert_eq!(scoped[0].model_label, "Fable");
         assert!((scoped[0].utilization - 0.04).abs() < 1e-9, "4 percent → 0.04 fraction");
         assert_eq!(scoped[0].resets_at, "2026-07-27T10:59:59+00:00");
+    }
+
+    /// The real `/api/oauth/profile` shape for a Claude Team org: the personal
+    /// `has_claude_*` flags are false and the plan lives under `organization`
+    /// (`organization_type` + `rate_limit_tier`). Premium has Max-parity limits.
+    #[test]
+    fn derive_plan_recognizes_team_premium_and_team() {
+        let premium = serde_json::json!({
+            "account": { "has_claude_max": false, "has_claude_pro": false },
+            "organization": { "organization_type": "claude_team", "rate_limit_tier": "default_claude_max_5x" }
+        });
+        assert_eq!(derive_plan(&premium, ""), "Claude Team Premium");
+
+        let standard = serde_json::json!({
+            "account": { "has_claude_max": false, "has_claude_pro": false },
+            "organization": { "organization_type": "claude_team", "rate_limit_tier": "default_claude_pro" }
+        });
+        assert_eq!(derive_plan(&standard, ""), "Claude Team");
+    }
+
+    /// Personal Max/Pro and the genuine API/Free fallback must be preserved,
+    /// and Max 20x/5x are split by rate_limit_tier.
+    #[test]
+    fn derive_plan_preserves_personal_and_free() {
+        let max20 = serde_json::json!({
+            "account": { "has_claude_max": true, "has_claude_pro": false },
+            "organization": { "rate_limit_tier": "default_claude_max_20x" }
+        });
+        assert_eq!(derive_plan(&max20, ""), "Claude Max 20x");
+
+        let pro = serde_json::json!({ "account": { "has_claude_max": false, "has_claude_pro": true } });
+        assert_eq!(derive_plan(&pro, ""), "Claude Pro");
+
+        // Credential subscription_type == "pro" still routes to Pro.
+        let cred_pro = serde_json::json!({ "account": {} });
+        assert_eq!(derive_plan(&cred_pro, "pro"), "Claude Pro");
+
+        // No signals at all → the honest API/Free fallback.
+        let free = serde_json::json!({ "account": {}, "organization": {} });
+        assert_eq!(derive_plan(&free, ""), "API / Free");
     }
 
     #[test]
