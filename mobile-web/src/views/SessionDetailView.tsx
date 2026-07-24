@@ -25,6 +25,7 @@ import {
   Waypoints,
   Wrench,
 } from "lucide-react";
+import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { EmptyState } from "./EmptyState";
 import { isFleetTool } from "./fleetTools";
 import { fleetSummary } from "./FleetBody";
@@ -72,6 +73,25 @@ const TAIL_INITIAL = 120;
 const TAIL_STEP = 200;
 const LIVE_THINKING_POLL_MS = 1200;
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
+
+/** Max subagents listed in the scope switcher — a parent that fanned out
+ *  dozens/hundreds would otherwise flood the dropdown. Mirrors the desktop
+ *  SUBAGENT_TAB_CAP. The menu scrolls, so the capped set stays reachable. */
+const SUBAGENT_TAB_CAP = 12;
+
+/** Statuses that count as "this member is doing something", used to order the
+ *  scope switcher active-first. Mirrors the desktop LIVE_STATUSES (broader than
+ *  WORKING: includes waitingInput/active) so a subagent parked on a decision
+ *  card still sorts ahead of finished ones. */
+const SCOPE_LIVE: Set<SessionStatus> = new Set([
+  "thinking",
+  "executing",
+  "streaming",
+  "processing",
+  "waitingInput",
+  "active",
+  "delegating",
+]);
 
 /** A user record whose content is only tool_result blocks is a tool's output,
  *  not a user turn — same filter as the desktop's isRenderableRow. */
@@ -885,6 +905,41 @@ export function SessionDetailView({
         : null,
     [session.isSubagent, session.parentSessionId, sessions],
   );
+  // The session family (main + its subagents) for the scope switcher. Built the
+  // same way as the desktop SessionDetail: match by parentSessionId, exclude
+  // workflow fan-out agents (`subagents/workflows/…`, 100+ per run), order
+  // active members first then most-recently-active finished ones, and cap. A
+  // running subagent's `agent-<id>` row is scanned the moment its transcript
+  // file appears, so it lands here with no wait for a completed Agent result.
+  // Empty when there are no subagents to switch between (solo session).
+  const family = useMemo<SessionInfo[]>(() => {
+    const notWorkflow = (s: SessionInfo) => !s.jsonlPath.includes("/subagents/workflows/");
+    let mainSession: SessionInfo | undefined;
+    let subs: SessionInfo[];
+    if (session.isSubagent && session.parentSessionId) {
+      mainSession = sessions.find((s) => s.id === session.parentSessionId);
+      subs = sessions.filter(
+        (s) => s.isSubagent && s.parentSessionId === session.parentSessionId && notWorkflow(s),
+      );
+    } else {
+      mainSession = session;
+      subs = sessions.filter(
+        (s) => s.isSubagent && s.parentSessionId === session.id && notWorkflow(s),
+      );
+    }
+    if (subs.length === 0) return [];
+    const active = subs.filter((s) => SCOPE_LIVE.has(s.status));
+    const finished = subs
+      .filter((s) => !SCOPE_LIVE.has(s.status))
+      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+    let ordered = [...active, ...finished].slice(0, SUBAGENT_TAB_CAP);
+    // Never drop the subagent currently being viewed, even if fresher siblings
+    // pushed it past the cap — its row must stay selectable.
+    if (session.isSubagent && !ordered.some((s) => s.id === session.id)) {
+      ordered = [session, ...ordered.slice(0, SUBAGENT_TAB_CAP - 1)];
+    }
+    return mainSession ? [mainSession, ...ordered] : ordered;
+  }, [session, sessions]);
 
   useEffect(() => {
     dwellFired.current = false;
@@ -1153,7 +1208,9 @@ export function SessionDetailView({
         </button>
         <div className={styles.headerText}>
           <div className={styles.headerTitle}>
-            {session.isSubagent && (
+            {/* When the session has a switchable family, the scope bar below
+                carries the ⎇ identity — drop the redundant title badge. */}
+            {session.isSubagent && family.length === 0 && (
               <span className={styles.subagentBadge}>⎇ {session.agentType || t("子代理")}</span>
             )}
             {session.titleOverride || session.aiTitle || session.slug || t("会话")}
@@ -1162,6 +1219,16 @@ export function SessionDetailView({
         </div>
         <span className={styles.statusDot} data-working={working} />
       </header>
+
+      {family.length > 0 && (
+        <div className={styles.scopeBar}>
+          <AgentScopeSwitcher
+            family={family}
+            current={session}
+            onOpen={(s) => onOpenSessionId(s.id)}
+          />
+        </div>
+      )}
 
       {session.isSubagent && (
         <button
