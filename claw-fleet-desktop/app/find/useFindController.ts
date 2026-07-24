@@ -45,15 +45,34 @@ function clearMainHighlights() {
   reg.delete(HL_CURRENT);
 }
 
-/** Elements whose subtree must never be searched. */
+/**
+ * Elements whose subtree must never be searched. The search is already scoped to
+ * the active page's content root (see {@link searchRoots}), so this additionally
+ * drops in-content chrome — the sidebar/nav, buttons and menus the boss asked to
+ * keep out of results — plus never-visible markup.
+ */
 function shouldSkip(el: Element): boolean {
   const tag = el.tagName;
   if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") return true;
+  if (tag === "ASIDE" || tag === "NAV" || tag === "BUTTON") return true;
   // The find bar's own chrome (input, count, buttons) must not match itself.
   if (el.hasAttribute("data-find-bar")) return true;
   if (el.getAttribute("aria-hidden") === "true") return true;
   if ((el as HTMLElement).hidden) return true;
   return false;
+}
+
+/**
+ * The content roots to search: the current page's content container(s), tagged
+ * `data-find-content`. Only visible ones count, so a mounted-but-offscreen view
+ * doesn't leak matches. Falls back to `<body>` if nothing is tagged (e.g. lite
+ * mode), which still beats searching nothing.
+ */
+function searchRoots(): Element[] {
+  const tagged = Array.from(document.querySelectorAll("[data-find-content]")).filter(
+    (el) => el.getClientRects().length > 0,
+  );
+  return tagged.length ? tagged : [document.body];
 }
 
 function rangeFor(m: FindMatch): Range {
@@ -162,12 +181,19 @@ export function useFindController(): FindController {
 
   const runSearch = useCallback(
     (q: string) => {
-      mainRef.current = q ? findMatches(document.body, q, shouldSkip) : [];
+      const roots = searchRoots();
+      // querySelectorAll returns roots in document order and findMatches is in
+      // order within each, so the concatenation is in document order (the final
+      // navigation order is re-derived by vertical position in rebuildOrder).
+      mainRef.current = q ? roots.flatMap((root) => findMatches(root, q, shouldSkip)) : [];
       paintMainAll();
 
-      // Reset frame bookkeeping and (re)issue the search to every candidate; the
-      // ones carrying the handler reply with a count, the rest stay at 0.
-      const frames = listSearchableFrames().map((frame) => ({ frame, count: 0 }));
+      // Reset frame bookkeeping and (re)issue the search to every candidate iframe
+      // that lives inside a content root; the ones carrying the handler reply with
+      // a count, the rest stay at 0.
+      const frames = listSearchableFrames()
+        .filter((f) => roots.some((r) => r.contains(f)))
+        .map((frame) => ({ frame, count: 0 }));
       framesRef.current = frames;
       if (q) frames.forEach((f) => frameSearch(f.frame, q));
       else frames.forEach((f) => frameClear(f.frame));
