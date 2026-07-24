@@ -14,6 +14,7 @@ import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchDecisionAsset } from "../decisionAsset";
+import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
 import { getLang, t } from "../i18n";
 import type { RelayClient } from "../relay";
@@ -1499,6 +1500,7 @@ function HtmlPreview({
 }) {
   const names = useMemo(() => (images ?? []).map((i) => i.name), [images]);
   const { states, retry } = useAssets(names, requestId, qidx, client);
+  const { open: openLightbox } = useLightbox();
   const resolved = useMemo(() => {
     let out = html;
     for (const name of names) {
@@ -1507,7 +1509,9 @@ function HtmlPreview({
       out = out.split(`src="${name}"`).join(`src="${st.uri}"`);
       out = out.split(`src='${name}'`).join(`src='${st.uri}'`);
     }
-    return out;
+    // Append the tap-to-zoom bridge so images inside the sandbox open the
+    // app-level lightbox (the sandbox is opaque-origin, so it must postMessage).
+    return out + IMG_ZOOM_INJECT;
   }, [html, names, states]);
   const failed = useMemo(
     () => names.filter((n) => states[n]?.status === "error"),
@@ -1534,13 +1538,18 @@ function HtmlPreview({
     const onMessage = (e: MessageEvent) => {
       // Opaque origins all stringify to "null" — identify our frame by source.
       if (!ref.current || e.source !== ref.current.contentWindow) return;
+      const zoomSrc = parseImgZoom(e.data);
+      if (zoomSrc) {
+        openLightbox(zoomSrc);
+        return;
+      }
       const h = parseFrameHeight(e.data);
       if (h === null) return;
       setHeight((cur) => (cur === null || Math.abs(h - cur) > FRAME_DEAD_BAND ? h : cur));
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [resolved]);
+  }, [resolved, openLightbox]);
 
   return (
     <>
