@@ -360,6 +360,19 @@ fn record_decision_answered(id: &str) {
         .insert(id.to_string(), now_ms());
 }
 
+/// Whether a `resume_session` for `session_id` was already dispatched within the
+/// dedup window (a resend hit). See [`serve_resume_session`] for why this exists.
+/// **P1 stub — real body lands in P2.** Currently returns `false` always, which
+/// is the pre-fix behavior (no resume dedup at all); the P1 test asserts a hit
+/// after `record_resume_dispatched`, so this stub makes that test fail red.
+fn resume_recently_dispatched(_session_id: &str) -> bool {
+    false
+}
+
+/// Record that a `resume_session` for `session_id` was dispatched, so a weak-net
+/// resend within the window short-circuits. **P1 stub — real body lands in P2.**
+fn record_resume_dispatched(_session_id: &str) {}
+
 /// Deliver a mobile answer with idempotent-resend dedup, shared by the legacy
 /// fire-and-forget `answer` event and the robust `decision_answer` req. A resend
 /// for an id already delivered this process is a no-op success, so an old client
@@ -2779,6 +2792,26 @@ mod tests {
         record_decision_answered(id);
         assert!(decision_already_answered(id));
         assert!(!decision_already_answered("dedup-decision-primitive-unrelated"));
+    }
+
+    // ── resume_session idempotent-resend dedup (弱网重发双跑去重) ──────────────
+
+    #[test]
+    fn resume_dedup_primitive_records_and_isolates() {
+        // A `resume_session` is an ackable write; on a lost ack the phone resends
+        // it, and without dedup the second resend launches a *second* `claude`
+        // turn on the same session (the two-roots double-submit we diagnosed).
+        // Before recording, a session is not a dedup hit; after recording it is,
+        // and an unrelated session is unaffected. The P1 no-op stub fails the
+        // middle assertion (it always reports "not recently dispatched").
+        let id = "dedup-resume-primitive-1";
+        assert!(!resume_recently_dispatched(id));
+        record_resume_dispatched(id);
+        assert!(
+            resume_recently_dispatched(id),
+            "a resume dispatched this window must be a dedup hit"
+        );
+        assert!(!resume_recently_dispatched("dedup-resume-primitive-unrelated"));
     }
 
     #[test]
