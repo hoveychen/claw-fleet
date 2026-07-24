@@ -116,15 +116,7 @@ fn normalize_snap(snap: MetricSnap) -> MetricSnap {
     }
 }
 
-fn load_snapshots() -> Vec<SnapshotEntry> {
-    let path = match snapshot_path() {
-        Some(p) => p,
-        None => return vec![],
-    };
-    let entries: Vec<SnapshotEntry> = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+fn normalize_entries(entries: Vec<SnapshotEntry>) -> Vec<SnapshotEntry> {
     entries
         .into_iter()
         .map(|e| SnapshotEntry {
@@ -141,12 +133,43 @@ fn load_snapshots() -> Vec<SnapshotEntry> {
         .collect()
 }
 
+fn load_snapshots_from(path: &std::path::Path) -> Vec<SnapshotEntry> {
+    let entries: Vec<SnapshotEntry> = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    normalize_entries(entries)
+}
+
+fn load_snapshots() -> Vec<SnapshotEntry> {
+    match snapshot_path() {
+        Some(p) => load_snapshots_from(&p),
+        None => vec![],
+    }
+}
+
+fn save_snapshots_to(path: &std::path::Path, entries: &[SnapshotEntry]) {
+    if let Ok(json) = serde_json::to_string(entries) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
 fn save_snapshots(entries: &[SnapshotEntry]) {
     if let Some(path) = snapshot_path() {
-        if let Ok(json) = serde_json::to_string(entries) {
-            let _ = std::fs::write(path, json);
-        }
+        save_snapshots_to(&path, entries);
     }
+}
+
+/// Append one usage sample to the on-disk history at `path`, prune, persist, and
+/// return the resulting history (the caller uses it to compute prev-period
+/// utilization). Extracted from `fetch_account_info` so the persistence policy
+/// is unit-testable against a tempdir.
+fn append_sample(path: &std::path::Path, sample: SnapshotEntry, now_ms: i64) -> Vec<SnapshotEntry> {
+    let mut history = load_snapshots_from(path);
+    history.push(sample);
+    prune_old_snapshots(&mut history, now_ms);
+    save_snapshots_to(path, &history);
+    history
 }
 
 fn period_ms(metric: &str) -> i64 {
@@ -579,8 +602,7 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
         };
 
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let mut history = load_snapshots();
-    history.push(SnapshotEntry {
+    let sample = SnapshotEntry {
         ts: now_ms,
         five_hour: five_hour.as_ref().map(|s| MetricSnap {
             utilization: s.utilization,
@@ -600,9 +622,11 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
                 snap: MetricSnap { utilization: s.utilization, resets_at: s.resets_at.clone() },
             })
             .collect(),
-    });
-    prune_old_snapshots(&mut history, now_ms);
-    save_snapshots(&history);
+    };
+    let history = match snapshot_path() {
+        Some(p) => append_sample(&p, sample, now_ms),
+        None => vec![sample],
+    };
 
     if let Some(ref mut s) = five_hour {
         let ra = s.resets_at.clone();
