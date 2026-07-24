@@ -1072,7 +1072,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
         await invoke("apply_elicitation_hook");
       } else {
         await invoke("remove_elicitation_hook");
-        if (getItem("interaction-mode-enabled") === "true") {
+        if (getItem("interaction-mode-enabled") !== "false") {
           setInteractionModeEnabled(false);
           setItem("interaction-mode-enabled", "false");
           await invoke("remove_interaction_mode").catch(() => {});
@@ -1084,9 +1084,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, []);
 
-  // ── Plan approval (ExitPlanMode) state — default off ───────────────────
+  // ── Plan approval (ExitPlanMode) state — default on ────────────────────
   const [planApprovalEnabled, setPlanApprovalEnabled] = useState(
-    () => getItem("plan-approval-enabled") === "true",
+    () => getItem("plan-approval-enabled") !== "false",
   );
 
   const handleTogglePlanApproval = useCallback(async (enabled: boolean) => {
@@ -1104,9 +1104,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, []);
 
-  // ── Interaction mode (global AskUserQuestion) state ────────────────────
+  // ── Interaction mode (global AskUserQuestion) state — default on ───────
   const [interactionModeEnabled, setInteractionModeEnabled] = useState(
-    () => getItem("interaction-mode-enabled") === "true",
+    () => getItem("interaction-mode-enabled") !== "false",
   );
 
   const handleToggleInteractionMode = useCallback(async (enabled: boolean) => {
@@ -1124,9 +1124,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, []);
 
-  // ── PRD discipline mode state — default off ────────────────────────────
+  // ── PRD discipline mode state — default on ─────────────────────────────
   const [prdModeEnabled, setPrdModeEnabled] = useState(
-    () => getItem("prd-mode-enabled") === "true",
+    () => getItem("prd-mode-enabled") !== "false",
   );
 
   const handleTogglePrdMode = useCallback(async (enabled: boolean) => {
@@ -1144,9 +1144,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, []);
 
-  // ── Model guidance state — default off ─────────────────────────────────
+  // ── Model guidance state — default on ──────────────────────────────────
   const [modelGuidanceEnabled, setModelGuidanceEnabled] = useState(
-    () => getItem("model-guidance-enabled") === "true",
+    () => getItem("model-guidance-enabled") !== "false",
   );
 
   const handleToggleModelGuidance = useCallback(async (enabled: boolean) => {
@@ -1178,9 +1178,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, []);
 
-  // ── Wiki guidance state — default off ──────────────────────────────────
+  // ── Wiki guidance state — default on ───────────────────────────────────
   const [wikiGuidanceEnabled, setWikiGuidanceEnabled] = useState(
-    () => getItem("wiki-guidance-enabled") === "true",
+    () => getItem("wiki-guidance-enabled") !== "false",
   );
 
   const handleToggleWikiGuidance = useCallback(async (enabled: boolean) => {
@@ -1219,7 +1219,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
 
   // ── TTS / chime state ──────────────────────────────────────────────────
   const [ttsMode, setTtsMode] = useState<TtsMode>(
-    () => (getItem("tts-mode") as TtsMode) || "off",
+    () => (getItem("tts-mode") as TtsMode) || "chime_and_speech",
   );
 
   const handleTtsModeChange = useCallback((mode: TtsMode) => {
@@ -1263,7 +1263,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
 
   // Wrap onDismiss: mark all features as seen, apply default-on hooks, + restart if sources changed
   const handleDismiss = useCallback(async () => {
-    // Apply hooks that are checked by default but were never toggled by the user
+    // Apply hooks/guidance that are checked by default but were never toggled
+    // by the user. These are all default-ON, so dismissing onboarding without
+    // touching them still writes the corresponding sentinel/hook to ~/.claude.
     if (guardEnabled) {
       await invoke("apply_guard_hook").catch((e: unknown) =>
         console.error("apply guard on dismiss:", e),
@@ -1274,12 +1276,51 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
         console.error("apply elicitation on dismiss:", e),
       );
     }
+    if (interactionModeEnabled) {
+      await invoke("apply_interaction_mode").catch((e: unknown) =>
+        console.error("apply interaction mode on dismiss:", e),
+      );
+    }
+    if (planApprovalEnabled) {
+      await invoke("apply_plan_approval_hook").catch((e: unknown) =>
+        console.error("apply plan approval on dismiss:", e),
+      );
+    }
+    if (prdModeEnabled) {
+      await invoke("apply_prd_mode").catch((e: unknown) =>
+        console.error("apply prd mode on dismiss:", e),
+      );
+    }
+    if (wikiGuidanceEnabled) {
+      await invoke("apply_wiki_guidance").catch((e: unknown) =>
+        console.error("apply wiki guidance on dismiss:", e),
+      );
+    }
+    if (modelGuidanceEnabled) {
+      await invoke("apply_model_guidance").catch((e: unknown) =>
+        console.error("apply model guidance on dismiss:", e),
+      );
+    }
+    // Mirror the Claude concept toggles (interaction / PRD / wiki / model) onto
+    // ~/.codex/AGENTS.md so codex sessions get the same guidance on first run.
+    await invoke("reconcile_codex_guidance").catch((e: unknown) =>
+      console.error("reconcile codex guidance on dismiss:", e),
+    );
     markFeaturesSeen([...ONBOARDING_FEATURES]);
     onDismiss();
     if (sourcesChanged.current) {
       invoke("restart_app");
     }
-  }, [onDismiss, guardEnabled, elicitationEnabled]);
+  }, [
+    onDismiss,
+    guardEnabled,
+    elicitationEnabled,
+    interactionModeEnabled,
+    planApprovalEnabled,
+    prdModeEnabled,
+    wikiGuidanceEnabled,
+    modelGuidanceEnabled,
+  ]);
 
   // Environment detection runs in the background and streams into the
   // diagnostics area — it must never block the first paint. Credential
