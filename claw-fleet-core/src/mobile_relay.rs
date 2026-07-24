@@ -360,6 +360,53 @@ fn record_decision_answered(id: &str) {
         .insert(id.to_string(), now_ms());
 }
 
+/// Resume dedup keys (`session_id\0prompt`) dispatched this process, mapped to
+/// when (ms). Guards the idempotent-resend case for `resume_session`: like
+/// `spawn_session` and `decision_answer`, it is an ackable write, so on a lost
+/// ack frame the phone resends it (best-effort relay — see registry::forward).
+/// Unlike `spawn_session` (which the `SPAWNED_SESSIONS` pid map already dedups),
+/// `serve_resume_session` had **no** guard, so a resend launched a *second*
+/// `claude --resume` turn on the same session — the two disjoint `parentUuid=None`
+/// roots we diagnosed from a double-submitted prompt. Keyed on session+prompt so
+/// an identical resend is caught while a *different* follow-up prompt passes
+/// through; pruned by age so the map can't grow unbounded.
+static RESUMED_SESSIONS: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+
+/// How long a dispatched resume key blocks an identical resend — comfortably
+/// longer than the phone's bounded resend window, short enough that a deliberate
+/// re-send of the exact same prompt later still goes through.
+const RESUME_DEDUP_TTL_MS: u64 = 60 * 1000;
+
+/// Whether `key` (`session_id\0prompt`) was dispatched recently (a resend hit).
+/// Prunes expired entries as a side effect so the map stays bounded.
+fn resume_recently_dispatched(key: &str) -> bool {
+    let now = now_ms();
+    let mut guard = RESUMED_SESSIONS.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.retain(|_, at| now.saturating_sub(*at) < RESUME_DEDUP_TTL_MS);
+    map.contains_key(key)
+}
+
+/// Build the resume dedup key. Keys on session **and** prompt so an identical
+/// weak-net resend collides while a different follow-up prompt on the same
+/// session does not (that is a new turn, not a resend). NUL-joined so no prompt
+/// text can forge a session-boundary collision.
+fn resume_dedup_key(session_id: &str, prompt: &str) -> String {
+    format!("{session_id}\u{0}{prompt}")
+}
+
+/// Record that a resume for `key` was dispatched, so a later resend short-circuits.
+fn record_resume_dispatched(key: &str) {
+    if key.trim().is_empty() {
+        return;
+    }
+    RESUMED_SESSIONS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(key.to_string(), now_ms());
+}
+
 /// Deliver a mobile answer with idempotent-resend dedup, shared by the legacy
 /// fire-and-forget `answer` event and the robust `decision_answer` req. A resend
 /// for an id already delivered this process is a no-op success, so an old client
@@ -2217,6 +2264,18 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
     let req: crate::auto_resume::ResumeSessionRequest =
         serde_json::from_value(params.clone())
             .map_err(|e| format!("bad resume_session params: {e}"))?;
+    // Idempotent-resend guard: `resume_session` is an ackable write, so a lost ack
+    // makes the phone resend it. Without this, a resend fires a *second*
+    // `claude --resume` on the same session — the double-submit that stacks two
+    // near-identical decision cards. Dedup an identical resend (same session +
+    // same prompt) within a short window; a different follow-up prompt is not a
+    // resend and passes through. All mobile frames funnel through one serially
+    // handled relay connection, so this per-process map is sufficient (no
+    // cross-process resume path exists).
+    let dedup_key = resume_dedup_key(&req.session_id, req.prompt.as_deref().unwrap_or(""));
+    if resume_recently_dispatched(&dedup_key) {
+        return Ok(json!({ "ok": true, "deduped": true }));
+    }
     // A "done" task resumed from mobile is active again — drop the done mark so
     // it re-surfaces as needs-review (next snapshot re-enriches user_mark).
     crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
@@ -2233,6 +2292,10 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
         },
         Box::new(|_| {}),
     )?;
+    // Record only after a successful dispatch: a failed resume must not block the
+    // user's legitimate retry, and frames are serial so the next resend is read
+    // only after this returns.
+    record_resume_dispatched(&dedup_key);
     Ok(json!({ "ok": true }))
 }
 
@@ -2779,6 +2842,47 @@ mod tests {
         record_decision_answered(id);
         assert!(decision_already_answered(id));
         assert!(!decision_already_answered("dedup-decision-primitive-unrelated"));
+    }
+
+    // ── resume_session idempotent-resend dedup (弱网重发双跑去重) ──────────────
+
+    #[test]
+    fn resume_dedup_primitive_records_and_isolates() {
+        // A `resume_session` is an ackable write; on a lost ack the phone resends
+        // it, and without dedup the second resend launches a *second* `claude`
+        // turn on the same session (the two-roots double-submit we diagnosed).
+        // Before recording, a session is not a dedup hit; after recording it is,
+        // and an unrelated session is unaffected. The P1 no-op stub fails the
+        // middle assertion (it always reports "not recently dispatched").
+        let id = "dedup-resume-primitive-1";
+        assert!(!resume_recently_dispatched(id));
+        record_resume_dispatched(id);
+        assert!(
+            resume_recently_dispatched(id),
+            "a resume dispatched this window must be a dedup hit"
+        );
+        assert!(!resume_recently_dispatched("dedup-resume-primitive-unrelated"));
+    }
+
+    #[test]
+    fn resume_dedup_key_distinguishes_prompt_not_just_session() {
+        // The key must catch an identical resend (same session + same prompt) yet
+        // let a genuine follow-up (same session, different prompt) through — else
+        // a fast second message would be silently swallowed. Guards against a
+        // regression that keys on session_id alone.
+        let sess = "resume-key-sess-A";
+        let resend = resume_dedup_key(sess, "同样的内容");
+        let same = resume_dedup_key(sess, "同样的内容");
+        let follow_up = resume_dedup_key(sess, "另一条不同的消息");
+        record_resume_dispatched(&resend);
+        assert!(
+            resume_recently_dispatched(&same),
+            "an identical resend must be deduped"
+        );
+        assert!(
+            !resume_recently_dispatched(&follow_up),
+            "a different follow-up prompt on the same session is a new turn, not a resend"
+        );
     }
 
     #[test]

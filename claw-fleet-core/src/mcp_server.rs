@@ -320,6 +320,28 @@ fn workspace_name_from_project_dir(dir: Option<&str>) -> String {
     dir.map(crate::session::workspace_name).unwrap_or_default()
 }
 
+/// RAII clear for the in-flight-ask marker: registered at the top of a card
+/// producer, dropped (cleared) on every normal return so the session frees up as
+/// soon as the card resolves. On the timeout→park path the process is SIGINT'd
+/// before Drop runs — that is fine: the parked card then guards re-entry, and a
+/// marker left by a dead pid is treated as stale on the next register.
+struct InflightGuard {
+    session_id: String,
+    request_id: String,
+}
+
+impl InflightGuard {
+    fn new(session_id: &str, request_id: &str) -> Self {
+        Self { session_id: session_id.to_string(), request_id: request_id.to_string() }
+    }
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        crate::parked::clear_inflight_ask(&self.session_id, &self.request_id);
+    }
+}
+
 fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     let questions: Vec<crate::mcp_ipc::FleetAskQuestion> =
@@ -361,6 +383,21 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 
     let request_id = crate::guard::new_request_id();
+
+    // In-flight guard: `has_parked_for_session` only catches a card that already
+    // timed out into the parked store — it does nothing while a card is actively
+    // waiting. A double-submitted prompt can briefly put a second `claude`
+    // process on this session, each blocking on its own `fleet__ask`, stacking
+    // two live cards before either parks. Register ourselves; if another live
+    // process already holds an in-flight ask for this session, hand back the stop
+    // notice instead of a duplicate card. `_inflight` clears our marker on every
+    // normal return (Drop); the park path below SIGINTs us, but then the parked
+    // card guards re-entry and a dead-pid marker self-heals.
+    if !crate::parked::register_inflight_ask(&session_id, &request_id) {
+        return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
+    }
+    let _inflight = InflightGuard::new(&session_id, &request_id);
+
     let workspace_name = project_dir_workspace_name();
 
     // Optional review docs (`.md` files / wiki entries to show next to the card).
@@ -541,6 +578,14 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 
     let request_id = crate::guard::new_request_id();
+
+    // Same in-flight guard as fleet__ask: a second live process must not stack a
+    // concurrent A2UI card on a session that already has one waiting.
+    if !crate::parked::register_inflight_ask(&session_id, &request_id) {
+        return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
+    }
+    let _inflight = InflightGuard::new(&session_id, &request_id);
+
     let workspace_name = project_dir_workspace_name();
 
     let req = crate::mcp_a2ui_ipc::A2uiRenderRequest {
