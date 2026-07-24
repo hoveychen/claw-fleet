@@ -41,7 +41,9 @@ const SHELL_TOOLS = new Set(["Bash", "PowerShell", "exec", "exec_command", "writ
 const WEB_TOOLS = new Set(["WebSearch", "WebFetch"]);
 const SEARCH_TOOLS = new Set(["Grep", "Glob", "Explore", "LSP"]);
 const AGENT_TOOLS = new Set(["Agent", "spawn_agent", "wait_agent"]);
-const PLAN_TOOLS = new Set(["TodoWrite", "TodoRead", "update_plan"]);
+const PLAN_TOOLS = new Set([
+  "TodoWrite", "TodoRead", "update_plan", "EnterPlanMode", "ExitPlanMode",
+]);
 
 /** Icon for a tool-call step, by tool name. Unknown tools (MCP, future) get a
  *  generic wrench rather than nothing, so the rail never has a hole. */
