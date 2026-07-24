@@ -97,7 +97,7 @@ export function WaitingAlerts() {
       // Strategy: defer the claude-code chime slightly; if a matching
       // decision arrives within the delay, cancel (DecisionPanel will
       // cover it); otherwise play.
-      const ttsMode = (getItem("tts-mode") as TtsMode) || "off";
+      const ttsMode = (getItem("tts-mode") as TtsMode) || "chime_and_speech";
       if (ttsMode === "off") return;
       for (const alert of e.payload) {
         if (spokenIds.current.has(alert.sessionId)) continue;
