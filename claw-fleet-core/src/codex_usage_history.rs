@@ -49,24 +49,33 @@ fn history_path() -> Option<std::path::PathBuf> {
         .map(|h| h.join(".fleet").join("claw-fleet-codex-usage-history.json"))
 }
 
-fn load() -> Vec<CodexUsageHistoryPoint> {
-    let path = match history_path() {
-        Some(p) => p,
-        None => return vec![],
-    };
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn save(points: &[CodexUsageHistoryPoint]) {
-    if let Some(path) = history_path() {
-        if let Ok(json) = serde_json::to_string(points) {
-            let _ = std::fs::write(path, json);
-        }
+fn load_from(path: &std::path::Path) -> Vec<CodexUsageHistoryPoint> {
+    // Read-only callers get an empty series on any absent/corrupt/unreadable
+    // file; a corrupt file is preserved to `.corrupt-*` by `load_preserving`.
+    match crate::atomic_json::load_preserving::<Vec<CodexUsageHistoryPoint>>(path) {
+        crate::atomic_json::JsonLoad::Loaded(v) => v,
+        _ => Vec::new(),
     }
 }
+
+fn load() -> Vec<CodexUsageHistoryPoint> {
+    match history_path() {
+        Some(p) => load_from(&p),
+        None => vec![],
+    }
+}
+
+fn save_to(path: &std::path::Path, points: &[CodexUsageHistoryPoint]) {
+    if let Ok(json) = serde_json::to_vec(points) {
+        let _ = crate::atomic_json::write_atomic(path, &json);
+    }
+}
+
+/// Minimum gap between two persisted codex samples. `record_snapshot` fires on
+/// every successful `fetch_codex_usage` (on-demand, ~every 10s), which without
+/// this throttle stormed the file and multiplied torn-write collisions — the
+/// same hazard as the Claude store's `MIN_APPEND_INTERVAL_MS`.
+const MIN_APPEND_INTERVAL_MS: i64 = 60 * 1000;
 
 /// Drop points older than `HISTORY_RETENTION_MS` relative to `now_ms`.
 fn prune_old(history: &mut Vec<CodexUsageHistoryPoint>, now_ms: i64) {
@@ -93,11 +102,33 @@ pub fn record_snapshot(usage: &CodexUsageItem) {
     if usage.primary.is_none() && usage.secondary.is_none() {
         return;
     }
+    let path = match history_path() {
+        Some(p) => p,
+        None => return,
+    };
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let mut history = load();
+    record_snapshot_at(&path, usage, now_ms);
+}
+
+/// Testable core of [`record_snapshot`] against an explicit path + clock.
+/// Non-destructive (an unreadable file is left untouched, a corrupt one backed
+/// up) and throttled (samples closer than `MIN_APPEND_INTERVAL_MS` are dropped).
+fn record_snapshot_at(path: &std::path::Path, usage: &CodexUsageItem, now_ms: i64) {
+    let mut history = match crate::atomic_json::load_preserving::<Vec<CodexUsageHistoryPoint>>(path)
+    {
+        crate::atomic_json::JsonLoad::Loaded(v) => v,
+        crate::atomic_json::JsonLoad::Missing | crate::atomic_json::JsonLoad::Corrupt => Vec::new(),
+        // Couldn't read the file — skip persisting so we never overwrite bytes
+        // we failed to read.
+        crate::atomic_json::JsonLoad::Unreadable => return,
+    };
+    let last_ts = history.iter().map(|p| p.ts).max().unwrap_or(i64::MIN);
+    if now_ms.saturating_sub(last_ts) < MIN_APPEND_INTERVAL_MS {
+        return;
+    }
     history.push(point_from_usage(usage, now_ms));
     prune_old(&mut history, now_ms);
-    save(&history);
+    save_to(path, &history);
 }
 
 /// Load persisted codex usage points whose timestamp falls within
@@ -124,6 +155,46 @@ mod tests {
             window_duration_mins: Some(mins),
             resets_at: Some(0),
         }
+    }
+
+    // Same regression as the Claude store: a corrupt/torn codex history file
+    // must be preserved, not silently overwritten by the next reading.
+    #[test]
+    fn record_snapshot_at_backs_up_corrupt_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("codex-history.json");
+        std::fs::write(&path, "[{\"ts\":1 GARBAGE").unwrap();
+
+        let usage = CodexUsageItem { primary: Some(window(50, 300)), ..Default::default() };
+        record_snapshot_at(&path, &usage, 2_000_000);
+
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt"))
+            .collect();
+        assert_eq!(backups.len(), 1, "corrupt codex history must be backed up, not destroyed");
+    }
+
+    // `record_snapshot` fires on every fetch_codex_usage (~10s); throttle it.
+    #[test]
+    fn record_snapshot_at_throttled_within_min_interval() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("codex-history.json");
+        let base = 1_000_000_000_i64;
+        let seed = vec![CodexUsageHistoryPoint { ts: base, ..Default::default() }];
+        std::fs::write(&path, serde_json::to_string(&seed).unwrap()).unwrap();
+
+        let usage = CodexUsageItem { primary: Some(window(50, 300)), ..Default::default() };
+        record_snapshot_at(&path, &usage, base + 10_000); // 10s later — throttled
+        assert_eq!(
+            load_from(&path).len(),
+            1,
+            "a codex sample within the min interval must not be appended"
+        );
+
+        record_snapshot_at(&path, &usage, base + 600_000); // 10min later — appended
+        assert_eq!(load_from(&path).len(), 2);
     }
 
     #[test]
