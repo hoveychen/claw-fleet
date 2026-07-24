@@ -401,6 +401,8 @@ const DICT: Record<string, string> = {
   "工具：": "Tool: ",
   "拒绝理由（可选）": "Reason for denying (optional)",
   收起: "Collapse",
+  "共 {0} 张": "{0} pending",
+  查看待处理决策: "View pending decisions",
   展开完整计划: "Show full plan",
   退出编辑: "Exit editing",
   编辑计划: "Edit plan",
