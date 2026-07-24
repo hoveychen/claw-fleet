@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, LayoutGrid, Coffee } from "lucide-react";
-import { useKeepAwake } from "../hooks/useKeepAwake";
+import { Menu, LayoutGrid } from "lucide-react";
 import { useUIStore } from "../store";
 import { PageShell } from "./PageShell";
 import styles from "./SessionsBanner.module.css";
@@ -43,7 +42,6 @@ export function SessionsPage({
   const { t } = useTranslation();
   const viewMode = useUIStore((s) => s.viewMode);
   const setViewMode = useUIStore((s) => s.setViewMode);
-  const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
 
   return (
     <PageShell
@@ -75,18 +73,6 @@ export function SessionsPage({
           >
             {showAll ? t("gallery_show_active") : t("gallery_show_all")}
           </button>
-          {keepAwakeSupported && (
-            <button
-              type="button"
-              className={`${styles.icon_btn} ${keepAwake ? styles.icon_btn_active : ""}`}
-              onClick={() => setKeepAwake(!keepAwake)}
-              title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-              aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-              aria-pressed={keepAwake}
-            >
-              <Coffee size={14} strokeWidth={1.5} />
-            </button>
-          )}
           <div className={styles.view_toggle} role="group" aria-label={t("view_sessions")}>
             <button
               type="button"

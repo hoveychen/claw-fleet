@@ -641,31 +641,52 @@
   transform: rotate(45deg);
 }
 
-.footer_icon_btn {
-  position: relative;
+/* Segmented toggle toolbar above the profile card — keep-awake / Lite / theme.
+   Same bordered-strip vocabulary as the banner's `.view_toggle` so it reads as
+   a deliberate control bar rather than three loose icons. Cells split the width
+   evenly (flex: 1) with hairline dividers between them. */
+.footer_toolbar {
+  display: flex;
+  align-items: stretch;
+  margin-bottom: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.footer_toolbar_btn {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  height: 28px;
   border: none;
-  background: none;
+  background: transparent;
   color: var(--color-text-dim);
   cursor: pointer;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
-  opacity: 0.75;
-  transition: background 0.14s, color 0.14s, opacity 0.14s;
+  transition: background 0.12s, color 0.12s;
 }
 
-.footer_icon_btn:hover {
-  background: var(--color-bg-secondary);
+.footer_toolbar_btn + .footer_toolbar_btn {
+  border-left: 1px solid var(--color-border);
+}
+
+.footer_toolbar_btn:hover {
+  background: var(--color-bg-card-hover);
   color: var(--color-text);
-  opacity: 1;
 }
 
-/* Theme cycle button holds a text glyph (☀/☽/⊙) rather than an SVG — size it
-   to sit level with the 14px lite-mode icon beside it. */
+/* Keep-awake (coffee) toggle in the "on" state — accent fill, matching the
+   banner's active segmented-control cell so the always-on status pops. */
+.footer_toolbar_btn_active,
+.footer_toolbar_btn_active:hover {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* Theme cycle cell holds a text glyph (☀/☽/⊙) rather than an SVG — size it to
+   sit level with the 14px lite-mode icon beside it. */
 .footer_theme_btn {
   font-size: 15px;
   line-height: 1;
