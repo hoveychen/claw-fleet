@@ -1499,6 +1499,18 @@ pub fn run() {
                 claw_fleet_core::log_debug(&format!("remove_legacy_fleet_dir failed: {e}"));
             }
 
+            // One-time cleanup: an old build installed a `com.claudefleet.serve`
+            // LaunchAgent that keeps a `fleet serve` process alive at login.
+            // On a desktop machine that stray serve becomes a *second*
+            // mobile-relay provider, so every phone submit spawns two claude
+            // processes (duplicate prompts / decision cards). Current code
+            // installs no LaunchAgent — remove the legacy plist. Best-effort.
+            if let Err(e) = claw_fleet_core::launchd::remove_legacy_serve_launchagent() {
+                claw_fleet_core::log_debug(&format!(
+                    "remove_legacy_serve_launchagent failed: {e}"
+                ));
+            }
+
             // Inject Fleet's permissions allowlist into ~/.claude/settings.json
             // so fleet guard becomes the sole audit gate. prune_dead_holders
             // inside acquire self-heals when a prior Fleet process died
