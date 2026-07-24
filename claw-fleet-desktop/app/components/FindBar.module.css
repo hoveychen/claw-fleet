@@ -1,0 +1,77 @@
+.bar {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  /* Sit clear of the macOS traffic lights / Windows caption buttons up top. */
+  -webkit-app-region: no-drag;
+}
+
+.input {
+  width: 200px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+}
+
+.input.empty {
+  /* query typed but nothing matched */
+  border-color: var(--color-error, #d33);
+}
+
+.count {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.unsupported {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 0 4px;
+}
