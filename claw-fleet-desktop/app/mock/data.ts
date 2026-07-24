@@ -354,6 +354,16 @@ const MOCK_SESSIONS_SEED: Array<
     contextPercent: 0.89,
     agentSource: "claude-code",
     lastOutcome: ["needs_input"],
+    watches: [
+      {
+        id: "w-mock02",
+        note: "staging deploy to go green",
+        created: NOW - 12 * MIN,
+        pollSecs: 30,
+        deadlineAt: NOW + 60 * MIN,
+        pollCount: 24,
+      },
+    ],
   },
 
 

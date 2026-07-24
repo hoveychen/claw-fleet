@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Bot, ChevronRight, Clock, FolderGit2, Waypoints } from "lucide-react";
+import { Bot, ChevronRight, Clock, FolderGit2, Radar, Waypoints } from "lucide-react";
 import type { SessionInfo } from "../types";
 import { LIVE_STATUSES, rowBarColor } from "../types";
 import { MarkControl } from "./MarkControl";
@@ -25,6 +25,18 @@ function formatRunning(ms: number, t: (k: string, opts?: Record<string, unknown>
   if (diff < 3_600_000) return t("ran_m", { n: Math.floor(diff / 60_000) });
   if (diff < 86_400_000) return t("ran_h", { n: Math.floor(diff / 3_600_000) });
   return t("ran_d", { n: Math.floor(diff / 86_400_000) });
+}
+
+/** Compact, language-neutral elapsed ("40s" / "3m" / "2h" / "1d") for the tight
+ *  row watch chip — mirrors SessionCard's formatDuration unit style. */
+function compactElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
 }
 
 /** FTS5 snippets arrive with literal `<mark>…</mark>` markers (see
@@ -170,6 +182,25 @@ export const SessionRow = memo(function SessionRow({
                 {s.handoff.hop}/{s.handoff.chainLen}
               </span>
             )}
+            {s.watches?.map((w) => (
+              <span
+                key={w.id}
+                className={styles.row_handoff}
+                title={[
+                  w.note ?? undefined,
+                  t("card.tip_watch", {
+                    elapsed: compactElapsed(w.created),
+                    count: w.pollCount,
+                    poll: w.pollSecs,
+                  }),
+                ]
+                  .filter(Boolean)
+                  .join(" — ")}
+              >
+                <Radar size={10} strokeWidth={1.6} />
+                {compactElapsed(w.created)}·{w.pollCount}
+              </span>
+            ))}
             {LIVE_STATUSES.has(s.status) && (
               <span
                 className={styles.row_runtime}
