@@ -14,6 +14,7 @@ import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchDecisionAsset } from "../decisionAsset";
+import { useLightbox } from "./Lightbox";
 import { getLang, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type {
@@ -1587,6 +1588,7 @@ function ImageGallery({
 }) {
   const names = useMemo(() => images.map((i) => i.name), [images]);
   const { states, retry } = useAssets(names, requestId, qidx, client);
+  const { open } = useLightbox();
   return (
     <div className={styles.gallery}>
       {images.map((img) => {
@@ -1594,7 +1596,11 @@ function ImageGallery({
         return (
           <figure key={img.name}>
             {st?.status === "ok" ? (
-              <img src={st.uri} alt={img.caption ?? img.name} />
+              <img
+                src={st.uri}
+                alt={img.caption ?? img.name}
+                onClick={() => open(st.uri, img.caption ?? img.name)}
+              />
             ) : st?.status === "error" ? (
               <button
                 type="button"
