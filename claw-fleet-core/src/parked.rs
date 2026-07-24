@@ -242,6 +242,35 @@ pub fn is_parked(id: &str) -> bool {
     card_path(id).map(|p| p.is_file()).unwrap_or(false)
 }
 
+// ── In-flight guard ────────────────────────────────────────────────────────
+//
+// `has_parked_for_session` only catches a card that already *timed out* into the
+// parked store. It does nothing while a card is still actively waiting. That was
+// enough when one session meant one process, but a double-submitted prompt can
+// briefly put *two* `claude` processes on one session (each with its own
+// `fleet mcp` child and its own blocking `fleet__ask`), and their in-flight
+// windows overlap — two cards stacked before either parks. The relay-side
+// resume dedup kills that at the source; this file-based marker is the
+// belt-and-braces second line: a second live process asking on a session that
+// already has an in-flight ask bails instead of stacking a duplicate card.
+
+/// Register this process as the in-flight `fleet__ask`/elicitation owner for
+/// `session_id`. Returns `false` when a *live* marker owned by a different,
+/// still-running process already exists — the caller must bail rather than
+/// stack a second card. A stale marker (owning pid dead, or older than the
+/// wait window) is treated as free and overwritten, so a crashed producer
+/// self-heals. **P3 stub — real body lands in P4.** Currently always returns
+/// `true` (the pre-fix behavior: no in-flight guard), so the P3 test's
+/// second-owner assertion fails red.
+pub fn register_inflight_ask(_session_id: &str, _request_id: &str) -> bool {
+    true
+}
+
+/// Clear the in-flight marker for `session_id` iff it is ours (`request_id`
+/// matches), so a different process's marker is never cleared. **P3 stub — real
+/// body lands in P4.**
+pub fn clear_inflight_ask(_session_id: &str, _request_id: &str) {}
+
 /// Drop a parked card without resuming anything — the user dismissed the
 /// question rather than answering it.
 pub fn discard(id: &str) -> Result<(), String> {
@@ -746,6 +775,37 @@ mod tests {
         assert_eq!(resume_source("codex-fleet"), "codex");
         assert_eq!(resume_source("codex-user"), "claude");
         assert_eq!(parkable_workspace("codex-missing"), None);
+    }
+
+    /// The in-flight guard must block a *second* live owner (a double-submit put a
+    /// second process on this session) while letting the same owner re-register and
+    /// a fresh owner take over after a clear. The P3 stub (`register` always true)
+    /// fails the second-owner assertion.
+    #[test]
+    fn inflight_ask_blocks_second_live_owner_then_frees_on_clear() {
+        let _home = TmpHome::new("inflight");
+        let sess = "inflight-sess-1";
+        // First owner (this process's pid, freshly stamped) registers fine.
+        assert!(register_inflight_ask(sess, "req-A"), "first owner registers");
+        // A different request id = a second process asking on the same session.
+        // Its marker is live (our pid) → must be refused.
+        assert!(
+            !register_inflight_ask(sess, "req-B"),
+            "a second live owner on the same session must be refused"
+        );
+        // An unrelated session is unaffected.
+        assert!(register_inflight_ask("inflight-sess-other", "req-X"));
+        // Owner clears; the session is free again for a new owner.
+        clear_inflight_ask(sess, "req-A");
+        assert!(
+            register_inflight_ask(sess, "req-C"),
+            "after the owner clears, a new owner may register"
+        );
+        // A clear that is not ours is a no-op (must not free req-C's hold).
+        clear_inflight_ask(sess, "req-not-owner");
+        assert!(!register_inflight_ask(sess, "req-D"), "non-owner clear must not free the hold");
+        clear_inflight_ask(sess, "req-C");
+        clear_inflight_ask("inflight-sess-other", "req-X");
     }
 
     /// A parked card outlives the process that asked the question: it must round
