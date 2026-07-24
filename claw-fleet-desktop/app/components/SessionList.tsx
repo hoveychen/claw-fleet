@@ -2,7 +2,8 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, ListChecks } from "lucide-react";
+import { Menu, Shield, ListChecks, Coffee } from "lucide-react";
+import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -54,6 +55,7 @@ export function SessionList() {
     toggleSecondarySidebar,
     mascotVisible,
   } = useUIStore();
+  const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
   // Views that own a secondary sidebar (二级侧边栏). Re-clicking the nav item of
   // the already-active one collapses/expands its sidebar instead of being a
@@ -411,6 +413,17 @@ export function SessionList() {
                     {isRemote ? t("settings.remote") : t("settings.local")}
                   </span>
                 </div>
+                {keepAwakeSupported && (
+                  <button
+                    className={`${styles.footer_icon_btn} ${keepAwake ? styles.footer_icon_btn_active : ""}`}
+                    onClick={(e) => { e.stopPropagation(); setKeepAwake(!keepAwake); }}
+                    title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                    aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                    aria-pressed={keepAwake}
+                  >
+                    <Coffee size={14} strokeWidth={1.5} />
+                  </button>
+                )}
                 <button
                   className={styles.footer_icon_btn}
                   onClick={(e) => { e.stopPropagation(); setLiteMode(true); }}

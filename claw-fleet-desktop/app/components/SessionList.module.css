@@ -664,6 +664,15 @@
   opacity: 1;
 }
 
+/* Keep-awake (coffee) toggle in the "on" state — tint it with the accent so
+   the always-on status reads at a glance, mirroring the banner's old active
+   pill. */
+.footer_icon_btn_active,
+.footer_icon_btn_active:hover {
+  color: var(--color-accent);
+  opacity: 1;
+}
+
 /* Theme cycle button holds a text glyph (☀/☽/⊙) rather than an SVG — size it
    to sit level with the 14px lite-mode icon beside it. */
 .footer_theme_btn {

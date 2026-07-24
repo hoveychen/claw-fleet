@@ -185,7 +185,15 @@ function handleIPC(
     case "show_main_window":
     case "respond_to_guard":
     case "respond_to_elicitation":
+    case "set_keep_awake":
       return null;
+
+    // Keep-awake (coffee) toggle — pretend the platform supports it so the
+    // sidebar footer button renders under ?mock.
+    case "keep_awake_supported":
+      return true;
+    case "get_keep_awake":
+      return false;
 
     case "set_session_title": {
       // Mirror the desktop restamp: set/clear titleOverride, re-emit so the row
