@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Radar } from "lucide-react";
 import type { SessionInfo } from "../types";
 import styles from "./WatchStatusRow.module.css";
 
@@ -48,7 +49,8 @@ export function WatchStatusRow({ session }: { session: SessionInfo }) {
           .join(" — ");
         return (
           <span key={w.id} className={styles.watch_chip} title={title}>
-            👁 {t("card.watch_chip", { elapsed, count: w.pollCount })}
+            <Radar size={11} />
+            {t("card.watch_chip", { elapsed, count: w.pollCount })}
           </span>
         );
       })}

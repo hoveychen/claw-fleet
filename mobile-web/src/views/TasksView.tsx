@@ -5,10 +5,10 @@ import {
   ChevronRight,
   Circle,
   Clock,
-  Eye,
   Folder,
   Inbox,
   Loader2,
+  Radar,
   Search,
   SearchX,
   Share2,
@@ -651,7 +651,7 @@ export function TasksView({
               className={styles.handoff}
               title={w.note ?? undefined}
             >
-              <Eye size={11} />
+              <Radar size={11} />
               {formatWatchElapsed(w.created)} · {t("轮询 {0} 次", w.pollCount)}
             </span>
           ))}
