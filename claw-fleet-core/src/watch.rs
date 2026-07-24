@@ -108,6 +108,13 @@ pub struct WatchRecord {
     /// re-armed before its first arm even lands).
     #[serde(default)]
     pub last_poll_at: u64,
+    /// Number of condition polls this watch has run — bumped once per `touch_in`
+    /// heartbeat (i.e. once per `until` probe that didn't fire). The single firing
+    /// poll isn't counted because the record is unlinked as it fires, but only
+    /// still-active watches are ever displayed, so that's immaterial. Surfaced on
+    /// the session card so a waiting session shows "checked N times".
+    #[serde(default)]
+    pub poll_count: u64,
 }
 
 impl WatchRecord {
@@ -267,6 +274,7 @@ fn create_in(
         generation: 0,
         created: now,
         last_poll_at: now,
+        poll_count: 0,
     };
     write_record(dir, &rec)?;
     Ok(rec)
@@ -613,6 +621,9 @@ fn touch_in(dir: &Path, id: &str, generation: u64, now: u64) {
     if let Some(mut rec) = get_in(dir, id) {
         if rec.generation == generation {
             rec.last_poll_at = now;
+            // Each heartbeat is one condition poll that didn't fire; count it so the
+            // session card can show how many times the watch has checked.
+            rec.poll_count += 1;
             let _ = write_record(dir, &rec);
         }
     }
@@ -1138,6 +1149,29 @@ mod tests {
         stop_in(d.path(), "w1");
         touch_in(d.path(), "w1", 0, 99_000);
         assert!(get_in(d.path(), "w1").is_none());
+    }
+
+    /// Each poll heartbeat also counts one condition check, so a waiting session's
+    /// card can show "checked N times". `decide` runs the probe exactly once per
+    /// wake and every not-yet-firing wake ends in `touch_in`, so per-touch counting
+    /// is per-probe counting. A wrong-generation touch (a superseded zombie timer)
+    /// must not inflate the count, just like it doesn't move the heartbeat.
+    #[test]
+    fn touch_increments_the_poll_count() {
+        let d = dir();
+        make(d.path(), "w1", 1_000);
+        assert_eq!(get_in(d.path(), "w1").unwrap().poll_count, 0, "starts at zero");
+        touch_in(d.path(), "w1", 0, 50_000);
+        touch_in(d.path(), "w1", 0, 80_000);
+        touch_in(d.path(), "w1", 0, 110_000);
+        assert_eq!(
+            get_in(d.path(), "w1").unwrap().poll_count,
+            3,
+            "one increment per poll heartbeat"
+        );
+        // wrong generation: neither the heartbeat nor the count moves
+        touch_in(d.path(), "w1", 9, 140_000);
+        assert_eq!(get_in(d.path(), "w1").unwrap().poll_count, 3);
     }
 
     /// Only a watch whose heartbeat is older than the grace window is re-armed;
