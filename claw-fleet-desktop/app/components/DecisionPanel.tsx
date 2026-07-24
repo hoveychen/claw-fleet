@@ -750,9 +750,9 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
       {/* Always-visible footer — options / "Other" / actions stay reachable
           without scrolling (flex-none tail; the body scrolls in .card_scroll). */}
       <div className={styles.card_footer}>
-        {/* Manual collapse only earns its chevron when the list is long enough
-            to be worth folding; short option sets (≤3) always stay open. */}
-        {q.options.length > 3 && (
+        {/* Manual collapse is offered whenever there is more than one option to
+            fold (default stays expanded); only a single-option card stays open. */}
+        {q.options.length > 1 && (
           <OptionsCollapseBar
             collapsed={optionsCollapsed}
             onToggle={() => setOptionsCollapsed((v) => !v)}
@@ -760,7 +760,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
             summary={collapsedSummary}
           />
         )}
-        {(q.options.length <= 3 || !optionsCollapsed) && (
+        {(q.options.length <= 1 || !optionsCollapsed) && (
         <SharedOptionsBlock
           decisionId={decision.id}
           sessionId={decision.request.sessionId}
@@ -1624,9 +1624,9 @@ export function FleetAskCard({
       {/* Always-visible footer — form fields / options / "Other" / actions stay
           reachable without scrolling (flex-none tail; body scrolls in .card_scroll). */}
       <div className={styles.card_footer}>
-        {/* Same rule as elicitation: only surface the collapse chevron when the
-            combined option + form-field count is long enough to fold. */}
-        {opts.length + formFields.length > 3 && (
+        {/* Same rule as elicitation: offer the collapse chevron whenever there is
+            more than one option/form-field to fold (default stays expanded). */}
+        {opts.length + formFields.length > 1 && (
           <OptionsCollapseBar
             collapsed={optionsCollapsed}
             onToggle={() => setOptionsCollapsed((v) => !v)}
@@ -1634,7 +1634,7 @@ export function FleetAskCard({
             summary={collapsedSummary}
           />
         )}
-        {(opts.length + formFields.length <= 3 || !optionsCollapsed) && formFields.length > 0 && (
+        {(opts.length + formFields.length <= 1 || !optionsCollapsed) && formFields.length > 0 && (
           <div className={styles.elicitation_options}>
             {formFields.map((f) => (
               <FleetAskFormFieldRow
@@ -1653,7 +1653,7 @@ export function FleetAskCard({
             options .map) is available on option-less fleet__ask cards. With an
             empty options array SharedOptionsBlock renders just the Other input.
             Only the user's collapse toggle hides it. */}
-        {(opts.length + formFields.length <= 3 || !optionsCollapsed) && (
+        {(opts.length + formFields.length <= 1 || !optionsCollapsed) && (
           <SharedOptionsBlock
             decisionId={decision.id}
             sessionId={decision.request.sessionId}
