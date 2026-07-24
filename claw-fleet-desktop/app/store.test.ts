@@ -1,4 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionInfo } from "./types";
+
+// navigateToSessionDetail → useDetailStore.open touches the tauri bridge; stub
+// it so the store logic runs headless.
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => undefined) }));
+vi.mock("@tauri-apps/api/event", () => ({
+  emit: vi.fn(async () => undefined),
+  listen: vi.fn(async () => () => {}),
+}));
 
 /**
  * 启动台's rail filters used to be component-local `useState` inside HistoryView.
@@ -193,5 +202,60 @@ describe("主导航页面浏览上下文", () => {
     useUIStore.getState().updateMainViewState("wiki", { query: "temporary search" });
 
     expect(getItem("main-view-state")).toBeNull();
+  });
+});
+
+/**
+ * gallery is the default session layout, but two paths used to silently pin
+ * users to `list` instead: (1) navigateToSessionDetail force-switched to list
+ * on every notification/tray click, persisting it as the new default even
+ * though the detail drawer renders under gallery too; (2) users who already
+ * had `list` on disk from that bug never got flipped to the new default.
+ */
+describe("gallery 默认会话视图", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("在画廊视图下打开非 Fleet 会话时保持画廊,不强切列表", async () => {
+    const { useUIStore, navigateToSessionDetail } = await import("./store");
+
+    useUIStore.getState().setViewMode("gallery");
+    expect(useUIStore.getState().viewMode).toBe("gallery");
+
+    const nonFleet = {
+      entrypoint: "cli",
+      isSubagent: false,
+      fleetSpawned: false,
+      jsonlPath: "/tmp/x.jsonl",
+    } as SessionInfo;
+
+    // open() already lands on a session view on its own; the caller must not
+    // clobber an existing gallery view with a hard `list`.
+    navigateToSessionDetail(nonFleet);
+
+    expect(useUIStore.getState().viewMode).toBe("gallery");
+  });
+
+  it("一次性把老用户已存的 list 翻成 gallery", async () => {
+    const { setItem, getItem, migrateSessionViewDefault } = await import("./storage");
+    setItem("viewMode", "list");
+    setItem("lastSessionViewMode", "list");
+
+    migrateSessionViewDefault();
+
+    expect(getItem("viewMode")).toBe("gallery");
+    expect(getItem("lastSessionViewMode")).toBe("gallery");
+    expect(getItem("gallery-default-migrated")).toBe("true");
+  });
+
+  it("迁移过后尊重用户重新选择的 list", async () => {
+    const { setItem, getItem, migrateSessionViewDefault } = await import("./storage");
+    setItem("gallery-default-migrated", "true");
+    setItem("viewMode", "list");
+
+    migrateSessionViewDefault();
+
+    expect(getItem("viewMode")).toBe("list");
   });
 });

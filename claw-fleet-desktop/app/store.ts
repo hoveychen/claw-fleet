@@ -711,7 +711,10 @@ export function navigateToSessionDetail(session: SessionInfo) {
   if (isFleetOwnedTask(session)) {
     useUIStore.getState().requestOpenTask(session.id);
   } else {
-    useUIStore.getState().setViewMode("list");
+    // The drawer renders under both list and gallery (see App's isSessionView),
+    // and open() already hops to the user's session layout when we're on a
+    // non-session view. Forcing `list` here used to silently persist itself as
+    // the new default — the whole reason gallery stopped sticking. Just open.
     useDetailStore.getState().open(session);
   }
 }
