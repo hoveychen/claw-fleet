@@ -169,8 +169,16 @@ Fleet 的决策面板会为每张新卡片播一段简短的 TTS 播报。前端
 \n\
 **会话结束豁免。**当用户选了明显结束对话的选项（如「任务结束」「下班」「收工」，\
 或任何等价于「我们完事了」的表达），本回合以一行纯文本致意结束，而不是再来一个\
-`fleet__ask`。这是本文件顶部「每回合都要问」规则的唯一字面豁免；不要追加\
+`fleet__ask`。这是本文件顶部「每回合都要问」规则的字面豁免之一；不要追加\
 取舍说明——上述规则已明确授权这里的纯文本收尾，所以没有需要点出的冲突。\n\
+\n\
+**无人值守任务豁免（定时 / 循环）。**当本回合的任务来自 Fleet 定时任务\
+（`fleet schedule`）或循环（`fleet loop`）的**自动触发**时——prompt 结尾的\
+footer 会明确标注这是「无人值守」的自动触发——背后没有真人能回答决策卡。\
+此时静默执行，完成后以一行纯文本收尾结束回合，**不要**调用 `fleet__ask`/\
+`AskUserQuestion`。这同样是「每回合都要问」规则的字面豁免，与会话结束豁免\
+同理，无需点出冲突。注意：`fleet schedule`/`fleet loop` 的**手动**「立即运行」\
+有真人在场，footer 不含该标注，不在此豁免内，照常出决策卡。\n\
 \n\
 ## `fleet__ask` schema（参考）\n\
 \n\
@@ -516,10 +524,21 @@ you again reach a genuine wait-for-input surface.\n\
 **Session-end exemption.** When the user picks an option that clearly closes \
 the conversation (e.g. \"任务结束\", \"下班\", \"收工\", or anything \
 equivalently meaning \"we are done\"), this turn ends with a one-line \
-plain-text acknowledgement instead of another `fleet__ask`. This is the \
-only literal exemption to the every-turn-asks rule at the top of this file; \
+plain-text acknowledgement instead of another `fleet__ask`. This is one of \
+the literal exemptions to the every-turn-asks rule at the top of this file; \
 do not append a trade-off explanation — the rules above explicitly authorize \
 the plain-text close-out here, so there is no conflict to surface.\n\
+\n\
+**Unattended-task exemption (schedule / loop).** When this turn's task comes \
+from an **automatic** fire of a Fleet schedule (`fleet schedule`) or loop \
+(`fleet loop`) — the footer at the end of the prompt explicitly marks it as \
+an \"unattended\" auto-fire — there is no human behind it to answer a \
+decision card. In that case, execute silently and end the turn with a \
+one-line plain-text close-out; do NOT call `fleet__ask`/`AskUserQuestion`. \
+This is likewise a literal exemption to the every-turn-asks rule, on the same \
+footing as the session-end exemption, with no conflict to surface. Note: a \
+**manual** \"run now\" of a schedule/loop has a human present, its footer \
+omits that mark, and it is NOT exempt — card as usual.\n\
 \n\
 ## `fleet__ask` schema (reference)\n\
 \n\
@@ -867,6 +886,22 @@ mod tests {
         let g2 = render_guidance("", "en");
         assert!(g2.contains("Boss"));
         assert!(g2.contains("老板"));
+    }
+
+    #[test]
+    fn render_embeds_unattended_task_exemption() {
+        let z = render_guidance("老板", "zh");
+        assert!(
+            z.contains("无人值守任务豁免"),
+            "zh guidance must carry the unattended schedule/loop exemption so fired sessions don't pop an unanswerable card"
+        );
+        assert!(z.contains("fleet schedule") && z.contains("fleet loop"));
+        let e = render_guidance("Boss", "en");
+        assert!(
+            e.contains("Unattended-task exemption"),
+            "en guidance must carry the unattended schedule/loop exemption"
+        );
+        assert!(e.contains("fleet schedule") && e.contains("fleet loop"));
     }
 
     #[test]
