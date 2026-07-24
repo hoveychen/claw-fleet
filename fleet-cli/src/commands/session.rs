@@ -145,7 +145,9 @@ fn forward_user_notify(payload: &[String]) {
         return;
     };
     let (prog, fixed) = cmd.split_first().unwrap(); // read_user_codex_notify never returns empty
-    let _ = std::process::Command::new(prog)
+    // Window-suppressed on Windows: this relay can run under a GUI-spawned
+    // detached session, where a raw spawn would flash a conhost box.
+    let _ = claw_fleet_core::process_util::command(prog)
         .args(fixed)
         .args(payload)
         .spawn();

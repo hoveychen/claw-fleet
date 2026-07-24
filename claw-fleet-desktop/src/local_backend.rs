@@ -833,10 +833,13 @@ impl LocalBackend {
                     if !running_ar.load(Ordering::SeqCst) {
                         break;
                     }
-                    // Heal Codex sessions frozen at `proc_alive = true` by a turn that
-                    // died mid-flight without a `task_complete` (no rollout write means
-                    // the fs-watcher never rescans them). Runs before the drain so the
-                    // queued follow-up sees the corrected `proc_alive == false`.
+                    // Heal Codex AND Claude sessions frozen at `proc_alive = true`
+                    // by a turn that ended without a final transcript write — a
+                    // Codex turn cut off with no `task_complete`, or a headless
+                    // `claude -p` that exits on hitting the usage limit. No write
+                    // means the fs-watcher never rescans them. Runs before the
+                    // drain and auto-resume below so both see the corrected
+                    // `proc_alive == false`.
                     refresh_dead_codex_liveness_and_emit(&sess_ar, &app_ar);
                     // Interrupt Codex turns that are alive but hung (process up,
                     // rollout silent past the threshold, not waiting on a decision
@@ -1715,20 +1718,31 @@ pub fn resume_session_impl(
     )
 }
 
-/// Reconcile stale `proc_alive` on Codex sessions against the live process table
-/// and re-emit the snapshot when anything changed. The fs-watcher only rescans a
-/// Codex session on a rollout write, so a turn that dies mid-flight (no
-/// `task_complete`) leaves `proc_alive` frozen `true`, jamming both the drain
-/// gate and the "会话运行中" UI. This runs off the periodic ticker — which fires
-/// regardless of file writes — to unstick both. See
-/// [`claw_fleet_core::codex_source::refresh_dead_codex_liveness`].
+/// Reconcile stale `proc_alive` on Codex **and** Claude sessions against the live
+/// process table and re-emit the snapshot when anything changed. The fs-watcher
+/// only rescans a session when its transcript is written, so a turn that dies
+/// without a final write — a Codex turn cut off mid-flight (no `task_complete`),
+/// or a headless `claude -p` that exits on hitting the usage limit — leaves
+/// `proc_alive` frozen `true`, jamming the drain gate, auto-resume, and the
+/// "会话运行中" UI. This runs off the periodic ticker — which fires regardless of
+/// file writes — to unstick all three. The Claude arm is what fixes the
+/// Windows-only "session stuck enqueuing after hitting the limit" report: on
+/// macOS noisy FSEvents wake the watcher often enough to heal `proc_alive`
+/// promptly, but a quiet Windows machine delivers no events, so without this the
+/// freeze persisted for tens of minutes. See
+/// [`claw_fleet_core::codex_source::refresh_dead_codex_liveness`] and
+/// [`claw_fleet_core::claude_source::refresh_dead_claude_liveness`].
 fn refresh_dead_codex_liveness_and_emit(
     sessions: &Arc<Mutex<Vec<SessionInfo>>>,
     app: &AppHandle,
 ) {
     let updated: Option<Vec<SessionInfo>> = {
         let mut s = sessions.lock().unwrap();
-        if claw_fleet_core::codex_source::refresh_dead_codex_liveness(&mut s) {
+        // Run both reconcilers (not short-circuit `||`) so a Codex change never
+        // masks a Claude one in the same pass.
+        let codex_changed = claw_fleet_core::codex_source::refresh_dead_codex_liveness(&mut s);
+        let claude_changed = claw_fleet_core::claude_source::refresh_dead_claude_liveness(&mut s);
+        if codex_changed || claude_changed {
             Some(s.clone())
         } else {
             None

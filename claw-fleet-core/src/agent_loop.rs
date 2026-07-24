@@ -922,6 +922,9 @@ fn reconcile_in(
 
 fn arm_timer_with(fleet_bin: &str, rec: &LoopRecord) -> Result<u32, String> {
     let mut cmd = std::process::Command::new(fleet_bin);
+    // CREATE_NO_WINDOW on Windows: a loop-timer re-arm spawned from the desktop
+    // GUI must not flash a conhost box. No-op on Unix (setsid detach below).
+    crate::process_util::no_window(&mut cmd);
     cmd.arg("loop")
         .arg("fire")
         .arg(&rec.id)
