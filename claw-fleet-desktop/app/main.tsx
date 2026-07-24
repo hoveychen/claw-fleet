@@ -27,7 +27,8 @@ async function boot() {
     triggerMockQaScenario = mocks.triggerMockQaScenario;
   }
 
-  const { initStorage, setItem, migrateSessionViewDefault } = await import("./storage");
+  const { initStorage, setItem, migrateSessionViewDefault, migrateFeatureTristate } =
+    await import("./storage");
 
   // Load persisted settings into memory before anything reads them.
   await initStorage();
@@ -36,6 +37,12 @@ async function boot() {
   // still carries a stale "list". Must run before the UIStore is constructed
   // (i.e. before ./App is imported below), same window as the ?lite pre-flip.
   migrateSessionViewDefault();
+
+  // Reset the changed-default feature keys to the "default" (unset) state once,
+  // so existing users follow the new central defaults instead of a stale binary
+  // value left by the old mount reconciliation. Must run before any feature
+  // read (SettingsPanel/Onboarding state inits, hook auto-apply).
+  migrateFeatureTristate();
 
   // `?lite` — pre-flip the lite-mode flag so UIStore picks it up at construction.
   // Mock-only shortcut so we can iterate on the portrait UI without tauri dev.
