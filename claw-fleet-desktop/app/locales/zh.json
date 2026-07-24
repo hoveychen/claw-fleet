@@ -790,6 +790,8 @@
     "bg_workflow": "工作流 {{count}}",
     "handoff_chip": "接力 {{hop}}/{{len}}",
     "tip_handoff": "该 session 是一条接力链的第 {{hop}} 棒（共 {{len}} 棒）。点击查看完整链条。",
+    "watch_chip": "watch · 已过 {{elapsed}} · {{count}} 次",
+    "tip_watch": "已等待 {{elapsed}}，条件已轮询 {{count}} 次（每 {{poll}} 秒一次）。",
     "handoff_loading": "正在加载接力链…",
     "handoff_hop": "第 {{n}} 棒",
     "tip_compact": "Context Compact：共 {{count}} 次 · 输入累计 {{pre}} tokens · 摘要累计 {{post}} tokens · 估算成本 ~${{cost}}（compact LLM 调用未单独入库，按 cache_read 和 output 单价估算）"

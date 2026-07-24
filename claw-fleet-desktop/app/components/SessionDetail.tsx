@@ -17,6 +17,7 @@ import { messageToText } from "../messageRows";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
+import { WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
 import type { PathLinkContext } from "../markdown/pathLinks";
 import { ResumeComposer } from "./ResumeComposer";
@@ -832,6 +833,10 @@ export function SessionDetail({
             </div>
             {/* Handoff relay chain — chip toggles the chain detail panel */}
             {liveSession.handoff && <HandoffChainRow session={liveSession} />}
+            {/* Active fleet-watch(es) — what this session is waiting on */}
+            {liveSession.watches && liveSession.watches.length > 0 && (
+              <WatchStatusRow session={liveSession} />
+            )}
           </div>
 
           {/* View-tab row. The agent scope selector no longer lives here — it

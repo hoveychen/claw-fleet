@@ -1,0 +1,23 @@
+/* ── Active fleet-watch status chip ──────────────────────────────────────── */
+/* Mirrors the handoff relay chip; a non-interactive status badge showing what a
+   session is waiting on, how long it has waited, and how many polls it ran. */
+
+.watch_row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.watch_chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--color-bg-tool);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+}
