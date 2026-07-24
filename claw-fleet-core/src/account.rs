@@ -756,6 +756,60 @@ mod tests {
         }
     }
 
+    // Regression: a corrupt/torn history file must never be silently overwritten
+    // (the 8-day history once vanished because `load` swallowed a parse error to
+    // empty and the caller then wrote a single fresh sample over the whole file).
+    #[test]
+    fn append_sample_backs_up_corrupt_file_instead_of_destroying_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage-history.json");
+        // A torn / half-written file — invalid JSON, as a reader would catch it
+        // mid-write from a concurrent non-atomic save.
+        let garbage = "[{\"ts\":123, THIS IS NOT VALID JSON";
+        std::fs::write(&path, garbage).unwrap();
+
+        let _ = append_sample(&path, snap_at(2_000_000), 2_000_000);
+
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt"))
+            .collect();
+        assert_eq!(
+            backups.len(),
+            1,
+            "a corrupt history file must be backed up (.corrupt-*), never silently destroyed"
+        );
+        let saved = std::fs::read_to_string(backups[0].path()).unwrap();
+        assert_eq!(saved, garbage, "the backup must hold the original corrupt bytes verbatim");
+    }
+
+    // On-demand `fetch_account_info` callers hit this every ~10s; without a
+    // throttle they storm the history file (422 points/hour) and multiply the
+    // odds of a torn-write collision. Samples closer than the min interval are
+    // dropped; samples past it are kept.
+    #[test]
+    fn append_sample_throttled_within_min_interval() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage-history.json");
+        let base = 1_000_000_000_i64;
+        save_snapshots_to(&path, &[snap_at(base)]);
+
+        // 10s later — well inside any sane min interval — must be dropped.
+        let h = append_sample(&path, snap_at(base + 10_000), base + 10_000);
+        assert_eq!(h.len(), 1, "a sample within the min interval must not be appended");
+        assert_eq!(
+            load_snapshots_from(&path).len(),
+            1,
+            "a throttled sample must not be persisted"
+        );
+
+        // 10 min later — past the interval — is appended.
+        let h2 = append_sample(&path, snap_at(base + 600_000), base + 600_000);
+        assert_eq!(h2.len(), 2, "a sample past the min interval must be appended");
+        assert_eq!(load_snapshots_from(&path).len(), 2);
+    }
+
     #[test]
     fn latest_of_picks_newest_regardless_of_order() {
         assert!(latest_of(&[]).is_none());
