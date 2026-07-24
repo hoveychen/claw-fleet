@@ -233,6 +233,16 @@ export function resolveFeature(key: string): boolean {
   return featureDefault(key);
 }
 
+/** Resolve a tristate UI state to a concrete boolean given its key: the explicit
+ *  "on"/"off" choice, or the central default for "default". Companion to
+ *  resolveFeature() for callers that already hold the FeatureState in component
+ *  state and want to avoid a second storage read. */
+export function resolveFeatureState(state: FeatureState, key: string): boolean {
+  if (state === "on") return true;
+  if (state === "off") return false;
+  return featureDefault(key);
+}
+
 /** The tristate UI state of a feature key: the user's explicit choice, or
  *  "default" when no value is stored. */
 export function getFeatureState(key: string): FeatureState {
