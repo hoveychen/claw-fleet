@@ -40,7 +40,7 @@ import { StructuredCommand } from "./StructuredCommand";
 import { basename } from "./taskNotification";
 import { permissionPrimary } from "./permissionPrimary";
 
-const KIND_LABEL: Record<string, string> = {
+export const KIND_LABEL: Record<string, string> = {
   guard: "命令审批",
   elicitation: "问题请示",
   "fleet-ask": "决策卡",

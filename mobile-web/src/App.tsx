@@ -43,6 +43,7 @@ import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
 import { NewSessionSheet } from "./views/Composer";
 import { DecisionsView } from "./views/DecisionsView";
+import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
 import { RepoView } from "./views/RepoView";
 import { RepoDetailView } from "./views/RepoDetailView";
@@ -503,6 +504,23 @@ export function App() {
     [],
   );
 
+  // A secondary page (session detail / wiki doc / repo / usage / new session)
+  // is covering the tab body. Used to decide whether the global decision drawer
+  // should take over as the answering surface.
+  const overlayOpen =
+    detailStack.length > 0 ||
+    wikiStack.length > 0 ||
+    showRepo ||
+    repoDetail !== null ||
+    showUsage ||
+    showNewSession;
+  // Float the decision drawer over whatever the boss is looking at — EXCEPT the
+  // plain 决策 tab, which already renders the cards inline (no overlay covering
+  // it), so the drawer would only duplicate them there. Everywhere else (other
+  // tabs, or any tab with a detail page open) the drawer is the surface.
+  const showDecisionDrawer =
+    decisions.length > 0 && (tab !== "decisions" || overlayOpen);
+
   if (!secret) {
     return (
       <div className={styles.gate}>
@@ -719,6 +737,19 @@ export function App() {
             onClose={() => setShowNewSession(false)}
           />
         </>
+      )}
+
+      {showDecisionDrawer && (
+        <DecisionDrawer
+          decisions={decisions}
+          client={clientRef.current}
+          connected={connected}
+          agentOnline={agentOnline}
+          decisionsLoaded={decisionsLoaded}
+          workspaceOf={workspaceOf}
+          onAnswered={markAnswered}
+          onOpenSession={openSessionRoot}
+        />
       )}
 
       {exitArmed && <div className={styles.exitToast}>{t("再按一次返回退出")}</div>}
