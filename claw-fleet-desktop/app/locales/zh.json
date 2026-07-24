@@ -1550,6 +1550,17 @@
     "tool_search": "加载工具",
     "tool_search_load": "加载工具 {{names}}",
     "tool_search_query": "搜索工具：{{query}}",
+    "fleet_tool": {
+      "ask": "决策卡",
+      "render_a2ui": "富交互卡",
+      "plan": "计划",
+      "handoff": "交接",
+      "watch": "守望",
+      "loop": "循环",
+      "schedule": "定时",
+      "wiki": "知识库",
+      "set_session_title": "设置标题"
+    },
     "tool_patch_add": "新建 {{path}}",
     "tool_patch_update": "编辑 {{path}}",
     "tool_patch_delete": "删除 {{path}}",

@@ -203,6 +203,25 @@ describe("claudeToolSummary", () => {
     ).toBe('detail.tool_search_load|{"names":"Read, Edit, Grep"}');
   });
 
+  it("ToolSearch select: → maps Fleet MCP ids to translated labels", () => {
+    expect(
+      claudeToolSummary("ToolSearch", { query: "select:mcp__fleet__fleet__ask" }, t),
+    ).toBe('detail.tool_search_load|{"names":"detail.fleet_tool.ask"}');
+    expect(
+      claudeToolSummary(
+        "ToolSearch",
+        { query: "select:mcp__fleet__fleet__plan,mcp__fleet__fleet__watch" },
+        t,
+      ),
+    ).toBe('detail.tool_search_load|{"names":"detail.fleet_tool.plan, detail.fleet_tool.watch"}');
+  });
+
+  it("ToolSearch select: → strips the mcp__server__ prefix of non-Fleet MCP tools", () => {
+    expect(
+      claudeToolSummary("ToolSearch", { query: "select:mcp__linear__create_issue" }, t),
+    ).toBe('detail.tool_search_load|{"names":"linear·create_issue"}');
+  });
+
   it("ToolSearch keyword query → a search label carrying the query", () => {
     expect(claudeToolSummary("ToolSearch", { query: "notebook jupyter" }, t)).toBe(
       'detail.tool_search_query|{"query":"notebook jupyter"}',
