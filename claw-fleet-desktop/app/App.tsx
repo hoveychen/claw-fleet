@@ -11,6 +11,8 @@ import { SessionDetail } from "./components/SessionDetail";
 import { SessionList } from "./components/SessionList";
 import { WaitingAlerts } from "./components/WaitingAlerts";
 import { DecisionPanel } from "./components/DecisionPanel";
+import { FindBar } from "./components/FindBar";
+import { useFindController } from "./find/useFindController";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { OPEN_FILE_EVENT, type OpenFilePayload } from "./hooks/usePathLinks";
 import { Wizard } from "./components/Wizard";
@@ -40,6 +42,10 @@ function App() {
   // (e.g. lite mode with no pending decisions).
   useDecisionEvents();
   useDecisionPeerSync();
+
+  // In-app Cmd/Ctrl+F find bar. The controller's key listener is global, so the
+  // bar can be summoned from any view; we render it in the searchable returns.
+  const find = useFindController();
 
   // Bridge: pop the floating decision window when the user can't see the in-app
   // DecisionPanel — either because the main window is minimized, because the
@@ -302,6 +308,7 @@ function App() {
         <WindowsFrameOverlay />
         <LiteApp />
         <WaitingAlerts />
+        <FindBar controller={find} />
       </div>
     );
   }
@@ -311,13 +318,18 @@ function App() {
       <WindowsFrameOverlay />
       {onboardingMode && <Onboarding mode={onboardingMode} onDismiss={finishOnboarding} />}
       {showWizard && <Wizard onDone={dismissWizard} />}
-      <div className="app_main">
+      {/* data-find-content scopes the Cmd+F find bar to the active page's
+          content; the sidebar nav lives inside here too but is skipped by tag
+          (<aside>/<nav>/<button>), and everything outside app_main (onboarding,
+          decision panel, alerts) is excluded by not being tagged. */}
+      <div className="app_main" data-find-content>
         <SessionList />
         {isSessionView && <SessionDetail />}
       </div>
       {!floatingDecisionPanel && <DecisionPanel />}
       <WaitingAlerts />
       <UpdateNotice />
+      <FindBar controller={find} />
     </div>
   );
 }

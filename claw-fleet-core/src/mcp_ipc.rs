@@ -596,12 +596,50 @@ addEventListener('load',send);addEventListener('resize',send);\
 if(window.ResizeObserver){new ResizeObserver(send).observe(document.documentElement);}\
 setTimeout(send,0);setTimeout(send,120);setTimeout(send,400);})();</script>";
 
-/// Append [`AUTOHEIGHT_SCRIPT`] unless the document already carries it.
+/// Marker the find handler carries; present in [`FIND_SCRIPT`].
+pub const FIND_MARKER: &str = "__fleetFind";
+
+/// Companion to [`AUTOHEIGHT_SCRIPT`]: an in-iframe find handler so the app's
+/// Cmd+F find bar can reach text sealed inside this sandboxed, cross-origin
+/// document (the parent cannot read `contentDocument`, so the search has to run
+/// inside just like the height measurement does).
+///
+/// The parent drives it over `postMessage`:
+/// - `{__fleetFind:{action:'search', q}}` → highlight all matches with the CSS
+///   Custom Highlight API and reply `{__fleetFindResult:{count}}`.
+/// - `{__fleetFind:{action:'goto', index}}` → mark the match at `index` as the
+///   active one and scroll it into view (index `-1` just clears the active mark).
+/// - `{__fleetFind:{action:'clear'}}` → drop all highlights.
+///
+/// It injects its own `::highlight()` styles (the agent's document has none) and
+/// skips `<script>`/`<style>` text, mirroring the main-document engine.
+pub const FIND_SCRIPT: &str = "\n<script>(function(){var ALL='find-match',CUR='find-current',m=[],styled=false;\
+function sup(){return typeof CSS!=='undefined'&&CSS.highlights&&typeof Highlight!=='undefined';}\
+function ensure(){if(styled)return;styled=true;var s=document.createElement('style');\
+s.textContent='::highlight(find-match){background-color:rgba(250,204,21,.4)}::highlight(find-current){background-color:#facc15;color:#000}';\
+(document.head||document.documentElement).appendChild(s);}\
+function collect(q){var out=[];if(!q)return out;var n=q.toLowerCase();\
+var w=document.createTreeWalker(document.body,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT,{acceptNode:function(x){\
+if(x.nodeType===1){var t=x.tagName;return(t==='SCRIPT'||t==='STYLE'||t==='NOSCRIPT')?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_SKIP;}\
+return NodeFilter.FILTER_ACCEPT;}});var node=w.nextNode();\
+while(node){var h=node.data.toLowerCase(),f=0;for(;;){var i=h.indexOf(n,f);if(i<0)break;out.push({node:node,s:i,e:i+n.length});f=i+n.length;}node=w.nextNode();}return out;}\
+function rng(x){var r=document.createRange();r.setStart(x.node,x.s);r.setEnd(x.node,x.e);return r;}\
+function all(){if(!sup())return;if(m.length){var h=new Highlight();for(var i=0;i<m.length;i++)h.add(rng(m[i]));CSS.highlights.set(ALL,h);}else CSS.highlights.delete(ALL);}\
+function cur(i){if(!sup())return;if(i<0||i>=m.length){CSS.highlights.delete(CUR);return;}CSS.highlights.set(CUR,new Highlight(rng(m[i])));\
+var el=m[i].node.parentElement;if(el&&el.scrollIntoView)el.scrollIntoView({block:'center'});}\
+addEventListener('message',function(e){var d=e.data;if(!d||typeof d!=='object'||!d.__fleetFind)return;var msg=d.__fleetFind,a=msg.action;\
+if(a==='clear'){m=[];if(sup()){CSS.highlights.delete(ALL);CSS.highlights.delete(CUR);}return;}ensure();\
+if(a==='search'){m=collect(msg.q||'');all();cur(-1);parent.postMessage({__fleetFindResult:{count:m.length}},'*');return;}\
+if(a==='goto'){cur(typeof msg.index==='number'?msg.index:-1);return;}});})();</script>";
+
+/// Append the in-iframe [`AUTOHEIGHT_SCRIPT`] + [`FIND_SCRIPT`] unless the
+/// document already carries them (the autoheight marker gates both — they are
+/// always injected together).
 pub fn with_autoheight(html: &str) -> String {
     if html.contains(AUTOHEIGHT_MARKER) {
         return html.to_string();
     }
-    format!("{html}{AUTOHEIGHT_SCRIPT}")
+    format!("{html}{AUTOHEIGHT_SCRIPT}{FIND_SCRIPT}")
 }
 
 /// Whether a document has anything at all to paint.
@@ -1562,6 +1600,25 @@ mod tests {
         let mut blank = empty_request("card-blank");
         normalize_html(&mut blank);
         assert_eq!(blank.questions[0].html, None);
+    }
+
+    #[test]
+    fn with_autoheight_injects_find_handler_alongside_height() {
+        let out = with_autoheight("<p>hi</p>");
+        assert!(out.starts_with("<p>hi</p>"), "author's html must survive: {out}");
+        // Both scripts land: height measurement + the Cmd+F find handler.
+        assert!(out.contains(AUTOHEIGHT_MARKER), "height script missing: {out}");
+        assert!(out.contains(FIND_MARKER), "find handler missing: {out}");
+        // The handler responds to the three parent actions and injects its own
+        // highlight styles (the agent document has none).
+        assert!(out.contains("__fleetFindResult"), "must reply with match count");
+        assert!(out.contains("::highlight(find-match)"), "must inject highlight css");
+        assert!(out.contains("'search'") && out.contains("'goto'") && out.contains("'clear'"));
+
+        // The autoheight marker gates both, so a re-injection stacks neither.
+        let twice = with_autoheight(&out);
+        assert_eq!(twice, out, "second pass must be a no-op");
+        assert_eq!(twice.matches(FIND_MARKER).count(), out.matches(FIND_MARKER).count());
     }
 
     #[test]
