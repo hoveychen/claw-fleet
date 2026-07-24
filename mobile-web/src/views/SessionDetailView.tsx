@@ -33,6 +33,7 @@ import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { MermaidBlock } from "../markdown/MermaidBlock";
 import { dateLocale, t } from "../i18n";
 import { CopyButton } from "./CopyButton";
+import { useLightbox } from "./Lightbox";
 import type { RelayClient } from "../relay";
 import type {
   ContentBlock,
@@ -490,12 +491,23 @@ function DigestChips({ meta }: { meta: ToolMeta }) {
   return <span className={styles.chipRow}>{chips}</span>;
 }
 
-/** A row of tappable thumbnails (result screenshots / pasted images). */
+/** A row of tappable thumbnails (result screenshots / pasted images). Tapping
+ *  opens the full-screen lightbox — note these are the low-res `_thumbs`, so
+ *  the enlarged view is the preview scaled up; the tool chip's detail panel
+ *  carries the full-resolution bytes. */
 function ThumbRow({ srcs }: { srcs: string[] }) {
+  const { open } = useLightbox();
   return (
     <div className={styles.thumbRow}>
       {srcs.map((src, i) => (
-        <img key={i} src={src} className={styles.thumbImg} alt="" loading="lazy" />
+        <img
+          key={i}
+          src={src}
+          className={styles.thumbImg}
+          alt=""
+          loading="lazy"
+          onClick={() => open(src)}
+        />
       ))}
     </div>
   );

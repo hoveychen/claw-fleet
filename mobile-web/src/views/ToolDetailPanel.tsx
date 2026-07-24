@@ -12,6 +12,7 @@ import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
+import { useLightbox } from "./Lightbox";
 import { isFleetTool } from "./fleetTools";
 import { FleetBody } from "./FleetBody";
 import styles from "./ToolDetailPanel.module.css";
@@ -337,6 +338,7 @@ export function ToolDetailPanel({
   const [detail, setDetail] = useState<ToolDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingFull, setLoadingFull] = useState(false);
+  const { open: openLightbox } = useLightbox();
 
   useEffect(() => {
     let cancelled = false;
@@ -382,15 +384,19 @@ export function ToolDetailPanel({
           <DetailBody detail={detail} isError={isError} />
           {detail.images && detail.images.length > 0 && (
             <div className={styles.imageList}>
-              {detail.images.map((img, i) => (
-                <img
-                  key={i}
-                  src={`data:${img.media_type ?? "image/jpeg"};base64,${img.data ?? ""}`}
-                  className={styles.imageFull}
-                  alt=""
-                  loading="lazy"
-                />
-              ))}
+              {detail.images.map((img, i) => {
+                const uri = `data:${img.media_type ?? "image/jpeg"};base64,${img.data ?? ""}`;
+                return (
+                  <img
+                    key={i}
+                    src={uri}
+                    className={styles.imageFull}
+                    alt=""
+                    loading="lazy"
+                    onClick={() => openLightbox(uri)}
+                  />
+                );
+              })}
             </div>
           )}
           {detail.truncated && (

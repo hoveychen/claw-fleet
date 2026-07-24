@@ -4,7 +4,7 @@
 // iframe，保真渲染桌面端归档的报告 / demo。顶栏可导出/分享当前文档。
 
 import type { ComponentPropsWithoutRef } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
@@ -13,6 +13,8 @@ import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { WikiDoc } from "../types";
 import { buildWikiHtml, exportWikiDoc, fetchWikiText, listWikiDocs } from "../wiki";
+import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
+import { useLightbox } from "./Lightbox";
 import styles from "./WikiDocView.module.css";
 
 interface Props {
@@ -39,9 +41,23 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
   const [srcdoc, setSrcdoc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const { open: openLightbox } = useLightbox();
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
 
   // Reset the version selector whenever a different doc is opened.
   useEffect(() => setVersion(doc.currentVersion), [doc.slug, doc.currentVersion]);
+
+  // Tap-to-zoom for images inside the html-branch iframe: the injected bridge
+  // posts the clicked image's src (a data: URI, see buildWikiHtml) up here.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (!frameRef.current || e.source !== frameRef.current.contentWindow) return;
+      const zoomSrc = parseImgZoom(e.data);
+      if (zoomSrc) openLightbox(zoomSrc);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [openLightbox]);
 
   // Markdown branch: fetch the entry text.
   useEffect(() => {
@@ -168,8 +184,17 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
           </code>
         );
       },
+      img: ({ src = "", alt, ...rest }: ComponentPropsWithoutRef<"img">) => (
+        <img
+          src={src}
+          alt={alt}
+          style={{ cursor: "zoom-in", maxWidth: "100%" }}
+          onClick={() => typeof src === "string" && src && openLightbox(src, alt ?? "")}
+          {...rest}
+        />
+      ),
     }),
-    [client],
+    [client, openLightbox],
   );
 
   const versions = doc.versions ?? [];
@@ -236,10 +261,11 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
           <div className={styles.hint}>{t("渲染中…（正在拉取页面资源）")}</div>
         ) : srcdoc !== null ? (
           <iframe
+            ref={frameRef}
             className={styles.frame}
             title={doc.title || doc.slug}
             sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-            srcDoc={srcdoc}
+            srcDoc={srcdoc + IMG_ZOOM_INJECT}
           />
         ) : null}
       </div>
