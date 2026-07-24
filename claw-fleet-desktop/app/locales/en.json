@@ -1600,6 +1600,10 @@
   "settings": {
     "title": "Settings",
     "close": "Close",
+    "tri_on": "On",
+    "tri_off": "Off",
+    "tri_default_on": "Default (On)",
+    "tri_default_off": "Default (Off)",
     "tab_general": "General",
     "tab_alerts": "Alerts",
     "tab_account": "Account",
