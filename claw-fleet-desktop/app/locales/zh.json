@@ -1597,6 +1597,10 @@
   "settings": {
     "title": "设置",
     "close": "关闭",
+    "tri_on": "开",
+    "tri_off": "关",
+    "tri_default_on": "默认（开）",
+    "tri_default_off": "默认（关）",
     "tab_general": "通用",
     "tab_alerts": "提醒",
     "tab_account": "账户",
