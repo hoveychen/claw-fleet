@@ -48,7 +48,8 @@ compactCount: number,
 compactPreTokens: number, 
 compactPostTokens: number, 
 compactCostUsd: number, 
-pendingMessages: Array<string>, };
+pendingMessages: Array<string>, 
+watches?: Array<WatchSummary>, };
 
 export type SessionMark = "pending" | "done";
 
@@ -191,6 +192,13 @@ planId?: string | null, links: Array<HandoffLink>, };
 export type SessionHandoffInfo = { chainId: string, 
 hop: number, 
 chainLen: number, };
+
+export type WatchSummary = { id: string, 
+note?: string | null, 
+created: number, 
+pollSecs: number, 
+deadlineAt: number, 
+pollCount: number, };
 
 export type LiveThinking = { sessionId: string, 
 thinking: string, 

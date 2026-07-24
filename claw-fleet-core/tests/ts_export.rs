@@ -120,6 +120,7 @@ fn build_bundle() -> String {
         claw_fleet_core::handoff::HandoffLink,
         claw_fleet_core::handoff::HandoffChain,
         claw_fleet_core::handoff::SessionHandoffInfo,
+        claw_fleet_core::watch::WatchSummary,
         claw_fleet_core::live_thinking::LiveThinking,
     );
 
