@@ -12,7 +12,6 @@
 //! access envelope as the read-only explorer.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -216,7 +215,10 @@ fn run_git(
 }
 
 fn run_git_in(root: &Path, args: &[&str]) -> Result<GitOpResult, String> {
-    let out = Command::new("git")
+    // `process_util::command` applies CREATE_NO_WINDOW on Windows so a push /
+    // pull fired from the desktop GUI doesn't flash a conhost window. No-op on
+    // Unix. (Raw `Command::new` here would pop a black console box per op.)
+    let out = crate::process_util::command("git")
         .current_dir(root)
         .args(args)
         .output()
@@ -518,6 +520,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
+    use std::process::Command;
 
     fn known(ws: &Path) -> Vec<String> {
         vec![ws.to_string_lossy().to_string()]

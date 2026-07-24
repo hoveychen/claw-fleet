@@ -203,6 +203,47 @@ fn show_main_window(app: tauri::AppHandle) {
     }
 }
 
+/// Clamp the main window to the monitor's work area (taskbar / menu-bar / Dock
+/// excluded) and re-center it. The configured size in tauri.conf.json (1280×820)
+/// is larger than the usable area on smaller displays — a 1366×768 laptop, or a
+/// high-DPI panel at 125–150% scaling — so at launch the bottom edge, and on
+/// Windows the custom caption buttons (decorations are off there), got pushed
+/// under the taskbar or off-screen. A no-op when the window already fits, so
+/// tauri.conf.json's `center: true` still governs on roomy displays.
+fn fit_main_window_to_work_area(w: &tauri::WebviewWindow) {
+    let Ok(Some(monitor)) = w.current_monitor() else {
+        return;
+    };
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let area_w = area.size.width as f64 / scale;
+    let area_h = area.size.height as f64 / scale;
+    let area_x = area.position.x as f64 / scale;
+    let area_y = area.position.y as f64 / scale;
+
+    let Ok(cur) = w.inner_size() else {
+        return;
+    };
+    let cur_w = cur.width as f64 / scale;
+    let cur_h = cur.height as f64 / scale;
+
+    // Small inset so the window isn't flush against the work-area edges.
+    const MARGIN: f64 = 24.0;
+    // Never shrink below the configured min size (900×600): on a tiny work area
+    // a slight overflow beats breaking the layout.
+    let new_w = cur_w.min((area_w - MARGIN).max(0.0)).max(900.0);
+    let new_h = cur_h.min((area_h - MARGIN).max(0.0)).max(600.0);
+
+    if (new_w - cur_w).abs() < 1.0 && (new_h - cur_h).abs() < 1.0 {
+        return; // already fits — leave conf's center:true alone
+    }
+
+    let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(new_w, new_h)));
+    let x = area_x + ((area_w - new_w) / 2.0).max(0.0);
+    let y = area_y + ((area_h - new_h) / 2.0).max(0.0);
+    let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+}
+
 // Lite portrait mode — shrink main window to phone-like portrait strip.
 // We intentionally keep the native decorations (titleBarStyle: Overlay on
 // macOS, default chrome elsewhere) because toggling set_decorations at
@@ -258,8 +299,14 @@ fn parse_theme(s: Option<&str>) -> Option<tauri::Theme> {
     }
 }
 
+// NOTE: async command on purpose. On Windows, `WebviewWindowBuilder::build()`
+// deadlocks the main-thread event loop when called from a *synchronous* command
+// (the loop can't pump WebView2's initialization messages), which leaves the new
+// window a frozen white screen whose events — including the close button — never
+// fire. Running as an async command builds the webview off the main thread and
+// lets the loop pump, so the page actually loads. See tauri-apps/tauri#13963.
 #[tauri::command]
-fn open_settings_window(
+async fn open_settings_window(
     app: tauri::AppHandle,
     connection: Option<String>,
     theme: Option<String>,
@@ -322,8 +369,10 @@ fn open_settings_window(
 
 // ── Preview subwindow (lite-mode decision preview) ──────────────────────────
 
+// async: see the deadlock note on `open_settings_window` — a synchronous
+// window-building command white-screens the new webview on Windows.
 #[tauri::command]
-fn open_preview_window(
+async fn open_preview_window(
     app: tauri::AppHandle,
     markdown: String,
     title: Option<String>,
@@ -557,11 +606,13 @@ fn decision_float_target_position(app: &tauri::AppHandle) -> (f64, f64) {
     (x, y)
 }
 
+// async: see the deadlock note on `open_settings_window` — a synchronous
+// window-building command white-screens the new webview on Windows.
 #[tauri::command]
-fn show_decision_float(
+async fn show_decision_float(
     app: tauri::AppHandle,
     snapshot: serde_json::Value,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     *state.decision_float_snapshot.lock().unwrap() = Some(snapshot);
 
@@ -1431,6 +1482,13 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_decorations(false);
+            }
+
+            // Shrink the initial window to fit the screen's usable area on
+            // small / high-DPI displays. No-op when the configured size already
+            // fits, so nothing changes on roomy monitors.
+            if let Some(w) = app.get_webview_window("main") {
+                fit_main_window_to_work_area(&w);
             }
 
             // Drop live-thinking sidecars left behind by finished turns. A
