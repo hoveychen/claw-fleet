@@ -225,21 +225,31 @@ fn user_rules_path() -> Option<std::path::PathBuf> {
 /// Load user audit rules from disk.  Returns defaults if the file is absent or
 /// malformed.
 pub fn load_user_rules() -> UserAuditRules {
-    user_rules_path()
-        .and_then(|p| std::fs::read_to_string(&p).ok())
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    match user_rules_path() {
+        Some(p) => load_user_rules_from(&p),
+        None => UserAuditRules::default(),
+    }
+}
+
+fn load_user_rules_from(path: &std::path::Path) -> UserAuditRules {
+    // A corrupt file is preserved to `.corrupt-*` (not silently reset to
+    // defaults, which would drop the user's custom + guard-allow rules).
+    match crate::atomic_json::load_preserving::<UserAuditRules>(path) {
+        crate::atomic_json::JsonLoad::Loaded(r) => r,
+        _ => UserAuditRules::default(),
+    }
 }
 
 /// Persist user audit rules to disk.
 pub fn save_user_rules(rules: &UserAuditRules) {
     if let Some(path) = user_rules_path() {
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if let Ok(json) = serde_json::to_string_pretty(rules) {
-            let _ = std::fs::write(&path, json);
-        }
+        save_user_rules_to(&path, rules);
+    }
+}
+
+fn save_user_rules_to(path: &std::path::Path, rules: &UserAuditRules) {
+    if let Ok(json) = serde_json::to_vec_pretty(rules) {
+        let _ = crate::atomic_json::write_atomic(path, &json);
     }
 }
 
@@ -1741,61 +1751,99 @@ fn history_file_path() -> Option<std::path::PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join(AUDIT_HISTORY_FILE))
 }
 
+/// Read the audit-history events at `path` (empty on absent/unreadable; a
+/// corrupt file is preserved to `.corrupt-*` by `load_preserving`).
+fn load_history_events(path: &std::path::Path) -> Vec<AuditEvent> {
+    match crate::atomic_json::load_preserving::<Vec<AuditEvent>>(path) {
+        crate::atomic_json::JsonLoad::Loaded(v) => v,
+        _ => Vec::new(),
+    }
+}
+
+/// Persist audit-history events to `path` atomically.
+fn save_history_events(path: &std::path::Path, events: &[AuditEvent]) {
+    if let Ok(json) = serde_json::to_vec(events) {
+        let _ = crate::atomic_json::write_atomic(path, &json);
+    }
+}
+
 impl AuditHistory {
+    fn from_events(events: Vec<AuditEvent>) -> Self {
+        let known_session_ids = events.iter().map(|e| e.session_id.clone()).collect();
+        Self { events, known_session_ids }
+    }
+
+    /// Load persisted history from `path`.  Returns an empty history if the file
+    /// is absent or malformed.
+    fn load_from(path: &std::path::Path) -> Self {
+        Self::from_events(load_history_events(path))
+    }
+
     /// Load persisted history from disk.  Returns an empty history if the file
     /// is absent or malformed.
     pub fn load() -> Self {
-        let events: Vec<AuditEvent> = history_file_path()
-            .and_then(|p| std::fs::read_to_string(&p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        let known_session_ids = events.iter().map(|e| e.session_id.clone()).collect();
-        Self {
-            events,
-            known_session_ids,
+        match history_file_path() {
+            Some(p) => Self::load_from(&p),
+            None => Self::from_events(Vec::new()),
         }
     }
 
     /// Persist current history to disk.
     pub fn save(&self) {
         if let Some(path) = history_file_path() {
-            if let Ok(json) = serde_json::to_string(&self.events) {
-                let _ = std::fs::write(&path, json);
-            }
+            save_history_events(&path, &self.events);
         }
     }
 
     /// Merge events from sessions that just went idle (evicted from the
     /// in-memory cache).  Only events from sessions not already in the history
     /// are added.  Triggers a save to disk if new events were added.
-    pub fn persist_evicted(
-        &mut self,
-        evicted_events: Vec<AuditEvent>,
-    ) {
+    pub fn persist_evicted(&mut self, evicted_events: Vec<AuditEvent>) {
+        if let Some(path) = history_file_path() {
+            self.persist_evicted_to(&path, evicted_events);
+        }
+    }
+
+    fn persist_evicted_to(&mut self, path: &std::path::Path, evicted_events: Vec<AuditEvent>) {
         if evicted_events.is_empty() {
             return;
         }
-        let mut changed = false;
-        for event in evicted_events {
-            if !self.known_session_ids.contains(&event.session_id) {
-                self.events.push(event);
-                changed = true;
+        // Serialize the read-modify-write behind an exclusive advisory lock and
+        // reload the on-disk state inside it, so another Fleet instance (desktop
+        // vs `fleet serve`) writing the same file can't lost-update us.
+        crate::atomic_json::with_file_lock(path, || {
+            let mut disk = match crate::atomic_json::load_preserving::<Vec<AuditEvent>>(path) {
+                crate::atomic_json::JsonLoad::Loaded(v) => v,
+                crate::atomic_json::JsonLoad::Missing | crate::atomic_json::JsonLoad::Corrupt => {
+                    Vec::new()
+                }
+                // Couldn't read the file — skip persisting so we never overwrite
+                // bytes we failed to read.
+                crate::atomic_json::JsonLoad::Unreadable => return,
+            };
+            // Snapshot the known sessions once (not mutated in the loop) so every
+            // event from a not-yet-persisted session is added, matching the
+            // original session-level dedup semantics.
+            let known: std::collections::HashSet<String> =
+                disk.iter().map(|e| e.session_id.clone()).collect();
+            let mut changed = false;
+            for event in evicted_events {
+                if !known.contains(&event.session_id) {
+                    disk.push(event);
+                    changed = true;
+                }
             }
-        }
-        if changed {
-            // Mark all newly-added session IDs as known.
-            self.known_session_ids = self.events.iter().map(|e| e.session_id.clone()).collect();
-            // Trim to keep the store bounded.
-            if self.events.len() > MAX_HISTORY_EVENTS {
-                // Sort by timestamp ascending, then drop the oldest.
-                self.events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-                let excess = self.events.len() - MAX_HISTORY_EVENTS;
-                self.events.drain(..excess);
-                self.known_session_ids =
-                    self.events.iter().map(|e| e.session_id.clone()).collect();
+            if changed {
+                if disk.len() > MAX_HISTORY_EVENTS {
+                    disk.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+                    let excess = disk.len() - MAX_HISTORY_EVENTS;
+                    disk.drain(..excess);
+                }
+                save_history_events(path, &disk);
             }
-            self.save();
-        }
+            self.known_session_ids = disk.iter().map(|e| e.session_id.clone()).collect();
+            self.events = disk;
+        });
     }
 
     /// Return a clone of all persisted events.
@@ -1806,13 +1854,32 @@ impl AuditHistory {
     /// Remove events for sessions that match the given IDs (e.g. sessions that
     /// became active again and will be tracked by the live cache).
     pub fn remove_sessions(&mut self, ids: &std::collections::HashSet<String>) {
-        let before = self.events.len();
-        self.events.retain(|e| !ids.contains(&e.session_id));
-        if self.events.len() != before {
-            self.known_session_ids =
-                self.events.iter().map(|e| e.session_id.clone()).collect();
-            self.save();
+        if let Some(path) = history_file_path() {
+            self.remove_sessions_to(&path, ids);
         }
+    }
+
+    fn remove_sessions_to(
+        &mut self,
+        path: &std::path::Path,
+        ids: &std::collections::HashSet<String>,
+    ) {
+        crate::atomic_json::with_file_lock(path, || {
+            let mut disk = match crate::atomic_json::load_preserving::<Vec<AuditEvent>>(path) {
+                crate::atomic_json::JsonLoad::Loaded(v) => v,
+                crate::atomic_json::JsonLoad::Missing | crate::atomic_json::JsonLoad::Corrupt => {
+                    Vec::new()
+                }
+                crate::atomic_json::JsonLoad::Unreadable => return,
+            };
+            let before = disk.len();
+            disk.retain(|e| !ids.contains(&e.session_id));
+            if disk.len() != before {
+                save_history_events(path, &disk);
+            }
+            self.known_session_ids = disk.iter().map(|e| e.session_id.clone()).collect();
+            self.events = disk;
+        });
     }
 }
 
@@ -1879,6 +1946,66 @@ mod tests {
             jsonl_path: "/tmp/x.jsonl".into(),
         };
         assert_eq!(ev.dedup_key(), "sess-1|2026-06-06T00:00:00Z|Bash");
+    }
+
+    fn audit_ev(session: &str) -> AuditEvent {
+        AuditEvent {
+            session_id: session.into(),
+            workspace_name: "ws".into(),
+            workspace_path: "/tmp/ws".into(),
+            agent_source: "claude".into(),
+            tool_name: "Bash".into(),
+            command_summary: "ls".into(),
+            full_command: "ls -la".into(),
+            risk_level: AuditRiskLevel::Medium,
+            risk_tags: vec![],
+            timestamp: "2026-07-24T00:00:00Z".into(),
+            jsonl_path: "/tmp/x.jsonl".into(),
+        }
+    }
+
+    // A corrupt/torn user-rules file must be preserved, not silently reset to
+    // defaults (which would drop the user's custom + guard-allow rules).
+    #[test]
+    fn load_user_rules_from_backs_up_corrupt_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("user-rules.json");
+        std::fs::write(&path, "{ not valid json").unwrap();
+
+        let _ = load_user_rules_from(&path);
+
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt"))
+            .collect();
+        assert_eq!(
+            backups.len(),
+            1,
+            "corrupt user-rules must be backed up, not silently reset to defaults"
+        );
+    }
+
+    // Two AuditHistory instances (desktop + `fleet serve`) writing the same file,
+    // both loaded BEFORE either writes: instance B must not clobber instance A's
+    // events. This is the cross-process lost-update the file lock + reload-merge
+    // fixes.
+    #[test]
+    fn audit_history_two_instances_dont_clobber_each_others_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit-history.json");
+
+        let mut a = AuditHistory::load_from(&path); // empty
+        let mut b = AuditHistory::load_from(&path); // also empty — loaded before any write
+
+        a.persist_evicted_to(&path, vec![audit_ev("sessA")]);
+        b.persist_evicted_to(&path, vec![audit_ev("sessB")]);
+
+        let disk = AuditHistory::load_from(&path);
+        let sids: std::collections::HashSet<String> =
+            disk.events().iter().map(|e| e.session_id.clone()).collect();
+        assert!(sids.contains("sessA"), "instance A's events must survive instance B's write");
+        assert!(sids.contains("sessB"), "instance B's events must be persisted");
     }
 
     /// Regression: the Windows `PowerShell` tool must feed the audit pipeline
