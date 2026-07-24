@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isStoredAttachment, splitContextFiles, userAttachmentUrl } from "./userAttachments";
+import {
+  attachmentName,
+  isStoredAttachment,
+  splitContextFiles,
+  userAttachmentUrl,
+} from "./userAttachments";
 
 describe("splitContextFiles", () => {
   it("peels the block the composers append", () => {
@@ -69,6 +74,40 @@ describe("userAttachmentUrl", () => {
   it("percent-encodes a name with spaces", () => {
     expect(userAttachmentUrl("/h/.fleet/user-attachments/ab12/my shot.png")).toBe(
       "fleet-attachment://localhost/ab12/my%20shot.png",
+    );
+  });
+
+  // Windows + LocalBackend: `PathBuf::join` freezes a backslash path into the
+  // transcript. The forward-slash-only matcher rejected it, so history showed a
+  // bare path chip instead of the image — the reported bug.
+  it("maps a Windows backslash store path onto the protocol", () => {
+    const p = "C:\\Users\\x\\.fleet\\user-attachments\\ab12cd34ef567890\\shot.png";
+    expect(isStoredAttachment(p)).toBe(true);
+    expect(userAttachmentUrl(p)).toBe(
+      "fleet-attachment://localhost/ab12cd34ef567890/shot.png",
+    );
+  });
+
+  it("maps a Windows backslash pre-store paste onto the legacy key", () => {
+    const p = "C:\\Users\\x\\AppData\\Local\\Temp\\fleet-pasted\\paste-1.png";
+    expect(userAttachmentUrl(p)).toBe(
+      "fleet-attachment://localhost/_pasted/paste-1.png",
+    );
+  });
+});
+
+describe("attachmentName", () => {
+  it("takes the trailing component of a forward-slash path", () => {
+    expect(attachmentName("/Users/x/.fleet/user-attachments/ab12/shot.png")).toBe(
+      "shot.png",
+    );
+  });
+
+  // The bug's second symptom: a backslash path split on "/" only yields the whole
+  // path as the "name", so the chip showed the entire path string.
+  it("takes the trailing component of a Windows backslash path", () => {
+    expect(attachmentName("C:\\Users\\x\\.fleet\\user-attachments\\ab12\\shot.png")).toBe(
+      "shot.png",
     );
   });
 });
