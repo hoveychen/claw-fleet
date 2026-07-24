@@ -1438,17 +1438,9 @@
     "skip": "Skip",
     "next": "Next",
     "done": "Got it",
-    "view_toggle": {
-      "title": "Switch Views",
-      "desc": "Toggle between List and Gallery view. List view shows session details in a sidebar, while Gallery view displays all sessions as cards in a grid."
-    },
-    "token_speed": {
-      "title": "Token Speed",
-      "desc": "Real-time chart showing the combined token output speed across all active sessions. Helps you monitor overall throughput at a glance."
-    },
-    "account_info": {
-      "title": "Settings",
-      "desc": "Click here to open Settings. Configure theme, language, connection, hooks, and check your account details and rate limit usage."
+    "new_session": {
+      "title": "Start a session here",
+      "desc": "This is the Tasks page — click \"New Session\" in the top right, pick a working directory, model, and first prompt, and dispatch a Claude to work for you. Every task you launch is collected on this page."
     }
   },
   "waiting_alerts": {
