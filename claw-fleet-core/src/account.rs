@@ -116,15 +116,7 @@ fn normalize_snap(snap: MetricSnap) -> MetricSnap {
     }
 }
 
-fn load_snapshots() -> Vec<SnapshotEntry> {
-    let path = match snapshot_path() {
-        Some(p) => p,
-        None => return vec![],
-    };
-    let entries: Vec<SnapshotEntry> = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+fn normalize_entries(entries: Vec<SnapshotEntry>) -> Vec<SnapshotEntry> {
     entries
         .into_iter()
         .map(|e| SnapshotEntry {
@@ -141,12 +133,124 @@ fn load_snapshots() -> Vec<SnapshotEntry> {
         .collect()
 }
 
-fn save_snapshots(entries: &[SnapshotEntry]) {
-    if let Some(path) = snapshot_path() {
-        if let Ok(json) = serde_json::to_string(entries) {
-            let _ = std::fs::write(path, json);
+/// Outcome of reading the on-disk snapshot history.
+enum SnapshotLoad {
+    /// File absent, or present and successfully parsed (possibly empty).
+    Loaded(Vec<SnapshotEntry>),
+    /// File present but could not be *read* (a transient I/O error, not a missing
+    /// file). The bytes on disk may be perfectly intact, so the write path must
+    /// NOT overwrite them this round — treating this as empty is what once let a
+    /// single bad read wipe the whole history.
+    Unreadable,
+}
+
+/// Preserve a corrupt (present but unparseable) history file by renaming it aside
+/// with a timestamped `.corrupt-*` suffix, so genuine on-disk corruption stays
+/// recoverable instead of being silently overwritten by the next sample.
+fn backup_corrupt_snapshot(path: &std::path::Path) {
+    let stamp = chrono::Utc::now().timestamp_millis();
+    let mut bak = path.as_os_str().to_owned();
+    bak.push(format!(".corrupt-{stamp}"));
+    let _ = std::fs::rename(path, std::path::PathBuf::from(bak));
+}
+
+fn load_snapshots_result_from(path: &std::path::Path) -> SnapshotLoad {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return SnapshotLoad::Loaded(Vec::new());
+        }
+        // Read failed for a reason other than "no file" — don't pretend it's
+        // empty, or the caller will clobber a file it merely failed to read.
+        Err(_) => return SnapshotLoad::Unreadable,
+    };
+    match serde_json::from_str::<Vec<SnapshotEntry>>(&raw) {
+        Ok(entries) => SnapshotLoad::Loaded(normalize_entries(entries)),
+        Err(_) => {
+            // Readable but not valid JSON — genuine corruption. Keep the bytes
+            // for recovery, then continue from empty.
+            backup_corrupt_snapshot(path);
+            SnapshotLoad::Loaded(Vec::new())
         }
     }
+}
+
+fn load_snapshots_from(path: &std::path::Path) -> Vec<SnapshotEntry> {
+    match load_snapshots_result_from(path) {
+        SnapshotLoad::Loaded(v) => v,
+        SnapshotLoad::Unreadable => Vec::new(),
+    }
+}
+
+fn load_snapshots() -> Vec<SnapshotEntry> {
+    match snapshot_path() {
+        Some(p) => load_snapshots_from(&p),
+        None => vec![],
+    }
+}
+
+/// Per-process, per-call unique suffix for temp files so two concurrent saves
+/// (sampler thread + a Tauri command thread) never race on the same temp path.
+static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Persist the history atomically: write to a unique temp file, then rename it
+/// over the target. `rename(2)` is atomic on POSIX, so a concurrent reader never
+/// observes a half-written file — the torn read that once wiped the 8-day
+/// history when a reader caught a non-atomic `fs::write` mid-flight.
+fn save_snapshots_to(path: &std::path::Path, entries: &[SnapshotEntry]) {
+    let json = match serde_json::to_string(entries) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut tmp_name = path.as_os_str().to_owned();
+    tmp_name.push(format!(".tmp.{}.{}", std::process::id(), seq));
+    let tmp = std::path::PathBuf::from(tmp_name);
+    if std::fs::write(&tmp, json.as_bytes()).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return;
+    }
+    if std::fs::rename(&tmp, path).is_err() {
+        // Platforms that can't rename onto an existing file (Windows): drop the
+        // old file first, then retry. Still far narrower than a full truncate.
+        let _ = std::fs::remove_file(path);
+        if std::fs::rename(&tmp, path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+}
+
+/// Minimum gap between two persisted samples. `fetch_account_info` is called on
+/// demand (usage panel, mobile relay, CLI) as often as every ~10s; without this
+/// throttle every call appended a snapshot, storming the file (~422 points/hour)
+/// and multiplying torn-write collisions. Kept well below the background
+/// sampler's 10-min cadence so its ticks are never the ones dropped.
+const MIN_APPEND_INTERVAL_MS: i64 = 60 * 1000;
+
+/// Append one usage sample to the on-disk history at `path`, prune, persist, and
+/// return the resulting history (the caller uses it to compute prev-period
+/// utilization). Extracted from `fetch_account_info` so the persistence policy
+/// is unit-testable against a tempdir. Non-destructive: a file that can't be read
+/// is left untouched, and a corrupt file is backed up (see
+/// `load_snapshots_result_from`). Throttled: samples closer together than
+/// `MIN_APPEND_INTERVAL_MS` are not written.
+fn append_sample(path: &std::path::Path, sample: SnapshotEntry, now_ms: i64) -> Vec<SnapshotEntry> {
+    let mut history = match load_snapshots_result_from(path) {
+        SnapshotLoad::Loaded(v) => v,
+        // Couldn't read the file — skip persisting so we never overwrite bytes we
+        // failed to read. Hand back just the current sample so the caller's
+        // prev-period lookup still sees this reading.
+        SnapshotLoad::Unreadable => return vec![sample],
+    };
+    let last_ts = history.iter().map(|e| e.ts).max().unwrap_or(i64::MIN);
+    if now_ms.saturating_sub(last_ts) < MIN_APPEND_INTERVAL_MS {
+        // Too soon since the last sample — keep the current history, don't write.
+        return history;
+    }
+    history.push(sample);
+    prune_old_snapshots(&mut history, now_ms);
+    save_snapshots_to(path, &history);
+    history
 }
 
 fn period_ms(metric: &str) -> i64 {
@@ -579,8 +683,7 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
         };
 
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let mut history = load_snapshots();
-    history.push(SnapshotEntry {
+    let sample = SnapshotEntry {
         ts: now_ms,
         five_hour: five_hour.as_ref().map(|s| MetricSnap {
             utilization: s.utilization,
@@ -600,9 +703,11 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
                 snap: MetricSnap { utilization: s.utilization, resets_at: s.resets_at.clone() },
             })
             .collect(),
-    });
-    prune_old_snapshots(&mut history, now_ms);
-    save_snapshots(&history);
+    };
+    let history = match snapshot_path() {
+        Some(p) => append_sample(&p, sample, now_ms),
+        None => vec![sample],
+    };
 
     if let Some(ref mut s) = five_hour {
         let ra = s.resets_at.clone();
@@ -730,6 +835,60 @@ mod tests {
             seven_day_sonnet: None,
             seven_day_scoped: Vec::new(),
         }
+    }
+
+    // Regression: a corrupt/torn history file must never be silently overwritten
+    // (the 8-day history once vanished because `load` swallowed a parse error to
+    // empty and the caller then wrote a single fresh sample over the whole file).
+    #[test]
+    fn append_sample_backs_up_corrupt_file_instead_of_destroying_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage-history.json");
+        // A torn / half-written file — invalid JSON, as a reader would catch it
+        // mid-write from a concurrent non-atomic save.
+        let garbage = "[{\"ts\":123, THIS IS NOT VALID JSON";
+        std::fs::write(&path, garbage).unwrap();
+
+        let _ = append_sample(&path, snap_at(2_000_000), 2_000_000);
+
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt"))
+            .collect();
+        assert_eq!(
+            backups.len(),
+            1,
+            "a corrupt history file must be backed up (.corrupt-*), never silently destroyed"
+        );
+        let saved = std::fs::read_to_string(backups[0].path()).unwrap();
+        assert_eq!(saved, garbage, "the backup must hold the original corrupt bytes verbatim");
+    }
+
+    // On-demand `fetch_account_info` callers hit this every ~10s; without a
+    // throttle they storm the history file (422 points/hour) and multiply the
+    // odds of a torn-write collision. Samples closer than the min interval are
+    // dropped; samples past it are kept.
+    #[test]
+    fn append_sample_throttled_within_min_interval() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage-history.json");
+        let base = 1_000_000_000_i64;
+        save_snapshots_to(&path, &[snap_at(base)]);
+
+        // 10s later — well inside any sane min interval — must be dropped.
+        let h = append_sample(&path, snap_at(base + 10_000), base + 10_000);
+        assert_eq!(h.len(), 1, "a sample within the min interval must not be appended");
+        assert_eq!(
+            load_snapshots_from(&path).len(),
+            1,
+            "a throttled sample must not be persisted"
+        );
+
+        // 10 min later — past the interval — is appended.
+        let h2 = append_sample(&path, snap_at(base + 600_000), base + 600_000);
+        assert_eq!(h2.len(), 2, "a sample past the min interval must be appended");
+        assert_eq!(load_snapshots_from(&path).len(), 2);
     }
 
     #[test]
