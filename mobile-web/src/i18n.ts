@@ -84,6 +84,10 @@ export function t(zh: string, ...args: Array<string | number>): string {
 
 const DICT: Record<string, string> = {
   "其他": "Other",
+  // ── 代理作用域切换器 ──
+  "主进程": "Main",
+  "当前": "current",
+  "切换代理": "Switch agent",
   // ── codex 注入的系统上下文折叠卡 ──
   "系统上下文": "System context",
   "权限 / 沙箱": "Permissions / sandbox",
