@@ -381,13 +381,56 @@ export function SessionList() {
           )}
         </div>
 
-        {/* Footer profile card */}
+        {/* Footer: a segmented toggle toolbar (keep-awake / Lite / theme) over
+            the profile card. The toggles used to live inside the card, but at
+            narrow sidebar widths they crowded out the app name — so they get
+            their own bar. Mirrors the banner's `view_toggle` segmented control
+            for visual consistency. Hidden when the sidebar is collapsed. */}
         <div className={styles.footer} data-wizard="settings-footer">
-          {/* role=button, not <button>: this card nests the Lite/theme icon
-              buttons below, and a <button> inside a <button> is invalid HTML
-              (React hydration error). A div carries no interactive-content
-              restriction, so the nesting is valid; keyboard a11y is restored
-              via tabIndex + onKeyDown. */}
+          {!sidebarCollapsed && (
+            <div className={styles.footer_toolbar} role="group" aria-label={t("settings.title")}>
+              {keepAwakeSupported && (
+                <button
+                  type="button"
+                  className={`${styles.footer_toolbar_btn} ${keepAwake ? styles.footer_toolbar_btn_active : ""}`}
+                  onClick={() => setKeepAwake(!keepAwake)}
+                  title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                  aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+                  aria-pressed={keepAwake}
+                >
+                  <Coffee size={14} strokeWidth={1.5} />
+                </button>
+              )}
+              <button
+                type="button"
+                className={styles.footer_toolbar_btn}
+                onClick={() => setLiteMode(true)}
+                title={t("lite.enter")}
+                aria-label={t("lite.enter")}
+              >
+                {/* Picture-in-picture / mini-window glyph for Lite mode */}
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
+                  <rect x="8.5" y="7.5" width="5" height="4.5" rx="0.8" fill="currentColor" fillOpacity="0.4" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`${styles.footer_toolbar_btn} ${styles.footer_theme_btn}`}
+                onClick={() =>
+                  // Cycle light → dark → system → light. setTheme is global and
+                  // already re-skins the app + overlays, so no extra wiring.
+                  setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light")
+                }
+                title={t(`theme.${theme}`)}
+                aria-label={t(`theme.${theme}`)}
+              >
+                {theme === "light" ? "☀" : theme === "dark" ? "☽" : "⊙"}
+              </button>
+            </div>
+          )}
+          {/* role=button, not <button>: keyboard a11y restored via
+              tabIndex + onKeyDown. */}
           <div
             className={styles.footer_card}
             role="button"
@@ -405,49 +448,13 @@ export function SessionList() {
               <img src="/app-icon.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
             {!sidebarCollapsed && (
-              <>
-                <div className={styles.footer_info}>
-                  <span className={styles.footer_name}>{t("title")}</span>
-                  <span className={styles.footer_status}>
-                    <span className={`${styles.footer_dot} ${isRemote ? styles.footer_dot_remote : ""}`} />
-                    {isRemote ? t("settings.remote") : t("settings.local")}
-                  </span>
-                </div>
-                {keepAwakeSupported && (
-                  <button
-                    className={`${styles.footer_icon_btn} ${keepAwake ? styles.footer_icon_btn_active : ""}`}
-                    onClick={(e) => { e.stopPropagation(); setKeepAwake(!keepAwake); }}
-                    title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-                    aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
-                    aria-pressed={keepAwake}
-                  >
-                    <Coffee size={14} strokeWidth={1.5} />
-                  </button>
-                )}
-                <button
-                  className={styles.footer_icon_btn}
-                  onClick={(e) => { e.stopPropagation(); setLiteMode(true); }}
-                  title={t("lite.enter")}
-                >
-                  {/* Picture-in-picture / mini-window glyph for Lite mode */}
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
-                    <rect x="8.5" y="7.5" width="5" height="4.5" rx="0.8" fill="currentColor" fillOpacity="0.4" />
-                  </svg>
-                </button>
-                <button
-                  className={`${styles.footer_icon_btn} ${styles.footer_theme_btn}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    // Cycle light → dark → system → light. setTheme is global
-                    // and already re-skins the app + overlays, so no extra wiring.
-                    setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light");
-                  }}
-                  title={t(`theme.${theme}`)}
-                >
-                  {theme === "light" ? "☀" : theme === "dark" ? "☽" : "⊙"}
-                </button>
-              </>
+              <div className={styles.footer_info}>
+                <span className={styles.footer_name}>{t("title")}</span>
+                <span className={styles.footer_status}>
+                  <span className={`${styles.footer_dot} ${isRemote ? styles.footer_dot_remote : ""}`} />
+                  {isRemote ? t("settings.remote") : t("settings.local")}
+                </span>
+              </div>
             )}
             <span className={styles.footer_gear}>⚙</span>
           </div>
