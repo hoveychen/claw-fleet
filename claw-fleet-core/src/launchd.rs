@@ -45,6 +45,61 @@ fn remove_legacy_fleet_dir_at(claude_dir: &std::path::Path) -> std::io::Result<(
     Ok(())
 }
 
+/// Label of the macOS LaunchAgent an old Fleet build installed to keep a
+/// `fleet serve` process running at login (`RunAtLoad` + `KeepAlive`).
+const LEGACY_SERVE_LAUNCHAGENT_LABEL: &str = "com.claudefleet.serve";
+
+/// Remove the legacy `com.claudefleet.serve` macOS LaunchAgent.
+///
+/// An old Fleet build installed a login-time LaunchAgent that kept a
+/// `fleet serve` process running (`RunAtLoad` + `KeepAlive`). That installer
+/// was removed together with the fleet-session supervisor feature, so current
+/// code installs no LaunchAgent — but machines that ran the old build still
+/// have the plist and launchd keeps respawning the serve process.
+///
+/// On a desktop machine that stray `fleet serve` becomes a **second**
+/// mobile-relay provider alongside the desktop app: the relay fans every phone
+/// `spawn_session` frame out to *all* agent-side connections (fleet-relay
+/// `registry::deliver` loops over every opposite-role member), and the
+/// per-process `SPAWNED_SESSIONS` dedup can't see across processes — so each
+/// mobile submit launches two `claude --session-id <same>` processes, the
+/// double-submitted-prompt / duplicate-decision-card bug. The desktop app is
+/// the sole intended local provider, so this plist is pure legacy: remove it on
+/// desktop startup. Best-effort; non-macOS and a missing plist are clean
+/// no-ops.
+pub fn remove_legacy_serve_launchagent() -> std::io::Result<()> {
+    // Stop + unload a still-loaded service first. With `KeepAlive=true`,
+    // deleting the plist alone leaves the current process running (relaunched
+    // until the next logout), so the plist must be booted out of the domain
+    // before it is removed.
+    #[cfg(target_os = "macos")]
+    unload_legacy_serve_launchagent();
+    match real_home_dir() {
+        Some(home) => {
+            remove_legacy_serve_launchagent_at(&home.join("Library").join("LaunchAgents"))
+        }
+        None => Ok(()),
+    }
+}
+
+/// `launchctl bootout` the legacy serve service so a running (KeepAlive) copy is
+/// stopped and dropped from the GUI domain. Best-effort: a service that isn't
+/// loaded makes `bootout` exit non-zero, which we ignore.
+#[cfg(target_os = "macos")]
+fn unload_legacy_serve_launchagent() {
+    let uid = unsafe { libc::getuid() };
+    let target = format!("gui/{uid}/{LEGACY_SERVE_LAUNCHAGENT_LABEL}");
+    let _ = std::process::Command::new("launchctl").args(["bootout", &target]).output();
+}
+
+fn remove_legacy_serve_launchagent_at(launch_agents_dir: &std::path::Path) -> std::io::Result<()> {
+    let plist = launch_agents_dir.join(format!("{LEGACY_SERVE_LAUNCHAGENT_LABEL}.plist"));
+    if plist.exists() {
+        std::fs::remove_file(&plist)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +119,21 @@ mod tests {
 
         // Idempotent: a second call on an absent dir is a clean no-op.
         remove_legacy_fleet_dir_at(&claude_dir).unwrap();
+    }
+
+    #[test]
+    fn removes_legacy_serve_plist_and_is_noop_when_absent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let launch_agents = tmp.path().join("LaunchAgents");
+        std::fs::create_dir_all(&launch_agents).unwrap();
+        let plist = launch_agents.join("com.claudefleet.serve.plist");
+        std::fs::write(&plist, b"<plist/>").unwrap();
+        assert!(plist.exists());
+
+        remove_legacy_serve_launchagent_at(&launch_agents).unwrap();
+        assert!(!plist.exists(), "legacy serve LaunchAgent plist must be removed");
+
+        // Idempotent: a second call on an absent plist is a clean no-op.
+        remove_legacy_serve_launchagent_at(&launch_agents).unwrap();
     }
 }
