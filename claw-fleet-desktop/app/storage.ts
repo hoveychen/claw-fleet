@@ -23,6 +23,10 @@ const ALL_KEYS = [
   "viewMode",
   // Which session sub-view (list vs gallery) the unified "Sessions" nav returns to.
   "lastSessionViewMode",
+  // One-shot flag: existing users' stored "list" has been flipped to the new
+  // gallery default (see migrateSessionViewDefault). Must be readable on boot
+  // so the migration never re-runs and clobbers a later deliberate "list".
+  "gallery-default-migrated",
   "liteMode",
   "lang",
   "sidebar-width",
@@ -143,6 +147,23 @@ export async function initStorage(): Promise<void> {
 /** Synchronous read from in-memory cache. */
 export function getItem(key: string): string | null {
   return cache.get(key) ?? null;
+}
+
+/**
+ * One-time rollout of gallery as the default session view. The code default is
+ * already "gallery", but existing users can carry a stored "list" — most often
+ * written accidentally by an older notification/tray path that force-switched
+ * to list and persisted it. Flip a stored "list" to "gallery" exactly once,
+ * guarded by a persisted flag so a later *deliberate* toggle back to list still
+ * sticks. Call once on boot, after initStorage() and before the store reads.
+ */
+export function migrateSessionViewDefault(): void {
+  if (getItem("gallery-default-migrated") === "true") return;
+  if (getItem("viewMode") === "list") setItem("viewMode", "gallery");
+  if (getItem("lastSessionViewMode") === "list") {
+    setItem("lastSessionViewMode", "gallery");
+  }
+  setItem("gallery-default-migrated", "true");
 }
 
 /** Write to both cache and Tauri store (async, fire-and-forget). */
