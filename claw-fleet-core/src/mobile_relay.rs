@@ -725,6 +725,10 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // handoff chip the desktop launchpad row does. Small object; enrich sets it
     // only for sessions on a chain, so it's absent (skipped) for the rest.
     "handoff",
+    // Active fleet-watch(es) — the mobile task row shows the same watch chip the
+    // desktop card does (what it's waiting on, elapsed, poll count). Small array;
+    // enrich sets it only for sessions with a live watch, so absent for the rest.
+    "watches",
 ];
 
 /// Byte size a re-encoded decision-asset image is squeezed toward. Every image

@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import { HandoffChainRow } from "./HandoffChainRow";
+import { WatchStatusRow } from "./WatchStatusRow";
 import styles from "./SessionCard.module.css";
 import { BG_TASK_KINDS } from "../bgTaskKinds";
 import { isKeyboardActivationKey } from "../keyboard";
@@ -624,6 +625,11 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
 
       {/* Handoff relay chain — chip toggles the chain detail panel */}
       {session.handoff && <HandoffChainRow session={session} />}
+
+      {/* Active fleet-watch(es) — what this session is waiting on */}
+      {session.watches && session.watches.length > 0 && (
+        <WatchStatusRow session={session} />
+      )}
 
       {/* Footer row */}
       <div className={styles.footer}>

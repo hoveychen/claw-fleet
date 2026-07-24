@@ -21,6 +21,7 @@ import type {
   TodoSummary,
   TaskPlanSummary,
   SessionHandoffInfo,
+  WatchSummary,
   GuardRequest,
   ElicitationRequest,
   FleetAskRequest,
@@ -119,6 +120,10 @@ export interface SessionInfo {
   /** Relay-chain position when this session took part in a handoff
    *  (`fleet handoff`); absent otherwise. Mirrors the desktop launchpad chip. */
   handoff?: SessionHandoffInfo | null;
+  /** Active `fleet watch`es this session registered — what it's waiting on, with
+   *  each watch's poll count and start time. Absent when it has none. Mirrors the
+   *  desktop watch chip. */
+  watches?: WatchSummary[];
 }
 
 /** Codex has no `CLAUDE_CODE_ENTRYPOINT`; the Codex scanner surfaces the rollout

@@ -798,6 +798,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         compact_post_tokens: 0,
         compact_cost_usd: 0.0,
         pending_messages: Vec::new(),
+        watches: Vec::new(),
     }
 }
 
@@ -808,6 +809,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
 /// clears whatever the human had set.
 pub fn enrich_all(sessions: &mut [SessionInfo]) {
     crate::handoff::enrich_sessions(sessions);
+    crate::watch::enrich_sessions(sessions);
     crate::session_mark::enrich_sessions(sessions);
     crate::session_title::enrich_sessions(sessions);
     crate::session_read::enrich_sessions(sessions);

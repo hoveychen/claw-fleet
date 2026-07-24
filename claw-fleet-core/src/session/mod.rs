@@ -265,6 +265,14 @@ pub struct SessionInfo {
     /// `pending_message::enrich_sessions` on the scan path.
     #[serde(default)]
     pub pending_messages: Vec<String>,
+    /// Active `fleet watch`es this session registered — what it is waiting on,
+    /// each carrying its poll count so the card can show "checked N times" and
+    /// how long it has been waiting. Empty for the overwhelming majority of
+    /// sessions. Stamped by `watch::enrich_sessions` at scan time, not during the
+    /// cached deep parse — a watch's poll count and existence change while the
+    /// waiting session's jsonl doesn't.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub watches: Vec<crate::watch::WatchSummary>,
 }
 
 
@@ -667,6 +675,7 @@ mod tests {
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
             pending_messages: Vec::new(),
+            watches: Vec::new(),
         }
     }
 

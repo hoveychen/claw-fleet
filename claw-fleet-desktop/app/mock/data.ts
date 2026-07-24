@@ -67,6 +67,16 @@ const MOCK_SESSIONS_SEED: Array<
     contextPercent: 0.34,
     agentSource: "claude-code",
     lastOutcome: ["feature_added"],
+    watches: [
+      {
+        id: "w-mock01",
+        note: "CI run 123 to finish",
+        created: NOW - 3 * MIN - 20 * 1000,
+        pollSecs: 60,
+        deadlineAt: NOW + 2 * 60 * MIN,
+        pollCount: 5,
+      },
+    ],
   },
   // Subagent: Explore agent for claw-fleet
   {
@@ -344,6 +354,16 @@ const MOCK_SESSIONS_SEED: Array<
     contextPercent: 0.89,
     agentSource: "claude-code",
     lastOutcome: ["needs_input"],
+    watches: [
+      {
+        id: "w-mock02",
+        note: "staging deploy to go green",
+        created: NOW - 12 * MIN,
+        pollSecs: 30,
+        deadlineAt: NOW + 60 * MIN,
+        pollCount: 24,
+      },
+    ],
   },
 
 
