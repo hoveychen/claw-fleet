@@ -793,6 +793,8 @@
     "bg_workflow": "{{count}} workflow(s)",
     "handoff_chip": "Relay {{hop}}/{{len}}",
     "tip_handoff": "This session is leg {{hop}} of a {{len}}-leg handoff chain. Click to view the chain.",
+    "watch_chip": "watch · {{elapsed}} · {{count}}×",
+    "tip_watch": "Waiting {{elapsed}}, condition polled {{count}} time(s) (every {{poll}}s).",
     "handoff_loading": "Loading relay chain…",
     "handoff_hop": "Leg {{n}}",
     "tip_compact": "Context compactions: {{count}} · {{pre}} input tokens summarised · {{post}} summary tokens produced · estimated cost ~${{cost}} (compact LLM calls aren't logged separately, priced from cache_read + output rates)"
