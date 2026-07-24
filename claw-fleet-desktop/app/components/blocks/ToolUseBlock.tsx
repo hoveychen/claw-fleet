@@ -309,6 +309,10 @@ export function claudeToolSummary(
       const slug = typeof input.skill === "string" ? input.skill.trim() : "";
       return slug ? t("detail.tool_skill_named", { slug }) : t("detail.tool_skill");
     }
+    // {} — takes no parameters, so without a dedicated label the collapsed
+    // summary would render the bare "{}" JSON fallback (confusing to readers).
+    case "EnterPlanMode":
+      return t("detail.tool_enter_plan");
     // { plan: "<markdown>" } — the plan renders in the expanded PlanModeInput.
     case "ExitPlanMode":
       return t("detail.tool_exit_plan");

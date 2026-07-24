@@ -1549,6 +1549,7 @@
     "tool_request_input": "请求用户输入",
     "tool_skill": "加载技能",
     "tool_skill_named": "加载技能 {{slug}}",
+    "tool_enter_plan": "进入计划模式",
     "tool_exit_plan": "查看计划",
     "tool_todo": "更新待办",
     "tool_todo_count": "更新待办（{{count}}）",

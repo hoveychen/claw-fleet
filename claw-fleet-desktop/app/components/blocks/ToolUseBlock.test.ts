@@ -172,6 +172,10 @@ describe("claudeToolSummary", () => {
     );
   });
 
+  it("EnterPlanMode → its own key (no params, so avoid the bare {} JSON fallback)", () => {
+    expect(claudeToolSummary("EnterPlanMode", {}, t)).toBe("detail.tool_enter_plan");
+  });
+
   it("TodoWrite → count of todos, or a bare key when the list is absent", () => {
     expect(claudeToolSummary("TodoWrite", { todos: [1, 2, 3] }, t)).toBe(
       'detail.tool_todo_count|{"count":3}',
