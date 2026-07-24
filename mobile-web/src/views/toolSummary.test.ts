@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { patchToolSummary } from "./toolSummary";
+import { friendlyToolName, patchToolSummary } from "./toolSummary";
 
 const tr = (key: string, ...args: Array<string | number>) => {
   let out = key;
@@ -8,6 +8,22 @@ const tr = (key: string, ...args: Array<string | number>) => {
   });
   return out;
 };
+
+describe("friendlyToolName", () => {
+  it("maps Fleet MCP ids to a readable label", () => {
+    expect(friendlyToolName("mcp__fleet__fleet__ask", tr)).toBe("决策卡");
+    expect(friendlyToolName("mcp__fleet__fleet__plan", tr)).toBe("计划");
+    expect(friendlyToolName("fleet__watch", tr)).toBe("守望");
+  });
+
+  it("strips the mcp__server__ prefix of non-Fleet MCP tools", () => {
+    expect(friendlyToolName("mcp__linear__create_issue", tr)).toBe("linear·create_issue");
+  });
+
+  it("passes a plain tool name through unchanged", () => {
+    expect(friendlyToolName("AskUserQuestion", tr)).toBe("AskUserQuestion");
+  });
+});
 
 describe("patchToolSummary", () => {
   it("names one added, updated, or deleted file without dumping the patch", () => {
