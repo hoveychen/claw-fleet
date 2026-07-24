@@ -27,6 +27,11 @@ const ALL_KEYS = [
   // gallery default (see migrateSessionViewDefault). Must be readable on boot
   // so the migration never re-runs and clobbers a later deliberate "list".
   "gallery-default-migrated",
+  // One-shot flag: legacy binary values for the tristate-migrated feature keys
+  // have been reset to "default" (see migrateFeatureTristate). MUST be readable
+  // on boot, otherwise the migration re-runs every launch and re-wipes whatever
+  // the user has since chosen.
+  "feature-tristate-migrated",
   "liteMode",
   "lang",
   "sidebar-width",
@@ -170,4 +175,104 @@ export function migrateSessionViewDefault(): void {
 export function setItem(key: string, value: string): void {
   cache.set(key, value);
   store?.set(key, value);
+}
+
+/** Delete from both cache and Tauri store (async, fire-and-forget). Used by the
+ *  tristate "默认/default" state, which is represented by the ABSENCE of a
+ *  stored value so the feature follows FEATURE_DEFAULTS. */
+export function removeItem(key: string): void {
+  cache.delete(key);
+  store?.delete(key);
+}
+
+// ── Tristate feature toggles (on / off / default) ───────────────────────────
+//
+// Every boolean feature toggle is tristate. A stored value is ONLY ever written
+// when the user makes an explicit choice ("on" / "off"); the "default" state is
+// the ABSENCE of a stored value, which makes the feature follow the single
+// source of truth below. Changing a feature's recommended default is therefore
+// a one-line edit to FEATURE_DEFAULTS — every user still on "default" follows it
+// automatically, with NO migration ever needed again.
+//
+// (Legacy "true"/"false" values written before the tristate refactor are still
+// understood by the readers below, so nothing breaks during the transition; the
+// one-time migrateFeatureTristate() normalizes the keys whose default changed.)
+export const FEATURE_DEFAULTS: Record<string, boolean> = {
+  // Default ON.
+  "guard-enabled": true,
+  "guard-llm-analysis": true,
+  "elicitation-enabled": true,
+  "interaction-mode-enabled": true,
+  "plan-approval-enabled": true,
+  "prd-mode-enabled": true,
+  "wiki-guidance-enabled": true,
+  "model-guidance-enabled": true,
+  "auto-update-check": true,
+  // Default OFF.
+  "tts-muted": false,
+  "personalized-mascot": false,
+  "mascot-visible": false,
+  "floating-decision-panel": false,
+  "skill-autosync-enabled": false,
+};
+
+export type FeatureState = "on" | "off" | "default";
+
+/** The recommended default (from FEATURE_DEFAULTS) for a feature key. */
+export function featureDefault(key: string): boolean {
+  return FEATURE_DEFAULTS[key] ?? false;
+}
+
+/** Resolve a tristate feature key to a concrete boolean: the user's explicit
+ *  choice if any, otherwise the central default. Accepts both the canonical
+ *  "on"/"off" and the legacy "true"/"false" forms. */
+export function resolveFeature(key: string): boolean {
+  const v = getItem(key);
+  if (v === "on" || v === "true") return true;
+  if (v === "off" || v === "false") return false;
+  return featureDefault(key);
+}
+
+/** The tristate UI state of a feature key: the user's explicit choice, or
+ *  "default" when no value is stored. */
+export function getFeatureState(key: string): FeatureState {
+  const v = getItem(key);
+  if (v === "on" || v === "true") return "on";
+  if (v === "off" || v === "false") return "off";
+  return "default";
+}
+
+/** Persist a tristate choice. "default" clears the key so the feature follows
+ *  FEATURE_DEFAULTS (and any future change to it). */
+export function setFeatureState(key: string, state: FeatureState): void {
+  if (state === "default") removeItem(key);
+  else setItem(key, state);
+}
+
+// Keys whose recommended default changed in the "default all features ON" work.
+// Existing users can carry a stale binary value here — most often written
+// automatically by the old SettingsPanel mount reconciliation (which persisted
+// "false" whenever the sentinel wasn't yet installed), not by a deliberate user
+// choice. Reset ALL of them to "default" once so those users follow the new
+// central default. (Boss decision 2026-07-24: reset all old values, accepting
+// that the rare user who deliberately set one will have it re-defaulted once.)
+const TRISTATE_MIGRATION_KEYS = [
+  "interaction-mode-enabled",
+  "plan-approval-enabled",
+  "prd-mode-enabled",
+  "wiki-guidance-enabled",
+  "model-guidance-enabled",
+  "tts-mode",
+];
+
+/**
+ * One-time reset of the changed-default feature keys to the "default" state
+ * (absence), so existing users follow FEATURE_DEFAULTS / the mode defaults.
+ * Guarded by a persisted flag so a later *deliberate* choice still sticks.
+ * Call once on boot, after initStorage() and before the store reads.
+ */
+export function migrateFeatureTristate(): void {
+  if (getItem("feature-tristate-migrated") === "true") return;
+  for (const key of TRISTATE_MIGRATION_KEYS) removeItem(key);
+  setItem("feature-tristate-migrated", "true");
 }
