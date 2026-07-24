@@ -364,6 +364,26 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         });
     }
 
+    // Answerability guard: `header`/`question` are the only serde-required
+    // fields, so a question with no `options`, no `html` and no `formFields`
+    // deserialises fine yet renders as a free-text-only card — no clickable or
+    // fillable answer surface. The native AskUserQuestion tool forbids this (it
+    // marks `options` required with `minItems: 2`); restore that contract here
+    // while still allowing `fleet__ask`'s pure-html and pure-form extension
+    // cards. A single lone option is likewise unanswerable-by-choice, so
+    // require at least two when options is the only surface.
+    if let Some(idx) = questions.iter().position(|q| {
+        q.options.len() < 2 && q.html.is_none() && q.form_fields.is_empty()
+    }) {
+        return Err(JsonRpcError {
+            code: -32602,
+            message: format!(
+                "Question {} has no answer surface: give it at least 2 `options`, or `html`, or `formFields`.",
+                idx + 1
+            ),
+        });
+    }
+
     // Heartbeat check — if no Fleet consumer is alive, refuse the call so
     // Claude Code's agent can choose to fall back to AskUserQuestion.
     let status = crate::consumer_heartbeat::consumer_status(heartbeat_window());
@@ -982,7 +1002,11 @@ mod tests {
                     "questions": [{
                         "question": "hi",
                         "header": "H",
-                        "multiSelect": false
+                        "multiSelect": false,
+                        "options": [
+                            {"label": "yes", "description": "affirm"},
+                            {"label": "no", "description": "deny"}
+                        ]
                     }]
                 }
             }
@@ -1037,6 +1061,58 @@ mod tests {
         });
         let resp = call(&req.to_string()).expect("response");
         assert_eq!(resp["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn tools_call_with_unanswerable_question_errors() {
+        // A question with no options, no html and no formFields has no answer
+        // surface — the card would render as free-text-only. The native
+        // AskUserQuestion tool forbids this (options is required, minItems 2);
+        // `fleet__ask` must restore that contract for the non-form/non-html
+        // case. Force FLEET_HOME empty so that, absent the guard, the call would
+        // otherwise fall through to the (not-alive) consumer check and return an
+        // `isError` envelope rather than a JSON-RPC error — proving the guard,
+        // not the heartbeat, is what rejects it.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir()
+            .join(format!("fleet-ask-unanswerable-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by `fleet_home_lock`.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__ask",
+                "arguments": {
+                    "questions": [{
+                        "question": "要不要一并清掉?",
+                        "header": "清库完成",
+                        "multiSelect": false
+                    }]
+                }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+
+        // SAFETY: restore under the same lock.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert_eq!(resp["error"]["code"], -32602);
+        let msg = resp["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            msg.contains("options") && msg.contains("html") && msg.contains("formFields"),
+            "error should name the three answer surfaces, got: {msg}"
+        );
     }
 
     #[test]
