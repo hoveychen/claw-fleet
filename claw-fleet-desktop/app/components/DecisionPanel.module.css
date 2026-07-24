@@ -113,6 +113,33 @@
   min-width: 380px;
 }
 
+/* Stacked with-detail variant: on windows too narrow to seat the card and the
+ * detail column side by side (detail min 420 + card min 380 = 800px), the row
+ * layout overflows and shoves the card off-screen. Stack them vertically
+ * instead — `column-reverse` so the card (2nd DOM child) sits on top and the
+ * detail column (1st child) below. Both fill the panel width and split the
+ * height, each keeping its own internal scroll. Mutually exclusive with
+ * `.panel_with_detail`, so the row-only `min-width` bases never apply here. */
+.panel_with_detail_stacked {
+  flex-direction: column-reverse;
+  align-items: stretch;
+  max-height: calc(100vh - 56px);
+  height: 80vh;
+}
+
+.panel_with_detail_stacked .detail_column,
+.panel_with_detail_stacked .main_column {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.panel_with_detail_stacked .detail_column {
+  border-left: none;
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
 /* Peek variant: user is holding Option/Alt to look at content behind the panel.
  * Fade nearly out and disable pointer events so clicks pass through. The pulse
  * glow also fades so it doesn't keep flashing through the see-through panel. */
