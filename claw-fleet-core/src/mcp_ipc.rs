@@ -848,6 +848,7 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                 "maxItems": 4,
                 "items": {
                     "type": "object",
+                    "description": "Every question needs an answer surface: give it at least 2 `options`, OR `html`, OR `formFields`. A question with none of the three renders as a free-text-only card and is rejected. `options` is otherwise optional — omit it for pure-html or pure-form cards.",
                     "properties": {
                         "question": { "type": "string" },
                         "header": { "type": "string", "maxLength": 12 },
@@ -856,6 +857,7 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                             "type": "array",
                             "minItems": 2,
                             "maxItems": 4,
+                            "description": "Clickable answer choices (2–4). Optional ONLY when the question carries `html` or `formFields` instead; a question with no options, no html and no formFields has no answer surface and is rejected. Do not add an 'Other' option — the UI appends a free-text escape hatch automatically.",
                             "items": {
                                 "type": "object",
                                 "properties": {
@@ -1452,6 +1454,24 @@ mod tests {
             "formFields camelCase, not snake_case"
         );
         assert!(props.get("form_fields").is_none());
+        // The answer-surface requirement enforced at runtime by
+        // handle_fleet_ask_call must also be advertised so agents author
+        // correctly instead of discovering it via a -32602. It lives both on
+        // the question-item object and on the options field.
+        let item_desc = s["properties"]["questions"]["items"]["description"]
+            .as_str()
+            .expect("question items carry a description");
+        assert!(
+            item_desc.contains("options")
+                && item_desc.contains("html")
+                && item_desc.contains("formFields"),
+            "question items description names the three answer surfaces, got: {item_desc}"
+        );
+        assert!(
+            props["options"]["description"].as_str().is_some_and(|d| d.contains("html")
+                && d.contains("formFields")),
+            "options description explains when it may be omitted"
+        );
         // Form-field kinds enum surfaces in schema:
         let kinds = &props["formFields"]["items"]["properties"]["kind"]["enum"];
         let arr = kinds.as_array().expect("enum array");
