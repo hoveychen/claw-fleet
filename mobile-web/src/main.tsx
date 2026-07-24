@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { CloudApp } from "./cloud/CloudApp";
+import { LightboxProvider } from "./views/Lightbox";
 import { initTheme } from "./theme";
 import { initWakeLock } from "./wakeLock";
 import { lockZoom } from "./lockZoom";
@@ -23,6 +24,12 @@ if (!cloudMode && "serviceWorker" in navigator) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {cloudMode ? <CloudApp /> : <App />}
+    {cloudMode ? (
+      <CloudApp />
+    ) : (
+      <LightboxProvider>
+        <App />
+      </LightboxProvider>
+    )}
   </StrictMode>,
 );
