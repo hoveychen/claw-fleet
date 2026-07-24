@@ -1950,6 +1950,22 @@ export function DecisionPanel({
   const cardAreaRef = useRef<HTMLDivElement>(null);
   const [widthTier, setWidthTier] = useState(0);
 
+  // Track the viewport width so the panel re-measures its available space when
+  // the window is resized. Without this, `window.innerWidth` is only read on the
+  // renders triggered by state changes (decision switch, history toggle, …), so
+  // a panel opened while the window was narrow keeps its narrow width after the
+  // user widens the window — leaving the two-column detail layout overflowing.
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1400,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onResize = () => setViewportWidth(window.innerWidth);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const active = decisions.length > 0
     ? (decisions.find((d) => d.id === activeDecisionId) ?? decisions[0])
     : null;
@@ -1987,14 +2003,12 @@ export function DecisionPanel({
   // forcing a scrollbar. Upper bound 1400px or viewport minus gutter.
   const widthTiers = useMemo(() => {
     const base = hasPreview ? 820 : 460;
-    const vpMax = typeof window !== "undefined"
-      ? Math.min(window.innerWidth - 24, 1400)
-      : 1400;
+    const vpMax = Math.min(viewportWidth - 24, 1400);
     const candidates = [base, 640, 820, 1040, 1200, vpMax];
     const unique = Array.from(new Set(candidates.filter((w) => w >= base && w <= vpMax)));
     unique.sort((a, b) => a - b);
     return unique;
-  }, [hasPreview]);
+  }, [hasPreview, viewportWidth]);
 
   // Reset tier when active decision changes.
   useEffect(() => {
@@ -2109,16 +2123,24 @@ export function DecisionPanel({
   // Detail column adds a fixed slab to the panel's overall width; clamp the
   // combined size to the viewport so the panel never escapes the screen.
   const DETAIL_COLUMN_WIDTH = 640;
-  const targetTotalWidth = sideColumnActive
+  const vpClamp = viewportWidth - 24;
+  // When the window is too narrow to seat the card and the detail column side by
+  // side without dropping below their min-widths (detail 420 + card 380 = 800),
+  // the two flex columns overflow the clamped panel and the card gets shoved
+  // off-screen. Below this threshold, stack them vertically instead (card on
+  // top, detail below) so everything stays inside the panel. The float window
+  // manages its own width (it widens to ~920px for the side-by-side layout), so
+  // it never needs stacking.
+  const STACK_DETAIL_BELOW = 900;
+  const stackDetail = sideColumnActive && !float && vpClamp < STACK_DETAIL_BELOW;
+  const targetTotalWidth = sideColumnActive && !stackDetail
     ? DETAIL_COLUMN_WIDTH + currentWidth
     : currentWidth;
-  const vpClamp =
-    typeof window !== "undefined" ? window.innerWidth - 24 : targetTotalWidth;
   const panelWidth = Math.min(targetTotalWidth, vpClamp);
 
   return (
     <div
-      className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${float ? styles.panel_float : ""} ${peeking ? styles.panel_peeking : ""} ${sideColumnActive ? styles.panel_with_detail : ""}`}
+      className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${float ? styles.panel_float : ""} ${peeking ? styles.panel_peeking : ""} ${sideColumnActive ? (stackDetail ? styles.panel_with_detail_stacked : styles.panel_with_detail) : ""}`}
       style={compact || float ? undefined : { width: `${panelWidth}px` }}
     >
       {sideColumnActive && (
