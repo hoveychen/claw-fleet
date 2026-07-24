@@ -869,6 +869,7 @@ export function HistoryView() {
           </button>
           <button
             type="button"
+            data-wizard="new-session-btn"
             className={`${styles.new_btn} ${activeId === DRAFT_TAB_ID ? styles.new_btn_active : ""}`}
             onClick={handleNewSession}
             title={t("new_session.title")}
