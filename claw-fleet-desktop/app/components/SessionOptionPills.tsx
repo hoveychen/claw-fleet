@@ -56,10 +56,10 @@ export function SessionOptionPills({
    *  monitored sources by the host. Defaults to the full catalog. When only one
    *  tool remains the pill is hidden — there is nothing to switch between. */
   toolChoices?: { value: string; label: string }[];
-  /** Narrow-host (lite) mode: tighter pills and prefix-less default labels
-   *  ("默认" instead of "模型：默认") so the row fits without wrapping to a
-   *  third line. Only affects the *default* labels; a chosen model/effort keeps
-   *  its own already-short label. */
+  /** Narrow-host (lite) mode: tighter pills, and the un-chosen state collapses
+   *  to a plain "默认" / "Default" instead of the category name ("模型" / "Model")
+   *  so the 340px strip fits without wrapping to a third line. Only affects the
+   *  *default* labels; a chosen model/effort keeps its own already-short label. */
   compact?: boolean;
 }) {
   const { t } = useTranslation();
@@ -67,6 +67,11 @@ export function SessionOptionPills({
   const toolLabel = toolChoices.find((x) => x.value === tool)?.label ?? "Claude";
   const modelChoices = isCodex ? CODEX_MODEL_CHOICES : CLAUDE_MODEL_CHOICES;
   const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : CLAUDE_EFFORT_CHOICES;
+  // In the un-chosen ("") state a pill shows only its bare category name
+  // ("Model" / "模型"), not a "…: default" value: the prefix+value form made the
+  // toolbar too wide to hold one row (English overflowed outright). The menu's
+  // own default item still spells out what "no choice" means, and picking a
+  // value replaces the label with that value.
   const modelLabel =
     modelChoices.find((m) => m.value === model)?.label ??
     t(compact ? "new_session.model_pill_default_compact" : "new_session.model_pill_default");
