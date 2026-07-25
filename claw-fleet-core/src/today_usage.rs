@@ -1366,7 +1366,6 @@ fn fold_report_days(
     by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
     by_day: &mut std::collections::BTreeMap<String, LineAcc>,
 ) {
-    use crate::model_cost::{turn_cost_usd, TurnUsage};
     if from_date >= upto_exclusive {
         return; // live pool already covers the whole requested window
     }
