@@ -135,6 +135,9 @@ pub struct CompletionUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
+    /// The 1-hour-TTL subset of `cache_creation_tokens`; the CLI reports it under
+    /// `usage.cache_creation.ephemeral_1h_input_tokens`.
+    pub cache_creation_1h_tokens: u64,
     pub cache_read_tokens: u64,
     pub total_cost_usd: f64,
 }
@@ -363,18 +366,45 @@ fn parse_claude_json_response(raw: &str) -> Option<Completion> {
         return None;
     }
     let text = v.get("result").and_then(|r| r.as_str())?.to_string();
-    let usage = v.get("usage").map(|u| CompletionUsage {
-        input_tokens: u.get("input_tokens").and_then(|n| n.as_u64()).unwrap_or(0),
-        output_tokens: u.get("output_tokens").and_then(|n| n.as_u64()).unwrap_or(0),
-        cache_creation_tokens: u
-            .get("cache_creation_input_tokens")
-            .and_then(|n| n.as_u64())
-            .unwrap_or(0),
-        cache_read_tokens: u
-            .get("cache_read_input_tokens")
-            .and_then(|n| n.as_u64())
-            .unwrap_or(0),
-        total_cost_usd: v.get("total_cost_usd").and_then(|n| n.as_f64()).unwrap_or(0.0),
+    let usage = v.get("usage").map(|u| {
+        // `usage` reports only the LAST iteration's raw input/output, while
+        // `total_cost_usd` is billed over the whole call — reading tokens from
+        // one and cost from the other leaves them on different 口径 and Fleet's
+        // receipt lines can never reconcile (real probe: `usage.input_tokens`
+        // 10 against `modelUsage.inputTokens` 530). `modelUsage` is the
+        // per-model aggregate the cost is computed from, so prefer it and sum
+        // across models — the same set `total_cost_usd` covers.
+        let mu = v.get("modelUsage").and_then(|m| m.as_object());
+        let sum = |field: &str| -> Option<u64> {
+            let m = mu?;
+            if m.is_empty() {
+                return None;
+            }
+            Some(
+                m.values()
+                    .map(|e| e.get(field).and_then(|n| n.as_u64()).unwrap_or(0))
+                    .sum(),
+            )
+        };
+        let pick = |mu_field: &str, usage_field: &str| -> u64 {
+            sum(mu_field).unwrap_or_else(|| {
+                u.get(usage_field).and_then(|n| n.as_u64()).unwrap_or(0)
+            })
+        };
+        CompletionUsage {
+            input_tokens: pick("inputTokens", "input_tokens"),
+            output_tokens: pick("outputTokens", "output_tokens"),
+            cache_creation_tokens: pick(
+                "cacheCreationInputTokens",
+                "cache_creation_input_tokens",
+            ),
+            // `modelUsage` carries no TTL split, so the breakdown always comes
+            // from `usage.cache_creation` (its cache totals agree with
+            // `modelUsage`'s — both are per-call sums).
+            cache_creation_1h_tokens: crate::model_cost::parse_cache_creation_1h(Some(u)),
+            cache_read_tokens: pick("cacheReadInputTokens", "cache_read_input_tokens"),
+            total_cost_usd: v.get("total_cost_usd").and_then(|n| n.as_f64()).unwrap_or(0.0),
+        }
     });
     Some(Completion { text, usage })
 }
@@ -969,6 +999,67 @@ mod tests {
         assert_eq!(u.cache_creation_tokens, 36382);
         assert_eq!(u.cache_read_tokens, 0);
         assert!((u.total_cost_usd - 0.0477).abs() < 1e-9);
+    }
+
+    /// `usage` in the `-p` result carries only the LAST iteration's raw input,
+    /// while `total_cost_usd` is billed over the whole call — so reading tokens
+    /// from `usage` and cost from `total_cost_usd` puts the two on different
+    /// 口径 and Fleet's own receipt lines can never reconcile. `modelUsage` is
+    /// the per-model aggregate the cost is actually computed from; prefer it.
+    ///
+    /// Shape and numbers captured from a real
+    /// `claude -p --model haiku --output-format json` probe (2026-07-25):
+    /// `530×$1 + 56×$5 + 30057×$2.00(1h) + 17536×$0.10 = $0.0626776`.
+    #[test]
+    fn parse_claude_json_prefers_model_usage_aggregate() {
+        let raw = r#"{
+            "type":"result","subtype":"success","is_error":false,
+            "result":"ok",
+            "total_cost_usd":0.0626776,
+            "usage":{
+                "input_tokens":10,
+                "cache_creation_input_tokens":30057,
+                "cache_read_input_tokens":17536,
+                "output_tokens":45,
+                "cache_creation":{"ephemeral_1h_input_tokens":30057,"ephemeral_5m_input_tokens":0}
+            },
+            "modelUsage":{
+                "claude-haiku-4-5-20251001":{
+                    "inputTokens":530,
+                    "outputTokens":56,
+                    "cacheReadInputTokens":17536,
+                    "cacheCreationInputTokens":30057,
+                    "costUSD":0.0626776
+                }
+            }
+        }"#;
+        let u = parse_claude_json_response(raw)
+            .expect("parse ok")
+            .usage
+            .expect("usage present");
+        assert_eq!(u.input_tokens, 530, "input must come from modelUsage");
+        assert_eq!(u.output_tokens, 56, "output must come from modelUsage");
+        assert_eq!(u.cache_creation_tokens, 30057);
+        assert_eq!(u.cache_creation_1h_tokens, 30057, "1h TTL split must survive");
+        assert_eq!(u.cache_read_tokens, 17536);
+
+        // With those tokens the receipt can reproduce the CLI's own cost.
+        let cost = crate::model_cost::turn_cost_usd(
+            "claude-haiku-4-5",
+            &crate::model_cost::TurnUsage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+                cache_creation_tokens: u.cache_creation_tokens,
+                cache_creation_1h_tokens: u.cache_creation_1h_tokens,
+                cache_read_tokens: u.cache_read_tokens,
+                web_search_requests: 0,
+            },
+        );
+        assert!(
+            (cost - u.total_cost_usd).abs() < 1e-9,
+            "recomputed ${cost} vs CLI ${}",
+            u.total_cost_usd
+        );
     }
 
     #[test]
