@@ -653,8 +653,6 @@
     "row_output": "输出",
     "subtotal": "小计",
     "grand_total": "合计",
-    "split_agent": "会话",
-    "split_fleet": "Fleet 自身",
     "tokens": "tokens",
     "footnote": "价格为各模型官方 $/M 单价 · 含缓存读写 · 今日与侧边栏计数同口径"
   },

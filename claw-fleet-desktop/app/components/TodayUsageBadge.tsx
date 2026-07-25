@@ -50,20 +50,17 @@ export function TodayUsageBadge({
 
   const cost = usage?.costUsd ?? 0;
   // Total tokens = input + output, cumulative across every turn (cache re-reads
-  // included), on the same口径 as cost — so a heavy day reads large. Counts all
-  // sources (Claude + Codex + Fleet's own LLM calls); the daily report card also
-  // sums cumulatively now, but is Claude-only, so the two need not match exactly.
+  // included), on the same口径 as cost — so a heavy day reads large. Agent
+  // sessions only (Claude + Codex); Fleet's own LLM calls are deliberately not
+  // counted here — see `today_usage` in claw-fleet-core. The daily report card
+  // also sums cumulatively, but is Claude-only, so the two need not match.
   const inputTokens = usage?.inputTokens ?? 0;
   const outputTokens = usage?.outputTokens ?? 0;
   const tokens = inputTokens + outputTokens;
   const label = t("today_usage.title", "今日累计");
-  const costBreakdown =
-    usage && usage.fleetCostUsd > 0
-      ? `\nagent $${usage.agentCostUsd.toFixed(2)} + fleet $${usage.fleetCostUsd.toFixed(2)}`
-      : "";
   const tokenBreakdown =
     usage && tokens > 0 ? `\nin ${fmtTokens(inputTokens)} + out ${fmtTokens(outputTokens)}` : "";
-  const title = `${label}: $${cost.toFixed(2)} · ${fmtTokens(tokens)} tok${tokenBreakdown}${costBreakdown}`;
+  const title = `${label}: $${cost.toFixed(2)} · ${fmtTokens(tokens)} tok${tokenBreakdown}`;
 
   const receipt = showReceipt ? (
     <TokenReceiptModal onClose={() => setShowReceipt(false)} />

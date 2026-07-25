@@ -25,8 +25,6 @@ interface ReceiptView {
   totalCacheReadTokens: number;
   totalOutputTokens: number;
   totalCostUsd: number;
-  agentCostUsd: number;
-  fleetCostUsd: number;
   /** Per-day trend points (empty for the single-day "today" view). */
   daily: DailyUsagePoint[];
   /** Any Codex session attributed whole-to-one-day → trend is approximate. */
@@ -101,8 +99,6 @@ function normalizeToday(r: TodayUsageBreakdown): ReceiptView {
     totalCacheReadTokens: r.totalCacheReadTokens,
     totalOutputTokens: r.totalOutputTokens,
     totalCostUsd: r.totalCostUsd,
-    agentCostUsd: r.agentCostUsd,
-    fleetCostUsd: r.fleetCostUsd,
     daily: [],
     hasCodexApproximation: false,
   };
@@ -117,8 +113,6 @@ function normalizeRange(r: UsageRangeBreakdown): ReceiptView {
     totalCacheReadTokens: r.totalCacheReadTokens,
     totalOutputTokens: r.totalOutputTokens,
     totalCostUsd: r.totalCostUsd,
-    agentCostUsd: r.agentCostUsd,
-    fleetCostUsd: r.fleetCostUsd,
     daily: r.daily,
     hasCodexApproximation: r.hasCodexApproximation,
   };
@@ -244,17 +238,11 @@ export function TokenReceiptModal({ onClose }: Props) {
                     </span>
                     <span className={styles.grand_value}>{fmtUsd(data.totalCostUsd)}</span>
                   </div>
+                  {/* Agent spend only — Fleet's own guard / report LLM calls are
+                      not on this receipt, so there is no agent-vs-fleet split to
+                      show. Fleet's own consumption lives in Settings → Usage. */}
                   <div className={styles.split_row}>
-                    <span>
-                      {t("token_receipt.split_agent", "会话")} {fmtUsd(data.agentCostUsd)}
-                      {data.fleetCostUsd > 0 && (
-                        <>
-                          {" + "}
-                          {t("token_receipt.split_fleet", "Fleet 自身")}{" "}
-                          {fmtUsd(data.fleetCostUsd)}
-                        </>
-                      )}
-                    </span>
+                    <span />
                     <span className={styles.tok_total}>
                       {fmtTok(totalTokens)} {t("token_receipt.tokens", "tokens")}
                     </span>

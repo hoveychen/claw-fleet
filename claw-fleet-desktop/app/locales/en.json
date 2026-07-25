@@ -656,8 +656,6 @@
     "row_output": "Output",
     "subtotal": "Subtotal",
     "grand_total": "Total",
-    "split_agent": "Sessions",
-    "split_fleet": "Fleet itself",
     "tokens": "tokens",
     "footnote": "Prices are each model's official $/M rate · cache reads/writes included · today matches the sidebar counter"
   },
