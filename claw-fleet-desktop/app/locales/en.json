@@ -2084,6 +2084,7 @@
   "history": {
     "title": "Tasks",
     "search_placeholder": "Search title, plan, full text…",
+    "enqueue_placeholder": "Session running — your message queues and continues after this turn…",
     "empty": "No sessions yet — hit New Session in the top-right to launch one",
     "no_match": "No matching sessions",
     "untitled": "(untitled)",
