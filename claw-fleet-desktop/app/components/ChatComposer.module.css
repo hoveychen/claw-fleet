@@ -339,11 +339,20 @@
 .action_row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 6px;
   margin-top: 4px;
 }
 
-.action_spacer {
+/* The wrapping happens inside this group, never on the row itself: the send
+   button is the row's own last child so it always stays on the right edge.
+   Wrapping the whole row instead let a too-wide pill set push the lone send
+   button onto a second line (English labels are wider than Chinese ones, so
+   only the English UI hit it). */
+.action_controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   flex: 1;
+  min-width: 0;
 }
