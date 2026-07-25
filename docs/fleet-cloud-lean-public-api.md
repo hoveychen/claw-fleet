@@ -36,7 +36,7 @@ H="Authorization: Bearer $FLEET_PUBLIC_TOKEN"
 curl -H "$H" -X POST $B/spawn_session -d '{
   "workspacePath": "/workspace/repo",
   "prompt": "修复 issue #12：登录页在 Safari 下白屏",
-  "model": "claude-opus-4-8",
+  "model": "claude-opus-5",
   "effort": "high"
 }'
 

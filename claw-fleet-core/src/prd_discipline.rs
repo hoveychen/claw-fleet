@@ -397,7 +397,7 @@ fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>] [--model
 飞、关键文件、坑、下一个具体步骤。像换班简报那样写。\n\
 - **当工作是一个 TASKS.md 计划时传 --plan/--next**，好让 Fleet 把后继者自动\
 归属到那个计划和 P；它会在那里恢复节奏，无需自己的任何 `fleet plan` 仪式。\n\
-- **--model / --effort 可选**：钉死后继者的模型（如 `claude-opus-4-8[1m]`，\
+- **--model / --effort 可选**：钉死后继者的模型（如 `claude-opus-5[1m]`，\
 括号后缀原样透传）和推理档位（low|medium|high|max），覆盖否则自动继承的值。\
 不传就沿用当前会话的模型与 CLAUDE_EFFORT。\n\
 - **然后干净地结束回合**：先按 Rule 3 提交 worktree 进度，再停。你一交出，\
@@ -933,7 +933,7 @@ concrete step. Write it like a shift-change briefing.\n\
 the successor to that plan and P automatically; it resumes the rhythm there \
 without any `fleet plan` ceremony of its own.\n\
 - **--model / --effort are optional** — pin the successor's model (e.g. \
-`claude-opus-4-8[1m]`, bracketed suffix passed through verbatim) and reasoning \
+`claude-opus-5[1m]`, bracketed suffix passed through verbatim) and reasoning \
 effort (low|medium|high|max), overriding the values otherwise auto-inherited. \
 Omit them to keep the current session's model and CLAUDE_EFFORT.\n\
 - **Then finish the turn cleanly**: commit worktree progress per Rule 3 \

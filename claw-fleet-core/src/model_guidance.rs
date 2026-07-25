@@ -54,8 +54,9 @@ pub fn render_guidance(locale: &str) -> String {
 | Fable 5 | `claude-fable-5` | 1M | $10 | $50 | 最强推理 + 超长程 agentic;\
 thinking 常开、原始思维链不返回;需 30 天数据留存;比 Opus 贵一倍——只用在\
 最难的任务 |\n\
-| Opus 4.8 | `claude-opus-4-8` | 1M | $5 | $25 | 默认主力。最强 Opus 档,\
-自主 agentic / 知识工作 / 记忆;支持 fast mode(约 2.5x 出字速度,溢价) |\n\
+| Opus 5 | `claude-opus-5` | 1M | $5 | $25 | 默认主力。当前 Opus 档,自主 \
+agentic / 编码 / 长程任务;thinking 默认开启;前代 `claude-opus-4-8` 同价仍\
+可选 |\n\
 | Sonnet 5 | `claude-sonnet-5` | 1M | $3(至 2026-08-31 优惠 $2)| \
 $15(优惠 $10)| 接近 Opus 的编码 / agentic,成本明显更低;高吞吐生产、\
 并行 subagent 的性价比之选 |\n\
@@ -87,7 +88,7 @@ Sol / Terra / Luna = 强 / 中 / 快 三档,同属 gpt-5.6。Codex 的 effort �
 - 机械、可并行、量大的 subagent → 便宜快档(Haiku / Sonnet;Luna / Terra)\
 + 低 effort。\n\
 - 硬推理、最终综合、把关校验 → 最强档(Opus / Fable;Sol)+ high/xhigh。\n\
-- 编码 / agentic 主循环 → Opus 4.8 或 Sonnet 5 配 xhigh;Codex 侧 Sol 从 \
+- 编码 / agentic 主循环 → Opus 5 或 Sonnet 5 配 xhigh;Codex 侧 Sol 从 \
 medium 起步。\n\
 - 拿不准就别 override,继承父/会话模型。\n"
             .to_string();
@@ -109,9 +110,10 @@ and `cws dispatch`'s `--model`/`--effort`.\n\
 longest-horizon agentic; thinking always on, raw chain-of-thought never \
 returned; requires 30-day data retention; ~2x the price of Opus — reserve it \
 for the hardest tasks |\n\
-| Opus 4.8 | `claude-opus-4-8` | 1M | $5 | $25 | The default workhorse. Most \
-capable Opus tier: autonomous agentic / knowledge work / memory; supports \
-fast mode (~2.5x output speed, premium price) |\n\
+| Opus 5 | `claude-opus-5` | 1M | $5 | $25 | The default workhorse. Current \
+Opus tier: autonomous agentic / coding / long-horizon work; thinking on by \
+default; the previous `claude-opus-4-8` is still selectable at the same \
+price |\n\
 | Sonnet 5 | `claude-sonnet-5` | 1M | $3 ($2 intro through 2026-08-31) | \
 $15 ($10 intro) | Near-Opus coding / agentic at noticeably lower cost; the \
 value pick for high-throughput production and parallel subagents |\n\
@@ -147,7 +149,7 @@ max, unlike Claude).\n\
 (Haiku / Sonnet; Luna / Terra) at low effort.\n\
 - Hard reasoning, final synthesis, adversarial verification → the strongest \
 tier (Opus / Fable; Sol) at high/xhigh.\n\
-- Coding / agentic main loop → Opus 4.8 or Sonnet 5 at xhigh; on the Codex \
+- Coding / agentic main loop → Opus 5 or Sonnet 5 at xhigh; on the Codex \
 side, Sol starting at medium.\n\
 - When in doubt, don't override — inherit the parent/session model.\n"
         .to_string()
@@ -272,7 +274,7 @@ mod tests {
         for locale in ["en", "zh"] {
             let g = render_guidance(locale);
             // Claude family model IDs
-            assert!(g.contains("claude-opus-4-8"), "{locale} must list Opus 4.8");
+            assert!(g.contains("claude-opus-5"), "{locale} must list Opus 5");
             assert!(g.contains("claude-fable-5"), "{locale} must list Fable 5");
             assert!(g.contains("claude-sonnet-5"), "{locale} must list Sonnet 5");
             assert!(g.contains("claude-haiku-4-5"), "{locale} must list Haiku 4.5");
