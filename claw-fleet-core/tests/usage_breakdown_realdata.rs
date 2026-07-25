@@ -112,25 +112,18 @@ fn real_receipt_rows_reconcile_to_their_subtotals() {
                 + per_m(l.cache_read_tokens, l.cache_read_price)
                 + per_m(l.output_tokens, l.output_price);
             let drift = (rows - l.cost_usd).abs();
-            // Fleet's own lines logged BEFORE TTL-aware accounting cannot
-            // reconcile and never will: those entries recorded the CLI's
-            // `usage.input_tokens` (last iteration only — 10 where the real
-            // figure was 530) and no cache-write TTL split, while their
-            // `cost_usd` is the CLI's true, fully-billed number. Keeping the
-            // accurate cost and under-itemising is the honest trade; entries
-            // written from this commit on carry both and do reconcile, so the
-            // residue ages out of the window on its own. Only the transcript
-            // -derived lines are held to the strict invariant.
-            // A Codex-provider Fleet call is logged with `costAccurate: false`
-            // and `cost_usd: 0.0` (no per-token price for a ChatGPT-plan quota),
-            // so its estimated-token rows sit under a $0.00 subtotal — another
-            // reason a fleet line can't be held to the invariant. Fleet lines are
-            // therefore reported, not asserted.
+            // Fleet's own overhead is no longer on this receipt at all, so a
+            // `fleet` line reappearing is itself the regression: those entries
+            // can't satisfy the invariant (pre-TTL entries logged a truncated
+            // input against a fully-billed cost; Codex-provider calls are logged
+            // unpriced with char-estimated tokens), which is why the surface is
+            // agent-only.
+            assert_ne!(l.source, "fleet", "{label}: Fleet's own spend is back on the receipt");
             // `unknown` is not a model: it is where report rows whose session
             // model was never recorded land (including rows written before the
             // `<synthetic>` guard). Real money, but no published price to itemise
             // it with — it falls back to the Opus tier. Reported, not asserted.
-            if l.source == "fleet" || !claw_fleet_core::session::is_real_model_id(&l.model) {
+            if !claw_fleet_core::session::is_real_model_id(&l.model) {
                 worst = worst.max(drift);
                 continue;
             }
