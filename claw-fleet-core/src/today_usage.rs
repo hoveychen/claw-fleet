@@ -205,8 +205,16 @@ pub struct ModelReceiptLine {
     /// Agent source that ran this model: `claude-code`, `codex`, or `fleet`
     /// (Fleet's own guard / audit / report-summary LLM calls).
     pub source: String,
+    /// Net input tokens — cache writes and reads are itemised separately below,
+    /// so this must NOT be the all-inclusive "tokens sent to the API" figure
+    /// (see `fold_report_model`, which nets the report DB's inclusive count).
     pub input_tokens: u64,
+    /// Cache-write tokens at the 5-minute TTL, priced at `cache_write_price`.
     pub cache_creation_tokens: u64,
+    /// Cache-write tokens at the 1-hour TTL, priced at `cache_write_1h_price`
+    /// (2× input, vs 1.25× for 5-minute writes). Split out rather than blended
+    /// so `Σ (tokens × unit price) == cost_usd` still holds for the UI.
+    pub cache_creation_1h_tokens: u64,
     pub cache_read_tokens: u64,
     pub output_tokens: u64,
     /// Official unit prices in USD per 1M tokens, for the receipt's "@ $X/M"
@@ -214,8 +222,10 @@ pub struct ModelReceiptLine {
     pub input_price: f64,
     pub output_price: f64,
     pub cache_write_price: f64,
+    pub cache_write_1h_price: f64,
     pub cache_read_price: f64,
-    /// Line cost = Σ per-turn `turn_cost_usd` for this (source, model).
+    /// Line cost = Σ per-turn `turn_cost_usd` for this (source, model). Equals
+    /// the sum of this line's itemised rows.
     pub cost_usd: f64,
 }
 
@@ -500,7 +510,10 @@ fn build_breakdown_cached(
     let mut fleet_cost = 0.0;
     for l in &lines {
         total_input = total_input.saturating_add(l.input_tokens);
-        total_cache_creation = total_cache_creation.saturating_add(l.cache_creation_tokens);
+        // The line splits its writes by TTL, so the header total takes both rows.
+        total_cache_creation = total_cache_creation
+            .saturating_add(l.cache_creation_tokens)
+            .saturating_add(l.cache_creation_1h_tokens);
         total_cache_read = total_cache_read.saturating_add(l.cache_read_tokens);
         total_output = total_output.saturating_add(l.output_tokens);
         if l.source == "fleet" {
@@ -535,16 +548,22 @@ fn build_lines(
         .into_iter()
         .map(|((source, model), acc)| {
             let c = get_model_costs(&model);
+            // `acc.cache_creation` is the total; the 1h figure is its subset, so
+            // the 5-minute row is the remainder. saturating_sub keeps a
+            // malformed pair from wrapping the row into nonsense.
+            let write_1h = acc.cache_creation_1h.min(acc.cache_creation);
             ModelReceiptLine {
                 model,
                 source,
                 input_tokens: acc.input,
-                cache_creation_tokens: acc.cache_creation,
+                cache_creation_tokens: acc.cache_creation.saturating_sub(write_1h),
+                cache_creation_1h_tokens: write_1h,
                 cache_read_tokens: acc.cache_read,
                 output_tokens: acc.output,
                 input_price: c.input,
                 output_price: c.output,
                 cache_write_price: c.cache_write,
+                cache_write_1h_price: c.cache_write_1h,
                 cache_read_price: c.cache_read,
                 cost_usd: acc.cost,
             }
@@ -1564,7 +1583,10 @@ fn build_range_breakdown_cached(
     let mut fleet_cost = 0.0;
     for l in &lines {
         total_input = total_input.saturating_add(l.input_tokens);
-        total_cache_creation = total_cache_creation.saturating_add(l.cache_creation_tokens);
+        // The line splits its writes by TTL, so the header total takes both rows.
+        total_cache_creation = total_cache_creation
+            .saturating_add(l.cache_creation_tokens)
+            .saturating_add(l.cache_creation_1h_tokens);
         total_cache_read = total_cache_read.saturating_add(l.cache_read_tokens);
         total_output = total_output.saturating_add(l.output_tokens);
         if l.source == "fleet" {
@@ -2315,6 +2337,113 @@ mod range_breakdown_tests {
         assert_eq!(b.daily.len(), 1);
         assert_eq!(b.daily[0].date, local_date_str(when));
         assert!((b.daily[0].cost_usd - 0.5).abs() < 1e-9);
+    }
+
+    /// The report DB stores `inputTokens` as `Σ(input + cache_write +
+    /// cache_read)` — every token sent to the API, matching its `cost_usd`. The
+    /// receipt itemises input separately from the two cache rows, so the fold
+    /// has to net them out. Left inclusive, the Input row shows the whole
+    /// API-side volume at the full input price *and* the cache rows list it
+    /// again (opus-4-8 over 30 days: a $92k itemisation under a $17.6k
+    /// subtotal).
+    #[test]
+    fn report_fold_nets_cache_out_of_the_input_row() {
+        use crate::daily_report::ModelTokens;
+        let mt = ModelTokens {
+            // 700 net input + 200 cache writes + 100 cache reads = 1000 sent.
+            input_tokens: 1000,
+            output_tokens: 50,
+            cache_creation_tokens: 200,
+            cache_creation_1h_tokens: 200,
+            cache_read_tokens: 100,
+            cost_usd: 1.23,
+        };
+        let mut by_model = std::collections::HashMap::new();
+        let mut by_day = std::collections::BTreeMap::new();
+        fold_report_model(
+            "2026-07-01",
+            "claude-opus-4-8",
+            &mt,
+            &mut by_model,
+            &mut by_day,
+        );
+
+        let acc = by_model
+            .get(&("claude-code".to_string(), "claude-opus-4-8".to_string()))
+            .expect("line keyed by inferred source");
+        assert_eq!(acc.input, 700, "input row must be net of both cache figures");
+        assert_eq!(acc.cache_creation, 200);
+        assert_eq!(acc.cache_creation_1h, 200);
+        assert_eq!(acc.cache_read, 100);
+        assert!((acc.cost - 1.23).abs() < 1e-9, "stored cost passes through");
+        assert_eq!(by_day["2026-07-01"].input, 700, "the trend nets it too");
+    }
+
+    /// A legacy report whose `input_tokens` predates the all-inclusive口径 can be
+    /// smaller than its own cache figures; the fold must clamp to 0 rather than
+    /// wrap a u64 subtraction into ~1.8e19 tokens.
+    #[test]
+    fn report_fold_clamps_when_input_is_smaller_than_cache() {
+        use crate::daily_report::ModelTokens;
+        let mt = ModelTokens {
+            input_tokens: 50,
+            output_tokens: 10,
+            cache_creation_tokens: 200,
+            cache_creation_1h_tokens: 0,
+            cache_read_tokens: 900,
+            cost_usd: 0.5,
+        };
+        let mut by_model = std::collections::HashMap::new();
+        let mut by_day = std::collections::BTreeMap::new();
+        fold_report_model("2026-04-20", "claude-opus-4-8", &mt, &mut by_model, &mut by_day);
+        let acc = by_model.values().next().unwrap();
+        assert_eq!(acc.input, 0, "clamped, not wrapped");
+    }
+
+    /// **The receipt invariant:** every itemised row the UI renders is
+    /// `tokens × unit price`, so their sum must equal the line's own subtotal.
+    /// A line whose cache writes are 1-hour TTL breaks that unless the line
+    /// exposes the two write rates separately — the UI can't price a blended
+    /// bucket. 1M of Haiku 4.5 1h writes costs $2.00; billed at the 5-minute
+    /// $1.25/M the rows would only add up to $1.25 under a $2.00 subtotal.
+    #[test]
+    fn receipt_line_rows_sum_to_its_subtotal() {
+        use crate::llm_usage::FleetLlmUsageEntry;
+        let when = ts("2026-07-15T10:00:00Z");
+        let e = FleetLlmUsageEntry {
+            timestamp_ms: when as u64,
+            scenario: "guard_command".to_string(),
+            provider: "claude".to_string(),
+            model: "haiku".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 1_000_000,
+            cache_creation_1h_tokens: 1_000_000,
+            cache_read_tokens: 0,
+            duration_ms: 0,
+            // What the CLI would report: 1M 1h writes at 2× Haiku 4.5's $1 input.
+            cost_usd: 2.0,
+            token_accurate: true,
+            cost_accurate: true,
+        };
+        let b = build_range_breakdown(
+            &[],
+            &[e],
+            ts("2026-07-14T00:00:00Z"),
+            ts("2026-07-16T00:00:00Z"),
+        );
+        let l = &b.lines[0];
+        let per_m = |tok: u64, price: f64| (tok as f64 / 1_000_000.0) * price;
+        let rows = per_m(l.input_tokens, l.input_price)
+            + per_m(l.cache_creation_tokens, l.cache_write_price)
+            + per_m(l.cache_creation_1h_tokens, l.cache_write_1h_price)
+            + per_m(l.cache_read_tokens, l.cache_read_price)
+            + per_m(l.output_tokens, l.output_price);
+        assert!(
+            (rows - l.cost_usd).abs() < 1e-9,
+            "rows ${rows} vs subtotal ${}",
+            l.cost_usd
+        );
     }
 
     /// `llm_usage` logs the model as the alias the caller asked for ("haiku"),
