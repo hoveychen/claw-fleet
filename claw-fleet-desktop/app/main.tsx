@@ -8,9 +8,18 @@ const isMockMode = params.has("mock") || import.meta.env.VITE_MOCK === "true";
 const forceLite = params.has("lite");
 const mockQaMode = params.has("qa");
 const promoScene = promoSceneFromSearch(window.location.search);
+// `?mock&demo` — the promo screencast board (real translated sessions + the
+// 5-hop relay). Handled inside tauri-mock; here we just skip onboarding so the
+// recording opens straight onto the populated board.
+const demoMode = params.has("demo");
 
-if (isMockMode && promoScene) {
+if (isMockMode && (promoScene || demoMode)) {
   primePromoStorage(window.localStorage);
+}
+// The promo screencast is an English piece — pin the UI language so no chrome
+// string (e.g. the composer placeholder) falls back to the boss's zh locale.
+if (isMockMode && demoMode) {
+  window.localStorage.setItem("mock-store:lang", "en");
 }
 
 stampHostClasses();
