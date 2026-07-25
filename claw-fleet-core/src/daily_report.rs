@@ -2114,6 +2114,27 @@ mod tests {
         assert_eq!(m.model.as_deref(), Some("claude-sonnet-4-20250514"));
     }
 
+    /// The stored per-day cost is what the 30d/All receipt shows as its
+    /// subtotal, so it has to bill 1-hour cache writes at 2× input, and it has
+    /// to persist the 1h subset so the receipt can itemise the two write rates.
+    /// Sonnet 5: 1M input ($3) + 1M output ($15) + 1M 1h writes ($6) = $24.
+    #[test]
+    fn report_metrics_price_one_hour_cache_writes_at_2x() {
+        let line = concat!(
+            r#"{"type":"assistant","message":{"id":"msg_1","content":[],"model":"claude-sonnet-5","stop_reason":"end_turn","#,
+            r#""usage":{"input_tokens":1000000,"output_tokens":1000000,"cache_creation_input_tokens":1000000,"#,
+            r#""cache_read_input_tokens":0,"cache_creation":{"ephemeral_1h_input_tokens":1000000,"ephemeral_5m_input_tokens":0}}}}"#,
+        );
+        let m = extract_session_metrics(line);
+        assert_eq!(m.cache_creation_tokens, 1_000_000);
+        assert_eq!(m.cache_creation_1h_tokens, 1_000_000, "1h subset must persist");
+        assert!(
+            (m.cost_usd - 24.0).abs() < 1e-9,
+            "expected $24.00 at the 1h rate, got ${}",
+            m.cost_usd
+        );
+    }
+
     #[test]
     fn test_extract_multiple_messages() {
         let lines = [
