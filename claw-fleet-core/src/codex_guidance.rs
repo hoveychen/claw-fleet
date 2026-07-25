@@ -607,7 +607,7 @@ Codex effort 档:`minimal` / `low` / `medium` / `high`(**没有** Claude 的 xhi
 | 模型 | ID | 上下文 | 输入/输出 $/1M | 何时选 |\n\
 |---|---|---|---|---|\n\
 | Fable 5 | `claude-fable-5` | 1M | $10 / $50 | 最强推理+超长程;只用在最难任务 |\n\
-| Opus 4.8 | `claude-opus-4-8` | 1M | $5 / $25 | 默认主力,自主 agentic / 知识工作 |\n\
+| Opus 5 | `claude-opus-5` | 1M | $5 / $25 | 默认主力,自主 agentic / 编码 / 长程任务(前代 `claude-opus-4-8` 同价仍可选) |\n\
 | Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15(有优惠)| 近 Opus 编码、成本更低;并行 subagent 首选 |\n\
 | Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | 最快最便宜;分类/抽取/机械活 |\n\
 \n\
@@ -617,7 +617,7 @@ Claude effort:`low`/`medium`/`high`/`xhigh`/`max`;`xhigh` 是编码/agentic 最�
 \n\
 - 机械、可并行、量大的 subagent → 便宜快档(Luna / Terra;Haiku / Sonnet)+ 低 effort。\n\
 - 硬推理、最终综合、把关校验 → 最强档(Sol;Opus / Fable)+ high/xhigh。\n\
-- 编码 / agentic 主循环 → Codex 侧 Sol 从 medium 起步;Claude 侧 Opus 4.8 / Sonnet 5 配 xhigh。\n\
+- 编码 / agentic 主循环 → Codex 侧 Sol 从 medium 起步;Claude 侧 Opus 5 / Sonnet 5 配 xhigh。\n\
 - 拿不准就别 override,继承父/会话模型。\n"
             .to_string();
     }
@@ -645,7 +645,7 @@ Codex effort levels: `minimal` / `low` / `medium` / `high` (**no** xhigh or max,
 | Model | ID | Context | In/Out $/1M | When to pick |\n\
 |---|---|---|---|---|\n\
 | Fable 5 | `claude-fable-5` | 1M | $10 / $50 | Strongest reasoning + longest-horizon; reserve for the hardest tasks |\n\
-| Opus 4.8 | `claude-opus-4-8` | 1M | $5 / $25 | Default workhorse: autonomous agentic / knowledge work |\n\
+| Opus 5 | `claude-opus-5` | 1M | $5 / $25 | Default workhorse: autonomous agentic / coding / long-horizon work (previous `claude-opus-4-8` still selectable, same price) |\n\
 | Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 (intro pricing) | Near-Opus coding at lower cost; value pick for parallel subagents |\n\
 | Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | Fastest / cheapest; classification, extraction, mechanical work |\n\
 \n\
@@ -658,7 +658,7 @@ Claude effort: `low`/`medium`/`high`/`xhigh`/`max`; `xhigh` is best for coding /
 - Hard reasoning, final synthesis, adversarial verification → the strongest \
 tier (Sol; Opus / Fable) at high/xhigh.\n\
 - Coding / agentic main loop → on Codex, Sol starting at medium; on Claude, \
-Opus 4.8 or Sonnet 5 at xhigh.\n\
+Opus 5 or Sonnet 5 at xhigh.\n\
 - When in doubt, don't override — inherit the parent/session model.\n"
         .to_string()
 }
@@ -1040,7 +1040,7 @@ mod tests {
         assert!(wiki.contains("[[slug]]"), "wiki must teach cross-links");
         assert!(!wiki.contains("git worktree"), "wiki block must not drag in PRD content");
         let model = render_codex_model_block("en");
-        assert!(model.contains("gpt-5.6-sol") && model.contains("claude-opus-4-8"),
+        assert!(model.contains("gpt-5.6-sol") && model.contains("claude-opus-5"),
             "model block must cover both families");
         assert!(model.contains("inherit"), "model block must teach the inherit default");
     }

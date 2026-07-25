@@ -3,6 +3,7 @@
 // launcher, for one, follows the CLI's own configured model).
 export const CLAUDE_MODEL_CHOICES: { value: string; label: string }[] = [
   { value: "claude-fable-5", label: "Fable 5" },
+  { value: "claude-opus-5", label: "Opus 5" },
   { value: "claude-opus-4-8", label: "Opus 4.8" },
   { value: "claude-sonnet-5", label: "Sonnet 5" },
   { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
