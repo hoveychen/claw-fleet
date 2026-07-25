@@ -325,7 +325,10 @@ impl StatsAcc {
 
             // Per-turn cost uses this turn's own model; fall back to most-recently-
             // seen model when a turn omits it (model can change mid-session).
-            let turn_model = msg.get("model").and_then(|m| m.as_str());
+            let turn_model = msg
+                .get("model")
+                .and_then(|m| m.as_str())
+                .filter(|m| crate::session::is_real_model_id(m));
             if let Some(m) = turn_model {
                 self.last_model = Some(m.to_string());
             }

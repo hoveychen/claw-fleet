@@ -126,11 +126,11 @@ fn real_receipt_rows_reconcile_to_their_subtotals() {
             // so its estimated-token rows sit under a $0.00 subtotal — another
             // reason a fleet line can't be held to the invariant. Fleet lines are
             // therefore reported, not asserted.
-            // `<synthetic>` is Claude Code's marker for injected control/error
-            // turns (403 notices, "No response requested"), not a model — it has
-            // no published price and lands on the unknown-model fallback, so its
-            // rows are meaningless by construction. Reported, not asserted.
-            if l.source == "fleet" || l.model == "<synthetic>" {
+            // `unknown` is not a model: it is where report rows whose session
+            // model was never recorded land (including rows written before the
+            // `<synthetic>` guard). Real money, but no published price to itemise
+            // it with — it falls back to the Opus tier. Reported, not asserted.
+            if l.source == "fleet" || !claw_fleet_core::session::is_real_model_id(&l.model) {
                 worst = worst.max(drift);
                 continue;
             }
