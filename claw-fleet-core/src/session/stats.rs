@@ -336,6 +336,7 @@ impl StatsAcc {
                     input_tokens,
                     output_tokens,
                     cache_creation_tokens,
+                    cache_creation_1h_tokens: crate::model_cost::parse_cache_creation_1h(usage),
                     cache_read_tokens,
                     web_search_requests,
                 },

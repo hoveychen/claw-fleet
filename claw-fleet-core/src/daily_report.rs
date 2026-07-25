@@ -74,10 +74,19 @@ pub struct DailyMetrics {
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTokens {
+    /// **Total** tokens sent to the API: `Σ(input + cache_write + cache_read)`,
+    /// on the same口径 as `cost_usd` — NOT net input. Consumers that itemise
+    /// input separately from the cache rows must subtract the two cache figures
+    /// (see `today_usage::fold_report_days`).
     pub input_tokens: u64,
     pub output_tokens: u64,
     #[serde(default)]
     pub cache_creation_tokens: u64,
+    /// The 1-hour-TTL subset of `cache_creation_tokens` (billed at 2× input, vs
+    /// 1.25× for 5-minute writes). Absent (0) in reports written before TTL-aware
+    /// pricing landed — those days price every write at the 5-minute rate.
+    #[serde(default)]
+    pub cache_creation_1h_tokens: u64,
     #[serde(default)]
     pub cache_read_tokens: u64,
     #[serde(default)]
@@ -166,8 +175,12 @@ pub struct SessionMetricsRaw {
     pub input_tokens: u64,
     /// Summed output tokens across all unique assistant turns.
     pub output_tokens: u64,
-    /// Summed cache-creation tokens (for billing).
+    /// Summed cache-creation tokens, both TTLs (for billing).
     pub cache_creation_tokens: u64,
+    /// The 1-hour-TTL subset of `cache_creation_tokens`, billed at 2× input
+    /// instead of 1.25×. Stored per model in the report so a later receipt can
+    /// itemise the two write rates separately.
+    pub cache_creation_1h_tokens: u64,
     /// Summed cache-read tokens (for billing).
     pub cache_read_tokens: u64,
     /// Summed web-search requests (for billing).
@@ -453,6 +466,7 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
     let mut total_output: u64 = 0;
     let mut sum_input: u64 = 0;
     let mut sum_cache_create: u64 = 0;
+    let mut sum_cache_create_1h: u64 = 0;
     let mut sum_cache_read: u64 = 0;
     let mut sum_web_search: u64 = 0;
     let mut sum_cost: f64 = 0.0;
@@ -511,8 +525,11 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
             .and_then(|t| t.as_u64())
             .unwrap_or(0);
 
+        let cache_create_1h = crate::model_cost::parse_cache_creation_1h(usage);
+
         total_output += output_tokens;
         sum_cache_create += cache_create;
+        sum_cache_create_1h += cache_create_1h;
         sum_cache_read += cache_read;
         sum_web_search += web_search;
 
@@ -534,6 +551,7 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
                 input_tokens: input,
                 output_tokens,
                 cache_creation_tokens: cache_create,
+                cache_creation_1h_tokens: cache_create_1h,
                 cache_read_tokens: cache_read,
                 web_search_requests: web_search,
             },
@@ -555,6 +573,7 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
         input_tokens: sum_input,
         output_tokens: total_output,
         cache_creation_tokens: sum_cache_create,
+        cache_creation_1h_tokens: sum_cache_create_1h,
         cache_read_tokens: sum_cache_read,
         web_search_requests: sum_web_search,
         cost_usd: sum_cost,
@@ -693,12 +712,14 @@ pub fn generate_report_from_sessions(
                     input_tokens: 0,
                     output_tokens: 0,
                     cache_creation_tokens: 0,
+                    cache_creation_1h_tokens: 0,
                     cache_read_tokens: 0,
                     cost_usd: 0.0,
                 });
             entry.input_tokens += sd.metrics.input_tokens;
             entry.output_tokens += sd.metrics.output_tokens;
             entry.cache_creation_tokens += sd.metrics.cache_creation_tokens;
+            entry.cache_creation_1h_tokens += sd.metrics.cache_creation_1h_tokens;
             entry.cache_read_tokens += sd.metrics.cache_read_tokens;
             entry.cost_usd += sd.metrics.cost_usd;
 
@@ -1859,6 +1880,7 @@ mod tests {
                             input_tokens: 5000,
                             output_tokens: 3000,
                             cache_creation_tokens: 0,
+                            cache_creation_1h_tokens: 0,
                             cache_read_tokens: 0,
                             cost_usd: 0.0,
                         },
