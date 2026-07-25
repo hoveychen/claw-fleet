@@ -36,7 +36,7 @@ snake_case，兼容 OpenAI：
   "object": "response",
   "created_at": 1741369938,
   "status": "in_progress",
-  "model": "claude-opus-4-8",
+  "model": "claude-opus-5",
   "output": [
     {"type":"message","role":"assistant","content":[{"type":"output_text","text":"..."}]}
   ],

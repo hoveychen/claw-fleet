@@ -207,7 +207,7 @@ enum Commands {
         /// Next P label for --plan, e.g. `P4` (optional).
         #[arg(long)]
         next: Option<String>,
-        /// Pin the successor's model, e.g. `claude-opus-4-8[1m]`. Overrides the
+        /// Pin the successor's model, e.g. `claude-opus-5[1m]`. Overrides the
         /// auto-inherited model — otherwise recovered from Fleet's launch-spec or,
         /// for sessions Fleet did not launch, the transcript's most recent turn,
         /// which is unreliable when that turn ran on a rate-limit fallback. The
@@ -481,7 +481,7 @@ pub(crate) enum ScheduleCommands {
         /// The prompt the fired session runs — the schedule's full context.
         #[arg(long)]
         prompt: String,
-        /// Model the fired session runs on (e.g. `claude-opus-4-8`,
+        /// Model the fired session runs on (e.g. `claude-opus-5`,
         /// `gpt-5.6-sol`). Overrides the value inherited from this session.
         #[arg(long)]
         model: Option<String>,
