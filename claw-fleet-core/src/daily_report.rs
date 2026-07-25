@@ -74,10 +74,19 @@ pub struct DailyMetrics {
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTokens {
+    /// **Total** tokens sent to the API: `Σ(input + cache_write + cache_read)`,
+    /// on the same口径 as `cost_usd` — NOT net input. Consumers that itemise
+    /// input separately from the cache rows must subtract the two cache figures
+    /// (see `today_usage::fold_report_days`).
     pub input_tokens: u64,
     pub output_tokens: u64,
     #[serde(default)]
     pub cache_creation_tokens: u64,
+    /// The 1-hour-TTL subset of `cache_creation_tokens` (billed at 2× input, vs
+    /// 1.25× for 5-minute writes). Absent (0) in reports written before TTL-aware
+    /// pricing landed — those days price every write at the 5-minute rate.
+    #[serde(default)]
+    pub cache_creation_1h_tokens: u64,
     #[serde(default)]
     pub cache_read_tokens: u64,
     #[serde(default)]
@@ -166,8 +175,12 @@ pub struct SessionMetricsRaw {
     pub input_tokens: u64,
     /// Summed output tokens across all unique assistant turns.
     pub output_tokens: u64,
-    /// Summed cache-creation tokens (for billing).
+    /// Summed cache-creation tokens, both TTLs (for billing).
     pub cache_creation_tokens: u64,
+    /// The 1-hour-TTL subset of `cache_creation_tokens`, billed at 2× input
+    /// instead of 1.25×. Stored per model in the report so a later receipt can
+    /// itemise the two write rates separately.
+    pub cache_creation_1h_tokens: u64,
     /// Summed cache-read tokens (for billing).
     pub cache_read_tokens: u64,
     /// Summed web-search requests (for billing).
@@ -453,6 +466,7 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
     let mut total_output: u64 = 0;
     let mut sum_input: u64 = 0;
     let mut sum_cache_create: u64 = 0;
+    let mut sum_cache_create_1h: u64 = 0;
     let mut sum_cache_read: u64 = 0;
     let mut sum_web_search: u64 = 0;
     let mut sum_cost: f64 = 0.0;
@@ -511,8 +525,11 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
             .and_then(|t| t.as_u64())
             .unwrap_or(0);
 
+        let cache_create_1h = crate::model_cost::parse_cache_creation_1h(usage);
+
         total_output += output_tokens;
         sum_cache_create += cache_create;
+        sum_cache_create_1h += cache_create_1h;
         sum_cache_read += cache_read;
         sum_web_search += web_search;
 
@@ -523,7 +540,13 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
 
         // Per-turn cost uses this turn's own model (falls back to the
         // most recently seen model if this line omits it).
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        // A `<synthetic>` / `unknown` turn is a CC-injected control message, not
+        // a model — adopting it would book the whole session's spend under a
+        // placeholder (see `session::is_real_model_id`).
+        let turn_model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .filter(|m| crate::session::is_real_model_id(m));
         if let Some(m) = turn_model {
             model = Some(m.to_string());
         }
@@ -534,6 +557,7 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
                 input_tokens: input,
                 output_tokens,
                 cache_creation_tokens: cache_create,
+                cache_creation_1h_tokens: cache_create_1h,
                 cache_read_tokens: cache_read,
                 web_search_requests: web_search,
             },
@@ -555,6 +579,7 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
         input_tokens: sum_input,
         output_tokens: total_output,
         cache_creation_tokens: sum_cache_create,
+        cache_creation_1h_tokens: sum_cache_create_1h,
         cache_read_tokens: sum_cache_read,
         web_search_requests: sum_web_search,
         cost_usd: sum_cost,
@@ -693,12 +718,14 @@ pub fn generate_report_from_sessions(
                     input_tokens: 0,
                     output_tokens: 0,
                     cache_creation_tokens: 0,
+                    cache_creation_1h_tokens: 0,
                     cache_read_tokens: 0,
                     cost_usd: 0.0,
                 });
             entry.input_tokens += sd.metrics.input_tokens;
             entry.output_tokens += sd.metrics.output_tokens;
             entry.cache_creation_tokens += sd.metrics.cache_creation_tokens;
+            entry.cache_creation_1h_tokens += sd.metrics.cache_creation_1h_tokens;
             entry.cache_read_tokens += sd.metrics.cache_read_tokens;
             entry.cost_usd += sd.metrics.cost_usd;
 
@@ -1859,6 +1886,7 @@ mod tests {
                             input_tokens: 5000,
                             output_tokens: 3000,
                             cache_creation_tokens: 0,
+                            cache_creation_1h_tokens: 0,
                             cache_read_tokens: 0,
                             cost_usd: 0.0,
                         },
@@ -2090,6 +2118,48 @@ mod tests {
         assert_eq!(m.output_tokens, 50);
         assert_eq!(m.tool_calls.get("Edit"), Some(&1));
         assert_eq!(m.model.as_deref(), Some("claude-sonnet-4-20250514"));
+    }
+
+    /// `<synthetic>` is Claude Code's marker for injected control/error turns
+    /// ("No response requested.", "Failed to authenticate. API Error: 403") —
+    /// not a model. The effective model is the LAST one seen, so a session that
+    /// ends on such a turn books its ENTIRE spend under `<synthetic>` in the
+    /// report's model_breakdown, where the receipt then prices it at the
+    /// unknown-model fallback. Real data: $53.93 over 30 days, and $62.42 booked
+    /// that way on 2026-07-24 alone.
+    #[test]
+    fn synthetic_control_turn_does_not_become_the_effective_model() {
+        let lines = [
+            r#"{"type":"assistant","message":{"id":"m1","content":[],"model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":10,"cache_read_input_tokens":5}}}"#,
+            r#"{"type":"assistant","message":{"id":"m2","content":[],"model":"<synthetic>","stop_reason":"end_turn","usage":{"input_tokens":0,"output_tokens":0}}}"#,
+        ];
+        let m = extract_session_metrics(&lines.join("\n"));
+        assert_eq!(
+            m.model.as_deref(),
+            Some("claude-opus-4-8"),
+            "a trailing control turn must not claim the session's spend"
+        );
+    }
+
+    /// The stored per-day cost is what the 30d/All receipt shows as its
+    /// subtotal, so it has to bill 1-hour cache writes at 2× input, and it has
+    /// to persist the 1h subset so the receipt can itemise the two write rates.
+    /// Sonnet 5: 1M input ($3) + 1M output ($15) + 1M 1h writes ($6) = $24.
+    #[test]
+    fn report_metrics_price_one_hour_cache_writes_at_2x() {
+        let line = concat!(
+            r#"{"type":"assistant","message":{"id":"msg_1","content":[],"model":"claude-sonnet-5","stop_reason":"end_turn","#,
+            r#""usage":{"input_tokens":1000000,"output_tokens":1000000,"cache_creation_input_tokens":1000000,"#,
+            r#""cache_read_input_tokens":0,"cache_creation":{"ephemeral_1h_input_tokens":1000000,"ephemeral_5m_input_tokens":0}}}}"#,
+        );
+        let m = extract_session_metrics(line);
+        assert_eq!(m.cache_creation_tokens, 1_000_000);
+        assert_eq!(m.cache_creation_1h_tokens, 1_000_000, "1h subset must persist");
+        assert!(
+            (m.cost_usd - 24.0).abs() < 1e-9,
+            "expected $24.00 at the 1h rate, got ${}",
+            m.cost_usd
+        );
     }
 
     #[test]

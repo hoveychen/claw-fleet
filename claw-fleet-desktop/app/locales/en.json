@@ -653,6 +653,7 @@
     "trend_scale_hint": "√ scale",
     "codex_note": "Codex has no per-turn detail; its usage is attributed whole to the session's start day, so the trend is approximate",
     "row_input": "Input",
+    "row_cache_write_1h": "Cache write (1h)",
     "row_cache_write": "Cache write",
     "row_cache_read": "Cache read",
     "row_output": "Output",

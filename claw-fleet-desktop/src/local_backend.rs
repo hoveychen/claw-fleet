@@ -3678,6 +3678,7 @@ mod tests {
             rate_limit: None,
             todos: None,
             background_tasks: Vec::new(),
+            watches: Vec::new(),
             task_plan: None,
             handoff: None,
             user_mark: None,

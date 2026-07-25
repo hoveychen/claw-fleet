@@ -71,6 +71,7 @@ fn append_backdated(
         input_tokens,
         output_tokens,
         cache_creation_tokens: 0,
+        cache_creation_1h_tokens: 0,
         cache_read_tokens: 0,
         duration_ms: 1200,
         cost_usd,
