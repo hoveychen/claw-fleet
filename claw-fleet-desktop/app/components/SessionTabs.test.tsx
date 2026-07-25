@@ -12,6 +12,15 @@ import "../i18n";
 import { SessionTabs, type TabItem } from "./SessionTabs";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+// jsdom ships no ResizeObserver, and SessionTabs constructs one in a mount
+// effect to track strip overflow — without this stub every test in the file dies
+// with `ReferenceError: ResizeObserver is not defined` before reaching its
+// assertions. Same stub as ResumeComposer.test.tsx.
+(globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
 
 const tabs: TabItem[] = [
   { id: "first", session: null, label: "First" },
