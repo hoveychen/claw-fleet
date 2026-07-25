@@ -476,6 +476,39 @@ mod input_accumulation_tests {
         assert_eq!(stats.total_output_tokens, 70);
     }
 
+    /// `SessionStats.total_cost_usd` is what the sidebar badge and the session
+    /// list show, so it must bill 1-hour cache writes at 2× input rather than
+    /// the 5-minute 1.25×. Sonnet 4.5 ($3 input): 1M of 1h writes = $6.00.
+    #[test]
+    fn session_cost_prices_one_hour_cache_writes_at_2x() {
+        let line = serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2026-07-25T10:00:00Z",
+            "message": {
+                "id": "m1",
+                "model": "claude-sonnet-4-5",
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": 1_000_000,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation": {
+                        "ephemeral_1h_input_tokens": 1_000_000,
+                        "ephemeral_5m_input_tokens": 0
+                    }
+                }
+            }
+        })
+        .to_string();
+        let stats = compute_session_stats(&[line.as_str()]);
+        assert!(
+            (stats.total_cost_usd - 6.0).abs() < 1e-9,
+            "expected $6.00 at the 1h rate, got ${}",
+            stats.total_cost_usd
+        );
+    }
+
     #[test]
     fn duplicate_msg_id_not_double_counted() {
         // Re-logging the same finalized message must not double its input.
