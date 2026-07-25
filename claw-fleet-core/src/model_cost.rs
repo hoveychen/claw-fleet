@@ -44,7 +44,7 @@ pub const COST_TIER_15_75: ModelCosts = ModelCosts {
     web_search: 0.01,
 };
 
-// Opus 4.5 / 4.6 default: $5 / $25 per Mtok.
+// Opus 4.5 / 4.6 / 4.7 / 4.8 and Opus 5: $5 / $25 per Mtok.
 pub const COST_TIER_5_25: ModelCosts = ModelCosts {
     input: 5.0,
     output: 25.0,
@@ -207,6 +207,17 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
         return COST_TIER_15_75;
     }
 
+    // Opus 5 and later majors: the modern $5/$25 tier (`claude-opus-5` is
+    // $5/$25, same as the 4.5+ minors). Matched on the major digit so a future
+    // `opus-6` is priced deliberately instead of landing on the unknown-model
+    // fallback, which happens to be the same tier only by coincidence.
+    if let Some(start) = m.find("opus-") {
+        let rest = &m.as_bytes()[start + "opus-".len()..];
+        if rest.first().is_some_and(|c| (b'5'..=b'9').contains(c)) {
+            return COST_TIER_5_25;
+        }
+    }
+
     // Sonnet tiers (4.6/4.5/4, 3.7, 3.5 all share $3/$15).
     if m.contains("sonnet") {
         return COST_TIER_3_15;
@@ -340,6 +351,25 @@ mod tests {
             "claude-opus-4-7-20260401",
             "Claude-Opus-4-7",
         ] {
+            let cost = turn_cost_usd(model, &usage);
+            assert!(
+                (cost - 30.0).abs() < 1e-9,
+                "model {model} priced wrong: {cost} (expected 30.0 @ $5/$25 tier)"
+            );
+        }
+    }
+
+    #[test]
+    fn opus_5_uses_modern_tier() {
+        // Opus 5 is $5/$25 per Mtok. The explicit branch pins that instead of
+        // leaning on DEFAULT_UNKNOWN_COST, which is the same tier today but is
+        // a fallback, not a statement about Opus 5.
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            ..Default::default()
+        };
+        for model in ["claude-opus-5", "Claude-Opus-5", "claude-opus-5-20260801"] {
             let cost = turn_cost_usd(model, &usage);
             assert!(
                 (cost - 30.0).abs() < 1e-9,
