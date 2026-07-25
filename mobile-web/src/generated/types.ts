@@ -66,8 +66,11 @@ sessionCount: number, };
 
 export type ModelReceiptLine = { 
 model: string, 
-source: string, inputTokens: number, cacheCreationTokens: number, cacheReadTokens: number, outputTokens: number, 
-inputPrice: number, outputPrice: number, cacheWritePrice: number, cacheReadPrice: number, 
+source: string, 
+inputTokens: number, 
+cacheCreationTokens: number, 
+cacheCreation1hTokens: number, cacheReadTokens: number, outputTokens: number, 
+inputPrice: number, outputPrice: number, cacheWritePrice: number, cacheWrite1hPrice: number, cacheReadPrice: number, 
 costUsd: number, };
 
 export type TodayUsageBreakdown = { 
@@ -333,7 +336,9 @@ export type DailyMetrics = {
 metricsVersion: number, totalInputTokens: number, totalOutputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalWebSearchRequests: number, totalCostUsd: number, totalSessions: number, totalSubagents: number, totalToolCalls: number, toolCallBreakdown: { [key in string]: number }, modelBreakdown: { [key in string]: ModelTokens }, projects: Array<ProjectMetrics>, sourceBreakdown: { [key in string]: number }, hourlyActivity: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], 
 decisionCards: DecisionCardStats, };
 
-export type ModelTokens = { inputTokens: number, outputTokens: number, cacheCreationTokens: number, cacheReadTokens: number, costUsd: number, };
+export type ModelTokens = { 
+inputTokens: number, outputTokens: number, cacheCreationTokens: number, 
+cacheCreation1hTokens: number, cacheReadTokens: number, costUsd: number, };
 
 export type ProjectMetrics = { workspacePath: string, workspaceName: string, sessionCount: number, subagentCount: number, totalInputTokens: number, totalOutputTokens: number, totalCacheCreationTokens: number, totalCacheReadTokens: number, totalWebSearchRequests: number, totalCostUsd: number, toolCalls: number, sessions: Array<ReportSessionSummary>, };
 
