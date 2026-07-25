@@ -540,7 +540,13 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
 
         // Per-turn cost uses this turn's own model (falls back to the
         // most recently seen model if this line omits it).
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        // A `<synthetic>` / `unknown` turn is a CC-injected control message, not
+        // a model — adopting it would book the whole session's spend under a
+        // placeholder (see `session::is_real_model_id`).
+        let turn_model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .filter(|m| crate::session::is_real_model_id(m));
         if let Some(m) = turn_model {
             model = Some(m.to_string());
         }
@@ -2112,6 +2118,27 @@ mod tests {
         assert_eq!(m.output_tokens, 50);
         assert_eq!(m.tool_calls.get("Edit"), Some(&1));
         assert_eq!(m.model.as_deref(), Some("claude-sonnet-4-20250514"));
+    }
+
+    /// `<synthetic>` is Claude Code's marker for injected control/error turns
+    /// ("No response requested.", "Failed to authenticate. API Error: 403") —
+    /// not a model. The effective model is the LAST one seen, so a session that
+    /// ends on such a turn books its ENTIRE spend under `<synthetic>` in the
+    /// report's model_breakdown, where the receipt then prices it at the
+    /// unknown-model fallback. Real data: $53.93 over 30 days, and $62.42 booked
+    /// that way on 2026-07-24 alone.
+    #[test]
+    fn synthetic_control_turn_does_not_become_the_effective_model() {
+        let lines = [
+            r#"{"type":"assistant","message":{"id":"m1","content":[],"model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":10,"cache_read_input_tokens":5}}}"#,
+            r#"{"type":"assistant","message":{"id":"m2","content":[],"model":"<synthetic>","stop_reason":"end_turn","usage":{"input_tokens":0,"output_tokens":0}}}"#,
+        ];
+        let m = extract_session_metrics(&lines.join("\n"));
+        assert_eq!(
+            m.model.as_deref(),
+            Some("claude-opus-4-8"),
+            "a trailing control turn must not claim the session's spend"
+        );
     }
 
     /// The stored per-day cost is what the 30d/All receipt shows as its

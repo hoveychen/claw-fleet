@@ -345,7 +345,12 @@ fn fold_session_turns(
             .and_then(|t| t.as_u64())
             .unwrap_or(0);
 
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        // Placeholder ids (`<synthetic>` control turns, `unknown`) never open a
+        // line of their own; their usage folds under the real model in flight.
+        let turn_model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .filter(|m| crate::session::is_real_model_id(m));
         if let Some(m) = turn_model {
             last_model = Some(m.to_string());
         }
@@ -699,7 +704,12 @@ fn fold_session_turns_range(
         }
 
         // Advance model tracking even for out-of-window / undated turns.
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        // Placeholder ids (`<synthetic>` control turns, `unknown`) never open a
+        // line of their own; their usage folds under the real model in flight.
+        let turn_model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .filter(|m| crate::session::is_real_model_id(m));
         if let Some(m) = turn_model {
             last_model = Some(m.to_string());
         }
@@ -860,7 +870,12 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
         }
 
         // Advance model tracking even for undated turns (matches the range folder).
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        // Placeholder ids (`<synthetic>` control turns, `unknown`) never open a
+        // line of their own; their usage folds under the real model in flight.
+        let turn_model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .filter(|m| crate::session::is_real_model_id(m));
         if let Some(m) = turn_model {
             last_model = Some(m.to_string());
         }
@@ -1439,6 +1454,16 @@ fn fold_report_model(
         )
     };
 
+    // Report rows written before the placeholder guard landed are keyed under
+    // `<synthetic>` — real money from a session whose model was never recorded.
+    // They can't be re-attributed (the transcripts are gone), so collapse them
+    // into the `unknown` placeholder the rest of the codebase already uses
+    // instead of presenting a control-turn marker as if it were a model.
+    let model = if crate::session::is_real_model_id(model) {
+        model
+    } else {
+        "unknown"
+    };
     let source = infer_report_source(model);
     by_model
         .entry((source, model.to_string()))
@@ -2338,6 +2363,30 @@ mod range_breakdown_tests {
         assert!((b.daily[0].cost_usd - 0.5).abs() < 1e-9);
     }
 
+    /// A `<synthetic>` control turn must not open a receipt line of its own:
+    /// it is not a model, so `get_model_costs` prices it at the unknown-model
+    /// fallback. Its usage belongs to the conversation's real model — the same
+    /// rule `session::parse` already applies when picking a session's model.
+    #[test]
+    fn synthetic_control_turns_fold_under_the_real_model() {
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-20T10:00:00.000Z","message":{"id":"a","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-07-20T10:01:00.000Z","message":{"id":"b","model":"<synthetic>","stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#,
+        );
+        let cells = fold_claude_session_cells(jsonl);
+        let models: Vec<&str> = cells.keys().map(|(_, m)| m.as_str()).collect();
+        assert!(
+            !models.contains(&"<synthetic>"),
+            "control turn opened its own line: {models:?}"
+        );
+        let acc = cells
+            .get(&("2026-07-20".to_string(), "claude-opus-4-8".to_string()))
+            .expect("real-model cell");
+        assert_eq!(acc.input, 107, "control turn's usage folds into the real model");
+        assert_eq!(acc.output, 23);
+    }
+
     /// The report DB stores `inputTokens` as `Σ(input + cache_write +
     /// cache_read)` — every token sent to the API, matching its `cost_usd`. The
     /// receipt itemises input separately from the two cache rows, so the fold
@@ -2376,6 +2425,30 @@ mod range_breakdown_tests {
         assert_eq!(acc.cache_read, 100);
         assert!((acc.cost - 1.23).abs() < 1e-9, "stored cost passes through");
         assert_eq!(by_day["2026-07-01"].input, 700, "the trend nets it too");
+    }
+
+    /// Report rows already on disk keyed under `<synthetic>` hold real money from
+    /// a session whose model was never recorded. They can't be re-attributed, so
+    /// they must at least stop masquerading as a model: collapse to `unknown`.
+    #[test]
+    fn report_fold_collapses_placeholder_models_to_unknown() {
+        use crate::daily_report::ModelTokens;
+        let mt = ModelTokens {
+            input_tokens: 1000,
+            output_tokens: 50,
+            cache_creation_tokens: 200,
+            cache_creation_1h_tokens: 0,
+            cache_read_tokens: 100,
+            cost_usd: 62.42,
+        };
+        let mut by_model = std::collections::HashMap::new();
+        let mut by_day = std::collections::BTreeMap::new();
+        fold_report_model("2026-07-24", "<synthetic>", &mt, &mut by_model, &mut by_day);
+        let keys: Vec<&(String, String)> = by_model.keys().collect();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].1, "unknown", "placeholder must not name a line");
+        // The money stays on the receipt — the grand total is derived from lines.
+        assert!((by_model.values().next().unwrap().cost - 62.42).abs() < 1e-9);
     }
 
     /// A legacy report whose `input_tokens` predates the all-inclusive口径 can be
