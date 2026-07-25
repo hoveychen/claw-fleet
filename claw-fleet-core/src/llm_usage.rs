@@ -182,7 +182,7 @@ fn estimate_tokens(s: &str) -> u64 {
 /// Resolve a Claude CLI alias ("haiku", "sonnet", "opus") to the current
 /// canonical model id that `model_cost::get_model_costs` recognises.
 /// Non-alias inputs pass through untouched.
-pub(crate) fn canonical_claude_model(alias: &str) -> &str {
+fn canonical_claude_model(alias: &str) -> &str {
     match alias {
         "haiku" => "claude-haiku-4-5",
         "sonnet" => "claude-sonnet-5",

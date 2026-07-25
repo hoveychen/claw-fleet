@@ -28,20 +28,25 @@ pub struct TodayUsage {
     /// Cumulative input tokens today (input + cache creation + cache read, cache
     /// re-reads included) — the "tokens sent to the API" total, on the same口径
     /// as cost. Per agent session it's the cumulative `SessionInfo.total_input_tokens`
-    /// (for both Claude and Codex sources, which now agree); plus Fleet's own LLM
-    /// calls' input + cache tokens. Summed alongside `output_tokens`. NOTE: this
-    /// is cache-read-dominated and can reach billions/day — it is NOT the daily
-    /// report's old last-turn snapshot (the report now sums cumulatively too, so
-    /// both surfaces agree on口径, though the sidebar also counts Codex + Fleet
-    /// which the Claude-only report does not).
+    /// (for both Claude and Codex sources, which now agree). **Agent sessions
+    /// only** — Fleet's own LLM calls are excluded (see [`today_usage`]). NOTE:
+    /// this is cache-read-dominated and can reach billions/day — it is NOT the
+    /// daily report's old last-turn snapshot (the report sums cumulatively too, so
+    /// both agree on口径, though the sidebar also counts Codex which the
+    /// Claude-only report does not).
     pub input_tokens: u64,
-    /// Output tokens today: agent sessions created today + Fleet's own LLM calls.
+    /// Output tokens today from agent sessions created today.
     pub output_tokens: u64,
-    /// Total USD cost today = `agent_cost_usd` + `fleet_cost_usd`.
+    /// Total USD cost today — equal to `agent_cost_usd`, since Fleet's own
+    /// overhead is excluded from this surface.
     pub cost_usd: f64,
-    /// Cost from agent (Claude Code) sessions created today.
+    /// Cost from agent (Claude Code / Codex) sessions created today.
     pub agent_cost_usd: f64,
-    /// Cost from Fleet's own LLM calls today (guard / audit / report summaries).
+    /// **Always 0.0.** Fleet's own LLM spend is no longer folded into this
+    /// surface; the field is retained only so mobile clients that render an
+    /// "agent + fleet" split don't read `undefined`. The real per-scenario figures
+    /// live in [`crate::llm_usage::list_usage_daily_buckets`], which powers
+    /// Settings → Usage.
     pub fleet_cost_usd: f64,
     /// Number of top-level (non-subagent) sessions created today that contributed.
     pub session_count: u64,
@@ -94,36 +99,37 @@ fn sum_today_sessions(sessions: &[SessionInfo], day_start_ms: i64) -> (f64, u64,
 /// Aggregate today's cumulative usage from an already-scanned session list.
 ///
 /// `sessions` is whatever the caller already has (e.g. `scan_all_sources`), so
-/// this adds no extra JSONL scan. Fleet's own spend is read from
-/// `fleet_llm_usage.jsonl` for today's local-day window.
+/// this adds no extra JSONL scan. Agent spend only — see the note in the body for
+/// why Fleet's own LLM overhead is excluded.
 pub fn today_usage(sessions: &[SessionInfo]) -> TodayUsage {
     let now_ms = chrono::Local::now().timestamp_millis();
-    let (day_start_ms, day_end_ms, date) = day_bounds_ms(now_ms);
+    let (day_start_ms, _day_end_ms, date) = day_bounds_ms(now_ms);
 
-    let (agent_cost_usd, mut input_tokens, mut output_tokens, session_count) =
+    let (agent_cost_usd, input_tokens, output_tokens, session_count) =
         sum_today_sessions(sessions, day_start_ms);
 
-    // Fleet's own LLM spend today. The window is by timestamp; every returned
-    // bucket is therefore today's local day. Sum across all scenarios. Input is
-    // input + cache creation + cache read, matching how agent sessions' input
-    // (`total_input_tokens`) already folds in cache.
-    let mut fleet_cost_usd = 0.0;
-    for b in crate::llm_usage::list_usage_daily_buckets(day_start_ms as u64, day_end_ms as u64) {
-        fleet_cost_usd += b.cost_usd;
-        input_tokens = input_tokens
-            .saturating_add(b.input_tokens)
-            .saturating_add(b.cache_creation_tokens)
-            .saturating_add(b.cache_read_tokens);
-        output_tokens = output_tokens.saturating_add(b.output_tokens);
-    }
+// Fleet's own LLM calls (guard analysis, audit-rule suggestions, daily-report
+// summaries, session outcome analysis, mascot quips) are deliberately NOT part of
+// this figure. They are Fleet's operational overhead rather than the user's agent
+// spend, and their accounting cannot be made to reconcile with the receipt's
+// per-row itemisation: entries logged before TTL-aware accounting recorded the
+// CLI's last-iteration `usage.input_tokens` against a fully-billed `cost_usd`,
+// and Codex-provider calls are logged unpriced (`cost_usd: 0.0`,
+// `cost_accurate: false`) with char-estimated tokens. Rather than show a line
+// that visibly fails `Σ rows == subtotal`, this surface is agent-only. Fleet's
+// own consumption stays visible in Settings → Usage, which renders the raw
+// `llm_usage::list_usage_daily_buckets` trend directly.
 
     TodayUsage {
         date,
         input_tokens,
         output_tokens,
-        cost_usd: agent_cost_usd + fleet_cost_usd,
+        cost_usd: agent_cost_usd,
         agent_cost_usd,
-        fleet_cost_usd,
+        // Retained at 0.0 rather than removed: the field crosses the wire to
+        // mobile clients (incl. the out-of-tree HarmonyOS app) that would show
+        // `undefined` if it vanished. Consumers already guard on `> 0`.
+        fleet_cost_usd: 0.0,
         session_count,
     }
 }
@@ -131,8 +137,8 @@ pub fn today_usage(sessions: &[SessionInfo]) -> TodayUsage {
 /// Consolidated per-container token usage for the Fleet Cloud lean deployment.
 ///
 /// One customer per container, so this container's usage **is** the customer's
-/// usage. `today` reuses [`today_usage`] (includes Fleet's own LLM overhead for
-/// the operational view); the `cumulative_*` fields sum **agent sessions only**
+/// usage. `today` reuses [`today_usage`] (agent sessions created today); the
+/// `cumulative_*` fields sum **agent sessions only**
 /// (claude/codex consumption — the token basis you'd bill on) across every
 /// session currently retained on disk.
 ///
@@ -143,7 +149,7 @@ pub fn today_usage(sessions: &[SessionInfo]) -> TodayUsage {
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CloudUsage {
-    /// Today's window (agent + Fleet overhead), same shape as `/today_usage`.
+    /// Today's window (agent sessions only), same shape as `/today_usage`.
     pub today: TodayUsage,
     /// Cumulative input tokens across all retained agent sessions.
     pub cumulative_input_tokens: u64,
@@ -187,9 +193,8 @@ pub fn cloud_usage(sessions: &[SessionInfo]) -> CloudUsage {
 // cache-write / cache-read / output tokens each model consumed today, the
 // model's official unit prices ($/Mtok), and the line cost. The receipt total
 // is built on the **exact same口径** as [`today_usage`] — sessions **created
-// today** (every SessionInfo, subagents included, each counted once) plus
-// Fleet's own LLM spend — so `Σ line.cost_usd == TodayUsage.cost_usd` to the
-// cent. Because per-model pricing is linear, folding a model's tokens and
+// today** (every SessionInfo, subagents included, each counted once), agent
+// spend only — so `Σ line.cost_usd == TodayUsage.cost_usd` to the cent. Because per-model pricing is linear, folding a model's tokens and
 // pricing once equals summing each turn's cost; we still accumulate per-turn
 // cost directly so the total reconciles with `SessionInfo.total_cost_usd`
 // (which `StatsAcc` folds the same way) regardless of mid-session model swaps.
@@ -426,12 +431,9 @@ fn fold_codex_session(
 /// `fleet_llm_usage.jsonl`. Lines are returned sorted by descending cost.
 pub fn today_usage_breakdown(sessions: &[SessionInfo]) -> TodayUsageBreakdown {
     let now_ms = chrono::Local::now().timestamp_millis();
-    let (day_start_ms, day_end_ms, _date) = day_bounds_ms(now_ms);
-    let fleet_entries =
-        crate::llm_usage::list_usage_entries(day_start_ms.max(0) as u64, day_end_ms as u64);
     let mut cache = usage_cache().lock().unwrap();
     cache.retain_sessions(&live_ids(sessions));
-    let out = build_breakdown_cached(sessions, &fleet_entries, now_ms, &mut cache);
+    let out = build_breakdown_cached(sessions, now_ms, &mut cache);
     persist_cache(&mut cache);
     out
 }
@@ -439,17 +441,8 @@ pub fn today_usage_breakdown(sessions: &[SessionInfo]) -> TodayUsageBreakdown {
 /// Test-only wrapper: a fresh (empty) cache so each call folds from disk, keeping
 /// the receipt tests hermetic and independent of the process-wide cache.
 #[cfg(test)]
-fn build_breakdown(
-    sessions: &[SessionInfo],
-    fleet_entries: &[crate::llm_usage::FleetLlmUsageEntry],
-    now_ms: i64,
-) -> TodayUsageBreakdown {
-    build_breakdown_cached(
-        sessions,
-        fleet_entries,
-        now_ms,
-        &mut UsageBreakdownCache::default(),
-    )
+fn build_breakdown(sessions: &[SessionInfo], now_ms: i64) -> TodayUsageBreakdown {
+    build_breakdown_cached(sessions, now_ms, &mut UsageBreakdownCache::default())
 }
 
 /// Pure core of [`today_usage_breakdown`], with Fleet's own LLM entries injected
@@ -459,7 +452,6 @@ fn build_breakdown(
 /// `cache` (folded from disk only on a miss); the today receipt sums every cell.
 fn build_breakdown_cached(
     sessions: &[SessionInfo],
-    fleet_entries: &[crate::llm_usage::FleetLlmUsageEntry],
     now_ms: i64,
     cache: &mut UsageBreakdownCache,
 ) -> TodayUsageBreakdown {
@@ -483,28 +475,6 @@ fn build_breakdown_cached(
         sum_cells_all(cells, &s.agent_source, &mut by_model);
     }
 
-    // Fleet's own LLM calls today, folded per model.
-    for e in fleet_entries {
-        by_model
-            // `llm_usage` records the alias the caller asked for ("haiku"), and
-            // `get_model_costs("haiku")` lands on the Haiku *3.5* tier even
-            // though Fleet calls 4.5. Canonicalise here — at *read* time — so
-            // the fix also covers every alias-tagged entry already on disk.
-            .entry((
-                "fleet".to_string(),
-                crate::llm_usage::canonical_claude_model(&e.model).to_string(),
-            ))
-            .or_default()
-            .add(
-                e.input_tokens,
-                e.cache_creation_tokens,
-                e.cache_creation_1h_tokens,
-                e.cache_read_tokens,
-                e.output_tokens,
-                e.cost_usd,
-            );
-    }
-
     let lines = build_lines(by_model);
 
     let mut total_input = 0u64;
@@ -512,7 +482,6 @@ fn build_breakdown_cached(
     let mut total_cache_read = 0u64;
     let mut total_output = 0u64;
     let mut agent_cost = 0.0;
-    let mut fleet_cost = 0.0;
     for l in &lines {
         total_input = total_input.saturating_add(l.input_tokens);
         // The line splits its writes by TTL, so the header total takes both rows.
@@ -521,11 +490,7 @@ fn build_breakdown_cached(
             .saturating_add(l.cache_creation_1h_tokens);
         total_cache_read = total_cache_read.saturating_add(l.cache_read_tokens);
         total_output = total_output.saturating_add(l.output_tokens);
-        if l.source == "fleet" {
-            fleet_cost += l.cost_usd;
-        } else {
-            agent_cost += l.cost_usd;
-        }
+        agent_cost += l.cost_usd;
     }
 
     TodayUsageBreakdown {
@@ -535,9 +500,12 @@ fn build_breakdown_cached(
         total_cache_creation_tokens: total_cache_creation,
         total_cache_read_tokens: total_cache_read,
         total_output_tokens: total_output,
-        total_cost_usd: agent_cost + fleet_cost,
+        total_cost_usd: agent_cost,
         agent_cost_usd: agent_cost,
-        fleet_cost_usd: fleet_cost,
+        // Always 0: Fleet's own overhead is excluded from this receipt (see the
+        // note in `today_usage`). Kept on the wire so mobile clients that read
+        // the split don't see `undefined`.
+        fleet_cost_usd: 0.0,
     }
 }
 
@@ -1319,11 +1287,9 @@ pub fn usage_range_breakdown(
     from_ms: i64,
     to_ms: i64,
 ) -> UsageRangeBreakdown {
-    let fleet_entries =
-        crate::llm_usage::list_usage_entries(from_ms.max(0) as u64, to_ms.max(0) as u64);
     let mut cache = usage_cache().lock().unwrap();
     cache.retain_sessions(&live_ids(sessions));
-    let out = build_range_breakdown_cached(sessions, &fleet_entries, from_ms, to_ms, &mut cache);
+    let out = build_range_breakdown_cached(sessions, from_ms, to_ms, &mut cache);
     persist_cache(&mut cache);
     out
 }
@@ -1333,17 +1299,10 @@ pub fn usage_range_breakdown(
 #[cfg(test)]
 fn build_range_breakdown(
     sessions: &[SessionInfo],
-    fleet_entries: &[crate::llm_usage::FleetLlmUsageEntry],
     from_ms: i64,
     to_ms: i64,
 ) -> UsageRangeBreakdown {
-    build_range_breakdown_cached(
-        sessions,
-        fleet_entries,
-        from_ms,
-        to_ms,
-        &mut UsageBreakdownCache::default(),
-    )
+    build_range_breakdown_cached(sessions, from_ms, to_ms, &mut UsageBreakdownCache::default())
 }
 
 /// Pure core of [`usage_range_breakdown`], with Fleet's own LLM entries injected
@@ -1488,7 +1447,6 @@ fn fold_report_model(
 
 fn build_range_breakdown_cached(
     sessions: &[SessionInfo],
-    fleet_entries: &[crate::llm_usage::FleetLlmUsageEntry],
     from_ms: i64,
     to_ms: i64,
     cache: &mut UsageBreakdownCache,
@@ -1555,43 +1513,6 @@ fn build_range_breakdown_cached(
         );
     }
 
-    // Fleet's own LLM calls, folded per model and per day — but only within the
-    // live window `[live_from_date, to_date]`. Older days are served whole from
-    // the report DB (which excludes Fleet overhead), so counting stray older
-    // Fleet entries there would mix口径; the omitted amount is a few $/day.
-    for e in fleet_entries {
-        let edate = local_date_str(e.timestamp_ms as i64);
-        if edate.as_str() < live_from_date.as_str() {
-            continue;
-        }
-        by_model
-            // `llm_usage` records the alias the caller asked for ("haiku"), and
-            // `get_model_costs("haiku")` lands on the Haiku *3.5* tier even
-            // though Fleet calls 4.5. Canonicalise here — at *read* time — so
-            // the fix also covers every alias-tagged entry already on disk.
-            .entry((
-                "fleet".to_string(),
-                crate::llm_usage::canonical_claude_model(&e.model).to_string(),
-            ))
-            .or_default()
-            .add(
-                e.input_tokens,
-                e.cache_creation_tokens,
-                e.cache_creation_1h_tokens,
-                e.cache_read_tokens,
-                e.output_tokens,
-                e.cost_usd,
-            );
-        by_day.entry(edate).or_default().add(
-            e.input_tokens,
-            e.cache_creation_tokens,
-            e.cache_creation_1h_tokens,
-            e.cache_read_tokens,
-            e.output_tokens,
-            e.cost_usd,
-        );
-    }
-
     // Backfill the pre-live-window portion `[from_date, live_from_date)` from the
     // durable daily-report DB. No-op for the today/7d presets (whose `from_date`
     // is already at or after the live floor).
@@ -1604,7 +1525,6 @@ fn build_range_breakdown_cached(
     let mut total_cache_read = 0u64;
     let mut total_output = 0u64;
     let mut agent_cost = 0.0;
-    let mut fleet_cost = 0.0;
     for l in &lines {
         total_input = total_input.saturating_add(l.input_tokens);
         // The line splits its writes by TTL, so the header total takes both rows.
@@ -1613,11 +1533,7 @@ fn build_range_breakdown_cached(
             .saturating_add(l.cache_creation_1h_tokens);
         total_cache_read = total_cache_read.saturating_add(l.cache_read_tokens);
         total_output = total_output.saturating_add(l.output_tokens);
-        if l.source == "fleet" {
-            fleet_cost += l.cost_usd;
-        } else {
-            agent_cost += l.cost_usd;
-        }
+        agent_cost += l.cost_usd;
     }
 
     // Header `from_date` = the earliest day we actually have data for, not the
@@ -1652,9 +1568,12 @@ fn build_range_breakdown_cached(
         total_cache_creation_tokens: total_cache_creation,
         total_cache_read_tokens: total_cache_read,
         total_output_tokens: total_output,
-        total_cost_usd: agent_cost + fleet_cost,
+        total_cost_usd: agent_cost,
         agent_cost_usd: agent_cost,
-        fleet_cost_usd: fleet_cost,
+        // Always 0: Fleet's own overhead is excluded from this receipt (see the
+        // note in `today_usage`). Kept on the wire so mobile clients that read
+        // the split don't see `undefined`.
+        fleet_cost_usd: 0.0,
         has_codex_approximation,
     }
 }
@@ -1865,7 +1784,7 @@ mod breakdown_tests {
             false,
         )];
         let now = chrono::Local::now().timestamp_millis();
-        let b = build_breakdown(&sessions, &[], now);
+        let b = build_breakdown(&sessions, now);
 
         assert_eq!(b.lines.len(), 1, "one model line");
         let l = &b.lines[0];
@@ -1911,7 +1830,7 @@ mod breakdown_tests {
             false,
         )];
         let now = chrono::Local::now().timestamp_millis();
-        let b = build_breakdown(&sessions, &[], now);
+        let b = build_breakdown(&sessions, now);
 
         assert_eq!(b.lines.len(), 2);
         assert_eq!(b.lines[0].model, "claude-opus-4-8", "pricier model first");
@@ -1929,7 +1848,7 @@ mod breakdown_tests {
         // Move creation to well before today's local midnight.
         s.created_at_ms = 1_000_000_000_000; // 2001 — definitely not today
         let now = chrono::Local::now().timestamp_millis();
-        let b = build_breakdown(&[s], &[], now);
+        let b = build_breakdown(&[s], now);
         assert!(b.lines.is_empty(), "yesterday's session excluded");
         assert_eq!(b.total_cost_usd, 0.0);
     }
@@ -1975,7 +1894,7 @@ mod breakdown_tests {
         let mut s = today_session_with_jsonl("codexfold", "codex", "", false);
         s.jsonl_path = format!("codex://{}", path.to_string_lossy());
         let now = chrono::Local::now().timestamp_millis();
-        let b = build_breakdown(&[s], &[], now);
+        let b = build_breakdown(&[s], now);
 
         assert_eq!(
             b.lines.len(),
@@ -2213,7 +2132,7 @@ mod range_breakdown_tests {
         let from = ts(d1) - 1000;
         let to = ts(d2) + 1000;
         let s = claude_session("twoday", from, to, &jsonl);
-        let b = build_range_breakdown(&[s], &[], from, to);
+        let b = build_range_breakdown(&[s], from, to);
 
         assert_eq!(b.daily.len(), 2, "one point per day");
         assert!(b.daily[0].date <= b.daily[1].date, "ascending by date");
@@ -2248,7 +2167,7 @@ mod range_breakdown_tests {
         let from = ts(inside) - 3_600_000; // 1h before
         let to = ts(inside) + 3_600_000; // 1h after
         let s = claude_session("filter", ts(before), ts(after), &jsonl);
-        let b = build_range_breakdown(&[s], &[], from, to);
+        let b = build_range_breakdown(&[s], from, to);
 
         assert_eq!(b.lines.len(), 1);
         assert_eq!(b.daily.len(), 1, "only the in-window day");
@@ -2265,7 +2184,7 @@ mod range_breakdown_tests {
         let s = claude_session("prune", ts(old), ts(old), &jsonl);
         let from = ts("2026-07-15T00:00:00Z");
         let to = ts("2026-07-16T00:00:00Z");
-        let b = build_range_breakdown(&[s], &[], from, to);
+        let b = build_range_breakdown(&[s], from, to);
 
         assert!(b.lines.is_empty());
         assert!(b.daily.is_empty());
@@ -2307,7 +2226,7 @@ mod range_breakdown_tests {
         let s = codex_session("codexin", created, "gpt-5.6-sol", 100_000, 60_000, 4_000);
         let from = ts("2026-07-14T00:00:00Z");
         let to = ts("2026-07-16T00:00:00Z");
-        let b = build_range_breakdown(&[s], &[], from, to);
+        let b = build_range_breakdown(&[s], from, to);
 
         assert!(b.has_codex_approximation, "codex contributed → flag set");
         assert_eq!(b.lines.len(), 1);
@@ -2324,7 +2243,7 @@ mod range_breakdown_tests {
         let s = codex_session("codexout", created, "gpt-5.6-sol", 100_000, 60_000, 4_000);
         let from = ts("2026-07-14T00:00:00Z");
         let to = ts("2026-07-16T00:00:00Z");
-        let b = build_range_breakdown(&[s], &[], from, to);
+        let b = build_range_breakdown(&[s], from, to);
 
         assert!(b.lines.is_empty());
         assert!(b.daily.is_empty());
@@ -2332,36 +2251,113 @@ mod range_breakdown_tests {
     }
 
     #[test]
-    fn fleet_entries_fold_per_day_and_source() {
-        use crate::llm_usage::FleetLlmUsageEntry;
-        let when = ts("2026-07-15T10:00:00Z");
-        let e = FleetLlmUsageEntry {
-            timestamp_ms: when as u64,
+    /// The sidebar's "今日累计" must not count Fleet's own overhead either. This
+    /// one drives the real `today_usage()` (which reads
+    /// `$FLEET_HOME/.fleet/fleet_llm_usage.jsonl`) rather than a pure helper, so
+    /// it seeds a today-stamped entry under a temp home and asserts the badge
+    /// stays at zero with no agent sessions.
+    #[test]
+    fn today_total_excludes_fleet_own_spend() {
+        use crate::llm_usage::{append_usage_entry, FleetLlmUsageEntry};
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        append_usage_entry(&FleetLlmUsageEntry {
+            timestamp_ms: chrono::Local::now().timestamp_millis() as u64,
             scenario: "guard_command".to_string(),
             provider: "claude".to_string(),
-            model: "claude-haiku-4-5".to_string(),
-            input_tokens: 1000,
-            output_tokens: 100,
-            cache_creation_tokens: 0,
-            cache_creation_1h_tokens: 0,
-            cache_read_tokens: 0,
+            model: "haiku".to_string(),
+            input_tokens: 10,
+            output_tokens: 465,
+            cache_creation_tokens: 30_426,
+            cache_creation_1h_tokens: 30_426,
+            cache_read_tokens: 17_464,
             duration_ms: 0,
-            cost_usd: 0.5,
+            cost_usd: 0.0662,
             token_accurate: true,
             cost_accurate: true,
-        };
-        let from = ts("2026-07-14T00:00:00Z");
-        let to = ts("2026-07-16T00:00:00Z");
-        let b = build_range_breakdown(&[], &[e], from, to);
+        });
 
-        assert_eq!(b.lines.len(), 1);
-        assert_eq!(b.lines[0].source, "fleet");
-        assert!((b.fleet_cost_usd - 0.5).abs() < 1e-9);
-        assert!((b.agent_cost_usd - 0.0).abs() < 1e-9);
-        assert_eq!(b.daily.len(), 1);
-        assert_eq!(b.daily[0].date, local_date_str(when));
-        assert!((b.daily[0].cost_usd - 0.5).abs() < 1e-9);
+        let u = today_usage(&[]);
+        std::env::remove_var("FLEET_HOME");
+
+        assert!((u.cost_usd - 0.0).abs() < 1e-9, "今日累计 counted Fleet: ${}", u.cost_usd);
+        assert!((u.fleet_cost_usd - 0.0).abs() < 1e-9);
+        assert_eq!(u.input_tokens, 0, "Fleet's input tokens leaked in");
+        assert_eq!(u.output_tokens, 0, "Fleet's output tokens leaked in");
     }
+
+    /// Same exclusion on the "today" preset, which is the口径 the sidebar badge
+    /// reconciles against. Drives the public `today_usage_breakdown` under a temp
+    /// `$FLEET_HOME` holding a real fleet entry — so it proves the receipt never
+    /// consults `fleet_llm_usage.jsonl`, not merely that a parameter is unused.
+    #[test]
+    fn today_receipt_excludes_fleet_own_spend() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("FLEET_HOME", tmp.path());
+        seed_fleet_entry(chrono::Local::now().timestamp_millis());
+
+        let b = today_usage_breakdown(&[]);
+        std::env::remove_var("FLEET_HOME");
+
+        assert!(b.lines.is_empty(), "fleet opened a line on today's receipt");
+        assert!((b.total_cost_usd - 0.0).abs() < 1e-9);
+        assert_eq!(b.total_output_tokens, 0, "fleet tokens leaked into the header");
+    }
+
+    /// Fleet's own LLM calls (guard analysis, audit-rule suggestions, report
+    /// summaries, session outcome analysis) are Fleet's operational overhead, not
+    /// the user's agent spend, and their accounting can't be made to reconcile:
+    /// entries logged before TTL-aware accounting recorded a truncated input
+    /// figure against a fully-billed cost, and Codex-provider calls are logged
+    /// unpriced (cost 0.0) with char-estimated tokens. So the receipt is
+    /// agent-only. Fleet's own consumption stays visible in Settings → Usage,
+    /// which reads the raw `fleet_llm_usage.jsonl` buckets directly.
+    #[test]
+    fn range_receipt_excludes_fleet_own_spend() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("FLEET_HOME", tmp.path());
+        let when = chrono::Local::now().timestamp_millis();
+        seed_fleet_entry(when);
+
+        let b = usage_range_breakdown(&[], when - 86_400_000, when + 1000);
+        std::env::remove_var("FLEET_HOME");
+
+        assert!(
+            b.lines.iter().all(|l| l.source != "fleet"),
+            "fleet line still on the receipt: {:?}",
+            b.lines.iter().map(|l| &l.source).collect::<Vec<_>>()
+        );
+        assert!((b.fleet_cost_usd - 0.0).abs() < 1e-9, "fleet cost leaked into the split");
+        assert!(
+            b.daily.iter().all(|d| d.cost_usd == 0.0),
+            "fleet spend leaked into the daily trend"
+        );
+    }
+
+    /// Append one today-stamped Fleet entry to `$FLEET_HOME/.fleet/`. Numbers are
+    /// a real logged guard call (Haiku 4.5, 1h cache writes).
+    fn seed_fleet_entry(timestamp_ms: i64) {
+        crate::llm_usage::append_usage_entry(&crate::llm_usage::FleetLlmUsageEntry {
+            timestamp_ms: timestamp_ms.max(0) as u64,
+            scenario: "guard_command".to_string(),
+            provider: "claude".to_string(),
+            model: "haiku".to_string(),
+            input_tokens: 10,
+            output_tokens: 465,
+            cache_creation_tokens: 30_426,
+            cache_creation_1h_tokens: 30_426,
+            cache_read_tokens: 17_464,
+            duration_ms: 0,
+            cost_usd: 0.0662,
+            token_accurate: true,
+            cost_accurate: true,
+        });
+    }
+
 
     /// A `<synthetic>` control turn must not open a receipt line of its own:
     /// it is not a model, so `get_model_costs` prices it at the unknown-model
@@ -2480,30 +2476,20 @@ mod range_breakdown_tests {
     /// $1.25/M the rows would only add up to $1.25 under a $2.00 subtotal.
     #[test]
     fn receipt_line_rows_sum_to_its_subtotal() {
-        use crate::llm_usage::FleetLlmUsageEntry;
-        let when = ts("2026-07-15T10:00:00Z");
-        let e = FleetLlmUsageEntry {
-            timestamp_ms: when as u64,
-            scenario: "guard_command".to_string(),
-            provider: "claude".to_string(),
-            model: "haiku".to_string(),
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_creation_tokens: 1_000_000,
-            cache_creation_1h_tokens: 1_000_000,
-            cache_read_tokens: 0,
-            duration_ms: 0,
-            // What the CLI would report: 1M 1h writes at 2× Haiku 4.5's $1 input.
-            cost_usd: 2.0,
-            token_accurate: true,
-            cost_accurate: true,
-        };
-        let b = build_range_breakdown(
-            &[],
-            &[e],
-            ts("2026-07-14T00:00:00Z"),
-            ts("2026-07-16T00:00:00Z"),
+        // A real transcript turn whose cache writes are all 1-hour TTL — the
+        // shape Claude Code actually produces. Opus 4.8: 1M 1h writes = $10.00,
+        // plus 1M input ($5) and 1M output ($25).
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-15T10:00:00.000Z","message":{"id":"a","model":"claude-opus-4-8","#,
+            r#""stop_reason":"end_turn","usage":{"input_tokens":1000000,"output_tokens":1000000,"#,
+            r#""cache_creation_input_tokens":1000000,"cache_read_input_tokens":0,"#,
+            r#""cache_creation":{"ephemeral_1h_input_tokens":1000000,"ephemeral_5m_input_tokens":0}}}}"#,
         );
+        let from = ts("2026-07-14T00:00:00Z");
+        let to = ts("2026-07-16T00:00:00Z");
+        let sess = claude_session("rows-reconcile", ts("2026-07-15T09:00:00Z"), to, jsonl);
+        let b = build_range_breakdown(&[sess], from, to);
+
         let l = &b.lines[0];
         let per_m = |tok: u64, price: f64| (tok as f64 / 1_000_000.0) * price;
         let rows = per_m(l.input_tokens, l.input_price)
@@ -2516,46 +2502,9 @@ mod range_breakdown_tests {
             "rows ${rows} vs subtotal ${}",
             l.cost_usd
         );
+        assert!((l.cost_usd - 40.0).abs() < 1e-9, "expected $40.00, got ${}", l.cost_usd);
     }
 
-    /// `llm_usage` logs the model as the alias the caller asked for ("haiku"),
-    /// and `get_model_costs("haiku")` falls into the **Haiku 3.5** tier
-    /// ($0.80/$4) even though Fleet actually calls Haiku 4.5 ($1/$5). Every
-    /// Fleet line already on disk carries such an alias, so the receipt has to
-    /// canonicalise at read time — not just at write time.
-    #[test]
-    fn fleet_line_prices_model_aliases_at_their_real_tier() {
-        use crate::llm_usage::FleetLlmUsageEntry;
-        let when = ts("2026-07-15T10:00:00Z");
-        let entry = |model: &str| FleetLlmUsageEntry {
-            timestamp_ms: when as u64,
-            scenario: "guard_command".to_string(),
-            provider: "claude".to_string(),
-            model: model.to_string(),
-            input_tokens: 1000,
-            output_tokens: 100,
-            cache_creation_tokens: 0,
-            cache_creation_1h_tokens: 0,
-            cache_read_tokens: 0,
-            duration_ms: 0,
-            cost_usd: 0.5,
-            token_accurate: true,
-            cost_accurate: true,
-        };
-        let from = ts("2026-07-14T00:00:00Z");
-        let to = ts("2026-07-16T00:00:00Z");
-
-        // ("haiku", Haiku 4.5), ("sonnet", Sonnet 5), ("opus", Opus 4.8), ("fable", Fable 5)
-        for (alias, want_input_price) in [("haiku", 1.0), ("sonnet", 3.0), ("opus", 5.0), ("fable", 10.0)] {
-            let b = build_range_breakdown(&[], &[entry(alias)], from, to);
-            assert_eq!(b.lines.len(), 1, "alias {alias}");
-            assert!(
-                (b.lines[0].input_price - want_input_price).abs() < 1e-9,
-                "alias {alias}: input price ${}, expected ${want_input_price}",
-                b.lines[0].input_price
-            );
-        }
-    }
 
     /// The cache-ready `(date, model)` cells must reconstruct BOTH receipts
     /// bit-for-bit: whole-table sum == today's `fold_session_turns` (undated
