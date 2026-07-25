@@ -977,7 +977,10 @@ fn codex_cost_and_input(lines: &[Value], model: Option<&str>) -> (f64, u64) {
             input_tokens: input - cached,
             output_tokens: output,
             cache_read_tokens: cached,
+            // Codex rollouts report no cache writes at all, so there is no TTL
+            // split to bill — both figures stay 0.
             cache_creation_tokens: 0,
+            cache_creation_1h_tokens: 0,
             web_search_requests: 0,
         };
         let cost = crate::model_cost::turn_cost_usd(model.unwrap_or("gpt"), &turn);

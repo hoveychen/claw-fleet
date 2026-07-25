@@ -205,8 +205,16 @@ pub struct ModelReceiptLine {
     /// Agent source that ran this model: `claude-code`, `codex`, or `fleet`
     /// (Fleet's own guard / audit / report-summary LLM calls).
     pub source: String,
+    /// Net input tokens — cache writes and reads are itemised separately below,
+    /// so this must NOT be the all-inclusive "tokens sent to the API" figure
+    /// (see `fold_report_model`, which nets the report DB's inclusive count).
     pub input_tokens: u64,
+    /// Cache-write tokens at the 5-minute TTL, priced at `cache_write_price`.
     pub cache_creation_tokens: u64,
+    /// Cache-write tokens at the 1-hour TTL, priced at `cache_write_1h_price`
+    /// (2× input, vs 1.25× for 5-minute writes). Split out rather than blended
+    /// so `Σ (tokens × unit price) == cost_usd` still holds for the UI.
+    pub cache_creation_1h_tokens: u64,
     pub cache_read_tokens: u64,
     pub output_tokens: u64,
     /// Official unit prices in USD per 1M tokens, for the receipt's "@ $X/M"
@@ -214,8 +222,10 @@ pub struct ModelReceiptLine {
     pub input_price: f64,
     pub output_price: f64,
     pub cache_write_price: f64,
+    pub cache_write_1h_price: f64,
     pub cache_read_price: f64,
-    /// Line cost = Σ per-turn `turn_cost_usd` for this (source, model).
+    /// Line cost = Σ per-turn `turn_cost_usd` for this (source, model). Equals
+    /// the sum of this line's itemised rows.
     pub cost_usd: f64,
 }
 
@@ -244,16 +254,30 @@ pub struct TodayUsageBreakdown {
 struct LineAcc {
     input: u64,
     cache_creation: u64,
+    /// The 1-hour-TTL subset of `cache_creation`, billed at 2× input instead of
+    /// 1.25×. Tracked separately so the receipt can itemise the two write rates
+    /// and still have `Σ rows == cost`.
+    cache_creation_1h: u64,
     cache_read: u64,
     output: u64,
     cost: f64,
 }
 
 impl LineAcc {
-    /// Fold one turn's tokens + cost into this accumulator.
-    fn add(&mut self, input: u64, cache_creation: u64, cache_read: u64, output: u64, cost: f64) {
+    /// Fold one turn's tokens + cost into this accumulator. `cache_creation_1h`
+    /// is the 1-hour-TTL *subset* of `cache_creation`, never additive on top.
+    fn add(
+        &mut self,
+        input: u64,
+        cache_creation: u64,
+        cache_creation_1h: u64,
+        cache_read: u64,
+        output: u64,
+        cost: f64,
+    ) {
         self.input += input;
         self.cache_creation += cache_creation;
+        self.cache_creation_1h += cache_creation_1h;
         self.cache_read += cache_read;
         self.output += output;
         self.cost += cost;
@@ -321,7 +345,12 @@ fn fold_session_turns(
             .and_then(|t| t.as_u64())
             .unwrap_or(0);
 
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        // Placeholder ids (`<synthetic>` control turns, `unknown`) never open a
+        // line of their own; their usage folds under the real model in flight.
+        let turn_model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .filter(|m| crate::session::is_real_model_id(m));
         if let Some(m) = turn_model {
             last_model = Some(m.to_string());
         }
@@ -336,6 +365,7 @@ fn fold_session_turns(
                 input_tokens: input,
                 output_tokens: output,
                 cache_creation_tokens: cache_creation,
+                cache_creation_1h_tokens: crate::model_cost::parse_cache_creation_1h(usage),
                 cache_read_tokens: cache_read,
                 web_search_requests: web_search,
             },
@@ -344,7 +374,14 @@ fn fold_session_turns(
         by_model
             .entry((source.to_string(), model))
             .or_default()
-            .add(input, cache_creation, cache_read, output, cost);
+            .add(
+                input,
+                cache_creation,
+                crate::model_cost::parse_cache_creation_1h(usage),
+                cache_read,
+                output,
+                cost,
+            );
     }
 }
 
@@ -378,7 +415,7 @@ fn fold_codex_session(
     by_model
         .entry(("codex".to_string(), key_model))
         .or_default()
-        .add(bd.input_tokens, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
+        .add(bd.input_tokens, 0, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
 }
 
 /// Build today's per-model receipt on the same口径 as [`today_usage`].
@@ -449,11 +486,19 @@ fn build_breakdown_cached(
     // Fleet's own LLM calls today, folded per model.
     for e in fleet_entries {
         by_model
-            .entry(("fleet".to_string(), e.model.clone()))
+            // `llm_usage` records the alias the caller asked for ("haiku"), and
+            // `get_model_costs("haiku")` lands on the Haiku *3.5* tier even
+            // though Fleet calls 4.5. Canonicalise here — at *read* time — so
+            // the fix also covers every alias-tagged entry already on disk.
+            .entry((
+                "fleet".to_string(),
+                crate::llm_usage::canonical_claude_model(&e.model).to_string(),
+            ))
             .or_default()
             .add(
                 e.input_tokens,
                 e.cache_creation_tokens,
+                e.cache_creation_1h_tokens,
                 e.cache_read_tokens,
                 e.output_tokens,
                 e.cost_usd,
@@ -470,7 +515,10 @@ fn build_breakdown_cached(
     let mut fleet_cost = 0.0;
     for l in &lines {
         total_input = total_input.saturating_add(l.input_tokens);
-        total_cache_creation = total_cache_creation.saturating_add(l.cache_creation_tokens);
+        // The line splits its writes by TTL, so the header total takes both rows.
+        total_cache_creation = total_cache_creation
+            .saturating_add(l.cache_creation_tokens)
+            .saturating_add(l.cache_creation_1h_tokens);
         total_cache_read = total_cache_read.saturating_add(l.cache_read_tokens);
         total_output = total_output.saturating_add(l.output_tokens);
         if l.source == "fleet" {
@@ -505,16 +553,22 @@ fn build_lines(
         .into_iter()
         .map(|((source, model), acc)| {
             let c = get_model_costs(&model);
+            // `acc.cache_creation` is the total; the 1h figure is its subset, so
+            // the 5-minute row is the remainder. saturating_sub keeps a
+            // malformed pair from wrapping the row into nonsense.
+            let write_1h = acc.cache_creation_1h.min(acc.cache_creation);
             ModelReceiptLine {
                 model,
                 source,
                 input_tokens: acc.input,
-                cache_creation_tokens: acc.cache_creation,
+                cache_creation_tokens: acc.cache_creation.saturating_sub(write_1h),
+                cache_creation_1h_tokens: write_1h,
                 cache_read_tokens: acc.cache_read,
                 output_tokens: acc.output,
                 input_price: c.input,
                 output_price: c.output,
                 cache_write_price: c.cache_write,
+                cache_write_1h_price: c.cache_write_1h,
                 cache_read_price: c.cache_read,
                 cost_usd: acc.cost,
             }
@@ -650,7 +704,12 @@ fn fold_session_turns_range(
         }
 
         // Advance model tracking even for out-of-window / undated turns.
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        // Placeholder ids (`<synthetic>` control turns, `unknown`) never open a
+        // line of their own; their usage folds under the real model in flight.
+        let turn_model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .filter(|m| crate::session::is_real_model_id(m));
         if let Some(m) = turn_model {
             last_model = Some(m.to_string());
         }
@@ -701,19 +760,25 @@ fn fold_session_turns_range(
                 input_tokens: input,
                 output_tokens: output,
                 cache_creation_tokens: cache_creation,
+                cache_creation_1h_tokens: crate::model_cost::parse_cache_creation_1h(usage),
                 cache_read_tokens: cache_read,
                 web_search_requests: web_search,
             },
         );
 
+        let cache_creation_1h = crate::model_cost::parse_cache_creation_1h(usage);
         by_model
             .entry((source.to_string(), model))
             .or_default()
-            .add(input, cache_creation, cache_read, output, cost);
-        by_day
-            .entry(local_date_str(ts_ms))
-            .or_default()
-            .add(input, cache_creation, cache_read, output, cost);
+            .add(input, cache_creation, cache_creation_1h, cache_read, output, cost);
+        by_day.entry(local_date_str(ts_ms)).or_default().add(
+            input,
+            cache_creation,
+            cache_creation_1h,
+            cache_read,
+            output,
+            cost,
+        );
     }
 }
 
@@ -739,11 +804,11 @@ fn fold_codex_session_range(
     by_model
         .entry(("codex".to_string(), key_model))
         .or_default()
-        .add(bd.input_tokens, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
+        .add(bd.input_tokens, 0, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
     by_day
         .entry(local_date_str(attribute_ms))
         .or_default()
-        .add(bd.input_tokens, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
+        .add(bd.input_tokens, 0, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
     true
 }
 
@@ -805,7 +870,12 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
         }
 
         // Advance model tracking even for undated turns (matches the range folder).
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        // Placeholder ids (`<synthetic>` control turns, `unknown`) never open a
+        // line of their own; their usage folds under the real model in flight.
+        let turn_model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .filter(|m| crate::session::is_real_model_id(m));
         if let Some(m) = turn_model {
             last_model = Some(m.to_string());
         }
@@ -841,6 +911,8 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
             .and_then(|t| t.as_u64())
             .unwrap_or(0);
 
+        let cache_creation_1h = crate::model_cost::parse_cache_creation_1h(usage);
+
         let model = turn_model
             .map(|s| s.to_string())
             .or_else(|| last_model.clone())
@@ -851,6 +923,7 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
                 input_tokens: input,
                 output_tokens: output,
                 cache_creation_tokens: cache_creation,
+                cache_creation_1h_tokens: cache_creation_1h,
                 cache_read_tokens: cache_read,
                 web_search_requests: web_search,
             },
@@ -859,7 +932,7 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
         cells
             .entry((date, model))
             .or_default()
-            .add(input, cache_creation, cache_read, output, cost);
+            .add(input, cache_creation, cache_creation_1h, cache_read, output, cost);
     }
     cells
 }
@@ -880,7 +953,7 @@ fn fold_codex_session_cells(uri: &str, attribute_ms: i64) -> SessionCells {
     cells
         .entry((local_date_str(attribute_ms), model))
         .or_default()
-        .add(bd.input_tokens, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
+        .add(bd.input_tokens, 0, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
     cells
 }
 
@@ -894,7 +967,14 @@ fn sum_cells_all(
         by_model
             .entry((source.to_string(), model.clone()))
             .or_default()
-            .add(acc.input, acc.cache_creation, acc.cache_read, acc.output, acc.cost);
+            .add(
+                acc.input,
+                acc.cache_creation,
+                acc.cache_creation_1h,
+                acc.cache_read,
+                acc.output,
+                acc.cost,
+            );
     }
 }
 
@@ -916,11 +996,22 @@ fn sum_cells_window(
         by_model
             .entry((source.to_string(), model.clone()))
             .or_default()
-            .add(acc.input, acc.cache_creation, acc.cache_read, acc.output, acc.cost);
-        by_day
-            .entry(date.clone())
-            .or_default()
-            .add(acc.input, acc.cache_creation, acc.cache_read, acc.output, acc.cost);
+            .add(
+                acc.input,
+                acc.cache_creation,
+                acc.cache_creation_1h,
+                acc.cache_read,
+                acc.output,
+                acc.cost,
+            );
+        by_day.entry(date.clone()).or_default().add(
+            acc.input,
+            acc.cache_creation,
+            acc.cache_creation_1h,
+            acc.cache_read,
+            acc.output,
+            acc.cost,
+        );
     }
 }
 
@@ -1025,7 +1116,7 @@ fn live_ids(sessions: &[SessionInfo]) -> std::collections::HashSet<&str> {
 // fold semantics change so stale files are discarded rather than mis-read.
 
 /// Bump when the cell shape or the projection semantics change.
-const CACHE_SCHEMA_VERSION: u32 = 1;
+const CACHE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PersistedCell {
@@ -1033,6 +1124,8 @@ struct PersistedCell {
     model: String,
     input: u64,
     cache_creation: u64,
+    #[serde(default)]
+    cache_creation_1h: u64,
     cache_read: u64,
     output: u64,
     cost: f64,
@@ -1064,6 +1157,7 @@ impl UsageBreakdownCache {
                         model: model.clone(),
                         input: acc.input,
                         cache_creation: acc.cache_creation,
+                        cache_creation_1h: acc.cache_creation_1h,
                         cache_read: acc.cache_read,
                         output: acc.output,
                         cost: acc.cost,
@@ -1097,7 +1191,14 @@ impl UsageBreakdownCache {
                 let mut cells = SessionCells::new();
                 for c in e.cells {
                     let mut acc = LineAcc::default();
-                    acc.add(c.input, c.cache_creation, c.cache_read, c.output, c.cost);
+                    acc.add(
+                        c.input,
+                        c.cache_creation,
+                        c.cache_creation_1h,
+                        c.cache_read,
+                        c.output,
+                        c.cost,
+                    );
                     cells.insert((c.date, c.model), acc);
                 }
                 (
@@ -1280,7 +1381,6 @@ fn fold_report_days(
     by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
     by_day: &mut std::collections::BTreeMap<String, LineAcc>,
 ) {
-    use crate::model_cost::{turn_cost_usd, TurnUsage};
     if from_date >= upto_exclusive {
         return; // live pool already covers the whole requested window
     }
@@ -1299,37 +1399,91 @@ fn fold_report_days(
             continue;
         };
         for (model, mt) in &report.metrics.model_breakdown {
-            let cost = if mt.cost_usd > 0.0 {
-                mt.cost_usd
-            } else {
-                turn_cost_usd(
-                    model,
-                    &TurnUsage {
-                        input_tokens: mt.input_tokens,
-                        output_tokens: mt.output_tokens,
-                        cache_creation_tokens: mt.cache_creation_tokens,
-                        cache_read_tokens: mt.cache_read_tokens,
-                        web_search_requests: 0,
-                    },
-                )
-            };
-            let source = infer_report_source(model);
-            by_model.entry((source, model.clone())).or_default().add(
-                mt.input_tokens,
-                mt.cache_creation_tokens,
-                mt.cache_read_tokens,
-                mt.output_tokens,
-                cost,
-            );
-            by_day.entry(date.clone()).or_default().add(
-                mt.input_tokens,
-                mt.cache_creation_tokens,
-                mt.cache_read_tokens,
-                mt.output_tokens,
-                cost,
-            );
+            fold_report_model(&date, model, mt, by_model, by_day);
         }
     }
+}
+
+/// Fold one report day's `(model, ModelTokens)` entry into the receipt
+/// accumulators. Split out of [`fold_report_days`] so the口径 conversion below
+/// is testable without a report DB on disk.
+///
+/// **The口径 conversion:** `ModelTokens::input_tokens` is
+/// `Σ(input + cache_write + cache_read)` — every token sent to the API, matching
+/// the stored `cost_usd`. The receipt itemises input *separately* from the two
+/// cache rows, so the cache figures must be netted out or the Input row shows
+/// the whole API-side volume at the full input price while the cache rows list
+/// it a second time (opus-4-8 over 30 days: a $92k itemisation under a $17.6k
+/// subtotal).
+fn fold_report_model(
+    date: &str,
+    model: &str,
+    mt: &crate::daily_report::ModelTokens,
+    by_model: &mut std::collections::HashMap<(String, String), LineAcc>,
+    by_day: &mut std::collections::BTreeMap<String, LineAcc>,
+) {
+    use crate::model_cost::{turn_cost_usd, TurnUsage};
+
+    // saturating_sub: a v0/legacy report whose `input_tokens` predates the
+    // all-inclusive口径 can be smaller than its own cache figures; clamping to 0
+    // is the honest answer there rather than wrapping to ~1.8e19.
+    let net_input = mt
+        .input_tokens
+        .saturating_sub(mt.cache_creation_tokens)
+        .saturating_sub(mt.cache_read_tokens);
+
+    let cost = if mt.cost_usd > 0.0 {
+        mt.cost_usd
+    } else {
+        // Pre-cost (v0) reports: recompute so ancient days show an approximate
+        // figure instead of $0. Prices the netted input, not the inclusive
+        // total — charging the full input rate on tokens the cache rows already
+        // bill is exactly the double-count above.
+        turn_cost_usd(
+            model,
+            &TurnUsage {
+                input_tokens: net_input,
+                output_tokens: mt.output_tokens,
+                cache_creation_tokens: mt.cache_creation_tokens,
+                // Reports written before TTL-aware pricing carry no 1h subset,
+                // so their writes can only be priced at the 5-minute rate.
+                cache_creation_1h_tokens: mt.cache_creation_1h_tokens,
+                cache_read_tokens: mt.cache_read_tokens,
+                web_search_requests: 0,
+            },
+        )
+    };
+
+    // Report rows written before the placeholder guard landed are keyed under
+    // `<synthetic>` — real money from a session whose model was never recorded.
+    // They can't be re-attributed (the transcripts are gone), so collapse them
+    // into the `unknown` placeholder the rest of the codebase already uses
+    // instead of presenting a control-turn marker as if it were a model.
+    let model = if crate::session::is_real_model_id(model) {
+        model
+    } else {
+        "unknown"
+    };
+    let source = infer_report_source(model);
+    by_model
+        .entry((source, model.to_string()))
+        .or_default()
+        .add(
+            net_input,
+            mt.cache_creation_tokens,
+            mt.cache_creation_1h_tokens,
+            mt.cache_read_tokens,
+            mt.output_tokens,
+            cost,
+        );
+    by_day.entry(date.to_string()).or_default().add(
+        net_input,
+        mt.cache_creation_tokens,
+        mt.cache_creation_1h_tokens,
+        mt.cache_read_tokens,
+        mt.output_tokens,
+        cost,
+    );
 }
 
 fn build_range_breakdown_cached(
@@ -1411,11 +1565,19 @@ fn build_range_breakdown_cached(
             continue;
         }
         by_model
-            .entry(("fleet".to_string(), e.model.clone()))
+            // `llm_usage` records the alias the caller asked for ("haiku"), and
+            // `get_model_costs("haiku")` lands on the Haiku *3.5* tier even
+            // though Fleet calls 4.5. Canonicalise here — at *read* time — so
+            // the fix also covers every alias-tagged entry already on disk.
+            .entry((
+                "fleet".to_string(),
+                crate::llm_usage::canonical_claude_model(&e.model).to_string(),
+            ))
             .or_default()
             .add(
                 e.input_tokens,
                 e.cache_creation_tokens,
+                e.cache_creation_1h_tokens,
                 e.cache_read_tokens,
                 e.output_tokens,
                 e.cost_usd,
@@ -1423,6 +1585,7 @@ fn build_range_breakdown_cached(
         by_day.entry(edate).or_default().add(
             e.input_tokens,
             e.cache_creation_tokens,
+            e.cache_creation_1h_tokens,
             e.cache_read_tokens,
             e.output_tokens,
             e.cost_usd,
@@ -1444,7 +1607,10 @@ fn build_range_breakdown_cached(
     let mut fleet_cost = 0.0;
     for l in &lines {
         total_input = total_input.saturating_add(l.input_tokens);
-        total_cache_creation = total_cache_creation.saturating_add(l.cache_creation_tokens);
+        // The line splits its writes by TTL, so the header total takes both rows.
+        total_cache_creation = total_cache_creation
+            .saturating_add(l.cache_creation_tokens)
+            .saturating_add(l.cache_creation_1h_tokens);
         total_cache_read = total_cache_read.saturating_add(l.cache_read_tokens);
         total_output = total_output.saturating_add(l.output_tokens);
         if l.source == "fleet" {
@@ -1836,6 +2002,7 @@ mod breakdown_tests {
                 input_tokens: 40_000,
                 output_tokens: 4_000,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
                 cache_read_tokens: 60_000,
                 web_search_requests: 0,
             },
@@ -1910,7 +2077,7 @@ mod range_breakdown_tests {
         // Pre-seed a distinctive cell under this session's current fingerprint.
         let mut seeded = SessionCells::new();
         let mut acc = LineAcc::default();
-        acc.add(11, 0, 0, 7, 0.25);
+        acc.add(11, 0, 0, 0, 7, 0.25);
         seeded.insert(("2026-07-21".to_string(), "m".to_string()), acc);
         cache.entries.insert(
             s.id.clone(),
@@ -1949,7 +2116,7 @@ mod range_breakdown_tests {
         let mut cache = UsageBreakdownCache::default();
         let mut cells = SessionCells::new();
         let mut acc = LineAcc::default();
-        acc.add(100, 5, 50, 20, 1.5);
+        acc.add(100, 5, 3, 50, 20, 1.5);
         cells.insert(("2026-07-21".to_string(), "claude-opus-4-8".to_string()), acc);
         cache.entries.insert(
             "s1".to_string(),
@@ -2176,6 +2343,7 @@ mod range_breakdown_tests {
             input_tokens: 1000,
             output_tokens: 100,
             cache_creation_tokens: 0,
+            cache_creation_1h_tokens: 0,
             cache_read_tokens: 0,
             duration_ms: 0,
             cost_usd: 0.5,
@@ -2193,6 +2361,200 @@ mod range_breakdown_tests {
         assert_eq!(b.daily.len(), 1);
         assert_eq!(b.daily[0].date, local_date_str(when));
         assert!((b.daily[0].cost_usd - 0.5).abs() < 1e-9);
+    }
+
+    /// A `<synthetic>` control turn must not open a receipt line of its own:
+    /// it is not a model, so `get_model_costs` prices it at the unknown-model
+    /// fallback. Its usage belongs to the conversation's real model — the same
+    /// rule `session::parse` already applies when picking a session's model.
+    #[test]
+    fn synthetic_control_turns_fold_under_the_real_model() {
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-20T10:00:00.000Z","message":{"id":"a","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-07-20T10:01:00.000Z","message":{"id":"b","model":"<synthetic>","stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#,
+        );
+        let cells = fold_claude_session_cells(jsonl);
+        let models: Vec<&str> = cells.keys().map(|(_, m)| m.as_str()).collect();
+        assert!(
+            !models.contains(&"<synthetic>"),
+            "control turn opened its own line: {models:?}"
+        );
+        let acc = cells
+            .get(&("2026-07-20".to_string(), "claude-opus-4-8".to_string()))
+            .expect("real-model cell");
+        assert_eq!(acc.input, 107, "control turn's usage folds into the real model");
+        assert_eq!(acc.output, 23);
+    }
+
+    /// The report DB stores `inputTokens` as `Σ(input + cache_write +
+    /// cache_read)` — every token sent to the API, matching its `cost_usd`. The
+    /// receipt itemises input separately from the two cache rows, so the fold
+    /// has to net them out. Left inclusive, the Input row shows the whole
+    /// API-side volume at the full input price *and* the cache rows list it
+    /// again (opus-4-8 over 30 days: a $92k itemisation under a $17.6k
+    /// subtotal).
+    #[test]
+    fn report_fold_nets_cache_out_of_the_input_row() {
+        use crate::daily_report::ModelTokens;
+        let mt = ModelTokens {
+            // 700 net input + 200 cache writes + 100 cache reads = 1000 sent.
+            input_tokens: 1000,
+            output_tokens: 50,
+            cache_creation_tokens: 200,
+            cache_creation_1h_tokens: 200,
+            cache_read_tokens: 100,
+            cost_usd: 1.23,
+        };
+        let mut by_model = std::collections::HashMap::new();
+        let mut by_day = std::collections::BTreeMap::new();
+        fold_report_model(
+            "2026-07-01",
+            "claude-opus-4-8",
+            &mt,
+            &mut by_model,
+            &mut by_day,
+        );
+
+        let acc = by_model
+            .get(&("claude-code".to_string(), "claude-opus-4-8".to_string()))
+            .expect("line keyed by inferred source");
+        assert_eq!(acc.input, 700, "input row must be net of both cache figures");
+        assert_eq!(acc.cache_creation, 200);
+        assert_eq!(acc.cache_creation_1h, 200);
+        assert_eq!(acc.cache_read, 100);
+        assert!((acc.cost - 1.23).abs() < 1e-9, "stored cost passes through");
+        assert_eq!(by_day["2026-07-01"].input, 700, "the trend nets it too");
+    }
+
+    /// Report rows already on disk keyed under `<synthetic>` hold real money from
+    /// a session whose model was never recorded. They can't be re-attributed, so
+    /// they must at least stop masquerading as a model: collapse to `unknown`.
+    #[test]
+    fn report_fold_collapses_placeholder_models_to_unknown() {
+        use crate::daily_report::ModelTokens;
+        let mt = ModelTokens {
+            input_tokens: 1000,
+            output_tokens: 50,
+            cache_creation_tokens: 200,
+            cache_creation_1h_tokens: 0,
+            cache_read_tokens: 100,
+            cost_usd: 62.42,
+        };
+        let mut by_model = std::collections::HashMap::new();
+        let mut by_day = std::collections::BTreeMap::new();
+        fold_report_model("2026-07-24", "<synthetic>", &mt, &mut by_model, &mut by_day);
+        let keys: Vec<&(String, String)> = by_model.keys().collect();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].1, "unknown", "placeholder must not name a line");
+        // The money stays on the receipt — the grand total is derived from lines.
+        assert!((by_model.values().next().unwrap().cost - 62.42).abs() < 1e-9);
+    }
+
+    /// A legacy report whose `input_tokens` predates the all-inclusive口径 can be
+    /// smaller than its own cache figures; the fold must clamp to 0 rather than
+    /// wrap a u64 subtraction into ~1.8e19 tokens.
+    #[test]
+    fn report_fold_clamps_when_input_is_smaller_than_cache() {
+        use crate::daily_report::ModelTokens;
+        let mt = ModelTokens {
+            input_tokens: 50,
+            output_tokens: 10,
+            cache_creation_tokens: 200,
+            cache_creation_1h_tokens: 0,
+            cache_read_tokens: 900,
+            cost_usd: 0.5,
+        };
+        let mut by_model = std::collections::HashMap::new();
+        let mut by_day = std::collections::BTreeMap::new();
+        fold_report_model("2026-04-20", "claude-opus-4-8", &mt, &mut by_model, &mut by_day);
+        let acc = by_model.values().next().unwrap();
+        assert_eq!(acc.input, 0, "clamped, not wrapped");
+    }
+
+    /// **The receipt invariant:** every itemised row the UI renders is
+    /// `tokens × unit price`, so their sum must equal the line's own subtotal.
+    /// A line whose cache writes are 1-hour TTL breaks that unless the line
+    /// exposes the two write rates separately — the UI can't price a blended
+    /// bucket. 1M of Haiku 4.5 1h writes costs $2.00; billed at the 5-minute
+    /// $1.25/M the rows would only add up to $1.25 under a $2.00 subtotal.
+    #[test]
+    fn receipt_line_rows_sum_to_its_subtotal() {
+        use crate::llm_usage::FleetLlmUsageEntry;
+        let when = ts("2026-07-15T10:00:00Z");
+        let e = FleetLlmUsageEntry {
+            timestamp_ms: when as u64,
+            scenario: "guard_command".to_string(),
+            provider: "claude".to_string(),
+            model: "haiku".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 1_000_000,
+            cache_creation_1h_tokens: 1_000_000,
+            cache_read_tokens: 0,
+            duration_ms: 0,
+            // What the CLI would report: 1M 1h writes at 2× Haiku 4.5's $1 input.
+            cost_usd: 2.0,
+            token_accurate: true,
+            cost_accurate: true,
+        };
+        let b = build_range_breakdown(
+            &[],
+            &[e],
+            ts("2026-07-14T00:00:00Z"),
+            ts("2026-07-16T00:00:00Z"),
+        );
+        let l = &b.lines[0];
+        let per_m = |tok: u64, price: f64| (tok as f64 / 1_000_000.0) * price;
+        let rows = per_m(l.input_tokens, l.input_price)
+            + per_m(l.cache_creation_tokens, l.cache_write_price)
+            + per_m(l.cache_creation_1h_tokens, l.cache_write_1h_price)
+            + per_m(l.cache_read_tokens, l.cache_read_price)
+            + per_m(l.output_tokens, l.output_price);
+        assert!(
+            (rows - l.cost_usd).abs() < 1e-9,
+            "rows ${rows} vs subtotal ${}",
+            l.cost_usd
+        );
+    }
+
+    /// `llm_usage` logs the model as the alias the caller asked for ("haiku"),
+    /// and `get_model_costs("haiku")` falls into the **Haiku 3.5** tier
+    /// ($0.80/$4) even though Fleet actually calls Haiku 4.5 ($1/$5). Every
+    /// Fleet line already on disk carries such an alias, so the receipt has to
+    /// canonicalise at read time — not just at write time.
+    #[test]
+    fn fleet_line_prices_model_aliases_at_their_real_tier() {
+        use crate::llm_usage::FleetLlmUsageEntry;
+        let when = ts("2026-07-15T10:00:00Z");
+        let entry = |model: &str| FleetLlmUsageEntry {
+            timestamp_ms: when as u64,
+            scenario: "guard_command".to_string(),
+            provider: "claude".to_string(),
+            model: model.to_string(),
+            input_tokens: 1000,
+            output_tokens: 100,
+            cache_creation_tokens: 0,
+            cache_creation_1h_tokens: 0,
+            cache_read_tokens: 0,
+            duration_ms: 0,
+            cost_usd: 0.5,
+            token_accurate: true,
+            cost_accurate: true,
+        };
+        let from = ts("2026-07-14T00:00:00Z");
+        let to = ts("2026-07-16T00:00:00Z");
+
+        // ("haiku", Haiku 4.5), ("sonnet", Sonnet 5), ("opus", Opus 4.8), ("fable", Fable 5)
+        for (alias, want_input_price) in [("haiku", 1.0), ("sonnet", 3.0), ("opus", 5.0), ("fable", 10.0)] {
+            let b = build_range_breakdown(&[], &[entry(alias)], from, to);
+            assert_eq!(b.lines.len(), 1, "alias {alias}");
+            assert!(
+                (b.lines[0].input_price - want_input_price).abs() < 1e-9,
+                "alias {alias}: input price ${}, expected ${want_input_price}",
+                b.lines[0].input_price
+            );
+        }
     }
 
     /// The cache-ready `(date, model)` cells must reconstruct BOTH receipts
@@ -2249,6 +2611,46 @@ mod range_breakdown_tests {
         // The undated turn `c` lands in the "" bucket and never reaches the trend.
         assert!(cells.keys().any(|(d, _)| d.is_empty()), "undated turn not bucketed");
         assert!(!new_day.keys().any(|d| d.is_empty()), "range trend leaked an undated turn");
+    }
+
+    /// Cache writes carry a TTL and Anthropic prices the two tiers differently:
+    /// an `ephemeral_5m` write costs 1.25× the model's input rate, an
+    /// `ephemeral_1h` write costs 2×. The numbers below come from a real
+    /// `claude -p --model haiku --output-format json` probe (2026-07-25) whose
+    /// `usage.cache_creation` was 100% `ephemeral_1h_input_tokens`; the CLI
+    /// reported `total_cost_usd = 0.0626776`, which is exactly
+    /// `530×$1 + 56×$5 + 30057×$2.00 + 17536×$0.10`. Pricing that same turn at
+    /// the 5-minute rate ($1.25/M) yields $0.0401 — a 36% undercount.
+    #[test]
+    fn one_hour_cache_writes_priced_at_2x_input() {
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-25T10:00:00.000Z","message":{"id":"a","model":"claude-haiku-4-5","#,
+            r#""stop_reason":"end_turn","usage":{"input_tokens":530,"output_tokens":56,"#,
+            r#""cache_creation_input_tokens":30057,"cache_read_input_tokens":17536,"#,
+            r#""cache_creation":{"ephemeral_1h_input_tokens":30057,"ephemeral_5m_input_tokens":0}}}}"#,
+        );
+        let cells = fold_claude_session_cells(jsonl);
+        let cost: f64 = cells.values().map(|a| a.cost).sum();
+        assert!(
+            (cost - 0.0626776).abs() < 1e-9,
+            "expected the CLI's own $0.0626776, got ${cost}"
+        );
+    }
+
+    /// A turn that mixes both TTLs must bill each portion at its own rate:
+    /// 1M input + 1M output on Sonnet 5, with 1M of cache writes split evenly,
+    /// = $3 + $15 + 0.5M×$3.75 + 0.5M×$6.00 = $22.875.
+    #[test]
+    fn mixed_ttl_cache_writes_split_by_rate() {
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-25T10:00:00.000Z","message":{"id":"a","model":"claude-sonnet-5","#,
+            r#""stop_reason":"end_turn","usage":{"input_tokens":1000000,"output_tokens":1000000,"#,
+            r#""cache_creation_input_tokens":1000000,"cache_read_input_tokens":0,"#,
+            r#""cache_creation":{"ephemeral_1h_input_tokens":500000,"ephemeral_5m_input_tokens":500000}}}}"#,
+        );
+        let cells = fold_claude_session_cells(jsonl);
+        let cost: f64 = cells.values().map(|a| a.cost).sum();
+        assert!((cost - 22.875).abs() < 1e-9, "expected $22.875, got ${cost}");
     }
 
     /// Normalize a `by_model` map to a comparable snapshot (cost → micro-USD int

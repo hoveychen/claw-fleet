@@ -2474,9 +2474,9 @@ export const MOCK_DAILY_REPORT: DailyReport = {
       NotebookEdit: 4,
     },
     modelBreakdown: {
-      "claude-opus-4-20250805": { inputTokens: 612_300, outputTokens: 234_800, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
-      "claude-sonnet-4-20250514": { inputTokens: 198_150, outputTokens: 87_320, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
-      "o3": { inputTokens: 82_000, outputTokens: 23_000, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+      "claude-opus-4-20250805": { inputTokens: 612_300, outputTokens: 234_800, cacheCreationTokens: 0, cacheCreation1hTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+      "claude-sonnet-4-20250514": { inputTokens: 198_150, outputTokens: 87_320, cacheCreationTokens: 0, cacheCreation1hTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+      "o3": { inputTokens: 82_000, outputTokens: 23_000, cacheCreationTokens: 0, cacheCreation1hTokens: 0, cacheReadTokens: 0, costUsd: 0 },
     },
     projects: [
       {
@@ -2717,7 +2717,7 @@ function buildMockReport(entry: typeof TIMELINE_SUMMARIES[0]): DailyReport {
       totalWebSearchRequests: 0,
       totalCostUsd: 0,
       toolCallBreakdown: { Read: Math.round(entry.tools * 0.3), Edit: Math.round(entry.tools * 0.25), Bash: Math.round(entry.tools * 0.2), Grep: Math.round(entry.tools * 0.15), Write: Math.round(entry.tools * 0.1) },
-      modelBreakdown: { "claude-sonnet-4-5-20250514": { inputTokens: entry.input, outputTokens: entry.output, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 } },
+      modelBreakdown: { "claude-sonnet-4-5-20250514": { inputTokens: entry.input, outputTokens: entry.output, cacheCreationTokens: 0, cacheCreation1hTokens: 0, cacheReadTokens: 0, costUsd: 0 } },
       projects: [{ workspacePath: "/Users/demo/workspace/project", workspaceName: "project", sessionCount: entry.sessions, subagentCount: entry.subagents, totalInputTokens: entry.input, totalOutputTokens: entry.output, totalCacheCreationTokens: 0, totalCacheReadTokens: 0, totalWebSearchRequests: 0, totalCostUsd: 0, toolCalls: entry.tools, sessions: [] }],
       sourceBreakdown: { "claude-code": entry.sessions },
       hourlyActivity: Array.from({ length: 24 }, (_, h) => h >= 9 && h <= 18 ? Math.round(Math.random() * 5) : 0) as DailyMetrics["hourlyActivity"],

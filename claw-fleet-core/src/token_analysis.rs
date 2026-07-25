@@ -685,6 +685,9 @@ fn estimate_cost_usd(u: &UsageTotals, model: Option<&str>) -> f64 {
             input_tokens: u.input_tokens,
             output_tokens: u.output_tokens,
             cache_creation_tokens: u.cache_creation_tokens,
+            // The TTL split is already parsed into `UsageTotals`; feeding it here
+            // is what bills 1-hour writes at 2× instead of the 5-minute 1.25×.
+            cache_creation_1h_tokens: u.ephemeral_1h_tokens,
             cache_read_tokens: u.cache_read_tokens,
             web_search_requests: 0,
         },
@@ -976,6 +979,7 @@ mod tests {
             input_tokens: u.input_tokens,
             output_tokens: u.output_tokens,
             cache_creation_tokens: u.cache_creation_tokens,
+            cache_creation_1h_tokens: u.ephemeral_1h_tokens,
             cache_read_tokens: u.cache_read_tokens,
             web_search_requests: 0,
         };

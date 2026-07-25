@@ -650,6 +650,7 @@
     "trend_scale_hint": "√ 刻度",
     "codex_note": "Codex 无逐轮明细,其用量整体归到会话起始日,趋势为近似",
     "row_input": "输入",
+    "row_cache_write_1h": "缓存写入 1h",
     "row_cache_write": "缓存写入",
     "row_cache_read": "缓存读取",
     "row_output": "输出",

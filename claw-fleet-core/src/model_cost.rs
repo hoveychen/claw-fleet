@@ -8,9 +8,18 @@
 //! The formula is:
 //!   (input_tokens / 1M)               * inputPrice
 //! + (output_tokens / 1M)              * outputPrice
-//! + (cache_creation_input_tokens / 1M)* promptCacheWritePrice
+//! + (5m cache-write tokens / 1M)      * promptCacheWritePrice
+//! + (1h cache-write tokens / 1M)      * promptCacheWrite1hPrice
 //! + (cache_read_input_tokens / 1M)    * promptCacheReadPrice
 //! + web_search_requests               * webSearchPrice
+//!
+//! Cache writes are billed by TTL: a 5-minute (`ephemeral_5m`) write costs
+//! 1.25× the model's input rate, a 1-hour (`ephemeral_1h`) write costs 2×.
+//! Claude Code opts into the 1-hour TTL, so in practice nearly every cache
+//! write in a transcript is the 2× kind — pricing them all at 1.25× undercounts
+//! spend. Verified against a real `claude -p --output-format json` probe
+//! (2026-07-25): a Haiku 4.5 turn with 30057 `ephemeral_1h_input_tokens`
+//! reported `total_cost_usd` exactly matching the 2× rate.
 
 #[derive(Clone, Copy, Debug)]
 pub struct ModelCosts {
@@ -18,8 +27,11 @@ pub struct ModelCosts {
     pub input: f64,
     /// USD per 1M output tokens.
     pub output: f64,
-    /// USD per 1M cache-write (creation) tokens.
+    /// USD per 1M cache-write (creation) tokens at the 5-minute TTL.
     pub cache_write: f64,
+    /// USD per 1M cache-write (creation) tokens at the 1-hour TTL (2× `input`).
+    /// Equal to `cache_write` for providers with no TTL tiers (GPT / Codex).
+    pub cache_write_1h: f64,
     /// USD per 1M cache-read tokens.
     pub cache_read: f64,
     /// USD per web-search request.
@@ -31,6 +43,7 @@ pub const COST_TIER_3_15: ModelCosts = ModelCosts {
     input: 3.0,
     output: 15.0,
     cache_write: 3.75,
+    cache_write_1h: 6.0,
     cache_read: 0.30,
     web_search: 0.01,
 };
@@ -40,6 +53,7 @@ pub const COST_TIER_15_75: ModelCosts = ModelCosts {
     input: 15.0,
     output: 75.0,
     cache_write: 18.75,
+    cache_write_1h: 30.0,
     cache_read: 1.5,
     web_search: 0.01,
 };
@@ -49,6 +63,7 @@ pub const COST_TIER_5_25: ModelCosts = ModelCosts {
     input: 5.0,
     output: 25.0,
     cache_write: 6.25,
+    cache_write_1h: 10.0,
     cache_read: 0.5,
     web_search: 0.01,
 };
@@ -58,6 +73,7 @@ pub const COST_TIER_30_150: ModelCosts = ModelCosts {
     input: 30.0,
     output: 150.0,
     cache_write: 37.5,
+    cache_write_1h: 60.0,
     cache_read: 3.0,
     web_search: 0.01,
 };
@@ -69,6 +85,7 @@ pub const COST_TIER_10_50: ModelCosts = ModelCosts {
     input: 10.0,
     output: 50.0,
     cache_write: 12.5,
+    cache_write_1h: 20.0,
     cache_read: 1.0,
     web_search: 0.01,
 };
@@ -78,6 +95,7 @@ pub const COST_HAIKU_35: ModelCosts = ModelCosts {
     input: 0.80,
     output: 4.0,
     cache_write: 1.0,
+    cache_write_1h: 1.6,
     cache_read: 0.08,
     web_search: 0.01,
 };
@@ -87,6 +105,7 @@ pub const COST_HAIKU_45: ModelCosts = ModelCosts {
     input: 1.0,
     output: 5.0,
     cache_write: 1.25,
+    cache_write_1h: 2.0,
     cache_read: 0.10,
     web_search: 0.01,
 };
@@ -112,6 +131,7 @@ pub const COST_GPT_SOL: ModelCosts = ModelCosts {
     input: 5.0,
     output: 30.0,
     cache_write: 6.25,
+    cache_write_1h: 6.25,
     cache_read: 0.50,
     web_search: 0.0,
 };
@@ -121,6 +141,7 @@ pub const COST_GPT_TERRA: ModelCosts = ModelCosts {
     input: 2.50,
     output: 15.0,
     cache_write: 3.125,
+    cache_write_1h: 3.125,
     cache_read: 0.25,
     web_search: 0.0,
 };
@@ -130,6 +151,7 @@ pub const COST_GPT_LUNA: ModelCosts = ModelCosts {
     input: 1.0,
     output: 6.0,
     cache_write: 1.25,
+    cache_write_1h: 1.25,
     cache_read: 0.10,
     web_search: 0.0,
 };
@@ -139,6 +161,7 @@ pub const COST_GPT_CODEX: ModelCosts = ModelCosts {
     input: 1.75,
     output: 14.0,
     cache_write: 2.1875,
+    cache_write_1h: 2.1875,
     cache_read: 0.175,
     web_search: 0.0,
 };
@@ -239,17 +262,46 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
 pub struct TurnUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// **Total** cache-write tokens, both TTLs (the API's
+    /// `cache_creation_input_tokens`).
     pub cache_creation_tokens: u64,
+    /// The subset of `cache_creation_tokens` written at the 1-hour TTL (the
+    /// API's `cache_creation.ephemeral_1h_input_tokens`). Billed at
+    /// `cache_write_1h`; the remainder is billed at `cache_write`. Leaving this
+    /// at 0 prices every write at the cheaper 5-minute rate, so callers that
+    /// fold real transcripts must populate it.
+    pub cache_creation_1h_tokens: u64,
     pub cache_read_tokens: u64,
     pub web_search_requests: u64,
+}
+
+/// Extract the 1-hour-TTL slice of a turn's cache writes out of a raw
+/// `message.usage` object: `usage.cache_creation.ephemeral_1h_input_tokens`.
+///
+/// Every folder that reads transcript usage needs this, so it lives here beside
+/// the prices rather than being re-derived per call site. A turn with no
+/// `cache_creation` sub-object (older transcripts, Codex rollouts) yields 0,
+/// which prices its writes at the 5-minute rate — the best available answer for
+/// a turn that never recorded its TTL.
+pub fn parse_cache_creation_1h(usage: Option<&serde_json::Value>) -> u64 {
+    usage
+        .and_then(|u| u.get("cache_creation"))
+        .and_then(|c| c.get("ephemeral_1h_input_tokens"))
+        .and_then(|n| n.as_u64())
+        .unwrap_or(0)
 }
 
 /// Compute USD cost for one assistant turn under the given model.
 pub fn turn_cost_usd(model: &str, usage: &TurnUsage) -> f64 {
     let c = get_model_costs(model);
+    // `cache_creation_1h_tokens` is a subset of the total; saturating_sub keeps a
+    // malformed pair (1h > total) from wrapping into an astronomical 5m figure.
+    let write_1h = usage.cache_creation_1h_tokens.min(usage.cache_creation_tokens);
+    let write_5m = usage.cache_creation_tokens.saturating_sub(write_1h);
     (usage.input_tokens as f64 / 1_000_000.0) * c.input
         + (usage.output_tokens as f64 / 1_000_000.0) * c.output
-        + (usage.cache_creation_tokens as f64 / 1_000_000.0) * c.cache_write
+        + (write_5m as f64 / 1_000_000.0) * c.cache_write
+        + (write_1h as f64 / 1_000_000.0) * c.cache_write_1h
         + (usage.cache_read_tokens as f64 / 1_000_000.0) * c.cache_read
         + (usage.web_search_requests as f64) * c.web_search
 }
@@ -282,6 +334,48 @@ mod tests {
         assert!((cost - 30.0).abs() < 1e-9);
     }
 
+    /// Anthropic's cache-write surcharges are multiples of the model's input
+    /// rate: 1.25× for a 5-minute TTL, 2× for a 1-hour TTL. Pin that on every
+    /// Claude tier so a future tier added with a hand-typed `cache_write_1h`
+    /// can't quietly drift.
+    #[test]
+    fn claude_cache_write_tiers_are_input_multiples() {
+        for c in [
+            COST_TIER_3_15,
+            COST_TIER_15_75,
+            COST_TIER_5_25,
+            COST_TIER_30_150,
+            COST_TIER_10_50,
+            COST_HAIKU_35,
+            COST_HAIKU_45,
+        ] {
+            assert!((c.cache_write - c.input * 1.25).abs() < 1e-9, "5m: {c:?}");
+            assert!((c.cache_write_1h - c.input * 2.0).abs() < 1e-9, "1h: {c:?}");
+        }
+    }
+
+    /// A 1h write costs 2× input, a 5m write 1.25×, and the 1h figure is a
+    /// *subset* of the total — never additive on top of it.
+    #[test]
+    fn one_hour_subset_is_not_double_charged() {
+        let all_1h = TurnUsage {
+            cache_creation_tokens: 1_000_000,
+            cache_creation_1h_tokens: 1_000_000,
+            ..Default::default()
+        };
+        // Sonnet: 1M of pure 1h writes = $6.00, not $6.00 + $3.75.
+        assert!((turn_cost_usd("claude-sonnet-5", &all_1h) - 6.0).abs() < 1e-9);
+
+        // A malformed pair (1h > total) clamps instead of wrapping into an
+        // astronomical 5m remainder.
+        let malformed = TurnUsage {
+            cache_creation_tokens: 1_000_000,
+            cache_creation_1h_tokens: 9_000_000,
+            ..Default::default()
+        };
+        assert!((turn_cost_usd("claude-sonnet-5", &malformed) - 6.0).abs() < 1e-9);
+    }
+
     #[test]
     fn cache_and_websearch() {
         // Sonnet: 100k cache-read ($0.30/M * 0.1 = $0.03) + 10 web searches ($0.01 = $0.10).
@@ -289,6 +383,7 @@ mod tests {
             input_tokens: 0,
             output_tokens: 0,
             cache_creation_tokens: 0,
+            cache_creation_1h_tokens: 0,
             cache_read_tokens: 100_000,
             web_search_requests: 10,
         };

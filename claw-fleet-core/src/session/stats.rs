@@ -325,7 +325,10 @@ impl StatsAcc {
 
             // Per-turn cost uses this turn's own model; fall back to most-recently-
             // seen model when a turn omits it (model can change mid-session).
-            let turn_model = msg.get("model").and_then(|m| m.as_str());
+            let turn_model = msg
+                .get("model")
+                .and_then(|m| m.as_str())
+                .filter(|m| crate::session::is_real_model_id(m));
             if let Some(m) = turn_model {
                 self.last_model = Some(m.to_string());
             }
@@ -336,6 +339,7 @@ impl StatsAcc {
                     input_tokens,
                     output_tokens,
                     cache_creation_tokens,
+                    cache_creation_1h_tokens: crate::model_cost::parse_cache_creation_1h(usage),
                     cache_read_tokens,
                     web_search_requests,
                 },
@@ -473,6 +477,39 @@ mod input_accumulation_tests {
         let stats = compute_session_stats(&refs);
         assert_eq!(stats.total_input_tokens, 7250, "cumulative input incl cache");
         assert_eq!(stats.total_output_tokens, 70);
+    }
+
+    /// `SessionStats.total_cost_usd` is what the sidebar badge and the session
+    /// list show, so it must bill 1-hour cache writes at 2× input rather than
+    /// the 5-minute 1.25×. Sonnet 4.5 ($3 input): 1M of 1h writes = $6.00.
+    #[test]
+    fn session_cost_prices_one_hour_cache_writes_at_2x() {
+        let line = serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2026-07-25T10:00:00Z",
+            "message": {
+                "id": "m1",
+                "model": "claude-sonnet-4-5",
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": 1_000_000,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation": {
+                        "ephemeral_1h_input_tokens": 1_000_000,
+                        "ephemeral_5m_input_tokens": 0
+                    }
+                }
+            }
+        })
+        .to_string();
+        let stats = compute_session_stats(&[line.as_str()]);
+        assert!(
+            (stats.total_cost_usd - 6.0).abs() < 1e-9,
+            "expected $6.00 at the 1h rate, got ${}",
+            stats.total_cost_usd
+        );
     }
 
     #[test]

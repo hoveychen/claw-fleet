@@ -347,8 +347,17 @@ function TrendChart({ daily }: { daily: DailyUsagePoint[] }) {
 
 function ReceiptLine({ line }: { line: ModelReceiptLine }) {
   const { t } = useTranslation();
+  // Cache writes are billed by TTL — a 1-hour write costs 2× the model's input
+  // rate, a 5-minute write 1.25× — so they get one row each. Blending them into
+  // a single row would leave `Σ rows ≠ subtotal`, which is exactly the receipt
+  // bug this split fixed.
   const rows: { label: string; tokens: number; price: number }[] = [
     { label: t("token_receipt.row_input", "输入"), tokens: line.inputTokens, price: line.inputPrice },
+    {
+      label: t("token_receipt.row_cache_write_1h", "缓存写入 1h"),
+      tokens: line.cacheCreation1hTokens,
+      price: line.cacheWrite1hPrice,
+    },
     {
       label: t("token_receipt.row_cache_write", "缓存写入"),
       tokens: line.cacheCreationTokens,

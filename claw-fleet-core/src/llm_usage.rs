@@ -54,6 +54,11 @@ pub struct FleetLlmUsageEntry {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_creation_tokens: u64,
+    /// The 1-hour-TTL subset of `cache_creation_tokens` (billed at 2× input, vs
+    /// 1.25× for 5-minute writes). Absent (0) in entries logged before TTL-aware
+    /// pricing landed.
+    #[serde(default)]
+    pub cache_creation_1h_tokens: u64,
     pub cache_read_tokens: u64,
     /// Wall-clock duration of the `complete()` call.
     pub duration_ms: u64,
@@ -177,7 +182,7 @@ fn estimate_tokens(s: &str) -> u64 {
 /// Resolve a Claude CLI alias ("haiku", "sonnet", "opus") to the current
 /// canonical model id that `model_cost::get_model_costs` recognises.
 /// Non-alias inputs pass through untouched.
-fn canonical_claude_model(alias: &str) -> &str {
+pub(crate) fn canonical_claude_model(alias: &str) -> &str {
     match alias {
         "haiku" => "claude-haiku-4-5",
         "sonnet" => "claude-sonnet-5",
@@ -205,12 +210,13 @@ pub fn complete_accounted(
     let completion = provider.complete(prompt, model, timeout)?;
     let duration_ms = started.elapsed().as_millis() as u64;
 
-    let (input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-         cost_usd, token_accurate, cost_accurate) = match &completion.usage {
+    let (input_tokens, output_tokens, cache_creation_tokens, cache_creation_1h_tokens,
+         cache_read_tokens, cost_usd, token_accurate, cost_accurate) = match &completion.usage {
         Some(u) => (
             u.input_tokens,
             u.output_tokens,
             u.cache_creation_tokens,
+            u.cache_creation_1h_tokens,
             u.cache_read_tokens,
             u.total_cost_usd,
             true,
@@ -230,7 +236,7 @@ pub fn complete_accounted(
             } else {
                 (0.0, false)
             };
-            (input, output, 0, 0, cost, false, cost_acc)
+            (input, output, 0, 0, 0, cost, false, cost_acc)
         }
     };
 
@@ -247,6 +253,7 @@ pub fn complete_accounted(
         input_tokens,
         output_tokens,
         cache_creation_tokens,
+        cache_creation_1h_tokens,
         cache_read_tokens,
         duration_ms,
         cost_usd,
@@ -291,6 +298,7 @@ mod tests {
                 provider: "claude".into(),
                 model: "haiku".into(),
                 input_tokens: 100,
+                cache_creation_1h_tokens: 0,
                 output_tokens: 50,
                 cache_creation_tokens: 0,
                 cache_read_tokens: 0,
@@ -305,6 +313,7 @@ mod tests {
                 provider: "claude".into(),
                 model: "haiku".into(),
                 input_tokens: 200,
+                cache_creation_1h_tokens: 0,
                 output_tokens: 80,
                 cache_creation_tokens: 0,
                 cache_read_tokens: 0,

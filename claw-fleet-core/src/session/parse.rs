@@ -362,6 +362,19 @@ pub fn extract_last_context_usage(lines: &[&str]) -> Option<(u64, String, u64)> 
     last.map(|(used, model)| (used, model, session_max))
 }
 
+/// Is `model` a real model id, rather than a placeholder?
+///
+/// Claude Code writes `<synthetic>` on the assistant turns it injects itself
+/// (`"No response requested."`, `"Failed to authenticate. API Error: 403 Request
+/// not allowed"`), and `unknown` when it has no id to report. Neither is a
+/// model: they have no published price, so anything that keys spend by model
+/// must not adopt them — `get_model_costs` would fall back to the Opus tier and
+/// the receipt would open a bogus line. The usage on such a turn belongs to the
+/// conversation's real model.
+pub fn is_real_model_id(model: &str) -> bool {
+    !model.is_empty() && model != "unknown" && model != "<synthetic>"
+}
+
 pub(crate) fn extract_model(last_lines: &[Value]) -> Option<String> {
     for msg in last_lines.iter().rev() {
         if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
@@ -372,7 +385,7 @@ pub(crate) fn extract_model(last_lines: &[Value]) -> Option<String> {
             .and_then(|m| m.get("model"))
             .and_then(|m| m.as_str())
             .unwrap_or_default();
-        if !model.is_empty() && model != "unknown" && model != "<synthetic>" {
+        if is_real_model_id(model) {
             return Some(model.to_string());
         }
     }
@@ -614,7 +627,7 @@ pub(crate) fn extract_last_text(last_lines: &[Value]) -> Option<String> {
             .get("message")
             .and_then(|m| m.get("model"))
             .and_then(|m| m.as_str())
-            == Some("<synthetic>")
+            .is_some_and(|m| !is_real_model_id(m))
         {
             continue;
         }
