@@ -56,10 +56,12 @@ export function SessionOptionPills({
    *  monitored sources by the host. Defaults to the full catalog. When only one
    *  tool remains the pill is hidden — there is nothing to switch between. */
   toolChoices?: { value: string; label: string }[];
-  /** Narrow-host (lite) mode: tighter pills, and the un-chosen state collapses
-   *  to a plain "默认" / "Default" instead of the category name ("模型" / "Model")
-   *  so the 340px strip fits without wrapping to a third line. Only affects the
-   *  *default* labels; a chosen model/effort keeps its own already-short label. */
+  /** Narrow-host (lite) mode: tighter pill chrome for the 340px strip. Labels are
+   *  the same in both modes — lite used to swap in a shorter "默认" / "Default" for
+   *  the un-chosen state, but now that a default pill just shows its category name
+   *  there is nothing left to shorten (measured in the lite strip: identical row
+   *  height, ≤12px of extra pill width, and that row wraps to two lines either
+   *  way). */
   compact?: boolean;
 }) {
   const { t } = useTranslation();
@@ -73,13 +75,11 @@ export function SessionOptionPills({
   // own default item still spells out what "no choice" means, and picking a
   // value replaces the label with that value.
   const modelLabel =
-    modelChoices.find((m) => m.value === model)?.label ??
-    t(compact ? "new_session.model_pill_default_compact" : "new_session.model_pill_default");
-  const effortLabel =
-    effort || t(compact ? "new_session.effort_pill_default_compact" : "new_session.effort_pill_default");
+    modelChoices.find((m) => m.value === model)?.label ?? t("new_session.model_pill_default");
+  const effortLabel = effort || t("new_session.effort_pill_default");
   const permissionLabel = permissionMode
     ? t(`new_session.permission_${permissionMode}`)
-    : t(compact ? "new_session.permission_pill_default_compact" : "new_session.permission_pill_default");
+    : t("new_session.permission_pill_default");
   return (
     <>
       {onToolChange && toolChoices.length > 1 && (
