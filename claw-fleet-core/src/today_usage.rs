@@ -336,6 +336,7 @@ fn fold_session_turns(
                 input_tokens: input,
                 output_tokens: output,
                 cache_creation_tokens: cache_creation,
+                cache_creation_1h_tokens: crate::model_cost::parse_cache_creation_1h(usage),
                 cache_read_tokens: cache_read,
                 web_search_requests: web_search,
             },
@@ -701,6 +702,7 @@ fn fold_session_turns_range(
                 input_tokens: input,
                 output_tokens: output,
                 cache_creation_tokens: cache_creation,
+                cache_creation_1h_tokens: crate::model_cost::parse_cache_creation_1h(usage),
                 cache_read_tokens: cache_read,
                 web_search_requests: web_search,
             },
@@ -841,6 +843,8 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
             .and_then(|t| t.as_u64())
             .unwrap_or(0);
 
+        let cache_creation_1h = crate::model_cost::parse_cache_creation_1h(usage);
+
         let model = turn_model
             .map(|s| s.to_string())
             .or_else(|| last_model.clone())
@@ -851,6 +855,7 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
                 input_tokens: input,
                 output_tokens: output,
                 cache_creation_tokens: cache_creation,
+                cache_creation_1h_tokens: cache_creation_1h,
                 cache_read_tokens: cache_read,
                 web_search_requests: web_search,
             },
@@ -1308,6 +1313,9 @@ fn fold_report_days(
                         input_tokens: mt.input_tokens,
                         output_tokens: mt.output_tokens,
                         cache_creation_tokens: mt.cache_creation_tokens,
+                        // v0 reports predate TTL accounting entirely, so their
+                        // writes can only be priced at the 5-minute rate.
+                        cache_creation_1h_tokens: mt.cache_creation_1h_tokens,
                         cache_read_tokens: mt.cache_read_tokens,
                         web_search_requests: 0,
                     },
@@ -1836,6 +1844,7 @@ mod breakdown_tests {
                 input_tokens: 40_000,
                 output_tokens: 4_000,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
                 cache_read_tokens: 60_000,
                 web_search_requests: 0,
             },
@@ -2249,6 +2258,46 @@ mod range_breakdown_tests {
         // The undated turn `c` lands in the "" bucket and never reaches the trend.
         assert!(cells.keys().any(|(d, _)| d.is_empty()), "undated turn not bucketed");
         assert!(!new_day.keys().any(|d| d.is_empty()), "range trend leaked an undated turn");
+    }
+
+    /// Cache writes carry a TTL and Anthropic prices the two tiers differently:
+    /// an `ephemeral_5m` write costs 1.25× the model's input rate, an
+    /// `ephemeral_1h` write costs 2×. The numbers below come from a real
+    /// `claude -p --model haiku --output-format json` probe (2026-07-25) whose
+    /// `usage.cache_creation` was 100% `ephemeral_1h_input_tokens`; the CLI
+    /// reported `total_cost_usd = 0.0626776`, which is exactly
+    /// `530×$1 + 56×$5 + 30057×$2.00 + 17536×$0.10`. Pricing that same turn at
+    /// the 5-minute rate ($1.25/M) yields $0.0401 — a 36% undercount.
+    #[test]
+    fn one_hour_cache_writes_priced_at_2x_input() {
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-25T10:00:00.000Z","message":{"id":"a","model":"claude-haiku-4-5","#,
+            r#""stop_reason":"end_turn","usage":{"input_tokens":530,"output_tokens":56,"#,
+            r#""cache_creation_input_tokens":30057,"cache_read_input_tokens":17536,"#,
+            r#""cache_creation":{"ephemeral_1h_input_tokens":30057,"ephemeral_5m_input_tokens":0}}}}"#,
+        );
+        let cells = fold_claude_session_cells(jsonl);
+        let cost: f64 = cells.values().map(|a| a.cost).sum();
+        assert!(
+            (cost - 0.0626776).abs() < 1e-9,
+            "expected the CLI's own $0.0626776, got ${cost}"
+        );
+    }
+
+    /// A turn that mixes both TTLs must bill each portion at its own rate:
+    /// 1M input + 1M output on Sonnet 5, with 1M of cache writes split evenly,
+    /// = $3 + $15 + 0.5M×$3.75 + 0.5M×$6.00 = $22.875.
+    #[test]
+    fn mixed_ttl_cache_writes_split_by_rate() {
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-07-25T10:00:00.000Z","message":{"id":"a","model":"claude-sonnet-5","#,
+            r#""stop_reason":"end_turn","usage":{"input_tokens":1000000,"output_tokens":1000000,"#,
+            r#""cache_creation_input_tokens":1000000,"cache_read_input_tokens":0,"#,
+            r#""cache_creation":{"ephemeral_1h_input_tokens":500000,"ephemeral_5m_input_tokens":500000}}}}"#,
+        );
+        let cells = fold_claude_session_cells(jsonl);
+        let cost: f64 = cells.values().map(|a| a.cost).sum();
+        assert!((cost - 22.875).abs() < 1e-9, "expected $22.875, got ${cost}");
     }
 
     /// Normalize a `by_model` map to a comparable snapshot (cost → micro-USD int
