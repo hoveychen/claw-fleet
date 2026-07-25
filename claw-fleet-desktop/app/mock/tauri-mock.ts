@@ -7,8 +7,11 @@
 
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-import type { SessionInfo } from "../types";
+import type { RawMessage, SessionInfo } from "../types";
+import type { LiveThinking } from "../generated/types";
 import type { PromoScene } from "./promo-scene";
+import { DEMO_BOARD, RELAY_CHAINS, RELAY_PATH_TO_ID, RELAY_SESSIONS } from "./demoData";
+import { RELAY_SCRIPTS } from "./demoScripts";
 import {
   MOCK_QA_DELAY_MS,
   MOCK_QA_MARKETPLACES,
@@ -56,10 +59,17 @@ import {
 
 // Test harnesses can seed `mock-no-sessions` in localStorage before boot to
 // simulate a machine that has never run an agent (onboarding ready-card path).
+// `?mock&demo` swaps the standard mock board for the promo screencast board:
+// real claude-fleet history (translated) + the 5-hop relay. Gated so existing
+// screenshot / footage tooling keeps the original board untouched.
+const DEMO_MODE = new URLSearchParams(window.location.search).has("demo");
+
 let currentSessions: SessionInfo[] =
   window.localStorage.getItem("mock-no-sessions") !== null
     ? []
-    : structuredClone(MOCK_SESSIONS);
+    : DEMO_MODE
+      ? [...structuredClone(DEMO_BOARD), ...structuredClone(RELAY_SESSIONS)]
+      : structuredClone(MOCK_SESSIONS);
 
 /** Nudge token counts and speeds to simulate live activity */
 function tickSessions() {
@@ -139,16 +149,36 @@ function handleIPC(
       return currentSessions;
     case "get_messages": {
       const jsonlPath = args.jsonlPath as string;
+      const relayId = RELAY_PATH_TO_ID[jsonlPath];
+      // Relay hero session: hand back only the opening prompt; the rest streams
+      // in via `session-tail` once `start_watching_session` starts the driver.
+      if (relayId && RELAY_SCRIPTS[relayId]) return RELAY_SCRIPTS[relayId].slice(0, 1);
       const session = currentSessions.find((s) => s.jsonlPath === jsonlPath);
       return getMessagesForSession(session?.id ?? "");
     }
     case "get_messages_tail": {
       const jsonlPath = args.jsonlPath as string;
       const tail = (args.tail as number) ?? 500;
+      const relayId = RELAY_PATH_TO_ID[jsonlPath];
+      if (relayId && RELAY_SCRIPTS[relayId]) return RELAY_SCRIPTS[relayId].slice(0, 1);
       const session = currentSessions.find((s) => s.jsonlPath === jsonlPath);
       const all = getMessagesForSession(session?.id ?? "");
       return all.slice(Math.max(0, all.length - tail));
     }
+    // Relay streaming engine hooks (promo-mock-demo).
+    case "read_live_thinking": {
+      const sid = args.sessionId as string;
+      return relayStream && relayStream.sessionId === sid ? relayStream.liveThinking : null;
+    }
+    case "start_watching_session": {
+      const jsonlPath = args.jsonlPath as string;
+      const relayId = RELAY_PATH_TO_ID[jsonlPath];
+      if (relayId) startRelayStream(relayId);
+      return null;
+    }
+    case "stop_watching_session":
+      stopRelayStream(true);
+      return null;
     case "get_tool_result_full": {
       // Pairs with the trimmed image Read in mock data (tool-img-trimmed):
       // return the untrimmed payload the way the Rust extractor would.
@@ -618,7 +648,7 @@ function handleIPC(
       const sid = args.sessionId as string;
       const sess = currentSessions.find((s) => s.id === sid);
       const chainId = sess?.handoff?.chainId;
-      return (chainId && MOCK_HANDOFF_CHAINS[chainId]) || null;
+      return (chainId && (RELAY_CHAINS[chainId] || MOCK_HANDOFF_CHAINS[chainId])) || null;
     }
 
     // ── Mobile relay (Mobile 板块; static demo values) ──
@@ -768,6 +798,129 @@ function installScreenplayDriver() {
   (window as any).__screenplay_getSessions = () => currentSessions;
 
   console.log("[mock] Screenplay driver installed");
+}
+
+// ── Relay streaming engine (promo-mock-demo) ────────────────────────────────
+// Replays a hero relay session's screenplay when its detail view is opened:
+// streams each assistant turn's `thinking` through `read_live_thinking`, then
+// appends the completed message via a `session-tail` event — exactly the wire
+// the real backend watcher drives. Only one stream runs at a time (the global
+// detail store closes the previous session before opening the next).
+
+interface RelayStream {
+  sessionId: string;
+  script: RawMessage[];
+  playhead: number; // next screenplay index to reveal
+  liveThinking: LiveThinking | null;
+  originalStatus: SessionInfo["status"];
+  timer: number | null;
+  pendingThinking: string | null; // thinking text mid-stream, null when idle
+  thinkingShown: number; // chars of pendingThinking revealed so far
+}
+let relayStream: RelayStream | null = null;
+
+// Fast-forward pacing: a beat every ~380ms, thinking revealed ~90 chars/beat,
+// so a ~10-message hop plays in ~15s — a believable sped-up session.
+const RELAY_BEAT_MS = 380;
+const RELAY_THINK_CHARS = 90;
+
+function relayFirstThinking(msg: RawMessage): string | null {
+  const c = msg.message?.content;
+  if (Array.isArray(c)) {
+    for (const b of c) {
+      if (b && typeof b === "object" && (b as { type?: string }).type === "thinking") {
+        return (b as { thinking?: string }).thinking ?? null;
+      }
+    }
+  }
+  return null;
+}
+
+function stopRelayStream(restoreStatus: boolean) {
+  if (!relayStream) return;
+  const s = relayStream;
+  if (s.timer != null) clearInterval(s.timer);
+  if (restoreStatus) {
+    currentSessions = currentSessions.map((x) =>
+      x.id === s.sessionId ? { ...x, status: s.originalStatus } : x,
+    );
+    emit("sessions-updated", currentSessions);
+  }
+  relayStream = null;
+}
+
+function startRelayStream(sessionId: string) {
+  stopRelayStream(true);
+  const script = RELAY_SCRIPTS[sessionId];
+  if (!script || script.length === 0) return;
+  const sess = currentSessions.find((x) => x.id === sessionId);
+  const originalStatus = sess?.status ?? "idle";
+  // Flip to a live status so the board card animates and reads as active while
+  // the detail streams. The live-thinking poller already arms (procAlive), so
+  // this is purely visual; the original status is restored when the stream ends.
+  currentSessions = currentSessions.map((x) =>
+    x.id === sessionId ? { ...x, status: "streaming", tokenSpeed: 74 } : x,
+  );
+  emit("sessions-updated", currentSessions);
+  relayStream = {
+    sessionId,
+    script,
+    playhead: 1, // index 0 (the opening prompt) is returned by get_messages_tail
+    liveThinking: null,
+    originalStatus,
+    timer: window.setInterval(tickRelayStream, RELAY_BEAT_MS),
+    pendingThinking: null,
+    thinkingShown: 0,
+  };
+}
+
+function tickRelayStream() {
+  const s = relayStream;
+  if (!s) return;
+
+  // Streaming a thinking block token-by-token.
+  if (s.pendingThinking != null) {
+    s.thinkingShown = Math.min(s.pendingThinking.length, s.thinkingShown + RELAY_THINK_CHARS);
+    s.liveThinking = {
+      sessionId: s.sessionId,
+      thinking: s.pendingThinking.slice(0, s.thinkingShown),
+      streaming: true,
+      updatedSecsAgo: 0,
+    };
+    if (s.thinkingShown >= s.pendingThinking.length) {
+      // Thinking complete → land the full message, drop the live bubble.
+      emit("session-tail", [s.script[s.playhead]]);
+      s.playhead += 1;
+      s.pendingThinking = null;
+      s.thinkingShown = 0;
+      s.liveThinking = null;
+    }
+    return;
+  }
+
+  // End of screenplay → restore status, stop.
+  if (s.playhead >= s.script.length) {
+    stopRelayStream(true);
+    return;
+  }
+
+  const msg = s.script[s.playhead];
+  const thinking = msg.type === "assistant" ? relayFirstThinking(msg) : null;
+  if (thinking) {
+    s.pendingThinking = thinking;
+    s.thinkingShown = Math.min(thinking.length, RELAY_THINK_CHARS);
+    s.liveThinking = {
+      sessionId: s.sessionId,
+      thinking: thinking.slice(0, s.thinkingShown),
+      streaming: true,
+      updatedSecsAgo: 0,
+    };
+  } else {
+    // Tool-use turn, tool_result, or plain text: land it immediately.
+    emit("session-tail", [msg]);
+    s.playhead += 1;
+    s.liveThinking = null;
+  }
 }
 
 // ── Install ─────────────────────────────────────────────────────────────────
