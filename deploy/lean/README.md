@@ -36,7 +36,7 @@ The API is then on `http://<host>:8080`. External integrators use
 ```python
 from openai import OpenAI
 client = OpenAI(base_url="http://<host>:8080/v1", api_key="$FLEET_PUBLIC_TOKEN")
-r = client.responses.create(model="claude-opus-4-8", input="fix issue #12")
+r = client.responses.create(model="claude-opus-5", input="fix issue #12")
 ```
 
 ## Environment

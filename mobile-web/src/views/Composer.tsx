@@ -19,6 +19,7 @@ import { DirPicker } from "./DirPicker";
 const MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
   ["claude-fable-5", "Fable 5"],
+  ["claude-opus-5", "Opus 5"],
   ["claude-opus-4-8", "Opus 4.8"],
   ["claude-sonnet-5", "Sonnet 5"],
   ["claude-sonnet-4-6", "Sonnet 4.6"],
