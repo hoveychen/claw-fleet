@@ -34,6 +34,12 @@ promo/video/node_modules/
 promo/*
 !promo/remotion/
 promo/remotion/out/
+# Demo screencast: track the pipeline scripts, not the heavy generated media.
+!promo/demo-video/
+promo/demo-video/*.mp4
+promo/demo-video/*.webm
+promo/demo-video/marks.json
+promo/demo-video/subs.srt
 Cargo.toml.bak
 
 # Fleet PRD Discipline scratch state — agent-managed, not for version control
