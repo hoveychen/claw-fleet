@@ -67,6 +67,11 @@ export function SessionOptionPills({
   const toolLabel = toolChoices.find((x) => x.value === tool)?.label ?? "Claude";
   const modelChoices = isCodex ? CODEX_MODEL_CHOICES : CLAUDE_MODEL_CHOICES;
   const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : CLAUDE_EFFORT_CHOICES;
+  // The un-chosen ("") state's pill text is per-locale on purpose: Chinese fits
+  // the "模型：默认" prefix+value form in one row, English does not (its words are
+  // wider, and the row already wrapped because of it), so `en` labels the pill
+  // with the bare category name — the menu's own default item still spells out
+  // what "no choice" means.
   const modelLabel =
     modelChoices.find((m) => m.value === model)?.label ??
     t(compact ? "new_session.model_pill_default_compact" : "new_session.model_pill_default");
