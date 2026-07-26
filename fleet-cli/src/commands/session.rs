@@ -30,13 +30,38 @@ pub(crate) fn cmd_session_idle() {
         return;
     };
 
+    // Timing starts once we have a session id to attribute it to. This hook runs
+    // on a 5s Claude Code budget and gets SIGKILLed on overrun, so a `begin` with
+    // no matching `end` in ~/.fleet/hook-timing.jsonl is the one durable signal
+    // that it was killed rather than deciding not to act. Every return path below
+    // ends the record explicitly.
+    let mut timing = claw_fleet_core::hook_timing::HookTiming::begin("session-idle", &sid);
+    // Decision inputs worth correlating with the timing when a turn slips
+    // through: these are exactly what `block_reason` gates on.
+    let (cron_count, bg_task_count) = stop_payload
+        .as_ref()
+        .map(|p| (p.session_crons.len(), p.background_tasks.len()))
+        .unwrap_or((0, 0));
+
     // Refuse the stop *before* marking idle or firing the relay: the turn isn't
     // actually over. Marking it idle would flip the kanban card to Pending while
     // the agent keeps working, and consuming the handoff here would hand a
     // successor work this session is about to resume.
     if let Some(payload) = &stop_payload {
+        // Prime suspect for budget overrun: this scans every process on the box.
         let headless = claw_fleet_core::session::is_headless_session(&sid);
+        timing.phase("is_headless");
         if let Some(reason) = claw_fleet_core::bg_guard::block_reason(payload, headless) {
+            // Explicitly before `exit`, which skips destructors.
+            timing.end(
+                2,
+                serde_json::json!({
+                    "blocked": true,
+                    "is_headless": headless,
+                    "session_crons": cron_count,
+                    "background_tasks": bg_task_count,
+                }),
+            );
             eprintln!("{reason}");
             std::process::exit(2);
         }
@@ -45,14 +70,22 @@ pub(crate) fn cmd_session_idle() {
     if let Err(e) = claw_fleet_core::idle::mark_idle(&sid) {
         eprintln!("fleet session idle: {e}");
     }
+    timing.phase("mark_idle");
     // Handoff relay: the session just yielded its turn — exactly the moment a
     // registered handoff should fire. Errors are logged, never propagated:
     // the Stop hook must not block or fail the session over a relay problem.
-    match claw_fleet_core::handoff::consume_and_spawn(&sid) {
-        Ok(Some(to_sid)) => println!("handoff: successor session {to_sid} spawned"),
-        Ok(None) => {}
-        Err(e) => eprintln!("fleet session idle: handoff relay failed: {e}"),
-    }
+    let handoff_fired = match claw_fleet_core::handoff::consume_and_spawn(&sid) {
+        Ok(Some(to_sid)) => {
+            println!("handoff: successor session {to_sid} spawned");
+            true
+        }
+        Ok(None) => false,
+        Err(e) => {
+            eprintln!("fleet session idle: handoff relay failed: {e}");
+            false
+        }
+    };
+    timing.phase("handoff");
 
     // Loop reconcile: re-arm timers for any agent loop left stranded (its
     // detached timer died on a reboot / kill). Cheap, idempotent, duplicate-safe
@@ -63,6 +96,7 @@ pub(crate) fn cmd_session_idle() {
     if !rearmed.is_empty() {
         println!("loop: re-armed {} stranded timer(s): {}", rearmed.len(), rearmed.join(", "));
     }
+    timing.phase("loop_reconcile");
 
     // Watch reconcile: same contract as the loop reconcile above, for condition
     // watches whose detached timer died. Re-arms only watches whose heartbeat has
@@ -76,6 +110,7 @@ pub(crate) fn cmd_session_idle() {
             watch_rearmed.join(", ")
         );
     }
+    timing.phase("watch_reconcile");
 
     // Schedule reconcile: same contract as the loop/watch reconciles above, for
     // one-shot schedules whose detached timer died — and, crucially, for fires
@@ -89,6 +124,20 @@ pub(crate) fn cmd_session_idle() {
             schedule_rearmed.join(", ")
         );
     }
+    timing.phase("schedule_reconcile");
+
+    timing.end(
+        0,
+        serde_json::json!({
+            "blocked": false,
+            "session_crons": cron_count,
+            "background_tasks": bg_task_count,
+            "handoff_fired": handoff_fired,
+        }),
+    );
+    // Trim here rather than in `append`: once per invocation, on the path that
+    // already finished its work, instead of on every line written.
+    claw_fleet_core::hook_timing::maybe_truncate_timing_file();
 }
 
 /// `fleet session resume` — UserPromptSubmit-hook entrypoint. Clears the idle
