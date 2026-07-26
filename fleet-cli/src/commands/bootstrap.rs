@@ -65,7 +65,8 @@ pub(crate) fn cmd_bootstrap(locale: Option<String>, title: Option<String>, json:
         Step {
             name: "prd_discipline",
             result: claw_fleet_core::prd_discipline::apply_prd_discipline(&title, &locale)
-                .and_then(|()| claw_fleet_core::hooks::apply_prd_context_hook()),
+                .and_then(|()| claw_fleet_core::hooks::apply_prd_context_hook())
+                .and_then(|()| claw_fleet_core::hooks::apply_wakeup_guard_hook()),
         },
         Step {
             name: "interaction_mode",

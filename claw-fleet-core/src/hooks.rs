@@ -641,6 +641,78 @@ fn is_prd_context_group(group: &Value) -> bool {
     group_invokes_fleet_subcommand(group, "prd-context")
 }
 
+// ── Wakeup guard hook (ScheduleWakeup / CronCreate interception) ────────
+
+/// Install the wakeup guard (synchronous PreToolUse for the built-in
+/// cross-turn schedulers). Installed and removed alongside the PRD-context
+/// hook: it is the enforcement layer for PRD discipline's Rule 5, which tells
+/// agents to relay via `fleet watch` / `fleet handoff` / `fleet loop` rather
+/// than the built-ins that silently strand a Fleet turn.
+pub fn apply_wakeup_guard_hook() -> Result<(), String> {
+    let fleet_bin = resolve_fleet_binary()
+        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+
+    if !obj.contains_key("hooks") {
+        obj.insert("hooks".into(), json!({}));
+    }
+    let hooks_obj = obj
+        .get_mut("hooks")
+        .and_then(|h| h.as_object_mut())
+        .ok_or("hooks is not an object")?;
+
+    // Short timeout: the decision is a local file check, not a user prompt.
+    let mut wakeup_hook = fleet_subcommand_hook(&fleet_bin, "wakeup-guard");
+    wakeup_hook["timeout"] = json!(5000);
+    let wakeup_group = json!({
+        "matcher": crate::wakeup_guard::WAKEUP_GUARD_MATCHER,
+        "hooks": [wakeup_hook]
+    });
+
+    // Idempotent: strip any pre-existing fleet wakeup-guard groups (possibly
+    // pointing at stale binary paths) before appending a fresh one.
+    if let Some(existing) = hooks_obj.get_mut("PreToolUse") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.retain(|group| !is_wakeup_guard_group(group));
+            arr.push(wakeup_group);
+        }
+    } else {
+        hooks_obj.insert("PreToolUse".to_string(), json!([wakeup_group]));
+    }
+
+    write_settings(&settings)
+}
+
+/// Remove the wakeup guard from settings.json.
+pub fn remove_wakeup_guard_hook() -> Result<(), String> {
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return Ok(());
+    };
+
+    if let Some(arr) = hooks_obj.get_mut("PreToolUse").and_then(|v| v.as_array_mut()) {
+        arr.retain(|group| !is_wakeup_guard_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("PreToolUse");
+        }
+    }
+
+    if hooks_obj.is_empty() {
+        obj.remove("hooks");
+    }
+
+    write_settings(&settings)
+}
+
+fn is_wakeup_guard_group(group: &Value) -> bool {
+    group_invokes_fleet_subcommand(group, "wakeup-guard")
+}
+
 // ── Idle hooks (Stop + UserPromptSubmit → kanban Pending sentinel) ──────
 
 /// Install both idle hooks: `Stop` calls `fleet session idle` (marks the
@@ -1264,6 +1336,124 @@ mod tests {
                 "timeout": 5000
             }]
         })
+    }
+
+    fn wakeup_guard_group_for(bin: &str) -> Value {
+        json!({
+            "matcher": crate::wakeup_guard::WAKEUP_GUARD_MATCHER,
+            "hooks": [{
+                "type": "command",
+                "command": fault_tolerant_command(bin, "wakeup-guard"),
+                "timeout": 5000
+            }]
+        })
+    }
+
+    #[test]
+    fn wakeup_guard_group_is_told_apart_from_its_pretooluse_neighbours() {
+        // All four live under PreToolUse. If `is_wakeup_guard_group` were loose
+        // enough to match a sibling, `remove_wakeup_guard_hook` would silently
+        // uninstall the command audit gate (guard) or the decision-card bridge
+        // (elicitation) instead.
+        let bin = "/tmp/fleet";
+        assert!(is_wakeup_guard_group(&wakeup_guard_group_for(bin)));
+        for neighbour in [
+            guard_group_for(bin),
+            elicitation_group_for(bin),
+            plan_approval_group_for(bin),
+        ] {
+            assert!(
+                !is_wakeup_guard_group(&neighbour),
+                "must not claim a sibling PreToolUse group: {neighbour}"
+            );
+        }
+        // ...and the siblings must not claim the wakeup group either.
+        let wakeup = wakeup_guard_group_for(bin);
+        assert!(!is_guard_group(&wakeup));
+        assert!(!is_elicitation_group(&wakeup));
+        assert!(!is_plan_approval_group(&wakeup));
+    }
+
+    #[test]
+    fn apply_wakeup_guard_is_idempotent_and_spares_sibling_hooks() {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-hooks-wakeupguard-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by the fleet_home_lock.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let outcome = (|| -> Result<(), String> {
+            // Seed a settings.json that already has a foreign PreToolUse group,
+            // so we can prove apply/remove leave it untouched.
+            let foreign = json!({
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "/usr/local/bin/somebody-else"}]
+            });
+            write_settings(&json!({ "hooks": { "PreToolUse": [foreign.clone()] } }))?;
+
+            // Apply twice — the second must not duplicate the group.
+            apply_wakeup_guard_hook()?;
+            apply_wakeup_guard_hook()?;
+
+            let settings = read_settings().ok_or("settings vanished after apply")?;
+            let arr = settings["hooks"]["PreToolUse"]
+                .as_array()
+                .ok_or("PreToolUse is not an array")?
+                .clone();
+            let ours: Vec<&Value> =
+                arr.iter().filter(|g| is_wakeup_guard_group(g)).collect();
+            if ours.len() != 1 {
+                return Err(format!("expected exactly 1 wakeup group, got {}", ours.len()));
+            }
+            let matcher = ours[0]["matcher"].as_str().unwrap_or_default();
+            if matcher != crate::wakeup_guard::WAKEUP_GUARD_MATCHER {
+                return Err(format!("wrong matcher: {matcher}"));
+            }
+            if !arr.contains(&foreign) {
+                return Err("apply clobbered the foreign PreToolUse group".into());
+            }
+
+            remove_wakeup_guard_hook()?;
+            let after = read_settings().ok_or("settings vanished after remove")?;
+            let arr_after = after["hooks"]["PreToolUse"]
+                .as_array()
+                .ok_or("remove dropped PreToolUse entirely, taking the foreign group with it")?;
+            if arr_after.iter().any(is_wakeup_guard_group) {
+                return Err("remove left our group behind".into());
+            }
+            if !arr_after.contains(&foreign) {
+                return Err("remove clobbered the foreign PreToolUse group".into());
+            }
+            Ok(())
+        })();
+
+        // Restore env before asserting so a failure can't leak FLEET_HOME.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = fs::remove_dir_all(&tmp);
+
+        // resolve_fleet_binary() needs an installed fleet CLI; without one the
+        // apply path can't be exercised, so treat that as a skip rather than a
+        // failure (mirrors how the hook itself fails open).
+        if let Err(e) = &outcome {
+            if e.contains("Cannot find fleet binary") {
+                eprintln!("skipped: no fleet binary on this host");
+                return;
+            }
+        }
+        outcome.expect("wakeup guard apply/remove must be idempotent and sibling-safe");
     }
 
     #[test]
