@@ -5,7 +5,8 @@
 
 pub(crate) fn cmd_prd_discipline_apply(title: &str, locale: &str) {
     let result = claw_fleet_core::prd_discipline::apply_prd_discipline(title, locale)
-        .and_then(|()| claw_fleet_core::hooks::apply_prd_context_hook());
+        .and_then(|()| claw_fleet_core::hooks::apply_prd_context_hook())
+        .and_then(|()| claw_fleet_core::hooks::apply_wakeup_guard_hook());
     match result {
         Ok(()) => println!("ok: regenerated PRD guidance (title={title:?}, locale={locale:?})"),
         Err(e) => {
