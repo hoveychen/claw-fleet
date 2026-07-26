@@ -166,6 +166,9 @@ enum Commands {
     /// [internal] PRD-context hook — re-injects the workspace's TASKS.md on every UserPromptSubmit
     #[command(hide = true)]
     PrdContext,
+    /// [internal] Wakeup guard — denies ScheduleWakeup/CronCreate in Fleet sessions
+    #[command(hide = true)]
+    WakeupGuard,
     /// [internal] Event-log hook — appends the hook JSON from stdin to
     /// ~/.fleet/hooks.jsonl (exec-form replacement for the unix `cat >>`
     /// one-liner, used on Windows where hooks may run under PowerShell)
@@ -837,6 +840,7 @@ fn main() {
             | Commands::Mcp
             | Commands::PlanApproval
             | Commands::PrdContext
+            | Commands::WakeupGuard
             | Commands::HookEvent => {
                 eprintln!("Error: --remote is not supported with the '{}' subcommand.",
                     match &cli.command {
@@ -847,6 +851,7 @@ fn main() {
                         Commands::Mcp => "mcp",
                         Commands::PlanApproval => "plan-approval",
                         Commands::PrdContext => "prd-context",
+                        Commands::WakeupGuard => "wakeup-guard",
                         Commands::HookEvent => "hook-event",
                         _ => unreachable!(),
                     }
@@ -890,6 +895,7 @@ fn main() {
         Commands::Mcp => commands::guard::cmd_mcp(),
         Commands::PlanApproval => commands::guard::cmd_plan_approval(),
         Commands::PrdContext => commands::prd::cmd_prd_context(),
+        Commands::WakeupGuard => commands::guard::cmd_wakeup_guard(),
         // Best-effort like the unix `cat >>` hook it replaces: a failed append
         // must not surface as a hook error to Claude Code.
         Commands::HookEvent => {
