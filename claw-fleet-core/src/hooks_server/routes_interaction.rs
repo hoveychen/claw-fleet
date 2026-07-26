@@ -283,7 +283,8 @@ pub(crate) fn route_apply_prd_mode(
                             &req_body.user_title,
                             &req_body.locale,
                         )
-                        .and_then(|()| hooks::apply_prd_context_hook());
+                        .and_then(|()| hooks::apply_prd_context_hook())
+                        .and_then(|()| hooks::apply_wakeup_guard_hook());
                         match result {
                             Ok(()) => {
                                 let _ = request.respond(
@@ -322,7 +323,8 @@ pub(crate) fn route_remove_prd_mode(
 
                 let r1 = prd_discipline::remove_prd_discipline();
                 let r2 = hooks::remove_prd_context_hook();
-                match r1.and(r2) {
+                let r3 = hooks::remove_wakeup_guard_hook();
+                match r1.and(r2).and(r3) {
                     Ok(()) => {
                         let _ = request.respond(
                             tiny_http::Response::from_string(r#"{"ok":true}"#)

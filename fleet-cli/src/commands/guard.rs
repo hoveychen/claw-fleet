@@ -460,6 +460,53 @@ pub(crate) fn cmd_mcp() {
 
 // ── Plan-approval CLI (hook entrypoint for ExitPlanMode) ────────────────
 
+// ── Wakeup guard (ScheduleWakeup / CronCreate interception) ─────────────────
+
+/// PreToolUse hook for `ScheduleWakeup` / `CronCreate`. Denies them in
+/// Fleet-spawned sessions, where they silently strand the turn, and names the
+/// Fleet relay to use instead. See [`claw_fleet_core::wakeup_guard`].
+///
+/// Fails open at every step (unreadable stdin, malformed JSON, unresolvable
+/// session id): a guard that can't tell what it's looking at must not block.
+pub(crate) fn cmd_wakeup_guard() {
+    use claw_fleet_core::guard::HookInput;
+    use claw_fleet_core::{launch_spec, wakeup_guard};
+    use std::io::Read;
+
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+
+    let hook_input: HookInput = match serde_json::from_str(&input) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    // The hook payload's session_id is authoritative for "which session is this";
+    // `was_fleet_spawned` is the ground truth for "did Fleet spawn it" (env vars
+    // like CLAUDE_CODE_ENTRYPOINT leak into plain `claude -p` children).
+    let session_id = hook_input.session_id.as_deref().unwrap_or("");
+    if session_id.is_empty() {
+        return;
+    }
+    let fleet_owned = launch_spec::was_fleet_spawned(session_id);
+
+    let Some(reason) = wakeup_guard::decide(hook_input.tool_name.as_deref(), fleet_owned)
+    else {
+        return;
+    };
+
+    let out = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    });
+    println!("{}", out);
+}
+
 pub(crate) fn cmd_plan_approval() {
     use claw_fleet_core::consumer_heartbeat;
     use claw_fleet_core::decision_history::{
