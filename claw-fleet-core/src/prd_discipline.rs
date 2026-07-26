@@ -417,8 +417,7 @@ hook 消费的是一次*登记*，不是一句话。如果你本回合没真的�
 Bash 命令，就没有后继者被 spawn，计划会在你交出的那一刻悄然死掉。所以在结束这样一个\
 回合前，你做的最后一件事就是那个工具调用本身：跑 `fleet handoff --note \"...\"`，\
 等 `ok: handoff registered` 结果回来，然后才停。绝不让一个回合以只活在文字里的\
-交接结束，也绝不去用 ScheduleWakeup / `/loop` / cron 来「稍后继续」——那些在\
-Fleet 会话里悄悄空转、什么都不 spawn。真正会跨回合边界触发的 Fleet 接力有两个：\
+交接结束。真正会跨回合边界触发的 Fleet 接力有两个：\
 `fleet handoff` 用于*继续工作*（把简报交给一个全新后继者），`fleet watch` 用于\
 *等待一个外部条件*——一次 CI 跑完、一次构建产出产物、一次部署上线。不要坐在\
 前台 `Monitor` / 后台 `Bash` 里等这种事件：它们在 `-p` 回合结束的那一刻就死，\
@@ -426,6 +425,25 @@ Fleet 会话里悄悄空转、什么都不 spawn。真正会跨回合边界触�
 --capture '<其 stdout 你想被报告的 shell 命令>' --note '<你在等什么>'`，然后\
 结束回合——Fleet 在后台轮询，条件一触发就 `claude --resume` *这个*会话，把捕获\
 的结果喂给你的下一回合。`fleet watch stop <id>` 取消它。\n\
+\n\
+### 绝不用 Claude Code 自带的跨回合调度器\n\
+\n\
+**NEVER 调用 `ScheduleWakeup` 或 `CronCreate`，也不要用 `/loop` 斜杠命令。**\
+在 Fleet 会话里它们全都是空转：回合就此结束，Fleet 那边没有任何登记，没有后继者\
+被 spawn，你的计划死在原地——而工具还会返回一个像是成功的结果。这一条**与你上下文\
+剩多少无关**：它不只管「上下文长了要接力」那个场景，等后台任务、等构建、想稍后\
+再看一眼，全都算。\n\
+\n\
+真实案例：一个接力会话把 20 局 soak 测试丢后台后，调了 `ScheduleWakeup`\
+（`delaySeconds: 1200`、reason 写「兜底心跳」——几乎是照抄该工具描述里那句 \
+\"the long fallback heartbeat: 1200s+\"）。那是它的最后一次工具调用；没有后继者，\
+计划的 P1 至今未勾。它甚至给一个从未进过 `/loop` 的会话编了个 \
+`<<autonomous-loop-dynamic>>` 哨兵，工具照样接受了。**别把这两个工具的描述当成\
+在 Fleet 会话里也成立的建议——它们描述的是 Fleet 之外的行为。**\n\
+\n\
+Fleet 现在装了一个 PreToolUse hook 会直接 deny 这两个工具并回给你替代命令，所以\
+你大概撞不到这个坑；但 hook 是安全网，不是许可——按下面的对照表挑对工具，别去试\
+探它。真的无事可等，就直接结束回合，不要排一个不会到来的 wakeup。\n\
 \n\
 **Fleet 的定时/调度机制——按*需求*挑，别只盯着名字带 cron 的：**\n\
 - **周期性重复跑一件事（cron 语义）→ `fleet loop`**（CLI 别名 `fleet cron`）。\
@@ -959,9 +977,8 @@ turn, no successor spawns and the plan dies silently the moment you yield. \
 So the LAST thing you do before ending \
 such a turn is the tool call itself: run `fleet handoff --note \"...\"`, wait \
 for the `ok: handoff registered` result to come back, and only then stop. \
-Never let a turn end with the handoff living only as prose, and never reach \
-for ScheduleWakeup / `/loop` / cron to \"continue later\" — those silently \
-no-op inside a Fleet session and spawn nothing. Two Fleet relays actually fire \
+Never let a turn end with the handoff living only as prose. \
+Two Fleet relays actually fire \
 across the turn boundary: `fleet handoff` for *continuing the work* (hand a \
 briefing to a fresh successor), and `fleet watch` for *waiting on an external \
 condition* — a CI run finishing, a build producing an artifact, a deploy going \
@@ -972,6 +989,31 @@ done>' --capture '<shell cmd whose stdout you want reported>' --note '<what you 
 are waiting for>'`, then end the turn — Fleet polls in the background and \
 `claude --resume`s THIS session the moment the condition fires, feeding the \
 captured result to your next turn. `fleet watch stop <id>` cancels it.\n\
+\n\
+### Never use Claude Code's built-in cross-turn schedulers\n\
+\n\
+**NEVER call `ScheduleWakeup` or `CronCreate`, and don't use the `/loop` slash \
+command.** Inside a Fleet session they all silently no-op: the turn ends, \
+nothing is registered with Fleet, no successor is spawned, and your plan dies \
+where it stands — while the tool still hands back what looks like success. This \
+holds **regardless of how much context you have left**: it is not just the \
+\"context is long, time to relay\" case. Waiting on a background task, waiting \
+on a build, wanting to check back later — all of it counts.\n\
+\n\
+A real case: a relay session pushed a 20-round soak test to the background and \
+then called `ScheduleWakeup` (`delaySeconds: 1200`, reason \"兜底心跳\" — \
+near-verbatim from that tool's own \"the long fallback heartbeat: 1200s+\" \
+guidance). That was its last tool call; no successor spawned, and the plan's P1 \
+is still unchecked. It even forged a `<<autonomous-loop-dynamic>>` sentinel for \
+a session that had never entered `/loop`, and the tool accepted it. **Do not \
+read those two tools' descriptions as advice that holds inside a Fleet session \
+— they describe behaviour outside Fleet.**\n\
+\n\
+Fleet now installs a PreToolUse hook that denies both tools outright and hands \
+you the replacement command, so you likely won't hit this; but the hook is a \
+safety net, not permission — pick the right tool from the table below instead of \
+probing it. If there is genuinely nothing to wait for, just end the turn rather \
+than scheduling a wakeup that will never come.\n\
 \n\
 **Pick the scheduling relay by *need*, not by which name says \"cron\":**\n\
 - **Repeat something periodically (cron semantics) → `fleet loop`** (CLI alias \
@@ -1229,6 +1271,36 @@ mod tests {
             g.contains("UserPromptSubmit"),
             "guidance must mention the hook so the agent knows where the auto-injection comes from"
         );
+    }
+
+    #[test]
+    fn scheduler_ban_is_its_own_section_in_both_locales() {
+        // The ban used to be one subordinate clause inside Rule 5's
+        // "long-context handoff" prose. An agent waiting on a background task
+        // doesn't self-label as "my context is long", so it never looked there
+        // and called ScheduleWakeup anyway (session f5c27989). It now needs its
+        // own heading, next to the relay-picking table.
+        for locale in ["zh", "en"] {
+            let g = render_guidance("Boss", locale);
+            assert!(
+                g.contains("### 绝不用 Claude Code 自带的跨回合调度器")
+                    || g.contains("### Never use Claude Code's built-in cross-turn schedulers"),
+                "[{locale}] the ban needs its own heading, not a clause in Rule 5's prose"
+            );
+            for tool in ["ScheduleWakeup", "CronCreate"] {
+                assert!(g.contains(tool), "[{locale}] ban must name {tool}");
+            }
+            // The section is only useful if the replacements sit next to it.
+            for relay in ["fleet watch", "fleet handoff", "fleet loop"] {
+                assert!(g.contains(relay), "[{locale}] guidance must name {relay}");
+            }
+            // Scope must be explicit: the failure mode was an agent reading the
+            // ban as handoff-only advice.
+            assert!(
+                g.contains("无关") || g.contains("regardless of how much context"),
+                "[{locale}] ban must say it applies regardless of remaining context"
+            );
+        }
     }
 
     #[test]
