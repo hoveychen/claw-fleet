@@ -1691,6 +1691,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "wiki_export" => serve_wiki_export(params),
         "chat_workspace" => serve_chat_workspace(params),
         "sources_config" => serve_sources_config(params),
+        "codex_profiles" => serve_codex_profiles(params),
         "browse_dir" => serve_browse_dir(params),
         // ── Write methods ────────────────────────────────────────────────
         "spawn_session" => serve_spawn_session(params),
@@ -2204,6 +2205,16 @@ fn serve_chat_workspace(_params: &Value) -> Result<Value, String> {
 fn serve_sources_config(_params: &Value) -> Result<Value, String> {
     let sources = crate::agent_source::get_sources_config_local();
     serde_json::to_value(sources).map_err(|e| e.to_string())
+}
+
+/// The desktop host's Codex profile-v2 files, for the mobile composer's model
+/// picker. The phone cannot enumerate them itself — the profiles live in the
+/// host's `$CODEX_HOME`, and they are the only place Codex's config names a
+/// third-party model (a `[model_providers.<id>]` block carries no model list).
+/// Mirrors the desktop's `list_codex_profiles` Tauri command.
+fn serve_codex_profiles(_params: &Value) -> Result<Value, String> {
+    let profiles = crate::codex_launch::list_codex_profiles();
+    serde_json::to_value(profiles).map_err(|e| e.to_string())
 }
 
 // Directory picker for the new-session composer. Deliberately NOT gated
