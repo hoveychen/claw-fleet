@@ -2336,6 +2336,10 @@ impl Backend for LocalBackend {
         crate::git_ops::git_pull(workspace, root, &self.known_workspaces())
     }
 
+    fn git_clone(&self, url: &str, dest: &str) -> Result<crate::git_ops::GitOpResult, String> {
+        crate::git_ops::git_clone(url, dest)
+    }
+
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
         crate::skills::scan_all_skills_for_workspaces(&self.known_workspaces())
     }

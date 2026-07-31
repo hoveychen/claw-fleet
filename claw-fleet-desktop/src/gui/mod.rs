@@ -1914,6 +1914,7 @@ pub fn run() {
             git_status,
             git_push,
             git_pull,
+            git_clone,
             list_explorer_dir,
             read_explorer_file,
             list_scratchpad_dir,
