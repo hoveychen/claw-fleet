@@ -14,6 +14,7 @@ import {
   FolderOpen,
   FolderPlus,
   GitBranch,
+  Link2,
   RefreshCw,
   Trash2,
   Upload,
@@ -23,6 +24,7 @@ import { CopyButton } from "./CopyButton";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DirPickerDialog } from "./DirPickerDialog";
+import { CloneRepoDialog } from "./CloneRepoDialog";
 import { isTempWorkspacePath, repoRootPath } from "./NewSessionForm";
 import {
   runningProcCounts,
@@ -62,6 +64,9 @@ interface GitStatus {
   isGit: boolean;
   branch: string | null;
   upstream: string | null;
+  /** Remote *URL* (`git@host:owner/repo.git`) — not the `origin/main` ref name
+   *  `upstream` carries. Null when the repo has no matching remote. */
+  remoteUrl: string | null;
   ahead: number | null;
   behind: number | null;
   dirtyCount: number;
@@ -101,6 +106,15 @@ function basename(p: string): string {
   return slash >= 0 ? normalized.slice(slash + 1) : normalized;
 }
 
+/** Everything above `p`, separator preserved. Used to pre-fill the clone
+ *  dialog: a new checkout almost always belongs beside the repo in hand. Empty
+ *  when `p` has no parent, which lets the dialog fall back to the host's home. */
+function parentDir(p: string): string {
+  const trimmed = p.replace(/[/\\]+$/, "");
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return cut > 0 ? trimmed.slice(0, cut) : "";
+}
+
 
 // ── Root view: workspace picker + explorer ──────────────────────────────────
 
@@ -124,6 +138,7 @@ export function FilesView() {
   // Remote-only: the backend-driven directory picker, since the native dialog
   // would browse *this* desktop rather than the probe (mirrors NewSessionForm).
   const [pickingDir, setPickingDir] = useState(false);
+  const [cloning, setCloning] = useState(false);
 
   // Row context menu — anchor + subject held together, mirroring WikiView.
   const [ctxMenu, setCtxMenu] = useState<{
@@ -265,14 +280,24 @@ export function FilesView() {
       title={t("files.panel_title")}
       count={workspaces.length > 0 ? workspaces.length : null}
       actions={
-        <button
-          className={fileStyles.add_ws_btn}
-          onClick={browseWorkspace}
-          title={t("files.add_path")}
-        >
-          <FolderPlus size={13} strokeWidth={1.7} />
-          <span>{t("files.add_path")}</span>
-        </button>
+        <>
+          <button
+            className={fileStyles.add_ws_btn}
+            onClick={() => setCloning(true)}
+            title={t("files.clone.title")}
+          >
+            <GitBranch size={13} strokeWidth={1.7} />
+            <span>{t("files.clone.button")}</span>
+          </button>
+          <button
+            className={fileStyles.add_ws_btn}
+            onClick={browseWorkspace}
+            title={t("files.add_path")}
+          >
+            <FolderPlus size={13} strokeWidth={1.7} />
+            <span>{t("files.add_path")}</span>
+          </button>
+        </>
       }
       secondary={
         <div className={styles.list_pane}>
@@ -329,6 +354,21 @@ export function FilesView() {
         />
       ) : (
         <div className={styles.placeholder}>{t("files.select_workspace")}</div>
+      )}
+      {cloning && (
+        <CloneRepoDialog
+          // Beside the repo in hand by default; the picker starts at the
+          // backend host's home when nothing is selected.
+          initialParent={selected ? parentDir(selected) : ""}
+          isRemote={isRemote}
+          onDone={(dest) => {
+            // A fresh clone has no sessions, so it would never surface from the
+            // session-derived list — carry it in as a hand-added card and open it.
+            addPath(dest);
+            setCloning(false);
+          }}
+          onCancel={() => setCloning(false)}
+        />
       )}
       {pickingDir && (
         <DirPickerDialog
@@ -685,6 +725,13 @@ function GitStatusBar({
   return (
     <div className={fileStyles.scm_bar}>
       <div className={fileStyles.scm_chips}>
+        {status.remoteUrl && (
+          <span className={fileStyles.scm_remote} title={status.remoteUrl}>
+            <Link2 size={12} strokeWidth={1.7} />
+            <span className={fileStyles.scm_remote_url}>{status.remoteUrl}</span>
+            <CopyButton text={status.remoteUrl} label={t("files.scm.copy_remote")} />
+          </span>
+        )}
         {status.upstream == null ? (
           <span className={fileStyles.scm_muted}>{t("files.scm.no_upstream")}</span>
         ) : clean ? (
