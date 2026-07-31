@@ -156,6 +156,26 @@
   gap: 4px;
 }
 
+/* The repo's remote URL. Read-only: this bar is a status surface, and changing a
+ * remote is a `git remote set-url` decision that belongs in a terminal. Long
+ * URLs are truncated with the full value on hover + a copy button beside it, so
+ * the chip can never push the push/pull actions off the row. */
+.scm_remote {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 320px;
+  color: var(--color-text-dim);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.scm_remote_url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .scm_chip_ahead {
   color: var(--color-accent);
 }
