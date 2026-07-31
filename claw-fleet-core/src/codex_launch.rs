@@ -433,6 +433,96 @@ fn tail_thread_started(
 /// ```
 /// Note the keys are hyphenated (`thread-id`, not `thread_id`). The thread id
 /// is codex's session id — the key Fleet relays a handoff on.
+/// Resolve Codex's home dir: `$CODEX_HOME`, else `~/.codex`.
+///
+/// Mirrors the same resolution in [`crate::codex_guidance`] and
+/// [`crate::codex_source`]; those predate this helper and still inline it.
+pub fn codex_home() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("CODEX_HOME") {
+        return Some(PathBuf::from(home));
+    }
+    crate::session::real_home_dir().map(|h| h.join(".codex"))
+}
+
+/// One Codex **profile-v2**: a `<CODEX_HOME>/<name>.config.toml` file whose
+/// settings layer on top of the base `config.toml` when Codex is invoked with
+/// `--profile <name>`.
+///
+/// This is Fleet's discovery surface for non-official models. A
+/// `[model_providers.<id>]` block declares only *how to connect* (base_url,
+/// auth, wire_api) — it carries no model list — so the only thing in Codex's
+/// config that names a usable model is a profile. One profile file therefore
+/// means one selectable model, which is the contract Fleet reads and a
+/// credential manager (foxy-switcher) writes.
+///
+/// Every field but `name` is optional because a profile may set any subset of
+/// Codex's config; a profile with no `model` still layers other settings and is
+/// listed, just without a model label.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CodexProfile {
+    /// The `<name>` in `<name>.config.toml` — what `--profile` takes.
+    pub name: String,
+    pub model: Option<String>,
+    pub model_provider: Option<String>,
+    pub reasoning_effort: Option<String>,
+}
+
+/// Every profile-v2 file in Codex's home, sorted by name.
+///
+/// Scans for `*.config.toml` and strips that suffix to recover the profile
+/// name. The base `config.toml` cannot collide: the suffix is 12 characters and
+/// requires a non-empty name before it, so `config.toml` (and
+/// `managed_config.toml`, which ends in `_config.toml`) are not matched. A file
+/// literally named `.config.toml` would yield an empty name and is skipped —
+/// `--profile ""` is not addressable.
+///
+/// Unreadable or malformed files are skipped rather than failing the scan: this
+/// feeds a UI picker, and one bad file should not blank the whole list. An
+/// absent Codex home yields an empty list.
+///
+/// Note `[profiles.<name>]` tables in `config.toml` are **not** consulted —
+/// codex 0.145.0 rejects them outright ("`profiles` contains legacy config
+/// profile tables and can no longer be written; use `--profile <name>` with
+/// `<name>.config.toml` instead"), so a session using one cannot start at all.
+pub fn list_codex_profiles() -> Vec<CodexProfile> {
+    const SUFFIX: &str = ".config.toml";
+    let Some(dir) = codex_home() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<CodexProfile> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let file_name = e.file_name();
+            let file_name = file_name.to_str()?;
+            let name = file_name.strip_suffix(SUFFIX)?;
+            if name.is_empty() {
+                return None;
+            }
+            let text = std::fs::read_to_string(e.path()).ok()?;
+            let value: toml::Value = text.parse().ok()?;
+            let str_field = |k: &str| {
+                value
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            };
+            Some(CodexProfile {
+                name: name.to_string(),
+                model: str_field("model"),
+                model_provider: str_field("model_provider"),
+                reasoning_effort: str_field("model_reasoning_effort"),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
 /// The user's own `notify` command from codex's `config.toml`, so the Fleet
 /// notify injection can chain-forward to it (Fleet's `-c notify` override
 /// replaces the config value for the invocation but never edits the file, so the
@@ -443,9 +533,7 @@ fn tail_thread_started(
 /// absent, malformed, empty, or — to prevent a self-invocation loop — when the
 /// command is itself Fleet's `codex-notify` relay.
 pub fn read_user_codex_notify() -> Option<Vec<String>> {
-    let codex_home = std::env::var_os("CODEX_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| crate::session::real_home_dir().map(|h| h.join(".codex")))?;
+    let codex_home = codex_home()?;
     let cfg = std::fs::read_to_string(codex_home.join("config.toml")).ok()?;
     let value: toml::Value = cfg.parse().ok()?;
     let arr = value.get("notify")?.as_array()?;
@@ -773,54 +861,53 @@ fn auth_json_is_chatgpt(v: &Value) -> bool {
     mode_is_chatgpt && no_api_key
 }
 
-/// Split a Fleet model selection into `(provider, model)`.
-///
-/// Codex can talk to any endpoint that implements the OpenAI **Responses** API
-/// via a `[model_providers.<id>]` block in `~/.codex/config.toml`, but routing a
-/// single invocation at one requires `-c model_provider=<id>` on top of
-/// `-m <model>` — the config block alone only *defines* the provider.
-///
-/// Rather than thread a second field through `SpawnSpec` and every client (the
-/// desktop, mobile-web and Harmony model pickers all carry a plain string),
-/// Fleet encodes the pair in the model string itself: `"<provider>:<model>"`.
-/// So `"openrouter:deepseek/deepseek-v4-flash"` → provider `openrouter`, model
-/// `deepseek/deepseek-v4-flash`.
-///
-/// A value with no `:` is a bare model id for Codex's own default provider —
-/// `"gpt-5.6-sol"` stays untouched. The split is on the **first** colon only,
-/// because provider ids are single tokens while model ids routinely contain
-/// slashes (and, for some providers, further colons). Either side coming out
-/// blank (`":m"`, `"p:"`) means the value isn't a provider pair after all, so
-/// the whole string is treated as the model — never emit a half-formed
-/// override.
-fn split_model_provider(model: &str) -> (Option<&str>, &str) {
-    match model.split_once(':') {
-        Some((provider, rest)) => {
-            let (provider, rest) = (provider.trim(), rest.trim());
-            if provider.is_empty() || rest.is_empty() {
-                (None, model.trim())
-            } else {
-                (Some(provider), rest)
-            }
-        }
-        None => (None, model.trim()),
-    }
-}
+/// The marker a Fleet model selection carries when it names a Codex
+/// **profile** rather than a bare model id.
+const PROFILE_PREFIX: &str = "profile:";
 
-/// Push `-m <model>` plus, when the selection carries a `<provider>:` prefix,
-/// `-c model_provider=<provider>`. Shared by the spawn and resume builders so
-/// the two paths can never drift on provider routing. Blank models are dropped.
+/// Turn a Fleet model selection into the argv fragment that selects it.
+///
+/// Two shapes reach here, both as one plain string — the desktop, mobile-web
+/// and Harmony pickers all carry a single value, and threading a second field
+/// through `SpawnSpec` would mean touching its ten construction sites plus the
+/// whole Backend/HTTP chain for something the string already expresses:
+///
+/// - `"gpt-5.6-sol"` → `-m gpt-5.6-sol`. A model from Codex's own catalog,
+///   served by whatever provider the config already defaults to.
+/// - `"profile:deepseek-flash"` → `-p deepseek-flash`. A profile-v2 file
+///   (`<CODEX_HOME>/deepseek-flash.config.toml`) that carries its own `model`
+///   **and** `model_provider`, which is the only way Codex's config names a
+///   third-party model at all (see [`list_codex_profiles`]).
+///
+/// `-p` deliberately replaces `-m` rather than joining it: the profile already
+/// pins the model, and passing both would let a stale `-m` silently override
+/// the profile's choice while keeping its provider — a mismatch that surfaces
+/// as a confusing "model not found" from the wrong endpoint. Verified against
+/// codex-cli 0.145.0: `-p <name> -m <other>` does exactly that, keeping the
+/// profile's provider but swapping the model.
+///
+/// Effort is untouched here and stays a separate `-c model_reasoning_effort=`
+/// flag, which wins over a profile's own value (also verified against 0.145.0).
+/// So picking a profile never locks Fleet's effort selector: chosen effort →
+/// profile's effort → config's top-level default, in that order.
+///
+/// A blank selection, or a bare `"profile:"` with no name, emits nothing and
+/// lets Codex fall back to its configured default.
 fn push_model_args(args: &mut Vec<String>, model: Option<&str>) {
     let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) else {
         return;
     };
-    let (provider, model_id) = split_model_provider(m);
-    if let Some(p) = provider {
-        args.push("-c".to_string());
-        args.push(format!("model_provider={p}"));
+    if let Some(profile) = m.strip_prefix(PROFILE_PREFIX) {
+        let profile = profile.trim();
+        if profile.is_empty() {
+            return;
+        }
+        args.push("-p".to_string());
+        args.push(profile.to_string());
+        return;
     }
     args.push("-m".to_string());
-    args.push(model_id.to_string());
+    args.push(m.to_string());
 }
 
 /// Build the `codex exec` argv for a headless spawn.
@@ -1690,66 +1777,107 @@ mod tests {
         assert!(!args.iter().any(|a| a.starts_with("model_reasoning_effort=")));
     }
 
-    /// A bare model id (Codex's own catalog) must not emit a provider override —
-    /// that would point the run at a `model_providers` block that isn't there.
+    /// A bare model id stays on `-m` and must never turn into a profile —
+    /// `-p gpt-5.6-sol` would fail on a profile file that does not exist.
     #[test]
-    fn arg_builder_emits_no_provider_for_bare_model() {
+    fn arg_builder_keeps_bare_model_on_dash_m() {
         let args = build_codex_exec_args("/ws", "hi", Some("gpt-5.6-sol"), None, &[]);
-        assert!(!args.iter().any(|a| a.starts_with("model_provider=")));
+        assert!(!args.contains(&"-p".to_string()));
         let mi = args.iter().position(|a| a == "-m").expect("has -m");
         assert_eq!(args[mi + 1], "gpt-5.6-sol");
     }
 
-    /// `"<provider>:<model>"` splits into `-c model_provider=<p>` + `-m <model>`.
-    /// The model id keeps its slashes — only the first colon is a separator.
+    /// `"profile:<name>"` becomes `-p <name>` and drops `-m` entirely: the
+    /// profile pins the model, and a stray `-m` would override it while keeping
+    /// the profile's provider.
     #[test]
-    fn arg_builder_splits_provider_prefix() {
-        let args = build_codex_exec_args(
-            "/ws",
-            "hi",
-            Some("openrouter:deepseek/deepseek-v4-flash"),
-            Some("high"),
-            &[],
-        );
-        let pi = args
-            .iter()
-            .position(|a| a == "model_provider=openrouter")
-            .expect("has provider override");
-        assert_eq!(args[pi - 1], "-c");
-        let mi = args.iter().position(|a| a == "-m").expect("has -m");
-        assert_eq!(args[mi + 1], "deepseek/deepseek-v4-flash");
-        // The provider override is a flag, so it must land before the `--`.
+    fn arg_builder_maps_profile_prefix_to_dash_p() {
+        let args = build_codex_exec_args("/ws", "hi", Some("profile:deepseek-flash"), Some("high"), &[]);
+        let pi = args.iter().position(|a| a == "-p").expect("has -p");
+        assert_eq!(args[pi + 1], "deepseek-flash");
+        assert!(!args.contains(&"-m".to_string()), "-p must replace -m");
+        // Effort stays independent of the profile so the UI selector still works.
+        assert!(args.contains(&"model_reasoning_effort=high".to_string()));
         let dd = args.iter().position(|a| a == "--").expect("has --");
-        assert!(pi < dd, "provider override must precede --");
+        assert!(pi < dd, "-p must precede --");
     }
 
     /// The resume path routes identically — a follow-up turn must not silently
-    /// fall back to Codex's default provider mid-thread.
+    /// fall back to Codex's default model/provider mid-thread.
     #[test]
-    fn resume_arg_builder_splits_provider_prefix() {
-        let args = build_codex_resume_args(
-            "thread-1",
-            "cont",
-            Some("openrouter:deepseek/deepseek-v4-flash"),
-            None,
-            &[],
-        );
-        assert!(args.contains(&"model_provider=openrouter".to_string()));
-        let mi = args.iter().position(|a| a == "-m").expect("has -m");
-        assert_eq!(args[mi + 1], "deepseek/deepseek-v4-flash");
+    fn resume_arg_builder_maps_profile_prefix_to_dash_p() {
+        let args = build_codex_resume_args("thread-1", "cont", Some("profile:deepseek-flash"), None, &[]);
+        let pi = args.iter().position(|a| a == "-p").expect("has -p");
+        assert_eq!(args[pi + 1], "deepseek-flash");
+        assert!(!args.contains(&"-m".to_string()));
     }
 
-    /// Half-formed values are not provider pairs: emitting `model_provider=`
-    /// with a blank side would make Codex fail to resolve a provider at all.
+    /// `"profile:"` with no name is not addressable — emitting `-p ""` makes
+    /// Codex fail to load a config layer. Fall through to its default instead.
     #[test]
-    fn arg_builder_ignores_half_formed_provider_prefix() {
-        for m in [":deepseek/v4", "openrouter:", "openrouter:   "] {
+    fn arg_builder_drops_nameless_profile_prefix() {
+        for m in ["profile:", "profile:   "] {
             let args = build_codex_exec_args("/ws", "hi", Some(m), None, &[]);
-            assert!(
-                !args.iter().any(|a| a.starts_with("model_provider=")),
-                "{m} must not yield a provider override"
-            );
+            assert!(!args.contains(&"-p".to_string()), "{m} must not yield -p");
+            assert!(!args.contains(&"-m".to_string()), "{m} must not yield -m");
         }
+    }
+
+    /// A model id that merely *contains* a colon is not a profile selector —
+    /// only the `profile:` marker is. Guards against provider-style ids
+    /// (`ollama` tags, `vendor:model`) being misread as profile names.
+    #[test]
+    fn arg_builder_treats_other_colons_as_part_of_the_model_id() {
+        let args = build_codex_exec_args("/ws", "hi", Some("llama3:8b"), None, &[]);
+        assert!(!args.contains(&"-p".to_string()));
+        let mi = args.iter().position(|a| a == "-m").expect("has -m");
+        assert_eq!(args[mi + 1], "llama3:8b");
+    }
+
+    /// The profile scanner reads `<CODEX_HOME>/<name>.config.toml`, skips the
+    /// base `config.toml`, and survives a malformed file without blanking the
+    /// list (it feeds a picker).
+    #[test]
+    fn lists_codex_profiles_from_codex_home() {
+        let base = std::env::temp_dir().join(format!("fleet-codex-profiles-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(
+            base.join("config.toml"),
+            "model = \"gpt-5.6-sol\"\n[model_providers.openrouter]\nbase_url = \"x\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            base.join("deepseek-flash.config.toml"),
+            "model = \"deepseek/deepseek-v4-flash\"\nmodel_provider = \"openrouter\"\nmodel_reasoning_effort = \"low\"\n",
+        )
+        .unwrap();
+        std::fs::write(base.join("aaa.config.toml"), "model = \"m-a\"\n").unwrap();
+        std::fs::write(base.join("broken.config.toml"), "this is = = not toml\n").unwrap();
+        std::fs::write(base.join("managed_config.toml"), "model = \"nope\"\n").unwrap();
+
+        let prev = std::env::var_os("CODEX_HOME");
+        std::env::set_var("CODEX_HOME", &base);
+        let got = list_codex_profiles();
+        match prev {
+            Some(v) => std::env::set_var("CODEX_HOME", v),
+            None => std::env::remove_var("CODEX_HOME"),
+        }
+
+        // Sorted by name; `config.toml` / `managed_config.toml` / the malformed
+        // file are all absent.
+        let names: Vec<&str> = got.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["aaa", "deepseek-flash"], "got {got:?}");
+        let ds = got.iter().find(|p| p.name == "deepseek-flash").unwrap();
+        assert_eq!(ds.model.as_deref(), Some("deepseek/deepseek-v4-flash"));
+        assert_eq!(ds.model_provider.as_deref(), Some("openrouter"));
+        assert_eq!(ds.reasoning_effort.as_deref(), Some("low"));
+        // A profile that sets only `model` leaves the rest None rather than "".
+        let a = got.iter().find(|p| p.name == "aaa").unwrap();
+        assert_eq!(a.model.as_deref(), Some("m-a"));
+        assert_eq!(a.model_provider, None);
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

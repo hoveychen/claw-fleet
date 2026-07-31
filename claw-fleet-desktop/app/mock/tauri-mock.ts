@@ -435,6 +435,25 @@ function handleIPC(
     case "get_sources_config":
       return MOCK_SOURCES_CONFIG;
 
+    // Codex profile-v2 files on the host. Two entries so the model picker
+    // shows the third-party half in screenshots; the real list comes from
+    // `<CODEX_HOME>/*.config.toml`.
+    case "list_codex_profiles":
+      return [
+        {
+          name: "deepseek-flash",
+          model: "deepseek/deepseek-v4-flash",
+          model_provider: "openrouter",
+          reasoning_effort: "low",
+        },
+        {
+          name: "deepseek-pro",
+          model: "deepseek/deepseek-v4-pro",
+          model_provider: "openrouter",
+          reasoning_effort: null,
+        },
+      ];
+
     // The settings panel dereferences these on render (`llmProviders.find`),
     // so the default `return null` crashed the whole settings page in mock
     // mode. Minimal truthy shapes keep it renderable for screenshots.
