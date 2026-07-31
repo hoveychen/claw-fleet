@@ -401,6 +401,9 @@ export interface RepoDetail {
   label: string;
   branch: string | null;
   upstream: string | null;
+  /** Remote *URL* (`git@host:owner/repo.git`) — not the `origin/main` ref name
+   *  `upstream` carries. Null when the repo has no matching remote. */
+  remoteUrl: string | null;
   unpushed: number | null;
   behind: number | null;
   dirtyCount: number;

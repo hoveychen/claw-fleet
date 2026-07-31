@@ -124,6 +124,17 @@
   flex-shrink: 0;
 }
 
+/* 远端 URL 常常比屏幕还宽：允许收缩并在任意字符处折行，右对齐读尾部
+   （owner/repo 在尾巴上），而不是把这一行撑出横向滚动。 */
+.remoteValue {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  min-width: 0;
+  text-align: right;
+  word-break: break-all;
+}
+
 .statChips,
 .wtMeta {
   display: flex;

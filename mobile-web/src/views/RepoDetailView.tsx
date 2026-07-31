@@ -89,6 +89,15 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
                   </span>
                 </div>
                 <div className={styles.divider} />
+                {/* 远端地址：只读。URL 比这一行宽得多，所以让它自己换行而不是
+                    把右侧挤没（rowValue 是 flex-shrink: 0 的）。 */}
+                <div className={styles.row}>
+                  <span className={styles.rowLabel}>{t("远端地址")}</span>
+                  <span className={styles.remoteValue}>
+                    {detail.remoteUrl ?? t("未配置")}
+                  </span>
+                </div>
+                <div className={styles.divider} />
                 <div className={styles.row}>
                   <span className={styles.rowLabel}>{t("未推 / 落后")}</span>
                   <span className={styles.statChips}>
