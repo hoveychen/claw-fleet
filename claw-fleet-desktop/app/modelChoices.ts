@@ -17,26 +17,52 @@ export const CLAUDE_EFFORT_CHOICES: string[] = ["low", "medium", "high", "xhigh"
 // Codex ships (see `~/.codex/models_cache.json`). The "" default follows
 // Codex's own configured model. Kept small on purpose — add ids as needed.
 //
-// A `<provider>:` prefix routes the run at a custom `[model_providers.<id>]`
-// block in `~/.codex/config.toml` (Codex needs `-c model_provider=<id>` on top
-// of `-m <model>`; the config block alone only defines the provider). The
-// backend splits the pair — see `split_model_provider` in `codex_launch.rs`.
-// Prefixed entries only work once the user has written that block themselves;
-// picking one without it makes Codex fail fast on an unknown provider id.
+// Third-party models are NOT listed here: they come from the host's Codex
+// profile files at runtime (see `codexProfileChoices`). Hardcoding them would
+// offer models whose provider block may not exist on the machine running Codex.
 export const CODEX_MODEL_CHOICES: { value: string; label: string }[] = [
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
   { value: "gpt-5.5", label: "GPT-5.5" },
-  {
-    value: "openrouter:deepseek/deepseek-v4-flash",
-    label: "DeepSeek V4 Flash (OpenRouter)",
-  },
-  {
-    value: "openrouter:deepseek/deepseek-v4-pro",
-    label: "DeepSeek V4 Pro (OpenRouter)",
-  },
 ];
+
+/** A Codex profile-v2 file as returned by the `list_codex_profiles` command —
+ *  one `<CODEX_HOME>/<name>.config.toml` on whichever host runs Codex. */
+export interface CodexProfile {
+  name: string;
+  model: string | null;
+  model_provider: string | null;
+  reasoning_effort: string | null;
+}
+
+/** Turn discovered profiles into model-picker entries.
+ *
+ *  A `[model_providers.<id>]` block declares only how to reach a provider, not
+ *  which models it serves, so a profile file is the only thing in Codex's
+ *  config that names a usable third-party model. One profile = one entry.
+ *
+ *  The value carries the `profile:` marker the backend splits into
+ *  `codex exec -p <name>` (see `push_model_args` in `codex_launch.rs`); `-p`
+ *  brings the profile's model *and* provider, which is why the raw model id is
+ *  never sent for these. The label prefers the profile's own model id — that is
+ *  what the user recognises — and falls back to the profile name for a profile
+ *  that sets no model of its own. Effort stays selectable regardless: Fleet's
+ *  `-c model_reasoning_effort=` flag overrides whatever the profile sets. */
+export function codexProfileChoices(
+  profiles: CodexProfile[],
+): { value: string; label: string }[] {
+  return profiles.map((p) => {
+    const model = p.model?.trim();
+    const provider = p.model_provider?.trim();
+    const label = model
+      ? provider
+        ? `${model} (${provider})`
+        : model
+      : p.name;
+    return { value: `profile:${p.name}`, label };
+  });
+}
 
 // Codex reasoning effort (`-c model_reasoning_effort=<level>`). Distinct from
 // Claude's --effort scale (no "xhigh"/"max"); Codex adds "minimal".
