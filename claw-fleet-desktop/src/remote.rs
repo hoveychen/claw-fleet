@@ -956,6 +956,16 @@ impl crate::backend::Backend for RemoteBackend {
         )
     }
 
+    /// Clone happens on the probe host, into a path the user picked there via
+    /// the backend-driven directory picker — url/dest go in the body rather
+    /// than the query string so no path escaping is involved.
+    fn git_clone(&self, url: &str, dest: &str) -> Result<crate::git_ops::GitOpResult, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::GIT_CLONE,
+            &serde_json::json!({ "url": url, "dest": dest }),
+        )
+    }
+
 
 
     fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<(), String> {

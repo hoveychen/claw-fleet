@@ -649,6 +649,11 @@ pub trait Backend: Send + Sync {
         workspace: &str,
         root: &str,
     ) -> Result<crate::git_ops::GitOpResult, String>;
+    /// `git clone <url> <dest>` on the backend's host. Unlike the three above,
+    /// this takes no `workspace`: a fresh clone isn't a known workspace yet, so
+    /// `git_ops::git_clone` guards it structurally instead (absolute dest,
+    /// existing parent, empty-or-absent dest — never overwrites anything).
+    fn git_clone(&self, url: &str, dest: &str) -> Result<crate::git_ops::GitOpResult, String>;
 
     // ── Skills ────────────────────────────────────────────────────────────────
     fn list_skills(&self) -> Vec<SkillItem>;
