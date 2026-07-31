@@ -11,6 +11,7 @@ import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useSourcesConfig } from "../useSourcesConfig";
+import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
 import styles from "./Composer.module.css";
@@ -37,18 +38,14 @@ const EFFORT_CHOICES: Array<[string, string]> = [
 
 // Codex model ids (`codex exec -m <model>`), disjoint from Claude's — mirrors
 // the desktop's CODEX_MODEL_CHOICES. "" default follows Codex's configured model.
-// A `<provider>:` prefix routes at a custom `[model_providers.<id>]` block in
-// the host's `~/.codex/config.toml` (the backend splits the pair — see
-// `split_model_provider` in `codex_launch.rs`); those entries only work once
-// that block exists on the machine actually running Codex.
+// 第三方模型不写在这里：它们运行时从主机的 codex profile 文件发现
+// （见 useCodexProfiles），硬编码会列出那台机器上根本没配 provider 的模型。
 const CODEX_MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
   ["gpt-5.6-sol", "GPT-5.6 Sol"],
   ["gpt-5.6-terra", "GPT-5.6 Terra"],
   ["gpt-5.6-luna", "GPT-5.6 Luna"],
   ["gpt-5.5", "GPT-5.5"],
-  ["openrouter:deepseek/deepseek-v4-flash", "DeepSeek V4 Flash (OpenRouter)"],
-  ["openrouter:deepseek/deepseek-v4-pro", "DeepSeek V4 Pro (OpenRouter)"],
 ];
 
 // Codex reasoning effort — no "xhigh"/"max", adds "minimal" (mirrors desktop).
@@ -228,6 +225,7 @@ function AttachmentRow({
 
 function OptionSelects({
   isCodex = false,
+  client,
   model,
   effort,
   permissionMode,
@@ -237,13 +235,19 @@ function OptionSelects({
   /** Codex has disjoint model/effort ids and no `--permission-mode` analogue,
    *  so the permission select is hidden and the codex choice lists are used. */
   isCodex?: boolean;
+  /** 用来向主机要 codex profile（第三方模型的唯一来源）。null 时只显示内置模型。 */
+  client: RelayClient | null;
   model: string;
   effort: string;
   permissionMode: string;
   permissionDefaultLabel: string;
   onChange: (patch: { model?: string; effort?: string; permissionMode?: string }) => void;
 }) {
-  const modelChoices = isCodex ? CODEX_MODEL_CHOICES : MODEL_CHOICES;
+  // 主机上的 profile 文件补进 codex 模型清单；Claude 侧不受影响。
+  const codexProfiles = useCodexProfiles(isCodex ? client : null);
+  const modelChoices = isCodex
+    ? [...CODEX_MODEL_CHOICES, ...codexProfileChoices(codexProfiles)]
+    : MODEL_CHOICES;
   const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : EFFORT_CHOICES;
   return (
     <div className={styles.optionRow}>
@@ -611,6 +615,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
         )}
         <OptionSelects
           isCodex={isCodex}
+          client={client}
           model={model}
           effort={effort}
           permissionMode={permissionMode}
@@ -806,6 +811,7 @@ export function ResumeComposer({
         {!enqueueing && (
           <OptionSelects
             isCodex={isCodex}
+            client={client}
             model={model}
             effort={effort}
             permissionMode={permissionMode}

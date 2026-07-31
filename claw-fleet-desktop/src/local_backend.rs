@@ -2829,6 +2829,10 @@ impl Backend for LocalBackend {
         crate::agent_source::get_sources_config_local()
     }
 
+    fn list_codex_profiles(&self) -> Vec<claw_fleet_core::codex_launch::CodexProfile> {
+        claw_fleet_core::codex_launch::list_codex_profiles()
+    }
+
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
         crate::agent_source::set_source_enabled_local(name, enabled)
     }

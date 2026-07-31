@@ -1992,6 +1992,7 @@ pub fn run() {
             get_usage_history,
             get_codex_usage_history,
             get_sources_config,
+            list_codex_profiles,
             set_source_enabled,
             list_claude_binaries,
             get_claude_binary_override,

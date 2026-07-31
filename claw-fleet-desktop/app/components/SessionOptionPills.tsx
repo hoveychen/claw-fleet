@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import {
   AGENT_TOOL_CHOICES,
   CLAUDE_EFFORT_CHOICES,
@@ -6,6 +8,8 @@ import {
   CLAUDE_PERMISSION_MODE_CHOICES,
   CODEX_EFFORT_CHOICES,
   CODEX_MODEL_CHOICES,
+  codexProfileChoices,
+  type CodexProfile,
 } from "../modelChoices";
 import { PillMenu } from "./PillMenu";
 
@@ -67,7 +71,31 @@ export function SessionOptionPills({
   const { t } = useTranslation();
   const isCodex = tool === "codex";
   const toolLabel = toolChoices.find((x) => x.value === tool)?.label ?? "Claude";
-  const modelChoices = isCodex ? CODEX_MODEL_CHOICES : CLAUDE_MODEL_CHOICES;
+  // Third-party Codex models are discovered from the host's profile files
+  // rather than hardcoded — a `[model_providers.<id>]` block names no models,
+  // so a profile is the only thing that does. Fetched only for Codex (the
+  // Claude picker never shows them) and best-effort: a failure leaves the
+  // built-in list intact rather than emptying the picker.
+  const [codexProfiles, setCodexProfiles] = useState<CodexProfile[]>([]);
+  useEffect(() => {
+    if (!isCodex) return;
+    let live = true;
+    invoke<CodexProfile[]>("list_codex_profiles")
+      .then((p) => {
+        if (live) setCodexProfiles(p ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [isCodex]);
+  const modelChoices = useMemo(
+    () =>
+      isCodex
+        ? [...CODEX_MODEL_CHOICES, ...codexProfileChoices(codexProfiles)]
+        : CLAUDE_MODEL_CHOICES,
+    [isCodex, codexProfiles],
+  );
   const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : CLAUDE_EFFORT_CHOICES;
   // In the un-chosen ("") state a pill shows only its bare category name
   // ("Model" / "模型"), not a "…: default" value: the prefix+value form made the
