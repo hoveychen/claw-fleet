@@ -64,6 +64,21 @@ pub(crate) fn route_sources_config(
                 );
             }
 
+/// `GET /codex_profiles` — the probe host's Codex profile-v2 files, so a
+/// desktop driving a remote workspace offers the models that host can actually
+/// resolve rather than its own.
+pub(crate) fn route_codex_profiles(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let profiles = crate::codex_launch::list_codex_profiles();
+    let body = serde_json::to_string(&profiles).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_set_source_enabled(
     ctx: &ServeCtx,
     request: tiny_http::Request,

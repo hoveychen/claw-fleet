@@ -815,6 +815,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             crate::routes::APPLY_HOOKS => route_apply_hooks(ctx, request, &query, json_header, path),
 
             crate::routes::SOURCES_CONFIG => route_sources_config(ctx, request, &query, json_header, path),
+            crate::routes::CODEX_PROFILES => route_codex_profiles(ctx, request, &query, json_header, path),
 
             crate::routes::SET_SOURCE_ENABLED => route_set_source_enabled(ctx, request, &query, json_header, path),
 
