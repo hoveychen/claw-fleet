@@ -324,6 +324,7 @@ impl crate::backend::Backend for RemoteBackend {
             list_marketplaces -> Vec<claw_fleet_core::claude_cli::CliMarketplace> = PLUGINS_MARKETPLACES;
             list_pending_plan_approvals -> Vec<claw_fleet_core::plan_approval::PlanApprovalRequest> = PLAN_APPROVAL_PENDING;
             get_sources_config -> Vec<crate::agent_source::SourceInfo> = SOURCES_CONFIG;
+            list_codex_profiles -> Vec<crate::codex_launch::CodexProfile> = CODEX_PROFILES;
             list_claude_binaries -> Vec<crate::claude_binary::ClaudeBinary> = LIST_CLAUDE_BINARIES;
             get_audit_rules -> Vec<crate::audit::AuditRuleInfo> = AUDIT_RULES;
             list_llm_providers -> Vec<crate::llm_provider::LlmProviderInfo> = LLM_PROVIDERS;

@@ -920,6 +920,21 @@ pub trait Backend: Send + Sync {
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo>;
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String>;
 
+    /// Codex profile-v2 files on the **host that will run Codex** — the model
+    /// picker's source of non-official models.
+    ///
+    /// Must go through the backend rather than reading `$CODEX_HOME` directly:
+    /// for a remote workspace the profiles that matter live on the probe host,
+    /// not on the machine running the desktop app, and a local read there would
+    /// offer models the remote Codex cannot resolve. See
+    /// [`crate::codex_launch::list_codex_profiles`] for the file convention.
+    ///
+    /// Defaults to empty so a not-yet-initialised backend simply shows no
+    /// custom profiles instead of failing the picker.
+    fn list_codex_profiles(&self) -> Vec<crate::codex_launch::CodexProfile> {
+        Vec::new()
+    }
+
     // ── Claude binary discovery & override ───────────────────────────────────
     /// Enumerate every Claude CLI binary fleet can find on the host, ranked by
     /// priority. The first entry is what fleet would auto-pick if no override
