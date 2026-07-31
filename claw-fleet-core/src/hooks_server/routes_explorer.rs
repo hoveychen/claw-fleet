@@ -159,6 +159,45 @@ pub(crate) fn route_explorer_roots(
                 }
             }
 
+/// POST `/git_clone` with `{"url": "...", "dest": "..."}`.
+///
+/// The only git route with no `ws` / `root`: a clone destination is by
+/// definition not a known workspace yet, so there is nothing to validate it
+/// against. `git_ops::git_clone` owns the structural guard rails instead
+/// (absolute dest, existing parent, empty-or-absent dest), and this route adds
+/// nothing on top — a probe that serves the explorer already lets the caller
+/// pick any cwd for a new session.
+pub(crate) fn route_git_clone(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        url: String,
+        dest: String,
+    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let result = serde_json::from_str::<Req>(&buf)
+        .map_err(|e| e.to_string())
+        .and_then(|req| crate::git_ops::git_clone(&req.url, &req.dest))
+        .map(|r| serde_json::to_string(&r).unwrap_or_default());
+    match result {
+        Ok(body) => {
+            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
 pub(crate) fn route_git_status(
     ctx: &ServeCtx,
     request: tiny_http::Request,
