@@ -16,11 +16,26 @@ export const CLAUDE_EFFORT_CHOICES: string[] = ["low", "medium", "high", "xhigh"
 // Selectable Codex models (`codex exec -m <model>`), curated from the ids
 // Codex ships (see `~/.codex/models_cache.json`). The "" default follows
 // Codex's own configured model. Kept small on purpose — add ids as needed.
+//
+// A `<provider>:` prefix routes the run at a custom `[model_providers.<id>]`
+// block in `~/.codex/config.toml` (Codex needs `-c model_provider=<id>` on top
+// of `-m <model>`; the config block alone only defines the provider). The
+// backend splits the pair — see `split_model_provider` in `codex_launch.rs`.
+// Prefixed entries only work once the user has written that block themselves;
+// picking one without it makes Codex fail fast on an unknown provider id.
 export const CODEX_MODEL_CHOICES: { value: string; label: string }[] = [
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
   { value: "gpt-5.5", label: "GPT-5.5" },
+  {
+    value: "openrouter:deepseek/deepseek-v4-flash",
+    label: "DeepSeek V4 Flash (OpenRouter)",
+  },
+  {
+    value: "openrouter:deepseek/deepseek-v4-pro",
+    label: "DeepSeek V4 Pro (OpenRouter)",
+  },
 ];
 
 // Codex reasoning effort (`-c model_reasoning_effort=<level>`). Distinct from

@@ -773,6 +773,56 @@ fn auth_json_is_chatgpt(v: &Value) -> bool {
     mode_is_chatgpt && no_api_key
 }
 
+/// Split a Fleet model selection into `(provider, model)`.
+///
+/// Codex can talk to any endpoint that implements the OpenAI **Responses** API
+/// via a `[model_providers.<id>]` block in `~/.codex/config.toml`, but routing a
+/// single invocation at one requires `-c model_provider=<id>` on top of
+/// `-m <model>` — the config block alone only *defines* the provider.
+///
+/// Rather than thread a second field through `SpawnSpec` and every client (the
+/// desktop, mobile-web and Harmony model pickers all carry a plain string),
+/// Fleet encodes the pair in the model string itself: `"<provider>:<model>"`.
+/// So `"openrouter:deepseek/deepseek-v4-flash"` → provider `openrouter`, model
+/// `deepseek/deepseek-v4-flash`.
+///
+/// A value with no `:` is a bare model id for Codex's own default provider —
+/// `"gpt-5.6-sol"` stays untouched. The split is on the **first** colon only,
+/// because provider ids are single tokens while model ids routinely contain
+/// slashes (and, for some providers, further colons). Either side coming out
+/// blank (`":m"`, `"p:"`) means the value isn't a provider pair after all, so
+/// the whole string is treated as the model — never emit a half-formed
+/// override.
+fn split_model_provider(model: &str) -> (Option<&str>, &str) {
+    match model.split_once(':') {
+        Some((provider, rest)) => {
+            let (provider, rest) = (provider.trim(), rest.trim());
+            if provider.is_empty() || rest.is_empty() {
+                (None, model.trim())
+            } else {
+                (Some(provider), rest)
+            }
+        }
+        None => (None, model.trim()),
+    }
+}
+
+/// Push `-m <model>` plus, when the selection carries a `<provider>:` prefix,
+/// `-c model_provider=<provider>`. Shared by the spawn and resume builders so
+/// the two paths can never drift on provider routing. Blank models are dropped.
+fn push_model_args(args: &mut Vec<String>, model: Option<&str>) {
+    let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) else {
+        return;
+    };
+    let (provider, model_id) = split_model_provider(m);
+    if let Some(p) = provider {
+        args.push("-c".to_string());
+        args.push(format!("model_provider={p}"));
+    }
+    args.push("-m".to_string());
+    args.push(model_id.to_string());
+}
+
 /// Build the `codex exec` argv for a headless spawn.
 ///
 /// `workspace_path` is passed to Codex via `-C` (Codex's own working-dir flag)
@@ -802,10 +852,7 @@ pub fn build_codex_exec_args(
         "-C".to_string(),
         workspace_path.to_string(),
     ];
-    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
-        args.push("-m".to_string());
-        args.push(m.to_string());
-    }
+    push_model_args(&mut args, model);
     if let Some(e) = effort.map(str::trim).filter(|e| !e.is_empty()) {
         args.push("-c".to_string());
         args.push(format!("model_reasoning_effort={e}"));
@@ -1109,10 +1156,7 @@ pub fn build_codex_resume_args(
         "--json".to_string(),
         "--skip-git-repo-check".to_string(),
     ];
-    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
-        args.push("-m".to_string());
-        args.push(m.to_string());
-    }
+    push_model_args(&mut args, model);
     if let Some(e) = effort.map(str::trim).filter(|e| !e.is_empty()) {
         args.push("-c".to_string());
         args.push(format!("model_reasoning_effort={e}"));
@@ -1644,6 +1688,68 @@ mod tests {
         let args = build_codex_exec_args("/ws", "hi", Some("  "), Some(""), &[]);
         assert!(!args.contains(&"-m".to_string()));
         assert!(!args.iter().any(|a| a.starts_with("model_reasoning_effort=")));
+    }
+
+    /// A bare model id (Codex's own catalog) must not emit a provider override —
+    /// that would point the run at a `model_providers` block that isn't there.
+    #[test]
+    fn arg_builder_emits_no_provider_for_bare_model() {
+        let args = build_codex_exec_args("/ws", "hi", Some("gpt-5.6-sol"), None, &[]);
+        assert!(!args.iter().any(|a| a.starts_with("model_provider=")));
+        let mi = args.iter().position(|a| a == "-m").expect("has -m");
+        assert_eq!(args[mi + 1], "gpt-5.6-sol");
+    }
+
+    /// `"<provider>:<model>"` splits into `-c model_provider=<p>` + `-m <model>`.
+    /// The model id keeps its slashes — only the first colon is a separator.
+    #[test]
+    fn arg_builder_splits_provider_prefix() {
+        let args = build_codex_exec_args(
+            "/ws",
+            "hi",
+            Some("openrouter:deepseek/deepseek-v4-flash"),
+            Some("high"),
+            &[],
+        );
+        let pi = args
+            .iter()
+            .position(|a| a == "model_provider=openrouter")
+            .expect("has provider override");
+        assert_eq!(args[pi - 1], "-c");
+        let mi = args.iter().position(|a| a == "-m").expect("has -m");
+        assert_eq!(args[mi + 1], "deepseek/deepseek-v4-flash");
+        // The provider override is a flag, so it must land before the `--`.
+        let dd = args.iter().position(|a| a == "--").expect("has --");
+        assert!(pi < dd, "provider override must precede --");
+    }
+
+    /// The resume path routes identically — a follow-up turn must not silently
+    /// fall back to Codex's default provider mid-thread.
+    #[test]
+    fn resume_arg_builder_splits_provider_prefix() {
+        let args = build_codex_resume_args(
+            "thread-1",
+            "cont",
+            Some("openrouter:deepseek/deepseek-v4-flash"),
+            None,
+            &[],
+        );
+        assert!(args.contains(&"model_provider=openrouter".to_string()));
+        let mi = args.iter().position(|a| a == "-m").expect("has -m");
+        assert_eq!(args[mi + 1], "deepseek/deepseek-v4-flash");
+    }
+
+    /// Half-formed values are not provider pairs: emitting `model_provider=`
+    /// with a blank side would make Codex fail to resolve a provider at all.
+    #[test]
+    fn arg_builder_ignores_half_formed_provider_prefix() {
+        for m in [":deepseek/v4", "openrouter:", "openrouter:   "] {
+            let args = build_codex_exec_args("/ws", "hi", Some(m), None, &[]);
+            assert!(
+                !args.iter().any(|a| a.starts_with("model_provider=")),
+                "{m} must not yield a provider override"
+            );
+        }
     }
 
     #[test]

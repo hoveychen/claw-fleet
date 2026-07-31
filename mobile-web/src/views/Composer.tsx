@@ -37,12 +37,18 @@ const EFFORT_CHOICES: Array<[string, string]> = [
 
 // Codex model ids (`codex exec -m <model>`), disjoint from Claude's — mirrors
 // the desktop's CODEX_MODEL_CHOICES. "" default follows Codex's configured model.
+// A `<provider>:` prefix routes at a custom `[model_providers.<id>]` block in
+// the host's `~/.codex/config.toml` (the backend splits the pair — see
+// `split_model_provider` in `codex_launch.rs`); those entries only work once
+// that block exists on the machine actually running Codex.
 const CODEX_MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
   ["gpt-5.6-sol", "GPT-5.6 Sol"],
   ["gpt-5.6-terra", "GPT-5.6 Terra"],
   ["gpt-5.6-luna", "GPT-5.6 Luna"],
   ["gpt-5.5", "GPT-5.5"],
+  ["openrouter:deepseek/deepseek-v4-flash", "DeepSeek V4 Flash (OpenRouter)"],
+  ["openrouter:deepseek/deepseek-v4-pro", "DeepSeek V4 Pro (OpenRouter)"],
 ];
 
 // Codex reasoning effort — no "xhigh"/"max", adds "minimal" (mirrors desktop).
