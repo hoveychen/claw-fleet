@@ -27,6 +27,11 @@ pub struct GitStatus {
     pub branch: Option<String>,
     /// Upstream tracking ref (e.g. `origin/main`), when the branch has one.
     pub upstream: Option<String>,
+    /// Fetch URL of the remote this root talks to — the branch's own remote when
+    /// it tracks one, else `origin`. `None` when the repo has no such remote.
+    /// This is the URL (`git@github.com:owner/repo.git`), not the ref name that
+    /// `upstream` carries.
+    pub remote_url: Option<String>,
     /// Commits ahead of upstream — i.e. unpushed. `None` without an upstream.
     pub ahead: Option<usize>,
     /// Commits behind upstream. `None` without an upstream.
@@ -58,6 +63,7 @@ impl GitStatus {
             is_git: false,
             branch: None,
             upstream: None,
+            remote_url: None,
             ahead: None,
             behind: None,
             dirty_count: 0,
@@ -92,6 +98,7 @@ pub fn git_status(
         is_git: true,
         branch,
         upstream,
+        remote_url: remote_url(&repo),
         ahead,
         behind,
         dirty_count: dirty_files.len(),
@@ -126,6 +133,23 @@ fn head_tracking(
         }
     }
     (branch, upstream, ahead, behind)
+}
+
+/// Fetch URL of the remote a repo talks to: the current branch's own remote
+/// when it tracks one, else `origin`. `None` on a repo with no matching remote
+/// (a purely local `git init`, or a branch tracking a remote that was removed).
+fn remote_url(repo: &git2::Repository) -> Option<String> {
+    let name = repo
+        .head()
+        .ok()
+        .filter(git2::Reference::is_branch)
+        .and_then(|h| h.name().map(str::to_string))
+        .and_then(|refname| repo.branch_upstream_remote(&refname).ok())
+        .and_then(|buf| buf.as_str().map(str::to_string))
+        .unwrap_or_else(|| "origin".to_string());
+    repo.find_remote(&name)
+        .ok()
+        .and_then(|r| r.url().map(str::to_string))
 }
 
 /// Count of working-tree entries that are neither clean nor gitignored. Kept
@@ -202,6 +226,56 @@ pub fn git_pull(
     known_workspaces: &[String],
 ) -> Result<GitOpResult, String> {
     run_git(workspace, root, known_workspaces, &["pull", "--ff-only"])
+}
+
+/// `git clone <url> <dest>` — the one git entry point that does NOT take a
+/// known workspace, because a fresh clone by definition isn't one yet.
+///
+/// That means `resolve_validated_root`'s access envelope can't apply here, so
+/// the guard rails are structural instead: `dest` must be absolute, its parent
+/// must already exist as a directory, and `dest` itself must be absent or an
+/// empty directory. Nothing existing can be written over or deleted — the worst
+/// a caller can do is create one new directory somewhere the process could
+/// already write (the same envelope as "launch a session in any cwd").
+///
+/// Runs from `dest`'s parent so a relative-path git config / credential helper
+/// resolves the way the user's shell would.
+pub fn git_clone(url: &str, dest: &str) -> Result<GitOpResult, String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err("clone url is empty".into());
+    }
+    // A leading dash would be parsed as an option (`--upload-pack=...`), so
+    // reject it outright rather than relying on git's `--` handling alone.
+    if url.starts_with('-') {
+        return Err("clone url must not start with '-'".into());
+    }
+    let dest_path = Path::new(dest);
+    if !dest_path.is_absolute() {
+        return Err(format!("clone destination must be an absolute path: {dest}"));
+    }
+    let parent = dest_path
+        .parent()
+        .ok_or_else(|| format!("clone destination has no parent directory: {dest}"))?;
+    if !parent.is_dir() {
+        return Err(format!(
+            "clone destination's parent directory does not exist: {}",
+            parent.display()
+        ));
+    }
+    if dest_path.exists() {
+        if !dest_path.is_dir() {
+            return Err(format!("clone destination already exists: {dest}"));
+        }
+        let empty = std::fs::read_dir(dest_path)
+            .map_err(|e| format!("clone destination: {e}"))?
+            .next()
+            .is_none();
+        if !empty {
+            return Err(format!("clone destination is not empty: {dest}"));
+        }
+    }
+    run_git_in(parent, &["clone", "--", url, dest])
 }
 
 fn run_git(
@@ -306,6 +380,9 @@ pub struct RepoDetail {
     pub label: String,
     pub branch: Option<String>,
     pub upstream: Option<String>,
+    /// Fetch URL of the repo's remote (branch's own remote, else `origin`).
+    /// Same field as `GitStatus::remote_url` — a URL, not a ref name.
+    pub remote_url: Option<String>,
     pub unpushed: Option<usize>,
     pub behind: Option<usize>,
     /// Uncommitted entries in the main checkout. Always `dirty_files.len()`.
@@ -370,6 +447,7 @@ pub fn repo_detail(root: &str, known_workspaces: &[String]) -> Result<RepoDetail
         root: root.to_string_lossy().to_string(),
         branch,
         upstream,
+        remote_url: remote_url(&repo),
         unpushed,
         behind,
         dirty_count: files.len(),
@@ -699,6 +777,109 @@ mod tests {
         let w = ws.to_str().unwrap();
         let err = git_status(w, w, &[]).unwrap_err();
         assert!(err.contains("not a known session workspace"), "got: {err}");
+    }
+
+    // ── Clone + remote URL ──────────────────────────────────────────────────
+
+    #[test]
+    fn clone_creates_checkout_and_status_reports_its_remote_url() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // A bare "remote" seeded with one commit, so the clone has something to
+        // check out and a real URL to report back.
+        let remote = tmp.path().join("remote.git");
+        fs::create_dir_all(&remote).unwrap();
+        git(&remote, &["init", "-q", "--bare", "-b", "main"]);
+        let seed = tmp.path().join("seed");
+        init_repo(&seed);
+        git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(&seed, &["push", "-q", "-u", "origin", "main"]);
+
+        let dest = tmp.path().join("cloned");
+        let res = git_clone(remote.to_str().unwrap(), dest.to_str().unwrap()).unwrap();
+        assert!(res.ok, "clone failed: {}", res.output);
+        assert!(dest.join(".git").exists(), "no .git in {}", dest.display());
+        assert!(dest.join("a.txt").exists(), "working tree not checked out");
+
+        // The fresh clone reports the URL it came from — the whole point of the
+        // new field, and it resolves via the branch's own remote.
+        let d = dest.to_str().unwrap();
+        let st = git_status(d, d, &known(&dest)).unwrap();
+        assert_eq!(st.remote_url.as_deref(), remote.to_str(), "status: {st:?}");
+        // repo_detail carries the same field for the mobile repo surface.
+        let detail = repo_detail(d, &known(&dest)).unwrap();
+        assert_eq!(detail.remote_url.as_deref(), remote.to_str());
+    }
+
+    #[test]
+    fn clone_into_existing_empty_dir_is_allowed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let remote = tmp.path().join("remote.git");
+        fs::create_dir_all(&remote).unwrap();
+        git(&remote, &["init", "-q", "--bare", "-b", "main"]);
+        let seed = tmp.path().join("seed");
+        init_repo(&seed);
+        git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(&seed, &["push", "-q", "-u", "origin", "main"]);
+
+        let dest = tmp.path().join("empty-dir");
+        fs::create_dir_all(&dest).unwrap();
+        let res = git_clone(remote.to_str().unwrap(), dest.to_str().unwrap()).unwrap();
+        assert!(res.ok, "clone into empty dir failed: {}", res.output);
+        assert!(dest.join(".git").exists());
+    }
+
+    #[test]
+    fn clone_rejects_bad_url_and_unsafe_destinations() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let url = "https://example.invalid/x.git";
+        let abs = tmp.path().join("ok").to_string_lossy().to_string();
+
+        // Empty / option-looking URLs never reach git.
+        assert!(git_clone("  ", &abs).unwrap_err().contains("empty"));
+        assert!(git_clone("--upload-pack=evil", &abs)
+            .unwrap_err()
+            .contains("must not start with '-'"));
+
+        // Relative destination.
+        let err = git_clone(url, "relative/dir").unwrap_err();
+        assert!(err.contains("absolute"), "got: {err}");
+
+        // Parent directory missing.
+        let missing = tmp.path().join("nope").join("child");
+        let err = git_clone(url, missing.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("parent directory does not exist"), "got: {err}");
+
+        // Destination is a file.
+        let file = tmp.path().join("a-file");
+        fs::write(&file, "x").unwrap();
+        let err = git_clone(url, file.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("already exists"), "got: {err}");
+
+        // Destination is a non-empty directory — refusing this is what keeps the
+        // clone from ever landing on top of existing work.
+        let full = tmp.path().join("full");
+        fs::create_dir_all(&full).unwrap();
+        fs::write(full.join("keep.txt"), "mine").unwrap();
+        let err = git_clone(url, full.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("not empty"), "got: {err}");
+        assert!(full.join("keep.txt").exists(), "existing file must survive");
+    }
+
+    #[test]
+    fn remote_url_is_none_without_a_remote_and_falls_back_to_origin() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        init_repo(&ws);
+        let w = ws.to_str().unwrap();
+
+        // Plain `git init` repo: no remotes at all.
+        assert_eq!(git_status(w, w, &known(&ws)).unwrap().remote_url, None);
+
+        // An `origin` with no tracking branch still resolves via the fallback.
+        git(&ws, &["remote", "add", "origin", "git@example.com:o/r.git"]);
+        let st = git_status(w, w, &known(&ws)).unwrap();
+        assert_eq!(st.remote_url.as_deref(), Some("git@example.com:o/r.git"));
+        assert_eq!(st.upstream, None, "no tracking branch: {st:?}");
     }
 
     // ── Repository overview ─────────────────────────────────────────────────
