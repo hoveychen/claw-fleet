@@ -2586,10 +2586,16 @@ type RelayWs = tokio_tungstenite::WebSocketStream<
 /// Open the relay WebSocket, giving up after `connect_timeout` so a stalled
 /// handshake can never park the reconnect loop.
 async fn connect_ws(url: &str, connect_timeout: Duration) -> Result<RelayWs, String> {
-    let _ = connect_timeout;
-    let (ws, _) =
-        tokio_tungstenite::connect_async(url).await.map_err(|e| format!("connect {url}: {e}"))?;
-    Ok(ws)
+    let attempt = tokio_tungstenite::connect_async(url);
+    match tokio::time::timeout(connect_timeout, attempt).await {
+        Ok(Ok((ws, _))) => Ok(ws),
+        Ok(Err(e)) => Err(format!("connect {url}: {e}")),
+        // Timing out is reported like any other connect failure so `ws_run_loop`
+        // logs it and retries after its usual backoff.
+        Err(_) => {
+            Err(format!("connect {url}: timed out after {}s", connect_timeout.as_secs_f32()))
+        }
+    }
 }
 
 /// Ensure the outbound relay WebSocket is running. Idempotent; no-op when
