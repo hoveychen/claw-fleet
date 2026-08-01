@@ -570,4 +570,105 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     expect(legacy!.kind).toBe("elicitation");
     expect(legacy!.id).toBe("d-oldserver");
   });
+
+  // ── relay 托管交付(store-and-forward)────────────────────────────────────
+  //
+  // 桌面掉线时 relay 会接管答复帧并在桌面回来后转投,同时立刻回一个
+  // msg_ack{status:"queued"}。手机连接中位只活 13 秒,等不到桌面重连,所以
+  // 「relay 已收妥」就必须算交付完成 —— 否则老板按了提交、答复其实已在
+  // relay 手里,卡片却因为等不到桌面 reply 而报失败。
+
+  /** 取某连接发出的原始外层帧(未加密部分,用来断言 ack_id)。 */
+  function rawSent(ws: FakeWs): Array<Record<string, unknown>> {
+    return ws.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
+  }
+
+  it("答复帧带外层 ack_id,relay 回 queued 即视为交付完成", async () => {
+    const { client, ws } = await connected(clients);
+    const p = client.answerViaReq(
+      "fleet-ask",
+      "d-queued",
+      { cancelled: false, answers: { q: "v" } },
+      { attempts: 3, timeoutMs: 1000 },
+    );
+    p.catch(() => {});
+    await waitAnswerReqCount(ws, 1);
+
+    // 外层必须带 ack_id:relay 打不开密封 payload,读不到里面的 req_id。
+    const msgFrame = rawSent(ws).find((f) => f.type === "msg" && f.ack_id);
+    expect(msgFrame).toBeTruthy();
+    const ackId = String(msgFrame!.ack_id);
+
+    // 桌面没上线,relay 报「已接管」。这一帧就该让答复落地。
+    ws.deliver({ type: "msg_ack", ack_id: ackId, status: "queued" });
+    await expect(p).resolves.toBeUndefined();
+    // 已交付就不该再重发。
+    expect((await answerReqIds(ws)).length).toBe(1);
+  });
+
+  it("relay 回 dropped → 当作未送达,继续重发", async () => {
+    const { client, ws } = await connected(clients);
+    const p = client.answerViaReq(
+      "elicitation",
+      "d-dropped",
+      { declined: false, answers: {} },
+      { attempts: 2, timeoutMs: 1000 },
+    );
+    p.catch(() => {});
+    await waitAnswerReqCount(ws, 1);
+    const ackId = String(rawSent(ws).find((f) => f.type === "msg" && f.ack_id)!.ack_id);
+
+    ws.deliver({ type: "msg_ack", ack_id: ackId, status: "dropped" });
+    // 没送达 → 重发第二帧,而不是坐等 1000ms 超时。
+    await waitAnswerReqCount(ws, 2);
+    expect((await answerReqIds(ws)).length).toBe(2);
+  });
+
+  it("delivered 的 ack 不代替桌面裁决:仍等 reply", async () => {
+    const { client, ws } = await connected(clients);
+    const p = client.answerViaReq(
+      "elicitation",
+      "d-delivered",
+      { declined: false, answers: {} },
+      { attempts: 1, timeoutMs: 1000 },
+    );
+    p.catch(() => {});
+    await waitAnswerReqCount(ws, 1);
+    const ackId = String(rawSent(ws).find((f) => f.type === "msg" && f.ack_id)!.ack_id);
+
+    // 桌面在线、relay 已转交 —— 但桌面是否真消费了这张卡只有它自己知道,
+    // 所以 delivered 不能顶替 reply(否则又回到「乐观移卡」那个原始 bug)。
+    ws.deliver({ type: "msg_ack", ack_id: ackId, status: "delivered" });
+    let settled = false;
+    p.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    await tick(5);
+    expect(settled).toBe(false);
+
+    const reqId = (await answerReqIds(ws))[0];
+    ws.deliver(await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: null }));
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("普通数据请求不把 queued 当成结果", async () => {
+    // 只有决策答复愿意接受「relay 已收妥」作为终局;pending_snapshot 这类
+    // 请求要的是桌面的数据,relay 的托管确认对它毫无意义。
+    const { client, ws } = await connected(clients);
+    const p = client.request("pending_snapshot", {}, 1000);
+    p.catch(() => {});
+    await tick(2);
+    const ackId = rawSent(ws).find((f) => f.type === "msg" && f.ack_id)?.ack_id;
+    if (ackId) {
+      ws.deliver({ type: "msg_ack", ack_id: String(ackId), status: "queued" });
+    }
+    let settled = false;
+    p.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    await tick(5);
+    expect(settled).toBe(false);
+  });
 });

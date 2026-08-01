@@ -168,6 +168,9 @@ export class RelayClient {
       // without waiting out the timeout. `acked` guards against a double fire.
       onAck?: () => void;
       acked?: boolean;
+      /** Accept the relay's `msg_ack{queued}` as a successful outcome (decision
+       *  answers only — see `request`'s doc comment). */
+      ackIsDelivery?: boolean;
     }
   >();
   private reconnectDelay = 1000;
@@ -314,8 +317,41 @@ export class RelayClient {
       case "msg":
         this.dispatchMsgPayload((frame.payload ?? {}) as Record<string, unknown>);
         break;
+      case "msg_ack":
+        this.handleMsgAck(String(frame.ack_id ?? ""), String(frame.status ?? ""));
+        break;
       default:
         break; // notify frames are handled by the service worker via Web Push
+    }
+  }
+
+  /** The relay's custody report for one of our outbound `msg` frames.
+   *
+   *  `queued` means no agent was online and the relay is holding the frame for
+   *  the next one. For a decision answer that is as good as delivered: this
+   *  phone's socket typically lives ~13s, far less than a desktop reconnect, so
+   *  waiting for the desktop's own reply would fail an answer that is in fact
+   *  safely in flight. It is NOT "the desktop acted on it" — the card is removed
+   *  because the answer can no longer be lost, not because it was consumed.
+   *
+   *  `dropped` means nobody took it, so the caller should retry.
+   *  `delivered` deliberately does nothing: the desktop is online and will send
+   *  its own reply, which is the only thing that proves consumption. Treating it
+   *  as done here would resurrect the optimistic-removal bug this path fixed. */
+  private handleMsgAck(ackId: string, status: string) {
+    const entry = this.pending.get(ackId);
+    if (!entry) return;
+    if (status === "queued" && entry.ackIsDelivery) {
+      this.pending.delete(ackId);
+      window.clearTimeout(entry.timer);
+      entry.resolve(undefined);
+      return;
+    }
+    if (status === "dropped") {
+      this.pending.delete(ackId);
+      window.clearTimeout(entry.timer);
+      // remote=false → the caller may resend (the desktop dedups by decision id).
+      entry.reject(new RelayRequestError(t("relay 未能转交（桌面离线）"), false));
     }
   }
 
@@ -435,11 +471,15 @@ export class RelayClient {
    *  payloads (answer/req/hello/bye) are small, so it never gzips before sealing
    *  — `z` is only ever set by the desktop. Best-effort: a closed socket or a
    *  seal failure drops the frame (the desktop's next snapshot reconciles). */
-  private async sealAndSend(payload: unknown): Promise<void> {
+  private async sealAndSend(payload: unknown, ackId?: string): Promise<void> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     await this.ensureKeys();
     const sealed = await seal(this.encKey!, JSON.stringify(payload));
-    this.sendRaw({ type: "msg", payload: sealed });
+    // `ack_id` rides *outside* the envelope on purpose: the relay can't open the
+    // sealed body, so the `req_id` the endpoints correlate on is ciphertext to
+    // it. This id is a meaningless random label whose only job is to let the
+    // relay report back what it did with the frame (`msg_ack`).
+    this.sendRaw(ackId ? { type: "msg", payload: sealed, ack_id: ackId } : { type: "msg", payload: sealed });
   }
 
   /** Fire-and-forget seal+send shell so the synchronous callers (answer / hello
@@ -477,7 +517,15 @@ export class RelayClient {
     let lastErr: unknown;
     for (let i = 0; i < attempts; i++) {
       try {
-        await this.request("decision_answer", { kind, id, ...fields }, opts?.timeoutMs);
+        // `ackIsDelivery`: a relay that took custody of the frame ends this
+        // answer successfully even if the desktop is still offline.
+        await this.request(
+          "decision_answer",
+          { kind, id, ...fields },
+          opts?.timeoutMs,
+          undefined,
+          true,
+        );
         return; // desktop confirmed delivery
       } catch (e) {
         lastErr = e;
@@ -504,12 +552,17 @@ export class RelayClient {
   }
 
   /** Data request to the agent (pending_snapshot / task_plans / …).
-   *  `timeoutMs` overrides the default for slow methods (LLM analysis). */
+   *  `timeoutMs` overrides the default for slow methods (LLM analysis).
+   *  `ackIsDelivery` opts this request into treating the relay's
+   *  `msg_ack{status:"queued"}` as a successful outcome — only a decision answer
+   *  wants that (see `answerViaReq`); a data request needs the desktop's actual
+   *  payload, for which the relay's custody report is worthless. */
   request<T>(
     method: string,
     params?: Record<string, unknown>,
     timeoutMs?: number,
     onAck?: () => void,
+    ackIsDelivery?: boolean,
   ): Promise<T> {
     const reqId = `${this.reqPrefix}-${++this.reqSeq}`;
     return new Promise<T>((resolve, reject) => {
@@ -529,11 +582,15 @@ export class RelayClient {
         timer,
         sentAt: Date.now(),
         onAck,
+        ackIsDelivery,
       });
       // Only the body is encrypted; reqId/pending bookkeeping is unchanged. If
       // the seal/send fails (socket dropped mid-flight, crypto error), clear the
       // pending entry and reject now rather than sitting out the full timeout.
-      void this.sealAndSend({ event: "req", req_id: reqId, method, params: params ?? {} }).catch(
+      void this.sealAndSend(
+        { event: "req", req_id: reqId, method, params: params ?? {} },
+        reqId,
+      ).catch(
         () => {
           const entry = this.pending.get(reqId);
           if (!entry) return;

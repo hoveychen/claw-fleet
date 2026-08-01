@@ -73,6 +73,95 @@ async fn recv_json(ws: &mut Client) -> Value {
     }
 }
 
+/// Read frames until one of `want_type` arrives. Membership frames
+/// (`presence` / `agent_status`) interleave with everything else, so a test that
+/// takes "the next frame" is racing the registry's broadcasts.
+async fn recv_json_of_type(ws: &mut Client, want_type: &str) -> Value {
+    for _ in 0..8 {
+        let v = recv_json(ws).await;
+        if v["type"] == want_type {
+            return v;
+        }
+    }
+    panic!("no {want_type} frame arrived within 8 frames");
+}
+
+/// End-to-end custody: a client that answers while the desktop is away gets a
+/// `queued` ack instead of silence, and the frame is handed to the agent that
+/// joins afterwards. This is the whole point of the store-and-forward path — the
+/// phone's socket usually dies long before a desktop reconnect, so without it
+/// the answer evaporates while decision cards keep arriving.
+///
+/// Written after the implementation (the red/green pair for the queueing logic
+/// itself lives in `registry::tests`); verified non-vacuous by temporarily
+/// restoring the old drop-on-forward behaviour, which turns both halves red.
+#[tokio::test]
+async fn client_answer_is_acked_and_held_while_the_agent_is_away() {
+    let url = spawn_server().await;
+
+    // No agent on the channel at all — the old code silently dropped this.
+    let (mut client, authed) = connect(&url, "client", SECRET).await;
+    assert_eq!(authed["agent_online"], false);
+
+    client
+        .send(Message::Text(
+            json!({"type": "msg", "payload": {"answer": "allow"}, "ack_id": "a1"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+
+    let ack = recv_json(&mut client).await;
+    assert_eq!(ack["type"], "msg_ack", "an acked client msg must get a custody report");
+    assert_eq!(ack["ack_id"], "a1");
+    assert_eq!(ack["status"], "queued", "no agent online → the relay holds it");
+
+    // The desktop comes back and inherits the answer.
+    let (mut agent, _) = connect(&url, "agent", SECRET).await;
+    let got = recv_json(&mut agent).await;
+    assert_eq!(got["type"], "msg");
+    assert_eq!(got["payload"]["answer"], "allow", "the joining agent inherits the held answer");
+
+    // With the agent online the same frame is now reported as delivered. The
+    // client's stream also carries the `agent_status` bump from that join, so
+    // wait for the ack specifically rather than taking the next frame blindly.
+    client
+        .send(Message::Text(
+            json!({"type": "msg", "payload": {"answer": "deny"}, "ack_id": "a2"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let ack = recv_json_of_type(&mut client, "msg_ack").await;
+    assert_eq!(ack["ack_id"], "a2");
+    assert_eq!(ack["status"], "delivered");
+}
+
+/// A client that sends no `ack_id` must behave exactly as before — no ack frame
+/// is injected into its stream, or an older PWA would treat the relay's ack as
+/// an agent reply and desync its pending-request map.
+#[tokio::test]
+async fn msg_without_ack_id_gets_no_ack_frame() {
+    let url = spawn_server().await;
+    let (mut agent, _) = connect(&url, "agent", SECRET).await;
+    let (mut client, _) = connect(&url, "client", SECRET).await;
+    let _presence = recv_json(&mut agent).await;
+
+    client
+        .send(Message::Text(json!({"type": "msg", "payload": {"x": 1}}).to_string().into()))
+        .await
+        .unwrap();
+
+    // The agent still receives it…
+    let got = recv_json(&mut agent).await;
+    assert_eq!(got["payload"]["x"], 1);
+    // …and nothing comes back down the client's own socket.
+    let quiet = tokio::time::timeout(std::time::Duration::from_millis(300), client.next()).await;
+    assert!(quiet.is_err(), "no ack was requested, so none may be sent");
+}
+
 #[tokio::test]
 async fn auth_then_forward_between_roles() {
     let url = spawn_server().await;
