@@ -316,6 +316,71 @@ fn record_if_dedupable(preassigned: Option<&str>, resp_session_id: Option<&str>,
         .insert(id.to_string(), pid);
 }
 
+/// Per-key locks serializing a check→act→record window.
+static DEDUP_KEY_GUARDS: Mutex<Option<HashMap<String, std::sync::Arc<Mutex<()>>>>> =
+    Mutex::new(None);
+
+/// The lock serializing everything done under one dedup `key`.
+///
+/// `spawn_session` and `resume_session` both read "did we already dispatch this?",
+/// then launch a process, then record it. Their comments used to justify that gap
+/// with "all mobile frames funnel through one serially handled relay connection" —
+/// no longer true now that handlers run concurrently, so two duplicates could
+/// both pass the check and launch twice. Holding this guard across the whole
+/// window makes the duplicate wait and then observe the first one's record, which
+/// is exactly the behaviour the serial loop used to provide for free.
+///
+/// Guards for keys nobody holds any more are pruned on each acquisition, so the
+/// map tracks only in-flight work rather than every session id ever seen.
+fn dedup_key_guard(key: &str) -> std::sync::Arc<Mutex<()>> {
+    let mut outer = DEDUP_KEY_GUARDS.lock().unwrap();
+    let map = outer.get_or_insert_with(HashMap::new);
+    map.retain(|_, g| std::sync::Arc::strong_count(g) > 1);
+    std::sync::Arc::clone(map.entry(key.to_string()).or_default())
+}
+
+/// Recently computed results for expensive read-only projections.
+static RESULT_CACHE: Mutex<Option<HashMap<String, (u64, Value)>>> = Mutex::new(None);
+
+/// Compute `key`'s value at most once per `ttl`, collapsing concurrent callers.
+///
+/// Handlers run concurrently now, and the phone polls the same few read-only
+/// methods on a timer while the desktop polls them too — so without this, N
+/// simultaneous `today_usage` requests each rescan every session on disk. The
+/// per-key guard makes the duplicates queue; by the time they get the lock the
+/// first one's result is cached, so they return it instead of redoing the work.
+/// Only safe for read-only projections whose value is fine to be `ttl` stale.
+fn cached_by_key<F>(key: &str, ttl: Duration, compute: F) -> Result<Value, String>
+where
+    F: FnOnce() -> Result<Value, String>,
+{
+    let guard = dedup_key_guard(&format!("cache:{key}"));
+    let _held = guard.lock().unwrap();
+    let ttl_ms = ttl.as_millis() as u64;
+    let now = now_ms();
+    if let Some(map) = RESULT_CACHE.lock().unwrap().as_ref() {
+        if let Some((at, v)) = map.get(key) {
+            if now.saturating_sub(*at) < ttl_ms {
+                return Ok(v.clone());
+            }
+        }
+    }
+    let value = compute()?;
+    let mut outer = RESULT_CACHE.lock().unwrap();
+    let map = outer.get_or_insert_with(HashMap::new);
+    // Bounded by the handful of cacheable methods, but prune anyway so a future
+    // per-argument key can't grow the map without limit.
+    map.retain(|_, (at, _)| now.saturating_sub(*at) < ttl_ms.max(60_000));
+    map.insert(key.to_string(), (now, value.clone()));
+    Ok(value)
+}
+
+/// How long a `today_usage` result is reused. Short enough that the mobile header
+/// still ticks along, long enough to collapse the phone's and the desktop's
+/// overlapping polls into one disk scan (315 calls on 2026-08-01, one of which
+/// held the ws loop for 163s).
+const TODAY_USAGE_CACHE_TTL: Duration = Duration::from_secs(5);
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -346,6 +411,36 @@ fn decision_already_answered(id: &str) -> bool {
     let map = guard.get_or_insert_with(HashMap::new);
     map.retain(|_, at| now.saturating_sub(*at) < ANSWER_DEDUP_TTL_MS);
     map.contains_key(id)
+}
+
+/// Claim `id` for delivery, returning whether this caller won the claim.
+///
+/// `false` means someone else already delivered (or is delivering) this answer,
+/// which the caller must report as an idempotent success. This has to be one
+/// atomic check-and-insert: with the ws loop dispatching handlers concurrently,
+/// a separate `decision_already_answered` + `record_decision_answered` pair lets
+/// two duplicate answers both pass the check before either records, and a live
+/// card would be delivered twice.
+fn claim_decision_answer(id: &str) -> bool {
+    let now = now_ms();
+    let mut guard = ANSWERED_DECISIONS.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.retain(|_, at| now.saturating_sub(*at) < ANSWER_DEDUP_TTL_MS);
+    // contains_key + insert under one lock hold: the whole point is that no
+    // second claimant can observe the gap between them.
+    if map.contains_key(id) {
+        return false;
+    }
+    map.insert(id.to_string(), now);
+    true
+}
+
+/// Give a claim back after a failed delivery so a genuine retry isn't swallowed
+/// as an idempotent no-op.
+fn release_decision_answer(id: &str) {
+    if let Some(map) = ANSWERED_DECISIONS.lock().unwrap().as_mut() {
+        map.remove(id);
+    }
 }
 
 /// Record that `id`'s answer was delivered, so a later resend short-circuits.
@@ -413,12 +508,20 @@ fn record_resume_dispatched(key: &str) {
 /// and a new client (or a new client's own retries) can't double-deliver.
 fn deliver_decision_answer_deduped(payload: &Value) -> Result<(), String> {
     let id = payload.get("id").and_then(Value::as_str).unwrap_or("").trim().to_string();
-    if !id.is_empty() && decision_already_answered(&id) {
+    if !id.is_empty() && !claim_decision_answer(&id) {
         return Ok(());
     }
-    deliver_decision_answer(payload)?;
-    record_decision_answered(&id);
-    Ok(())
+    // Hand the claim back if the delivery itself failed, so the phone's retry is
+    // not short-circuited into a false success.
+    match deliver_decision_answer(payload) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            if !id.is_empty() {
+                release_decision_answer(&id);
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Record (or refresh) a client from its `client_hello` payload. First sighting
@@ -1996,10 +2099,15 @@ fn serve_token_breakdown(params: &Value) -> Result<Value, String> {
 // Today's cumulative token/cost counter for the mobile header (mirrors
 // `LocalBackend::today_usage` / `/today_usage`).
 fn serve_today_usage(_params: &Value) -> Result<Value, String> {
-    let sources = crate::agent_source::build_sources();
-    let sessions = crate::session::scan_all_sources(&sources);
-    let usage = crate::today_usage::today_usage(&sessions);
-    serde_json::to_value(usage).map_err(|e| e.to_string())
+    // Rescanning every session on disk per poll is what made this the loop's most
+    // expensive method by total time; the phone and the desktop both poll it, so
+    // collapse overlapping calls onto one scan.
+    cached_by_key("today_usage", TODAY_USAGE_CACHE_TTL, || {
+        let sources = crate::agent_source::build_sources();
+        let sessions = crate::session::scan_all_sources(&sources);
+        let usage = crate::today_usage::today_usage(&sessions);
+        serde_json::to_value(usage).map_err(|e| e.to_string())
+    })
 }
 
 // Per-model receipt breakdown behind the header counter (mirrors
@@ -2251,6 +2359,11 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
+    // Handlers run concurrently, so hold this id's guard across check→spawn→record:
+    // a duplicate frame waits here and then sees the recorded pid instead of
+    // launching a second `claude --session-id S`.
+    let guard = preassigned.as_deref().map(|id| dedup_key_guard(&format!("spawn:{id}")));
+    let _held = guard.as_ref().map(|g| g.lock().unwrap());
     if let Some(id) = preassigned.as_deref() {
         if let Some(pid) = spawned_session_pid(id) {
             return serde_json::to_value(crate::session_launch::SpawnSessionResponse {
@@ -2284,10 +2397,13 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
     // `claude --resume` on the same session — the double-submit that stacks two
     // near-identical decision cards. Dedup an identical resend (same session +
     // same prompt) within a short window; a different follow-up prompt is not a
-    // resend and passes through. All mobile frames funnel through one serially
-    // handled relay connection, so this per-process map is sufficient (no
-    // cross-process resume path exists).
+    // resend and passes through. Only one relay process handles these frames (no
+    // cross-process resume path exists), so a per-process map suffices — but the
+    // frames are no longer processed one at a time, so the check→dispatch→record
+    // window is held under this key's guard.
     let dedup_key = resume_dedup_key(&req.session_id, req.prompt.as_deref().unwrap_or(""));
+    let guard = dedup_key_guard(&format!("resume:{dedup_key}"));
+    let _held = guard.lock().unwrap();
     if resume_recently_dispatched(&dedup_key) {
         return Ok(json!({ "ok": true, "deduped": true }));
     }
@@ -2308,8 +2424,8 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
         Box::new(|_| {}),
     )?;
     // Record only after a successful dispatch: a failed resume must not block the
-    // user's legitimate retry, and frames are serial so the next resend is read
-    // only after this returns.
+    // user's legitimate retry. The guard above (still held) is what keeps a
+    // concurrent resend from slipping in before this record lands.
     record_resume_dispatched(&dedup_key);
     Ok(json!({ "ok": true }))
 }
@@ -2569,6 +2685,35 @@ fn ws_url(relay_url: &str) -> String {
     format!("{ws_base}/ws")
 }
 
+/// Upper bound on a single relay connect attempt (TCP + TLS + HTTP upgrade).
+/// Without a bound a peer that accepts the TCP connection and then goes silent
+/// mid-TLS-handshake parks the connect future forever, which strands the whole
+/// reconnect loop: `WS_STARTED` stays `true`, so `ensure_ws_client` refuses to
+/// start a replacement and the desktop never rejoins the channel until the
+/// process is restarted. Observed 2026-08-01: the agent left the channel at
+/// 21:39 and the desktop logged nothing after 21:44 while still holding one
+/// idle ESTABLISHED socket to the relay.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+type RelayWs = tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+>;
+
+/// Open the relay WebSocket, giving up after `connect_timeout` so a stalled
+/// handshake can never park the reconnect loop.
+async fn connect_ws(url: &str, connect_timeout: Duration) -> Result<RelayWs, String> {
+    let attempt = tokio_tungstenite::connect_async(url);
+    match tokio::time::timeout(connect_timeout, attempt).await {
+        Ok(Ok((ws, _))) => Ok(ws),
+        Ok(Err(e)) => Err(format!("connect {url}: {e}")),
+        // Timing out is reported like any other connect failure so `ws_run_loop`
+        // logs it and retries after its usual backoff.
+        Err(_) => {
+            Err(format!("connect {url}: timed out after {}s", connect_timeout.as_secs_f32()))
+        }
+    }
+}
+
 /// Ensure the outbound relay WebSocket is running. Idempotent; no-op when
 /// the feature is disabled or no secret is set.
 pub fn ensure_ws_client() {
@@ -2616,14 +2761,62 @@ async fn ws_run_loop() {
     }
 }
 
+/// Run one decoded inbound payload's handler and ship its reply.
+///
+/// Called from the ws `select!` loop's inbound arm, which means whatever this
+/// awaits also stalls reading the next frame, the heartbeat ping, and the
+/// outbound flush — all three live in the same `select!`. Slow handlers therefore
+/// starve the connection: on 2026-08-01 a single `today_usage` held the loop for
+/// 163s (and `tail` for 92s, `guard_analyze` for 60s), the ping never went out,
+/// the relay dropped the socket, and every answer frame buffered behind it was
+/// lost unread — while decision cards, which only need one momentary push, kept
+/// arriving. Hence the handler must not be awaited inline.
+async fn dispatch_inbound<F>(payload: Value, handler: F)
+where
+    F: FnOnce(&Value) -> Option<Value> + Send + 'static,
+{
+    let method = payload
+        .get("method")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("event").and_then(Value::as_str))
+        .unwrap_or("?")
+        .to_string();
+    // Detached: the loop returns to `select!` immediately, so a slow handler can
+    // no longer starve the ping or the frame reads. Replies go out through the
+    // `OUT_TX` channel, which is already order-independent (every reply carries
+    // its own `req_id`), so handlers completing out of order is fine.
+    //
+    // Concurrency is now real, which is why the dedup windows that used to lean on
+    // "frames are serial" are held under `dedup_key_guard` / claimed atomically —
+    // see `claim_decision_answer` and `serve_spawn_session`.
+    tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        // Blocking file IO (write_response / pending scans) must not run on the ws
+        // runtime thread.
+        let reply = tokio::task::spawn_blocking(move || handler(&payload)).await.ok().flatten();
+        let handle_ms = started.elapsed().as_millis();
+        if let Some(reply) = reply {
+            let out = encode_payload(&reply);
+            let Outbound::Text(ref wire) = out;
+            crate::log_debug(&format!(
+                "[relay-timing] method={method} handle_ms={handle_ms} wire_bytes={}",
+                wire.len()
+            ));
+            send_out(out);
+        } else if handle_ms >= 50 {
+            crate::log_debug(&format!(
+                "[relay-timing] method={method} handle_ms={handle_ms} no-reply"
+            ));
+        }
+    });
+}
+
 async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String> {
     use futures::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
 
     let url = ws_url(&cfg.relay_url);
-    let (ws, _) = tokio_tungstenite::connect_async(&url)
-        .await
-        .map_err(|e| format!("connect {url}: {e}"))?;
+    let ws = connect_ws(&url, CONNECT_TIMEOUT).await?;
     let (mut sink, mut stream) = ws.split();
 
     // auth as agent. We send the HKDF-derived channel token, NOT the raw
@@ -2705,39 +2898,7 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                         // path under the hard cutover.
                         if let Some(payload) = frame.get("payload").and_then(decode_inbound_payload)
                         {
-                            // Requests are handled one at a time (this arm awaits
-                            // before the next frame is read), so queue wait is
-                            // inferable from adjacent [relay-timing] lines: the
-                            // previous line's end is the next request's start.
-                            let method = payload
-                                .get("method")
-                                .and_then(Value::as_str)
-                                .or_else(|| payload.get("event").and_then(Value::as_str))
-                                .unwrap_or("?")
-                                .to_string();
-                            let started = std::time::Instant::now();
-                            // Blocking file IO (write_response / pending scans)
-                            // must not run on the ws runtime thread.
-                            let reply = tokio::task::spawn_blocking(move || {
-                                handle_client_payload(&payload)
-                            })
-                            .await
-                            .ok()
-                            .flatten();
-                            let handle_ms = started.elapsed().as_millis();
-                            if let Some(reply) = reply {
-                                let out = encode_payload(&reply);
-                                let Outbound::Text(ref wire) = out;
-                                crate::log_debug(&format!(
-                                    "[relay-timing] method={method} handle_ms={handle_ms} wire_bytes={}",
-                                    wire.len()
-                                ));
-                                send_out(out);
-                            } else if handle_ms >= 50 {
-                                crate::log_debug(&format!(
-                                    "[relay-timing] method={method} handle_ms={handle_ms} no-reply"
-                                ));
-                            }
+                            dispatch_inbound(payload, handle_client_payload).await;
                         } else {
                             // A dropped envelope is invisible to the phone (it just
                             // times out) — make version/key mismatches greppable.
@@ -4731,6 +4892,244 @@ mod tests {
             "expected a claude account or an error, got {v}"
         );
         assert!(v["sources"].is_array(), "sources is always an array");
+    }
+
+    /// Concurrent callers of one expensive read-only projection must collapse into
+    /// a single computation, and a stale entry must expire. Both the phone and the
+    /// desktop poll `today_usage` on timers, so without this every overlapping
+    /// poll rescans every session on disk.
+    #[test]
+    fn cached_by_key_collapses_callers_and_expires() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::{Arc, Barrier};
+
+        let key = format!("cache-test-{}", now_ms());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(6));
+
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                let (key, calls, barrier) =
+                    (key.clone(), Arc::clone(&calls), Arc::clone(&barrier));
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    cached_by_key(&key, Duration::from_secs(30), || {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(20));
+                        Ok(json!({"v": 1}))
+                    })
+                    .expect("cached_by_key must succeed")
+                })
+            })
+            .collect();
+        for h in handles {
+            let v = h.join().expect("cache thread must not panic");
+            assert_eq!(v["v"], 1, "every caller gets the same value");
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "6 concurrent callers must trigger exactly one computation"
+        );
+
+        // A short TTL must expire, or the header would freeze on a stale number.
+        let short = format!("cache-ttl-{}", now_ms());
+        let ttl_calls = Arc::new(AtomicUsize::new(0));
+        for _ in 0..2 {
+            let c = Arc::clone(&ttl_calls);
+            cached_by_key(&short, Duration::from_millis(10), || {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({"v": 2}))
+            })
+            .expect("ttl probe must succeed");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(ttl_calls.load(Ordering::SeqCst), 2, "an expired entry is recomputed");
+    }
+
+    /// The ws loop's inbound arm must hand a payload off and come straight back
+    /// to `select!`, because that same `select!` owns reading the next frame, the
+    /// 30s heartbeat ping and the outbound flush. Awaiting the handler inline is
+    /// what let one 163s `today_usage` starve the ping, drop the socket, and lose
+    /// every answer frame buffered behind it.
+    ///
+    /// A 300ms handler stands in for those slow methods; dispatch must return in a
+    /// small fraction of that, and the handler must still actually run.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dispatch_inbound_does_not_wait_for_a_slow_handler() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+
+        let ran = Arc::new(AtomicBool::new(false));
+        let ran_in_handler = Arc::clone(&ran);
+        let started = std::time::Instant::now();
+        dispatch_inbound(json!({ "method": "slow_probe" }), move |_| {
+            std::thread::sleep(Duration::from_millis(300));
+            ran_in_handler.store(true, Ordering::SeqCst);
+            None
+        })
+        .await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(100),
+            "dispatch blocked the ws loop for {elapsed:?} — heartbeat and frame reads stall with it"
+        );
+
+        // Handing off must not mean dropping the work on the floor.
+        for _ in 0..100 {
+            if ran.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(ran.load(Ordering::SeqCst), "the handler must still run, just off the loop");
+    }
+
+    /// Two holders of the same dedup key must never be inside the critical
+    /// section at once, and different keys must not block each other. This is
+    /// what replaces the "frames are serial" assumption that `spawn_session` and
+    /// `resume_session` used to lean on: without it, two duplicate spawn frames
+    /// both pass the "already dispatched?" check and launch two processes.
+    #[test]
+    fn dedup_key_guard_serializes_same_key_and_not_others() {
+        use std::sync::atomic::{AtomicUsize, Ordering as AtOrd};
+        use std::sync::{Arc, Barrier};
+
+        let key = format!("guard-{}", now_ms());
+        let inside = Arc::new(AtomicUsize::new(0));
+        let overlaps = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(8));
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let (key, inside, overlaps, barrier) = (
+                    key.clone(),
+                    Arc::clone(&inside),
+                    Arc::clone(&overlaps),
+                    Arc::clone(&barrier),
+                );
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let guard = dedup_key_guard(&key);
+                    let _held = guard.lock().unwrap();
+                    // Anyone else in here at the same time is a lost dedup.
+                    if inside.fetch_add(1, AtOrd::SeqCst) != 0 {
+                        overlaps.fetch_add(1, AtOrd::SeqCst);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                    inside.fetch_sub(1, AtOrd::SeqCst);
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("guard thread must not panic");
+        }
+        assert_eq!(
+            overlaps.load(AtOrd::SeqCst),
+            0,
+            "same-key holders overlapped — the check→spawn→record window is not serialized"
+        );
+
+        // Distinct keys must be independent, or one slow spawn would stall every
+        // other session's.
+        let a = dedup_key_guard("guard-independent-a");
+        let _a_held = a.lock().unwrap();
+        let b = dedup_key_guard("guard-independent-b");
+        assert!(b.try_lock().is_ok(), "a different key must not be blocked");
+    }
+
+    /// Exactly one concurrent claimant may win a decision id. The ws loop used
+    /// to handle one request at a time, so a check-then-record pair was safe;
+    /// once handlers run concurrently, two duplicate answers (the phone's own
+    /// resend racing the original) can both pass the check and get delivered
+    /// twice — for a parked card that means two `claude --resume` turns.
+    ///
+    /// This is a race, so it is pinned by piling 32 threads onto one barrier
+    /// rather than by construction; against the two-lock version it fails
+    /// consistently, which is what makes it a real red light.
+    #[test]
+    fn only_one_concurrent_claimant_wins_a_decision_id() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::{Arc, Barrier};
+
+        // Distinct id per run so a previously claimed id can't mask the race.
+        let id = format!("race-{}", now_ms());
+        let threads = 32;
+        let barrier = Arc::new(Barrier::new(threads));
+        let winners = Arc::new(AtomicUsize::new(0));
+
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                let barrier = Arc::clone(&barrier);
+                let winners = Arc::clone(&winners);
+                let id = id.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    if claim_decision_answer(&id) {
+                        winners.fetch_add(1, Ordering::SeqCst);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("claim thread must not panic");
+        }
+
+        assert_eq!(
+            winners.load(Ordering::SeqCst),
+            1,
+            "a decision id may be delivered once; extra winners double-deliver the answer"
+        );
+    }
+
+    /// Releasing a claim after a failed delivery lets a genuine retry through —
+    /// otherwise a delivery that errored would be swallowed as an idempotent
+    /// no-op forever and the card could never be answered.
+    #[test]
+    fn released_claim_can_be_reclaimed() {
+        let id = format!("release-{}", now_ms());
+        assert!(claim_decision_answer(&id), "first claim wins");
+        assert!(!claim_decision_answer(&id), "second claim is a dedup hit");
+        release_decision_answer(&id);
+        assert!(claim_decision_answer(&id), "a released id is claimable again");
+    }
+
+    /// A relay that accepts the TCP connection and then never speaks must not
+    /// park the connect future forever: `connect_ws` has to honour its own
+    /// deadline. Without it `ws_run_loop` is stranded inside this await — no
+    /// reconnect, no log line, and `WS_STARTED` stuck `true` so nothing can
+    /// take over — which is how the desktop silently left the relay channel on
+    /// 2026-08-01 and every phone answer lost its receiver.
+    ///
+    /// The listener accepts and holds the connection without writing a byte,
+    /// which is exactly the stalled-handshake shape. The outer bound only
+    /// exists so a regression fails loudly instead of hanging the suite.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connect_ws_gives_up_on_a_silent_peer() {
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback listener");
+        let addr = listener.local_addr().expect("listener addr");
+        // Accept and hold: never write, never close.
+        let _accepting = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+
+        let url = format!("ws://{addr}/ws");
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(3),
+            connect_ws(&url, Duration::from_millis(300)),
+        )
+        .await;
+
+        let inner = outcome.expect(
+            "connect_ws must return on its own deadline; it parked instead, \
+             which strands the reconnect loop forever",
+        );
+        assert!(inner.is_err(), "a peer that never completes the handshake is not a connection");
     }
 
     /// The pure gzip-gate decision — no global state, safe to run alone.

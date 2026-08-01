@@ -206,11 +206,18 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered, onOpenSession
   const aiTitle = req.aiTitle || session?.titleOverride || session?.aiTitle;
 
   // Answering over the robust req/reply path: the card is removed only once the
-  // desktop confirms delivery (answerViaReq resolves). Under a weak link the old
-  // fire-and-forget `answer` would drop the frame, yet the card was removed
-  // optimistically — so the desktop stayed blocked while the card vanished. Here
-  // a lost frame is resent, and a final failure keeps the card so the boss can
-  // retry rather than silently losing the answer.
+  // answer can no longer be lost (answerViaReq resolves) — either the desktop
+  // replied, or the relay took custody of the frame and will hand it to the
+  // desktop when it reconnects. Under a weak link the old fire-and-forget
+  // `answer` would drop the frame, yet the card was removed optimistically — so
+  // the desktop stayed blocked while the card vanished. Here a lost frame is
+  // resent, and a final failure keeps the card so the boss can retry rather than
+  // silently losing the answer.
+  //
+  // Note the relay-custody case is genuinely weaker than a desktop reply: the
+  // card leaves this list before any session has acted on it. That is the right
+  // trade — this phone's socket usually lives seconds, so demanding a desktop
+  // round trip is what made answers unsendable while cards kept arriving.
   const [sending, setSending] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
   const submit = useCallback(

@@ -9,9 +9,10 @@
 //! Connections push serialized frames through unbounded senders so the
 //! registry stays synchronous and unit-testable without real sockets.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::UnboundedSender;
@@ -37,10 +38,20 @@ pub fn channel_id(secret: &str) -> String {
     out.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// A client frame accepted while no agent was online, held until one joins.
+#[derive(Debug, Clone)]
+struct Pending {
+    msg: OutMsg,
+    at: Instant,
+}
+
 #[derive(Default)]
 struct Channel {
     agents: HashMap<u64, Tx>,
     clients: HashMap<u64, Tx>,
+    /// Client→agent frames waiting for an agent. Only ever non-empty while the
+    /// channel has no agent connection.
+    pending: VecDeque<Pending>,
 }
 
 impl Channel {
@@ -58,8 +69,18 @@ impl Channel {
         }
     }
 
+    /// A channel is only collectable once nothing is left to deliver — a queue
+    /// held for an absent agent must outlive the client that handed it over,
+    /// otherwise the phone's answer dies the moment its socket drops.
     fn is_empty(&self) -> bool {
-        self.agents.is_empty() && self.clients.is_empty()
+        self.agents.is_empty() && self.clients.is_empty() && self.pending.is_empty()
+    }
+
+    /// Drop queued frames older than `ttl`. Returns how many were discarded.
+    fn drop_expired(&mut self, ttl: Duration) -> usize {
+        let before = self.pending.len();
+        self.pending.retain(|p| p.at.elapsed() < ttl);
+        before - self.pending.len()
     }
 }
 
@@ -74,11 +95,35 @@ pub const DEFAULT_MAX_CHANNELS: usize = 100_000;
 /// stopping one channel from being packed with sockets.
 pub const DEFAULT_MAX_PER_CHANNEL: usize = 64;
 
+/// Default cap on client frames held for an absent agent, per channel. A phone
+/// answering decision cards emits one small frame per answer, so 32 covers a
+/// long offline stretch; past that the oldest is dropped (and logged — never
+/// silently).
+pub const DEFAULT_MAX_PENDING_PER_CHANNEL: usize = 32;
+/// Default lifetime of a queued client frame. Past this the answer is stale
+/// enough that the desktop has likely resolved the card another way, so holding
+/// it would replay an outdated decision.
+pub const DEFAULT_PENDING_TTL: Duration = Duration::from_secs(600);
+
+/// What became of a client frame handed to the registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    /// Handed to this many live agent connections.
+    Delivered(usize),
+    /// No agent online; queued for the next one to join. Carries the queue depth
+    /// after the push.
+    Queued(usize),
+    /// No agent online and the frame could not be queued (channel unknown).
+    Dropped,
+}
+
 pub struct Registry {
     channels: Mutex<HashMap<String, Channel>>,
     next_id: AtomicU64,
     max_channels: usize,
     max_per_channel: usize,
+    max_pending: usize,
+    pending_ttl: Duration,
 }
 
 impl Default for Registry {
@@ -101,7 +146,16 @@ impl Registry {
             next_id: AtomicU64::new(0),
             max_channels,
             max_per_channel,
+            max_pending: DEFAULT_MAX_PENDING_PER_CHANNEL,
+            pending_ttl: DEFAULT_PENDING_TTL,
         }
+    }
+
+    /// Override the store-and-forward limits (tests drive tiny caps / TTLs).
+    pub fn with_pending_limits(mut self, max_pending: usize, pending_ttl: Duration) -> Self {
+        self.max_pending = max_pending;
+        self.pending_ttl = pending_ttl;
+        self
     }
 
     /// Register a connection and notify the opposite role of the change. Returns
@@ -132,6 +186,30 @@ impl Registry {
         let conn_id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let ch = channels.entry(channel.to_string()).or_default();
         ch.members_mut(role).insert(conn_id, tx);
+        // An agent taking the channel inherits whatever the phones handed over
+        // while it was away, oldest first. Stale frames are dropped rather than
+        // replayed — the card they answer may have been resolved another way.
+        if role == Role::Agent {
+            let expired = ch.drop_expired(self.pending_ttl);
+            if expired > 0 {
+                log::info!(
+                    "channel {}… discarded {expired} expired held frame(s) on agent join",
+                    &channel[..channel.len().min(12)]
+                );
+            }
+            if !ch.pending.is_empty() {
+                let tx = &ch.agents[&conn_id];
+                let held = std::mem::take(&mut ch.pending);
+                log::info!(
+                    "channel {}… flushing {} held frame(s) to the joining agent",
+                    &channel[..channel.len().min(12)],
+                    held.len()
+                );
+                for p in held {
+                    let _ = tx.send(p.msg);
+                }
+            }
+        }
         let state = JoinState {
             conn_id,
             clients: ch.clients.len(),
@@ -168,6 +246,40 @@ impl Registry {
     /// connection of the opposite role, verbatim. Returns the delivery count.
     pub fn forward_binary(&self, channel: &str, from: Role, bytes: Vec<u8>) -> usize {
         self.deliver(channel, from, OutMsg::Binary(bytes))
+    }
+
+    /// Forward a client frame to the channel's agents, or hold it until one
+    /// joins. This is what keeps an answer alive across the gap where the phone
+    /// is online but the desktop is not: the phone's socket often lives only a
+    /// few seconds, far less than the round trip it would need to wait out a
+    /// reconnect, so the relay takes custody instead of dropping the frame.
+    pub fn deliver_or_queue(&self, channel: &str, msg: OutMsg) -> Delivery {
+        let mut channels = self.channels.lock().unwrap();
+        let Some(ch) = channels.get_mut(channel) else {
+            return Delivery::Dropped;
+        };
+        let mut delivered = 0;
+        for tx in ch.agents.values() {
+            if tx.send(msg.clone()).is_ok() {
+                delivered += 1;
+            }
+        }
+        if delivered > 0 {
+            return Delivery::Delivered(delivered);
+        }
+        ch.drop_expired(self.pending_ttl);
+        // At the cap the oldest goes: a fresher answer is the one worth keeping,
+        // and the loss is logged rather than passed off as a delivery.
+        while ch.pending.len() >= self.max_pending {
+            ch.pending.pop_front();
+            log::warn!(
+                "channel {}… pending queue at cap {}; dropped the oldest held frame",
+                &channel[..channel.len().min(12)],
+                self.max_pending
+            );
+        }
+        ch.pending.push_back(Pending { msg, at: Instant::now() });
+        Delivery::Queued(ch.pending.len())
     }
 
     fn deliver(&self, channel: &str, from: Role, msg: OutMsg) -> usize {
@@ -214,6 +326,108 @@ mod tests {
             }
         }
         out
+    }
+
+    // ── store-and-forward:agent 离线时暂存 client 帧,上线后转投 ──────────────
+    //
+    // 治的是「收得到卡、发不出答复」的不对称:收卡只要单向一瞬,答复要一次完整
+    // 往返 + 双方同时在线。手机连接常常只活几秒,等不到桌面重连,所以让 relay
+    // 先接管这一帧。
+
+    fn text(v: serde_json::Value) -> OutMsg {
+        OutMsg::Text(v.to_string())
+    }
+
+    #[test]
+    fn client_frame_is_queued_while_no_agent_and_flushed_on_join() {
+        let reg = Registry::default();
+        let (client_tx, _client_rx) = unbounded_channel();
+        reg.join("ch", Role::Client, client_tx);
+
+        // No agent yet — the frame must be taken into custody, not dropped.
+        let d = reg.deliver_or_queue("ch", text(json!({"answer": 1})));
+        assert_eq!(d, Delivery::Queued(1), "an offline agent must not lose the answer");
+
+        // The agent arrives and receives the held frame.
+        let (agent_tx, mut agent_rx) = unbounded_channel();
+        reg.join("ch", Role::Agent, agent_tx);
+        let got = drain(&mut agent_rx);
+        assert!(
+            got.contains(&json!({"answer": 1})),
+            "joining agent must be handed the queued answer, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn queue_outlives_the_client_that_handed_it_over() {
+        let reg = Registry::default();
+        let (client_tx, _client_rx) = unbounded_channel();
+        let client = reg.join("ch", Role::Client, client_tx).expect("client joins");
+        reg.deliver_or_queue("ch", text(json!({"answer": 2})));
+
+        // The phone drops off right after submitting — the usual case, since its
+        // socket lives seconds. The channel must survive to keep the answer.
+        reg.leave("ch", Role::Client, client.conn_id);
+
+        let (agent_tx, mut agent_rx) = unbounded_channel();
+        reg.join("ch", Role::Agent, agent_tx);
+        let got = drain(&mut agent_rx);
+        assert!(
+            got.contains(&json!({"answer": 2})),
+            "answer must survive the client's disconnect, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn live_agent_still_gets_frames_directly_without_queueing() {
+        let reg = Registry::default();
+        let (agent_tx, mut agent_rx) = unbounded_channel();
+        reg.join("ch", Role::Agent, agent_tx);
+        drain(&mut agent_rx);
+
+        let d = reg.deliver_or_queue("ch", text(json!({"answer": 3})));
+        assert_eq!(d, Delivery::Delivered(1), "an online agent is served directly");
+        assert_eq!(drain(&mut agent_rx), vec![json!({"answer": 3})]);
+    }
+
+    #[test]
+    fn pending_queue_is_capped_and_drops_the_oldest() {
+        let reg = Registry::default().with_pending_limits(2, Duration::from_secs(600));
+        let (client_tx, _client_rx) = unbounded_channel();
+        reg.join("ch", Role::Client, client_tx);
+
+        for i in 1..=3 {
+            reg.deliver_or_queue("ch", text(json!({"answer": i})));
+        }
+
+        let (agent_tx, mut agent_rx) = unbounded_channel();
+        reg.join("ch", Role::Agent, agent_tx);
+        let got = drain(&mut agent_rx);
+        let answers: Vec<_> = got.iter().filter(|v| v.get("answer").is_some()).collect();
+        assert_eq!(answers.len(), 2, "cap of 2 holds two frames, got {got:?}");
+        assert!(
+            !got.contains(&json!({"answer": 1})),
+            "the oldest frame is the one dropped at the cap"
+        );
+        assert!(got.contains(&json!({"answer": 3})), "the newest frame is kept");
+    }
+
+    #[test]
+    fn expired_pending_frames_are_not_replayed() {
+        let reg = Registry::default().with_pending_limits(32, Duration::from_millis(30));
+        let (client_tx, _client_rx) = unbounded_channel();
+        reg.join("ch", Role::Client, client_tx);
+        reg.deliver_or_queue("ch", text(json!({"answer": 4})));
+
+        std::thread::sleep(Duration::from_millis(60));
+
+        let (agent_tx, mut agent_rx) = unbounded_channel();
+        reg.join("ch", Role::Agent, agent_tx);
+        let got = drain(&mut agent_rx);
+        assert!(
+            !got.contains(&json!({"answer": 4})),
+            "a stale answer must not be replayed onto a card resolved elsewhere, got {got:?}"
+        );
     }
 
     fn drain_binary(rx: &mut UnboundedReceiver<OutMsg>) -> Vec<Vec<u8>> {

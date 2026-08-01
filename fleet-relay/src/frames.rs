@@ -27,7 +27,17 @@ pub enum InFrame {
     /// Must be the first frame on every connection.
     Auth { role: Role, secret: String },
     /// Opaque payload forwarded verbatim to the opposite role.
-    Msg { payload: Value },
+    ///
+    /// `ack_id` is an optional, deliberately meaningless correlation id the
+    /// sender may attach so the relay can report back what became of the frame
+    /// (`msg_ack`). It sits *outside* the sealed payload because the relay
+    /// cannot open the envelope — the `req_id` the endpoints correlate on is
+    /// ciphertext to us. Older clients omit it and get no ack, as before.
+    Msg {
+        payload: Value,
+        #[serde(default)]
+        ack_id: Option<String>,
+    },
     /// Agent only: fan out a Web Push to the channel's subscriptions and
     /// forward to online clients.
     Notify {
@@ -72,11 +82,30 @@ pub enum OutFrame {
         #[serde(skip_serializing_if = "Option::is_none")]
         url: Option<String>,
     },
+    /// Custody report for a client `msg` that carried an `ack_id`.
+    ///
+    /// `Delivered` means live agent connections received it. `Queued` means no
+    /// agent was online and the relay is holding it for the next one — so the
+    /// sender may stop retrying, but must not read it as "the desktop has acted
+    /// on this". `Dropped` means neither happened and the sender should retry.
+    MsgAck {
+        ack_id: String,
+        status: MsgAckStatus,
+    },
     /// Sent to agents when the number of connected clients changes.
     Presence { clients: usize },
     /// Sent to clients when agent connectivity changes.
     AgentStatus { online: bool },
     Error { message: String },
+}
+
+/// What the relay did with an acked client `msg`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MsgAckStatus {
+    Delivered,
+    Queued,
+    Dropped,
 }
 
 /// Payload of a Web Push notification (what the service worker receives).
