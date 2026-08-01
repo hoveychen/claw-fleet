@@ -2569,6 +2569,29 @@ fn ws_url(relay_url: &str) -> String {
     format!("{ws_base}/ws")
 }
 
+/// Upper bound on a single relay connect attempt (TCP + TLS + HTTP upgrade).
+/// Without a bound a peer that accepts the TCP connection and then goes silent
+/// mid-TLS-handshake parks the connect future forever, which strands the whole
+/// reconnect loop: `WS_STARTED` stays `true`, so `ensure_ws_client` refuses to
+/// start a replacement and the desktop never rejoins the channel until the
+/// process is restarted. Observed 2026-08-01: the agent left the channel at
+/// 21:39 and the desktop logged nothing after 21:44 while still holding one
+/// idle ESTABLISHED socket to the relay.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+type RelayWs = tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+>;
+
+/// Open the relay WebSocket, giving up after `connect_timeout` so a stalled
+/// handshake can never park the reconnect loop.
+async fn connect_ws(url: &str, connect_timeout: Duration) -> Result<RelayWs, String> {
+    let _ = connect_timeout;
+    let (ws, _) =
+        tokio_tungstenite::connect_async(url).await.map_err(|e| format!("connect {url}: {e}"))?;
+    Ok(ws)
+}
+
 /// Ensure the outbound relay WebSocket is running. Idempotent; no-op when
 /// the feature is disabled or no secret is set.
 pub fn ensure_ws_client() {
@@ -2621,9 +2644,7 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
     use tokio_tungstenite::tungstenite::Message;
 
     let url = ws_url(&cfg.relay_url);
-    let (ws, _) = tokio_tungstenite::connect_async(&url)
-        .await
-        .map_err(|e| format!("connect {url}: {e}"))?;
+    let ws = connect_ws(&url, CONNECT_TIMEOUT).await?;
     let (mut sink, mut stream) = ws.split();
 
     // auth as agent. We send the HKDF-derived channel token, NOT the raw
@@ -4731,6 +4752,43 @@ mod tests {
             "expected a claude account or an error, got {v}"
         );
         assert!(v["sources"].is_array(), "sources is always an array");
+    }
+
+    /// A relay that accepts the TCP connection and then never speaks must not
+    /// park the connect future forever: `connect_ws` has to honour its own
+    /// deadline. Without it `ws_run_loop` is stranded inside this await — no
+    /// reconnect, no log line, and `WS_STARTED` stuck `true` so nothing can
+    /// take over — which is how the desktop silently left the relay channel on
+    /// 2026-08-01 and every phone answer lost its receiver.
+    ///
+    /// The listener accepts and holds the connection without writing a byte,
+    /// which is exactly the stalled-handshake shape. The outer bound only
+    /// exists so a regression fails loudly instead of hanging the suite.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connect_ws_gives_up_on_a_silent_peer() {
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback listener");
+        let addr = listener.local_addr().expect("listener addr");
+        // Accept and hold: never write, never close.
+        let _accepting = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+
+        let url = format!("ws://{addr}/ws");
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(3),
+            connect_ws(&url, Duration::from_millis(300)),
+        )
+        .await;
+
+        let inner = outcome.expect(
+            "connect_ws must return on its own deadline; it parked instead, \
+             which strands the reconnect loop forever",
+        );
+        assert!(inner.is_err(), "a peer that never completes the handshake is not a connection");
     }
 
     /// The pure gzip-gate decision — no global state, safe to run alone.
