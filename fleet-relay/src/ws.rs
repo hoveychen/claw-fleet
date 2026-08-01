@@ -19,9 +19,9 @@ use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::frames::{InFrame, OutFrame, PushPayload, Role};
+use crate::frames::{InFrame, MsgAckStatus, OutFrame, PushPayload, Role};
 use crate::limits::ConnGuard;
-use crate::registry::{channel_id, OutMsg};
+use crate::registry::{channel_id, Delivery, OutMsg};
 use crate::AppState;
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -126,6 +126,9 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
     let channel = channel_id(&secret);
 
     let (tx, mut rx) = unbounded_channel::<OutMsg>();
+    // Kept so this connection can push frames addressed to *itself* (the
+    // `msg_ack` custody report) through the same write pump.
+    let own_tx = tx.clone();
     let Some(joined) = state.registry.join(&channel, role, tx) else {
         let _ = send_frame(&mut socket, &OutFrame::Error { message: "channel at capacity".into() }).await;
         return;
@@ -182,8 +185,38 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
         };
         match frame {
             InFrame::Auth { .. } => {} // already authed; ignore
-            InFrame::Msg { payload } => {
-                state.registry.forward(&channel, role, &OutFrame::Msg { payload });
+            InFrame::Msg { payload, ack_id } => {
+                let out = OutFrame::Msg { payload };
+                match role {
+                    // A client frame is taken into custody when the agent is
+                    // away: the phone's socket usually lives only seconds, far
+                    // less than a desktop reconnect, so dropping it here is what
+                    // made answers vanish while cards still arrived.
+                    Role::Client => {
+                        let serialized = match serde_json::to_string(&out) {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        };
+                        let delivery =
+                            state.registry.deliver_or_queue(&channel, OutMsg::Text(serialized));
+                        if let Some(ack_id) = ack_id {
+                            let status = match delivery {
+                                Delivery::Delivered(_) => MsgAckStatus::Delivered,
+                                Delivery::Queued(_) => MsgAckStatus::Queued,
+                                Delivery::Dropped => MsgAckStatus::Dropped,
+                            };
+                            let ack = OutFrame::MsgAck { ack_id, status };
+                            // Straight back down this socket: the ack belongs to
+                            // this connection, not to the channel's other role.
+                            if let Ok(s) = serde_json::to_string(&ack) {
+                                let _ = own_tx.send(OutMsg::Text(s));
+                            }
+                        }
+                    }
+                    Role::Agent => {
+                        state.registry.forward(&channel, role, &out);
+                    }
+                }
             }
             InFrame::Notify { title, body, tag, url } if role == Role::Agent => {
                 let out = OutFrame::Notify {
