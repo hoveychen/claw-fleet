@@ -339,6 +339,48 @@ fn dedup_key_guard(key: &str) -> std::sync::Arc<Mutex<()>> {
     std::sync::Arc::clone(map.entry(key.to_string()).or_default())
 }
 
+/// Recently computed results for expensive read-only projections.
+static RESULT_CACHE: Mutex<Option<HashMap<String, (u64, Value)>>> = Mutex::new(None);
+
+/// Compute `key`'s value at most once per `ttl`, collapsing concurrent callers.
+///
+/// Handlers run concurrently now, and the phone polls the same few read-only
+/// methods on a timer while the desktop polls them too — so without this, N
+/// simultaneous `today_usage` requests each rescan every session on disk. The
+/// per-key guard makes the duplicates queue; by the time they get the lock the
+/// first one's result is cached, so they return it instead of redoing the work.
+/// Only safe for read-only projections whose value is fine to be `ttl` stale.
+fn cached_by_key<F>(key: &str, ttl: Duration, compute: F) -> Result<Value, String>
+where
+    F: FnOnce() -> Result<Value, String>,
+{
+    let guard = dedup_key_guard(&format!("cache:{key}"));
+    let _held = guard.lock().unwrap();
+    let ttl_ms = ttl.as_millis() as u64;
+    let now = now_ms();
+    if let Some(map) = RESULT_CACHE.lock().unwrap().as_ref() {
+        if let Some((at, v)) = map.get(key) {
+            if now.saturating_sub(*at) < ttl_ms {
+                return Ok(v.clone());
+            }
+        }
+    }
+    let value = compute()?;
+    let mut outer = RESULT_CACHE.lock().unwrap();
+    let map = outer.get_or_insert_with(HashMap::new);
+    // Bounded by the handful of cacheable methods, but prune anyway so a future
+    // per-argument key can't grow the map without limit.
+    map.retain(|_, (at, _)| now.saturating_sub(*at) < ttl_ms.max(60_000));
+    map.insert(key.to_string(), (now, value.clone()));
+    Ok(value)
+}
+
+/// How long a `today_usage` result is reused. Short enough that the mobile header
+/// still ticks along, long enough to collapse the phone's and the desktop's
+/// overlapping polls into one disk scan (315 calls on 2026-08-01, one of which
+/// held the ws loop for 163s).
+const TODAY_USAGE_CACHE_TTL: Duration = Duration::from_secs(5);
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2057,10 +2099,15 @@ fn serve_token_breakdown(params: &Value) -> Result<Value, String> {
 // Today's cumulative token/cost counter for the mobile header (mirrors
 // `LocalBackend::today_usage` / `/today_usage`).
 fn serve_today_usage(_params: &Value) -> Result<Value, String> {
-    let sources = crate::agent_source::build_sources();
-    let sessions = crate::session::scan_all_sources(&sources);
-    let usage = crate::today_usage::today_usage(&sessions);
-    serde_json::to_value(usage).map_err(|e| e.to_string())
+    // Rescanning every session on disk per poll is what made this the loop's most
+    // expensive method by total time; the phone and the desktop both poll it, so
+    // collapse overlapping calls onto one scan.
+    cached_by_key("today_usage", TODAY_USAGE_CACHE_TTL, || {
+        let sources = crate::agent_source::build_sources();
+        let sessions = crate::session::scan_all_sources(&sources);
+        let usage = crate::today_usage::today_usage(&sessions);
+        serde_json::to_value(usage).map_err(|e| e.to_string())
+    })
 }
 
 // Per-model receipt breakdown behind the header counter (mirrors
@@ -4845,6 +4892,59 @@ mod tests {
             "expected a claude account or an error, got {v}"
         );
         assert!(v["sources"].is_array(), "sources is always an array");
+    }
+
+    /// Concurrent callers of one expensive read-only projection must collapse into
+    /// a single computation, and a stale entry must expire. Both the phone and the
+    /// desktop poll `today_usage` on timers, so without this every overlapping
+    /// poll rescans every session on disk.
+    #[test]
+    fn cached_by_key_collapses_callers_and_expires() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::{Arc, Barrier};
+
+        let key = format!("cache-test-{}", now_ms());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(6));
+
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                let (key, calls, barrier) =
+                    (key.clone(), Arc::clone(&calls), Arc::clone(&barrier));
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    cached_by_key(&key, Duration::from_secs(30), || {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(20));
+                        Ok(json!({"v": 1}))
+                    })
+                    .expect("cached_by_key must succeed")
+                })
+            })
+            .collect();
+        for h in handles {
+            let v = h.join().expect("cache thread must not panic");
+            assert_eq!(v["v"], 1, "every caller gets the same value");
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "6 concurrent callers must trigger exactly one computation"
+        );
+
+        // A short TTL must expire, or the header would freeze on a stale number.
+        let short = format!("cache-ttl-{}", now_ms());
+        let ttl_calls = Arc::new(AtomicUsize::new(0));
+        for _ in 0..2 {
+            let c = Arc::clone(&ttl_calls);
+            cached_by_key(&short, Duration::from_millis(10), || {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({"v": 2}))
+            })
+            .expect("ttl probe must succeed");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(ttl_calls.load(Ordering::SeqCst), 2, "an expired entry is recomputed");
     }
 
     /// The ws loop's inbound arm must hand a payload off and come straight back
