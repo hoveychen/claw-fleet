@@ -186,6 +186,30 @@ impl Registry {
         let conn_id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let ch = channels.entry(channel.to_string()).or_default();
         ch.members_mut(role).insert(conn_id, tx);
+        // An agent taking the channel inherits whatever the phones handed over
+        // while it was away, oldest first. Stale frames are dropped rather than
+        // replayed — the card they answer may have been resolved another way.
+        if role == Role::Agent {
+            let expired = ch.drop_expired(self.pending_ttl);
+            if expired > 0 {
+                log::info!(
+                    "channel {}… discarded {expired} expired held frame(s) on agent join",
+                    &channel[..channel.len().min(12)]
+                );
+            }
+            if !ch.pending.is_empty() {
+                let tx = &ch.agents[&conn_id];
+                let held = std::mem::take(&mut ch.pending);
+                log::info!(
+                    "channel {}… flushing {} held frame(s) to the joining agent",
+                    &channel[..channel.len().min(12)],
+                    held.len()
+                );
+                for p in held {
+                    let _ = tx.send(p.msg);
+                }
+            }
+        }
         let state = JoinState {
             conn_id,
             clients: ch.clients.len(),
@@ -230,8 +254,32 @@ impl Registry {
     /// few seconds, far less than the round trip it would need to wait out a
     /// reconnect, so the relay takes custody instead of dropping the frame.
     pub fn deliver_or_queue(&self, channel: &str, msg: OutMsg) -> Delivery {
-        let delivered = self.deliver(channel, Role::Client, msg);
-        Delivery::Delivered(delivered)
+        let mut channels = self.channels.lock().unwrap();
+        let Some(ch) = channels.get_mut(channel) else {
+            return Delivery::Dropped;
+        };
+        let mut delivered = 0;
+        for tx in ch.agents.values() {
+            if tx.send(msg.clone()).is_ok() {
+                delivered += 1;
+            }
+        }
+        if delivered > 0 {
+            return Delivery::Delivered(delivered);
+        }
+        ch.drop_expired(self.pending_ttl);
+        // At the cap the oldest goes: a fresher answer is the one worth keeping,
+        // and the loss is logged rather than passed off as a delivery.
+        while ch.pending.len() >= self.max_pending {
+            ch.pending.pop_front();
+            log::warn!(
+                "channel {}… pending queue at cap {}; dropped the oldest held frame",
+                &channel[..channel.len().min(12)],
+                self.max_pending
+            );
+        }
+        ch.pending.push_back(Pending { msg, at: Instant::now() });
+        Delivery::Queued(ch.pending.len())
     }
 
     fn deliver(&self, channel: &str, from: Role, msg: OutMsg) -> usize {
