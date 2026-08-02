@@ -808,11 +808,38 @@ pub fn fleet_notify_args() -> Vec<String> {
 /// Measured effect: median `codex exec` turn ~19s→16s on a ChatGPT-team account
 /// (n=4 interleaved A/B). The variance is large; this shaves a few seconds off
 /// every spawned/resumed Codex turn without touching the user's `config.toml`.
-pub fn codex_ws_disable_args() -> Vec<String> {
-    if !codex_uses_chatgpt_auth() {
+pub fn codex_ws_disable_args(model: Option<&str>) -> Vec<String> {
+    ws_disable_args_for(model, codex_uses_chatgpt_auth())
+}
+
+/// The gate itself, with the `auth.json` read lifted out so it can be unit
+/// tested: `model` is the spawn's Fleet model selection, `uses_chatgpt_auth`
+/// what [`codex_uses_chatgpt_auth`] found.
+fn ws_disable_args_for(model: Option<&str>, uses_chatgpt_auth: bool) -> Vec<String> {
+    if !uses_chatgpt_auth || selection_pins_provider(model) {
         return Vec::new();
     }
     ws_disable_provider_args()
+}
+
+/// Whether this spawn's model selection already pins a provider of its own —
+/// i.e. it is a `profile:<name>` pick, whose profile-v2 file carries a
+/// `model_provider` (see [`list_codex_profiles`]).
+///
+/// The WS-disable `-c` flags are applied *after* the `-p` profile layer and
+/// would override that provider with `chatgpt-http`, sending a third-party
+/// model id (e.g. an OpenRouter `deepseek/…`) to the ChatGPT backend. That 400s
+/// on the first turn — the session dies with no output at all. A profile pick
+/// is the user explicitly choosing a non-ChatGPT backend, so the ChatGPT-only
+/// WebSocket workaround simply does not apply to it.
+///
+/// A nameless `profile:` pins nothing: [`push_model_args`] drops it, so the
+/// session does fall through to the ChatGPT default and still wants the flags.
+fn selection_pins_provider(model: Option<&str>) -> bool {
+    model
+        .map(str::trim)
+        .and_then(|m| m.strip_prefix(PROFILE_PREFIX))
+        .is_some_and(|name| !name.trim().is_empty())
 }
 
 /// The concrete `-c` provider overrides, factored out (no I/O) for testing.
@@ -1061,7 +1088,7 @@ pub fn spawn_new_codex_session(
     let mut pre_prompt = decision_args;
     pre_prompt.extend(fleet_notify_args());
     // Skip Codex's flaky WebSocket transport on ChatGPT logins (no-op otherwise).
-    pre_prompt.extend(codex_ws_disable_args());
+    pre_prompt.extend(codex_ws_disable_args(model));
     // Channel B: prepend the workspace's active TASKS.md plans (new session has
     // no thread id yet, so no backtrack backstop — pass None).
     let prompt = maybe_prepend_active_plans(&workspace_path, None, prompt);
@@ -1329,7 +1356,7 @@ pub fn resume_codex_session(
     let mut pre_prompt = decision_args;
     pre_prompt.extend(fleet_notify_args());
     // Skip Codex's flaky WebSocket transport on ChatGPT logins (no-op otherwise).
-    pre_prompt.extend(codex_ws_disable_args());
+    pre_prompt.extend(codex_ws_disable_args(model));
     // Channel B: prepend the workspace's active TASKS.md plans; this resume knows
     // its thread id, so the backtrack backstop can fire for a completed child.
     let prompt = maybe_prepend_active_plans(&workspace_path, Some(session_id), prompt);
@@ -1672,6 +1699,36 @@ mod tests {
         assert!(args.contains(&"model_providers.chatgpt-http.supports_websockets=false".to_string()));
         // Never touches the reserved built-in `openai` provider (Codex rejects that).
         assert!(!args.iter().any(|a| a.contains("model_providers.openai.")));
+    }
+
+    /// A `profile:<name>` selection layers a profile-v2 file that pins its own
+    /// `model_provider` (OpenRouter & co). The WS-disable overrides carry
+    /// `-c model_provider=chatgpt-http`, which is applied *after* the profile
+    /// layer and silently repoints such a session at the ChatGPT backend — the
+    /// model id then comes back as "not supported when using Codex with a
+    /// ChatGPT account" and the session dies before its first turn. So a
+    /// profile selection must suppress the overrides entirely, even on a
+    /// ChatGPT login.
+    #[test]
+    fn ws_disable_suppressed_for_profile_selection() {
+        assert!(ws_disable_args_for(Some("profile:or-deepseek-flash"), true).is_empty());
+        assert!(ws_disable_args_for(Some("  profile:or-deepseek-flash  "), true).is_empty());
+    }
+
+    /// The suppression is narrow: a bare model id still gets the overrides (that
+    /// is the whole point of the WS workaround), and a nameless `profile:` is
+    /// not addressable — `push_model_args` drops it, so the session really does
+    /// fall through to the ChatGPT default and still wants the overrides.
+    #[test]
+    fn ws_disable_still_applies_without_a_profile() {
+        for m in [Some("gpt-5.6-sol"), None, Some("profile:"), Some("profile:   ")] {
+            assert!(
+                ws_disable_args_for(m, true).contains(&"model_provider=chatgpt-http".to_string()),
+                "expected overrides for {m:?}"
+            );
+        }
+        // Non-ChatGPT logins never get them, profile or not.
+        assert!(ws_disable_args_for(Some("gpt-5.6-sol"), false).is_empty());
     }
 
     #[test]
