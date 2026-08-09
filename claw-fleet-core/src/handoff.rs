@@ -232,6 +232,15 @@ fn register_in(
     // Continue the chain this session was itself handed, if any.
     let (chain_id, hop) = match chain_containing_in(chain_dir, session_id) {
         Some(chain) => {
+            if let Some(successor) = successor_of(&chain, session_id) {
+                return Err(format!(
+                    "session {session_id} already handed off to {successor} (chain {}) — \
+                     refusing to relay the same baton twice; that successor owns the work now. \
+                     If you were woken up after handing off (a parked card answered late, a watch \
+                     firing, the user prompting you), answer and stop — do not register again.",
+                    chain.chain_id
+                ));
+            }
             let hop = chain.hop_of(session_id).unwrap_or(1);
             if hop >= MAX_CHAIN_HOPS {
                 return Err(format!(
@@ -382,6 +391,23 @@ fn list_chains_in(dir: &Path) -> Vec<HandoffChain> {
 pub fn chain_containing(session_id: &str) -> Option<HandoffChain> {
     let dir = chain_dir()?;
     chain_containing_in(&dir, session_id)
+}
+
+/// The session `session_id` already relayed to, if it has one.
+///
+/// A session appears as a link's `from` exactly once per baton it handed over,
+/// so a hit here means the session is *retired*: its successor owns the work.
+/// Both the registration path and the Stop-hook consumption path refuse on it,
+/// because a retired session that gets woken up late (parked card answered
+/// hours later, a watch firing again, a manual prompt) resumes with a context
+/// that ends at "I just registered a handoff" and re-registers the same stale
+/// baton — forking the chain into two successors at one hop number.
+fn successor_of(chain: &HandoffChain, session_id: &str) -> Option<String> {
+    chain
+        .links
+        .iter()
+        .find(|l| l.from_session_id == session_id)
+        .map(|l| l.to_session_id.clone())
 }
 
 fn chain_containing_in(dir: &Path, session_id: &str) -> Option<HandoffChain> {
@@ -588,6 +614,20 @@ where
     let Some(pending) = take_pending_in(pending_dir, session_id, now) else {
         return Ok(None);
     };
+    // Backstop for the refusal in `register_in`: a record written by an older
+    // build — or between a take and its link — must not spawn a second
+    // successor for a session that already relayed. The record is already gone
+    // (take removes first), so dropping it here retires it for good.
+    if let Some(chain) = chain_containing_in(chain_dir, session_id) {
+        if let Some(successor) = successor_of(&chain, session_id) {
+            crate::log_debug(&format!(
+                "handoff: {session_id} already relayed to {successor} (chain {}); \
+                 discarding a second pending record instead of forking the chain",
+                chain.chain_id
+            ));
+            return Ok(None);
+        }
+    }
     let prompt = compose_successor_prompt(&pending);
     // The relay continues the predecessor's work, so it continues on the
     // predecessor's model and effort. Falling through to the CLI default here
@@ -1045,6 +1085,62 @@ mod tests {
         register_simple(&pdir, &cdir, "s1", "second", 2000).unwrap();
         let taken = take_pending_in(&pdir, "s1", 3000).unwrap();
         assert_eq!(taken.note, "second");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A session that already handed its baton over is retired: the successor
+    /// owns the work. Late wake-ups happen all the time — a parked decision card
+    /// answered hours later, a watch that fires again, the user prompting the
+    /// session by hand — and the woken agent's context still ends at "I just
+    /// registered a handoff", so it dutifully registers the *same* handoff a
+    /// second time. Without this refusal the Stop hook relays it again and the
+    /// chain forks into two successors sharing one hop number.
+    #[test]
+    fn register_refuses_after_the_session_already_handed_off() {
+        let (root, pdir, cdir) = fresh_dirs("already-relayed");
+        register_simple(&pdir, &cdir, "s1", "first", 1000).unwrap();
+        let taken = take_pending_in(&pdir, "s1", 1001).unwrap();
+        record_link_in(&cdir, &taken, "s2", 1002).unwrap();
+
+        let err = register_simple(&pdir, &cdir, "s1", "same baton again", 2000).unwrap_err();
+        assert!(err.contains("already handed off"), "{err}");
+        assert!(
+            read_pending_in(&pdir, "s1").is_none(),
+            "a refused registration must not leave a pending record behind"
+        );
+        // The successor itself is of course still free to register its own.
+        assert!(register_simple(&pdir, &cdir, "s2", "next hop", 2100).is_ok());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Consume-side backstop for the same fork: a pending record that predates
+    /// the refusal above (older build, or one written between the take and the
+    /// link) must be discarded rather than spawning a second successor.
+    #[test]
+    fn consume_discards_a_pending_record_from_an_already_relayed_session() {
+        let (root, pdir, cdir) = fresh_dirs("relayed-consume");
+        let rec = register_simple(&pdir, &cdir, "s1", "note", 1000).unwrap();
+        // Link recorded while the pending file is still on disk.
+        record_link_in(&cdir, &rec, "s2", 1001).unwrap();
+
+        let spawned = std::cell::Cell::new(false);
+        let out = consume_and_spawn_in(&pdir, &cdir, None, "s1", 1002, |_, _, _, _, _, _, _| {
+            spawned.set(true);
+            Ok(crate::session_launch::SpawnSessionResponse {
+                pid: 1,
+                session_id: Some("s3".to_string()),
+            })
+        })
+        .unwrap();
+
+        assert!(out.is_none(), "must not spawn a second successor for s1");
+        assert!(!spawned.get(), "the spawner must not be called at all");
+        assert!(
+            read_pending_in(&pdir, "s1").is_none(),
+            "the stale record must be consumed, not left to refire"
+        );
+        let chain = chain_containing_in(&cdir, "s1").unwrap();
+        assert_eq!(chain.links.len(), 1, "chain must not gain a duplicate link");
         let _ = fs::remove_dir_all(&root);
     }
 
