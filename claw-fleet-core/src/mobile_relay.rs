@@ -405,6 +405,12 @@ const ANSWER_DEDUP_TTL_MS: u64 = 5 * 60 * 1000;
 
 /// Whether `id`'s answer was already delivered recently (a dedup hit). Prunes
 /// expired entries as a side effect so the map stays bounded.
+///
+/// Test-only seam: the delivery path claims atomically through
+/// [`claim_decision_answer`] instead (see its doc comment for why the
+/// check-then-record pair was unsafe). Kept so the tests can drive the map's
+/// semantics directly.
+#[cfg(test)]
 fn decision_already_answered(id: &str) -> bool {
     let now = now_ms();
     let mut guard = ANSWERED_DECISIONS.lock().unwrap();
@@ -444,6 +450,10 @@ fn release_decision_answer(id: &str) {
 }
 
 /// Record that `id`'s answer was delivered, so a later resend short-circuits.
+///
+/// Test-only seam, same rationale as [`decision_already_answered`]: the live
+/// path records inside [`claim_decision_answer`]'s lock hold.
+#[cfg(test)]
 fn record_decision_answered(id: &str) {
     if id.trim().is_empty() {
         return;
