@@ -4,13 +4,9 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderOpen } from "lucide-react";
 import { DirPickerDialog } from "./DirPickerDialog";
+import { ProcTerminal } from "./ProcTerminal";
+import type { ProcRecord } from "../types";
 import styles from "./CloneRepoDialog.module.css";
-
-// mirror claw-fleet-core/src/git_ops.rs
-interface GitOpResult {
-  ok: boolean;
-  output: string;
-}
 
 /** Directory name `git clone` itself would pick for `url`: the last path
  *  segment with any `.git` suffix dropped. Handles both URL forms git accepts —
@@ -47,9 +43,11 @@ interface Props {
 /** Clone a git repository into a directory the user picks.
  *
  *  The clone runs on whichever host the backend is bound to (local desktop or
- *  the remote probe), blocking for its duration — same shape as the push / pull
- *  buttons in the source-control bar, so git's own output is what gets shown on
- *  failure rather than a paraphrase. */
+ *  the remote probe) as a *streaming* workspace command, so git's own progress
+ *  counters ("Receiving objects: 47% …") land in a terminal here rather than
+ *  the dialog sitting on a spinner for the whole transfer. That reuses the
+ *  existing proc runner wholesale — same detached pty host, same incremental
+ *  output polling, already at parity between Local and Remote backends. */
 export function CloneRepoDialog({ initialParent, isRemote, onDone, onCancel }: Props) {
   const { t } = useTranslation();
   const [url, setUrl] = useState("");
@@ -58,6 +56,8 @@ export function CloneRepoDialog({ initialParent, isRemote, onDone, onCancel }: P
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The running clone. Set once it's spawned; the terminal below tails it.
+  const [proc, setProc] = useState<ProcRecord | null>(null);
 
   // The name field is a *override* of the derived default, so an untouched
   // field keeps tracking whatever the user pastes into the URL box.
@@ -79,14 +79,24 @@ export function CloneRepoDialog({ initialParent, isRemote, onDone, onCancel }: P
     setBusy(true);
     setError(null);
     try {
-      const res = await invoke<GitOpResult>("git_clone", { url: url.trim(), dest });
-      if (res.ok) onDone(dest);
-      else setError(res.output || t("files.clone.failed"));
+      // Returns as soon as the proc is spawned — the guard rails (absolute
+      // dest, existing parent, empty destination, url shape) are enforced
+      // before that, so a rejection still surfaces here rather than in the
+      // terminal.
+      setProc(await invoke<ProcRecord>("start_git_clone", { url: url.trim(), dest }));
     } catch (e) {
       setError(String(e));
-    } finally {
       setBusy(false);
     }
+  };
+
+  /// Every output poll hands back the proc's record; act on the first one that
+  /// reports an exit. `onDone` is what registers the new checkout as browsable.
+  const onProcRecord = (record: ProcRecord) => {
+    if (record.status !== "exited" || !busy) return;
+    setBusy(false);
+    if (record.exitCode === 0) onDone(dest);
+    else setError(t("files.clone.failed"));
   };
 
   // Escape closes — but never mid-clone, when the dialog is the only place the
@@ -171,6 +181,17 @@ export function CloneRepoDialog({ initialParent, isRemote, onDone, onCancel }: P
 
         {dest && <div className={styles.dest}>{dest}</div>}
         <p className={styles.hint}>{t("files.clone.hint")}</p>
+
+        {/* git's own progress, live. Kept mounted after a failure so the error
+            output stays readable while the user edits the url and retries. */}
+        {proc && (
+          <ProcTerminal
+            key={proc.id}
+            proc={proc}
+            onRecord={onProcRecord}
+            height={180}
+          />
+        )}
 
         {error && <div className={styles.error}>{error}</div>}
 

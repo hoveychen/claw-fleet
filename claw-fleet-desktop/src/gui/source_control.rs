@@ -47,3 +47,15 @@ pub(crate) fn git_clone(
     state.backend.read().unwrap().git_clone(&url, &dest)
 }
 
+/// Start the clone as a streaming proc and hand back its record. Returns as
+/// soon as the proc is spawned — the dialog then tails it via `proc_output`,
+/// which is how git's own progress counters reach the UI.
+#[tauri::command(async)]
+pub(crate) fn start_git_clone(
+    url: String,
+    dest: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
+    state.backend.read().unwrap().start_git_clone(&url, &dest)
+}
+
