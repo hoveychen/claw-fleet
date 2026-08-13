@@ -13,8 +13,23 @@ const EXIT_DRAIN_POLLS = 3;
  * the backend's incremental log reads (works identically for Local and
  * Remote backends); keystrokes and resizes go back through the proc's
  * control socket. */
-export function ProcTerminal({ proc }: { proc: ProcRecord }) {
+export function ProcTerminal({
+  proc,
+  onRecord,
+  height = 320,
+}: {
+  proc: ProcRecord;
+  /** Called with the record piggybacked on every output poll, so a caller that
+   *  needs to know the proc exited (and with what code) doesn't have to run a
+   *  second poll loop against the same log. */
+  onRecord?: (record: ProcRecord) => void;
+  height?: number;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Held in a ref so a caller passing an inline closure doesn't tear down and
+  // rebuild the terminal on every render.
+  const onRecordRef = useRef(onRecord);
+  onRecordRef.current = onRecord;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -70,6 +85,7 @@ export function ProcTerminal({ proc }: { proc: ProcRecord }) {
           const bytes = Uint8Array.from(atob(chunk.dataB64), (c) => c.charCodeAt(0));
           term.write(bytes);
         }
+        onRecordRef.current?.(chunk.record);
         if (chunk.record.status === "exited") drainPolls += 1;
       } catch {
         // Proc was cleared while the terminal is open — stop advancing.
@@ -94,5 +110,5 @@ export function ProcTerminal({ proc }: { proc: ProcRecord }) {
     };
   }, [proc.id]);
 
-  return <div ref={containerRef} style={{ height: 320, padding: "4px 0 0 6px" }} />;
+  return <div ref={containerRef} style={{ height, padding: "4px 0 0 6px" }} />;
 }
