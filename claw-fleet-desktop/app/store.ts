@@ -97,7 +97,11 @@ export interface MainViewState {
   };
   files: {
     selectedWorkspace: string | null;
-    extraPaths: string[];
+    // NOTE: the hand-added / cloned directories used to live here, but this
+    // store is in-memory only (mainViewState is not in storage.ts ALL_KEYS), so
+    // a cloned repo's card vanished on restart — and the backend, which owns
+    // the explorer's permission gate, never learned about it either. They are
+    // backend state now: `list_browse_paths` / `add_browse_path`.
     activeRootPath: string | null;
     showIgnored: boolean;
     tab: "files" | "procs";
@@ -152,7 +156,6 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
   },
   files: {
     selectedWorkspace: null,
-    extraPaths: [],
     activeRootPath: null,
     showIgnored: false,
     tab: "files",

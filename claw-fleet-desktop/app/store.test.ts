@@ -132,7 +132,6 @@ describe("主导航页面浏览上下文", () => {
     });
     updateMainViewState("files", {
       selectedWorkspace: "/repo",
-      extraPaths: ["/tmp/demo"],
       activeRootPath: "/repo/.worktrees/feature",
       showIgnored: true,
       tab: "procs",
@@ -186,7 +185,6 @@ describe("主导航页面浏览上下文", () => {
     });
     expect(state.files).toEqual({
       selectedWorkspace: "/repo",
-      extraPaths: ["/tmp/demo"],
       activeRootPath: "/repo/.worktrees/feature",
       showIgnored: true,
       tab: "procs",

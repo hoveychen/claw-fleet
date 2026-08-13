@@ -115,6 +115,10 @@ impl LocalBackend {
     /// Workspace paths the file explorer may browse. Prefers the session
     /// cache; falls back to a direct source scan when the first background
     /// scan hasn't populated it yet.
+    ///
+    /// Sessions are only half the set: a repo cloned from the 仓库 page (or a
+    /// directory added by hand) has no sessions at all, so `browsable_workspaces`
+    /// unions in the paths the user explicitly registered.
     fn known_workspaces(&self) -> Vec<String> {
         let mut paths: Vec<String> = self
             .sessions
@@ -131,9 +135,7 @@ impl LocalBackend {
                 .map(|s| s.workspace_path)
                 .collect();
         }
-        paths.sort();
-        paths.dedup();
-        paths
+        claw_fleet_core::file_explorer::browsable_workspaces(&paths)
     }
 
     /// Re-stamp the cached sessions from the on-disk mark / read state and push
@@ -2252,6 +2254,18 @@ impl Backend for LocalBackend {
         crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace_path), session_id)
     }
 
+    fn list_browse_paths(&self) -> Vec<String> {
+        claw_fleet_core::browse_paths::list()
+    }
+
+    fn add_browse_path(&self, path: &str) -> Result<Vec<String>, String> {
+        claw_fleet_core::browse_paths::add(path)
+    }
+
+    fn remove_browse_path(&self, path: &str) -> Result<Vec<String>, String> {
+        claw_fleet_core::browse_paths::remove(path)
+    }
+
     fn list_explorer_roots(
         &self,
         workspace: &str,
@@ -2337,7 +2351,15 @@ impl Backend for LocalBackend {
     }
 
     fn git_clone(&self, url: &str, dest: &str) -> Result<crate::git_ops::GitOpResult, String> {
-        crate::git_ops::git_clone(url, dest)
+        let result = crate::git_ops::git_clone(url, dest)?;
+        // A fresh clone has no sessions, so without registering it the 仓库 page
+        // would list the card and then refuse to open its file tree.
+        if let Err(e) = claw_fleet_core::browse_paths::add(dest) {
+            claw_fleet_core::log_debug(&format!(
+                "[local_backend] clone succeeded but registering {dest} as browsable failed: {e}"
+            ));
+        }
+        Ok(result)
     }
 
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
