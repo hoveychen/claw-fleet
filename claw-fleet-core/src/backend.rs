@@ -658,7 +658,21 @@ pub trait Backend: Send + Sync {
         workspace: &str,
         root: &str,
     ) -> Result<crate::git_ops::GitOpResult, String>;
-    /// `git clone <url> <dest>` on the backend's host. Unlike the three above,
+    /// Start `git clone` as a streaming workspace command and return its
+    /// record, so the caller can tail git's own progress counters through
+    /// `proc_output` instead of staring at a spinner for the whole clone.
+    ///
+    /// Runs on the backend's host, and is validated there — the destination's
+    /// parent has to exist on the machine doing the cloning, which is the probe
+    /// (not this desktop) on a remote connection.
+    fn start_git_clone(
+        &self,
+        url: &str,
+        dest: &str,
+    ) -> Result<crate::proc_runner::ProcRecord, String>;
+
+    /// `git clone <url> <dest>` on the backend's host, blocking until it
+    /// finishes. Unlike the three above,
     /// this takes no `workspace`: a fresh clone isn't a known workspace yet, so
     /// `git_ops::git_clone` guards it structurally instead (absolute dest,
     /// existing parent, empty-or-absent dest — never overwrites anything).

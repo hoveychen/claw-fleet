@@ -261,6 +261,12 @@ pub struct PreparedClone {
     pub command: String,
 }
 
+/// Pty size for a streaming clone. Nothing types into this terminal — it only
+/// has to be wide enough that git's single-line `\r` progress counters don't
+/// wrap into a growing wall of text.
+pub const CLONE_PTY_COLS: u16 = 120;
+pub const CLONE_PTY_ROWS: u16 = 30;
+
 /// Quote one argument for the shell `proc_runner`'s host will use.
 ///
 /// POSIX gets `shell_words::quote` (single quotes, with `'` broken out), which

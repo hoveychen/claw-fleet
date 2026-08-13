@@ -117,6 +117,11 @@ mod tests {
         // settings, guidance, filesystem browse or credential surfaces.
         for p in [
             routes::PROC_RUN,
+            // Spawns a proc on the host just like PROC_RUN, so it must sit on
+            // the same side of the boundary — and registering a browse path
+            // widens what the explorer will read.
+            routes::GIT_CLONE_STREAM,
+            routes::BROWSE_PATHS_ADD,
             routes::APPLY_GUARD_HOOK,
             routes::EXPLORER_FILE,
             routes::BROWSE_DIR,
