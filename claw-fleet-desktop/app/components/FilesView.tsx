@@ -124,9 +124,12 @@ export function FilesView() {
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const procs = useProcStore((s) => s.procs);
   const fileNav = useUIStore((s) => s.fileNav);
-  const { selectedWorkspace: selected, extraPaths } = useUIStore(
-    (s) => s.mainViewState.files,
-  );
+  const { selectedWorkspace: selected } = useUIStore((s) => s.mainViewState.files);
+  // Directories the user added by hand or cloned. Backend state, not UI state:
+  // they widen the explorer's permission gate, and a repo with no sessions is
+  // only browsable because the backend recorded it. Fetched on mount so a
+  // cloned repo's card is still here after a restart.
+  const [extraPaths, setExtraPaths] = useState<string[]>([]);
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const setSelected = (selectedWorkspace: string | null) =>
     updateMainViewState("files", { selectedWorkspace });
@@ -146,9 +149,21 @@ export function FilesView() {
     anchor: ContextMenuAnchor;
   } | null>(null);
 
+  // Re-fetch whenever the backend changes underfoot: local↔remote swaps point
+  // at a different host, whose registered directories are its own.
+  useEffect(() => {
+    void invoke<string[]>("list_browse_paths")
+      .then(setExtraPaths)
+      .catch(() => setExtraPaths([]));
+  }, [isRemote]);
+
   // Drop a hand-added path (zero-count card) back out of the session view.
-  const removePath = (path: string) => {
-    updateMainViewState("files", { extraPaths: extraPaths.filter((p) => p !== path) });
+  const removePath = async (path: string) => {
+    try {
+      setExtraPaths(await invoke<string[]>("remove_browse_path", { path }));
+    } catch {
+      return;
+    }
     if (selected === path) setSelected(null);
   };
 
@@ -186,7 +201,7 @@ export function FilesView() {
         label: t("files.remove_path", "从列表移除"),
         icon: <Trash2 size={13} strokeWidth={1.7} />,
         danger: true,
-        onSelect: () => removePath(ws.path),
+        onSelect: () => void removePath(ws.path),
       });
     }
     return items;
@@ -255,10 +270,15 @@ export function FilesView() {
     );
   }, [workspaces, selected]);
 
-  const addPath = (path: string) => {
-    updateMainViewState("files", {
-      extraPaths: extraPaths.includes(path) ? extraPaths : [path, ...extraPaths],
-    });
+  // Registering is what makes the directory browsable at all, so select it only
+  // once the backend has accepted it — otherwise the card opens onto the very
+  // "not a known session workspace" error this replaced.
+  const addPath = async (path: string) => {
+    try {
+      setExtraPaths(await invoke<string[]>("add_browse_path", { path }));
+    } catch {
+      return;
+    }
     setSelected(path);
   };
 
@@ -270,7 +290,7 @@ export function FilesView() {
       return;
     }
     const picked = await openDialog({ multiple: false, directory: true });
-    if (typeof picked === "string") addPath(picked);
+    if (typeof picked === "string") await addPath(picked);
   };
 
   return (
@@ -362,9 +382,10 @@ export function FilesView() {
           initialParent={selected ? parentDir(selected) : ""}
           isRemote={isRemote}
           onDone={(dest) => {
-            // A fresh clone has no sessions, so it would never surface from the
-            // session-derived list — carry it in as a hand-added card and open it.
-            addPath(dest);
+            // The backend already registered the clone destination, but re-adding
+            // is idempotent and returns the fresh list — so this both syncs the
+            // cards and opens the new repo.
+            void addPath(dest);
             setCloning(false);
           }}
           onCancel={() => setCloning(false)}
@@ -374,7 +395,7 @@ export function FilesView() {
         <DirPickerDialog
           initialPath={selected ?? ""}
           onPick={(path) => {
-            addPath(path);
+            void addPath(path);
             setPickingDir(false);
           }}
           onCancel={() => setPickingDir(false)}
