@@ -7,6 +7,7 @@ pub mod auto_resume;
 pub mod backend;
 pub mod bg_guard;
 pub mod bom;
+pub mod browse_paths;
 pub mod claude_analyze;
 pub mod claude_binary;
 pub mod claude_cli;

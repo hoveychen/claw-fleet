@@ -4,9 +4,12 @@
 //! linked git worktrees) without opening an IDE. Everything here is
 //! read-only; there is deliberately no write/delete surface.
 //!
-//! Security model — all three entry points take a `known_workspaces` list
-//! (the workspace paths of sessions the backend already knows about) and
-//! reject anything else:
+//! Security model — all three entry points take a `known_workspaces` list and
+//! reject anything else. Backends build that list with
+//! [`browsable_workspaces`]: the workspace paths of sessions the backend
+//! already knows about, plus the directories the user explicitly added or
+//! cloned ([`crate::browse_paths`]). Both halves are decided server-side; a
+//! client can ask the backend to register a path, but cannot widen a read.
 //!   • `workspace` must canonicalize to a member of `known_workspaces`.
 //!   • `root` must be that workspace itself or one of its linked git
 //!     worktrees (enumerated live via git2, never trusted from the client).
@@ -335,6 +338,22 @@ pub(crate) fn resolve_validated_root(
     resolve_root(&ws, root)
 }
 
+/// The full set of directories the explorer may browse: the workspaces the
+/// backend derived from session transcripts, plus the ones the user added by
+/// hand or cloned from the 仓库 page ([`crate::browse_paths`]).
+///
+/// Backends call this to build the `known_workspaces` argument the entry points
+/// above take, so both halves of the boundary are decided server-side — a
+/// freshly cloned repo is browsable because the backend recorded the clone, not
+/// because a client asked nicely.
+pub fn browsable_workspaces(session_workspaces: &[String]) -> Vec<String> {
+    let mut paths: Vec<String> = session_workspaces.to_vec();
+    paths.extend(crate::browse_paths::list());
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 fn validate_workspace(workspace: &str, known_workspaces: &[String]) -> Result<PathBuf, String> {
     let ws = fs::canonicalize(workspace).map_err(|e| format!("workspace: {e}"))?;
     let known = known_workspaces
@@ -523,6 +542,39 @@ mod tests {
         let err = list_dir(tmp.path().to_str().unwrap(), tmp.path().to_str().unwrap(), "", false, &[])
             .unwrap_err();
         assert!(err.contains("not a known session workspace"), "got: {err}");
+    }
+
+    /// Regression: a repo cloned from the 仓库 page has no sessions of its own,
+    /// so the session-derived list can never contain it and the file tree
+    /// answered "workspace is not a known session workspace" — indistinguishable
+    /// from a failed clone. Once the backend has recorded the clone destination
+    /// in `browse_paths`, `browsable_workspaces` must let it through.
+    #[test]
+    fn a_user_added_path_is_browsable_even_with_no_sessions() {
+        let _lock = crate::session::fleet_home_lock();
+        let home = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", home.path()) };
+
+        let repo = home.path().join("cloned-repo");
+        fs::create_dir_all(repo.join("src")).unwrap();
+        let repo_s = fs::canonicalize(&repo).unwrap().to_string_lossy().to_string();
+        crate::browse_paths::add(&repo_s).unwrap();
+
+        // No sessions anywhere — exactly the state right after a clone.
+        let known = browsable_workspaces(&[]);
+        let listed = list_dir(&repo_s, &repo_s, "", false, &known);
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+
+        let entries = listed.expect("a user-added path must be browsable");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "src");
     }
 
     #[test]
