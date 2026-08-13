@@ -592,9 +592,18 @@ pub trait Backend: Send + Sync {
         session_id: Option<&str>,
     ) -> Vec<crate::prd_tasks::TaskPlanDetail>;
 
+    // ── User-added browse paths ───────────────────────────────────────────────
+    // Directories the user added by hand ("添加路径") or cloned from the 仓库
+    // page. They have no sessions of their own, so without this registry the
+    // explorer's session-derived gate rejects them — see `browse_paths`.
+    // Every method returns the updated list so the caller never has to re-fetch.
+    fn list_browse_paths(&self) -> Vec<String>;
+    fn add_browse_path(&self, path: &str) -> Result<Vec<String>, String>;
+    fn remove_browse_path(&self, path: &str) -> Result<Vec<String>, String>;
+
     // ── File explorer ─────────────────────────────────────────────────────────
-    // Read-only browsing of a known session workspace (and its linked git
-    // worktrees). `workspace` must match a session's workspace_path; `root`
+    // Read-only browsing of a workspace the backend knows about — one with
+    // sessions, or one registered above — and its linked git worktrees. `root`
     // must be one of the paths returned by `list_explorer_roots`.
     fn list_explorer_roots(
         &self,

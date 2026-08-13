@@ -106,11 +106,12 @@ pub(crate) fn route_explorer_roots(
                         .unwrap_or_default()
                 };
                 let ws = decode("ws");
-                let known: Vec<String> = sources
+                let sessions: Vec<String> = sources
                     .iter()
                     .flat_map(|s| s.scan_sessions())
                     .map(|s| s.workspace_path)
                     .collect();
+                let known = crate::file_explorer::browsable_workspaces(&sessions);
                 let result: Result<String, String> = match path {
                     crate::routes::EXPLORER_ROOTS => crate::file_explorer::list_roots(&ws, &known)
                         .map(|r| serde_json::to_string(&r).unwrap_or_default()),
@@ -167,6 +168,10 @@ pub(crate) fn route_explorer_roots(
 /// (absolute dest, existing parent, empty-or-absent dest), and this route adds
 /// nothing on top — a probe that serves the explorer already lets the caller
 /// pick any cwd for a new session.
+///
+/// On success the destination is registered in `browse_paths`, mirroring
+/// `LocalBackend::git_clone`: the freshly cloned repo has no sessions, so the
+/// explorer would otherwise refuse to open the very directory it just created.
 pub(crate) fn route_git_clone(
     _ctx: &ServeCtx,
     mut request: tiny_http::Request,
@@ -181,8 +186,72 @@ pub(crate) fn route_git_clone(
     let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
     let result = serde_json::from_str::<Req>(&buf)
         .map_err(|e| e.to_string())
-        .and_then(|req| crate::git_ops::git_clone(&req.url, &req.dest))
+        .and_then(|req| {
+            let out = crate::git_ops::git_clone(&req.url, &req.dest)?;
+            if let Err(e) = crate::browse_paths::add(&req.dest) {
+                crate::log_debug(&format!(
+                    "[serve] clone succeeded but registering {} as browsable failed: {e}",
+                    req.dest
+                ));
+            }
+            Ok(out)
+        })
         .map(|r| serde_json::to_string(&r).unwrap_or_default());
+    match result {
+        Ok(body) => {
+            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
+/// GET `/browse_paths` — the directories the user registered on this host.
+pub(crate) fn route_browse_paths(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let body = serde_json::to_string(&crate::browse_paths::list()).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
+/// POST `/browse_paths/add` | `/browse_paths/remove` with `{"path": "..."}`.
+///
+/// This is the one surface that widens what the explorer will read, so it is
+/// deliberately a separate, explicit call rather than a per-read argument: the
+/// probe token already lets a caller start a session in any directory, but a
+/// single mis-issued explorer request must not be able to name an arbitrary
+/// path. Both respond with the updated list.
+pub(crate) fn route_browse_paths_mutate(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        path: String,
+    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let adding = path == crate::routes::BROWSE_PATHS_ADD;
+    let result = serde_json::from_str::<Req>(&buf)
+        .map_err(|e| e.to_string())
+        .and_then(|req| {
+            if adding {
+                crate::browse_paths::add(&req.path)
+            } else {
+                crate::browse_paths::remove(&req.path)
+            }
+        })
+        .map(|list| serde_json::to_string(&list).unwrap_or_default());
     match result {
         Ok(body) => {
             let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
@@ -215,11 +284,12 @@ pub(crate) fn route_git_status(
                 };
                 let ws = decode("ws");
                 let root = decode("root");
-                let known: Vec<String> = sources
+                let sessions: Vec<String> = sources
                     .iter()
                     .flat_map(|s| s.scan_sessions())
                     .map(|s| s.workspace_path)
                     .collect();
+                let known = crate::file_explorer::browsable_workspaces(&sessions);
                 let result: Result<String, String> = match path {
                     crate::routes::GIT_STATUS => crate::git_ops::git_status(&ws, &root, &known)
                         .map(|s| serde_json::to_string(&s).unwrap_or_default()),

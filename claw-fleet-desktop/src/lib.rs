@@ -90,6 +90,15 @@ impl Backend for NullBackend {
     fn kill_pid(&self, _: u32) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn list_browse_paths(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn add_browse_path(&self, _: &str) -> Result<Vec<String>, String> {
+        Err("backend not ready".into())
+    }
+    fn remove_browse_path(&self, _: &str) -> Result<Vec<String>, String> {
+        Err("backend not ready".into())
+    }
     fn list_explorer_roots(
         &self,
         _: &str,

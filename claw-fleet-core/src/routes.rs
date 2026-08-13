@@ -30,6 +30,12 @@ pub const AUDIT_RULES_SAVE: &str = "/audit/rules/save";
 pub const AUDIT_RULES_SUGGEST: &str = "/audit/rules/suggest";
 pub const AUDIT_RULES_TOGGLE: &str = "/audit/rules/toggle";
 pub const BROWSE_DIR: &str = "/browse_dir";
+/// Directories the user explicitly added to the 仓库 page: list / add / remove.
+/// These widen the explorer's `known_workspaces` beyond session-derived paths,
+/// so registration is a deliberate server-side act rather than a per-read flag.
+pub const BROWSE_PATHS: &str = "/browse_paths";
+pub const BROWSE_PATHS_ADD: &str = "/browse_paths/add";
+pub const BROWSE_PATHS_REMOVE: &str = "/browse_paths/remove";
 pub const CHAT_WORKSPACE: &str = "/chat_workspace";
 /// Fleet Cloud lean: consolidated per-container (== per-customer) token usage.
 pub const CLOUD_USAGE: &str = "/cloud_usage";
