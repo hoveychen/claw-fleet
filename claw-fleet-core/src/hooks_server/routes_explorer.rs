@@ -212,6 +212,59 @@ pub(crate) fn route_git_clone(
     }
 }
 
+/// POST `/git_clone_stream` with `{"url": "...", "dest": "..."}` — start the
+/// clone as a detached proc and return its [`crate::proc_runner::ProcRecord`],
+/// which the client then tails through `/proc_output`.
+///
+/// Same guard rails as `/git_clone` (they live in `prepare_clone`), plus the
+/// shell quoting that path doesn't need: this one goes through the proc host's
+/// `$SHELL -c`, so the url is quoted rather than passed as argv.
+///
+/// Unlike the blocking route, registering the destination in `browse_paths`
+/// can't happen here — the clone has only just started. The client does it once
+/// the proc exits 0.
+pub(crate) fn route_git_clone_stream(
+    _ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        url: String,
+        dest: String,
+    }
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let result = serde_json::from_str::<Req>(&buf)
+        .map_err(|e| e.to_string())
+        .and_then(|req| {
+            let prepared = crate::git_ops::prepare_clone(&req.url, &req.dest)?;
+            let exe = std::env::current_exe()
+                .map_err(|e| format!("cannot locate fleet binary: {e}"))?;
+            crate::proc_runner::spawn_proc(
+                &exe,
+                &prepared.parent.to_string_lossy(),
+                &prepared.command,
+                crate::git_ops::CLONE_PTY_COLS,
+                crate::git_ops::CLONE_PTY_ROWS,
+            )
+        })
+        .map(|rec| serde_json::to_string(&rec).unwrap_or_default());
+    match result {
+        Ok(body) => {
+            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
 /// GET `/browse_paths` — the directories the user registered on this host.
 pub(crate) fn route_browse_paths(
     _ctx: &ServeCtx,

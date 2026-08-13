@@ -64,6 +64,9 @@ pub const FLEET_ASK_PENDING: &str = "/fleet-ask/pending";
 pub const FLEET_ASK_RESPOND: &str = "/fleet-ask/respond";
 pub const FLEET_LLM_USAGE_DAILY: &str = "/fleet_llm_usage/daily";
 pub const GIT_CLONE: &str = "/git_clone";
+/// Start a clone as a streaming proc and return its record — the caller then
+/// tails it through the ordinary `/proc_output` polling.
+pub const GIT_CLONE_STREAM: &str = "/git_clone_stream";
 pub const GIT_PULL: &str = "/git_pull";
 pub const GIT_PUSH: &str = "/git_push";
 pub const GIT_STATUS: &str = "/git_status";

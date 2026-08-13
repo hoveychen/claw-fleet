@@ -2350,6 +2350,22 @@ impl Backend for LocalBackend {
         crate::git_ops::git_pull(workspace, root, &self.known_workspaces())
     }
 
+    fn start_git_clone(
+        &self,
+        url: &str,
+        dest: &str,
+    ) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
+        let prepared = claw_fleet_core::git_ops::prepare_clone(url, dest)?;
+        let exe = std::env::current_exe().map_err(|e| format!("cannot locate own binary: {e}"))?;
+        claw_fleet_core::proc_runner::spawn_proc(
+            &exe,
+            &prepared.parent.to_string_lossy(),
+            &prepared.command,
+            claw_fleet_core::git_ops::CLONE_PTY_COLS,
+            claw_fleet_core::git_ops::CLONE_PTY_ROWS,
+        )
+    }
+
     fn git_clone(&self, url: &str, dest: &str) -> Result<crate::git_ops::GitOpResult, String> {
         let result = crate::git_ops::git_clone(url, dest)?;
         // A fresh clone has no sessions, so without registering it the 仓库 page
