@@ -115,6 +115,10 @@ impl LocalBackend {
     /// Workspace paths the file explorer may browse. Prefers the session
     /// cache; falls back to a direct source scan when the first background
     /// scan hasn't populated it yet.
+    ///
+    /// Sessions are only half the set: a repo cloned from the 仓库 page (or a
+    /// directory added by hand) has no sessions at all, so `browsable_workspaces`
+    /// unions in the paths the user explicitly registered.
     fn known_workspaces(&self) -> Vec<String> {
         let mut paths: Vec<String> = self
             .sessions
@@ -131,9 +135,7 @@ impl LocalBackend {
                 .map(|s| s.workspace_path)
                 .collect();
         }
-        paths.sort();
-        paths.dedup();
-        paths
+        claw_fleet_core::file_explorer::browsable_workspaces(&paths)
     }
 
     /// Re-stamp the cached sessions from the on-disk mark / read state and push
