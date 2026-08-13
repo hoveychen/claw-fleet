@@ -162,6 +162,13 @@ impl Backend for NullBackend {
     fn git_clone(&self, _: &str, _: &str) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
         Err("backend not ready".into())
     }
+    fn start_git_clone(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
+        Err("backend not ready".into())
+    }
     fn kill_workspace(&self, _: String) -> Result<(), String> {
         Err("backend not ready".into())
     }
