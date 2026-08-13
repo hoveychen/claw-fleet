@@ -241,6 +241,59 @@ pub fn git_pull(
 /// Runs from `dest`'s parent so a relative-path git config / credential helper
 /// resolves the way the user's shell would.
 pub fn git_clone(url: &str, dest: &str) -> Result<GitOpResult, String> {
+    let prepared = prepare_clone(url, dest)?;
+    run_git_in(&prepared.parent, &["clone", "--", prepared.url.as_str(), dest])
+}
+
+/// A validated clone request: where to run, and the exact shell command line.
+///
+/// [`git_clone`] runs git directly (argv, no shell) and only needs the guard
+/// rails. The streaming path in `proc_runner` cannot: it hands a *string* to
+/// `$SHELL -c` / `cmd /S /C`, so the url and destination have to be quoted or a
+/// url like `https://x/y; rm -rf ~` would run as two commands.
+pub struct PreparedClone {
+    /// Directory to run git from — `dest`'s parent.
+    pub parent: PathBuf,
+    /// The trimmed, validated url.
+    pub url: String,
+    /// Shell-safe `git clone --progress -- <url> <dest>` for the current
+    /// platform's shell.
+    pub command: String,
+}
+
+/// Pty size for a streaming clone. Nothing types into this terminal — it only
+/// has to be wide enough that git's single-line `\r` progress counters don't
+/// wrap into a growing wall of text.
+pub const CLONE_PTY_COLS: u16 = 120;
+pub const CLONE_PTY_ROWS: u16 = 30;
+
+/// Quote one argument for the shell `proc_runner`'s host will use.
+///
+/// POSIX gets `shell_words::quote` (single quotes, with `'` broken out), which
+/// is the same quoting the audit surface already relies on. `cmd /S /C` does not
+/// understand single quotes and has its own escaping rules, so there we wrap in
+/// double quotes and refuse the two characters that survive them: a literal `"`
+/// closes the quoting, and `%` can still expand a variable.
+#[cfg(not(windows))]
+fn quote_for_shell(arg: &str) -> Result<String, String> {
+    Ok(shell_words::quote(arg).into_owned())
+}
+
+#[cfg(windows)]
+fn quote_for_shell(arg: &str) -> Result<String, String> {
+    if arg.contains('"') || arg.contains('%') {
+        return Err(format!(
+            "clone url/destination must not contain '\"' or '%' on Windows: {arg}"
+        ));
+    }
+    Ok(format!("\"{arg}\""))
+}
+
+/// Validate a clone request and build its shell command. Shared by the blocking
+/// [`git_clone`] and the streaming proc path so both enforce the same rails:
+/// absolute destination, existing parent, empty-or-absent destination, and a
+/// url that can't be mistaken for an option.
+pub fn prepare_clone(url: &str, dest: &str) -> Result<PreparedClone, String> {
     let url = url.trim();
     if url.is_empty() {
         return Err("clone url is empty".into());
@@ -249,6 +302,11 @@ pub fn git_clone(url: &str, dest: &str) -> Result<GitOpResult, String> {
     // reject it outright rather than relying on git's `--` handling alone.
     if url.starts_with('-') {
         return Err("clone url must not start with '-'".into());
+    }
+    // A newline would end the quoted argument and start a second command line
+    // no matter how the rest is quoted, on either shell.
+    if url.contains(['\n', '\r']) || dest.contains(['\n', '\r']) {
+        return Err("clone url and destination must not contain newlines".into());
     }
     let dest_path = Path::new(dest);
     if !dest_path.is_absolute() {
@@ -275,7 +333,18 @@ pub fn git_clone(url: &str, dest: &str) -> Result<GitOpResult, String> {
             return Err(format!("clone destination is not empty: {dest}"));
         }
     }
-    run_git_in(parent, &["clone", "--", url, dest])
+    // `--progress` because the streaming path wants git's counters even when it
+    // decides stderr isn't a terminal (always true on the Windows pipe host).
+    let command = format!(
+        "git clone --progress -- {} {}",
+        quote_for_shell(url)?,
+        quote_for_shell(dest)?
+    );
+    Ok(PreparedClone {
+        parent: parent.to_path_buf(),
+        url: url.to_string(),
+        command,
+    })
 }
 
 fn run_git(
@@ -810,6 +879,51 @@ mod tests {
         assert_eq!(detail.remote_url.as_deref(), remote.to_str());
     }
 
+    /// The quoting has to survive a *real* shell, not just a round-trip through
+    /// `shell_words::split` — that is the whole reason `PreparedClone::command`
+    /// exists. Running it through `sh -c` with a destination containing a space
+    /// proves both halves: the command parses, and the space doesn't split the
+    /// path into two arguments.
+    #[cfg(unix)]
+    #[test]
+    fn prepared_clone_command_actually_clones_through_a_real_shell() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let remote = tmp.path().join("remote.git");
+        fs::create_dir_all(&remote).unwrap();
+        git(&remote, &["init", "-q", "--bare", "-b", "main"]);
+        let seed = tmp.path().join("seed");
+        init_repo(&seed);
+        git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(&seed, &["push", "-q", "-u", "origin", "main"]);
+
+        // A space in the destination is the cheapest real quoting failure.
+        let dest = tmp.path().join("cloned with space");
+        let prepared =
+            prepare_clone(remote.to_str().unwrap(), dest.to_str().unwrap()).unwrap();
+
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&prepared.command)
+            .current_dir(&prepared.parent)
+            .output()
+            .expect("run the prepared command");
+        assert!(
+            out.status.success(),
+            "command `{}` failed: {}",
+            prepared.command,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(dest.join(".git").exists(), "no .git in {}", dest.display());
+        assert!(dest.join("a.txt").exists(), "working tree not checked out");
+        // `--progress` was requested, so git reports counters even though stderr
+        // here is a pipe rather than a terminal — that is what the dialog tails.
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("Receiving objects") || stderr.contains("done"),
+            "expected progress output on stderr, got: {stderr}"
+        );
+    }
+
     #[test]
     fn clone_into_existing_empty_dir_is_allowed() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -826,6 +940,47 @@ mod tests {
         let res = git_clone(remote.to_str().unwrap(), dest.to_str().unwrap()).unwrap();
         assert!(res.ok, "clone into empty dir failed: {}", res.output);
         assert!(dest.join(".git").exists());
+    }
+
+    #[test]
+    /// The streaming clone path hands `PreparedClone::command` to a shell, so a
+    /// url carrying shell metacharacters must come back quoted — otherwise
+    /// `https://x/y.git; rm -rf ~` runs as two commands. Asserting on the
+    /// command *string* rather than on side effects keeps this from ever needing
+    /// to actually execute the injected payload to prove the point.
+    #[test]
+    fn prepared_clone_command_quotes_shell_metacharacters() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dest = tmp.path().join("repo w space");
+        let dest_s = dest.to_string_lossy().to_string();
+
+        let evil = "https://example.invalid/x.git; touch /tmp/pwned";
+        let prepared = prepare_clone(evil, &dest_s).expect("guard rails should still pass");
+
+        // "Correctly quoted" means exactly this: parsing the command back with
+        // the shell's own rules yields the original arguments verbatim, so the
+        // `;` stays inside argv[4] instead of separating two commands. A
+        // substring check would not distinguish the two.
+        #[cfg(unix)]
+        {
+            let argv = shell_words::split(&prepared.command).expect("command must parse");
+            assert_eq!(
+                argv,
+                vec!["git", "clone", "--progress", "--", evil, dest_s.as_str()],
+                "got: {}",
+                prepared.command
+            );
+        }
+        #[cfg(windows)]
+        assert!(
+            prepared.command.contains(&format!("\"{evil}\"")),
+            "got: {}",
+            prepared.command
+        );
+
+        // A newline can't be quoted away on either shell, so it is refused.
+        assert!(prepare_clone("https://x/y.git\nrm -rf /", &dest_s).is_err());
+        assert!(prepare_clone("https://x/y.git", "/tmp/a\nb").is_err());
     }
 
     #[test]

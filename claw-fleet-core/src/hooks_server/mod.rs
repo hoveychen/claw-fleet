@@ -804,6 +804,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::GIT_CLONE if request.method() == &tiny_http::Method::Post => route_git_clone(ctx, request, json_header),
 
+            crate::routes::GIT_CLONE_STREAM if request.method() == &tiny_http::Method::Post => route_git_clone_stream(ctx, request, json_header),
+
             crate::routes::BROWSE_PATHS => route_browse_paths(ctx, request, json_header),
 
             crate::routes::BROWSE_PATHS_ADD | crate::routes::BROWSE_PATHS_REMOVE
