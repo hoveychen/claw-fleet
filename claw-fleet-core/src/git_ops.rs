@@ -879,6 +879,51 @@ mod tests {
         assert_eq!(detail.remote_url.as_deref(), remote.to_str());
     }
 
+    /// The quoting has to survive a *real* shell, not just a round-trip through
+    /// `shell_words::split` — that is the whole reason `PreparedClone::command`
+    /// exists. Running it through `sh -c` with a destination containing a space
+    /// proves both halves: the command parses, and the space doesn't split the
+    /// path into two arguments.
+    #[cfg(unix)]
+    #[test]
+    fn prepared_clone_command_actually_clones_through_a_real_shell() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let remote = tmp.path().join("remote.git");
+        fs::create_dir_all(&remote).unwrap();
+        git(&remote, &["init", "-q", "--bare", "-b", "main"]);
+        let seed = tmp.path().join("seed");
+        init_repo(&seed);
+        git(&seed, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(&seed, &["push", "-q", "-u", "origin", "main"]);
+
+        // A space in the destination is the cheapest real quoting failure.
+        let dest = tmp.path().join("cloned with space");
+        let prepared =
+            prepare_clone(remote.to_str().unwrap(), dest.to_str().unwrap()).unwrap();
+
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&prepared.command)
+            .current_dir(&prepared.parent)
+            .output()
+            .expect("run the prepared command");
+        assert!(
+            out.status.success(),
+            "command `{}` failed: {}",
+            prepared.command,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(dest.join(".git").exists(), "no .git in {}", dest.display());
+        assert!(dest.join("a.txt").exists(), "working tree not checked out");
+        // `--progress` was requested, so git reports counters even though stderr
+        // here is a pipe rather than a terminal — that is what the dialog tails.
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("Receiving objects") || stderr.contains("done"),
+            "expected progress output on stderr, got: {stderr}"
+        );
+    }
+
     #[test]
     fn clone_into_existing_empty_dir_is_allowed() {
         let tmp = tempfile::TempDir::new().unwrap();
