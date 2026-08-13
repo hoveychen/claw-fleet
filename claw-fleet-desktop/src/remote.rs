@@ -849,6 +849,28 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&url).unwrap_or_default()
     }
 
+    fn list_browse_paths(&self) -> Vec<String> {
+        self.probe
+            .get(claw_fleet_core::routes::BROWSE_PATHS)
+            .unwrap_or_default()
+    }
+
+    /// Registered on the probe host — the path names a directory there, not on
+    /// this desktop, so the body carries it verbatim (no query escaping).
+    fn add_browse_path(&self, path: &str) -> Result<Vec<String>, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::BROWSE_PATHS_ADD,
+            &serde_json::json!({ "path": path }),
+        )
+    }
+
+    fn remove_browse_path(&self, path: &str) -> Result<Vec<String>, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::BROWSE_PATHS_REMOVE,
+            &serde_json::json!({ "path": path }),
+        )
+    }
+
     fn list_explorer_roots(
         &self,
         workspace: &str,
