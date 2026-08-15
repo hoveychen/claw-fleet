@@ -278,6 +278,15 @@ function handleIPC(
       return "# muveectl\n\nmock 模式下的占位正文。";
 
     // File explorer (Repos view + the scratchpad tab).
+    //
+    // `list_browse_paths` MUST return a list for the same reason the wiki calls
+    // below do: FilesView does `setExtraPaths(await invoke(...))` and then
+    // `extraPaths.filter(...)`, so falling through to `default: return null`
+    // threw inside a render and unmounted the entire app the moment you opened
+    // the 仓库 page under ?mock. Nothing is registered by hand in mock mode, so
+    // the honest answer is an empty list.
+    case "list_browse_paths":
+      return [];
     case "list_explorer_roots":
       return MOCK_EXPLORER_ROOTS;
     case "list_explorer_dir":
