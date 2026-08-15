@@ -1575,6 +1575,18 @@ pub fn run() {
                 ));
             }
 
+            // Reclaim any `dsh web` a previous Fleet left behind. It is the
+            // same self-healing idea as the injectors' prune_dead_holders, but
+            // it has to kill a process rather than drop a record: dsh's server
+            // has no authentication layer, so an orphan is an open port onto
+            // every dsh session on this machine.
+            let reaped = claw_fleet_core::dsh_server::reap_orphans();
+            if reaped > 0 {
+                claw_fleet_core::log_debug(&format!(
+                    "reaped {reaped} orphaned dsh web process(es)"
+                ));
+            }
+
             // Inject Fleet's permissions allowlist into ~/.claude/settings.json
             // so fleet guard becomes the sole audit gate. prune_dead_holders
             // inside acquire self-heals when a prior Fleet process died
@@ -2059,6 +2071,11 @@ pub fn run() {
                 let _ = claw_fleet_core::mcp_injector::release(
                     std::process::id(),
                 );
+                // dsh is the opposite case to the injectors above: its server is
+                // a process-global singleton nothing else drops, and `dsh web`
+                // has no authentication layer, so leaving it running would leave
+                // an open port onto every dsh session on this machine.
+                claw_fleet_core::dsh_source::shutdown();
             }
         });
 }
