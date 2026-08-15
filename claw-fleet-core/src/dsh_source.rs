@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 
 use crate::agent_source::{AgentSource, WatchStrategy};
 use crate::dsh_client::DshClient;
+use crate::dsh_events::DshEventWatcher;
 use crate::dsh_server::DshServer;
 use crate::session::{SessionInfo, SessionStatus};
 
@@ -27,7 +28,12 @@ pub const DSH_URI_PREFIX: &str = "dsh://";
 
 /// dsh has no filesystem signal Fleet can watch (its logs are compressed and
 /// written by a server that owns them), so the session list is polled.
-/// Superseded by the `events.mux` / `events.host` downlinks once those land.
+///
+/// The `events.mux` / `events.host` downlinks do not replace this poll: they
+/// carry a session's *phase*, not its roster or its token totals, and the
+/// registry's watch loop is a shared thread no single source may block. So the
+/// poll stays the roster refresh and [`DshEventWatcher`] sharpens the status of
+/// what it returns.
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 
 pub struct DshSource {
@@ -37,6 +43,9 @@ pub struct DshSource {
     ///
     /// [`is_available`]: AgentSource::is_available
     server: Mutex<Option<DshServer>>,
+    /// Follower of the server's two downlinks, rebuilt whenever the server
+    /// lands on a new port.
+    watcher: Mutex<Option<DshEventWatcher>>,
 }
 
 impl Default for DshSource {
@@ -49,6 +58,7 @@ impl DshSource {
     pub fn new() -> Self {
         Self {
             server: Mutex::new(None),
+            watcher: Mutex::new(None),
         }
     }
 
@@ -79,8 +89,50 @@ impl DshSource {
         }
 
         let server = guard.as_ref().expect("server started above");
+        self.ensure_watcher(server.port());
         let client = server.client()?;
         f(&client)
+    }
+
+    /// Point the downlink follower at `port`, replacing one that is following a
+    /// stale port.
+    ///
+    /// Called from inside [`with_client`], so the lock order is always
+    /// server-then-watcher; nothing takes them the other way round.
+    ///
+    /// [`with_client`]: Self::with_client
+    fn ensure_watcher(&self, port: u16) {
+        let mut guard = self
+            .watcher
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if guard.as_ref().is_some_and(|w| w.port() == port) {
+            return;
+        }
+        // Assigning drops the old watcher, which stops its follower thread. Its
+        // live view goes with it: those phases belong to sessions as seen by a
+        // server that no longer exists.
+        *guard = Some(DshEventWatcher::start(port));
+    }
+
+    /// The port Fleet's `dsh web` instance is listening on, or `None` before
+    /// the first RPC starts it. Diagnostics, and the handle tests need to drive
+    /// a turn through the same server this source observes.
+    pub fn server_port(&self) -> Option<u16> {
+        self.server
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(DshServer::port)
+    }
+
+    /// The phase the downlinks report for `session_id`, if any is fresh.
+    fn live_phase(&self, session_id: &str) -> Option<SessionStatus> {
+        self.watcher
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .and_then(|w| w.phase_of(session_id))
     }
 
     /// Strip the `dsh://` scheme off a session URI.
@@ -141,9 +193,9 @@ fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         workspace_name: crate::session::workspace_name(&workspace_path),
         workspace_path,
         ai_title: title,
-        // `running` is the only liveness bit on the wire. Finer statuses
-        // (Thinking / Executing / Processing) need the event stream, which
-        // arrives with the mux downlink.
+        // `running` is the only liveness bit `session.list` carries. Finer
+        // phases (Thinking / Streaming / Executing / Processing) come off the
+        // mux downlink and are overlaid by `scan_sessions`.
         status: if running {
             SessionStatus::Active
         } else {
@@ -185,6 +237,14 @@ impl AgentSource for DshSource {
                     items
                         .iter()
                         .filter_map(session_info_from_list_item)
+                        .map(|mut info| {
+                            // The poll only knows running/not-running; the
+                            // downlinks know which phase of the turn it is in.
+                            if let Some(phase) = self.live_phase(&info.id) {
+                                info.status = phase;
+                            }
+                            info
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
