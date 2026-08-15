@@ -34,6 +34,17 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 /// stall with no way to report progress. A user who wants dsh installs it
 /// (`npm i -g @deepseek-ai/dsh`), exactly like Claude Code and Codex.
 pub fn discover() -> Option<PathBuf> {
+    // Explicit override, same escape hatch `claude_binary` gives for a Claude
+    // install Fleet cannot find. Also the only way to point at an `npx`-cached
+    // copy, which is how this source is tested on a machine without a global
+    // install.
+    if let Some(p) = std::env::var_os("FLEET_DSH_BIN") {
+        let path = PathBuf::from(p);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
     if let Some(p) = crate::process_util::which("dsh") {
         return Some(PathBuf::from(p));
     }

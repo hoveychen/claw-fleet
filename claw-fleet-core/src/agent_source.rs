@@ -401,6 +401,14 @@ pub fn build_sources() -> Vec<Box<dyn AgentSource>> {
         sources.push(Box::new(crate::codex_source::CodexSource::new()));
     }
 
+    // dsh (DeepSeek Harness). Gated on the binary existing, not just on the
+    // config flag: this source reaches its sessions through a server it has to
+    // start, so on a machine without dsh installed every poll would fail and
+    // log. The other two sources read files and degrade to an empty list.
+    if config.is_enabled("dsh") && crate::dsh_server::is_available() {
+        sources.push(Box::new(crate::dsh_source::DshSource::new()));
+    }
+
     sources
 }
 
