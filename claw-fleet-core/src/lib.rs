@@ -26,6 +26,7 @@ pub mod decision_panel_config;
 #[cfg(windows)]
 pub mod dpapi;
 pub mod dsh_client;
+pub mod dsh_events;
 pub mod dsh_server;
 pub mod dsh_source;
 pub mod elicitation;
