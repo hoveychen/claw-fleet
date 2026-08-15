@@ -291,6 +291,11 @@ function handleIPC(
       }
       return { kind: "text", content: "mock 模式下的占位文件内容。\n", truncated: false, sizeBytes: 42 };
     }
+    // A path clicked in agent prose that belongs to no workspace (`/tmp/…`).
+    case "read_external_file": {
+      const content = `# ${(args.path as string) ?? ""}\n\nmock 模式下的工作区外文件内容。\n`;
+      return { kind: "text", content, truncated: false, sizeBytes: content.length };
+    }
     case "git_status":
       return MOCK_GIT_STATUS;
 
