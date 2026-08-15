@@ -126,6 +126,15 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     } else {
         let _ = crate::mcp_injector::release(serve_pid);
     }
+    // A previous Fleet that died without running its exit path (SIGKILL, an
+    // aborting panic, or simply the process-global server never being dropped)
+    // left its `dsh web` running with no authentication in front of it. Nothing
+    // else on the machine reclaims it, so every Fleet start sweeps.
+    let reaped = crate::dsh_server::reap_orphans();
+    if reaped > 0 {
+        eprintln!("[fleet serve] reaped {reaped} orphaned dsh web process(es)");
+    }
+
     if let Err(e) = ctrlc::try_set_handler(move || {
         let _ = crate::permissions_injector::release(serve_pid);
         let _ = crate::mcp_injector::release(serve_pid);
