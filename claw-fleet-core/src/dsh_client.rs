@@ -129,6 +129,20 @@ fn parse_response(sent_rpc_id: &str, body: &str) -> Result<Value, DshRpcError> {
     })
 }
 
+/// Build the `client-response` envelope body for one answered downlink frame.
+///
+/// The `rpcId` is the *frame's*, not one we mint: `/api/respond` routes the
+/// answer through its pending table by that id, so an id of our own would come
+/// back `not-pending`.
+fn build_client_response(rpc_id: &str, result: Value) -> String {
+    json!({
+        "type": "client-response",
+        "rpcId": rpc_id,
+        "result": result,
+    })
+    .to_string()
+}
+
 /// Decode the carrier receipt returned by `/api/respond`.
 ///
 /// This is deliberately not an `RpcResult`: dsh models it as a carrier-layer
@@ -217,12 +231,33 @@ impl DshClient {
     /// `{sessionId, approvalId, outcome}`; omitting `approvalId` is refused
     /// with `bad-response`.
     pub fn respond(&self, rpc_id: &str, value: Value) -> Result<(), DshRpcError> {
-        let body = json!({
-            "type": "client-response",
-            "rpcId": rpc_id,
-            "result": { "ok": true, "value": value },
-        })
-        .to_string();
+        self.post_response(
+            rpc_id,
+            json!({ "ok": true, "value": value }),
+        )
+    }
+
+    /// Withdraw an answerable frame instead of answering it.
+    ///
+    /// The only refusal dsh accepts: `/api/respond` maps an `ok:false` result
+    /// to a cancellation *only* when the error code is `cancelled` (every other
+    /// code is refused as `bad-response`), and only questions are cancellable —
+    /// an approval expects one of its two outcomes instead. `details` must be
+    /// present and empty: the error schema is a discriminated union whose
+    /// `cancelled` arm declares `details: {}`.
+    pub fn respond_cancelled(&self, rpc_id: &str, message: &str) -> Result<(), DshRpcError> {
+        self.post_response(
+            rpc_id,
+            json!({
+                "ok": false,
+                "error": { "code": "cancelled", "message": message, "details": {} },
+            }),
+        )
+    }
+
+    /// POST one `client-response` envelope and decode its carrier receipt.
+    fn post_response(&self, rpc_id: &str, result: Value) -> Result<(), DshRpcError> {
+        let body = build_client_response(rpc_id, result);
 
         let resp = self
             .http
@@ -335,6 +370,30 @@ mod tests {
             DshRpcError::Rejected(reason) => assert_eq!(reason, "not-pending"),
             other => panic!("expected Rejected, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn client_response_echoes_the_frames_rpc_id() {
+        let body = build_client_response("frame-1", json!({ "ok": true, "value": { "a": 1 } }));
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["type"], "client-response");
+        assert_eq!(parsed["rpcId"], "frame-1");
+        assert_eq!(parsed["result"]["value"]["a"], 1);
+    }
+
+    /// dsh's error schema is a discriminated union: the `cancelled` arm declares
+    /// `details: {}`, so an envelope that omits the slot fails validation and
+    /// comes back `bad-response` instead of withdrawing the question.
+    #[test]
+    fn a_cancellation_carries_the_cancelled_code_and_an_empty_details() {
+        let body = build_client_response(
+            "frame-1",
+            json!({ "ok": false, "error": { "code": "cancelled", "message": "m", "details": {} } }),
+        );
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["result"]["ok"], false);
+        assert_eq!(parsed["result"]["error"]["code"], "cancelled");
+        assert_eq!(parsed["result"]["error"]["details"], json!({}));
     }
 
     #[test]

@@ -98,9 +98,52 @@ pub enum DshFrame {
     },
     /// `host/session-status` — the coarse running bit, pushed.
     Status { session_id: String, running: bool },
+    /// `approval/requested` — a tool call the session's policy will not run
+    /// unattended. Answerable: [`crate::dsh_decisions`] raises a card for it and
+    /// answers on `rpc_id`.
+    ///
+    /// Not to be confused with the `approval/asked` *session event*, which the
+    /// mux also carries at the same moment: that one is the durable audit
+    /// record, it has no `rpcId` of its own, and answering it is impossible.
+    ApprovalRequested {
+        rpc_id: String,
+        session_id: String,
+        approval_id: String,
+        tool_name: String,
+        call_id: Option<String>,
+        reason: Option<String>,
+    },
+    /// `approval/resolved` — the decision was reached, by us or by anyone else.
+    ApprovalResolved {
+        session_id: String,
+        approval_id: String,
+    },
+    /// `question/requested` — the agent called `ask_user_question`. Answerable.
+    QuestionRequested {
+        rpc_id: String,
+        session_id: String,
+        questions: Vec<crate::dsh_decisions::DshQuestion>,
+    },
+    /// `question/resolved` — answered or cancelled. Identified by the requested
+    /// frame's `rpcId`, since a question carries no id of its own.
+    QuestionResolved { question_rpc_id: String },
     /// Everything Fleet does not act on: projections (already carried by
     /// `session.list`), queue snapshots, `session/subscribed`, host commands.
     Ignored,
+}
+
+impl DshFrame {
+    /// Whether this frame belongs to the decision bridge rather than to the
+    /// phase state machine.
+    pub fn is_decision(&self) -> bool {
+        matches!(
+            self,
+            Self::ApprovalRequested { .. }
+                | Self::ApprovalResolved { .. }
+                | Self::QuestionRequested { .. }
+                | Self::QuestionResolved { .. }
+        )
+    }
 }
 
 /// Which block an `assistant/chunk` belongs to, across the chunk shapes dsh
@@ -142,14 +185,28 @@ pub fn parse_frame(text: &str) -> DshFrame {
     let Some(payload) = parsed.get("payload") else {
         return DshFrame::Ignored;
     };
+    let rpc_id = parsed
+        .get("rpcId")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let session_id = payload
         .get("sessionId")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    if session_id.is_empty() {
+    // `question/resolved` names the question by the requested frame's rpcId
+    // rather than by session, so it is the one frame that survives without one.
+    if session_id.is_empty() && method != "question/resolved" {
         return DshFrame::Ignored;
     }
+    let optional_str = |key: &str| {
+        payload
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
 
     match method {
         "session/event" => {
@@ -186,6 +243,57 @@ pub fn parse_frame(text: &str) -> DshFrame {
                 running,
             }
         }
+        "approval/requested" => {
+            // Without the envelope's rpcId there is no way to answer, and a card
+            // nobody can answer is worse than no card: it would block the turn
+            // behind a button that always comes back `not-pending`.
+            let (Some(approval_id), Some(tool_name)) =
+                (optional_str("approvalId"), optional_str("toolName"))
+            else {
+                return DshFrame::Ignored;
+            };
+            if rpc_id.is_empty() {
+                return DshFrame::Ignored;
+            }
+            DshFrame::ApprovalRequested {
+                rpc_id,
+                session_id,
+                approval_id,
+                tool_name,
+                call_id: optional_str("callId"),
+                reason: optional_str("reason"),
+            }
+        }
+        "approval/resolved" => match optional_str("approvalId") {
+            Some(approval_id) => DshFrame::ApprovalResolved {
+                session_id,
+                approval_id,
+            },
+            None => DshFrame::Ignored,
+        },
+        "question/requested" => {
+            let questions: Vec<crate::dsh_decisions::DshQuestion> = payload
+                .get("questions")
+                .and_then(Value::as_array)
+                .map(|qs| {
+                    qs.iter()
+                        .filter_map(crate::dsh_decisions::DshQuestion::from_value)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if rpc_id.is_empty() || questions.is_empty() {
+                return DshFrame::Ignored;
+            }
+            DshFrame::QuestionRequested {
+                rpc_id,
+                session_id,
+                questions,
+            }
+        }
+        "question/resolved" => match optional_str("questionRpcId") {
+            Some(question_rpc_id) => DshFrame::QuestionResolved { question_rpc_id },
+            None => DshFrame::Ignored,
+        },
         _ => DshFrame::Ignored,
     }
 }
@@ -297,7 +405,9 @@ impl LiveView {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 guard.entry(session_id).or_default().running = running;
             }
-            DshFrame::Ignored => {}
+            // The answerable frames and their resolutions carry no phase; the
+            // pump routes them to `dsh_decisions` instead of here.
+            _ => {}
         }
     }
 
@@ -376,6 +486,9 @@ pub struct DshEventWatcher {
     port: u16,
     live: SharedLive,
     stop: Arc<AtomicBool>,
+    /// Kept alive for as long as the watcher is: dropping it is what tells the
+    /// bridge's worker to withdraw whatever it is still holding.
+    _decisions: Arc<crate::dsh_decisions::DecisionBridge>,
 }
 
 impl DshEventWatcher {
@@ -386,9 +499,11 @@ impl DshEventWatcher {
     pub fn start(port: u16) -> Self {
         let live: SharedLive = Arc::new(LiveView::default());
         let stop = Arc::new(AtomicBool::new(false));
+        let decisions = Arc::new(crate::dsh_decisions::DecisionBridge::start(port));
 
         let thread_states = live.clone();
         let thread_stop = stop.clone();
+        let thread_decisions = decisions.clone();
         let spawned = std::thread::Builder::new()
             .name("dsh-events".into())
             .spawn(move || {
@@ -406,11 +521,13 @@ impl DshEventWatcher {
                     let mux = follow(
                         format!("ws://127.0.0.1:{port}/api/events.mux"),
                         thread_states.clone(),
+                        thread_decisions.clone(),
                         thread_stop.clone(),
                     );
                     let host = follow(
                         format!("ws://127.0.0.1:{port}/api/events.host"),
                         thread_states.clone(),
+                        thread_decisions.clone(),
                         thread_stop.clone(),
                     );
                     tokio::join!(mux, host);
@@ -421,7 +538,12 @@ impl DshEventWatcher {
             stop.store(true, Ordering::SeqCst);
         }
 
-        Self { port, live, stop }
+        Self {
+            port,
+            live,
+            stop,
+            _decisions: decisions,
+        }
     }
 
     /// The port this watcher follows.
@@ -464,10 +586,15 @@ type DshWs = tokio_tungstenite::WebSocketStream<
 >;
 
 /// Keep one downlink connected for as long as the watcher lives.
-async fn follow(url: String, states: SharedLive, stop: Arc<AtomicBool>) {
+async fn follow(
+    url: String,
+    states: SharedLive,
+    decisions: Arc<crate::dsh_decisions::DecisionBridge>,
+    stop: Arc<AtomicBool>,
+) {
     while !stop.load(Ordering::SeqCst) {
         match connect(&url).await {
-            Ok(ws) => pump(ws, &states, &stop).await,
+            Ok(ws) => pump(ws, &states, &decisions, &stop).await,
             Err(e) => crate::log_debug(&format!("dsh events: {e}")),
         }
         sleep_interruptible(RECONNECT_BACKOFF, &stop).await;
@@ -486,7 +613,12 @@ async fn connect(url: &str) -> Result<DshWs, String> {
 }
 
 /// Read frames until the socket closes or the watcher is dropped.
-async fn pump(mut ws: DshWs, states: &SharedLive, stop: &Arc<AtomicBool>) {
+async fn pump(
+    mut ws: DshWs,
+    states: &SharedLive,
+    decisions: &Arc<crate::dsh_decisions::DecisionBridge>,
+    stop: &Arc<AtomicBool>,
+) {
     use tokio_tungstenite::tungstenite::Message;
     while !stop.load(Ordering::SeqCst) {
         // The timeout is the only reason this loop re-checks `stop` on an idle
@@ -500,7 +632,15 @@ async fn pump(mut ws: DshWs, states: &SharedLive, stop: &Arc<AtomicBool>) {
                 break;
             }
             Ok(Some(Ok(Message::Text(text)))) => {
-                states.apply(parse_frame(&text), now_ms());
+                let frame = parse_frame(&text);
+                // Answerable frames go to the bridge's own thread: raising a
+                // card and answering it are blocking file + HTTP work, and this
+                // one is a tokio worker.
+                if frame.is_decision() {
+                    decisions.offer(frame);
+                } else {
+                    states.apply(frame, now_ms());
+                }
             }
             Ok(Some(Ok(Message::Close(_)))) => break,
             // Ping/Pong are answered by the stream itself; binary frames are not
@@ -615,6 +755,178 @@ mod tests {
             .to_string();
             assert_eq!(parse_frame(&frame), DshFrame::Ignored, "method {method}");
         }
+    }
+
+    /// Verbatim `approval/requested` frame captured off `events.mux` while a
+    /// `workspace-write` session tried to touch a file outside its workspace.
+    #[test]
+    fn decodes_a_live_approval_request() {
+        let frame = json!({
+            "type": "server-request",
+            "rpcId": "4ca8058f-2e6f-4c1e-9b0a-2a1f5c7d3e11",
+            "method": "approval/requested",
+            "payload": {
+                "type": "approval/requested",
+                "sessionId": "session-ef76dbb8",
+                "approvalId": "364f574f-9d2c-4a7b-9f10-8c3d1e5a7b92",
+                "toolName": "bash",
+                "callId": "toolu_01ABC",
+                "reason": "escalate sandbox to danger-full-access: writes outside the workspace"
+            }
+        })
+        .to_string();
+        match parse_frame(&frame) {
+            DshFrame::ApprovalRequested {
+                rpc_id,
+                session_id,
+                approval_id,
+                tool_name,
+                call_id,
+                reason,
+            } => {
+                assert_eq!(rpc_id, "4ca8058f-2e6f-4c1e-9b0a-2a1f5c7d3e11");
+                assert_eq!(session_id, "session-ef76dbb8");
+                assert_eq!(approval_id, "364f574f-9d2c-4a7b-9f10-8c3d1e5a7b92");
+                assert_eq!(tool_name, "bash");
+                assert_eq!(call_id.as_deref(), Some("toolu_01ABC"));
+                assert!(reason.unwrap().contains("danger-full-access"));
+            }
+            other => panic!("expected ApprovalRequested, got {other:?}"),
+        }
+    }
+
+    /// The mux carries a durable `approval/asked` session event at the same
+    /// moment as the answerable frame. It has no rpcId of its own, so answering
+    /// it is impossible — it must not be mistaken for the request.
+    #[test]
+    fn the_durable_approval_audit_event_is_not_the_answerable_frame() {
+        let frame = json!({
+            "type": "server-request",
+            "rpcId": "x",
+            "method": "session/event",
+            "payload": {
+                "sessionId": "session-a",
+                "event": {
+                    "type": "approval/asked",
+                    "seq": 40,
+                    "data": { "id": "ap-1", "toolName": "bash", "reason": "why" }
+                }
+            }
+        })
+        .to_string();
+        assert!(matches!(
+            parse_frame(&frame),
+            DshFrame::Event { ref kind, .. } if kind == "approval/asked"
+        ));
+    }
+
+    /// An approval frame with no rpcId cannot be answered, and a card nobody can
+    /// answer would park the turn behind a permanently `not-pending` button.
+    #[test]
+    fn an_unanswerable_approval_is_dropped() {
+        let frame = json!({
+            "type": "server-request",
+            "method": "approval/requested",
+            "payload": { "sessionId": "session-a", "approvalId": "ap-1", "toolName": "bash" }
+        })
+        .to_string();
+        assert_eq!(parse_frame(&frame), DshFrame::Ignored);
+    }
+
+    #[test]
+    fn decodes_an_approval_resolution() {
+        let frame = json!({
+            "type": "server-request",
+            "rpcId": "x",
+            "method": "approval/resolved",
+            "payload": {
+                "type": "approval/resolved",
+                "sessionId": "session-a",
+                "approvalId": "ap-1",
+                "outcome": "allowed-once"
+            }
+        })
+        .to_string();
+        assert_eq!(
+            parse_frame(&frame),
+            DshFrame::ApprovalResolved {
+                session_id: "session-a".into(),
+                approval_id: "ap-1".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn decodes_a_question_request() {
+        let frame = json!({
+            "type": "server-request",
+            "rpcId": "q-rpc-1",
+            "method": "question/requested",
+            "payload": {
+                "type": "question/requested",
+                "sessionId": "session-a",
+                "questions": [{
+                    "id": "pick",
+                    "question": "Which database?",
+                    "header": "Database",
+                    "options": [{ "label": "Postgres" }, { "label": "SQLite" }]
+                }]
+            }
+        })
+        .to_string();
+        match parse_frame(&frame) {
+            DshFrame::QuestionRequested {
+                rpc_id,
+                session_id,
+                questions,
+            } => {
+                assert_eq!(rpc_id, "q-rpc-1");
+                assert_eq!(session_id, "session-a");
+                assert_eq!(questions.len(), 1);
+                assert_eq!(questions[0].id, "pick");
+                assert_eq!(questions[0].options.len(), 2);
+            }
+            other => panic!("expected QuestionRequested, got {other:?}"),
+        }
+    }
+
+    /// A question is named by the requested frame's rpcId, so its resolution is
+    /// the one frame that carries no `sessionId` — the session-less guard must
+    /// not swallow it.
+    #[test]
+    fn decodes_a_question_resolution_without_a_session_id() {
+        let frame = json!({
+            "type": "server-request",
+            "rpcId": "x",
+            "method": "question/resolved",
+            "payload": {
+                "type": "question/resolved",
+                "questionRpcId": "q-rpc-1",
+                "outcome": "answered"
+            }
+        })
+        .to_string();
+        assert_eq!(
+            parse_frame(&frame),
+            DshFrame::QuestionResolved {
+                question_rpc_id: "q-rpc-1".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn only_the_answerable_frames_route_to_the_bridge() {
+        assert!(DshFrame::QuestionResolved {
+            question_rpc_id: "q".into()
+        }
+        .is_decision());
+        assert!(!event("session-a", "tool/call").is_decision());
+        assert!(!DshFrame::Status {
+            session_id: "session-a".into(),
+            running: true
+        }
+        .is_decision());
+        assert!(!DshFrame::Ignored.is_decision());
     }
 
     #[test]

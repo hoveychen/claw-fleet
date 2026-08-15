@@ -13,9 +13,24 @@
 use claw_fleet_core::agent_source::AgentSource;
 use claw_fleet_core::dsh_source::DshSource;
 
+/// Stops Fleet's process-global `dsh web` when the test that started it ends.
+///
+/// The server outlives every `DshSource` on purpose (see `dsh_source::SERVER`),
+/// so a test binary that starts one and exits leaves it running — measured: one
+/// orphaned `dsh web` after a run of this file. `dsh web` has no authentication
+/// layer, so an orphan is an open door onto every session on the machine.
+struct ServerGuard;
+
+impl Drop for ServerGuard {
+    fn drop(&mut self) {
+        claw_fleet_core::dsh_source::shutdown();
+    }
+}
+
 #[test]
 #[ignore = "starts a real `dsh web`; run manually with --ignored"]
 fn live_scan_lists_sessions_with_a_self_started_server() {
+    let _guard = ServerGuard;
     let source = DshSource::new();
     assert!(
         source.is_available(),
@@ -49,6 +64,7 @@ fn live_scan_lists_sessions_with_a_self_started_server() {
 #[test]
 #[ignore = "starts a real `dsh web`; run manually with --ignored"]
 fn live_history_returns_durable_events() {
+    let _guard = ServerGuard;
     let source = DshSource::new();
     assert!(
         source.is_available(),
