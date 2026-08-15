@@ -465,7 +465,15 @@ mod tests {
     /// Set FLEET_HOME to a fresh temp dir so `AutoResumeConfig::load()` and
     /// `latest_usage_snapshot()` read an empty (disabled) config, never the
     /// developer's real `~/.fleet`.
+    ///
+    /// `FLEET_HOME` is process-wide, so this repoints Fleet's home for *every*
+    /// test running concurrently, not just this one. The returned handle
+    /// therefore carries the process-wide lock (and restores the previous value
+    /// on drop): without it these tests made unrelated assertions elsewhere read
+    /// this temp home — `interaction_mode_test`'s HOME check was observed
+    /// failing with this very directory on one side of the comparison.
     fn isolated_fleet_home() -> TempHome {
+        let lock = crate::session::fleet_home_lock();
         let base = std::env::temp_dir().join(format!(
             "fleet-headless-test-{}-{}",
             std::process::id(),
@@ -473,17 +481,32 @@ mod tests {
         ));
         let fleet = base.join(".fleet");
         std::fs::create_dir_all(&fleet).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
         std::env::set_var("FLEET_HOME", &fleet);
-        TempHome { base }
+        TempHome {
+            base,
+            prev,
+            _lock: lock,
+        }
     }
 
     static NEXT_ID: TestCounter = TestCounter::new(0);
 
     struct TempHome {
         base: std::path::PathBuf,
+        prev: Option<std::ffi::OsString>,
+        /// Held for as long as the temp home is in place — dropping it is what
+        /// lets the next home-repointing test run.
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
     impl Drop for TempHome {
         fn drop(&mut self) {
+            // Restore before the lock goes: the next waiter must not observe
+            // this test's home.
+            match &self.prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
             let _ = std::fs::remove_dir_all(&self.base);
         }
     }

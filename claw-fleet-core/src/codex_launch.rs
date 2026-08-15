@@ -1896,6 +1896,12 @@ mod tests {
     /// list (it feeds a picker).
     #[test]
     fn lists_codex_profiles_from_codex_home() {
+        // `CODEX_HOME` is process-wide: without this lock the flip below landed
+        // in the middle of `codex_guidance`'s reconcile tests, which resolve
+        // `CODEX_HOME` on every call but capture the path they assert on once —
+        // so their writes went to *this* directory and their assertions read a
+        // stale file. Held for the whole test, since the restore is at the end.
+        let _lock = crate::session::fleet_home_lock();
         let base = std::env::temp_dir().join(format!("fleet-codex-profiles-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
