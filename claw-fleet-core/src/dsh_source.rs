@@ -107,6 +107,11 @@ impl DshSource {
                 let binary = crate::dsh_server::discover().ok_or_else(|| {
                     "dsh is not installed (npm i -g @deepseek-ai/dsh)".to_string()
                 })?;
+                // Before adding one, take away any this machine is still
+                // carrying from a Fleet that died without stopping its own.
+                // Servers whose owner is alive are left alone, so this never
+                // touches a concurrently running Fleet's instance.
+                crate::dsh_server::reap_orphans();
                 // Root the server at the harness home rather than a project:
                 // observation spans every workspace, and a server rooted in a
                 // directory that later disappears would fail to restart.
