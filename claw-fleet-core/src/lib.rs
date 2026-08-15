@@ -26,6 +26,7 @@ pub mod decision_panel_config;
 #[cfg(windows)]
 pub mod dpapi;
 pub mod dsh_client;
+pub mod dsh_server;
 pub mod elicitation;
 pub mod file_explorer;
 pub mod fleet_cli;
