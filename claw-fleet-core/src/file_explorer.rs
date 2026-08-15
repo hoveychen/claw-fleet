@@ -199,11 +199,18 @@ fn list_dir_in(
 }
 
 fn read_file_at(root: &Path, rel_path: &str) -> Result<ExplorerFileContent, String> {
-    let path = resolve_rel(root, rel_path)?;
+    read_file_content(&resolve_rel(root, rel_path)?)
+}
+
+/// Classify + read one already-vetted absolute path. Split out of
+/// `read_file_at` so the out-of-workspace surface below can reuse the exact
+/// same size caps and text/image/binary classification without going through
+/// a root + relative path.
+fn read_file_content(path: &Path) -> Result<ExplorerFileContent, String> {
     if !path.is_file() {
         return Err("not a file".into());
     }
-    let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+    let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
     let size_bytes = metadata.len();
 
     let ext = path
@@ -216,7 +223,7 @@ fn read_file_at(root: &Path, rel_path: &str) -> Result<ExplorerFileContent, Stri
         if size_bytes > IMAGE_PREVIEW_CAP {
             return Ok(ExplorerFileContent::Binary { size_bytes });
         }
-        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+        let bytes = fs::read(path).map_err(|e| e.to_string())?;
         return Ok(ExplorerFileContent::Image {
             base64: base64::engine::general_purpose::STANDARD.encode(bytes),
             mime: mime.to_string(),
@@ -224,7 +231,7 @@ fn read_file_at(root: &Path, rel_path: &str) -> Result<ExplorerFileContent, Stri
         });
     }
 
-    let bytes = read_head(&path, TEXT_PREVIEW_CAP as usize)?;
+    let bytes = read_head(path, TEXT_PREVIEW_CAP as usize)?;
     let sniff = &bytes[..bytes.len().min(8192)];
     if sniff.contains(&0) {
         return Ok(ExplorerFileContent::Binary { size_bytes });
@@ -322,6 +329,44 @@ pub fn read_scratchpad_file(
     validate_workspace(workspace, known_workspaces)?;
     let root = scratchpad_root(workspace, session_id).ok_or("no scratchpad for this session")?;
     read_file_at(&root, rel_path)
+}
+
+// ── Out-of-workspace files ────────────────────────────────────────────────────
+//
+// Agents constantly name paths that belong to no workspace — `/tmp/report.md`
+// they just wrote, a file under another repo, something in `~/Downloads`. The
+// 文件 page can't show those: its whole navigation model is a workspace root
+// plus a relative path, and `validate_workspace` rejects the rest. Clicking
+// such a path used to do nothing at all.
+//
+// This is a *single-file read*, deliberately not a second browsing surface:
+// no directory listing, no tree, no traversal. Given one absolute path it
+// returns that file's preview content or an error, so the reachable set is
+// exactly "paths a human clicked in agent prose".
+//
+// It carries no `known_workspaces` gate, which is a real widening for
+// `fleet serve` — so the route stays admin-only (see `hooks_server::auth`;
+// a scoped customer token is denied, and there is a test pinning that).
+// The equivalent widening already exists for an admin caller: `browse_paths`
+// lets one register any directory and then browse it. What must not happen is
+// that widening leaking to a *scoped* token, and that is what the auth test
+// holds.
+
+/// Read one absolute path for preview, independent of any workspace.
+///
+/// Requires an absolute path that canonicalizes to a regular file. Same size
+/// caps and text/image/binary classification as [`read_file`].
+pub fn read_external_file(path: &str) -> Result<ExplorerFileContent, String> {
+    let p = Path::new(path);
+    if !p.is_absolute() {
+        return Err("external path must be absolute".into());
+    }
+    // Canonicalize before reading so a symlinked spelling (`/tmp/x` on macOS,
+    // which is really `/private/tmp/x`) resolves the same way the explorer's
+    // roots do — the front end compares against canonical roots to decide a
+    // path is "external" in the first place.
+    let canon = fs::canonicalize(p).map_err(|e| format!("external path: {e}"))?;
+    read_file_content(&canon)
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -575,6 +620,85 @@ mod tests {
         let entries = listed.expect("a user-added path must be browsable");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "src");
+    }
+
+    // ── Out-of-workspace single-file reads ────────────────────────────────────
+
+    /// The case that motivated the surface: an agent writes `/tmp/report.md`
+    /// and names it in prose. It belongs to no workspace, so every
+    /// workspace-gated entry point refuses it — this one must not.
+    #[test]
+    fn external_read_returns_text_for_a_file_outside_every_workspace() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("report.md");
+        fs::write(&file, b"# out of tree").unwrap();
+
+        match read_external_file(file.to_str().unwrap()).unwrap() {
+            ExplorerFileContent::Text { content, truncated, .. } => {
+                assert_eq!(content, "# out of tree");
+                assert!(!truncated);
+            }
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    /// Classification is shared with `read_file`, so an out-of-workspace image
+    /// must come back inlined rather than as opaque binary.
+    #[test]
+    fn external_read_classifies_images_like_the_workspace_reader() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("shot.png");
+        fs::write(&file, b"\x89PNG\r\n\x1a\n").unwrap();
+
+        match read_external_file(file.to_str().unwrap()).unwrap() {
+            ExplorerFileContent::Image { mime, .. } => assert_eq!(mime, "image/png"),
+            other => panic!("expected image, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn external_read_rejects_relative_paths_and_directories() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(
+            read_external_file("relative/report.md")
+                .unwrap_err()
+                .contains("absolute"),
+            "a relative path has no unambiguous meaning here"
+        );
+        assert!(
+            read_external_file(tmp.path().to_str().unwrap())
+                .unwrap_err()
+                .contains("not a file"),
+            "this is a single-file surface, not a second directory browser"
+        );
+        assert!(read_external_file(
+            tmp.path().join("missing.md").to_str().unwrap()
+        )
+        .is_err());
+    }
+
+    /// The front end decides a path is "external" by comparing it against the
+    /// canonical roots the backend returned, so a symlinked spelling of a real
+    /// file (macOS `/tmp` → `/private/tmp`) lands here and must still read.
+    #[test]
+    fn external_read_follows_a_symlinked_spelling() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let real_dir = tmp.path().join("real");
+        fs::create_dir_all(&real_dir).unwrap();
+        fs::write(real_dir.join("note.txt"), b"hi").unwrap();
+
+        let link = tmp.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real_dir, &link).unwrap();
+        #[cfg(windows)]
+        if std::os::windows::fs::symlink_dir(&real_dir, &link).is_err() {
+            return; // unprivileged Windows can't create symlinks; nothing to assert
+        }
+
+        match read_external_file(link.join("note.txt").to_str().unwrap()).unwrap() {
+            ExplorerFileContent::Text { content, .. } => assert_eq!(content, "hi"),
+            other => panic!("expected text, got {other:?}"),
+        }
     }
 
     #[test]
