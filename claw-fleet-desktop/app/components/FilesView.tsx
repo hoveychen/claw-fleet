@@ -553,11 +553,17 @@ function WorkspaceExplorer({
   // Rehydrate the selected file object from its stable root-relative path after
   // this explorer remounts. FileTree owns directory loading, so its reveal path
   // is the single source of truth for reconstructing the entry.
+  //
+  // `externalPath` blocks it: revealing ends in `onPick` → `selectFile`, which
+  // drops the out-of-tree preview. Without the guard, an external path clicked
+  // while some tree file was already selected flashed up and was immediately
+  // replaced by that file. Clearing the preview re-runs this and restores the
+  // selection, which is what "close" should do anyway.
   useEffect(() => {
-    if (!activeRoot || !activeFilePath || nav) return;
+    if (!activeRoot || !activeFilePath || nav || externalPath) return;
     clickNonce.current -= 1;
     setReveal({ relPath: activeFilePath, nonce: clickNonce.current });
-  }, [activeRoot, activeFilePath, nav, loadDir]);
+  }, [activeRoot, activeFilePath, nav, externalPath, loadDir]);
 
   const selectRoot = (root: ExplorerRoot) => {
     setActiveRoot(root);

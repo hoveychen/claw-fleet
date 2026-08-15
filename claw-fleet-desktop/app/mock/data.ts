@@ -865,7 +865,10 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           },
           {
             type: "text",
-            text: "I'll create a mock mode that intercepts Tauri IPC calls and returns realistic demo data. Let me first explore the codebase to understand all the data flows.",
+            // The `/tmp/…` chip is load-bearing for the demo, not decoration:
+            // it is the out-of-workspace path case, so clicking it exercises the
+            // 文件 page's external-file preview rather than the tree.
+            text: "I'll create a mock mode that intercepts Tauri IPC calls and returns realistic demo data. I dumped the call graph to `/tmp/mock-ipc-callgraph.md` first; the app source itself is under `src/store.ts`.",
           },
         ],
         stop_reason: "end_turn",
