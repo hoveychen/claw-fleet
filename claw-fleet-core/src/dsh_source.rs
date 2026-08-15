@@ -284,7 +284,7 @@ fn projection_u64(projections: &Value, key: &str, field: &str) -> u64 {
 /// already folded, so this is a field rename rather than a transcript parse.
 /// Everything Fleet derives from a transcript it does not have here (entrypoint,
 /// pid liveness, todos, skills) stays at its default.
-fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
+pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
     let id = item.get("sessionId").and_then(Value::as_str)?.to_string();
     let workspace_path = item
         .get("cwd")
