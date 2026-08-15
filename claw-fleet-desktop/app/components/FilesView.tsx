@@ -437,6 +437,10 @@ function WorkspaceExplorer({
   } = useResizableWidth("files-tree-width", { min: 140, max: 480, initial: 220 });
 
   const [activeFile, setActiveFile] = useState<ExplorerEntry | null>(null);
+  // A clicked path that no root of this workspace owns. Held next to
+  // `activeFile` rather than inside it: it has no root and no relative path, so
+  // it can't take part in tree selection — it only replaces the preview pane.
+  const [externalPath, setExternalPath] = useState<string | null>(null);
 
   const procCount = useMemo(
     () => procs.filter((p) => p.workspacePath === workspace).length,
@@ -514,10 +518,15 @@ function WorkspaceExplorer({
 
     const owner = pickRoot(roots, nav.absPath);
     if (!owner) {
-      // Path lies outside every root of this workspace — nothing to reveal.
+      // Outside every root of this workspace — an agent naming /tmp/report.md,
+      // a file in another repo, something under ~. There is no tree node to
+      // reveal, so preview the single file on its own instead of (as this used
+      // to) dropping the click on the floor with no feedback at all.
+      setExternalPath(nav.absPath);
       clearFileNav();
       return;
     }
+    setExternalPath(null);
     if (owner.path !== activeRoot.path) {
       setActiveRoot(owner); // this effect retries once the new root is active
       updateMainViewState("files", { activeRootPath: owner.path, activeFilePath: null });
@@ -544,11 +553,17 @@ function WorkspaceExplorer({
   // Rehydrate the selected file object from its stable root-relative path after
   // this explorer remounts. FileTree owns directory loading, so its reveal path
   // is the single source of truth for reconstructing the entry.
+  //
+  // `externalPath` blocks it: revealing ends in `onPick` → `selectFile`, which
+  // drops the out-of-tree preview. Without the guard, an external path clicked
+  // while some tree file was already selected flashed up and was immediately
+  // replaced by that file. Clearing the preview re-runs this and restores the
+  // selection, which is what "close" should do anyway.
   useEffect(() => {
-    if (!activeRoot || !activeFilePath || nav) return;
+    if (!activeRoot || !activeFilePath || nav || externalPath) return;
     clickNonce.current -= 1;
     setReveal({ relPath: activeFilePath, nonce: clickNonce.current });
-  }, [activeRoot, activeFilePath, nav, loadDir]);
+  }, [activeRoot, activeFilePath, nav, externalPath, loadDir]);
 
   const selectRoot = (root: ExplorerRoot) => {
     setActiveRoot(root);
@@ -557,6 +572,7 @@ function WorkspaceExplorer({
 
   const selectFile = (entry: ExplorerEntry) => {
     setActiveFile(entry);
+    setExternalPath(null); // picking in the tree leaves the out-of-tree preview
     updateMainViewState("files", { activeFilePath: entry.relativePath });
   };
 
@@ -660,7 +676,12 @@ function WorkspaceExplorer({
             </aside>
 
             <div className={styles.detail_body}>
-              {activeFile && activeRoot ? (
+              {externalPath ? (
+                <ExternalFilePreview
+                  path={externalPath}
+                  onClose={() => setExternalPath(null)}
+                />
+              ) : activeFile && activeRoot ? (
                 <FilePreview file={activeFile} load={readFile} />
               ) : (
                 <p className={styles.empty}>{t("files.select_file")}</p>
@@ -670,6 +691,76 @@ function WorkspaceExplorer({
         </>
       )}
     </>
+  );
+}
+
+// ── Out-of-workspace file preview ────────────────────────────────────────────
+
+/**
+ * One file that belongs to no workspace, previewed on its own.
+ *
+ * Agents name such paths constantly — `/tmp/report.md` they just wrote, a file
+ * in a sibling repo. The tree can't hold them (they have no root), so this
+ * stands in for the whole tree+preview pair: a banner saying where the file
+ * lives, plus the ordinary `FilePreview` fed by the ungated backend read.
+ */
+function ExternalFilePreview({ path, onClose }: { path: string; onClose: () => void }) {
+  const { t } = useTranslation();
+  const { connection } = useConnectionStore();
+  const isRemote = connection?.type === "remote";
+
+  // FilePreview keys its read off `relativePath`; for an out-of-tree file the
+  // absolute path IS the key, and the rest of the entry is only display data.
+  const entry = useMemo<ExplorerEntry>(
+    () => ({
+      name: basename(path),
+      relativePath: path,
+      sizeBytes: 0,
+      isDir: false,
+      modifiedMs: 0,
+      isIgnored: false,
+      isSymlink: false,
+    }),
+    [path],
+  );
+
+  const load = useCallback(
+    (absPath: string) => invoke<ExplorerFileContent>("read_external_file", { path: absPath }),
+    [],
+  );
+
+  const revealKey =
+    document.documentElement.getAttribute("data-platform") === "windows"
+      ? "paths.reveal_in_explorer"
+      : "paths.reveal_in_finder";
+
+  return (
+    <div className={fileStyles.external_wrap}>
+      <div className={fileStyles.external_bar}>
+        <div className={fileStyles.external_text}>
+          <span className={fileStyles.external_title}>{t("files.external_title")}</span>
+          <span className={fileStyles.external_path}>{path}</span>
+        </div>
+        <div className={fileStyles.external_actions}>
+          <CopyButton text={path} />
+          {/* A remote workspace's files are on the probe host, not this Mac. */}
+          {!isRemote && (
+            <button
+              className={fileStyles.external_btn}
+              onClick={() => void invoke("reveal_path", { path }).catch(() => {})}
+            >
+              {t(revealKey)}
+            </button>
+          )}
+          <button className={fileStyles.external_btn} onClick={onClose}>
+            {t("files.external_close")}
+          </button>
+        </div>
+      </div>
+      <div className={fileStyles.external_body}>
+        <FilePreview file={entry} load={load} />
+      </div>
+    </div>
   );
 }
 

@@ -1921,6 +1921,7 @@ pub fn run() {
             start_git_clone,
             list_explorer_dir,
             read_explorer_file,
+            read_external_file,
             list_scratchpad_dir,
             read_scratchpad_file,
             list_skills,

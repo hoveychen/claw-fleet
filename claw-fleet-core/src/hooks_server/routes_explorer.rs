@@ -105,6 +105,18 @@ pub(crate) fn route_explorer_roots(
                         .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
                         .unwrap_or_default()
                 };
+                // The out-of-workspace read has no workspace to validate, so it
+                // answers before the session scan every gated arm below needs.
+                if path == crate::routes::EXPLORER_EXTERNAL_FILE {
+                    respond_explorer_json(
+                        request,
+                        json_header,
+                        crate::file_explorer::read_external_file(&decode("path"))
+                            .map(|c| serde_json::to_string(&c).unwrap_or_default()),
+                    );
+                    return;
+                }
+
                 let ws = decode("ws");
                 let sessions: Vec<String> = sources
                     .iter()
@@ -143,22 +155,30 @@ pub(crate) fn route_explorer_roots(
                     _ => crate::file_explorer::read_file(&ws, &decode("root"), &decode("rel"), &known)
                         .map(|c| serde_json::to_string(&c).unwrap_or_default()),
                 };
-                match result {
-                    Ok(body) => {
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = serde_json::json!({ "error": e }).to_string();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body)
-                                .with_status_code(400)
-                                .with_header(json_header),
-                        );
-                    }
-                }
+                respond_explorer_json(request, json_header, result);
             }
+
+/// Serialised body → 200, explorer error → 400 with `{"error": …}`. Shared by
+/// every arm of `route_explorer_roots`, including the early-returning one.
+fn respond_explorer_json(
+    request: tiny_http::Request,
+    json_header: tiny_http::Header,
+    result: Result<String, String>,
+) {
+    match result {
+        Ok(body) => {
+            let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
 
 /// POST `/git_clone` with `{"url": "...", "dest": "..."}`.
 ///

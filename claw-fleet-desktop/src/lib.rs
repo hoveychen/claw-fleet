@@ -138,6 +138,12 @@ impl Backend for NullBackend {
     ) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
         Err("backend not ready".into())
     }
+    fn read_external_file(
+        &self,
+        _: &str,
+    ) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
+        Err("backend not ready".into())
+    }
     fn git_status(
         &self,
         _: &str,

@@ -909,6 +909,19 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn read_external_file(
+        &self,
+        path: &str,
+    ) -> Result<crate::file_explorer::ExplorerFileContent, String> {
+        // The path is the probe host's, not this desktop's — a remote session
+        // naming /tmp/foo.md means /tmp on that machine.
+        self.probe.get(&format!(
+            "{}?path={}",
+            claw_fleet_core::routes::EXPLORER_EXTERNAL_FILE,
+            encode_path(path),
+        ))
+    }
+
     fn list_scratchpad_dir(
         &self,
         workspace: &str,

@@ -2150,6 +2150,8 @@
     "no_workspaces_subtitle": "Project directories appear here once sessions are running.",
     "select_workspace": "Select a workspace to browse its files.",
     "select_file": "Select a file to preview it.",
+    "external_title": "File outside this workspace (read-only)",
+    "external_close": "Close",
     "tree_label": "Files",
     "loading": "Loading…",
     "empty_dir": "Empty directory.",

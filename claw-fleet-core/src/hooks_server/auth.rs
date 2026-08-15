@@ -124,6 +124,8 @@ mod tests {
             routes::BROWSE_PATHS_ADD,
             routes::APPLY_GUARD_HOOK,
             routes::EXPLORER_FILE,
+            // Same read power as EXPLORER_FILE with no workspace gate at all.
+            routes::EXPLORER_EXTERNAL_FILE,
             routes::BROWSE_DIR,
             routes::LLM_CONFIG,
             routes::SOURCES_CONFIG,
@@ -181,6 +183,7 @@ mod tests {
         // routes::is_public, this test fails on purpose.
         for p in [
             routes::EXPLORER_FILE,          // reads an arbitrary path
+            routes::EXPLORER_EXTERNAL_FILE, // reads an arbitrary path, ungated
             routes::SCRATCHPAD_FILE,        // reads an arbitrary scratchpad path
             routes::PROC_RUN,               // arbitrary command exec
             routes::PROC_OUTPUT,            // output of arbitrary command
