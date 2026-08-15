@@ -67,3 +67,13 @@ pub(crate) fn read_explorer_file(
         .read_explorer_file(&workspace, &root, &rel_path)
 }
 
+/// Preview a path that belongs to no workspace — what a `/tmp/foo.md` chip in
+/// agent prose resolves to. Single file, no listing.
+#[tauri::command(async)]
+pub(crate) fn read_external_file(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
+    state.backend.read().unwrap().read_external_file(&path)
+}
+

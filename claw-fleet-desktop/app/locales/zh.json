@@ -2146,6 +2146,8 @@
     "no_workspaces_subtitle": "有会话跑起来之后，这里会列出它们的项目目录。",
     "select_workspace": "选择左侧工作区浏览文件。",
     "select_file": "选择左侧文件查看内容。",
+    "external_title": "工作区外的文件（只读预览）",
+    "external_close": "关闭",
     "tree_label": "文件",
     "loading": "加载中…",
     "empty_dir": "目录为空。",

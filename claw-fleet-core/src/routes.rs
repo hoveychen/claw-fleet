@@ -58,6 +58,9 @@ pub const ELICITATION_RESPOND: &str = "/elicitation/respond";
 pub const ELICITATION_UPLOAD: &str = "/elicitation/upload";
 pub const EXPLORER_DIR: &str = "/explorer_dir";
 pub const EXPLORER_FILE: &str = "/explorer_file";
+/// Read one absolute path outside every workspace (a path clicked in agent
+/// prose). Admin-only, like `EXPLORER_FILE` — it carries no workspace gate.
+pub const EXPLORER_EXTERNAL_FILE: &str = "/explorer_external_file";
 pub const EXPLORER_ROOTS: &str = "/explorer_roots";
 pub const FILE_SIZE: &str = "/file_size";
 pub const FLEET_ASK_PENDING: &str = "/fleet-ask/pending";
