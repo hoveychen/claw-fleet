@@ -91,6 +91,10 @@ pub enum DshFrame {
         session_id: String,
         kind: String,
         block_type: Option<String>,
+        /// `turn/end`'s `data.reason.kind` — observed as `completed` when the
+        /// agent finished on its own and `aborted` when `session.cancel` cut it
+        /// short. Absent on every other event.
+        reason_kind: Option<String>,
     },
     /// `host/session-status` — the coarse running bit, pushed.
     Status { session_id: String, running: bool },
@@ -158,14 +162,18 @@ pub fn parse_frame(text: &str) -> DshFrame {
             if kind.is_empty() {
                 return DshFrame::Ignored;
             }
-            let block_type = event
-                .and_then(|e| e.get("data"))
-                .and_then(|d| d.get("chunk"))
-                .and_then(chunk_block_type);
+            let data = event.and_then(|e| e.get("data"));
+            let block_type = data.and_then(|d| d.get("chunk")).and_then(chunk_block_type);
+            let reason_kind = data
+                .and_then(|d| d.get("reason"))
+                .and_then(|r| r.get("kind"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
             DshFrame::Event {
                 session_id,
                 kind,
                 block_type,
+                reason_kind,
             }
         }
         "host/session-status" => {
@@ -234,36 +242,127 @@ impl LiveSession {
     }
 }
 
-/// The per-session live view both sockets write into.
-pub type LiveStates = Arc<Mutex<HashMap<String, LiveSession>>>;
+/// Called once when a session's turn ends; `true` when it ran to completion.
+pub type TurnEndCallback = Box<dyn FnOnce(bool) + Send>;
 
-/// Fold one frame into the live view. Split out from the socket loop so the
-/// state machine is testable without a server.
-pub fn apply_frame(states: &LiveStates, frame: DshFrame, now_ms: u64) {
-    let mut guard = states
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    match frame {
-        DshFrame::Event {
-            session_id,
-            kind,
-            block_type,
-        } => {
-            let Some(phase) = phase_of(&kind, block_type.as_deref()) else {
-                return;
-            };
-            let entry = guard.entry(session_id).or_default();
-            entry.phase = phase;
-            entry.phase_at_ms = now_ms;
+/// The per-session live view both sockets write into.
+///
+/// Two maps, two locks: `sessions` is read on every scan tick, while `waiters`
+/// is touched only when a Fleet-driven turn starts and when it ends. Sharing one
+/// lock would make every scan contend with callbacks that may run arbitrary
+/// caller code.
+#[derive(Default)]
+pub struct LiveView {
+    sessions: Mutex<HashMap<String, LiveSession>>,
+    waiters: Mutex<HashMap<String, Vec<TurnEndCallback>>>,
+}
+
+/// Handle shared between the socket follower and its owner.
+pub type SharedLive = Arc<LiveView>;
+
+impl LiveView {
+    /// Fold one frame in. Split out from the socket loop so the state machine is
+    /// testable without a server.
+    pub fn apply(&self, frame: DshFrame, now_ms: u64) {
+        match frame {
+            DshFrame::Event {
+                session_id,
+                kind,
+                block_type,
+                reason_kind,
+            } => {
+                if let Some(phase) = phase_of(&kind, block_type.as_deref()) {
+                    let mut guard = self
+                        .sessions
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let entry = guard.entry(session_id.clone()).or_default();
+                    entry.phase = phase;
+                    entry.phase_at_ms = now_ms;
+                }
+                if kind == "turn/end" {
+                    // `aborted` (session.cancel) is the one other kind observed
+                    // live; treat anything that is not an outright completion as
+                    // a failed turn so the caller does not record it as success.
+                    self.settle(&session_id, reason_kind.as_deref() == Some("completed"));
+                }
+            }
+            DshFrame::Status {
+                session_id,
+                running,
+            } => {
+                let mut guard = self
+                    .sessions
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                guard.entry(session_id).or_default().running = running;
+            }
+            DshFrame::Ignored => {}
         }
-        DshFrame::Status {
-            session_id,
-            running,
-        } => {
-            let entry = guard.entry(session_id).or_default();
-            entry.running = running;
+    }
+
+    /// Run (and forget) every callback waiting on this session's turn.
+    ///
+    /// Callbacks run outside the lock: they are caller-supplied and may take
+    /// their own locks, which would otherwise be a deadlock waiting to happen.
+    fn settle(&self, session_id: &str, success: bool) {
+        let waiting = {
+            let mut guard = self
+                .waiters
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.remove(session_id).unwrap_or_default()
+        };
+        for cb in waiting {
+            cb(success);
         }
-        DshFrame::Ignored => {}
+    }
+
+    /// Call `cb` when this session's next `turn/end` arrives.
+    ///
+    /// Fleet's spawn/resume contract wants a completion signal, and dsh has no
+    /// per-session process whose exit could provide one — the turn runs inside
+    /// the shared server. `turn/end` is that signal.
+    pub fn on_turn_end(&self, session_id: &str, cb: TurnEndCallback) {
+        self.waiters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(session_id.to_string())
+            .or_default()
+            .push(cb);
+    }
+
+    /// The phase to overlay for `session_id`, if a fresh one exists.
+    pub fn phase_of(&self, session_id: &str, now_ms: u64) -> Option<SessionStatus> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(session_id)
+            .and_then(|s| s.effective_phase(now_ms))
+    }
+
+    /// How many sessions the sockets have reported on.
+    pub fn tracked(&self) -> usize {
+        self.sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+    }
+
+    /// Fail every outstanding waiter. Used when the follower is torn down: a
+    /// turn whose completion Fleet can no longer observe must not leave the
+    /// caller (the auto-resume scheduler) holding its slot forever.
+    fn abandon_all(&self) {
+        let waiting: Vec<TurnEndCallback> = {
+            let mut guard = self
+                .waiters
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.drain().flat_map(|(_, cbs)| cbs).collect()
+        };
+        for cb in waiting {
+            cb(false);
+        }
     }
 }
 
@@ -275,7 +374,7 @@ pub fn apply_frame(states: &LiveStates, frame: DshFrame, now_ms: u64) {
 /// so the owner drops this watcher and starts another rather than reusing it.
 pub struct DshEventWatcher {
     port: u16,
-    states: LiveStates,
+    live: SharedLive,
     stop: Arc<AtomicBool>,
 }
 
@@ -285,10 +384,10 @@ impl DshEventWatcher {
     /// Returns immediately; the sockets connect (and reconnect) on their own, so
     /// a server that is not answering yet costs nothing but a retry.
     pub fn start(port: u16) -> Self {
-        let states: LiveStates = Arc::new(Mutex::new(HashMap::new()));
+        let live: SharedLive = Arc::new(LiveView::default());
         let stop = Arc::new(AtomicBool::new(false));
 
-        let thread_states = states.clone();
+        let thread_states = live.clone();
         let thread_stop = stop.clone();
         let spawned = std::thread::Builder::new()
             .name("dsh-events".into())
@@ -322,7 +421,7 @@ impl DshEventWatcher {
             stop.store(true, Ordering::SeqCst);
         }
 
-        Self { port, states, stop }
+        Self { port, live, stop }
     }
 
     /// The port this watcher follows.
@@ -333,20 +432,17 @@ impl DshEventWatcher {
     /// The phase to show for `session_id`, or `None` when the sockets have
     /// nothing fresher than the poll.
     pub fn phase_of(&self, session_id: &str) -> Option<SessionStatus> {
-        let now = now_ms();
-        let guard = self
-            .states
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        guard.get(session_id).and_then(|s| s.effective_phase(now))
+        self.live.phase_of(session_id, now_ms())
+    }
+
+    /// Call `cb` when this session's next turn ends. See [`LiveView::on_turn_end`].
+    pub fn on_turn_end(&self, session_id: &str, cb: TurnEndCallback) {
+        self.live.on_turn_end(session_id, cb);
     }
 
     /// How many sessions the sockets have reported on. Diagnostics and tests.
     pub fn tracked(&self) -> usize {
-        self.states
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .len()
+        self.live.tracked()
     }
 }
 
@@ -357,6 +453,9 @@ impl Drop for DshEventWatcher {
         // on a socket read, and a detached thread with a stop flag set exits on
         // its own within the tick.
         self.stop.store(true, Ordering::SeqCst);
+        // Nothing will observe those turns any more, so no caller may be left
+        // waiting on a completion that can never arrive.
+        self.live.abandon_all();
     }
 }
 
@@ -365,7 +464,7 @@ type DshWs = tokio_tungstenite::WebSocketStream<
 >;
 
 /// Keep one downlink connected for as long as the watcher lives.
-async fn follow(url: String, states: LiveStates, stop: Arc<AtomicBool>) {
+async fn follow(url: String, states: SharedLive, stop: Arc<AtomicBool>) {
     while !stop.load(Ordering::SeqCst) {
         match connect(&url).await {
             Ok(ws) => pump(ws, &states, &stop).await,
@@ -387,7 +486,7 @@ async fn connect(url: &str) -> Result<DshWs, String> {
 }
 
 /// Read frames until the socket closes or the watcher is dropped.
-async fn pump(mut ws: DshWs, states: &LiveStates, stop: &Arc<AtomicBool>) {
+async fn pump(mut ws: DshWs, states: &SharedLive, stop: &Arc<AtomicBool>) {
     use tokio_tungstenite::tungstenite::Message;
     while !stop.load(Ordering::SeqCst) {
         // The timeout is the only reason this loop re-checks `stop` on an idle
@@ -401,7 +500,7 @@ async fn pump(mut ws: DshWs, states: &LiveStates, stop: &Arc<AtomicBool>) {
                 break;
             }
             Ok(Some(Ok(Message::Text(text)))) => {
-                apply_frame(states, parse_frame(&text), now_ms());
+                states.apply(parse_frame(&text), now_ms());
             }
             Ok(Some(Ok(Message::Close(_)))) => break,
             // Ping/Pong are answered by the stream itself; binary frames are not
@@ -456,8 +555,38 @@ mod tests {
                 session_id: "session-ef76dbb8".into(),
                 kind: "tool/call".into(),
                 block_type: None,
+                reason_kind: None,
             }
         );
+    }
+
+    /// Verbatim `turn/end` frames: one that finished, one cut short by
+    /// `session.cancel`. The nested `reason.kind` is the only thing telling the
+    /// two apart, and it decides what `on_turn_end` reports.
+    #[test]
+    fn decodes_the_outcome_of_a_finished_turn() {
+        let end = |reason: Value| {
+            json!({
+                "type": "server-request",
+                "rpcId": "x",
+                "method": "session/event",
+                "payload": {
+                    "sessionId": "session-a",
+                    "event": { "type": "turn/end", "seq": 85, "data": { "turn": 2, "reason": reason } }
+                }
+            })
+            .to_string()
+        };
+        let completed = parse_frame(&end(json!({ "kind": "completed" })));
+        let aborted = parse_frame(&end(json!({ "kind": "aborted", "reason": { "kind": "user" } })));
+        assert!(matches!(
+            completed,
+            DshFrame::Event { ref reason_kind, .. } if reason_kind.as_deref() == Some("completed")
+        ));
+        assert!(matches!(
+            aborted,
+            DshFrame::Event { ref reason_kind, .. } if reason_kind.as_deref() == Some("aborted")
+        ));
     }
 
     /// The frame type lives on the envelope's `method`, not on the payload — a
@@ -574,16 +703,29 @@ mod tests {
         assert_eq!(phase_of("agent/inbox/spliced", None), None);
     }
 
-    fn states() -> LiveStates {
-        Arc::new(Mutex::new(HashMap::new()))
+    fn event(sid: &str, kind: &str) -> DshFrame {
+        DshFrame::Event {
+            session_id: sid.into(),
+            kind: kind.into(),
+            block_type: None,
+            reason_kind: None,
+        }
+    }
+
+    fn turn_end(sid: &str, reason: &str) -> DshFrame {
+        DshFrame::Event {
+            session_id: sid.into(),
+            kind: "turn/end".into(),
+            block_type: None,
+            reason_kind: Some(reason.into()),
+        }
     }
 
     #[test]
     fn folds_a_whole_turn_into_the_live_view() {
-        let states = states();
+        let live = LiveView::default();
         let sid = "session-a";
-        apply_frame(
-            &states,
+        live.apply(
             DshFrame::Status {
                 session_id: sid.into(),
                 running: true,
@@ -591,21 +733,57 @@ mod tests {
             1_000,
         );
         for (kind, at) in [("turn/start", 1_001u64), ("step/start", 1_002), ("tool/call", 1_003)] {
-            apply_frame(
-                &states,
-                DshFrame::Event {
-                    session_id: sid.into(),
-                    kind: kind.into(),
-                    block_type: None,
-                },
-                at,
-            );
+            live.apply(event(sid, kind), at);
         }
-        let guard = states.lock().unwrap();
-        let live = guard.get(sid).expect("tracked");
-        assert!(live.running);
-        assert_eq!(live.phase, SessionStatus::Executing);
-        assert_eq!(live.effective_phase(1_004), Some(SessionStatus::Executing));
+        assert_eq!(live.phase_of(sid, 1_004), Some(SessionStatus::Executing));
+        assert_eq!(live.tracked(), 1);
+    }
+
+    /// dsh runs turns inside the shared server, so `turn/end` is the only
+    /// completion signal Fleet's spawn/resume contract can hang `on_exit` on.
+    #[test]
+    fn a_finished_turn_settles_its_waiters_with_success() {
+        let live = LiveView::default();
+        let seen = Arc::new(Mutex::new(Vec::<bool>::new()));
+        for _ in 0..2 {
+            let sink = seen.clone();
+            live.on_turn_end("session-a", Box::new(move |ok| sink.lock().unwrap().push(ok)));
+        }
+        // Another session's turn ending must not settle ours.
+        live.apply(turn_end("session-b", "completed"), 1_000);
+        assert!(seen.lock().unwrap().is_empty());
+
+        live.apply(turn_end("session-a", "completed"), 1_001);
+        assert_eq!(*seen.lock().unwrap(), vec![true, true]);
+
+        // Waiters fire exactly once: a second turn on the same session must not
+        // re-settle callers who already got their answer.
+        live.apply(turn_end("session-a", "completed"), 1_002);
+        assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    /// A cancelled turn is not a successful one — reporting it as success would
+    /// let the auto-resume scheduler record a win it never had.
+    #[test]
+    fn an_aborted_turn_settles_its_waiters_with_failure() {
+        let live = LiveView::default();
+        let seen = Arc::new(Mutex::new(Vec::<bool>::new()));
+        let sink = seen.clone();
+        live.on_turn_end("session-a", Box::new(move |ok| sink.lock().unwrap().push(ok)));
+        live.apply(turn_end("session-a", "aborted"), 1_000);
+        assert_eq!(*seen.lock().unwrap(), vec![false]);
+    }
+
+    /// Tearing the follower down abandons what it can no longer observe, so a
+    /// caller waiting on a turn is never left holding its slot forever.
+    #[test]
+    fn dropping_the_view_fails_outstanding_waiters() {
+        let live = LiveView::default();
+        let seen = Arc::new(Mutex::new(Vec::<bool>::new()));
+        let sink = seen.clone();
+        live.on_turn_end("session-a", Box::new(move |ok| sink.lock().unwrap().push(ok)));
+        live.abandon_all();
+        assert_eq!(*seen.lock().unwrap(), vec![false]);
     }
 
     /// A running session's phase never expires — the turn is still in flight
@@ -643,23 +821,22 @@ mod tests {
     /// status must stand rather than being overwritten with the default.
     #[test]
     fn a_status_only_session_overlays_nothing() {
-        let states = states();
-        apply_frame(
-            &states,
+        let live = LiveView::default();
+        live.apply(
             DshFrame::Status {
                 session_id: "session-a".into(),
                 running: false,
             },
             1_000,
         );
-        let guard = states.lock().unwrap();
-        assert_eq!(guard.get("session-a").unwrap().effective_phase(1_000), None);
+        assert_eq!(live.phase_of("session-a", 1_000), None);
+        assert_eq!(live.tracked(), 1, "it is tracked, it just has no phase");
     }
 
     #[test]
     fn ignored_frames_do_not_create_entries() {
-        let states = states();
-        apply_frame(&states, DshFrame::Ignored, 1_000);
-        assert!(states.lock().unwrap().is_empty());
+        let live = LiveView::default();
+        live.apply(DshFrame::Ignored, 1_000);
+        assert_eq!(live.tracked(), 0);
     }
 }

@@ -138,6 +138,17 @@ impl DshServer {
         self.port
     }
 
+    /// The launcher process id.
+    ///
+    /// dsh has no per-session process — every session's turn runs inside this
+    /// one server — so this is the only pid Fleet can report for a dsh session,
+    /// and it is shared by all of them. Killing it would take down every dsh
+    /// session at once, which is why [`crate::dsh_source::DshSource`] does not
+    /// implement `kill_pid`.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// The workspace root this instance was started in.
     pub fn workspace(&self) -> &Path {
         &self.workspace

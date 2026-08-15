@@ -129,6 +129,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     if let Err(e) = ctrlc::try_set_handler(move || {
         let _ = crate::permissions_injector::release(serve_pid);
         let _ = crate::mcp_injector::release(serve_pid);
+        // `dsh web` is a child of this process with no authentication layer;
+        // exiting without stopping it would leave the port open.
+        crate::dsh_source::shutdown();
         std::process::exit(0);
     }) {
         eprintln!("[fleet serve] ctrlc handler install failed: {e}");
