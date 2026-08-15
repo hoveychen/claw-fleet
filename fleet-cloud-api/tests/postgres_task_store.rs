@@ -80,10 +80,35 @@ fn command(
     }
 }
 
+/// The disposable Postgres this test runs against, or `None` when the machine
+/// has not been pointed at one.
+///
+/// Absent is a *skip*, not a failure. This test needs a live database that it
+/// `TRUNCATE`s on the way in, so it can only ever run where someone has stood
+/// one up on purpose; CI does not (`ci.yml` builds `fleet-cli` /
+/// `claw-fleet-core` / `fleet-hooks-server` only). Failing on absence made a
+/// bare `cargo test --workspace` red on every machine that is not doing Fleet
+/// Cloud work, which trains everyone to run the workspace suite with
+/// `--exclude fleet-cloud-api` — and an excluded crate is an untested one.
+fn integration_database() -> Option<String> {
+    match std::env::var("DATABASE_URL") {
+        Ok(url) if !url.trim().is_empty() => Some(url),
+        _ => {
+            eprintln!(
+                "SKIP postgres_create_task_is_atomic_and_idempotent: no DATABASE_URL. \
+                 Point it at a disposable database to run this — the test TRUNCATEs \
+                 every table, so never aim it at anything you care about."
+            );
+            None
+        }
+    }
+}
+
 #[tokio::test]
 async fn postgres_create_task_is_atomic_and_idempotent() {
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must point at the disposable integration database");
+    let Some(database_url) = integration_database() else {
+        return;
+    };
     let store = PgTaskStore::connect(&database_url).await.unwrap();
     store.migrate().await.unwrap();
     sqlx::query("TRUNCATE organizations CASCADE")
