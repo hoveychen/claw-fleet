@@ -2298,6 +2298,13 @@ impl Backend for LocalBackend {
         crate::file_explorer::read_file(workspace, root, rel_path, &self.known_workspaces())
     }
 
+    fn read_external_file(
+        &self,
+        path: &str,
+    ) -> Result<crate::file_explorer::ExplorerFileContent, String> {
+        crate::file_explorer::read_external_file(path)
+    }
+
     fn list_scratchpad_dir(
         &self,
         workspace: &str,

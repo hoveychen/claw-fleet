@@ -622,6 +622,13 @@ pub trait Backend: Send + Sync {
         root: &str,
         rel_path: &str,
     ) -> Result<crate::file_explorer::ExplorerFileContent, String>;
+    /// Read one absolute path that belongs to no workspace — the `/tmp/foo.md`
+    /// an agent just wrote and named in prose. Single file, no listing: see
+    /// `file_explorer::read_external_file` for why that is the whole surface.
+    fn read_external_file(
+        &self,
+        path: &str,
+    ) -> Result<crate::file_explorer::ExplorerFileContent, String>;
 
     // ── Session scratchpad ────────────────────────────────────────────────────
     // Read-only browsing of the private temp dir Claude Code hands a session.
