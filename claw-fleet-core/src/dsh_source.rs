@@ -12,7 +12,7 @@
 //! here). The server's own cwd only decides where *new* sessions would root.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -36,17 +36,51 @@ pub const DSH_URI_PREFIX: &str = "dsh://";
 /// what it returns.
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 
-pub struct DshSource {
-    /// The server is started on first use and reused. `None` until then, or
-    /// after a start failure — a machine without dsh installed never pays for
-    /// a spawn attempt because [`is_available`] gates the whole source.
-    ///
-    /// [`is_available`]: AgentSource::is_available
-    server: Mutex<Option<DshServer>>,
-    /// Follower of the server's two downlinks, rebuilt whenever the server
-    /// lands on a new port.
-    watcher: Mutex<Option<DshEventWatcher>>,
+/// Fleet's single `dsh web` instance, shared by every [`DshSource`] in the
+/// process rather than owned by one.
+///
+/// It has to be process-global: `agent_source::spawn_session` and
+/// `resume_session` call `build_sources()` on every invocation, so the source
+/// they route through is a throwaway. An instance-owned server would be started
+/// for the call and killed by `Drop` on the way out — taking the turn that had
+/// just been admitted with it. One shared server also matches what the source
+/// already does, which is root itself at the harness home and observe every
+/// workspace from there.
+///
+/// Because it is never dropped, [`shutdown`] is the only thing that stops it,
+/// and every process exit path must call it: `dsh web` has no authentication
+/// layer, so a leaked child is an open door onto every session on the machine.
+static SERVER: OnceLock<Mutex<Option<DshServer>>> = OnceLock::new();
+
+/// Follower of [`SERVER`]'s two downlinks, rebuilt whenever the server lands on
+/// a new port.
+static WATCHER: OnceLock<Mutex<Option<DshEventWatcher>>> = OnceLock::new();
+
+fn server_slot() -> &'static Mutex<Option<DshServer>> {
+    SERVER.get_or_init(|| Mutex::new(None))
 }
+
+fn watcher_slot() -> &'static Mutex<Option<DshEventWatcher>> {
+    WATCHER.get_or_init(|| Mutex::new(None))
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Stop Fleet's `dsh web` and its downlink follower, if either is running.
+///
+/// Idempotent, and a no-op when dsh was never used. Every long-lived Fleet
+/// process must call this on exit — see [`SERVER`].
+pub fn shutdown() {
+    // Watcher first: it holds sockets onto the server it follows.
+    *lock(watcher_slot()) = None;
+    if let Some(mut server) = lock(server_slot()).take() {
+        server.stop();
+    }
+}
+
+pub struct DshSource;
 
 impl Default for DshSource {
     fn default() -> Self {
@@ -56,10 +90,7 @@ impl Default for DshSource {
 
 impl DshSource {
     pub fn new() -> Self {
-        Self {
-            server: Mutex::new(None),
-            watcher: Mutex::new(None),
-        }
+        Self
     }
 
     /// Run `f` against a live server, starting or restarting it as needed.
@@ -68,10 +99,7 @@ impl DshSource {
     /// OS-assigned port, so a memoized client would silently point at a dead
     /// listener.
     fn with_client<T>(&self, f: impl FnOnce(&DshClient) -> Result<T, String>) -> Result<T, String> {
-        let mut guard = self
-            .server
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = lock(server_slot());
 
         match guard.as_mut() {
             Some(server) => server.ensure_alive()?,
@@ -89,7 +117,7 @@ impl DshSource {
         }
 
         let server = guard.as_ref().expect("server started above");
-        self.ensure_watcher(server.port());
+        Self::ensure_watcher(server.port());
         let client = server.client()?;
         f(&client)
     }
@@ -101,11 +129,8 @@ impl DshSource {
     /// server-then-watcher; nothing takes them the other way round.
     ///
     /// [`with_client`]: Self::with_client
-    fn ensure_watcher(&self, port: u16) {
-        let mut guard = self
-            .watcher
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    fn ensure_watcher(port: u16) {
+        let mut guard = lock(watcher_slot());
         if guard.as_ref().is_some_and(|w| w.port() == port) {
             return;
         }
@@ -116,21 +141,21 @@ impl DshSource {
     }
 
     /// The port Fleet's `dsh web` instance is listening on, or `None` before
-    /// the first RPC starts it. Diagnostics, and the handle tests need to drive
-    /// a turn through the same server this source observes.
+    /// the first RPC starts it. Diagnostics, and how the tests drive a turn
+    /// through the same server this source observes.
     pub fn server_port(&self) -> Option<u16> {
-        self.server
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .map(DshServer::port)
+        lock(server_slot()).as_ref().map(DshServer::port)
+    }
+
+    /// The launcher pid, or 0 when the server is not up. Reported as a dsh
+    /// session's pid — see [`DshServer::pid`] for why it is shared.
+    fn server_pid() -> u32 {
+        lock(server_slot()).as_ref().map(DshServer::pid).unwrap_or(0)
     }
 
     /// The phase the downlinks report for `session_id`, if any is fresh.
     fn live_phase(&self, session_id: &str) -> Option<SessionStatus> {
-        self.watcher
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        lock(watcher_slot())
             .as_ref()
             .and_then(|w| w.phase_of(session_id))
     }
@@ -138,6 +163,108 @@ impl DshSource {
     /// Strip the `dsh://` scheme off a session URI.
     fn session_id_of(path: &str) -> Option<&str> {
         path.strip_prefix(DSH_URI_PREFIX).filter(|s| !s.is_empty())
+    }
+
+    /// Point an existing session at a model, when the caller named one.
+    ///
+    /// Also the step that makes resume work: a session written by another
+    /// process is cold to this server until something touches it, and
+    /// `session.selectModel` loads it (verified against a session created by a
+    /// different `dsh web` instance).
+    fn select_model(
+        client: &DshClient,
+        session_id: &str,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<(), String> {
+        let Some((provider, model)) = model.and_then(split_model) else {
+            return Ok(());
+        };
+        let mut payload = json!({
+            "sessionId": session_id,
+            "provider": provider,
+            "model": model,
+        });
+        if let Some(effort) = effort.filter(|e| !e.is_empty()) {
+            payload["reasoningEffort"] = json!(effort);
+        }
+        client
+            .call("session.selectModel", payload)
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    /// Hand a prompt to a session. Returns once dsh has admitted the turn, not
+    /// when it finishes — completion arrives on the mux as `turn/end`.
+    fn prompt(client: &DshClient, session_id: &str, prompt: &str) -> Result<(), String> {
+        client
+            .call(
+                "session.prompt",
+                json!({
+                    "sessionId": session_id,
+                    // "queue" appends to the session's inbox; "steer" would cut
+                    // into a turn already running, which is not what either of
+                    // Fleet's launch paths means.
+                    "mode": "queue",
+                    "content": [{ "type": "text", "text": prompt }],
+                }),
+            )
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    /// Arrange for `on_exit` to fire when `session_id`'s turn ends.
+    ///
+    /// Returns a handle that fires it with `false` if the caller never gets the
+    /// turn started — registering *before* prompting is what closes the race
+    /// where a very short turn ends before the callback is in place.
+    fn arm_turn_end(session_id: &str, on_exit: Box<dyn FnOnce(bool) + Send>) -> ArmedCallback {
+        let cell: ArmedCallback = Arc::new(Mutex::new(Some(on_exit)));
+        let for_watcher = cell.clone();
+        let fired = move |ok: bool| {
+            if let Some(cb) = lock(&for_watcher).take() {
+                cb(ok);
+            }
+        };
+        match lock(watcher_slot()).as_ref() {
+            Some(watcher) => watcher.on_turn_end(session_id, Box::new(fired)),
+            // No follower means no completion signal will ever arrive; say so
+            // now rather than leaving the caller's slot held forever.
+            None => fired(false),
+        }
+        cell
+    }
+}
+
+/// A `on_exit` callback that has been handed to the watcher but can still be
+/// reclaimed by the caller if the turn never starts. Whoever takes it first runs
+/// it, so it fires exactly once.
+type ArmedCallback = Arc<Mutex<Option<Box<dyn FnOnce(bool) + Send>>>>;
+
+/// Split Fleet's single `model` string into dsh's `provider` + `model` pair.
+///
+/// dsh addresses a model as two fields, Fleet's [`SpawnSpec`] carries one
+/// string, so the first `/` separates them: `openrouter/anthropic/claude-haiku-4.5`
+/// → provider `openrouter`, model `anthropic/claude-haiku-4.5`. A string with no
+/// `/` names no provider and is ignored, leaving the session on the model the
+/// harness itself is configured with.
+///
+/// [`SpawnSpec`]: crate::agent_source::SpawnSpec
+fn split_model(model: &str) -> Option<(&str, &str)> {
+    let (provider, rest) = model.trim().split_once('/')?;
+    if provider.is_empty() || rest.is_empty() {
+        return None;
+    }
+    Some((provider, rest))
+}
+
+/// dsh's own id shape. Fleet mints one when the caller did not pre-assign an id,
+/// and prefixes a bare one so every dsh session id looks the same on the wire.
+fn normalize_session_id(id: Option<&str>) -> String {
+    match id.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(id) if id.starts_with("session-") => id.to_string(),
+        Some(id) => format!("session-{id}"),
+        None => format!("session-{}", uuid::Uuid::new_v4()),
     }
 }
 
@@ -291,6 +418,97 @@ impl AgentSource for DshSource {
         path.starts_with(DSH_URI_PREFIX)
     }
 
+    /// Start a brand-new dsh session and give it its first prompt.
+    ///
+    /// Three RPCs, no process: `session.create` with a Fleet-minted id (dsh
+    /// honours a pre-assigned one, so the caller can correlate immediately
+    /// instead of guessing which session appeared), an optional
+    /// `session.selectModel`, then `session.prompt`.
+    fn spawn(
+        &self,
+        spec: &crate::agent_source::SpawnSpec,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+        if spec.workspace_path.trim().is_empty() {
+            return Err("dsh spawn: workspace_path is required".into());
+        }
+        let session_id = normalize_session_id(spec.session_id.as_deref());
+
+        self.with_client(|client| {
+            let created = client
+                .call(
+                    "session.create",
+                    json!({ "cwd": spec.workspace_path, "sessionId": session_id }),
+                )
+                .map_err(String::from)?;
+            // dsh echoes the id it actually used. If it ever stopped honouring
+            // the pre-assignment, silently returning our own id would hand the
+            // caller a session that does not exist.
+            let assigned = created
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if assigned != session_id {
+                return Err(format!(
+                    "dsh spawn: asked for session {session_id}, got {assigned}"
+                ));
+            }
+            Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
+            Self::prompt(client, &session_id, &spec.prompt)
+        })?;
+
+        Ok(crate::session_launch::SpawnSessionResponse {
+            // Every dsh session shares the server's pid — there is no per-session
+            // process. See `DshServer::pid`.
+            pid: Self::server_pid(),
+            session_id: Some(session_id),
+        })
+    }
+
+    /// Continue an existing dsh session.
+    ///
+    /// dsh has no separate resume method and needs none: `session.selectModel`
+    /// loads a session this server has never seen (verified against one written
+    /// by a different `dsh web` process) and `session.prompt` appends to it, so
+    /// the history is already back in the model's context.
+    fn resume(
+        &self,
+        spec: &crate::agent_source::ResumeSpec,
+        on_exit: Box<dyn FnOnce(bool) + Send>,
+    ) -> Result<(), String> {
+        let session_id = Self::session_id_of(&spec.session_id)
+            .unwrap_or(&spec.session_id)
+            .to_string();
+        if session_id.is_empty() {
+            let _ = on_exit;
+            return Err("dsh resume: session_id is required".into());
+        }
+        let prompt = if spec.prompt.trim().is_empty() {
+            "continue"
+        } else {
+            &spec.prompt
+        };
+
+        // Make sure the server and its follower are up before arming: the
+        // callback registry lives on the watcher.
+        self.with_client(|_| Ok(()))?;
+        let armed = Self::arm_turn_end(&session_id, on_exit);
+
+        let started = self.with_client(|client| {
+            Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
+            Self::prompt(client, &session_id, prompt)
+        });
+
+        if let Err(e) = started {
+            // The turn never began, so no `turn/end` is coming. Reclaim the
+            // callback and report the failure ourselves.
+            if let Some(cb) = lock(&armed).take() {
+                cb(false);
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// dsh sessions have no Fleet-readable file: the transcript is a
     /// zstd-framed log the server owns. Nothing may hand out a path for it.
     fn resolve_file_path(&self, _path: &str) -> Option<PathBuf> {
@@ -432,6 +650,61 @@ mod tests {
         );
         assert_eq!(DshSource::session_id_of("dsh://"), None);
         assert_eq!(DshSource::session_id_of("session-abc"), None);
+    }
+
+    /// Fleet carries one model string; dsh wants provider and model separately.
+    #[test]
+    fn splits_a_model_string_at_its_first_slash() {
+        assert_eq!(
+            split_model("openrouter/anthropic/claude-haiku-4.5"),
+            Some(("openrouter", "anthropic/claude-haiku-4.5")),
+            "the provider is the first segment; the rest is the model verbatim"
+        );
+        assert_eq!(split_model("deepseek/deepseek-chat"), Some(("deepseek", "deepseek-chat")));
+    }
+
+    /// A model with no provider cannot be selected, and guessing one would point
+    /// the session at a provider the user never configured — leave it on the
+    /// harness default instead.
+    #[test]
+    fn a_model_without_a_provider_selects_nothing() {
+        assert_eq!(split_model("claude-haiku-4.5"), None);
+        assert_eq!(split_model(""), None);
+        assert_eq!(split_model("/model"), None);
+        assert_eq!(split_model("provider/"), None);
+    }
+
+    #[test]
+    fn session_ids_take_dsh_shape() {
+        assert_eq!(
+            normalize_session_id(Some("session-abc")),
+            "session-abc",
+            "an id that is already dsh-shaped passes through"
+        );
+        assert_eq!(
+            normalize_session_id(Some("abc")),
+            "session-abc",
+            "a bare id (Claude's shape) gets the prefix"
+        );
+        let minted = normalize_session_id(None);
+        assert!(minted.starts_with("session-"));
+        assert_ne!(minted, normalize_session_id(None), "each mint is unique");
+    }
+
+    #[test]
+    fn blank_session_ids_are_minted_not_prefixed() {
+        assert_ne!(normalize_session_id(Some("   ")), "session-   ");
+        assert!(normalize_session_id(Some("   ")).len() > "session-".len());
+    }
+
+    /// The spawn path refuses to guess a workspace: `session.create`'s `cwd`
+    /// decides where the agent's tools run.
+    #[test]
+    fn spawn_requires_a_workspace() {
+        let err = DshSource::new()
+            .spawn(&crate::agent_source::SpawnSpec::default())
+            .unwrap_err();
+        assert!(err.contains("workspace_path"), "unexpected error: {err}");
     }
 
     #[test]

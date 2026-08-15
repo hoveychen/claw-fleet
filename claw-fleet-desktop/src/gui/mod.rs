@@ -2058,6 +2058,11 @@ pub fn run() {
                 let _ = claw_fleet_core::mcp_injector::release(
                     std::process::id(),
                 );
+                // dsh is the opposite case to the injectors above: its server is
+                // a process-global singleton nothing else drops, and `dsh web`
+                // has no authentication layer, so leaving it running would leave
+                // an open port onto every dsh session on this machine.
+                claw_fleet_core::dsh_source::shutdown();
             }
         });
 }
