@@ -140,8 +140,17 @@ fn live_unknown_session_has_no_phase() {
 #[test]
 #[ignore = "runs a real dsh turn (costs model credits); run manually with --ignored"]
 fn live_scan_sessions_carries_the_pushed_phase() {
-    // `DshSource` starts and owns its own server, so this exercises the whole
-    // desktop wiring: with_client → ensure_watcher → overlay.
+    // Nothing else reclaims the process-global server when a test binary exits.
+    struct ServerGuard;
+    impl Drop for ServerGuard {
+        fn drop(&mut self) {
+            claw_fleet_core::dsh_source::shutdown();
+        }
+    }
+    let _guard = ServerGuard;
+
+    // `DshSource` starts (and shares) Fleet's server, so this exercises the
+    // whole desktop wiring: with_client → ensure_watcher → overlay.
     let source = DshSource::new();
     // The first scan is what starts the server and the watcher.
     let before = source.scan_sessions();

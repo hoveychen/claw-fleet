@@ -19,6 +19,21 @@ use claw_fleet_core::session::SessionStatus;
 
 const PROBE_PROMPT: &str = "Reply with exactly: ok";
 
+/// Stops Fleet's process-global `dsh web` when the test that started it ends,
+/// however it ends.
+///
+/// The server outlives every `DshSource` on purpose (see `dsh_source::SERVER`),
+/// so nothing reclaims it when a test binary exits — measured: three orphaned
+/// `dsh web` processes after one live run. Production has `dsh_source::shutdown`
+/// wired into its exit paths; a test binary needs its own.
+struct ServerGuard;
+
+impl Drop for ServerGuard {
+    fn drop(&mut self) {
+        claw_fleet_core::dsh_source::shutdown();
+    }
+}
+
 fn wait_for<T>(budget: Duration, mut f: impl FnMut() -> Option<T>) -> Option<T> {
     let deadline = Instant::now() + budget;
     while Instant::now() < deadline {
@@ -33,6 +48,7 @@ fn wait_for<T>(budget: Duration, mut f: impl FnMut() -> Option<T>) -> Option<T> 
 #[test]
 #[ignore = "runs a real dsh turn (costs model credits); run manually with --ignored"]
 fn live_spawn_creates_the_session_it_promised() {
+    let _guard = ServerGuard;
     let source = DshSource::new();
     let spec = SpawnSpec {
         workspace_path: "/tmp".into(),
@@ -75,6 +91,7 @@ fn live_spawn_creates_the_session_it_promised() {
 #[test]
 #[ignore = "runs a real dsh turn (costs model credits); run manually with --ignored"]
 fn live_spawn_honours_a_preassigned_id() {
+    let _guard = ServerGuard;
     let source = DshSource::new();
     let wanted = format!("session-{}", uuid::Uuid::new_v4());
     let spawned = source
@@ -93,6 +110,7 @@ fn live_spawn_honours_a_preassigned_id() {
 #[test]
 #[ignore = "runs two real dsh turns (costs model credits); run manually with --ignored"]
 fn live_resume_continues_a_session_and_reports_its_outcome() {
+    let _guard = ServerGuard;
     let source = DshSource::new();
     let spawned = source
         .spawn(&SpawnSpec {
@@ -150,6 +168,7 @@ fn live_resume_continues_a_session_and_reports_its_outcome() {
 #[test]
 #[ignore = "starts a real `dsh web`; run manually with --ignored"]
 fn live_resume_of_an_unknown_session_releases_its_callback() {
+    let _guard = ServerGuard;
     let source = DshSource::new();
     let (tx, rx) = mpsc::channel();
     let err = source
