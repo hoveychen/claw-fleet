@@ -90,6 +90,37 @@ pub(crate) fn route_codex_token_breakdown(
     }
 }
 
+pub(crate) fn route_dsh_token_breakdown(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    // `path` here is a `dsh://<session-id>` URI, not a filesystem path — dsh
+    // sessions have no file. The param keeps the name the other breakdown
+    // routes use so the remote client's encoder stays shared.
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let uri = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    match crate::dsh_source::dsh_token_breakdown(&uri) {
+        Ok(t) => {
+            let body = serde_json::to_string(&t).unwrap_or_default();
+            let _ = request
+                .respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(format!(
+                    "{{\"error\":{}}}",
+                    serde_json::to_string(&e).unwrap_or_default()
+                ))
+                .with_status_code(500)
+                .with_header(json_header),
+            );
+        }
+    }
+}
+
 pub(crate) fn route_explorer_roots(
     ctx: &ServeCtx,
     request: tiny_http::Request,

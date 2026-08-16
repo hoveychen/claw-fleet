@@ -142,3 +142,88 @@ fn live_bad_uri_is_rejected_without_touching_the_server() {
     let err = source.get_messages("codex://not-ours").unwrap_err();
     assert!(err.contains("invalid dsh URI"), "{err}");
 }
+
+/// The Token tab's data path, end to end against a real server.
+///
+/// The unit tests beside `dsh_source.rs` map a recorded projections block; this
+/// one proves a live server still ships that block, that the four billed buckets
+/// really sum to the total, and — the reading the panel exists to keep straight —
+/// that context occupancy is a *snapshot* that stays well under the cumulative
+/// billed figure on any session that has re-read a cached prefix.
+#[test]
+#[ignore = "starts a real `dsh web`; run manually with --ignored"]
+fn live_token_breakdown_reads_projections_off_a_real_server() {
+    let _guard = ServerGuard;
+    let source = DshSource::new();
+    assert!(
+        source.is_available(),
+        "set FLEET_DSH_BIN to a dsh executable"
+    );
+
+    let sessions = source.scan_sessions();
+    assert!(!sessions.is_empty(), "no dsh sessions to read");
+
+    // Pick the busiest session: a blank one would pass every assertion vacuously.
+    let busiest = sessions
+        .iter()
+        .max_by_key(|s| s.total_input_tokens + s.total_output_tokens)
+        .expect("at least one");
+    assert!(
+        busiest.total_input_tokens + busiest.total_output_tokens > 0,
+        "every dsh session on this machine is blank — run a turn first"
+    );
+
+    let b = claw_fleet_core::dsh_source::dsh_token_breakdown(&busiest.jsonl_path)
+        .expect("breakdown");
+    println!(
+        "{} | billed {} (uncached {} / read {} / write {} / out {}) | ctx {:?}/{:?}",
+        busiest.id,
+        b.total_tokens,
+        b.uncached_input_tokens,
+        b.cache_read_tokens,
+        b.cache_write_tokens,
+        b.output_tokens,
+        b.projected_tokens,
+        b.context_window
+    );
+
+    assert_eq!(
+        b.uncached_input_tokens + b.cache_read_tokens + b.cache_write_tokens + b.output_tokens,
+        b.total_tokens,
+        "rows must sum to the total or the panel's percentages lie"
+    );
+    // Cross-check against the same numbers as reached through `scan_sessions`,
+    // which folds the input buckets together — the two paths must agree.
+    assert_eq!(b.output_tokens, busiest.total_output_tokens);
+    assert_eq!(
+        b.uncached_input_tokens + b.cache_read_tokens + b.cache_write_tokens,
+        busiest.total_input_tokens
+    );
+
+    let window = b.context_window.expect("a used session knows its window");
+    let projected = b.projected_tokens.expect("a used session has pressure");
+    assert!(projected > 0 && projected <= window, "{projected}/{window}");
+    let pct = b.context_percent.expect("percent");
+    assert!(
+        (pct - projected as f64 / window as f64).abs() < 1e-9,
+        "percent must be derived from the pair it is shown beside"
+    );
+    // The window holds the live conversation, not the session's whole spend.
+    assert!(
+        projected <= b.total_tokens,
+        "context {projected} exceeds cumulative billed {} — the two readings \
+         got conflated somewhere",
+        b.total_tokens
+    );
+}
+
+/// A URI whose id no longer exists must say so, not render an all-zero panel
+/// that reads like a brand-new session.
+#[test]
+#[ignore = "starts a real `dsh web`; run manually with --ignored"]
+fn live_token_breakdown_reports_an_unknown_session() {
+    let _guard = ServerGuard;
+    let err = claw_fleet_core::dsh_source::dsh_token_breakdown("dsh://session-does-not-exist")
+        .expect_err("unknown id");
+    assert!(err.contains("not found"), "{err}");
+}

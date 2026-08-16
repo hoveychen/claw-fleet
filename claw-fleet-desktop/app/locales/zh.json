@@ -740,6 +740,26 @@
     "col_tokens": "Token",
     "caveat": "数据取自 Codex 累计的 total_token_usage。缓存输入是原始输入的子集，按缓存读取价计费；输出已包含推理 token。花费按模型公开价档估算。"
   },
+  "dsh_token": {
+    "loading": "正在读取 dsh token…",
+    "no_data": "无数据",
+    "kpi_total": "总 token（计费）",
+    "kpi_context": "上下文占用",
+    "section_billed": "计费 token（全会话累计）",
+    "section_context": "当前上下文构成",
+    "row_uncached": "输入（全价）",
+    "row_cache_read": "缓存读取",
+    "row_cache_write": "缓存写入",
+    "row_output": "输出",
+    "row_system": "系统提示",
+    "row_tools": "工具定义",
+    "row_messages": "对话消息",
+    "row_total": "总计",
+    "row_context_total": "窗口内",
+    "col_source": "类别",
+    "col_tokens": "Token",
+    "caveat": "数据取自 dsh 自己的会话 projections。计费桶是整个会话的累计值，上下文构成是当前窗口的快照，两者不能相加。dsh 不提供每会话的模型名，Fleet 也无法为 OpenRouter 的开放模型空间定价，故不显示花费。"
+  },
   "inspect": {
     "close": "关闭",
     "path": "路径"

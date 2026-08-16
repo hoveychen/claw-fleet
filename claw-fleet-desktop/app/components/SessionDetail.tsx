@@ -29,6 +29,8 @@ import { formatModel } from "./SessionCard";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { CodexTokenPanel } from "./CodexTokenPanel";
+import { DshTokenPanel } from "./DshTokenPanel";
+import { tokenPanelForAgentSource } from "../modelChoices";
 import { inlineCodexFleetAsk } from "./codexDecision";
 import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
@@ -916,14 +918,18 @@ export function SessionDetail({
           )}
 
           {viewTab === "tokens" && liveSession && (
-            liveSession.agentSource === "codex" ? (
-              <CodexTokenPanel jsonlPath={liveSession.jsonlPath} />
-            ) : (
-              <TokenSpendPanel
-                jsonlPath={liveSession.jsonlPath}
-                workspacePath={liveSession.workspacePath}
-              />
-            )
+            {
+              // `jsonlPath` carries each source's own handle: a file path for
+              // Claude, a `codex://` rollout URI, a `dsh://` session id.
+              codex: <CodexTokenPanel jsonlPath={liveSession.jsonlPath} />,
+              dsh: <DshTokenPanel uri={liveSession.jsonlPath} />,
+              claude: (
+                <TokenSpendPanel
+                  jsonlPath={liveSession.jsonlPath}
+                  workspacePath={liveSession.workspacePath}
+                />
+              ),
+            }[tokenPanelForAgentSource(liveSession.agentSource)]
           )}
 
           {viewTab === "tasks" && (
