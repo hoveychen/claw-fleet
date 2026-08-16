@@ -86,6 +86,55 @@ fn live_spawn_creates_the_session_it_promised() {
     assert!(worked.is_some(), "the spawned session never started working");
 }
 
+/// The path the desktop launcher actually takes.
+///
+/// Every test above drives `DshSource` directly, which proves the source works
+/// but skips the step in front of it: the UI sends a *tool string*, and
+/// `agent_source::spawn_session` has to resolve that string to this source.
+/// It resolves by `api_name()`, which dsh never overrides — so this test is what
+/// says the default (`name()` → `"dsh"`) is the string the launcher must send,
+/// and that the launcher's new "dsh" entry lands somewhere real rather than on
+/// "agent tool 'dsh' is not available".
+#[test]
+#[ignore = "runs a real dsh turn (costs model credits); run manually with --ignored"]
+fn live_the_launcher_tool_string_reaches_this_source() {
+    let _guard = ServerGuard;
+    let spawned = claw_fleet_core::agent_source::spawn_session(
+        "dsh",
+        &SpawnSpec {
+            workspace_path: "/tmp".into(),
+            prompt: PROBE_PROMPT.into(),
+            ..Default::default()
+        },
+    )
+    .expect("the launcher's tool string must route to the dsh source");
+    let session_id = spawned.session_id.expect("spawn must report an id");
+
+    let found = wait_for(Duration::from_secs(30), || {
+        DshSource::new()
+            .scan_sessions()
+            .into_iter()
+            .find(|s| s.id == session_id)
+    })
+    .expect("the dispatched session must show up in a scan");
+    assert_eq!(found.agent_source, "dsh");
+}
+
+/// An unknown tool must fail loudly rather than silently launching Claude.
+#[test]
+fn an_unknown_launcher_tool_is_refused() {
+    let err = claw_fleet_core::agent_source::spawn_session(
+        "not-a-real-agent",
+        &SpawnSpec {
+            workspace_path: "/tmp".into(),
+            prompt: "noop".into(),
+            ..Default::default()
+        },
+    )
+    .expect_err("an unknown tool must not fall back to another agent");
+    assert!(err.contains("not-a-real-agent"), "{err}");
+}
+
 /// A caller-supplied id must be honoured end to end — that is what lets Fleet
 /// correlate the session it asked for with the one that appears.
 #[test]

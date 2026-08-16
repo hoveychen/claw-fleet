@@ -5,7 +5,7 @@ import { CalendarClock, Repeat, Trash2, RefreshCw, Plus, Pencil, ArrowUpRight, P
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { SessionOptionPills } from "./SessionOptionPills";
-import { agentToolsForSources, type SourceInfo } from "../modelChoices";
+import { agentToolsForSources, toolForAgentSource, type SourceInfo } from "../modelChoices";
 import { useUIStore, useSessionsStore, useDetailStore } from "../store";
 import styles from "./ScheduleView.module.css";
 
@@ -459,7 +459,7 @@ function EditModal({
   const [fireLocal, setFireLocal] = useState(toLocalInput(new Date(rec.fireAt)));
   const [model, setModel] = useState(rec.model ?? "");
   const [effort, setEffort] = useState(rec.effort ?? "");
-  const [tool, setTool] = useState(rec.agentSource === "codex" ? "codex" : "claude");
+  const [tool, setTool] = useState(toolForAgentSource(rec.agentSource));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
