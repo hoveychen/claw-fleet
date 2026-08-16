@@ -10,6 +10,7 @@ import {
   type ChatComposerStagedAttachment,
 } from "./ChatComposer";
 import { SessionOptionPills } from "./SessionOptionPills";
+import { toolForAgentSource } from "../modelChoices";
 import { StopControl, canControl } from "./StopControl";
 import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
@@ -225,7 +226,7 @@ export function ResumeComposer({
           enqueueing ? undefined : (
           <SessionOptionPills
             placement="below"
-            tool={agentSource === "codex" ? "codex" : "claude"}
+            tool={toolForAgentSource(agentSource)}
             model={model}
             effort={effort}
             permissionMode={permissionMode}

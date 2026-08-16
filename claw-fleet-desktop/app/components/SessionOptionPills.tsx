@@ -70,6 +70,7 @@ export function SessionOptionPills({
 }) {
   const { t } = useTranslation();
   const isCodex = tool === "codex";
+  const isDsh = tool === "dsh";
   const toolLabel = toolChoices.find((x) => x.value === tool)?.label ?? "Claude";
   // Third-party Codex models are discovered from the host's profile files
   // rather than hardcoded — a `[model_providers.<id>]` block names no models,
@@ -89,14 +90,21 @@ export function SessionOptionPills({
       live = false;
     };
   }, [isCodex]);
-  const modelChoices = useMemo(
-    () =>
-      isCodex
-        ? [...CODEX_MODEL_CHOICES, ...codexProfileChoices(codexProfiles)]
-        : CLAUDE_MODEL_CHOICES,
-    [isCodex, codexProfiles],
-  );
-  const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : CLAUDE_EFFORT_CHOICES;
+  // dsh addresses a model as `provider/model` and publishes the pair — plus a
+  // per-model effort scale — through its own `llm.models` RPC, so neither of
+  // Fleet's two curated lists applies to it. Until that catalogue is wired
+  // through the Backend trait, dsh offers only "default", which is honest: the
+  // session then runs on whatever `~/.dsh/settings.yaml` selects. Offering
+  // Claude's list here would be worse than offering nothing — picking
+  // `claude-opus-5` for a dsh session silently does nothing, because
+  // `dsh_source::split_model` needs a provider prefix and drops a bare name.
+  const modelChoices = useMemo(() => {
+    if (isDsh) return [];
+    return isCodex
+      ? [...CODEX_MODEL_CHOICES, ...codexProfileChoices(codexProfiles)]
+      : CLAUDE_MODEL_CHOICES;
+  }, [isCodex, isDsh, codexProfiles]);
+  const effortChoices = isDsh ? [] : isCodex ? CODEX_EFFORT_CHOICES : CLAUDE_EFFORT_CHOICES;
   // In the un-chosen ("") state a pill shows only its bare category name
   // ("Model" / "模型"), not a "…: default" value: the prefix+value form made the
   // toolbar too wide to hold one row (English overflowed outright). The menu's
@@ -167,10 +175,13 @@ export function SessionOptionPills({
           })),
         ]}
       />
-      {/* Codex has no --permission-mode analogue (its sandbox/approval mapping
-          is a later milestone), so the permission pill is Claude-only. Hosts
-          with no permission concept (e.g. schedule edit) hide it outright. */}
-      {showPermission && !isCodex && (
+      {/* Neither Codex nor dsh has a --permission-mode analogue: Codex's
+          sandbox/approval mapping is a later milestone, and dsh models the same
+          ground as a preset plus an approval policy that only its own RPC can
+          switch (`setApprovalPolicy` and friends answer "not found" — probed
+          live). So the permission pill is Claude-only. Hosts with no permission
+          concept (e.g. schedule edit) hide it outright. */}
+      {showPermission && !isCodex && !isDsh && (
         <PillMenu
           placement={placement}
           compact={compact}
