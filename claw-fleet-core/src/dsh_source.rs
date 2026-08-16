@@ -398,7 +398,10 @@ impl AgentSource for DshSource {
                 .map_err(Into::into)
         })?;
 
-        Ok(history_events(&value))
+        // Normalised, not raw: every Fleet client reads Claude Code's message
+        // vocabulary, and dsh's own records match none of it. See
+        // `crate::dsh_messages`.
+        Ok(crate::dsh_messages::normalize(&history_events(&value)))
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
@@ -412,7 +415,10 @@ impl AgentSource for DshSource {
                 .map_err(Into::into)
         })?;
 
-        Ok(history_events(&value))
+        // Normalised, not raw: every Fleet client reads Claude Code's message
+        // vocabulary, and dsh's own records match none of it. See
+        // `crate::dsh_messages`.
+        Ok(crate::dsh_messages::normalize(&history_events(&value)))
     }
 
     fn watch_strategy(&self) -> WatchStrategy {
