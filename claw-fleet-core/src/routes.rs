@@ -83,6 +83,7 @@ pub const HEALTH: &str = "/health";
 pub const HOOKS_PLAN: &str = "/hooks_plan";
 pub const INTERACTION_DIAGNOSTICS: &str = "/interaction_diagnostics";
 pub const INTERRUPT: &str = "/interrupt";
+pub const INTERRUPT_AGENT_SESSION: &str = "/interrupt_agent_session";
 pub const LIST_CLAUDE_BINARIES: &str = "/list_claude_binaries";
 pub const LIVE_THINKING: &str = "/live_thinking";
 pub const LLM_CONFIG: &str = "/llm/config";

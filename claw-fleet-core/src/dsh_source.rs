@@ -520,6 +520,30 @@ impl AgentSource for DshSource {
         Ok(())
     }
 
+    /// Cut the session's current turn short.
+    ///
+    /// This is the whole reason [`AgentSource::interrupt_session`] exists: every
+    /// dsh session shares one server process, so the pid-based stop path would
+    /// signal that server and take down every dsh session on the machine
+    /// (Fleet's included). `session.cancel` is the per-session lever — measured
+    /// live, it ends the turn with `turn/end.data.reason = {"kind":"aborted",
+    /// "reason":{"kind":"user"}}` against `{"kind":"completed"}` for a turn that
+    /// finished on its own, which is also what makes
+    /// [`crate::dsh_events::LiveView`] report the outcome as a failure rather
+    /// than a success.
+    fn interrupt_session(&self, session_id: &str) -> Result<(), String> {
+        let id = Self::session_id_of(session_id).unwrap_or(session_id);
+        if id.is_empty() {
+            return Err("dsh interrupt: session_id is required".into());
+        }
+        self.with_client(|client| {
+            client
+                .call("session.cancel", json!({ "sessionId": id }))
+                .map(|_| ())
+                .map_err(Into::into)
+        })
+    }
+
     /// dsh sessions have no Fleet-readable file: the transcript is a
     /// zstd-framed log the server owns. Nothing may hand out a path for it.
     fn resolve_file_path(&self, _path: &str) -> Option<PathBuf> {

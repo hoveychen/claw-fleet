@@ -260,6 +260,14 @@ pub trait Backend: Send + Sync {
     /// call but leaves the transcript resumable. See
     /// [`crate::session::interrupt_pid_impl`] for the signal semantics.
     fn interrupt_pid(&self, pid: u32) -> Result<(), String>;
+    /// Interrupt the session at `path` through its own agent source, for the
+    /// sources with no per-session process to signal.
+    ///
+    /// dsh is the case that needs it: every dsh session's turn runs inside one
+    /// shared `dsh web`, so the pid on its `SessionInfo` is that server's and
+    /// [`Self::interrupt_pid`] would stop every dsh session at once. See
+    /// [`crate::agent_source::interrupt_session_at`].
+    fn interrupt_agent_session(&self, path: String) -> Result<(), String>;
     fn kill_pid(&self, pid: u32) -> Result<(), String>;
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String>;
     /// Headlessly resume a session, routing by `agent_source`: a claude-code

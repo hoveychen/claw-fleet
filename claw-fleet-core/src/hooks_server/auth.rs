@@ -156,6 +156,7 @@ mod tests {
             routes::LIVE_THINKING,
             routes::ENQUEUE_MESSAGE,
             routes::INTERRUPT,
+            routes::INTERRUPT_AGENT_SESSION,
             routes::STOP,
             routes::GUARD_RESPOND,
             routes::FLEET_ASK_RESPOND,

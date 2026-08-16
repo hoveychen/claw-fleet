@@ -87,6 +87,9 @@ impl Backend for NullBackend {
     fn interrupt_pid(&self, _: u32) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn interrupt_agent_session(&self, _: String) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn kill_pid(&self, _: u32) -> Result<(), String> {
         Err("backend not ready".into())
     }

@@ -1858,6 +1858,7 @@ pub fn run() {
             get_app_version,
             desktop_build_commit,
             interrupt_session,
+            interrupt_agent_session,
             kill_session,
             kill_workspace_sessions,
             resume_rate_limited_session,

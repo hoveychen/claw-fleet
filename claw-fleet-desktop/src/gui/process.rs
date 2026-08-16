@@ -10,6 +10,19 @@ pub(crate) fn interrupt_session(pid: u32, state: tauri::State<'_, AppState>) -> 
     state.backend.write().unwrap().interrupt_pid(pid)
 }
 
+/// Graceful stop for a source with no per-session process: route the stop to the
+/// agent source that owns `path` instead of signalling a pid.
+///
+/// dsh needs this — the pid on a dsh `SessionInfo` is the shared `dsh web`
+/// server's, so `interrupt_session` would stop every dsh session at once.
+#[tauri::command(async)]
+pub(crate) fn interrupt_agent_session(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.write().unwrap().interrupt_agent_session(path)
+}
+
 #[tauri::command(async)]
 pub(crate) fn kill_session(pid: u32, state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.backend.write().unwrap().kill_pid(pid)
