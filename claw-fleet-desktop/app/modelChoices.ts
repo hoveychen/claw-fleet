@@ -104,6 +104,24 @@ export function toolForAgentSource(agentSource: string | undefined | null): stri
   return AGENT_TOOL_CHOICES.some((c) => c.value === tool) ? tool : "claude";
 }
 
+/** Which Token-tab panel a session's `agentSource` should render.
+ *
+ *  Each source records token usage in its own vocabulary and reaches it over its
+ *  own transport, so the panels are not interchangeable:
+ *  - `claude` — the attribution panel, parsed out of the session's JSONL.
+ *  - `codex`  — the rollout's cumulative `total_token_usage`, read from the file.
+ *  - `dsh`    — dsh's `session.list` projections, fetched over RPC. dsh has no
+ *    transcript file at all, so the file-reading panels return nothing for it.
+ */
+export function tokenPanelForAgentSource(
+  agentSource: string | undefined | null,
+): "claude" | "codex" | "dsh" {
+  const source = (agentSource ?? "").trim();
+  if (source === "codex") return "codex";
+  if (source === "dsh") return "dsh";
+  return "claude";
+}
+
 /** Restrict the launchable agent tools to the sources that are actually being
  *  monitored — a source must be both enabled (the settings toggle) and available
  *  (installed). This is what keeps Codex out of the launcher when its source is

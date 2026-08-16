@@ -2513,6 +2513,13 @@ impl Backend for LocalBackend {
         claw_fleet_core::codex_source::codex_token_breakdown(jsonl_path)
     }
 
+    fn get_dsh_token_breakdown(
+        &self,
+        uri: &str,
+    ) -> Result<claw_fleet_core::dsh_source::DshTokenBreakdown, String> {
+        claw_fleet_core::dsh_source::dsh_token_breakdown(uri)
+    }
+
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

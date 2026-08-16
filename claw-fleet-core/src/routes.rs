@@ -164,6 +164,7 @@ pub const TODAY_USAGE_BREAKDOWN: &str = "/today_usage_breakdown";
 pub const USAGE_RANGE_BREAKDOWN: &str = "/usage_range_breakdown";
 pub const TOKEN_BREAKDOWN: &str = "/token_breakdown";
 pub const CODEX_TOKEN_BREAKDOWN: &str = "/codex_token_breakdown";
+pub const DSH_TOKEN_BREAKDOWN: &str = "/dsh_token_breakdown";
 pub const USAGE_HISTORY: &str = "/usage_history";
 pub const CODEX_USAGE_HISTORY: &str = "/codex_usage_history";
 pub const CODEX_PROFILES: &str = "/codex_profiles";

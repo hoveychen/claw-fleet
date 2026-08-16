@@ -1839,6 +1839,7 @@ pub fn run() {
             get_workflow_trees,
             get_task_token_breakdown,
             get_codex_token_breakdown,
+            get_dsh_token_breakdown,
             get_session_todos,
             get_audit_events,
             get_audit_rules,

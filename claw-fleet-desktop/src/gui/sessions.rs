@@ -132,6 +132,19 @@ pub(crate) fn get_codex_token_breakdown(
         .get_codex_token_breakdown(&jsonl_path)
 }
 
+/// `uri` is a `dsh://<session-id>`, not a path — dsh sessions have no file.
+#[tauri::command(async)]
+pub(crate) fn get_dsh_token_breakdown(
+    uri: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::dsh_source::DshTokenBreakdown, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .get_dsh_token_breakdown(&uri)
+}
+
 #[tauri::command(async)]
 pub(crate) fn get_session_todos(
     jsonl_path: String,

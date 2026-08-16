@@ -4,6 +4,7 @@ import {
   agentToolsForSources,
   codexProfileChoices,
   toolForAgentSource,
+  tokenPanelForAgentSource,
   type CodexProfile,
 } from "./modelChoices";
 
@@ -92,5 +93,22 @@ describe("toolForAgentSource", () => {
     expect(toolForAgentSource("")).toBe("claude");
     expect(toolForAgentSource(undefined)).toBe("claude");
     expect(toolForAgentSource(null)).toBe("claude");
+  });
+});
+
+describe("tokenPanelForAgentSource", () => {
+  it("gives dsh its own panel instead of the file-reading Claude one", () => {
+    // Was the bug: the Token tab's `agentSource === "codex" ? … : …` ternary
+    // sent dsh to `TokenSpendPanel`, which reads the session's JSONL — dsh has
+    // no file (`resolve_file_path` returns None), so the tab rendered nothing.
+    expect(tokenPanelForAgentSource("dsh")).toBe("dsh");
+  });
+
+  it("leaves claude and codex on the panels they already had", () => {
+    expect(tokenPanelForAgentSource("codex")).toBe("codex");
+    expect(tokenPanelForAgentSource("claude-code")).toBe("claude");
+    expect(tokenPanelForAgentSource("")).toBe("claude");
+    expect(tokenPanelForAgentSource(undefined)).toBe("claude");
+    expect(tokenPanelForAgentSource(null)).toBe("claude");
   });
 });

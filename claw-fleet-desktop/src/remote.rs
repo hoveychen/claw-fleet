@@ -1184,6 +1184,17 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn get_dsh_token_breakdown(
+        &self,
+        uri: &str,
+    ) -> Result<claw_fleet_core::dsh_source::DshTokenBreakdown, String> {
+        self.probe.get(&format!(
+            "{}?path={}",
+            claw_fleet_core::routes::DSH_TOKEN_BREAKDOWN,
+            encode_path(uri)
+        ))
+    }
+
     fn get_waiting_alerts(&self) -> Vec<crate::backend::WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

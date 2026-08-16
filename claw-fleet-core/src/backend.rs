@@ -750,6 +750,15 @@ pub trait Backend: Send + Sync {
         jsonl_path: &str,
     ) -> Result<crate::codex_source::CodexTokenBreakdown, String>;
 
+    /// dsh-native token breakdown for a single `dsh://` session. dsh has no
+    /// transcript file for the other two breakdowns to parse, so the desktop
+    /// "Token" tab routes dsh sessions here, where the numbers come off the
+    /// server's own projections. See `dsh_source::dsh_token_breakdown`.
+    fn get_dsh_token_breakdown(
+        &self,
+        uri: &str,
+    ) -> Result<crate::dsh_source::DshTokenBreakdown, String>;
+
     // ── Plugins ──────────────────────────────────────────────────────────────
     /// Scan `~/.claude/plugins/` for installed Claude Code plugins.
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem>;

@@ -551,6 +551,128 @@ impl AgentSource for DshSource {
     }
 }
 
+/// dsh-native token breakdown for one session, shown in the desktop "Token" tab.
+///
+/// The other two sources parse a transcript file; dsh has none (see
+/// [`AgentSource::resolve_file_path`] above), so this is assembled from the
+/// projections dsh itself folds and hands over on `session.list`. Two distinct
+/// things live here and must not be added together:
+///
+/// - **Billed, cumulative** (`tokenUsage`): the four buckets dsh meters over the
+///   whole session. These sum to [`Self::total_tokens`].
+/// - **Context, current** (`contextPressure` / `contextBreakdown`): how full the
+///   window is *right now* and what is occupying it. A single re-read of a large
+///   cached prefix adds to the cumulative buckets without moving these at all.
+///
+/// No cost figure: dsh routes through OpenRouter to an open model space, and
+/// Fleet's price table only knows Claude and GPT tiers, so an unknown model
+/// would silently price at the Opus fallback. A wrong number is worse than none.
+/// No model id either — a session's model appears only in its single
+/// `request/header` event near the head of the log, which would cost a full
+/// `session.history` fetch to reach.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DshTokenBreakdown {
+    /// Input tokens that missed the cache and were billed at full price.
+    pub uncached_input_tokens: u64,
+    /// Input tokens served from the prompt cache, billed at the cache-read rate.
+    pub cache_read_tokens: u64,
+    /// Input tokens written into the prompt cache, billed at the cache-write rate.
+    pub cache_write_tokens: u64,
+    /// Output tokens.
+    pub output_tokens: u64,
+    /// The four buckets above, summed — the panel's total.
+    pub total_tokens: u64,
+    /// System prompt currently occupying the window.
+    pub system_tokens: u64,
+    /// Tool definitions currently occupying the window.
+    pub tools_tokens: u64,
+    /// Conversation messages currently occupying the window.
+    pub message_tokens: u64,
+    /// What the next request is projected to send, per dsh's own estimate.
+    /// `None` until the session has run a turn (dsh reports `contextPressure`
+    /// as an empty object on a blank session).
+    pub projected_tokens: Option<u64>,
+    /// The model's context window, when dsh knows it.
+    pub context_window: Option<u64>,
+    /// `projected_tokens / context_window`, `None` when either is missing.
+    pub context_percent: Option<f64>,
+}
+
+/// Build a [`DshTokenBreakdown`] from one `session.list` item's projections.
+///
+/// Split out from the RPC so the mapping is unit-testable against a recorded
+/// payload. A projections block missing a key yields zeros rather than an error:
+/// a session that has not run a turn genuinely has no usage, and the panel
+/// should show that rather than an error string.
+fn dsh_token_breakdown_from_projections(projections: &Value) -> DshTokenBreakdown {
+    let uncached_input_tokens = projection_u64(projections, "tokenUsage", "uncachedInputTokens");
+    let cache_read_tokens = projection_u64(projections, "tokenUsage", "cacheReadTokens");
+    let cache_write_tokens = projection_u64(projections, "tokenUsage", "cacheWriteTokens");
+    let output_tokens = projection_u64(projections, "tokenUsage", "outputTokens");
+
+    let opt = |key: &str, field: &str| -> Option<u64> {
+        projections
+            .get("values")
+            .and_then(|v| v.get(key))
+            .and_then(|v| v.get(field))
+            .and_then(Value::as_u64)
+    };
+    let projected_tokens = opt("contextPressure", "projectedTokens");
+    let context_window = opt("contextPressure", "contextWindow");
+    let context_percent = match (projected_tokens, context_window) {
+        (Some(used), Some(window)) if window > 0 => Some(used as f64 / window as f64),
+        _ => None,
+    };
+
+    DshTokenBreakdown {
+        uncached_input_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        output_tokens,
+        total_tokens: uncached_input_tokens
+            + cache_read_tokens
+            + cache_write_tokens
+            + output_tokens,
+        system_tokens: projection_u64(projections, "contextBreakdown", "systemTokens"),
+        tools_tokens: projection_u64(projections, "contextBreakdown", "toolsTokens"),
+        message_tokens: projection_u64(projections, "contextBreakdown", "messageTokens"),
+        projected_tokens,
+        context_window,
+        context_percent,
+    }
+}
+
+/// Token breakdown for a `dsh://` session URI.
+///
+/// Reads the projections off `session.list` — the same call [`DshSource::scan_sessions`]
+/// already makes — rather than `session.history`: both carry the same
+/// projections block, but history additionally ships every event of the session
+/// just to be thrown away here. Errors when the id is unknown to the server, so
+/// a stale URI reports that instead of rendering a plausible all-zero panel.
+pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
+    let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
+    let value = DshSource::new()
+        .with_client(|client| client.call("session.list", json!({})).map_err(Into::into))?;
+
+    let item = value
+        .get("items")
+        .and_then(Value::as_array)
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|it| it.get("sessionId").and_then(Value::as_str) == Some(id))
+        })
+        .ok_or_else(|| format!("dsh session not found: {id}"))?;
+
+    let projections = item
+        .get("projections")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    Ok(dsh_token_breakdown_from_projections(&projections))
+}
+
 /// Pull the raw `SessionEvent`s out of a `session.history` answer.
 ///
 /// Each entry pairs the durable event with an optional host-computed tool view;
@@ -646,6 +768,103 @@ mod tests {
     #[test]
     fn rejects_an_item_without_a_session_id() {
         assert!(session_info_from_list_item(&json!({ "cwd": "/tmp" })).is_none());
+    }
+
+    /// Verbatim projections of a session that has run four turns, copied off a
+    /// live `session.list` (server started with `dsh web --port 0`).
+    fn live_projections() -> Value {
+        json!({
+            "asOfSeq": 175,
+            "values": {
+                "sessionStats": { "turns": 4, "steps": 8 },
+                "title": "Fleet P4 Probe Echo Command",
+                "tokenUsage": {
+                    "uncachedInputTokens": 36,
+                    "outputTokens": 509,
+                    "cacheReadTokens": 60325,
+                    "cacheWriteTokens": 10306
+                },
+                "contextPressure": {
+                    "pressureTokens": 9178,
+                    "projectedTokens": 9215,
+                    "contextWindow": 200000
+                },
+                "contextBreakdown": {
+                    "systemTokens": 1506,
+                    "toolsTokens": 6376,
+                    "messageTokens": 574
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn token_breakdown_keeps_the_four_billed_buckets_separate() {
+        let b = dsh_token_breakdown_from_projections(&live_projections());
+        assert_eq!(b.uncached_input_tokens, 36);
+        assert_eq!(b.cache_read_tokens, 60325);
+        assert_eq!(b.cache_write_tokens, 10306);
+        assert_eq!(b.output_tokens, 509);
+        // The rows must sum to the total or the panel's percentages lie.
+        assert_eq!(b.total_tokens, 36 + 60325 + 10306 + 509);
+        assert_eq!(
+            b.uncached_input_tokens + b.cache_read_tokens + b.cache_write_tokens + b.output_tokens,
+            b.total_tokens
+        );
+    }
+
+    #[test]
+    fn token_breakdown_reports_context_separately_from_billing() {
+        let b = dsh_token_breakdown_from_projections(&live_projections());
+        // Context occupancy is a snapshot of the current window, not a running
+        // total: 9215 projected against 200k, while 71k tokens were billed.
+        assert_eq!(b.projected_tokens, Some(9215));
+        assert_eq!(b.context_window, Some(200000));
+        let pct = b.context_percent.expect("percent");
+        assert!((pct - 9215.0 / 200000.0).abs() < 1e-9, "got {pct}");
+        assert!(pct < 0.05, "must not be confused with the 71k billed");
+        assert_eq!(b.system_tokens, 1506);
+        assert_eq!(b.tools_tokens, 6376);
+        assert_eq!(b.message_tokens, 574);
+    }
+
+    #[test]
+    fn token_breakdown_on_a_blank_session_is_zeroed_not_an_error() {
+        // Live shape of a session that never ran: `contextPressure` is `{}`.
+        let projections = json!({
+            "asOfSeq": 6,
+            "values": {
+                "tokenUsage": {
+                    "uncachedInputTokens": 0,
+                    "outputTokens": 0,
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0
+                },
+                "contextPressure": {},
+                "contextBreakdown": { "systemTokens": 0, "toolsTokens": 0, "messageTokens": 0 }
+            }
+        });
+        let b = dsh_token_breakdown_from_projections(&projections);
+        assert_eq!(b.total_tokens, 0);
+        // No window known yet — the panel must show "—", not 0%.
+        assert_eq!(b.projected_tokens, None);
+        assert_eq!(b.context_percent, None);
+    }
+
+    #[test]
+    fn token_breakdown_tolerates_a_missing_projections_block() {
+        assert_eq!(
+            dsh_token_breakdown_from_projections(&json!({})),
+            DshTokenBreakdown::default()
+        );
+    }
+
+    #[test]
+    fn token_breakdown_rejects_a_uri_without_a_session_id() {
+        // Guards the URI parse without reaching a server: a bare scheme has no
+        // id, so this must fail before `with_client` tries to start one.
+        let err = dsh_token_breakdown("dsh://").expect_err("no id");
+        assert!(err.contains("invalid dsh URI"), "got {err}");
     }
 
     #[test]
