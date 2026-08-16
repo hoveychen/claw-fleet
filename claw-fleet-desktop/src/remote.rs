@@ -398,6 +398,14 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get_ok(&format!("{}?pid={}", claw_fleet_core::routes::INTERRUPT, pid))
     }
 
+    fn interrupt_agent_session(&self, path: String) -> Result<(), String> {
+        self.probe.get_ok(&format!(
+            "{}?path={}",
+            claw_fleet_core::routes::INTERRUPT_AGENT_SESSION,
+            encode_path(&path)
+        ))
+    }
+
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
         self.probe.get_ok(&format!("{}?pid={}&force=false", claw_fleet_core::routes::STOP, pid))
     }

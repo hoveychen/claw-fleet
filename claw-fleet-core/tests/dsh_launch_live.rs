@@ -240,3 +240,63 @@ fn live_resume_of_an_unknown_session_releases_its_callback() {
         "a resume that never started must report failure immediately"
     );
 }
+
+/// The stop button's dsh path, end to end.
+///
+/// Fleet's stop is otherwise pid-based, and a dsh `SessionInfo` carries the
+/// *shared server's* pid — signalling it would stop every dsh session on the
+/// machine. `interrupt_session_at` routes to `session.cancel` instead, and what
+/// proves it worked is not the RPC receipt but the turn's own verdict: dsh ends
+/// a cancelled turn with `reason.kind = "aborted"`, which
+/// `dsh_events::LiveView` reports to `on_exit` as failure — against `true` for
+/// the turn that finished on its own, asserted in the resume test above.
+#[test]
+#[ignore = "runs a real dsh turn (costs model credits); run manually with --ignored"]
+fn live_interrupt_cancels_the_turn_without_touching_the_server() {
+    let _guard = ServerGuard;
+    let source = DshSource::new();
+    let spawned = source
+        .spawn(&SpawnSpec {
+            workspace_path: "/tmp".into(),
+            prompt: "Count slowly from 1 to 200, one number per line, and nothing else.".into(),
+            ..Default::default()
+        })
+        .expect("spawn");
+    let session_id = spawned.session_id.expect("id");
+    let server_pid = spawned.pid;
+
+    // Wait until the turn is actually in flight; cancelling before admission
+    // would prove nothing.
+    let running = wait_for(Duration::from_secs(120), || {
+        let s = source.scan_sessions().into_iter().find(|x| x.id == session_id)?;
+        (s.status != SessionStatus::Idle).then_some(s.status)
+    });
+    println!("status before interrupt: {running:?}");
+    assert!(running.is_some(), "the turn never started");
+
+    claw_fleet_core::agent_source::interrupt_session_at(&format!("dsh://{session_id}"))
+        .expect("interrupt must reach the dsh source");
+
+    // The user-visible promise: the turn stops. (That dsh reports it as
+    // `reason.kind = "aborted"` rather than `"completed"`, and that
+    // `LiveView` therefore settles `on_exit` with failure, is pinned by the
+    // unit tests beside `dsh_events` — this one is about the turn really
+    // ending, on a prompt long enough that it would still be running.)
+    let stopped = wait_for(Duration::from_secs(120), || {
+        let s = source.scan_sessions().into_iter().find(|x| x.id == session_id)?;
+        matches!(s.status, SessionStatus::WaitingInput | SessionStatus::Idle).then_some(s.status)
+    });
+    println!("status after interrupt: {stopped:?}");
+    assert!(stopped.is_some(), "the cancelled turn never stopped");
+
+    // The whole point of routing by session: the shared server is untouched, so
+    // every other dsh session (and Fleet's own view of them) survives.
+    assert!(
+        claw_fleet_core::session::is_process_alive(server_pid),
+        "the shared dsh web server (pid {server_pid}) must survive a session interrupt"
+    );
+    assert!(
+        !source.scan_sessions().is_empty(),
+        "the server must still be answering after the interrupt"
+    );
+}

@@ -48,6 +48,31 @@ pub(crate) fn route_sessions(
                 );
             }
 
+/// `/interrupt_agent_session?path=<uri>` — stop one session through its own
+/// source, for the sources with no per-session process to signal (dsh).
+pub(crate) fn route_interrupt_agent_session(
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+) {
+    let Some(target) = query.get("path").filter(|p| !p.is_empty()) else {
+        let _ = request.respond(tiny_http::Response::empty(400));
+        return;
+    };
+    match crate::agent_source::interrupt_session_at(target) {
+        Ok(()) => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),
+            );
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request
+                .respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+    }
+}
+
 pub(crate) fn route_interrupt(
     ctx: &ServeCtx,
     request: tiny_http::Request,

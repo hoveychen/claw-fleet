@@ -649,6 +649,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::INTERRUPT => route_interrupt(ctx, request, &query, json_header, path),
 
+            crate::routes::INTERRUPT_AGENT_SESSION => {
+                route_interrupt_agent_session(request, &query, json_header)
+            }
+
             crate::routes::STOP => route_stop(ctx, request, &query, json_header, path),
 
             // `/stop_workspace` kills every agent process (and its tree) rooted

@@ -39,8 +39,28 @@ export type StopMode = "interrupt" | "stop" | "spent";
  * would be aborting whichever turn we guessed at, and unlike `stop` there is no
  * confirmation dialog to catch the mistake.
  */
+/**
+ * Sources with no per-session process, whose stop must go through the source
+ * rather than a signal.
+ *
+ * dsh is the case: every dsh session's turn runs inside one shared `dsh web`,
+ * so the pid on its `SessionInfo` is that *server's*. Signalling it would stop
+ * every dsh session on the machine and take Fleet's own server down with them —
+ * and the `!pidPrecise` fallback below is no better, since it kills by
+ * workspace. `session.cancel` is the per-session lever, reached through
+ * `interrupt_agent_session`.
+ */
+export function usesSourceInterrupt(s: SessionInfo): boolean {
+  return s.agentSource === "dsh";
+}
+
 export function stopMode(s: SessionInfo): StopMode {
   if (s.pid === null) return "spent";
+  // The source-level stop only ever cancels a turn, so there is nothing to
+  // offer once the session is idle — and nothing that could be a hard kill.
+  if (usesSourceInterrupt(s)) {
+    return TURN_IN_FLIGHT.has(s.status) ? "interrupt" : "spent";
+  }
   if (
     isFleetOwnedEntrypoint(s.entrypoint) &&
     s.pidPrecise &&
@@ -68,6 +88,13 @@ export async function performStop(
 ): Promise<void> {
   const mode = stopMode(session);
   if (mode === "spent") return;
+  // Routed by session, never by pid — see `usesSourceInterrupt`. No confirmation
+  // dialog: this cancels the current turn and nothing else, and the session
+  // stays exactly as resumable as an agent that finished on its own.
+  if (usesSourceInterrupt(session)) {
+    await invoke("interrupt_agent_session", { path: session.jsonlPath });
+    return;
+  }
   if (mode === "interrupt") {
     await invoke("interrupt_session", { pid: session.pid });
   } else if (session.pidPrecise) {

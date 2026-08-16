@@ -1785,6 +1785,13 @@ impl Backend for LocalBackend {
         }
     }
 
+    fn interrupt_agent_session(&self, path: String) -> Result<(), String> {
+        // No rescan kick here, unlike the pid paths: the source that owns the
+        // session pushes its own status (dsh's `turn/end` arrives on the mux
+        // within the same second), so a forced re-poll would only race it.
+        claw_fleet_core::agent_source::interrupt_session_at(&path)
+    }
+
     fn interrupt_pid(&self, pid: u32) -> Result<(), String> {
         claw_fleet_core::session::interrupt_pid_impl(pid)?;
         // The CLI needs a moment to write its interrupt marker and exit, so the
