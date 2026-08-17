@@ -377,6 +377,13 @@ pub fn get_sources_config_local() -> Vec<SourceInfo> {
                     { crate::process_util::command("where").arg("codex").output().map_or(false, |o| o.status.success()) }
                 }
         }),
+        // dsh. Availability is the *binary*, not a home directory: `~/.dsh`
+        // exists as soon as anything writes a setting there, but this source can
+        // only reach its sessions through a `dsh web` it starts itself — which is
+        // also the gate [`build_sources`] applies. Reusing `is_available` keeps
+        // the row's "not detected" label and the actual scan decision from ever
+        // disagreeing.
+        ("dsh", crate::dsh_server::is_available()),
     ];
 
     all_sources
