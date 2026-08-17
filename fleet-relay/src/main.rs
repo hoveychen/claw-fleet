@@ -10,6 +10,14 @@
 //!   * pin RELAY_VAPID_KEY so browser push subscriptions survive redeploys
 //!   * mount/point RELAY_DATA_DIR at a persistent path (push subscriptions)
 //!   * RELAY_STATIC_DIR holds the mobile web bundle (served at /)
+//!   * to let the native shell pair by deep link, set the association vars —
+//!     without them /.well-known/* 404s and the shell can never be paired:
+//!       RELAY_IOS_APP_ID=6HU93XQG5B.com.hoveychen.clawfleet
+//!       RELAY_ANDROID_PACKAGE=com.hoveychen.clawfleet
+//!       RELAY_ANDROID_SHA256=<release cert SHA-256, colon-separated hex>
+//!     The Android fingerprint must be the *release* signing certificate the
+//!     APK is actually signed with (debug builds have a different one and will
+//!     silently fail verification). See applinks.rs.
 
 mod applinks;
 mod frames;
