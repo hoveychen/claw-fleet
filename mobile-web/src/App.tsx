@@ -42,7 +42,9 @@ import {
 import { useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
-import { NewSessionSheet } from "./views/Composer";
+import { NEW_SESSION_DRAFT_KEY, NewSessionSheet } from "./views/Composer";
+import { loadDraft, saveDraft } from "./draft";
+import { onShareReceived } from "./shareTarget";
 import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
@@ -112,6 +114,18 @@ export function App() {
       persistSecret(paired);
       setSecret(paired);
       setIdbProbed(true);
+    });
+  }, []);
+
+  // Android share sheet → new-session composer. Seed the draft *before* opening
+  // the sheet: NewSessionSheet reads it once on mount via useDraft, so writing
+  // after would be ignored. Merging (rather than replacing) keeps whatever
+  // workspace/model the user last picked.
+  useEffect(() => {
+    return onShareReceived((prompt) => {
+      const current = loadDraft<Record<string, unknown>>(NEW_SESSION_DRAFT_KEY, {});
+      saveDraft(NEW_SESSION_DRAFT_KEY, { ...current, prompt });
+      setShowNewSession(true);
     });
   }, []);
 

@@ -20,6 +20,9 @@ importers:
       '@capacitor/ios':
         specifier: ^8.5.0
         version: 8.5.0(@capacitor/core@8.5.0)
+      '@capgo/capacitor-share-target':
+        specifier: ^8.0.46
+        version: 8.0.46(@capacitor/core@8.5.0)
       katex:
         specifier: ^0.17.0
         version: 0.17.0
@@ -204,6 +207,11 @@ packages:
     resolution: {integrity: sha512-7k1TfohJu5BzRXc1F3g04Q8QQ0fyQgms6h1AvhnHb04VaNr9EdHOx03hL8O+OigEKMQnyJd1ZOjTPPNHCqL5Yw==}
     peerDependencies:
       '@capacitor/core': ^8.5.0
+
+  '@capgo/capacitor-share-target@8.0.46':
+    resolution: {integrity: sha512-fY+rAapXp3HS3LpArso7PT4fmgWQa9ObGJLsK5dmH+t40WA8oxtsqa18yQPdqxgC8U1Z+0bV1WLC57rtFFxZmw==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
@@ -2178,6 +2186,10 @@ snapshots:
       tslib: 2.8.1
 
   '@capacitor/ios@8.5.0(@capacitor/core@8.5.0)':
+    dependencies:
+      '@capacitor/core': 8.5.0
+
+  '@capgo/capacitor-share-target@8.0.46(@capacitor/core@8.5.0)':
     dependencies:
       '@capacitor/core': 8.5.0
 

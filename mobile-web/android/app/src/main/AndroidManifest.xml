@@ -36,6 +36,26 @@
                 <data android:scheme="https" android:host="fleet-relay.muveeai.com" />
             </intent-filter>
 
+            <!-- Share target: put Fleet in the system share sheet so text or
+                 files from any other app land straight in a new-session draft
+                 (see src/shareTarget.ts). text/* is listed separately from */*
+                 because some senders match only the narrower filter. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+
         </activity>
 
         <provider

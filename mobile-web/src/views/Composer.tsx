@@ -302,7 +302,7 @@ interface NewSessionProps {
 /** 新会话表单的未提交草稿 key。全局唯一（同时只有一个新会话 sheet），意外关闭
  *  sheet / 切标签 / iOS 杀 PWA 后回来原样恢复；只有创建成功才清空。附件不入草稿——
  *  它们是已上传到 relay 的产物，重开时重新挑选即可。 */
-const NEW_SESSION_DRAFT_KEY = "new-session";
+export const NEW_SESSION_DRAFT_KEY = "new-session";
 const NEW_SESSION_ATTACH_KEY = "new-session:attachments";
 
 /** 把 repo 内的 worktree checkout 折叠回 repo 根。Fleet 在 `<repo-root>/.worktrees/<task-id>`
