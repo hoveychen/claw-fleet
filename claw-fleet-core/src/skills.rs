@@ -1,10 +1,20 @@
-//! Skills scanning for Claude Code and Codex.
+//! Skills scanning for Claude Code, Codex and dsh.
 //!
 //! Supports two layouts:
 //!   • Directory-based: `~/.claude/skills/<name>/SKILL.md`
 //!   • Flat file:       `~/.claude/skills/<name>.md`
 //!
 //! Name and description are extracted from YAML frontmatter when present.
+//!
+//! # Shared roots
+//!
+//! `~/.agents/skills` and `<repo>/.agents/skills` are read by **both** codex and
+//! dsh (dsh's `@deepseek-ai/dsh-skill-filesystem` calls them `user-agents` and
+//! `project-agents`). [`SkillItem::source`] holds one label, and the scan dedupes
+//! by canonical root, so those two stay labelled `codex` — a skill living there
+//! is offered to dsh sessions too, the panel just cannot say so twice. Only the
+//! dsh-exclusive roots (`<dshHome>/skills`, `<repo>/.dsh/skills`) are labelled
+//! `dsh`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -122,14 +132,41 @@ pub fn scan_all_skills_for_workspaces(workspaces: &[String]) -> Vec<SkillItem> {
         &mut results,
     );
 
+    // dsh's `user-dsh` root. Deletable, unlike codex's system root: this is the
+    // user's own directory, the same standing `~/.agents/skills` has. dsh accepts
+    // flat `<name>.md` here as well as `<name>/SKILL.md`.
+    if let Some(dsh_home) = dsh_home_dir() {
+        scan_skill_root(
+            &dsh_home.join("skills"),
+            "dsh",
+            "user",
+            true,
+            true,
+            &mut seen_roots,
+            &mut results,
+        );
+    }
+
     for workspace in workspaces {
-        for root in repo_skill_roots(Path::new(workspace)) {
+        for root in repo_skill_roots(Path::new(workspace), ".agents") {
             scan_skill_root(
                 &root,
                 "codex",
                 "repo",
                 true,
                 false,
+                &mut seen_roots,
+                &mut results,
+            );
+        }
+        // dsh's `project-dsh` root — the one repo-scoped root codex does not read.
+        for root in repo_skill_roots(Path::new(workspace), ".dsh") {
+            scan_skill_root(
+                &root,
+                "dsh",
+                "repo",
+                true,
+                true,
                 &mut seen_roots,
                 &mut results,
             );
@@ -148,6 +185,10 @@ pub fn scan_all_skills_for_workspaces(workspaces: &[String]) -> Vec<SkillItem> {
 
 fn codex_home_dir() -> Option<PathBuf> {
     crate::session::get_codex_dir()
+}
+
+fn dsh_home_dir() -> Option<PathBuf> {
+    crate::session::get_dsh_dir()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -218,11 +259,14 @@ fn scan_skill_root(
     }
 }
 
-fn repo_skill_roots(workspace: &Path) -> Vec<PathBuf> {
+/// Repo-scoped skill roots at `<dir>/skills`, walking up from `workspace` to the
+/// enclosing repo root. `dir` is `.agents` (read by codex and dsh alike) or
+/// `.dsh` (dsh's `project-dsh` root).
+fn repo_skill_roots(workspace: &Path, dir: &str) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     let mut current = workspace.to_path_buf();
     loop {
-        let candidate = current.join(".agents").join("skills");
+        let candidate = current.join(dir).join("skills");
         if candidate.is_dir() {
             roots.push(candidate);
         }
@@ -477,6 +521,9 @@ fn allowed_skill_root(path: &Path) -> Option<(PathBuf, bool)> {
     if let Some(codex_home) = codex_home_dir() {
         candidates.push((codex_home.join("skills"), false));
     }
+    if let Some(dsh_home) = dsh_home_dir() {
+        candidates.push((dsh_home.join("skills"), true));
+    }
     candidates.push((PathBuf::from("/etc/codex/skills"), false));
 
     for (root, can_delete) in candidates {
@@ -487,14 +534,17 @@ fn allowed_skill_root(path: &Path) -> Option<(PathBuf, bool)> {
         }
     }
 
+    // Repo-scoped roots, recognized structurally so a repository outside the
+    // user's home stays inspectable over local and remote backends alike.
     for ancestor in path.ancestors() {
-        if ancestor.file_name().and_then(|n| n.to_str()) == Some("skills")
-            && ancestor
-                .parent()
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                == Some(".agents")
-        {
+        if ancestor.file_name().and_then(|n| n.to_str()) != Some("skills") {
+            continue;
+        }
+        let parent = ancestor
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str());
+        if parent == Some(".agents") || parent == Some(".dsh") {
             return Some((ancestor.to_path_buf(), true));
         }
     }
@@ -647,6 +697,90 @@ mod tests {
         assert!(read_skill_file(&system_item.path)
             .unwrap()
             .contains("description: system"));
+    }
+
+    /// dsh's two exclusive roots (`<dshHome>/skills` and `<repo>/.dsh/skills`)
+    /// are discovered and labelled `dsh`, while the roots it shares with codex
+    /// keep their existing `codex` label — the scan dedupes by canonical root and
+    /// `SkillItem::source` holds one value, so a shared root cannot say both.
+    #[test]
+    fn scans_dsh_user_and_repo_roots_without_relabelling_shared_ones() {
+        let _lock = crate::session::fleet_home_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = FleetHomeOverride::new(temp.path());
+        // FLEET_HOME drives real_home_dir(), so ~/.dsh resolves under temp with
+        // no DSH_HOME override needed. Point CODEX_HOME somewhere empty so this
+        // test does not read the developer's own codex skills.
+        let _codex = CodexHomeOverride::new(&temp.path().join(".codex"));
+
+        let dsh_user = temp.path().join(".dsh/skills/dsh-user-skill");
+        fs::create_dir_all(&dsh_user).unwrap();
+        fs::write(
+            dsh_user.join("SKILL.md"),
+            "---\nname: dsh-user-skill\ndescription: dsh user\n---\n",
+        )
+        .unwrap();
+        // dsh accepts a flat `<name>.md` in this root too.
+        fs::write(
+            temp.path().join(".dsh/skills/flat-dsh.md"),
+            "---\nname: flat-dsh\ndescription: flat\n---\n",
+        )
+        .unwrap();
+
+        // The root codex and dsh share: it must stay labelled codex.
+        let shared = temp.path().join(".agents/skills/shared-skill");
+        fs::create_dir_all(&shared).unwrap();
+        fs::write(
+            shared.join("SKILL.md"),
+            "---\nname: shared-skill\ndescription: shared\n---\n",
+        )
+        .unwrap();
+
+        let repo = temp.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        let dsh_repo = repo.join(".dsh/skills/dsh-repo-skill");
+        fs::create_dir_all(&dsh_repo).unwrap();
+        fs::write(
+            dsh_repo.join("SKILL.md"),
+            "---\nname: dsh-repo-skill\ndescription: dsh repo\n---\n",
+        )
+        .unwrap();
+
+        let skills = scan_all_skills_for_workspaces(&[repo.to_string_lossy().to_string()]);
+        let find = |name: &str| {
+            skills
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap_or_else(|| panic!("{name} not discovered in {skills:#?}"))
+        };
+
+        let user = find("dsh-user-skill");
+        assert_eq!(user.source, "dsh");
+        assert_eq!(user.scope, "user");
+        assert!(user.can_delete, "the user's own dsh root is deletable");
+
+        assert_eq!(find("flat-dsh").source, "dsh", "flat .md is a dsh skill too");
+
+        let repo_item = find("dsh-repo-skill");
+        assert_eq!(repo_item.source, "dsh");
+        assert_eq!(repo_item.scope, "repo");
+
+        assert_eq!(
+            find("shared-skill").source,
+            "codex",
+            "~/.agents/skills is read by both runtimes but keeps its codex label"
+        );
+
+        // Both dsh roots must also be reachable for reading and deleting, or the
+        // panel would list skills it cannot open.
+        assert!(read_skill_file(&user.path)
+            .unwrap()
+            .contains("description: dsh user"));
+        assert!(read_skill_file(&repo_item.path)
+            .unwrap()
+            .contains("description: dsh repo"));
+        delete_skill(&repo_item.path).expect("a repo-scoped dsh skill is deletable");
+        assert!(!dsh_repo.exists());
     }
 
     #[test]

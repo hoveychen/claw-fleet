@@ -79,14 +79,11 @@ const FLEET_MARKERS: &[(&str, &str)] = &[
 
 /// Resolve dsh's home dir (`$DSH_HOME` or `~/.dsh`).
 ///
-/// The plugin resolves the same pair, so Fleet writing to a different place
-/// would silently inject nothing. `real_home_dir()` (not `dirs::home_dir()`)
-/// keeps this consistent with every other Fleet home resolution.
+/// Delegates to the canonical resolver so this module, [`crate::skills`], and
+/// anything else touching dsh's home cannot drift apart — the plugin resolves
+/// the same pair, and writing anywhere else would silently inject nothing.
 fn dsh_home() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("DSH_HOME") {
-        return Some(PathBuf::from(home));
-    }
-    crate::session::real_home_dir().map(|h| h.join(".dsh"))
+    crate::session::get_dsh_dir()
 }
 
 fn agents_md_path() -> Option<PathBuf> {

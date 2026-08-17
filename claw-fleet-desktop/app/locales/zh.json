@@ -338,6 +338,7 @@
     "delete_failed": "删除失败：{{error}}",
     "source_claude": "Claude",
     "source_codex": "Codex",
+    "source_dsh": "dsh",
     "scope_user": "用户级",
     "scope_repo": "仓库级",
     "scope_admin": "管理员",
