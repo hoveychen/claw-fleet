@@ -14,6 +14,7 @@ import { CalendarClock } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
+import { reconcileMessages } from "../messageReuse";
 import {
   initialFollowState,
   nextFollowState,
@@ -211,7 +212,7 @@ export function SessionDetail({
     })
       .then((msgs) => {
         if (cancelled) return;
-        setLocalMessages(msgs);
+        setLocalMessages((prev) => reconcileMessages(prev, msgs));
         setLocalFullyLoaded(msgs.length < tail);
         setLocalLoading(false);
       })
@@ -234,7 +235,7 @@ export function SessionDetail({
         jsonlPath: localSession.jsonlPath,
         tail: nextTail,
       });
-      setLocalMessages(msgs);
+      setLocalMessages((prev) => reconcileMessages(prev, msgs));
       setLocalFullyLoaded(msgs.length < nextTail);
     } finally {
       setLocalLoading(false);
@@ -436,7 +437,7 @@ export function SessionDetail({
       })
         .then((msgs) => {
           if (cancelled) return;
-          setLocalMessages(msgs);
+          setLocalMessages((prev) => reconcileMessages(prev, msgs));
           setLocalFullyLoaded(msgs.length < tail);
           // Window saturated: the next transcript write would slide already-
           // rendered messages out of the top. Grow the window so the visible
