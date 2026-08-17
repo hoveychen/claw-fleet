@@ -180,8 +180,35 @@
   top: 0;
   right: 0;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   opacity: 0;
   transition: opacity 0.12s;
+}
+
+/* Opens the message in the full-screen reader. Matches CopyButton's box so the
+   pair reads as one control strip. */
+.read_btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.read_btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
 }
 
 /* The user bubble already hugs the right edge; put its control on the free

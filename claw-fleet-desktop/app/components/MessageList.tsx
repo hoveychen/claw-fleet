@@ -32,6 +32,7 @@ import {
 } from "./blocks/toolResultFetch";
 import { UserContent } from "./blocks/UserContent";
 import { CopyButton } from "./CopyButton";
+import { ReaderModal } from "./ReaderModal";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import { MetaFoldBlock } from "./blocks/MetaFoldBlock";
 import { groupMetaRuns } from "./metaGrouping";
@@ -101,6 +102,11 @@ interface MsgProps {
 }
 
 const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch, paths, turnUsage }: MsgProps) {
+  const { t } = useTranslation();
+  // Declared before the early returns below so the hook order stays fixed
+  // across the compact-summary / meta-fold branches.
+  const [reading, setReading] = useState(false);
+
   // Same predicate the list uses to build its window and day separators, so the
   // two can never disagree about which records occupy a row.
   if (!isRenderableRow(msg) || !msg.message) return null;
@@ -168,11 +174,28 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
       className={`${styles.message} ${isAssistant ? styles.assistant : styles.user} ${isActiveMatch ? styles.active_match : ""}`}
       data-msg-idx={msgIdx}
     >
-      {/* Tool-only assistant turns have no prose worth copying. */}
+      {/* Tool-only assistant turns have no prose worth copying or reading. */}
       {copyText && (
         <div className={styles.row_actions}>
+          <button
+            type="button"
+            className={styles.read_btn}
+            onClick={() => setReading(true)}
+            title={t("detail.read")}
+            aria-label={t("detail.read")}
+          >
+            ⤢
+          </button>
           <CopyButton text={copyText} />
         </div>
+      )}
+      {reading && (
+        <ReaderModal
+          text={copyText}
+          title={time?.full}
+          paths={paths}
+          onClose={() => setReading(false)}
+        />
       )}
       <div className={styles.content}>
         {isAssistant && Array.isArray(content) && (

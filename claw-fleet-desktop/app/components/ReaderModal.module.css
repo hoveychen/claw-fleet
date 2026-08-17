@@ -1,0 +1,117 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+/* A page, not a dialog: fixed reading measure, centred, the rest of the app
+   dimmed behind it. */
+.paper {
+  display: flex;
+  flex-direction: column;
+  width: min(860px, 100%);
+  max-height: 100%;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Keep the wheel inside the page — scrolling the reader must not scroll the
+     transcript sitting behind the overlay. */
+  overscroll-behavior: contain;
+  padding: 28px 40px 40px;
+}
+
+/* Reading typography. The selectors carry the .paper prefix so they outrank
+   TextBlock's own `.root p` rules (equal specificity would leave the winner up
+   to CSS-module bundling order). */
+.paper .body :global(p),
+.paper .body :global(li) {
+  font-size: 15px;
+  line-height: 1.9;
+}
+
+.paper .body :global(p) {
+  margin: 0 0 18px;
+}
+
+.paper .body :global(ul),
+.paper .body :global(ol) {
+  margin: 0 0 18px;
+}
+
+.paper .body :global(li) {
+  margin: 6px 0;
+}
+
+.paper .body :global(h1) { font-size: 22px; margin: 32px 0 12px; }
+.paper .body :global(h2) { font-size: 19px; margin: 28px 0 10px; }
+.paper .body :global(h3) { font-size: 16px; margin: 24px 0 8px; }
+
+.paper .body :global(blockquote) {
+  padding-left: 16px;
+  margin: 0 0 18px;
+}
+
+.paper .body :global(table) {
+  font-size: 14px;
+}
