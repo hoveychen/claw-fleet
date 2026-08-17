@@ -39,6 +39,7 @@ async fn spawn_server_with(max_ws_message_bytes: usize) -> String {
         conn_limiter,
         conn_rate,
         max_ws_message_bytes,
+        applinks: Default::default(),
     });
     let app = build_api(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -33,6 +33,7 @@ import {
   needsA2hsForDurableStorage,
   persistSecret,
 } from "./secretStore";
+import { onPairingLink } from "./deepLink";
 import {
   clearCachedSessions,
   loadCachedSessions,
@@ -102,6 +103,18 @@ export function App() {
       cancelled = true;
     };
   }, [secret]);
+
+  // Native shell only: the app boots from bundled assets, so there is no URL to
+  // read the pairing secret from. Universal Links / App Links deliver the
+  // scanned pairing URL here instead. No-op in the browser/PWA.
+  useEffect(() => {
+    return onPairingLink((paired) => {
+      persistSecret(paired);
+      setSecret(paired);
+      setIdbProbed(true);
+    });
+  }, []);
+
   const [tab, setTab] = useState<Tab>("decisions");
   const [connected, setConnected] = useState(false);
   const [agentOnline, setAgentOnline] = useState(false);

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Universal Links for pairing. The shell boots from bundled assets and
+	     therefore never sees the pairing URL the desktop QR encodes; this
+	     association makes iOS hand the scanned https URL to the app instead of
+	     Safari, which is the shell's only route to a pairing secret.
+
+	     The matching server side is GET /.well-known/apple-app-site-association
+	     on the same host, served by fleet-relay (see fleet-relay/src/applinks.rs)
+	     and enabled by setting RELAY_IOS_APP_ID=<TeamID>.com.hoveychen.clawfleet.
+	     Without that env var the endpoint 404s and this entitlement does nothing. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:fleet-relay.muveeai.com</string>
+	</array>
+</dict>
+</plist>

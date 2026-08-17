@@ -22,6 +22,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- App Link for pairing: the desktop QR encodes
+                 https://fleet-relay.muveeai.com/#k=<secret>. With autoVerify
+                 the OS checks /.well-known/assetlinks.json on that host against
+                 this package's signing certificate and, on success, opens the
+                 link here instead of in a browser — which is the only way the
+                 shell ever receives a pairing secret (see src/deepLink.ts).
+                 The fragment carrying the secret is never sent to the relay. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="fleet-relay.muveeai.com" />
+            </intent-filter>
+
         </activity>
 
         <provider
