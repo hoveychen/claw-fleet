@@ -951,16 +951,22 @@ pub trait Backend: Send + Sync {
     fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_prd_mode(&self) -> Result<(), String>;
 
-    // ── Codex guidance (global ~/.codex/AGENTS.md blocks) ───────────────────
+    // ── Non-Claude guidance carriers (global AGENTS.md blocks) ──────────────
     /// Mirror the Claude-side concept toggles (interaction / PRD / wiki / model)
-    /// onto codex's `~/.codex/AGENTS.md`. One concept toggle drives both
-    /// carriers: the desktop calls this after any concept toggle and on startup,
-    /// so codex's per-concept blocks always match the Claude sentinels. Reads
-    /// the enabled set from the Claude carriers, so it is idempotent and
-    /// order-independent. Default-bodied so unsupported backends fail loudly;
-    /// LocalBackend and RemoteBackend override it.
+    /// onto every non-Claude carrier: codex's `~/.codex/AGENTS.md` **and** dsh's
+    /// `$DSH_HOME/AGENTS.md`. One concept toggle drives all carriers: the desktop
+    /// calls this after any concept toggle and on startup, so each harness's
+    /// per-concept blocks always match the Claude sentinels. Reads the enabled
+    /// set from the Claude carriers, so it is idempotent and order-independent.
+    /// Default-bodied so unsupported backends fail loudly; LocalBackend and
+    /// RemoteBackend override it.
+    ///
+    /// The name stays codex-specific because it is also the Tauri command name,
+    /// the `/reconcile_codex_guidance` route, and the string the frontend
+    /// `invoke`s — renaming it would break a desktop talking to an older
+    /// `fleet serve`. Read it as "reconcile the non-Claude guidance carriers".
     fn reconcile_codex_guidance(&self, _user_title: &str, _locale: &str) -> Result<(), String> {
-        Err("codex guidance not supported by this backend".into())
+        Err("agent guidance not supported by this backend".into())
     }
 
     // ── Agent sources config ─────────────────────────────────────────────────

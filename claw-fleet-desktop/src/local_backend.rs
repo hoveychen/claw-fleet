@@ -2688,7 +2688,13 @@ impl Backend for LocalBackend {
     }
 
     fn reconcile_codex_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
-        crate::codex_guidance::reconcile_codex_from_claude_state(user_title, locale)
+        // Both non-Claude carriers, not just codex — see the trait doc for why
+        // the method keeps its codex-era name. Each is attempted regardless of
+        // the other's outcome so one broken harness home cannot strand the
+        // other's blocks; the first error is what the UI retries on.
+        let codex = crate::codex_guidance::reconcile_codex_from_claude_state(user_title, locale);
+        let dsh = crate::dsh_guidance::reconcile_dsh_from_claude_state(user_title, locale);
+        codex.and(dsh)
     }
 
     fn respond_to_elicitation(
