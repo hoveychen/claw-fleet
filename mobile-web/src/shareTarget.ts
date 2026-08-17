@@ -47,22 +47,57 @@ export function shareToPrompt(share: IncomingShare): string {
 }
 
 /**
- * Call `handler` with the composer text whenever another app shares into Fleet.
+ * Fetch shared files into real `File` objects so they can go through the
+ * existing attachment upload path.
+ *
+ * The plugin hands back platform URIs (`content://…` on Android), which the
+ * WebView cannot fetch directly — `convertFileSrc` rewrites them to the local
+ * bridge URL that can. One unreadable file must not sink the whole share, so
+ * failures are skipped individually rather than rejecting.
+ */
+export async function sharedFilesToFiles(shared: SharedFile[]): Promise<File[]> {
+  const out: File[] = [];
+  for (const item of shared) {
+    if (!item?.uri) continue;
+    const src = Capacitor.convertFileSrc(item.uri);
+    try {
+      const response = await fetch(src);
+      if (!response.ok) {
+        // Loud on purpose: the caller degrades to naming the file in the prompt,
+        // which looks like it worked. Without this line the reason is invisible.
+        console.warn(`[share] ${item.uri} → ${src} returned ${response.status}`);
+        continue;
+      }
+      const blob = await response.blob();
+      out.push(
+        new File([blob], item.name || "shared", { type: item.mimeType || blob.type }),
+      );
+    } catch (e) {
+      console.warn(`[share] ${item.uri} → ${src} threw`, e);
+    }
+  }
+  return out;
+}
+
+/**
+ * Call `handler` whenever another app shares into Fleet. The caller decides how
+ * to split the share between attachments and composer text — which it can only
+ * do after awaiting `sharedFilesToFiles`, hence the raw share here rather than
+ * a pre-rendered prompt.
+ *
  * No-op on web and on iOS (no Share Extension). Returns an unsubscribe function.
  */
-export function onShareReceived(handler: (prompt: string, share: IncomingShare) => void): () => void {
+export function onShareReceived(handler: (share: IncomingShare) => void): () => void {
   if (!Capacitor.isNativePlatform()) return () => {};
 
   let cancelled = false;
   const listener = CapacitorShareTarget.addListener("shareReceived", (event) => {
     if (cancelled) return;
-    const share: IncomingShare = {
+    handler({
       title: event.title ?? "",
       texts: event.texts ?? [],
       files: event.files ?? [],
-    };
-    const prompt = shareToPrompt(share);
-    if (prompt) handler(prompt, share);
+    });
   });
 
   return () => {

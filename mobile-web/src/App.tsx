@@ -44,7 +44,7 @@ import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
 import { NEW_SESSION_DRAFT_KEY, NewSessionSheet } from "./views/Composer";
 import { loadDraft, saveDraft } from "./draft";
-import { onShareReceived } from "./shareTarget";
+import { onShareReceived, shareToPrompt, sharedFilesToFiles } from "./shareTarget";
 import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
@@ -122,10 +122,20 @@ export function App() {
   // after would be ignored. Merging (rather than replacing) keeps whatever
   // workspace/model the user last picked.
   useEffect(() => {
-    return onShareReceived((prompt) => {
-      const current = loadDraft<Record<string, unknown>>(NEW_SESSION_DRAFT_KEY, {});
-      saveDraft(NEW_SESSION_DRAFT_KEY, { ...current, prompt });
-      setShowNewSession(true);
+    return onShareReceived((share) => {
+      void (async () => {
+        const files = await sharedFilesToFiles(share.files);
+        // Files that became real attachments don't need naming in the prose —
+        // the chips already show them. Only the ones we failed to read stay in
+        // the text, so the user still knows something came along.
+        const fetched = new Set(files.map((f) => f.name));
+        const missed = share.files.filter((f) => !fetched.has(f.name));
+        const prompt = shareToPrompt({ ...share, files: missed });
+        const current = loadDraft<Record<string, unknown>>(NEW_SESSION_DRAFT_KEY, {});
+        saveDraft(NEW_SESSION_DRAFT_KEY, { ...current, prompt });
+        setSharedFiles(files);
+        setShowNewSession(true);
+      })();
     });
   }, []);
 
@@ -188,6 +198,9 @@ export function App() {
   const [repoDetail, setRepoDetail] = useState<RepoSummary | null>(null);
   const [showUsage, setShowUsage] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
+  // Files handed over by another app's share, pending upload once the
+  // new-session sheet mounts (that's where the attachment state lives).
+  const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [exitArmed, setExitArmed] = useState(false);
   const clientRef = useRef<RelayClient | null>(null);
   // ids answered on THIS device whose answer is still in flight → timestamp.
@@ -761,7 +774,12 @@ export function App() {
           <NewSessionSheet
             sessions={mergedSessions}
             client={clientRef.current}
-            onClose={() => setShowNewSession(false)}
+            initialFiles={sharedFiles}
+            onClose={() => {
+              setShowNewSession(false);
+              // Consumed by the sheet — don't re-upload them if it reopens.
+              setSharedFiles([]);
+            }}
           />
         </>
       )}
