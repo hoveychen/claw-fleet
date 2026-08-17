@@ -14,6 +14,14 @@ import { CalendarClock } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
+import { reconcileMessages } from "../messageReuse";
+import {
+  initialFollowState,
+  nextFollowState,
+  type FollowInput,
+  type FollowState,
+} from "../followState";
+import { installScrollFreezeProbe } from "../scrollFreezeProbe";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
@@ -46,9 +54,6 @@ const SUBAGENT_TAB_CAP = 12;
 /** Standalone-mode live tail: re-pull the transcript tail at this cadence
  *  while the session is in an active status. */
 const LIVE_TAIL_POLL_MS = 1500;
-
-/** How close to the bottom still counts as "following the newest message". */
-const FOLLOW_SLACK_PX = 200;
 
 /** After a resume/enqueue submit, keep the live-tail + live-thinking pollers
  *  armed for this long even though the session is still flipping to `live` via
@@ -207,7 +212,7 @@ export function SessionDetail({
     })
       .then((msgs) => {
         if (cancelled) return;
-        setLocalMessages(msgs);
+        setLocalMessages((prev) => reconcileMessages(prev, msgs));
         setLocalFullyLoaded(msgs.length < tail);
         setLocalLoading(false);
       })
@@ -230,7 +235,7 @@ export function SessionDetail({
         jsonlPath: localSession.jsonlPath,
         tail: nextTail,
       });
-      setLocalMessages(msgs);
+      setLocalMessages((prev) => reconcileMessages(prev, msgs));
       setLocalFullyLoaded(msgs.length < nextTail);
     } finally {
       setLocalLoading(false);
@@ -432,7 +437,7 @@ export function SessionDetail({
       })
         .then((msgs) => {
           if (cancelled) return;
-          setLocalMessages(msgs);
+          setLocalMessages((prev) => reconcileMessages(prev, msgs));
           setLocalFullyLoaded(msgs.length < tail);
           // Window saturated: the next transcript write would slide already-
           // rendered messages out of the top. Grow the window so the visible
@@ -611,31 +616,50 @@ export function SessionDetail({
 
   // `isFollowing` drives the footer, but the pin below runs from a
   // ResizeObserver callback that must not re-subscribe on every state change —
-  // so mirror the flag into a ref and write both through one setter.
-  const followingRef = useRef(true);
-  const setFollowing = useCallback((next: boolean) => {
-    followingRef.current = next;
-    setIsFollowing(next);
+  // so mirror the state into a ref and write both through one reducer.
+  const followRef = useRef<FollowState>(initialFollowState);
+  const applyFollow = useCallback((input: FollowInput) => {
+    const next = nextFollowState(followRef.current, input);
+    if (next.following === followRef.current.following && next.detached === followRef.current.detached) {
+      return;
+    }
+    followRef.current = next;
+    setIsFollowing(next.following);
   }, []);
 
-  const checkFollow = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setFollowing(dist < FOLLOW_SLACK_PX);
-  }, [setFollowing]);
+  // Auto-follow writes that actually moved the viewport, read by the scroll
+  // freeze probe to tell "the pin dragged it back" from "nothing moved at all".
+  const pinCountRef = useRef(0);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    el.addEventListener("scroll", checkFollow, { passive: true });
-    return () => el.removeEventListener("scroll", checkFollow);
-  }, [checkFollow, session, viewTab]);
+    const onScroll = () => {
+      applyFollow({
+        kind: "scroll",
+        distFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight,
+      });
+    };
+    // An upward gesture detaches immediately, before the scroll it causes is
+    // even dispatched. Position alone can't express "I want to read back": the
+    // reader is still inside the slack window at that point, so the distance
+    // rule would keep following and the pin would drag them back down.
+    const onWheel = (ev: WheelEvent) => {
+      applyFollow({ kind: "gesture", intent: ev.deltaY });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", onWheel, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, [applyFollow, session, viewTab]);
 
   // A different session, or a fresh visit to the tab, starts pinned again.
   useEffect(() => {
-    setFollowing(true);
-  }, [liveSession?.id, viewTab, setFollowing]);
+    followRef.current = initialFollowState;
+    setIsFollowing(true);
+  }, [liveSession?.id, viewTab]);
 
   // Pin the viewport to the newest message for as long as the reader has not
   // scrolled away to read history.
@@ -656,8 +680,13 @@ export function SessionDetail({
     if (!el) return;
 
     const pin = () => {
-      if (!followingRef.current) return;
+      if (!followRef.current.following) return;
+      const before = el.scrollTop;
       el.scrollTop = el.scrollHeight;
+      // Only count a pin that actually moved the viewport. Re-pinning a box
+      // already at the bottom is a no-op, and counting those would let the
+      // freeze probe blame the pin for gestures it never touched.
+      if (el.scrollTop !== before) pinCountRef.current += 1;
     };
 
     // Observe the children, not the scroll box: the box's own border box never
@@ -669,6 +698,45 @@ export function SessionDetail({
     pin();
     return () => ro.disconnect();
   }, [viewTab, liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
+
+  // Render-synced mirror so the probe below reports the *current* session
+  // without re-installing its listener on every poll.
+  const probeStateRef = useRef({
+    sessionId: null as string | null,
+    status: null as string | null,
+    messageCount: 0,
+  });
+  probeStateRef.current = {
+    sessionId: liveSession?.id ?? null,
+    status: liveSession?.status ?? null,
+    messageCount: displayedMessages.length,
+  };
+
+  // Catch the conversation pane refusing to scroll. Reported repeatedly, never
+  // caught in the act: it starts at no identifiable moment, a release build has
+  // no devtools, and the state is gone by the time it gets described. The probe
+  // watches every wheel gesture and writes one line to the host debug log when
+  // a gesture that had somewhere to go doesn't land — with the metrics that say
+  // whether it was a layout fault, the auto-follow pin, or the compositor.
+  useEffect(() => {
+    if (viewTab !== "messages") return;
+    const el = scrollRef.current;
+    if (!el) return;
+    return installScrollFreezeProbe(
+      el,
+      {
+        sessionId: () => probeStateRef.current.sessionId,
+        status: () => probeStateRef.current.status,
+        messageCount: () => probeStateRef.current.messageCount,
+        isFollowing: () => followRef.current.following,
+        pinCount: () => pinCountRef.current,
+      },
+      (line) => {
+        // Absent outside Tauri (the mock browser preview); nothing to report to.
+        invoke("log_frontend_debug", { msg: line }).catch(() => {});
+      },
+    );
+  }, [viewTab, liveSession?.id]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;

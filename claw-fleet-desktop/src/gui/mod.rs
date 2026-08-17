@@ -101,6 +101,25 @@ fn get_platform() -> String {
     std::env::consts::OS.to_string()
 }
 
+/// Append a line to `~/.fleet/claw-fleet-debug.log` on behalf of the webview.
+///
+/// The webview has no file access and a release build has no devtools, so a UI
+/// fault that only reproduces on the user's machine (the conversation pane
+/// freezing mid-scroll) otherwise leaves no trace at all. This lets the
+/// frontend's own probes land in the same log the host writes, interleaved with
+/// the host-side events that explain them.
+///
+/// Like `reveal_path`, this is a host action rather than a data-fetching
+/// capability, so it does not belong on the Backend trait: it records the state
+/// of *this* webview, which exists only on the machine drawing the UI. A remote
+/// workspace has no scroll container to diagnose.
+#[tauri::command]
+fn log_frontend_debug(msg: String) {
+    // Bound the line so a runaway caller can't grow the log without limit.
+    let trimmed: String = msg.chars().take(2000).collect();
+    claw_fleet_core::log_debug(&format!("[ui] {trimmed}"));
+}
+
 /// Reveal a path in the OS file manager (Finder / Explorer).
 ///
 /// The `~` expansion happens here rather than in the webview: `reveal_item_in_dir`
@@ -1853,6 +1872,7 @@ pub fn run() {
             get_account_info,
             get_log_path,
             get_platform,
+            log_frontend_debug,
             reveal_path,
             check_app_version,
             get_app_version,
