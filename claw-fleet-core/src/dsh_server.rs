@@ -245,6 +245,19 @@ impl DshServer {
             .arg("--port")
             .arg("0")
             .current_dir(workspace)
+            // `dsh` is a `#!/usr/bin/env node` script, so starting it needs
+            // `node` on PATH — not just the script itself, which `discover()`
+            // already finds by absolute path. A Tauri app launched by launchd
+            // carries `/usr/bin:/bin:/usr/sbin:/sbin`, where there is no node, so
+            // the child died instantly with `env: node: No such file or
+            // directory` and Fleet only saw "exited before reporting a port" —
+            // retried every poll, forever. Every dsh live test missed it because
+            // `cargo test` inherits a developer shell's PATH.
+            //
+            // Same fix, same helper, as the Claude and Codex spawn paths
+            // (`session_launch.rs` / `codex_launch.rs`); this was the one spawn
+            // site that had not been wired to it.
+            .env("PATH", crate::session_launch::augmented_path_with_front(&[]))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
