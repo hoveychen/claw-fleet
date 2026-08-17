@@ -338,6 +338,7 @@
     "delete_failed": "Failed to delete skill: {{error}}",
     "source_claude": "Claude",
     "source_codex": "Codex",
+    "source_dsh": "dsh",
     "scope_user": "User",
     "scope_repo": "Repository",
     "scope_admin": "Admin",
