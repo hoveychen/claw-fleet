@@ -10,6 +10,39 @@
 //! harness home knows about regardless of their cwd, including ones written by
 //! a completely different profile (a `dsh --profile headless` run shows up
 //! here). The server's own cwd only decides where *new* sessions would root.
+//!
+//! # No account or quota surface (measured — do not re-probe)
+//!
+//! [`AgentSource::fetch_account`], [`AgentSource::fetch_usage`] and
+//! [`AgentSource::usage_summary`] stay at their refusing defaults for dsh, and
+//! that is not an omission: **dsh exposes nothing to implement them with.**
+//!
+//! The `/api` method catalog (read off `@deepseek-ai/dsh-host-apiproxy`, then
+//! called against a live server) is `agentPreset.*`, `credentials.*`, `goal.*`,
+//! `host.*`, `llm.*`, `session.*`, `settings.*`, `skill.list`, `subagent.*`,
+//! `workspace.*`. There is no `account.*`, `usage.*`, `quota.*`, or
+//! `rateLimit.*`. Of the near misses:
+//!
+//! * `credentials.describe` takes `{refs: [...]}` and reports whether *those
+//!   credential refs* are set — presence, not an account or a balance.
+//! * `llm.providers` returns the provider catalog with an `active` flag
+//!   (measured on this machine: `openrouter` and `deepseek-official` active,
+//!   ~35 others declared-but-inactive). No plan, no limit, no reset.
+//! * `host.describe` returns `{version, cwd, provider, model, attachedSessions,
+//!   canOpenPath}` — the host's default route, not the session's, and no usage.
+//! * `QUOTA_EXCEEDED` / `RATE_LIMIT` exist only as *error classifications* an
+//!   adapter assigns to a request that already failed (HTTP 429 and friends in
+//!   `dsh-llm-deepseek` / `dsh-llm-pi-ai`). They are not a pollable window with
+//!   a utilization and a reset time, which is what [`crate::backend::UsageBar`]
+//!   needs.
+//!
+//! This follows from what dsh *is*: a bring-your-own-key harness. The quota
+//! belongs to whichever provider the user configured, so any real usage view for
+//! a dsh user has to come from that provider's own API (for the OpenRouter case,
+//! see the generation-cost path in [`dsh_token_breakdown`]'s neighbourhood), not
+//! from dsh. Per-session token accounting is a different question and dsh *does*
+//! answer it — see [`dsh_token_breakdown`], which reads the `session.list`
+//! projections `@deepseek-ai/dsh-token-meter` publishes.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
