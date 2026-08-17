@@ -560,34 +560,38 @@ export function MessageList({
     [matches, activeMatch, displayMsgs.length, scrollToRow],
   );
 
-  // Auto-scroll to bottom (or to search match) when session switches
+  // Jump to the bottom (or to a search match) when the session switches.
+  //
+  // Only on a *switch*. Keeping up with a growing transcript is the owner's
+  // job — `SessionDetail` pins the viewport from a ResizeObserver, and it is
+  // the only place that knows whether the reader has deliberately scrolled up.
+  // This used to also smooth-scroll to the bottom on every append whenever the
+  // viewport was within its own hard-coded 200px of the end, which meant two
+  // mechanisms writing the same scroll position from different rules: a reader
+  // who had just detached to read back got dragged down anyway, and a smooth
+  // animation fought the pin's instant jump for the same pixels.
   useEffect(() => {
     const scroller = listRef.current?.parentElement;
     if (!scroller) return;
-    if (sessionSwitchedRef.current) {
-      sessionSwitchedRef.current = false;
-      // If we have a search match, scroll to it instead of the bottom
-      if (searchMatchIndex >= 0 && !searchScrolledRef.current) {
-        searchScrolledRef.current = true;
-        // Find the DOM element for the matching message
-        const matchRelIdx = searchMatchIndex - effectiveStart;
-        if (matchRelIdx >= 0 && listRef.current) {
-          const rows = listRef.current.querySelectorAll("[data-msg-idx]");
-          for (const row of rows) {
-            if (Number(row.getAttribute("data-msg-idx")) === searchMatchIndex) {
-              row.scrollIntoView({ behavior: "instant", block: "center" });
-              return;
-            }
+    if (!sessionSwitchedRef.current) return;
+    sessionSwitchedRef.current = false;
+
+    // If we have a search match, scroll to it instead of the bottom
+    if (searchMatchIndex >= 0 && !searchScrolledRef.current) {
+      searchScrolledRef.current = true;
+      // Find the DOM element for the matching message
+      const matchRelIdx = searchMatchIndex - effectiveStart;
+      if (matchRelIdx >= 0 && listRef.current) {
+        const rows = listRef.current.querySelectorAll("[data-msg-idx]");
+        for (const row of rows) {
+          if (Number(row.getAttribute("data-msg-idx")) === searchMatchIndex) {
+            row.scrollIntoView({ behavior: "instant", block: "center" });
+            return;
           }
         }
       }
-      bottomRef.current?.scrollIntoView({ behavior: "instant" });
-      return;
     }
-    const distFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-    if (distFromBottom < 200) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
+    bottomRef.current?.scrollIntoView({ behavior: "instant" });
   }, [displayMsgs.length, searchMatchIndex, effectiveStart]);
 
   // Which indicator (if any) trails the newest message. A fresh user prompt at

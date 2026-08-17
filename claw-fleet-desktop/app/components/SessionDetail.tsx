@@ -14,6 +14,12 @@ import { CalendarClock } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
+import {
+  initialFollowState,
+  nextFollowState,
+  type FollowInput,
+  type FollowState,
+} from "../followState";
 import { installScrollFreezeProbe } from "../scrollFreezeProbe";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
@@ -47,9 +53,6 @@ const SUBAGENT_TAB_CAP = 12;
 /** Standalone-mode live tail: re-pull the transcript tail at this cadence
  *  while the session is in an active status. */
 const LIVE_TAIL_POLL_MS = 1500;
-
-/** How close to the bottom still counts as "following the newest message". */
-const FOLLOW_SLACK_PX = 200;
 
 /** After a resume/enqueue submit, keep the live-tail + live-thinking pollers
  *  armed for this long even though the session is still flipping to `live` via
@@ -612,35 +615,50 @@ export function SessionDetail({
 
   // `isFollowing` drives the footer, but the pin below runs from a
   // ResizeObserver callback that must not re-subscribe on every state change —
-  // so mirror the flag into a ref and write both through one setter.
-  const followingRef = useRef(true);
-  const setFollowing = useCallback((next: boolean) => {
-    followingRef.current = next;
-    setIsFollowing(next);
+  // so mirror the state into a ref and write both through one reducer.
+  const followRef = useRef<FollowState>(initialFollowState);
+  const applyFollow = useCallback((input: FollowInput) => {
+    const next = nextFollowState(followRef.current, input);
+    if (next.following === followRef.current.following && next.detached === followRef.current.detached) {
+      return;
+    }
+    followRef.current = next;
+    setIsFollowing(next.following);
   }, []);
 
   // Auto-follow writes that actually moved the viewport, read by the scroll
   // freeze probe to tell "the pin dragged it back" from "nothing moved at all".
   const pinCountRef = useRef(0);
 
-  const checkFollow = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setFollowing(dist < FOLLOW_SLACK_PX);
-  }, [setFollowing]);
-
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    el.addEventListener("scroll", checkFollow, { passive: true });
-    return () => el.removeEventListener("scroll", checkFollow);
-  }, [checkFollow, session, viewTab]);
+    const onScroll = () => {
+      applyFollow({
+        kind: "scroll",
+        distFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight,
+      });
+    };
+    // An upward gesture detaches immediately, before the scroll it causes is
+    // even dispatched. Position alone can't express "I want to read back": the
+    // reader is still inside the slack window at that point, so the distance
+    // rule would keep following and the pin would drag them back down.
+    const onWheel = (ev: WheelEvent) => {
+      applyFollow({ kind: "gesture", intent: ev.deltaY });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", onWheel, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, [applyFollow, session, viewTab]);
 
   // A different session, or a fresh visit to the tab, starts pinned again.
   useEffect(() => {
-    setFollowing(true);
-  }, [liveSession?.id, viewTab, setFollowing]);
+    followRef.current = initialFollowState;
+    setIsFollowing(true);
+  }, [liveSession?.id, viewTab]);
 
   // Pin the viewport to the newest message for as long as the reader has not
   // scrolled away to read history.
@@ -661,7 +679,7 @@ export function SessionDetail({
     if (!el) return;
 
     const pin = () => {
-      if (!followingRef.current) return;
+      if (!followRef.current.following) return;
       const before = el.scrollTop;
       el.scrollTop = el.scrollHeight;
       // Only count a pin that actually moved the viewport. Re-pinning a box
@@ -709,7 +727,7 @@ export function SessionDetail({
         sessionId: () => probeStateRef.current.sessionId,
         status: () => probeStateRef.current.status,
         messageCount: () => probeStateRef.current.messageCount,
-        isFollowing: () => followingRef.current,
+        isFollowing: () => followRef.current.following,
         pinCount: () => pinCountRef.current,
       },
       (line) => {
