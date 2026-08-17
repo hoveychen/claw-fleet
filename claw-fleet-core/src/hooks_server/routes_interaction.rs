@@ -342,9 +342,11 @@ pub(crate) fn route_remove_prd_mode(
                 }
             }
 
-/// Mirror the Claude concept toggles onto codex's AGENTS.md on the serve host.
-/// Body carries `{user_title, locale}`; the enabled set is read from the host's
-/// own Claude carriers.
+/// Mirror the Claude concept toggles onto every non-Claude carrier on the serve
+/// host — codex's `~/.codex/AGENTS.md` and dsh's `$DSH_HOME/AGENTS.md`. Body
+/// carries `{user_title, locale}`; the enabled set is read from the host's own
+/// Claude carriers. The route keeps its codex-era path for wire compatibility
+/// with older desktops (see [`crate::backend::Backend::reconcile_codex_guidance`]).
 pub(crate) fn route_reconcile_codex_guidance(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,
@@ -362,10 +364,15 @@ pub(crate) fn route_reconcile_codex_guidance(
     }
     match serde_json::from_slice::<Req>(&body_bytes) {
         Ok(req_body) => {
-            match crate::codex_guidance::reconcile_codex_from_claude_state(
+            let codex = crate::codex_guidance::reconcile_codex_from_claude_state(
                 &req_body.user_title,
                 &req_body.locale,
-            ) {
+            );
+            let dsh = crate::dsh_guidance::reconcile_dsh_from_claude_state(
+                &req_body.user_title,
+                &req_body.locale,
+            );
+            match codex.and(dsh) {
                 Ok(()) => {
                     let _ = request.respond(
                         tiny_http::Response::from_string(r#"{"ok":true}"#)

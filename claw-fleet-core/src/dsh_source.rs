@@ -10,6 +10,39 @@
 //! harness home knows about regardless of their cwd, including ones written by
 //! a completely different profile (a `dsh --profile headless` run shows up
 //! here). The server's own cwd only decides where *new* sessions would root.
+//!
+//! # No account or quota surface (measured — do not re-probe)
+//!
+//! [`AgentSource::fetch_account`], [`AgentSource::fetch_usage`] and
+//! [`AgentSource::usage_summary`] stay at their refusing defaults for dsh, and
+//! that is not an omission: **dsh exposes nothing to implement them with.**
+//!
+//! The `/api` method catalog (read off `@deepseek-ai/dsh-host-apiproxy`, then
+//! called against a live server) is `agentPreset.*`, `credentials.*`, `goal.*`,
+//! `host.*`, `llm.*`, `session.*`, `settings.*`, `skill.list`, `subagent.*`,
+//! `workspace.*`. There is no `account.*`, `usage.*`, `quota.*`, or
+//! `rateLimit.*`. Of the near misses:
+//!
+//! * `credentials.describe` takes `{refs: [...]}` and reports whether *those
+//!   credential refs* are set — presence, not an account or a balance.
+//! * `llm.providers` returns the provider catalog with an `active` flag
+//!   (measured on this machine: `openrouter` and `deepseek-official` active,
+//!   ~35 others declared-but-inactive). No plan, no limit, no reset.
+//! * `host.describe` returns `{version, cwd, provider, model, attachedSessions,
+//!   canOpenPath}` — the host's default route, not the session's, and no usage.
+//! * `QUOTA_EXCEEDED` / `RATE_LIMIT` exist only as *error classifications* an
+//!   adapter assigns to a request that already failed (HTTP 429 and friends in
+//!   `dsh-llm-deepseek` / `dsh-llm-pi-ai`). They are not a pollable window with
+//!   a utilization and a reset time, which is what [`crate::backend::UsageBar`]
+//!   needs.
+//!
+//! This follows from what dsh *is*: a bring-your-own-key harness. The quota
+//! belongs to whichever provider the user configured, so any real usage view for
+//! a dsh user has to come from that provider's own API (for the OpenRouter case,
+//! see the generation-cost path in [`dsh_token_breakdown`]'s neighbourhood), not
+//! from dsh. Per-session token accounting is a different question and dsh *does*
+//! answer it — see [`dsh_token_breakdown`], which reads the `session.list`
+//! projections `@deepseek-ai/dsh-token-meter` publishes.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -246,6 +279,34 @@ impl DshSource {
 /// it, so it fires exactly once.
 type ArmedCallback = Arc<Mutex<Option<Box<dyn FnOnce(bool) + Send>>>>;
 
+/// Channel B (prompt-prepend) of dsh guidance: if the dsh **PRD** block is
+/// installed (its `$DSH_HOME/AGENTS.md` sentinel is present) AND the workspace
+/// has active TASKS.md plans, prepend the same `<system-reminder>` block Claude
+/// gets via the `fleet prd-context` UserPromptSubmit hook.
+///
+/// Channel A ([`crate::dsh_guidance`]) is static: the AGENTS.md blocks enter a
+/// session's history once, as the agent-instructions baseline. The macro plan is
+/// not static — it changes as boxes get ticked — so it rides the prompt instead,
+/// exactly as [`crate::codex_launch`] does for codex. Every Fleet-driven dsh turn
+/// goes through `session.prompt`, so prepending at both prompt sites gives the
+/// per-turn re-injection Claude's hook provides.
+///
+/// Gated on the dsh PRD concept specifically: static and dynamic injection move
+/// together with the PRD toggle. No PRD block / no active plan → the prompt is
+/// returned unchanged.
+fn maybe_prepend_active_plans(workspace_path: &str, session_id: &str, prompt: &str) -> String {
+    if workspace_path.trim().is_empty() || !crate::dsh_guidance::is_dsh_prd_installed() {
+        return prompt.to_string();
+    }
+    match crate::prd_tasks::render_active_plans_reminder(
+        std::path::Path::new(workspace_path),
+        Some(session_id),
+    ) {
+        Some(reminder) => format!("{reminder}\n\n{prompt}"),
+        None => prompt.to_string(),
+    }
+}
+
 /// Split Fleet's single `model` string into dsh's `provider` + `model` pair.
 ///
 /// dsh addresses a model as two fields, Fleet's [`SpawnSpec`] carries one
@@ -398,7 +459,10 @@ impl AgentSource for DshSource {
                 .map_err(Into::into)
         })?;
 
-        Ok(history_events(&value))
+        // Normalised, not raw: every Fleet client reads Claude Code's message
+        // vocabulary, and dsh's own records match none of it. See
+        // `crate::dsh_messages`.
+        Ok(crate::dsh_messages::normalize(&history_events(&value)))
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
@@ -412,7 +476,10 @@ impl AgentSource for DshSource {
                 .map_err(Into::into)
         })?;
 
-        Ok(history_events(&value))
+        // Normalised, not raw: every Fleet client reads Claude Code's message
+        // vocabulary, and dsh's own records match none of it. See
+        // `crate::dsh_messages`.
+        Ok(crate::dsh_messages::normalize(&history_events(&value)))
     }
 
     fn watch_strategy(&self) -> WatchStrategy {
@@ -458,7 +525,9 @@ impl AgentSource for DshSource {
                 ));
             }
             Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
-            Self::prompt(client, &session_id, &spec.prompt)
+            let prompt =
+                maybe_prepend_active_plans(&spec.workspace_path, &session_id, &spec.prompt);
+            Self::prompt(client, &session_id, &prompt)
         })?;
 
         Ok(crate::session_launch::SpawnSessionResponse {
@@ -500,7 +569,8 @@ impl AgentSource for DshSource {
 
         let started = self.with_client(|client| {
             Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
-            Self::prompt(client, &session_id, prompt)
+            let prompt = maybe_prepend_active_plans(&spec.workspace_path, &session_id, prompt);
+            Self::prompt(client, &session_id, &prompt)
         });
 
         if let Err(e) = started {
@@ -514,11 +584,174 @@ impl AgentSource for DshSource {
         Ok(())
     }
 
+    /// Cut the session's current turn short.
+    ///
+    /// This is the whole reason [`AgentSource::interrupt_session`] exists: every
+    /// dsh session shares one server process, so the pid-based stop path would
+    /// signal that server and take down every dsh session on the machine
+    /// (Fleet's included). `session.cancel` is the per-session lever — measured
+    /// live, it ends the turn with `turn/end.data.reason = {"kind":"aborted",
+    /// "reason":{"kind":"user"}}` against `{"kind":"completed"}` for a turn that
+    /// finished on its own, which is also what makes
+    /// [`crate::dsh_events::LiveView`] report the outcome as a failure rather
+    /// than a success.
+    fn interrupt_session(&self, session_id: &str) -> Result<(), String> {
+        let id = Self::session_id_of(session_id).unwrap_or(session_id);
+        if id.is_empty() {
+            return Err("dsh interrupt: session_id is required".into());
+        }
+        self.with_client(|client| {
+            client
+                .call("session.cancel", json!({ "sessionId": id }))
+                .map(|_| ())
+                .map_err(Into::into)
+        })
+    }
+
     /// dsh sessions have no Fleet-readable file: the transcript is a
     /// zstd-framed log the server owns. Nothing may hand out a path for it.
     fn resolve_file_path(&self, _path: &str) -> Option<PathBuf> {
         None
     }
+}
+
+/// dsh-native token breakdown for one session, shown in the desktop "Token" tab.
+///
+/// The other two sources parse a transcript file; dsh has none (see
+/// [`AgentSource::resolve_file_path`] above), so this is assembled from the
+/// projections dsh itself folds and hands over on `session.list`. Two distinct
+/// things live here and must not be added together:
+///
+/// - **Billed, cumulative** (`tokenUsage`): the four buckets dsh meters over the
+///   whole session. These sum to [`Self::total_tokens`].
+/// - **Context, current** (`contextPressure` / `contextBreakdown`): how full the
+///   window is *right now* and what is occupying it. A single re-read of a large
+///   cached prefix adds to the cumulative buckets without moving these at all.
+///
+/// No cost figure: dsh routes through OpenRouter to an open model space, and
+/// Fleet's price table only knows Claude and GPT tiers, so an unknown model
+/// would silently price at the Opus fallback. A wrong number is worse than none.
+/// No model id either — a session's model appears only in its single
+/// `request/header` event near the head of the log, which would cost a full
+/// `session.history` fetch to reach.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DshTokenBreakdown {
+    /// Input tokens that missed the cache and were billed at full price.
+    pub uncached_input_tokens: u64,
+    /// Input tokens served from the prompt cache, billed at the cache-read rate.
+    pub cache_read_tokens: u64,
+    /// Input tokens written into the prompt cache, billed at the cache-write rate.
+    pub cache_write_tokens: u64,
+    /// Output tokens.
+    pub output_tokens: u64,
+    /// The four buckets above, summed — the panel's total.
+    pub total_tokens: u64,
+    /// System prompt currently occupying the window.
+    pub system_tokens: u64,
+    /// Tool definitions currently occupying the window.
+    pub tools_tokens: u64,
+    /// Conversation messages currently occupying the window.
+    pub message_tokens: u64,
+    /// What the next request is projected to send, per dsh's own estimate.
+    /// `None` until the session has run a turn (dsh reports `contextPressure`
+    /// as an empty object on a blank session).
+    pub projected_tokens: Option<u64>,
+    /// The model's context window, when dsh knows it.
+    pub context_window: Option<u64>,
+    /// `projected_tokens / context_window`, `None` when either is missing.
+    pub context_percent: Option<f64>,
+}
+
+/// Build a [`DshTokenBreakdown`] from one `session.list` item's projections.
+///
+/// Split out from the RPC so the mapping is unit-testable against a recorded
+/// payload. A projections block missing a key yields zeros rather than an error:
+/// a session that has not run a turn genuinely has no usage, and the panel
+/// should show that rather than an error string.
+fn dsh_token_breakdown_from_projections(projections: &Value) -> DshTokenBreakdown {
+    let uncached_input_tokens = projection_u64(projections, "tokenUsage", "uncachedInputTokens");
+    let cache_read_tokens = projection_u64(projections, "tokenUsage", "cacheReadTokens");
+    let cache_write_tokens = projection_u64(projections, "tokenUsage", "cacheWriteTokens");
+    let output_tokens = projection_u64(projections, "tokenUsage", "outputTokens");
+
+    let opt = |key: &str, field: &str| -> Option<u64> {
+        projections
+            .get("values")
+            .and_then(|v| v.get(key))
+            .and_then(|v| v.get(field))
+            .and_then(Value::as_u64)
+    };
+    let projected_tokens = opt("contextPressure", "projectedTokens");
+    let context_window = opt("contextPressure", "contextWindow");
+    let context_percent = match (projected_tokens, context_window) {
+        (Some(used), Some(window)) if window > 0 => Some(used as f64 / window as f64),
+        _ => None,
+    };
+
+    DshTokenBreakdown {
+        uncached_input_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        output_tokens,
+        total_tokens: uncached_input_tokens
+            + cache_read_tokens
+            + cache_write_tokens
+            + output_tokens,
+        system_tokens: projection_u64(projections, "contextBreakdown", "systemTokens"),
+        tools_tokens: projection_u64(projections, "contextBreakdown", "toolsTokens"),
+        message_tokens: projection_u64(projections, "contextBreakdown", "messageTokens"),
+        projected_tokens,
+        context_window,
+        context_percent,
+    }
+}
+
+/// Token breakdown for a `dsh://` session URI.
+///
+/// Reads the projections off `session.list` — the same call [`DshSource::scan_sessions`]
+/// already makes — rather than `session.history`: both carry the same
+/// projections block, but history additionally ships every event of the session
+/// just to be thrown away here. Errors when the id is unknown to the server, so
+/// a stale URI reports that instead of rendering a plausible all-zero panel.
+pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
+    let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
+    let value = DshSource::new()
+        .with_client(|client| client.call("session.list", json!({})).map_err(Into::into))?;
+
+    let item = value
+        .get("items")
+        .and_then(Value::as_array)
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|it| it.get("sessionId").and_then(Value::as_str) == Some(id))
+        })
+        .ok_or_else(|| format!("dsh session not found: {id}"))?;
+
+    let projections = item
+        .get("projections")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    Ok(dsh_token_breakdown_from_projections(&projections))
+}
+
+/// The **raw**, un-normalised durable events of a `dsh://` session.
+///
+/// [`AgentSource::get_messages`] returns the same history translated into Claude
+/// Code's message vocabulary, which is what every Fleet client reads — but that
+/// translation drops the typed `source` metadata dsh hangs off each record.
+/// [`crate::dsh_cost`] needs exactly that metadata (the provider's generation
+/// id), so it reads the events themselves.
+pub fn session_events(uri: &str) -> Result<Vec<Value>, String> {
+    let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
+    let value = DshSource::new().with_client(|client| {
+        client
+            .call("session.history", json!({ "sessionId": id }))
+            .map_err(Into::into)
+    })?;
+    Ok(history_events(&value))
 }
 
 /// Pull the raw `SessionEvent`s out of a `session.history` answer.
@@ -618,6 +851,103 @@ mod tests {
         assert!(session_info_from_list_item(&json!({ "cwd": "/tmp" })).is_none());
     }
 
+    /// Verbatim projections of a session that has run four turns, copied off a
+    /// live `session.list` (server started with `dsh web --port 0`).
+    fn live_projections() -> Value {
+        json!({
+            "asOfSeq": 175,
+            "values": {
+                "sessionStats": { "turns": 4, "steps": 8 },
+                "title": "Fleet P4 Probe Echo Command",
+                "tokenUsage": {
+                    "uncachedInputTokens": 36,
+                    "outputTokens": 509,
+                    "cacheReadTokens": 60325,
+                    "cacheWriteTokens": 10306
+                },
+                "contextPressure": {
+                    "pressureTokens": 9178,
+                    "projectedTokens": 9215,
+                    "contextWindow": 200000
+                },
+                "contextBreakdown": {
+                    "systemTokens": 1506,
+                    "toolsTokens": 6376,
+                    "messageTokens": 574
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn token_breakdown_keeps_the_four_billed_buckets_separate() {
+        let b = dsh_token_breakdown_from_projections(&live_projections());
+        assert_eq!(b.uncached_input_tokens, 36);
+        assert_eq!(b.cache_read_tokens, 60325);
+        assert_eq!(b.cache_write_tokens, 10306);
+        assert_eq!(b.output_tokens, 509);
+        // The rows must sum to the total or the panel's percentages lie.
+        assert_eq!(b.total_tokens, 36 + 60325 + 10306 + 509);
+        assert_eq!(
+            b.uncached_input_tokens + b.cache_read_tokens + b.cache_write_tokens + b.output_tokens,
+            b.total_tokens
+        );
+    }
+
+    #[test]
+    fn token_breakdown_reports_context_separately_from_billing() {
+        let b = dsh_token_breakdown_from_projections(&live_projections());
+        // Context occupancy is a snapshot of the current window, not a running
+        // total: 9215 projected against 200k, while 71k tokens were billed.
+        assert_eq!(b.projected_tokens, Some(9215));
+        assert_eq!(b.context_window, Some(200000));
+        let pct = b.context_percent.expect("percent");
+        assert!((pct - 9215.0 / 200000.0).abs() < 1e-9, "got {pct}");
+        assert!(pct < 0.05, "must not be confused with the 71k billed");
+        assert_eq!(b.system_tokens, 1506);
+        assert_eq!(b.tools_tokens, 6376);
+        assert_eq!(b.message_tokens, 574);
+    }
+
+    #[test]
+    fn token_breakdown_on_a_blank_session_is_zeroed_not_an_error() {
+        // Live shape of a session that never ran: `contextPressure` is `{}`.
+        let projections = json!({
+            "asOfSeq": 6,
+            "values": {
+                "tokenUsage": {
+                    "uncachedInputTokens": 0,
+                    "outputTokens": 0,
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0
+                },
+                "contextPressure": {},
+                "contextBreakdown": { "systemTokens": 0, "toolsTokens": 0, "messageTokens": 0 }
+            }
+        });
+        let b = dsh_token_breakdown_from_projections(&projections);
+        assert_eq!(b.total_tokens, 0);
+        // No window known yet — the panel must show "—", not 0%.
+        assert_eq!(b.projected_tokens, None);
+        assert_eq!(b.context_percent, None);
+    }
+
+    #[test]
+    fn token_breakdown_tolerates_a_missing_projections_block() {
+        assert_eq!(
+            dsh_token_breakdown_from_projections(&json!({})),
+            DshTokenBreakdown::default()
+        );
+    }
+
+    #[test]
+    fn token_breakdown_rejects_a_uri_without_a_session_id() {
+        // Guards the URI parse without reaching a server: a bare scheme has no
+        // id, so this must fail before `with_client` tries to start one.
+        let err = dsh_token_breakdown("dsh://").expect_err("no id");
+        assert!(err.contains("invalid dsh URI"), "got {err}");
+    }
+
     #[test]
     fn history_events_keeps_the_durable_event_only() {
         // Entries pair the durable event with a transient host-computed view.
@@ -710,6 +1040,70 @@ mod tests {
             .spawn(&crate::agent_source::SpawnSpec::default())
             .unwrap_err();
         assert!(err.contains("workspace_path"), "unexpected error: {err}");
+    }
+
+    /// Channel B: the active-plans reminder rides the prompt, but only when the
+    /// dsh PRD block is installed. Both branches, against a temp `$DSH_HOME` and
+    /// a temp workspace holding a real TASKS.md.
+    ///
+    /// Self-guarding on the shared home lock (see `tests/home_env_lock_guard.rs`)
+    /// because it repoints `DSH_HOME`.
+    #[test]
+    fn active_plans_ride_the_prompt_only_when_the_prd_block_is_installed() {
+        let _guard = crate::session::fleet_home_lock();
+        let base = std::env::temp_dir()
+            .join(format!("fleet-dsh-prepend-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let home = base.join("dsh-home");
+        let ws = base.join("ws");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("TASKS.md"),
+            "# TASKS\n\n<!-- fleet:prd:begin id=\"demo-plan\" v=\"2\" -->\n\n\
+             **Plan:** Demo\n\n- [ ] **P1** — do the thing\n\n\
+             <!-- fleet:prd:end id=\"demo-plan\" -->\n",
+        )
+        .unwrap();
+
+        let prev = std::env::var_os("DSH_HOME");
+        std::env::set_var("DSH_HOME", &home);
+        let ws_str = ws.to_string_lossy().to_string();
+
+        // No AGENTS.md at all → the PRD concept is off, so nothing is prepended
+        // even though the workspace has a live plan.
+        assert_eq!(
+            maybe_prepend_active_plans(&ws_str, "session-x", "hello"),
+            "hello",
+            "no dsh PRD block installed → prompt untouched"
+        );
+
+        crate::dsh_guidance::reconcile_dsh_agents_md(
+            crate::dsh_guidance::DshGuidanceSet {
+                prd: true,
+                ..Default::default()
+            },
+            "Boss",
+            "en",
+        )
+        .unwrap();
+
+        let out = maybe_prepend_active_plans(&ws_str, "session-x", "hello");
+        assert!(out.ends_with("hello"), "the original prompt stays at the tail");
+        assert!(
+            out.contains("demo-plan") && out.contains("P1"),
+            "the active plan must reach the model: {out}"
+        );
+
+        // An empty workspace path is the resume-without-a-workspace case: there is
+        // no TASKS.md to resolve, and Path::new("") would resolve against cwd.
+        assert_eq!(maybe_prepend_active_plans("", "session-x", "hello"), "hello");
+
+        match prev {
+            Some(v) => std::env::set_var("DSH_HOME", v),
+            None => std::env::remove_var("DSH_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

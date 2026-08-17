@@ -202,6 +202,22 @@ pub trait AgentSource: Send + Sync {
     // ── Optional capabilities ───────────────────────────────────────────────
 
     /// Kill a process by PID.
+    /// Stop the turn `session_id` is running, without touching any other
+    /// session.
+    ///
+    /// Fleet's stop button is otherwise pid-based, which assumes one process per
+    /// session. That assumption holds for Claude Code and Codex and fails for
+    /// dsh: every dsh session's turn runs inside one shared `dsh web`, so the
+    /// pid on a dsh `SessionInfo` is that server's — signalling it would stop
+    /// every dsh session at once and take Fleet's own server down with them.
+    ///
+    /// A source that overrides this is saying "route the stop button here
+    /// instead of at my pid". The default refusal is what keeps the pid path in
+    /// charge for the two sources where it is correct.
+    fn interrupt_session(&self, _session_id: &str) -> Result<(), String> {
+        Err(format!("{}: interrupt_session not supported", self.name()))
+    }
+
     fn kill_pid(&self, _pid: u32) -> Result<(), String> {
         Err(format!("{}: kill_pid not supported", self.name()))
     }
@@ -466,6 +482,20 @@ pub fn find_source_by_api_name<'a>(
 }
 
 /// Find the source that handles a given path/URI by matching URI prefix.
+/// Stop the turn running in the session at `path`, through whichever source
+/// owns it.
+///
+/// The counterpart to the pid-based stop for sources that have no per-session
+/// process. Errors when no source claims the path, or when the owning source
+/// has no per-session interrupt — in which case the caller should be signalling
+/// the pid instead, and the error says so rather than silently doing nothing.
+pub fn interrupt_session_at(path: &str) -> Result<(), String> {
+    let sources = build_sources();
+    let source = find_source_for_path(&sources, path)
+        .ok_or_else(|| format!("no agent source owns {path}"))?;
+    source.interrupt_session(path)
+}
+
 pub fn find_source_for_path<'a>(
     sources: &'a [Box<dyn AgentSource>],
     path: &str,

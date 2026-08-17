@@ -84,7 +84,7 @@ export interface MainViewState {
   };
   skills: {
     query: string;
-    sourceFilter: "all" | "claude-code" | "codex";
+    sourceFilter: "all" | "claude-code" | "codex" | "dsh";
     selectedPath: string | null;
     activeFilePath: string | null;
     collapsedPaths: string[];

@@ -17,7 +17,7 @@ import skillStyles from "./SkillsView.module.css";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface SkillItem {
-  source: "claude-code" | "codex" | string;
+  source: "claude-code" | "codex" | "dsh" | string;
   scope: "user" | "repo" | "admin" | "system" | string;
   name: string;
   description: string;
@@ -51,6 +51,31 @@ interface SkillSyncReport {
   items: SkillSyncEntry[];
   actions: Array<{ slug: string; target: string; action: string; path: string }>;
   conflicts: string[];
+}
+
+// `skill_sync` projects Fleet's canonical copy into exactly two runtimes —
+// `SkillSyncEntry` has a claude/codex pair of fields and `compatibility` is a
+// two-runtime enum. dsh's roots are discovered, inspectable and deletable, but
+// nothing projects into them, so a dsh skill is never "managed" and must not be
+// offered adopt/unlink: those would resolve to the wrong target.
+const SYNCABLE_SOURCES = new Set(["claude-code", "codex"]);
+
+function isSyncable(skill: SkillItem): boolean {
+  return SYNCABLE_SOURCES.has(skill.source);
+}
+
+function syncManaged(skill: SkillItem, entry: SkillSyncEntry | undefined): boolean {
+  if (!isSyncable(skill)) return false;
+  return skill.source === "codex"
+    ? entry?.codexManaged === true
+    : entry?.claudeManaged === true;
+}
+
+// Short label for the source tag on a skill card.
+function sourceLabel(source: string): string {
+  if (source === "codex") return "Codex";
+  if (source === "dsh") return "dsh";
+  return "Claude";
 }
 
 // Extensions we render as text. Others fall back to a "binary" placeholder.
@@ -123,7 +148,7 @@ export function SkillsView() {
   );
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const setQuery = (value: string) => updateMainViewState("skills", { query: value });
-  const setSourceFilter = (value: "all" | "claude-code" | "codex") =>
+  const setSourceFilter = (value: "all" | "claude-code" | "codex" | "dsh") =>
     updateMainViewState("skills", { sourceFilter: value });
   const [syncEntries, setSyncEntries] = useState<SkillSyncEntry[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -160,6 +185,7 @@ export function SkillsView() {
   const sourceCounts = useMemo(() => ({
     "claude-code": skills.filter((s) => s.source === "claude-code").length,
     codex: skills.filter((s) => s.source === "codex").length,
+    dsh: skills.filter((s) => s.source === "dsh").length,
   }), [skills]);
 
   const syncBySlug = useMemo(
@@ -228,12 +254,9 @@ export function SkillsView() {
 
   const skillMenuItems = (skill: SkillItem): ContextMenuItem[] => {
     const syncEntry = syncBySlug.get(skill.name);
-    const managed =
-      skill.source === "codex"
-        ? syncEntry?.codexManaged === true
-        : syncEntry?.claudeManaged === true;
+    const managed = syncManaged(skill, syncEntry);
     const items: ContextMenuItem[] = [];
-    if (skill.scope === "user" && syncEntry?.state === "unmanaged") {
+    if (isSyncable(skill) && skill.scope === "user" && syncEntry?.state === "unmanaged") {
       items.push({
         id: "adopt",
         label: t("skills.share_both"),
@@ -319,6 +342,13 @@ export function SkillsView() {
           >
             <span>{t("skills.source_codex")}</span>
             <span className={styles.chip_count}>{sourceCounts.codex}</span>
+          </button>
+          <button
+            className={`${styles.chip} ${sourceFilter === "dsh" ? styles.chip_active : ""}`}
+            onClick={() => setSourceFilter(sourceFilter === "dsh" ? "all" : "dsh")}
+          >
+            <span>{t("skills.source_dsh")}</span>
+            <span className={styles.chip_count}>{sourceCounts.dsh}</span>
           </button>
         </>
       }
@@ -411,9 +441,7 @@ function SkillCard({
           <div className={styles.card_hook}>{skill.description}</div>
         )}
         <div className={styles.card_meta}>
-          <span className={skillStyles.source_tag}>
-            {skill.source === "codex" ? "Codex" : "Claude"}
-          </span>
+          <span className={skillStyles.source_tag}>{sourceLabel(skill.source)}</span>
           <span>{t(`skills.scope_${skill.scope}`, { defaultValue: skill.scope })}</span>
           {syncEntry && (
             <span className={`${skillStyles.sync_tag} ${skillStyles[`sync_${syncEntry.state}`]}`}>
@@ -565,9 +593,7 @@ function SkillDetail({
     }
   }, [deleting, onDeleted, skill.name, skill.path, t]);
 
-  const managedForSource = skill.source === "codex"
-    ? syncEntry?.codexManaged === true
-    : syncEntry?.claudeManaged === true;
+  const managedForSource = syncManaged(skill, syncEntry);
 
   const adopt = useCallback(async () => {
     if (mutatingSync) return;
@@ -614,7 +640,7 @@ function SkillDetail({
           )}
         </div>
         <div className={styles.detail_actions}>
-          {skill.scope === "user" && syncEntry?.state === "unmanaged" && (
+          {isSyncable(skill) && skill.scope === "user" && syncEntry?.state === "unmanaged" && (
             <button className={styles.promote_btn} onClick={adopt} disabled={mutatingSync}>
               {t("skills.share_both")}
             </button>

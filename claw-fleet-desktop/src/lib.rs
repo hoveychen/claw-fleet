@@ -87,6 +87,9 @@ impl Backend for NullBackend {
     fn interrupt_pid(&self, _: u32) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn interrupt_agent_session(&self, _: String) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn kill_pid(&self, _: u32) -> Result<(), String> {
         Err("backend not ready".into())
     }
@@ -427,6 +430,18 @@ impl Backend for NullBackend {
         &self,
         _: &str,
     ) -> Result<claw_fleet_core::codex_source::CodexTokenBreakdown, String> {
+        Err("backend not ready".into())
+    }
+    fn get_dsh_token_breakdown(
+        &self,
+        _: &str,
+    ) -> Result<claw_fleet_core::dsh_source::DshTokenBreakdown, String> {
+        Err("backend not ready".into())
+    }
+    fn get_dsh_session_cost(
+        &self,
+        _: &str,
+    ) -> Result<claw_fleet_core::dsh_cost::DshSessionCost, String> {
         Err("backend not ready".into())
     }
     fn list_plugins(&self) -> Vec<claw_fleet_core::plugins::PluginItem> {
