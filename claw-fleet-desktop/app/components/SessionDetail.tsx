@@ -14,6 +14,7 @@ import { CalendarClock } from "lucide-react";
 import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollowSession, LIVE_STATUSES, SCHEDULE_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
+import { installScrollFreezeProbe } from "../scrollFreezeProbe";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
@@ -618,6 +619,10 @@ export function SessionDetail({
     setIsFollowing(next);
   }, []);
 
+  // Auto-follow writes that actually moved the viewport, read by the scroll
+  // freeze probe to tell "the pin dragged it back" from "nothing moved at all".
+  const pinCountRef = useRef(0);
+
   const checkFollow = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -657,7 +662,12 @@ export function SessionDetail({
 
     const pin = () => {
       if (!followingRef.current) return;
+      const before = el.scrollTop;
       el.scrollTop = el.scrollHeight;
+      // Only count a pin that actually moved the viewport. Re-pinning a box
+      // already at the bottom is a no-op, and counting those would let the
+      // freeze probe blame the pin for gestures it never touched.
+      if (el.scrollTop !== before) pinCountRef.current += 1;
     };
 
     // Observe the children, not the scroll box: the box's own border box never
@@ -669,6 +679,45 @@ export function SessionDetail({
     pin();
     return () => ro.disconnect();
   }, [viewTab, liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
+
+  // Render-synced mirror so the probe below reports the *current* session
+  // without re-installing its listener on every poll.
+  const probeStateRef = useRef({
+    sessionId: null as string | null,
+    status: null as string | null,
+    messageCount: 0,
+  });
+  probeStateRef.current = {
+    sessionId: liveSession?.id ?? null,
+    status: liveSession?.status ?? null,
+    messageCount: displayedMessages.length,
+  };
+
+  // Catch the conversation pane refusing to scroll. Reported repeatedly, never
+  // caught in the act: it starts at no identifiable moment, a release build has
+  // no devtools, and the state is gone by the time it gets described. The probe
+  // watches every wheel gesture and writes one line to the host debug log when
+  // a gesture that had somewhere to go doesn't land — with the metrics that say
+  // whether it was a layout fault, the auto-follow pin, or the compositor.
+  useEffect(() => {
+    if (viewTab !== "messages") return;
+    const el = scrollRef.current;
+    if (!el) return;
+    return installScrollFreezeProbe(
+      el,
+      {
+        sessionId: () => probeStateRef.current.sessionId,
+        status: () => probeStateRef.current.status,
+        messageCount: () => probeStateRef.current.messageCount,
+        isFollowing: () => followingRef.current,
+        pinCount: () => pinCountRef.current,
+      },
+      (line) => {
+        // Absent outside Tauri (the mock browser preview); nothing to report to.
+        invoke("log_frontend_debug", { msg: line }).catch(() => {});
+      },
+    );
+  }, [viewTab, liveSession?.id]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
