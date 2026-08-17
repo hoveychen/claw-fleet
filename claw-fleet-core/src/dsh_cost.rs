@@ -34,6 +34,28 @@
 //! Calls made through any other provider are counted but not priced — dsh's
 //! other adapters expose no cost endpoint. The panel says how many were left
 //! out rather than quietly under-reporting the total.
+//!
+//! # A fresh generation is not queryable right away (measured)
+//!
+//! `/generation` answers `404 Generation … not found` for an id that was just
+//! produced, and starts answering with the real record some time later.
+//! Measured on one pair of ids: still 404 at roughly one minute and again at
+//! two and a half minutes after the turn, priced normally when re-queried later
+//! in the same working session; ids from two days earlier resolved immediately.
+//! The exact window is **not** established — only that it is longer than the
+//! ~2.5 minutes observed.
+//!
+//! (An earlier reading of this blamed interrupted turns. That was wrong: the
+//! "control" session was five minutes older and queried at a different moment,
+//! so it never controlled for anything. The interrupted session priced fine once
+//! enough time had passed.)
+//!
+//! Consequence for the panel: opening a session's cost immediately after a turn
+//! can legitimately show fewer priced calls than it has model messages. Those
+//! land in `unpriced_calls` with a note and are never folded into the total as a
+//! zero — "we could not price this yet" and "this was free" are different facts.
+//! Because the on-disk cache only ever stores successful lookups, a later visit
+//! re-asks and fills the gap in.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
