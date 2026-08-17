@@ -1582,6 +1582,29 @@ mod tests {
 
     /// Build an elicitation request whose first option is explicitly marked
     /// `(Recommended)`.
+    /// An RFC3339 timestamp at `hh:mm:ss` on 2026-04-28 **local** time.
+    ///
+    /// A test that queries by calendar day must not hardcode a UTC instant.
+    /// `collect_other_picks_for_date` compares `local_date_of(requested_at)`
+    /// against the requested day — deliberately, since the daily report is
+    /// per local day. On a UTC-7 machine `2026-04-28T02:00:00Z` is
+    /// 2026-04-27 locally, so the record was correctly filtered out and the
+    /// assertion saw zero picks. Building the instant from local time keeps
+    /// these tests true at any UTC offset; noon is far enough from midnight
+    /// that no offset (or DST shift) can move the date.
+    fn local_ts(h: u32, m: u32, sec: u32) -> String {
+        use chrono::TimeZone;
+        let naive = chrono::NaiveDate::from_ymd_opt(2026, 4, 28)
+            .expect("valid date")
+            .and_hms_opt(h, m, sec)
+            .expect("valid time");
+        chrono::Local
+            .from_local_datetime(&naive)
+            .single()
+            .expect("midday is unambiguous in every zone")
+            .to_rfc3339()
+    }
+
     fn recommended_request(session_id: &str, id: &str) -> ElicitationRequest {
         ElicitationRequest {
             parked: false,
@@ -1589,7 +1612,7 @@ mod tests {
             session_id: session_id.into(),
             workspace_name: "claude-fleet".into(),
             ai_title: None,
-            timestamp: "2026-04-28T02:00:00Z".into(),
+            timestamp: local_ts(12, 0, 0),
             questions: vec![ElicitationQuestion {
                 question: "Which approach?".into(),
                 header: "Approach".into(),
@@ -1633,7 +1656,7 @@ mod tests {
             &req,
             ElicitationOutcome::Answered,
             &answers,
-            "2026-04-28T02:00:05Z".into(),
+            local_ts(12, 0, 5),
         );
         let mut stats = DecisionCardStats::default();
         accumulate_self(&mut stats, &DecisionHistoryRecord::Elicitation(rec));
@@ -1657,7 +1680,7 @@ mod tests {
             &req,
             ElicitationOutcome::Answered,
             &answers,
-            "2026-04-28T02:00:03Z".into(),
+            local_ts(12, 0, 3),
         );
         let mut stats = DecisionCardStats::default();
         accumulate_self(&mut stats, &DecisionHistoryRecord::Elicitation(rec));
@@ -1807,7 +1830,7 @@ mod tests {
             &req_other,
             ElicitationOutcome::Answered,
             &a1,
-            "2026-04-28T02:00:05Z".into(),
+            local_ts(12, 0, 5),
         );
         append_record(&DecisionHistoryRecord::Elicitation(rec_other)).unwrap();
 
@@ -1819,7 +1842,7 @@ mod tests {
             &req_picked,
             ElicitationOutcome::Answered,
             &a2,
-            "2026-04-28T02:00:06Z".into(),
+            local_ts(12, 0, 6),
         );
         append_record(&DecisionHistoryRecord::Elicitation(rec_picked)).unwrap();
 
@@ -1848,7 +1871,7 @@ mod tests {
             session_id: "sess-plan".into(),
             workspace_name: "claude-fleet".into(),
             ai_title: None,
-            timestamp: "2026-04-28T03:00:00Z".into(),
+            timestamp: local_ts(13, 0, 0),
             plan_content: "Step 1: delete everything\nStep 2: rewrite".into(),
             plan_file_path: None,
         };
@@ -1862,7 +1885,7 @@ mod tests {
             &req,
             PlanApprovalOutcome::Rejected,
             Some(&resp),
-            "2026-04-28T03:00:20Z".into(),
+            local_ts(13, 0, 20),
         );
         append_record(&DecisionHistoryRecord::PlanApproval(rec)).unwrap();
 
@@ -1882,7 +1905,7 @@ mod tests {
             &req,
             ElicitationOutcome::Answered,
             &answers,
-            "2026-04-28T02:00:05Z".into(),
+            local_ts(12, 0, 5),
         );
         let mut stats = DecisionCardStats::default();
         // Ask for a different day than the record's requestedAt.
@@ -1939,3 +1962,4 @@ mod tests {
         assert_eq!(unique.len(), 5, "each of the 5 prompts recorded exactly once");
     }
 }
+
