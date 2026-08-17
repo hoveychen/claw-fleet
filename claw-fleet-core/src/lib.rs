@@ -28,6 +28,7 @@ pub mod dpapi;
 pub mod dsh_client;
 pub mod dsh_decisions;
 pub mod dsh_events;
+pub mod dsh_guidance;
 pub mod dsh_messages;
 pub mod dsh_server;
 pub mod dsh_source;
