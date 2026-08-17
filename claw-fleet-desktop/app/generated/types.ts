@@ -177,6 +177,13 @@ projectedTokens: number | null,
 contextWindow: number | null, 
 contextPercent: number | null, };
 
+export type DshSessionCost = { 
+totalUsd: number | null, 
+pricedCalls: number, 
+unpricedCalls: number, 
+unpriceableCalls: number, 
+note: string, };
+
 export type SessionTodo = { content: string, activeForm: string, 
 status: string, };
 

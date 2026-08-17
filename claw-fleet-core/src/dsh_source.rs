@@ -737,6 +737,23 @@ pub fn dsh_token_breakdown(uri: &str) -> Result<DshTokenBreakdown, String> {
     Ok(dsh_token_breakdown_from_projections(&projections))
 }
 
+/// The **raw**, un-normalised durable events of a `dsh://` session.
+///
+/// [`AgentSource::get_messages`] returns the same history translated into Claude
+/// Code's message vocabulary, which is what every Fleet client reads — but that
+/// translation drops the typed `source` metadata dsh hangs off each record.
+/// [`crate::dsh_cost`] needs exactly that metadata (the provider's generation
+/// id), so it reads the events themselves.
+pub fn session_events(uri: &str) -> Result<Vec<Value>, String> {
+    let id = DshSource::session_id_of(uri).ok_or_else(|| format!("invalid dsh URI: {uri}"))?;
+    let value = DshSource::new().with_client(|client| {
+        client
+            .call("session.history", json!({ "sessionId": id }))
+            .map_err(Into::into)
+    })?;
+    Ok(history_events(&value))
+}
+
 /// Pull the raw `SessionEvent`s out of a `session.history` answer.
 ///
 /// Each entry pairs the durable event with an optional host-computed tool view;

@@ -2520,6 +2520,13 @@ impl Backend for LocalBackend {
         claw_fleet_core::dsh_source::dsh_token_breakdown(uri)
     }
 
+    fn get_dsh_session_cost(
+        &self,
+        uri: &str,
+    ) -> Result<claw_fleet_core::dsh_cost::DshSessionCost, String> {
+        claw_fleet_core::dsh_cost::dsh_session_cost(uri)
+    }
+
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

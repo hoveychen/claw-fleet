@@ -1195,6 +1195,19 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn get_dsh_session_cost(
+        &self,
+        uri: &str,
+    ) -> Result<claw_fleet_core::dsh_cost::DshSessionCost, String> {
+        // The remote host holds the dsh install *and* its OpenRouter key, so the
+        // lookup happens there; only the resulting figure crosses the wire.
+        self.probe.get(&format!(
+            "{}?path={}",
+            claw_fleet_core::routes::DSH_SESSION_COST,
+            encode_path(uri)
+        ))
+    }
+
     fn get_waiting_alerts(&self) -> Vec<crate::backend::WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

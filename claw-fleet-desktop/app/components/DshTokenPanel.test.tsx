@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import "../i18n";
 import { DshTokenView } from "./DshTokenPanel";
-import type { DshTokenBreakdown } from "../types";
+import type { DshSessionCost, DshTokenBreakdown } from "../types";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -35,11 +35,11 @@ const live: DshTokenBreakdown = {
   contextPercent: 9215 / 200000,
 };
 
-function render(data: DshTokenBreakdown) {
+function render(data: DshTokenBreakdown, cost?: DshSessionCost | null) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root!.render(<DshTokenView data={data} />));
+  act(() => root!.render(<DshTokenView data={data} cost={cost} />));
   return container!;
 }
 
@@ -85,5 +85,57 @@ describe("DshTokenPanel", () => {
     const text = render(blank).textContent ?? "";
     expect(text).toContain("—");
     expect(text).not.toContain("100%");
+  });
+
+  it("shows the provider's real charge, not a figure derived from the tokens", () => {
+    const cost: DshSessionCost = {
+      totalUsd: 0.0342,
+      pricedCalls: 3,
+      unpricedCalls: 0,
+      unpriceableCalls: 0,
+      note: "",
+    };
+    const text = render(live, cost).textContent ?? "";
+    expect(text).toContain("$0.0342");
+  });
+
+  it("renders no spend and keeps the tokens when the cost lookup came back empty", () => {
+    const cost: DshSessionCost = {
+      totalUsd: null,
+      pricedCalls: 0,
+      unpricedCalls: 3,
+      unpriceableCalls: 0,
+      note: "no OpenRouter API key configured",
+    };
+    const text = render(live, cost).textContent ?? "";
+    // Never $0.00 — that would read as "this session was free".
+    expect(text).not.toContain("$0");
+    expect(text).toContain("no OpenRouter API key configured");
+    expect(text).toContain("71.2k");
+  });
+
+  it("keeps a sub-cent total legible instead of rounding it to zero", () => {
+    const cost: DshSessionCost = {
+      totalUsd: 0.0004,
+      pricedCalls: 1,
+      unpricedCalls: 0,
+      unpriceableCalls: 0,
+      note: "",
+    };
+    expect(render(live, cost).textContent ?? "").toContain("<$0.01");
+  });
+
+  it("surfaces calls that were left out of the total", () => {
+    const cost: DshSessionCost = {
+      totalUsd: 0.02,
+      pricedCalls: 2,
+      unpricedCalls: 0,
+      unpriceableCalls: 1,
+      note: "1 call(s) went through a provider with no cost API and are not included",
+    };
+    const text = render(live, cost).textContent ?? "";
+    expect(text).toContain("$0.0200");
+    // A partial total that does not say it is partial is a wrong total.
+    expect(text).toContain("no cost API");
   });
 });

@@ -762,7 +762,9 @@
     "row_context_total": "In window",
     "col_source": "Source",
     "col_tokens": "Tokens",
-    "caveat": "From dsh's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. dsh reports no per-session model, and Fleet cannot price OpenRouter's model space, so no cost is shown."
+    "kpi_cost": "Real spend",
+    "cost_calls": "{{count}} call(s) priced by the provider",
+    "caveat": "Token counts come from dsh's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. The spend figure is what the provider actually charged for this session's generations — it is never derived from the token counts, because the same model costs different amounts through different providers."
   },
   "inspect": {
     "close": "Close",

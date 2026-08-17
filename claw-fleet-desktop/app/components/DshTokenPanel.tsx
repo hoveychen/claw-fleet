@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import type { DshTokenBreakdown } from "../types";
+import type { DshSessionCost, DshTokenBreakdown } from "../types";
 import styles from "./TokenSpendPanel.module.css";
 
 interface Props {
@@ -27,14 +27,17 @@ function fmtTok(n: number): string {
  *    cached prefix inflates the billed buckets while leaving this untouched,
  *    so a session can show 71k billed against 9k of context.
  *
- * No cost row: dsh routes to OpenRouter's open model space and Fleet's price
- * table only knows Claude and GPT tiers, so an unknown model would silently
- * price at the Opus fallback. Routed here from SessionDetail via
- * `tokenPanelForAgentSource`.
+ * The cost figure is **asked of the provider**, never inferred from the token
+ * counts above: the same model costs different amounts through different
+ * providers, so multiplying by any table Fleet holds would produce a confident
+ * wrong number. It loads on its own (it needs the full session history and may
+ * hit the network), so the token view never waits on it. Routed here from
+ * SessionDetail via `tokenPanelForAgentSource`.
  */
 export function DshTokenPanel({ uri }: Props) {
   const { t } = useTranslation();
   const [data, setData] = useState<DshTokenBreakdown | null>(null);
+  const [cost, setCost] = useState<DshSessionCost | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -53,6 +56,16 @@ export function DshTokenPanel({ uri }: Props) {
         setError(String(e));
         setLoading(false);
       });
+    // Deliberately not awaited alongside the breakdown: a slow or failing cost
+    // lookup must never keep the token numbers off the screen.
+    setCost(null);
+    invoke<DshSessionCost>("get_dsh_session_cost", { uri })
+      .then((c) => {
+        if (!cancelled) setCost(c);
+      })
+      .catch(() => {
+        /* the panel simply shows no cost card */
+      });
     return () => {
       cancelled = true;
     };
@@ -63,7 +76,7 @@ export function DshTokenPanel({ uri }: Props) {
   if (error) return <div className={styles.empty}>{error}</div>;
   if (!data) return <div className={styles.empty}>{t("dsh_token.no_data") || "No data"}</div>;
 
-  return <DshTokenView data={data} />;
+  return <DshTokenView data={data} cost={cost} />;
 }
 
 interface Row {
@@ -73,7 +86,20 @@ interface Row {
   value: number;
 }
 
-export function DshTokenView({ data }: { data: DshTokenBreakdown }) {
+function fmtUsd(n: number): string {
+  // Sub-cent totals are the common case for a short session; $0.00 would read
+  // as "free" when it is really "very cheap".
+  if (n > 0 && n < 0.01) return "<$0.01";
+  return `$${n.toFixed(n < 1 ? 4 : 2)}`;
+}
+
+export function DshTokenView({
+  data,
+  cost,
+}: {
+  data: DshTokenBreakdown;
+  cost?: DshSessionCost | null;
+}) {
   const { t } = useTranslation();
 
   const billed: Row[] = [
@@ -133,6 +159,18 @@ export function DshTokenView({ data }: { data: DshTokenBreakdown }) {
           primary={fmtTok(data.totalTokens)}
         />
         <KpiCard
+          label={t("dsh_token.kpi_cost") || "Real spend"}
+          primary={cost?.totalUsd != null ? fmtUsd(cost.totalUsd) : "—"}
+          secondary={
+            cost
+              ? cost.pricedCalls > 0
+                ? t("dsh_token.cost_calls", { count: cost.pricedCalls }) ||
+                  `${cost.pricedCalls} call(s) priced`
+                : cost.note
+              : ""
+          }
+        />
+        <KpiCard
           label={t("dsh_token.kpi_context") || "Context used"}
           primary={
             data.contextPercent != null ? `${(data.contextPercent * 100).toFixed(0)}%` : "—"
@@ -161,9 +199,13 @@ export function DshTokenView({ data }: { data: DshTokenBreakdown }) {
         totalLabel={t("dsh_token.row_context_total") || "In window"}
       />
 
+      {cost?.note && cost.pricedCalls > 0 && (
+        <div className={styles.caveat}>{cost.note}</div>
+      )}
+
       <div className={styles.caveat}>
         {t("dsh_token.caveat") ||
-          "From dsh's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. dsh reports no per-session model, and Fleet cannot price OpenRouter's model space, so no cost is shown."}
+          "Token counts come from dsh's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. The spend figure is what the provider actually charged for this session's generations — it is never derived from the token counts, because the same model costs different amounts through different providers."}
       </div>
     </div>
   );

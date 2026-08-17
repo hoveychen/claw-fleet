@@ -759,7 +759,9 @@
     "row_context_total": "窗口内",
     "col_source": "类别",
     "col_tokens": "Token",
-    "caveat": "数据取自 dsh 自己的会话 projections。计费桶是整个会话的累计值，上下文构成是当前窗口的快照，两者不能相加。dsh 不提供每会话的模型名，Fleet 也无法为 OpenRouter 的开放模型空间定价，故不显示花费。"
+    "kpi_cost": "真实花费",
+    "cost_calls": "已向 provider 取到 {{count}} 次调用的实价",
+    "caveat": "token 数取自 dsh 自己的会话 projections：计费桶是整个会话的累计值，上下文构成是当前窗口的快照，两者不能相加。花费是 provider 实际收取的金额，不是按 token 反推的——同一个模型经不同 provider 价格不同。"
   },
   "inspect": {
     "close": "关闭",
