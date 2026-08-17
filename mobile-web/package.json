@@ -11,6 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
     "katex": "^0.17.0",
     "lucide-react": "^1.16.0",
     "mermaid": "^11.16.0",
@@ -27,6 +30,7 @@
     "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@types/hast": "^3.0.5",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
