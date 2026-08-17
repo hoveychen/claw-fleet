@@ -3,6 +3,20 @@
 //! Claude Code stores Markdown under `~/.claude/projects/*/memory/`. Codex
 //! stores durable Markdown under `$CODEX_HOME/memories/` and keeps the
 //! background stage-1 summaries in `$CODEX_HOME/memories_1.sqlite`.
+//!
+//! # dsh has no memory surface (measured — do not re-probe)
+//!
+//! There is deliberately no `scan_dsh_memories`. dsh ships no memory subsystem
+//! at all: no `memory`/`memories`/`recall` package in the distribution, no
+//! `memory.*` method in the `/api` catalog (see [`crate::dsh_source`]'s survey),
+//! and a real `~/.dsh` holds only `profiles`, `sessions`, `settings.yaml` and
+//! `storages` — no memories directory or store.
+//!
+//! What dsh does have is a *static instruction* file, `$DSH_HOME/AGENTS.md`,
+//! which is a guidance carrier Fleet writes rather than something the agent
+//! authors about itself. That is [`crate::dsh_guidance`]'s job, not this
+//! module's; surfacing it here would put a Fleet-owned file in a panel whose
+//! whole subject is what the *agent* remembered.
 
 use std::collections::HashMap;
 use std::fs;

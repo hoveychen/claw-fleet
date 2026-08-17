@@ -649,6 +649,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             crate::routes::INTERRUPT => route_interrupt(ctx, request, &query, json_header, path),
 
+            crate::routes::INTERRUPT_AGENT_SESSION => {
+                route_interrupt_agent_session(request, &query, json_header)
+            }
+
             crate::routes::STOP => route_stop(ctx, request, &query, json_header, path),
 
             // `/stop_workspace` kills every agent process (and its tree) rooted
@@ -806,6 +810,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             crate::routes::TOKEN_BREAKDOWN => route_token_breakdown(ctx, request, &query, json_header, path),
 
             crate::routes::CODEX_TOKEN_BREAKDOWN => route_codex_token_breakdown(ctx, request, &query, json_header, path),
+
+            crate::routes::DSH_TOKEN_BREAKDOWN => route_dsh_token_breakdown(ctx, request, &query, json_header, path),
+
+            crate::routes::DSH_SESSION_COST => route_dsh_session_cost(ctx, request, &query, json_header, path),
 
             crate::routes::EXPLORER_ROOTS | crate::routes::EXPLORER_DIR | crate::routes::EXPLORER_FILE | crate::routes::SCRATCHPAD_DIR
             | crate::routes::SCRATCHPAD_FILE | crate::routes::EXPLORER_EXTERNAL_FILE => route_explorer_roots(ctx, request, &query, json_header, path),

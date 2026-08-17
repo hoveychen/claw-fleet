@@ -260,6 +260,14 @@ pub trait Backend: Send + Sync {
     /// call but leaves the transcript resumable. See
     /// [`crate::session::interrupt_pid_impl`] for the signal semantics.
     fn interrupt_pid(&self, pid: u32) -> Result<(), String>;
+    /// Interrupt the session at `path` through its own agent source, for the
+    /// sources with no per-session process to signal.
+    ///
+    /// dsh is the case that needs it: every dsh session's turn runs inside one
+    /// shared `dsh web`, so the pid on its `SessionInfo` is that server's and
+    /// [`Self::interrupt_pid`] would stop every dsh session at once. See
+    /// [`crate::agent_source::interrupt_session_at`].
+    fn interrupt_agent_session(&self, path: String) -> Result<(), String>;
     fn kill_pid(&self, pid: u32) -> Result<(), String>;
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String>;
     /// Headlessly resume a session, routing by `agent_source`: a claude-code
@@ -742,6 +750,23 @@ pub trait Backend: Send + Sync {
         jsonl_path: &str,
     ) -> Result<crate::codex_source::CodexTokenBreakdown, String>;
 
+    /// dsh-native token breakdown for a single `dsh://` session. dsh has no
+    /// transcript file for the other two breakdowns to parse, so the desktop
+    /// "Token" tab routes dsh sessions here, where the numbers come off the
+    /// server's own projections. See `dsh_source::dsh_token_breakdown`.
+    fn get_dsh_token_breakdown(
+        &self,
+        uri: &str,
+    ) -> Result<crate::dsh_source::DshTokenBreakdown, String>;
+
+    /// Real spend for a single `dsh://` session, asked of the provider rather
+    /// than inferred from token counts. Separate from the breakdown above
+    /// because it needs the full `session.history` and may hit the network, so
+    /// the panel renders tokens first and fills the cost in after. See
+    /// `dsh_cost::dsh_session_cost`.
+    fn get_dsh_session_cost(&self, uri: &str)
+        -> Result<crate::dsh_cost::DshSessionCost, String>;
+
     // ── Plugins ──────────────────────────────────────────────────────────────
     /// Scan `~/.claude/plugins/` for installed Claude Code plugins.
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem>;
@@ -934,16 +959,22 @@ pub trait Backend: Send + Sync {
     fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_prd_mode(&self) -> Result<(), String>;
 
-    // ── Codex guidance (global ~/.codex/AGENTS.md blocks) ───────────────────
+    // ── Non-Claude guidance carriers (global AGENTS.md blocks) ──────────────
     /// Mirror the Claude-side concept toggles (interaction / PRD / wiki / model)
-    /// onto codex's `~/.codex/AGENTS.md`. One concept toggle drives both
-    /// carriers: the desktop calls this after any concept toggle and on startup,
-    /// so codex's per-concept blocks always match the Claude sentinels. Reads
-    /// the enabled set from the Claude carriers, so it is idempotent and
-    /// order-independent. Default-bodied so unsupported backends fail loudly;
-    /// LocalBackend and RemoteBackend override it.
+    /// onto every non-Claude carrier: codex's `~/.codex/AGENTS.md` **and** dsh's
+    /// `$DSH_HOME/AGENTS.md`. One concept toggle drives all carriers: the desktop
+    /// calls this after any concept toggle and on startup, so each harness's
+    /// per-concept blocks always match the Claude sentinels. Reads the enabled
+    /// set from the Claude carriers, so it is idempotent and order-independent.
+    /// Default-bodied so unsupported backends fail loudly; LocalBackend and
+    /// RemoteBackend override it.
+    ///
+    /// The name stays codex-specific because it is also the Tauri command name,
+    /// the `/reconcile_codex_guidance` route, and the string the frontend
+    /// `invoke`s — renaming it would break a desktop talking to an older
+    /// `fleet serve`. Read it as "reconcile the non-Claude guidance carriers".
     fn reconcile_codex_guidance(&self, _user_title: &str, _locale: &str) -> Result<(), String> {
-        Err("codex guidance not supported by this backend".into())
+        Err("agent guidance not supported by this backend".into())
     }
 
     // ── Agent sources config ─────────────────────────────────────────────────

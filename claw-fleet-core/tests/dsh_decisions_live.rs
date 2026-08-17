@@ -273,16 +273,26 @@ fn live_a_question_becomes_a_card_and_its_answer_reaches_the_agent() {
     // lands in the session's durable history as
     // `{"answers":[{"id":"colour","selected":["Cobalt"]}]}` (captured live).
     //
-    // The match is narrowed to `tool/result` deliberately: the label also
-    // appears in the agent's own `tool/call` arguments, so a search across all
-    // events would pass on the *question* and prove nothing about the answer.
+    // The match is narrowed to the tool *result* deliberately: the label also
+    // appears in the agent's own tool call arguments, so a search across all
+    // messages would pass on the *question* and prove nothing about the answer.
+    //
+    // `get_messages` returns the history already translated into Claude Code's
+    // vocabulary (`dsh_messages::normalize`) — which is what every Fleet client
+    // renders — so the raw `tool/result` event is not what arrives here. It
+    // becomes a `user` message carrying `tool_result` content blocks. Asserting
+    // on that shape checks two things at once: that dsh handed the answer to the
+    // agent, and that it survives into what the UI actually shows.
     let uri = format!("dsh://{session_id}");
     let saw_answer = wait_for(EFFECT_BUDGET, || {
-        let events = source.get_messages(&uri).ok()?;
-        events
+        let messages = source.get_messages(&uri).ok()?;
+        messages
             .iter()
-            .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("tool/result"))
-            .any(|e| serde_json::to_string(e).unwrap_or_default().contains(&picked))
+            .filter(|m| m.get("type").and_then(|t| t.as_str()) == Some("user"))
+            .filter_map(|m| m.pointer("/message/content")?.as_array())
+            .flatten()
+            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+            .any(|b| serde_json::to_string(b).unwrap_or_default().contains(&picked))
             .then_some(())
     });
     assert!(

@@ -68,10 +68,17 @@ export function codexProfileChoices(
 // Claude's --effort scale (no "xhigh"/"max"); Codex adds "minimal".
 export const CODEX_EFFORT_CHOICES: string[] = ["minimal", "low", "medium", "high"];
 
-// The agent tools Fleet can launch a new session with.
+// The agent tools Fleet can launch a new session with. `agentToolsForSources`
+// filters this down to the sources actually enabled + available, so listing a
+// tool here does not by itself put it in the launcher.
 export const AGENT_TOOL_CHOICES: { value: string; label: string }[] = [
   { value: "claude", label: "Claude" },
   { value: "codex", label: "Codex" },
+  // dsh registers under its own bare name, so no sourceNameToTool mapping is
+  // needed. Its source is additionally gated on the binary existing (see
+  // `agent_source::build_sources`), which is what keeps it out of the launcher
+  // on a machine with no dsh installed.
+  { value: "dsh", label: "dsh" },
 ];
 
 /** A source entry as returned by the `get_sources_config` backend command. */
@@ -86,6 +93,33 @@ export interface SourceInfo {
  *  launcher tool value is the bare "claude". */
 function sourceNameToTool(name: string): string {
   return name === "claude-code" ? "claude" : name;
+}
+
+/** Map a session's `agentSource` onto the launcher tool value its composer
+ *  should offer. Anything Fleet cannot launch falls back to Claude, which is
+ *  what the resume/schedule editors did with a hardcoded ternary before dsh
+ *  existed — and which quietly offered Claude's models for a dsh session. */
+export function toolForAgentSource(agentSource: string | undefined | null): string {
+  const tool = sourceNameToTool((agentSource ?? "").trim());
+  return AGENT_TOOL_CHOICES.some((c) => c.value === tool) ? tool : "claude";
+}
+
+/** Which Token-tab panel a session's `agentSource` should render.
+ *
+ *  Each source records token usage in its own vocabulary and reaches it over its
+ *  own transport, so the panels are not interchangeable:
+ *  - `claude` — the attribution panel, parsed out of the session's JSONL.
+ *  - `codex`  — the rollout's cumulative `total_token_usage`, read from the file.
+ *  - `dsh`    — dsh's `session.list` projections, fetched over RPC. dsh has no
+ *    transcript file at all, so the file-reading panels return nothing for it.
+ */
+export function tokenPanelForAgentSource(
+  agentSource: string | undefined | null,
+): "claude" | "codex" | "dsh" {
+  const source = (agentSource ?? "").trim();
+  if (source === "codex") return "codex";
+  if (source === "dsh") return "dsh";
+  return "claude";
 }
 
 /** Restrict the launchable agent tools to the sources that are actually being

@@ -1,4 +1,4 @@
-//! Drift-guard for the `FLEET_HOME` / `CODEX_HOME` test lock.
+//! Drift-guard for the `FLEET_HOME` / `CODEX_HOME` / `DSH_HOME` test lock.
 //!
 //! `crate::paths::fleet_home_lock()` is a process-wide mutex that serialises
 //! every test which repoints Fleet's home directories. It has to exist because
@@ -41,7 +41,7 @@ use std::path::{Path, PathBuf};
 ///
 /// `HOME` itself is not listed: no test repoints it process-wide (the spawn
 /// paths bind it per-`Command`, which is local to that child).
-const GUARDED_VARS: &[&str] = &["FLEET_HOME", "CODEX_HOME"];
+const GUARDED_VARS: &[&str] = &["FLEET_HOME", "CODEX_HOME", "DSH_HOME"];
 
 /// The lock every mutator must be under, directly or through its helper.
 const LOCK: &str = "fleet_home_lock";
@@ -222,7 +222,7 @@ fn every_test_that_repoints_a_fleet_home_holds_the_lock() {
 
     assert!(
         offenders.is_empty(),
-        "these tests perturb FLEET_HOME/CODEX_HOME without holding \
+        "these tests perturb FLEET_HOME/CODEX_HOME/DSH_HOME without holding \
          `crate::session::fleet_home_lock()`, so they race every other test that \
          reads a Fleet home:\n{}\n\nFix by taking the lock for the whole test \
          (`let _lock = crate::session::fleet_home_lock();` as the first line), or \

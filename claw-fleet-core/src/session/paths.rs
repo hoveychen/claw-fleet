@@ -94,6 +94,23 @@ pub fn get_codex_dir() -> Option<PathBuf> {
     real_home_dir().map(|h| h.join(".codex"))
 }
 
+/// dsh's config home: `$DSH_HOME` if set (dsh honours it), else `~/.dsh`.
+///
+/// The third agent's analogue of [`get_codex_dir`], and canonical for the same
+/// reason: `@deepseek-ai/dsh-home-paths` resolves this exact pair, so every
+/// Fleet surface that writes into or reads out of dsh's home — the guidance
+/// AGENTS.md ([`crate::dsh_guidance`]) and the skill roots ([`crate::skills`]) —
+/// has to agree with it, or Fleet writes somewhere dsh never looks.
+pub fn get_dsh_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("DSH_HOME") {
+        let path = PathBuf::from(dir);
+        if !path.as_os_str().is_empty() {
+            return Some(path);
+        }
+    }
+    real_home_dir().map(|h| h.join(".dsh"))
+}
+
 #[cfg(unix)]
 pub fn is_process_alive(pid: u32) -> bool {
     let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };

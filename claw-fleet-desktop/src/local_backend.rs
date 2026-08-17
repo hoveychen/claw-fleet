@@ -1785,6 +1785,13 @@ impl Backend for LocalBackend {
         }
     }
 
+    fn interrupt_agent_session(&self, path: String) -> Result<(), String> {
+        // No rescan kick here, unlike the pid paths: the source that owns the
+        // session pushes its own status (dsh's `turn/end` arrives on the mux
+        // within the same second), so a forced re-poll would only race it.
+        claw_fleet_core::agent_source::interrupt_session_at(&path)
+    }
+
     fn interrupt_pid(&self, pid: u32) -> Result<(), String> {
         claw_fleet_core::session::interrupt_pid_impl(pid)?;
         // The CLI needs a moment to write its interrupt marker and exit, so the
@@ -2506,6 +2513,20 @@ impl Backend for LocalBackend {
         claw_fleet_core::codex_source::codex_token_breakdown(jsonl_path)
     }
 
+    fn get_dsh_token_breakdown(
+        &self,
+        uri: &str,
+    ) -> Result<claw_fleet_core::dsh_source::DshTokenBreakdown, String> {
+        claw_fleet_core::dsh_source::dsh_token_breakdown(uri)
+    }
+
+    fn get_dsh_session_cost(
+        &self,
+        uri: &str,
+    ) -> Result<claw_fleet_core::dsh_cost::DshSessionCost, String> {
+        claw_fleet_core::dsh_cost::dsh_session_cost(uri)
+    }
+
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }
@@ -2674,7 +2695,13 @@ impl Backend for LocalBackend {
     }
 
     fn reconcile_codex_guidance(&self, user_title: &str, locale: &str) -> Result<(), String> {
-        crate::codex_guidance::reconcile_codex_from_claude_state(user_title, locale)
+        // Both non-Claude carriers, not just codex — see the trait doc for why
+        // the method keeps its codex-era name. Each is attempted regardless of
+        // the other's outcome so one broken harness home cannot strand the
+        // other's blocks; the first error is what the UI retries on.
+        let codex = crate::codex_guidance::reconcile_codex_from_claude_state(user_title, locale);
+        let dsh = crate::dsh_guidance::reconcile_dsh_from_claude_state(user_title, locale);
+        codex.and(dsh)
     }
 
     fn respond_to_elicitation(

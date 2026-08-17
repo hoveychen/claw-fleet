@@ -164,6 +164,26 @@ costUsd: number,
 contextPercent: number | null, 
 model: string | null, };
 
+export type DshTokenBreakdown = { 
+uncachedInputTokens: number, 
+cacheReadTokens: number, 
+cacheWriteTokens: number, 
+outputTokens: number, 
+totalTokens: number, 
+systemTokens: number, 
+toolsTokens: number, 
+messageTokens: number, 
+projectedTokens: number | null, 
+contextWindow: number | null, 
+contextPercent: number | null, };
+
+export type DshSessionCost = { 
+totalUsd: number | null, 
+pricedCalls: number, 
+unpricedCalls: number, 
+unpriceableCalls: number, 
+note: string, };
+
 export type SessionTodo = { content: string, activeForm: string, 
 status: string, };
 

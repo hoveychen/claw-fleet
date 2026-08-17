@@ -398,6 +398,14 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get_ok(&format!("{}?pid={}", claw_fleet_core::routes::INTERRUPT, pid))
     }
 
+    fn interrupt_agent_session(&self, path: String) -> Result<(), String> {
+        self.probe.get_ok(&format!(
+            "{}?path={}",
+            claw_fleet_core::routes::INTERRUPT_AGENT_SESSION,
+            encode_path(&path)
+        ))
+    }
+
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
         self.probe.get_ok(&format!("{}?pid={}&force=false", claw_fleet_core::routes::STOP, pid))
     }
@@ -1173,6 +1181,30 @@ impl crate::backend::Backend for RemoteBackend {
             "{}?path={}",
             claw_fleet_core::routes::CODEX_TOKEN_BREAKDOWN,
             encode_path(jsonl_path)
+        ))
+    }
+
+    fn get_dsh_token_breakdown(
+        &self,
+        uri: &str,
+    ) -> Result<claw_fleet_core::dsh_source::DshTokenBreakdown, String> {
+        self.probe.get(&format!(
+            "{}?path={}",
+            claw_fleet_core::routes::DSH_TOKEN_BREAKDOWN,
+            encode_path(uri)
+        ))
+    }
+
+    fn get_dsh_session_cost(
+        &self,
+        uri: &str,
+    ) -> Result<claw_fleet_core::dsh_cost::DshSessionCost, String> {
+        // The remote host holds the dsh install *and* its OpenRouter key, so the
+        // lookup happens there; only the resulting figure crosses the wire.
+        self.probe.get(&format!(
+            "{}?path={}",
+            claw_fleet_core::routes::DSH_SESSION_COST,
+            encode_path(uri)
         ))
     }
 
