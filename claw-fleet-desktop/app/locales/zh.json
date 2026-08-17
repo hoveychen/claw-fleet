@@ -1728,7 +1728,8 @@
     "source_not_detected": "未检测到",
     "source_name": {
       "claude-code": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "dsh": "dsh"
     },
     "claude_binary": "Claude 程序位置",
     "claude_binary_desc": "Fleet 会自动找到你电脑上的 Claude，一般无需改动。只有想指定某个特定版本时，才在下面手动选择。",
