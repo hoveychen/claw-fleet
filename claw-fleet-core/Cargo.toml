@@ -53,6 +53,12 @@ ctrlc = { version = "3", features = ["termination"] }
 git2 = { version = "0.18", default-features = false }
 # Outbound WebSocket long-connection for the mobile relay channel.
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+# dsh stores its provider config (including which env var holds the OpenRouter
+# key) as YAML. Already a production dependency of fleet-cli and already in the
+# lockfile, so promoting it here from dev-dependencies adds no new crate — and
+# hand-rolling a parser for nested YAML would be strictly worse.
+serde_yaml = "0.9"
+
 # Rust→TypeScript type generation. Optional + feature-gated so a normal `cargo
 # build` never pulls the proc-macro: the `#[derive(TS)]` attrs are wrapped in
 # `#[cfg_attr(feature = "ts-export", ...)]`, and bindings are (re)generated only
@@ -69,7 +75,6 @@ windows = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_
 
 [dev-dependencies]
 tempfile = "3"
-serde_yaml = "0.9"
 # Source-text parsing for the backend drift-guard test (tests/backend_drift_guard.rs).
 # Already in the dependency tree transitively (v1.12.x via reqwest/sysinfo etc), so
 # this adds no new download; used only by the guard to detect fan-out drift.

@@ -759,6 +759,14 @@ pub trait Backend: Send + Sync {
         uri: &str,
     ) -> Result<crate::dsh_source::DshTokenBreakdown, String>;
 
+    /// Real spend for a single `dsh://` session, asked of the provider rather
+    /// than inferred from token counts. Separate from the breakdown above
+    /// because it needs the full `session.history` and may hit the network, so
+    /// the panel renders tokens first and fills the cost in after. See
+    /// `dsh_cost::dsh_session_cost`.
+    fn get_dsh_session_cost(&self, uri: &str)
+        -> Result<crate::dsh_cost::DshSessionCost, String>;
+
     // ── Plugins ──────────────────────────────────────────────────────────────
     /// Scan `~/.claude/plugins/` for installed Claude Code plugins.
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem>;

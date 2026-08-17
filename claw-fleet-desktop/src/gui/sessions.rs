@@ -145,6 +145,16 @@ pub(crate) fn get_dsh_token_breakdown(
         .get_dsh_token_breakdown(&uri)
 }
 
+/// Real spend for a `dsh://` session. `async` because it may go to the provider
+/// over the network — a sync command would block the main thread.
+#[tauri::command(async)]
+pub(crate) fn get_dsh_session_cost(
+    uri: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::dsh_cost::DshSessionCost, String> {
+    state.backend.read().unwrap().get_dsh_session_cost(&uri)
+}
+
 #[tauri::command(async)]
 pub(crate) fn get_session_todos(
     jsonl_path: String,
