@@ -35,7 +35,7 @@ pub(crate) fn route_sessions(
     let sources = ctx.sources;
     let search_index = ctx.search_index;
 
-                let sessions = scan_all_sources(sources);
+                let sessions = ctx.snapshot.sessions();
                 // Incrementally update the search index with the latest session list.
                 let pairs: Vec<(String, String)> = sessions
                     .iter()
@@ -261,7 +261,7 @@ pub(crate) fn route_setup_status(
 ) {
     let sources = ctx.sources;
 
-                let sessions = scan_all_sources(sources);
+                let sessions = ctx.snapshot.sessions();
                 let detected_tools = crate::detect_installed_tools(&sessions);
                 let (cli_installed, cli_path) = crate::check_cli_installed();
                 let claude_dir_exists = get_claude_dir().map_or(false, |d| d.is_dir());
@@ -308,7 +308,7 @@ pub(crate) fn route_today_usage(
 ) {
     let sources = ctx.sources;
 
-                let sessions = scan_all_sources(sources);
+                let sessions = ctx.snapshot.sessions();
                 let usage = crate::today_usage::today_usage(&sessions);
                 let body = serde_json::to_string(&usage).unwrap_or_default();
                 let _ = request.respond(
@@ -324,8 +324,8 @@ pub(crate) fn route_cloud_usage(
     _path: &str,
 ) {
     // One customer per container, so this container's usage IS the customer's.
-    // Reuses the scanned sessions; no extra JSONL scan beyond scan_all_sources.
-    let sessions = scan_all_sources(ctx.sources);
+    // Reuses the session snapshot; no extra JSONL scan beyond it.
+    let sessions = ctx.snapshot.sessions();
     let usage = crate::today_usage::cloud_usage(&sessions);
     let body = serde_json::to_string(&usage).unwrap_or_default();
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
@@ -339,7 +339,7 @@ pub(crate) fn route_today_usage_breakdown(
     _path: &str,
 ) {
     let sources = ctx.sources;
-    let sessions = scan_all_sources(sources);
+    let sessions = ctx.snapshot.sessions();
     let breakdown = crate::today_usage::today_usage_breakdown(&sessions);
     let body = serde_json::to_string(&breakdown).unwrap_or_default();
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
@@ -360,7 +360,7 @@ pub(crate) fn route_usage_range_breakdown(
         .get("to_ms")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(i64::MAX);
-    let sessions = scan_all_sources(ctx.sources);
+    let sessions = ctx.snapshot.sessions();
     let breakdown = crate::today_usage::usage_range_breakdown(&sessions, from_ms, to_ms);
     let body = serde_json::to_string(&breakdown).unwrap_or_default();
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
@@ -381,7 +381,7 @@ pub(crate) fn route_session_decisions(
                     percent_decode_str(s.as_str()).decode_utf8_lossy().to_string()
                 });
                 let resolved = if jsonl_path.is_none() {
-                    scan_all_sources(sources)
+                    ctx.snapshot.sessions()
                         .into_iter()
                         .find(|s| s.id == session_id)
                         .map(|s| s.jsonl_path)

@@ -19,7 +19,7 @@ pub(crate) fn route_audit(
     let audit_history = ctx.audit_history.clone();
 
                 use crate::audit::extract_audit_events;
-                let sessions = scan_all_sources(sources);
+                let sessions = ctx.snapshot.sessions();
                 let active_ids: std::collections::HashSet<String> = sessions
                     .iter()
                     .filter(|s| !matches!(s.status, SessionStatus::Idle))

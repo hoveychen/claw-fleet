@@ -70,7 +70,7 @@ pub(crate) fn route_elicitation_pending(
     let sources = ctx.sources;
 
                 let ids = elicitation::list_pending_requests();
-                let sessions = scan_all_sources(sources);
+                let sessions = ctx.snapshot.sessions();
                 let mut requests = Vec::new();
                 for id in &ids {
                     if let Some(mut req) = elicitation::read_request(id) {

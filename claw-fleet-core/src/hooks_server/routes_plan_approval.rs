@@ -70,7 +70,7 @@ pub(crate) fn route_plan_approval_pending(
     let sources = ctx.sources;
 
                 let ids = plan_approval::list_pending_requests();
-                let sessions = scan_all_sources(sources);
+                let sessions = ctx.snapshot.sessions();
                 let mut requests = Vec::new();
                 for id in &ids {
                     if let Some(mut req) = plan_approval::read_request(id) {
