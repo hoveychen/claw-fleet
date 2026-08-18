@@ -224,6 +224,7 @@
     "browse": "Browse…",
     "model": "Model",
     "model_default": "Default (CLI setting)",
+    "model_other_vendors": "Other vendors ({{count}})",
     "model_pill_default": "Model",
     "effort": "Effort",
     "effort_default": "Default",

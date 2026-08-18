@@ -155,6 +155,15 @@ pub(crate) fn get_dsh_session_cost(
     state.backend.read().unwrap().get_dsh_session_cost(&uri)
 }
 
+/// dsh's model catalogue for the launcher's model / effort menus. `async`
+/// because the first call may have to start `dsh web` and then wait on it.
+#[tauri::command(async)]
+pub(crate) fn dsh_models(
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::dsh_source::DshModelCatalog, String> {
+    state.backend.read().unwrap().dsh_models()
+}
+
 #[tauri::command(async)]
 pub(crate) fn get_session_todos(
     jsonl_path: String,

@@ -39,6 +39,7 @@ import {
   MOCK_SKILL_FILES,
   MOCK_MEMORY_CONTENT,
   MOCK_MEMORY_HISTORY,
+  MOCK_DSH_MODELS,
   MOCK_SOURCES_CONFIG,
   MOCK_SETUP_STATUS,
   MOCK_HOOKS_PLAN,
@@ -449,6 +450,13 @@ function handleIPC(
       return MOCK_MEMORY_HISTORY;
     case "get_sources_config":
       return MOCK_SOURCES_CONFIG;
+
+    // dsh's model catalogue. Small on purpose: one 2-model provider listed
+    // inline plus one big provider that folds by vendor, so a screenshot shows
+    // both menu levels. The real list is the host's whole provider space (278
+    // models across 43 vendors when this was written).
+    case "dsh_models":
+      return MOCK_DSH_MODELS;
 
     // Codex profile-v2 files on the host. Two entries so the model picker
     // shows the third-party half in screenshots; the real list comes from

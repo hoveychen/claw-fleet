@@ -112,6 +112,13 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { path: q(a.uri) },
   }),
 
+  // No params: `llm.models` describes the host's providers, not a session.
+  dsh_models: () => ({
+    method: "GET",
+    path: "/dsh_models",
+    query: {},
+  }),
+
   list_session_decisions: (a) => ({
     method: "GET",
     path: "/session_decisions",

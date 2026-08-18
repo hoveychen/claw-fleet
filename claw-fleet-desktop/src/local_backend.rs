@@ -2527,6 +2527,10 @@ impl Backend for LocalBackend {
         claw_fleet_core::dsh_cost::dsh_session_cost(uri)
     }
 
+    fn dsh_models(&self) -> Result<claw_fleet_core::dsh_source::DshModelCatalog, String> {
+        claw_fleet_core::dsh_source::dsh_models()
+    }
+
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }
