@@ -18,7 +18,7 @@ pub(crate) fn route_fleet_ask_pending(
     let sources = ctx.sources;
 
                 let ids = crate::mcp_ipc::list_pending_requests();
-                let sessions = scan_all_sources(sources);
+                let sessions = ctx.snapshot.sessions();
                 let mut requests = Vec::new();
                 for id in &ids {
                     if let Some(mut req) = crate::mcp_ipc::read_request(id) {
@@ -110,7 +110,7 @@ pub(crate) fn route_permission_prompt_pending(
     let sources = ctx.sources;
 
                 let ids = crate::permission_prompt_ipc::list_pending_requests();
-                let sessions = scan_all_sources(sources);
+                let sessions = ctx.snapshot.sessions();
                 let mut requests = Vec::new();
                 for id in &ids {
                     if let Some(mut req) = crate::permission_prompt_ipc::read_request(id) {
@@ -183,7 +183,7 @@ pub(crate) fn route_a2ui_render_pending(
     let sources = ctx.sources;
 
                 let ids = crate::mcp_a2ui_ipc::list_pending_requests();
-                let sessions = scan_all_sources(sources);
+                let sessions = ctx.snapshot.sessions();
                 let mut requests = Vec::new();
                 for id in &ids {
                     if let Some(mut req) = crate::mcp_a2ui_ipc::read_request(id) {
