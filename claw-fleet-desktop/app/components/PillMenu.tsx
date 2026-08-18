@@ -16,6 +16,11 @@ export interface PillMenuItem {
   /** Icon shown in the check column (for action items like "Browse…"). */
   icon?: ReactNode;
   checked?: boolean;
+  /** Leave the popover open after selecting. For rows that *navigate* the menu
+   *  rather than commit a value — the dsh model picker's vendor folders and its
+   *  back row — where closing would make the second level unreachable in one
+   *  gesture. Committing rows leave this unset and close as before. */
+  keepOpen?: boolean;
   onSelect: () => void | Promise<void>;
 }
 
@@ -87,7 +92,7 @@ export function PillMenu({
       role="menuitem"
       className={styles.menu_item}
       onClick={async () => {
-        setOpen(false);
+        if (!item.keepOpen) setOpen(false);
         await item.onSelect();
       }}
     >
