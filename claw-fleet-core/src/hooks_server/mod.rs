@@ -82,6 +82,11 @@ pub(crate) struct ServeCtx<'a> {
     pub(crate) llm_config: &'a std::sync::Arc<std::sync::Mutex<crate::llm_provider::LlmConfig>>,
     pub(crate) audit_history: &'a std::sync::Arc<std::sync::Mutex<crate::audit::AuditHistory>>,
     pub(crate) search_index: &'a crate::search_index::SearchIndex,
+    /// The background-refreshed session list. Scan-bearing routes read this
+    /// instead of calling `scan_all_sources` on the request; the exceptions
+    /// (the `/v1` surface, which must see a just-created session) are called out
+    /// where they scan.
+    pub(crate) snapshot: &'a std::sync::Arc<crate::session_snapshot::SessionSnapshot>,
 }
 
 pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
@@ -157,7 +162,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     crate::injector_watchdog::start(watchdog_fleet_path);
 
 
-    let sources = build_sources();
+    let sources = Arc::new(build_sources());
+
+    // The session list every scan-bearing route reads. Refreshed by its own
+    // ticker while anyone is reading, so a route costs a clone instead of an
+    // RPC to every agent source — see session_snapshot for the staleness
+    // contract and for which callers must still scan directly.
+    let snapshot = crate::session_snapshot::SessionSnapshot::new(sources.clone());
+    snapshot.start_ticker();
 
     // Open the daily report store.
     let report_store = Arc::new(Mutex::new(
@@ -269,8 +281,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     // and pushes them to connected SSE clients.
     {
         let sse_bg = sse.clone();
+        let snapshot_bg = snapshot.clone();
         std::thread::spawn(move || {
-            let sources_bg = build_sources();
             let mut prev_sessions_json = String::new();
             let mut prev_mobile_clients: usize = 0;
             let mut prev_alert_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -295,8 +307,12 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 // so `fleet guard`/`fleet elicitation` know the head is reachable.
                 crate::consumer_heartbeat::write_heartbeat();
 
-                // Broadcast session updates
-                let sessions = scan_all_sources(&sources_bg);
+                // Broadcast session updates. Reads the same snapshot the routes
+                // read rather than scanning again: this loop and a `/sessions`
+                // poll used to each pay their own RPC to every source, and its
+                // 2s cadence matches the snapshot's refresh interval, so what a
+                // client is told still changes as fast as it did.
+                let sessions = snapshot_bg.sessions();
                 let json = serde_json::to_string(&sessions).unwrap_or_default();
                 let sessions_changed = json != prev_sessions_json;
                 if sessions_changed {
@@ -620,7 +636,6 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     let workers = worker_count();
     eprintln!("[fleet serve] {workers} request worker(s)");
     let server = Arc::new(server);
-    let sources = Arc::new(sources);
     for _ in 1..workers {
         let server = server.clone();
         let sources = sources.clone();
@@ -631,6 +646,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         let token = token.clone();
         let public_token = public_token.clone();
         let sse = sse.clone();
+        let snapshot = snapshot.clone();
         std::thread::spawn(move || {
             run_request_worker(
                 server,
@@ -642,6 +658,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 token,
                 public_token,
                 sse,
+                snapshot,
             )
         });
     }
@@ -655,6 +672,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         token,
         public_token,
         sse,
+        snapshot,
     );
 }
 
@@ -691,6 +709,7 @@ fn run_request_worker(
     token: String,
     public_token: Option<String>,
     sse: SseBroadcaster,
+    snapshot: Arc<crate::session_snapshot::SessionSnapshot>,
 ) {
     let search_index = match SearchIndex::open_at(&search_db_path) {
         Ok(idx) => idx,
@@ -711,6 +730,7 @@ fn run_request_worker(
         llm_config: &llm_config,
         audit_history: &audit_history,
         search_index: &search_index,
+        snapshot: &snapshot,
     };
     loop {
         match server.recv() {

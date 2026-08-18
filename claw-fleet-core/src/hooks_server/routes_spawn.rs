@@ -40,6 +40,10 @@ pub(crate) fn route_resume_session(
                             Box::new(|_| {}),
                         ) {
                             Ok(()) => {
+                                // Same reason as the spawn route: a resumed
+                                // session changes the roster, and only a rescan
+                                // puts that in the snapshot.
+                                ctx.snapshot.invalidate();
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(r#"{"ok":true}"#)
                                         .with_header(json_header),
@@ -233,6 +237,10 @@ pub(crate) fn route_spawn_session(
                             &spec,
                         ) {
                             Ok(resp) => {
+                                // The roster the routes serve is a snapshot; without
+                                // this the caller's own new session would not appear
+                                // until the next ticker refresh.
+                                ctx.snapshot.invalidate();
                                 let body =
                                     serde_json::to_string(&resp).unwrap_or_default();
                                 let _ = request.respond(

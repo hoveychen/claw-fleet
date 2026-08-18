@@ -38,6 +38,13 @@ const HISTORY_DELAY_MS: u64 = 100;
 /// can only fail by queueing, not by the machine being slow.
 const HEALTH_BUDGET: Duration = Duration::from_millis(1000);
 
+/// What a repeat `/sessions` poll is allowed to take once the snapshot is warm.
+///
+/// Serving it is a clone of an already-scanned list plus JSON encoding, so this
+/// is orders of magnitude above the real cost and still an order of magnitude
+/// below the 5s dsh RPC a scan-on-request poll pays.
+const POLL_BUDGET: Duration = Duration::from_millis(500);
+
 // ── Harness ────────────────────────────────────────────────────────────────
 
 fn unique_tempdir(label: &str) -> PathBuf {
@@ -192,7 +199,81 @@ fn timed_get(port: u16, path: &str, token: &str) -> (Duration, String) {
     (elapsed, String::from_utf8_lossy(&raw).to_string())
 }
 
-// ── The test ───────────────────────────────────────────────────────────────
+// ── The tests ──────────────────────────────────────────────────────────────
+
+/// A scan-bearing route must read a shared snapshot, not scan on the request.
+///
+/// The worker pool stops one slow scan from blocking *other* requests, but the
+/// scanning request itself still waits for the slowest source every time. dsh's
+/// roster single-flight bounds that to one call per `ROSTER_TTL` (2s), so a
+/// frontend polling `/sessions` slower than that — which is exactly what it does
+/// — pays the full dsh RPC on nearly every poll.
+///
+/// So the session list is kept as a snapshot refreshed off the request path, the
+/// way the desktop's `LocalBackend::list_sessions` reads
+/// `Arc<Mutex<Vec<SessionInfo>>>` filled by its watcher/poll threads. Requests
+/// then cost a clone.
+///
+/// The samples are deliberately spaced *past* `ROSTER_TTL`, since anything
+/// inside that window would be answered by dsh's own cache and prove nothing.
+#[test]
+fn repeat_session_polls_must_not_pay_the_scan_each_time() {
+    if claw_fleet_core::process_util::which("node").is_none() {
+        eprintln!("skipped: node not on PATH, the dsh fixture cannot run");
+        return;
+    }
+
+    let fleet_home = unique_tempdir("sessions-snapshot");
+    let port_file = fleet_home.join("port");
+    let token = "serve-snapshot-token";
+
+    let mut serve = spawn_slow_dsh_serve(&fleet_home, &port_file, token);
+    let port = wait_for_port_file(&port_file, Duration::from_secs(20), &mut serve);
+
+    // The first poll may pay for the cold snapshot; that is the one request the
+    // design allows to wait. It also proves the slow fixture is really in play.
+    let (cold, cold_body) = timed_get(port, "/sessions", token);
+    assert!(
+        cold_body.contains("session-fake-slow"),
+        "the fixture's session is missing from /sessions, so this measures the \
+         wrong thing: {}\n{}",
+        cold_body.chars().take(400).collect::<String>(),
+        serve.logs()
+    );
+    assert!(
+        cold >= Duration::from_secs(3),
+        "the first /sessions took {cold:?}; the 5s dsh fixture was not in the \
+         picture, so a fast repeat poll would prove nothing\n{}",
+        serve.logs()
+    );
+
+    // Spaced past dsh's roster TTL, so each of these would go back to dsh under
+    // the scan-per-request design.
+    let spacing = claw_fleet_core::dsh_source::ROSTER_TTL + Duration::from_millis(1500);
+    let mut samples = Vec::new();
+    for _ in 0..3 {
+        std::thread::sleep(spacing);
+        let (elapsed, body) = timed_get(port, "/sessions", token);
+        assert!(
+            body.contains("session-fake-slow"),
+            "a repeat /sessions lost the session — a snapshot that answers fast \
+             but empty is worse than a slow scan: {}\n{}",
+            body.chars().take(400).collect::<String>(),
+            serve.logs()
+        );
+        samples.push(elapsed);
+    }
+
+    let worst = samples.iter().copied().max().unwrap_or_default();
+    assert!(
+        worst <= POLL_BUDGET,
+        "a repeat /sessions poll took {worst:?} (budget {POLL_BUDGET:?}, cold \
+         poll took {cold:?}); the route is still scanning every source on the \
+         request instead of reading a snapshot refreshed off the request path. \
+         samples: {samples:?}\n{}",
+        serve.logs()
+    );
+}
 
 #[test]
 fn a_slow_scan_request_must_not_block_health() {
