@@ -450,6 +450,7 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
           : workspace || t("new_session.workspace_placeholder")
       }
       disabled={submitting}
+      testId="workspace-pill"
       menuHeader={(close) => (
         <div className={pillStyles.menu_header}>
           <input
