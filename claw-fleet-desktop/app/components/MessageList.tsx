@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
+import { conversationPlaceholder } from "../conversationPlaceholder";
 import type {
   DecisionHistoryRecord,
   LiveThinking,
@@ -330,6 +331,12 @@ function WorkingIndicator({ status }: { status: string }) {
 interface Props {
   messages: RawMessage[];
   isLoading: boolean;
+  /** The fetch blew its deadline or failed with nothing to show. Replaces the
+   *  spinner with an explanation + retry — a transcript fetch that never lands
+   *  used to leave this pane on 「加载中…」 forever. */
+  stalled?: boolean;
+  /** Re-run the fetch. Required for the stalled pane's retry button to appear. */
+  onRetry?: () => void;
   searchQuery?: string | null;
   /** Live scanner status of the session (e.g. "thinking", "executing");
    *  drives the animated activity indicator under the newest message. */
@@ -368,6 +375,8 @@ const NO_DECISIONS: DecisionHistoryRecord[] = [];
 export function MessageList({
   messages,
   isLoading,
+  stalled = false,
+  onRetry,
   searchQuery,
   status,
   liveThinking,
@@ -625,12 +634,27 @@ export function MessageList({
   // reader watches tools stream in; it folds itself once the agent moves on.
   const isWorkingNow = !!status && WORKING_STATUSES.has(status);
 
-  // Only take over the panel when there is genuinely nothing to show. The same
-  // `isLoading` flag is raised while fetching *older* history, and blanking the
-  // whole conversation for that is how the previous "load earlier" button made
-  // the transcript flash empty on every click.
-  if (isLoading && displayMsgs.length === 0) {
+  // Only take over the panel when there is genuinely nothing to show — see
+  // `conversationPlaceholder` for the exact rule (and its unit tests).
+  const placeholder = conversationPlaceholder({
+    isLoading,
+    stalled,
+    messageCount: displayMsgs.length,
+  });
+  if (placeholder === "loading") {
     return <div className={styles.loading}>{t("loading", "Loading…")}</div>;
+  }
+  if (placeholder === "stalled") {
+    return (
+      <div className={styles.loading} data-testid="conversation-stalled">
+        <div>{t("detail.load_stalled")}</div>
+        {onRetry && (
+          <button type="button" className={styles.stalled_retry} onClick={onRetry}>
+            {t("detail.load_retry")}
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (

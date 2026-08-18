@@ -1617,7 +1617,9 @@
     "copy_workspace_path": "Copy workspace path",
     "more": "More",
     "switch_agent": "Switch agent",
-    "agent_current": "current"
+    "agent_current": "current",
+    "load_stalled": "Loading the conversation timed out — the backend never answered. It may be busy or wedged; it recovers on its own, or retry now.",
+    "load_retry": "Retry"
   },
   "settings": {
     "title": "Settings",

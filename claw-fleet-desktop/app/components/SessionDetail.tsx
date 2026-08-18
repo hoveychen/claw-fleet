@@ -15,6 +15,7 @@ import { canResumeSession, canEnqueueSession, preferredSessionTitle, shouldFollo
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { messageToText } from "../messageRows";
 import { reconcileMessages } from "../messageReuse";
+import { withStallWatch } from "../loadDeadline";
 import {
   initialFollowState,
   nextFollowState,
@@ -166,6 +167,9 @@ export function SessionDetail({
   const [localSession, setLocalSession] = useState<SessionInfo | null>(sessionInfo ?? null);
   const [localMessages, setLocalMessages] = useState<RawMessage[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
+  const [localStalled, setLocalStalled] = useState(false);
+  /** Bumped by the stalled pane's retry button to re-run the fetch effect. */
+  const [reloadKey, setReloadKey] = useState(0);
   const [localFullyLoaded, setLocalFullyLoaded] = useState(false);
   const [localTail, setLocalTail] = useState<number>(INITIAL_TAIL);
   // Render-synced mirrors for the live-tail interval callback, which must read
@@ -208,24 +212,39 @@ export function SessionDetail({
     let cancelled = false;
     const tail = localTailRef.current;
     setLocalLoading(true);
-    invoke<RawMessage[]>("get_messages_tail", {
-      jsonlPath: localSession.jsonlPath,
-      tail,
-    })
+    setLocalStalled(false);
+    // Deadline, not abort: `get_messages_tail` can stay pending forever when the
+    // backend stops answering (proven by freezing dsh's web server — the pane
+    // sat on 「加载中…」 for 80s+ with no error). A late result still renders.
+    withStallWatch(
+      invoke<RawMessage[]>("get_messages_tail", {
+        jsonlPath: localSession.jsonlPath,
+        tail,
+      }),
+      () => {
+        if (cancelled) return;
+        setLocalLoading(false);
+        setLocalStalled(true);
+      },
+    )
       .then((msgs) => {
         if (cancelled) return;
         setLocalMessages((prev) => reconcileMessages(prev, msgs));
         setLocalFullyLoaded(msgs.length < tail);
         setLocalLoading(false);
+        setLocalStalled(false);
       })
       .catch(() => {
         if (cancelled) return;
         setLocalLoading(false);
+        // A rejection with nothing on screen used to render as a silent blank
+        // pane; say so instead, and give the reader a retry.
+        setLocalStalled(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [isStandalone, localSession?.jsonlPath, paused]);
+  }, [isStandalone, localSession?.jsonlPath, paused, reloadKey]);
 
   const standaloneLoadEarlier = useCallback(async () => {
     if (!isStandalone || !localSession || localFullyLoaded) return;
@@ -248,6 +267,11 @@ export function SessionDetail({
   const session = isStandalone ? localSession : global.session;
   const messages = isStandalone ? localMessages : global.messages;
   const isLoading = isStandalone ? localLoading : global.isLoading;
+  const loadStalled = isStandalone ? localStalled : global.loadStalled;
+  const retryLoad = useCallback(() => {
+    if (isStandalone) setReloadKey((k) => k + 1);
+    else void global.retryLoad();
+  }, [isStandalone, global.retryLoad]);
   const fullyLoaded = isStandalone ? localFullyLoaded : global.fullyLoaded;
   const searchQuery = isStandalone ? standaloneSearchQuery : global.searchQuery;
   const close = global.close;
@@ -1154,6 +1178,8 @@ export function SessionDetail({
                   <MessageList
                     messages={displayedMessages}
                     isLoading={isLoading}
+                    stalled={loadStalled}
+                    onRetry={retryLoad}
                     searchQuery={searchQuery}
                     status={liveSession?.status ?? null}
                     liveThinking={liveThinking}

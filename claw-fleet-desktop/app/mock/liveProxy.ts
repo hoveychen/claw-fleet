@@ -32,6 +32,25 @@ export const LIVE_MODE =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).has("live");
 
+/**
+ * `?stall=get_messages_tail,...` — hold those commands pending forever.
+ *
+ * A wedged agent backend (the condition that produced the eternal 「加载中…」)
+ * can be staged for real by SIGSTOPping the dsh web server, but that also
+ * wedges `/sessions`, so the board never loads and there is nothing to click.
+ * This knob wedges exactly one command instead, which is what the frontend's
+ * deadline behaviour actually needs to be exercised against.
+ */
+const STALLED_COMMANDS = new Set(
+  (typeof window === "undefined"
+    ? ""
+    : (new URLSearchParams(window.location.search).get("stall") ?? "")
+  )
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
 type LiveReq = {
   method: "GET" | "POST";
   path: string;
@@ -113,16 +132,29 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
 
   today_usage: () => ({ method: "GET", path: "/today_usage" }),
 
+  // The launcher builds its tool picker from the real source registry — with
+  // fixtures here, "which agents can I start" would be fiction.
+  get_sources_config: () => ({ method: "GET", path: "/sources_config" }),
+
+  get_account_info: () => ({ method: "GET", path: "/sources/claude/account" }),
+
+  get_source_usage: (a) => ({
+    method: "GET",
+    path: `/sources/${String(a.source ?? "claude")}/usage`,
+  }),
+
+  // NOTE: the probe's request bodies are `#[serde(rename_all = "camelCase")]`,
+  // so they take the frontend's own casing verbatim — snake_case here 400s.
   spawn_new_claude_session: (a) => ({
     method: "POST",
     path: "/spawn_session",
     body: {
-      workspace_path: a.workspacePath,
+      workspacePath: a.workspacePath,
       prompt: a.prompt,
       model: a.model ?? null,
       effort: a.effort ?? null,
-      permission_mode: a.permissionMode ?? null,
-      session_id: null,
+      permissionMode: a.permissionMode ?? null,
+      sessionId: null,
       tool: a.tool ?? null,
     },
   }),
@@ -132,8 +164,8 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/enqueue_message",
     empty: true,
     body: {
-      session_id: a.sessionId,
-      workspace_path: a.workspacePath,
+      sessionId: a.sessionId,
+      workspacePath: a.workspacePath,
       text: a.text,
     },
   }),
@@ -143,13 +175,13 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/resume_session",
     empty: true,
     body: {
-      session_id: a.sessionId,
-      workspace_path: a.workspacePath,
+      sessionId: a.sessionId,
+      workspacePath: a.workspacePath,
       prompt: a.prompt ?? null,
       model: a.model ?? null,
       effort: a.effort ?? null,
-      permission_mode: a.permissionMode ?? null,
-      agent_source: a.agentSource ?? "claude",
+      permissionMode: a.permissionMode ?? null,
+      agentSource: a.agentSource ?? "claude",
     },
   }),
 
@@ -246,6 +278,11 @@ export async function liveInvoke(
   cmd: string,
   args: Record<string, unknown>,
 ): Promise<{ handled: boolean; value?: unknown }> {
+  if (STALLED_COMMANDS.has(cmd)) {
+    logLine(`STALL ${cmd} (held pending by ?stall=)`);
+    return { handled: true, value: await new Promise<never>(() => {}) };
+  }
+
   // Watching is a push channel in the real app; here it is a poller.
   if (cmd === "start_watching_session") {
     startTailPoll(String(args.jsonlPath ?? ""));

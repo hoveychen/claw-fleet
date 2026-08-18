@@ -1614,7 +1614,9 @@
     "copy_workspace_path": "复制工作目录",
     "more": "更多",
     "switch_agent": "切换查看的 agent",
-    "agent_current": "当前"
+    "agent_current": "当前",
+    "load_stalled": "加载对话超时——后端一直没有响应。它可能正忙,也可能挂了;稍后会自动恢复,也可以立刻重试。",
+    "load_retry": "重试"
   },
   "settings": {
     "title": "设置",
