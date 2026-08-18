@@ -10,3 +10,5 @@
 /.clang-tidy
 **/.test
 /.appanalyzer
+# mobile-web 的 dist 副本，由打包管线同步进来（见计划 P6），不入库
+/entry/src/main/resources/rawfile/web/
