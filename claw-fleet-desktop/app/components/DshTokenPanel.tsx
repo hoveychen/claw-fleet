@@ -27,12 +27,15 @@ function fmtTok(n: number): string {
  *    cached prefix inflates the billed buckets while leaving this untouched,
  *    so a session can show 71k billed against 9k of context.
  *
- * The cost figure is **asked of the provider**, never inferred from the token
- * counts above: the same model costs different amounts through different
- * providers, so multiplying by any table Fleet holds would produce a confident
- * wrong number. It loads on its own (it needs the full session history and may
- * hit the network), so the token view never waits on it. Routed here from
- * SessionDetail via `tokenPanelForAgentSource`.
+ * The cost figure comes from one of two places, and the KPI's own sub-label says
+ * which: a provider that issues a receipt per generation is **asked** what it
+ * charged (never inferred from the token counts above — the same model costs
+ * different amounts through different providers, so multiplying by any table
+ * Fleet holds would produce a confident wrong number), while a route with one
+ * seller and a published price list is priced from those rates. It loads on its
+ * own (it needs the full session history and may hit the network), so the token
+ * view never waits on it. Routed here from SessionDetail via
+ * `tokenPanelForAgentSource`.
  */
 export function DshTokenPanel({ uri }: Props) {
   const { t } = useTranslation();
@@ -87,10 +90,52 @@ interface Row {
 }
 
 function fmtUsd(n: number): string {
-  // Sub-cent totals are the common case for a short session; $0.00 would read
-  // as "free" when it is really "very cheap".
-  if (n > 0 && n < 0.01) return "<$0.01";
+  // Sub-cent totals are the common case for a short session, and "<$0.01" threw
+  // away the figure the panel had just gone to the trouble of obtaining — a
+  // DeepSeek-official turn can cost $0.0028 and the user should see that. Four
+  // decimals below a dollar; only below a hundredth of a cent, where four
+  // decimals really would round to zero, does it fall back to a bound. $0.00 is
+  // never printed: it would read as "free" when it means "very cheap".
+  if (n > 0 && n < 0.0001) return "<$0.0001";
   return `$${n.toFixed(n < 1 ? 4 : 2)}`;
+}
+
+/// Where the figure came from, in the KPI's own words.
+///
+/// Two kinds of number can sit under "Real spend" and the label must not blur
+/// them: a receipt the provider issued, and a published rate applied to counted
+/// tokens. Saying "priced by the provider" over a table-priced total would be a
+/// small lie in the one place the panel exists to be exact.
+function costCallsLabel(
+  cost: { pricedCalls: number; tablePricedCalls?: number | null; note: string },
+  t: (key: string, vars?: Record<string, unknown>) => string,
+): string {
+  if (cost.pricedCalls <= 0) return cost.note;
+  // A remote probe can be an older build than the desktop it answers — Fleet's
+  // RemoteBackend talks to whatever `fleet serve` runs on the other machine — so
+  // this field may simply be absent. Treating that as 0 keeps the old wording
+  // (which was correct for a receipt-only build); subtracting `undefined` put a
+  // literal "NaN by the provider" on screen, which is how this was caught.
+  const tablePriced = cost.tablePricedCalls ?? 0;
+  const byReceipt = cost.pricedCalls - tablePriced;
+  if (tablePriced <= 0) {
+    return (
+      t("dsh_token.cost_calls", { count: cost.pricedCalls }) ||
+      `${cost.pricedCalls} call(s) priced by the provider`
+    );
+  }
+  if (byReceipt <= 0) {
+    return (
+      t("dsh_token.cost_calls_rates", { count: tablePriced }) ||
+      `${tablePriced} call(s) priced from published rates`
+    );
+  }
+  return (
+    t("dsh_token.cost_calls_mixed", {
+      receipt: byReceipt,
+      rates: tablePriced,
+    }) || `${byReceipt} by the provider / ${tablePriced} from published rates`
+  );
 }
 
 export function DshTokenView({
@@ -161,14 +206,7 @@ export function DshTokenView({
         <KpiCard
           label={t("dsh_token.kpi_cost") || "Real spend"}
           primary={cost?.totalUsd != null ? fmtUsd(cost.totalUsd) : "—"}
-          secondary={
-            cost
-              ? cost.pricedCalls > 0
-                ? t("dsh_token.cost_calls", { count: cost.pricedCalls }) ||
-                  `${cost.pricedCalls} call(s) priced`
-                : cost.note
-              : ""
-          }
+          secondary={cost ? costCallsLabel(cost, t) : ""}
         />
         <KpiCard
           label={t("dsh_token.kpi_context") || "Context used"}

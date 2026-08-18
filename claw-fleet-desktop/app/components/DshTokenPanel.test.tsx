@@ -91,6 +91,7 @@ describe("DshTokenPanel", () => {
     const cost: DshSessionCost = {
       totalUsd: 0.0342,
       pricedCalls: 3,
+      tablePricedCalls: 0,
       unpricedCalls: 0,
       unpriceableCalls: 0,
       note: "",
@@ -103,6 +104,7 @@ describe("DshTokenPanel", () => {
     const cost: DshSessionCost = {
       totalUsd: null,
       pricedCalls: 0,
+      tablePricedCalls: 0,
       unpricedCalls: 3,
       unpriceableCalls: 0,
       note: "no OpenRouter API key configured",
@@ -118,17 +120,87 @@ describe("DshTokenPanel", () => {
     const cost: DshSessionCost = {
       totalUsd: 0.0004,
       pricedCalls: 1,
+      tablePricedCalls: 0,
       unpricedCalls: 0,
       unpriceableCalls: 0,
       note: "",
     };
-    expect(render(live, cost).textContent ?? "").toContain("<$0.01");
+    const text = render(live, cost).textContent ?? "";
+    // Four decimals, not "<$0.01": the panel already obtained the figure, and a
+    // DeepSeek-official turn genuinely lands in this range.
+    expect(text).toContain("$0.0004");
+    expect(text).not.toContain("$0.00 ");
+  });
+
+  it("falls back to a bound only below a hundredth of a cent", () => {
+    const cost: DshSessionCost = {
+      totalUsd: 0.00002,
+      pricedCalls: 1,
+      tablePricedCalls: 1,
+      unpricedCalls: 0,
+      unpriceableCalls: 0,
+      note: "",
+    };
+    const text = render(live, cost).textContent ?? "";
+    expect(text).toContain("<$0.0001");
+    // Never a bare zero — that would read as "this call was free".
+    expect(text).not.toContain("$0.0000");
+  });
+
+  it("says a table-priced total came from published rates, not from the provider", () => {
+    const cost: DshSessionCost = {
+      totalUsd: 0.00284702,
+      pricedCalls: 1,
+      tablePricedCalls: 1,
+      unpricedCalls: 0,
+      unpriceableCalls: 0,
+      note: "1 call(s) priced from DeepSeek's published rates (0 peak / 1 off-peak)",
+    };
+    const text = render(live, cost).textContent ?? "";
+    expect(text).toContain("$0.0028");
+    expect(text).toContain("published rates");
+    // The receipt wording would be a small lie about where the number came from.
+    expect(text).not.toContain("priced by the provider");
+  });
+
+  // Caught on screen: against a probe built before `tablePricedCalls` existed,
+  // subtracting the absent field rendered a literal "NaN by the provider".
+  // RemoteBackend talks to whatever `fleet serve` runs on the other machine, so
+  // an older field set is a normal state, not a corrupt one.
+  it("degrades to the receipt wording when an older backend omits the new field", () => {
+    const cost = {
+      totalUsd: 0.0342,
+      pricedCalls: 3,
+      unpricedCalls: 0,
+      unpriceableCalls: 0,
+      note: "",
+    } as unknown as DshSessionCost;
+    const text = render(live, cost).textContent ?? "";
+    expect(text).not.toContain("NaN");
+    expect(text).toContain("3");
+    expect(text).toContain("provider");
+  });
+
+  it("splits the two kinds of figure when a session used both routes", () => {
+    const cost: DshSessionCost = {
+      totalUsd: 0.31,
+      pricedCalls: 5,
+      tablePricedCalls: 3,
+      unpricedCalls: 0,
+      unpriceableCalls: 0,
+      note: "3 call(s) priced from DeepSeek's published rates (1 peak / 2 off-peak)",
+    };
+    const text = render(live, cost).textContent ?? "";
+    expect(text).toContain("2");
+    expect(text).toContain("published rates");
+    expect(text).toContain("provider");
   });
 
   it("surfaces calls that were left out of the total", () => {
     const cost: DshSessionCost = {
       totalUsd: 0.02,
       pricedCalls: 2,
+      tablePricedCalls: 0,
       unpricedCalls: 0,
       unpriceableCalls: 1,
       note: "1 call(s) went through a provider with no cost API and are not included",

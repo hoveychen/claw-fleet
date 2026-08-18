@@ -180,6 +180,7 @@ contextPercent: number | null, };
 export type DshSessionCost = { 
 totalUsd: number | null, 
 pricedCalls: number, 
+tablePricedCalls: number, 
 unpricedCalls: number, 
 unpriceableCalls: number, 
 note: string, };
