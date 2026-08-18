@@ -10,7 +10,16 @@
 //!   * pin RELAY_VAPID_KEY so browser push subscriptions survive redeploys
 //!   * mount/point RELAY_DATA_DIR at a persistent path (push subscriptions)
 //!   * RELAY_STATIC_DIR holds the mobile web bundle (served at /)
+//!   * to let the native shell pair by deep link, set the association vars —
+//!     without them /.well-known/* 404s and the shell can never be paired:
+//!       RELAY_IOS_APP_ID=6HU93XQG5B.com.hoveychen.clawfleet
+//!       RELAY_ANDROID_PACKAGE=com.hoveychen.clawfleet
+//!       RELAY_ANDROID_SHA256=<release cert SHA-256, colon-separated hex>
+//!     The Android fingerprint must be the *release* signing certificate the
+//!     APK is actually signed with (debug builds have a different one and will
+//!     silently fail verification). See applinks.rs.
 
+mod applinks;
 mod frames;
 mod harmony_push;
 mod limits;
@@ -28,6 +37,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use tower_http::services::{ServeDir, ServeFile};
 
+use applinks::AppLinks;
 use harmony_push::HarmonyPush;
 use limits::{ConnLimiter, ConnRateLimiter};
 use push::Push;
@@ -44,6 +54,9 @@ pub struct AppState {
     pub conn_rate: Arc<ConnRateLimiter>,
     /// Cap on a single inbound WebSocket message/frame.
     pub max_ws_message_bytes: usize,
+    /// Universal Link / App Link association documents; empty unless the
+    /// RELAY_IOS_APP_ID / RELAY_ANDROID_* vars are set.
+    pub applinks: AppLinks,
 }
 
 fn env_or(name: &str, default: &str) -> String {
@@ -79,6 +92,29 @@ pub fn build_api(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/ws", get(ws::ws_handler))
         .route("/healthz", get(|| async { "ok" }))
+        // Deliberately routes, not static files — the static service would
+        // answer a missing file with index.html (200 + HTML), which a verifier
+        // would happily cache. See applinks.rs.
+        .route(
+            "/.well-known/apple-app-site-association",
+            get({
+                let state = state.clone();
+                move || {
+                    let resp = state.applinks.aasa_response();
+                    async move { resp }
+                }
+            }),
+        )
+        .route(
+            "/.well-known/assetlinks.json",
+            get({
+                let state = state.clone();
+                move || {
+                    let resp = state.applinks.assetlinks_response();
+                    async move { resp }
+                }
+            }),
+        )
         .route(
             "/vapid",
             get({
@@ -139,6 +175,15 @@ async fn main() {
     let max_ws_message_bytes =
         env_usize("RELAY_MAX_WS_MESSAGE_BYTES", ws::DEFAULT_MAX_WS_MESSAGE_BYTES);
 
+    let applinks = AppLinks::from_env();
+    log::info!(
+        "app association: iOS Universal Link {} (RELAY_IOS_APP_ID), Android App Link {} \
+         (RELAY_ANDROID_PACKAGE + RELAY_ANDROID_SHA256) — unset sides 404, so the \
+         native shell cannot pair by deep link",
+        if applinks.ios_configured() { "enabled" } else { "disabled" },
+        if applinks.android_configured() { "enabled" } else { "disabled" },
+    );
+
     let state = Arc::new(AppState {
         registry,
         push,
@@ -146,6 +191,7 @@ async fn main() {
         conn_limiter,
         conn_rate,
         max_ws_message_bytes,
+        applinks,
     });
 
     let index = static_dir.join("index.html");

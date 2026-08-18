@@ -33,6 +33,7 @@ import {
   needsA2hsForDurableStorage,
   persistSecret,
 } from "./secretStore";
+import { onPairingLink } from "./deepLink";
 import {
   clearCachedSessions,
   loadCachedSessions,
@@ -41,7 +42,9 @@ import {
 import { useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
-import { NewSessionSheet } from "./views/Composer";
+import { NEW_SESSION_DRAFT_KEY, NewSessionSheet } from "./views/Composer";
+import { loadDraft, saveDraft } from "./draft";
+import { onShareReceived, shareToPrompt, sharedFilesToFiles } from "./shareTarget";
 import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
@@ -102,6 +105,40 @@ export function App() {
       cancelled = true;
     };
   }, [secret]);
+
+  // Native shell only: the app boots from bundled assets, so there is no URL to
+  // read the pairing secret from. Universal Links / App Links deliver the
+  // scanned pairing URL here instead. No-op in the browser/PWA.
+  useEffect(() => {
+    return onPairingLink((paired) => {
+      persistSecret(paired);
+      setSecret(paired);
+      setIdbProbed(true);
+    });
+  }, []);
+
+  // Android share sheet → new-session composer. Seed the draft *before* opening
+  // the sheet: NewSessionSheet reads it once on mount via useDraft, so writing
+  // after would be ignored. Merging (rather than replacing) keeps whatever
+  // workspace/model the user last picked.
+  useEffect(() => {
+    return onShareReceived((share) => {
+      void (async () => {
+        const files = await sharedFilesToFiles(share.files);
+        // Files that became real attachments don't need naming in the prose —
+        // the chips already show them. Only the ones we failed to read stay in
+        // the text, so the user still knows something came along.
+        const fetched = new Set(files.map((f) => f.name));
+        const missed = share.files.filter((f) => !fetched.has(f.name));
+        const prompt = shareToPrompt({ ...share, files: missed });
+        const current = loadDraft<Record<string, unknown>>(NEW_SESSION_DRAFT_KEY, {});
+        saveDraft(NEW_SESSION_DRAFT_KEY, { ...current, prompt });
+        setSharedFiles(files);
+        setShowNewSession(true);
+      })();
+    });
+  }, []);
+
   const [tab, setTab] = useState<Tab>("decisions");
   const [connected, setConnected] = useState(false);
   const [agentOnline, setAgentOnline] = useState(false);
@@ -161,6 +198,9 @@ export function App() {
   const [repoDetail, setRepoDetail] = useState<RepoSummary | null>(null);
   const [showUsage, setShowUsage] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
+  // Files handed over by another app's share, pending upload once the
+  // new-session sheet mounts (that's where the attachment state lives).
+  const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [exitArmed, setExitArmed] = useState(false);
   const clientRef = useRef<RelayClient | null>(null);
   // ids answered on THIS device whose answer is still in flight → timestamp.
@@ -734,7 +774,12 @@ export function App() {
           <NewSessionSheet
             sessions={mergedSessions}
             client={clientRef.current}
-            onClose={() => setShowNewSession(false)}
+            initialFiles={sharedFiles}
+            onClose={() => {
+              setShowNewSession(false);
+              // Consumed by the sheet — don't re-upload them if it reopens.
+              setSharedFiles([]);
+            }}
           />
         </>
       )}
