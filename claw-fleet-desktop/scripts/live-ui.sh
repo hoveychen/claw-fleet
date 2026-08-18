@@ -22,7 +22,8 @@ mkdir -p "$LOGDIR"
 # dsh sessions are scanned through the dsh CLI/web API; make sure the probe can
 # find it the same way the desktop app does.
 if [ -z "${FLEET_DSH_BIN:-}" ] && command -v dsh >/dev/null 2>&1; then
-  export FLEET_DSH_BIN="$(command -v dsh)"
+  FLEET_DSH_BIN="$(command -v dsh)"
+  export FLEET_DSH_BIN
 fi
 
 # `fleet serve` unconditionally rewrites ~/.fleet/{port,token} — the discovery

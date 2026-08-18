@@ -1,9 +1,9 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # 把 mobile-web 构建产物同步进 rawfile，供 WebShell 离线加载。
 #
 # 用法:
-#   zsh scripts/sync-web.sh                    # 打生产 relay
-#   RELAY_URL=http://127.0.0.1:18080 zsh scripts/sync-web.sh   # 打本地 relay
+#   bash scripts/sync-web.sh                    # 打生产 relay
+#   RELAY_URL=http://127.0.0.1:18080 bash scripts/sync-web.sh   # 打本地 relay
 #
 # 两个参数是硬性的，都是真机踩出来的，别改：
 #
