@@ -34,10 +34,21 @@
           {
             "actions": ["ohos.want.action.sendData"],
             // utd 而非 mime type;每条都必须带 scheme,否则构建期 schema 就挂。
+            //
+            // 要**穷举**具体类型:只写笼统的 general.image 时,真机上分享一张图
+            // 依然看不到 Fleet。系统按精确 utd 匹配,所以 jpeg/png/gif 各列一条,
+            // 笼统类型留着兜底。maxFileSupported 是 SkillUri 的正式字段
+            // (SDK bundleManager/Skill.d.ts),不给的话等于没声明能收几个。
             "uris": [
-              { "scheme": "file", "utd": "general.text" },
-              { "scheme": "file", "utd": "general.image" },
-              { "scheme": "file", "utd": "general.object" }
+              { "scheme": "file", "utd": "general.text", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.plain-text", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.image", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.jpeg", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.png", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.gif", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.media", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.file", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.object", "maxFileSupported": 10 }
             ]
           }
         ]

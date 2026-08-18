@@ -1,7 +1,7 @@
 import { AbilityConstant, ConfigurationConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
-import { SharedInbox } from '../common/SharedInbox';
+import { SharedInbox, SharedItem } from '../common/SharedInbox';
 import { initTheme, setSystemDark, themeTokens } from '../common/Theme';
 import { initSafeArea } from '../common/SafeArea';
 import { initWakeLock } from '../common/WakeLock';
@@ -28,11 +28,16 @@ export default class EntryAbility extends UIAbility {
   /// 分享由独立的 ShareExtAbility 进程接收并写进 SharedInbox（preferences），
   /// 这里只在前台时取走 —— 两者不同进程，AppStorage 传不过来。
   private drainSharedInbox(): void {
-    SharedInbox.take(this.context).then((text: string | null) => {
-      if (text === null) {
+    SharedInbox.take(this.context).then((item: SharedItem | null) => {
+      if (item === null) {
         return;
       }
-      AppStorage.setOrCreate('sharedText', text);
+      // 图片本体还没有通道送进 WebView（那要给拦截器加一条沙箱映射），先把
+      // 文件名并进正文 —— 用户至少看得见自己分享了什么，而不是一片空白。
+      const parts: string[] = [];
+      if (item.text.length > 0) { parts.push(item.text); }
+      if (item.fileNames.length > 0) { parts.push('[共享文件] ' + item.fileNames.join(', ')); }
+      AppStorage.setOrCreate('sharedText', parts.join('\n\n'));
       const n: number = AppStorage.get<number>('sharedNonce') ?? 0;
       AppStorage.setOrCreate('sharedNonce', n + 1);
     }).catch((e: Error) => {

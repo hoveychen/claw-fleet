@@ -27,29 +27,41 @@ struct SharePanel {
     try {
       const params = want?.parameters as Record<string, Object> | undefined;
       const key = params?.['ability.want.params.udKey'];
-      let text: string = '';
+      const texts: string[] = [];
+      const files: string[] = [];
       if (typeof key === 'string' && key.length > 0) {
-        // 分享内容不在 want 参数里，want 只带一把 key，真数据要拿它去 UDMF 查。
+        // 分享内容不在 want 参数里,want 只带一把 key,真数据要拿它去 UDMF 查。
         const list = await unifiedDataChannel.queryData({
           intention: unifiedDataChannel.Intention.DATA_HUB,
           key: key,
         });
-        const parts: string[] = [];
         for (const data of list) {
           for (const rec of data.getRecords()) {
+            // 文本与文件要分开收：只认 PlainText 的话，分享一张图会走到
+            // 「没有可接收的内容」，而图片恰恰是最常见的分享。
             const plain = rec as unifiedDataChannel.PlainText;
             if (plain.textContent !== undefined && plain.textContent.length > 0) {
-              parts.push(plain.textContent);
+              texts.push(plain.textContent);
+              continue;
+            }
+            const img = rec as unifiedDataChannel.Image;
+            const uri: string = img.imageUri !== undefined && img.imageUri.length > 0
+              ? img.imageUri
+              : (rec as unifiedDataChannel.File).uri ?? '';
+            if (uri.length > 0) {
+              const slash = uri.lastIndexOf('/');
+              const name = slash >= 0 ? uri.substring(slash + 1) : uri;
+              files.push(name + '|' + uri);
             }
           }
         }
-        text = parts.join('\n\n');
       }
-      if (text.length === 0) {
-        this.status = '没有可接收的文本内容';
+      const text = texts.join('\n\n');
+      if (text.length === 0 && files.length === 0) {
+        this.status = '没有可接收的内容';
         return;
       }
-      await SharedInbox.put(ctx, text);
+      await SharedInbox.put(ctx, text, files);
       // 拉起主应用去处理；分享面板本身随即关闭。
       await ctx.startAbility({
         bundleName: 'com.atomicservice.6917610791622358675',
