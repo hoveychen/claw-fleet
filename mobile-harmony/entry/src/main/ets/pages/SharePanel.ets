@@ -1,5 +1,4 @@
 import { common, Want } from '@kit.AbilityKit';
-import { unifiedDataChannel } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { SharedInbox } from '../common/SharedInbox';
 
@@ -26,38 +25,49 @@ struct SharePanel {
     const ctx = getContext(this) as common.UIExtensionContext;
     try {
       const params = want?.parameters as Record<string, Object> | undefined;
-      const key = params?.['ability.want.params.udKey'];
+      hilog.info(DOMAIN, TAG, 'share-diag action=%{public}s keys=%{public}s',
+        want?.action ?? '(none)',
+        params === undefined ? '(no params)' : JSON.stringify(Object.keys(params)));
       const texts: string[] = [];
       const files: string[] = [];
-      if (typeof key === 'string' && key.length > 0) {
-        // 分享内容不在 want 参数里,want 只带一把 key,真数据要拿它去 UDMF 查。
-        const list = await unifiedDataChannel.queryData({
-          intention: unifiedDataChannel.Intention.DATA_HUB,
-          key: key,
-        });
-        for (const data of list) {
-          for (const rec of data.getRecords()) {
-            // 文本与文件要分开收：只认 PlainText 的话，分享一张图会走到
-            // 「没有可接收的内容」，而图片恰恰是最常见的分享。
-            const plain = rec as unifiedDataChannel.PlainText;
-            if (plain.textContent !== undefined && plain.textContent.length > 0) {
-              texts.push(plain.textContent);
-              continue;
-            }
-            const img = rec as unifiedDataChannel.Image;
-            const uri: string = img.imageUri !== undefined && img.imageUri.length > 0
-              ? img.imageUri
-              : (rec as unifiedDataChannel.File).uri ?? '';
-            if (uri.length > 0) {
-              const slash = uri.lastIndexOf('/');
-              const name = slash >= 0 ? uri.substring(slash + 1) : uri;
-              files.push(name + '|' + uri);
-            }
-          }
+
+      // 文件走 `ability.params.stream`：真机日志里图片 uri 就直接躺在这个数组
+      // 里（file://media/Photo/...）。此前按二手资料写的
+      // `ability.want.params.udKey` + UDMF queryData 在真机上根本不存在那个
+      // key，所以永远提取为空 —— 这是「分享列表里有 Fleet，点进去却说没有
+      // 内容」的真正原因。
+      const stream = params?.['ability.params.stream'];
+      if (Array.isArray(stream)) {
+        for (const entry of stream as Object[]) {
+          const uri: string = String(entry);
+          if (uri.length === 0) { continue; }
+          const slash: number = uri.lastIndexOf('/');
+          const name: string = slash >= 0 ? uri.substring(slash + 1) : uri;
+          files.push(name + '|' + uri);
         }
       }
+
+      // 纯文本分享不带 stream，文本在这几个键之一。逐个试而不是赌某一个。
+      const textKeys: string[] = [
+        'ability.want.params.text',
+        'ability.params.text',
+        'ohos.extra.param.key.contentTitle',
+        'title',
+        'text',
+      ];
+      for (const k of textKeys) {
+        const v = params?.[k];
+        if (typeof v === 'string' && v.length > 0) {
+          texts.push(v);
+        }
+      }
+      if (texts.length === 0 && want?.uri !== undefined && want.uri.length > 0) {
+        texts.push(want.uri);
+      }
+
       const text = texts.join('\n\n');
       if (text.length === 0 && files.length === 0) {
+        hilog.warn(DOMAIN, TAG, 'share-diag nothing extracted');
         this.status = '没有可接收的内容';
         return;
       }
