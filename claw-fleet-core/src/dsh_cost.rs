@@ -14,13 +14,26 @@
 //! # How a session's calls are found (measured)
 //!
 //! Every successful model call leaves a durable `assistant/message` event whose
-//! `data.message.source` is
-//! `{kind: "model", provider, model, replayState: {responseId, …}}`. Measured
-//! against a real 120-event session: three model calls, three distinct
+//! `data.message.source` is `{kind: "model", provider, model, replayState}`.
+//! Measured against a real 120-event session: three model calls, three distinct
 //! `responseId`s of the form `gen-1786757116-pDmWgCIKXi2AWZCPaQTI`, each tagged
 //! `provider: "openrouter"`. The same id also rides the preceding
 //! `assistant/chunk` `finish` frame; this module reads it off the **message**
 //! because that is the durable record and there is exactly one per call.
+//!
+//! ## Where the id sits: two shapes, both live
+//!
+//! dsh later wrapped the adapter's response record in a replay *envelope* —
+//! `interface ReplayEnvelope { response: unknown; blocks?: readonly unknown[] }`
+//! in `@deepseek-ai/dsh-llm/lib/types/types.d.ts` — moving the id one level in:
+//!
+//! - flat (the payload carries `version: 1`): `replayState.responseId`
+//! - envelope (`version: 2`): `replayState.response.responseId`
+//!
+//! Measured on one real install: 64 sessions, 35 flat and 14 envelope, and the
+//! envelope ones were the newest — so reading only the flat path meant every
+//! session a user was likely to open reported "no model calls" while its ids sat
+//! right there on the wire. Both paths are read, and old sessions keep pricing.
 //!
 //! A session's real spend is therefore the sum over its `responseId`s.
 //!
@@ -128,8 +141,15 @@ pub fn generation_refs(events: &[Value]) -> Vec<GenerationRef> {
         if source.get("kind").and_then(Value::as_str) != Some("model") {
             continue;
         }
+        // Two shapes, both live on one machine. dsh wrapped the adapter's
+        // response record in a replay envelope — `{response, blocks?}`, typed in
+        // `@deepseek-ai/dsh-llm`'s `ReplayEnvelope` — so what used to sit
+        // directly on `replayState` now sits one level in. Sessions written
+        // before the change keep the flat shape and must keep pricing, so both
+        // are read; the envelope first, because that is what dsh writes now.
         let Some(id) = source
-            .pointer("/replayState/responseId")
+            .pointer("/replayState/response/responseId")
+            .or_else(|| source.pointer("/replayState/responseId"))
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
         else {
