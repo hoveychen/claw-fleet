@@ -45,3 +45,8 @@ Cargo.toml.bak
 # Fleet PRD Discipline scratch state — agent-managed, not for version control
 TASKS.md
 .worktrees/
+
+# Mobile app signing material — private keys, NEVER commit. Back these up
+# out-of-band: losing the keystore means already-installed builds can no
+# longer be upgraded in place.
+.signing/
