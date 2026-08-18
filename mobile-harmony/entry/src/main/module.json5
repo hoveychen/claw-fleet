@@ -19,6 +19,30 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
+    "extensionAbilities": [
+      {
+        // 系统分享的接收端。只在 UIAbility 上声明 sendData skill 不够 —— 真机
+        // 上 utd 已登记进 bm dump,分享面板里依然没有 Fleet;面板要求接收方
+        // 提供一个 share 类型的 UIExtension(SDK 的 ShareExtensionAbility)。
+        "name": "ShareExtAbility",
+        "srcEntry": "./ets/shareability/ShareExtAbility.ets",
+        "icon": "$media:icon",
+        "label": "$string:EntryAbility_label",
+        "type": "share",
+        "exported": true,
+        "skills": [
+          {
+            "actions": ["ohos.want.action.sendData"],
+            // utd 而非 mime type;每条都必须带 scheme,否则构建期 schema 就挂。
+            "uris": [
+              { "scheme": "file", "utd": "general.text" },
+              { "scheme": "file", "utd": "general.image" },
+              { "scheme": "file", "utd": "general.object" }
+            ]
+          }
+        ]
+      }
+    ],
     "abilities": [
       {
         "name": "EntryAbility",
@@ -36,22 +60,6 @@
             ],
             "actions": [
               "ohos.want.action.home"
-            ]
-          },
-          {
-            // 让 Fleet 出现在别的 app 的系统分享列表里(接收方)。这与
-            // SystemShare.ets 是反方向:那个是 Fleet 主动分享出去。
-            "actions": [
-              "ohos.want.action.sendData"
-            ],
-            // 必须用 utd(统一数据类型)而不是 mime type —— 第一版写成
-            // "type": "text/plain" 系统压根不认,Fleet 不出现在分享面板里。
-            // 每个条目都必须带 scheme,少了会在构建期 schema 校验直接失败。
-            // general.object 覆盖全部类型,前两条明确常用的文本与图片。
-            "uris": [
-              { "scheme": "file", "utd": "general.text" },
-              { "scheme": "file", "utd": "general.image" },
-              { "scheme": "file", "utd": "general.object" }
             ]
           }
         ]
