@@ -889,6 +889,172 @@ fn history_events(value: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// One reasoning-effort step a model accepts, as the catalogue names it.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DshEffort {
+    /// The value to send as `reasoningEffort` (`"off"`, `"low"`, `"max"`, …).
+    pub id: String,
+    /// Display label (`"Off"`, `"Low"`, `"Max"`, …).
+    pub name: String,
+}
+
+/// One selectable model inside a provider group.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DshModelEntry {
+    /// The provider-scoped model id, exactly as dsh reports it. Not unique
+    /// across groups and **not** what Fleet stores — see [`Self::spec`].
+    pub id: String,
+    /// Display label.
+    pub name: String,
+    /// Optional one-liner from the provider.
+    pub description: Option<String>,
+    /// The `provider/model` string to put in [`SpawnSpec::model`], i.e. what
+    /// [`split_model`] parses back into dsh's two fields. Composed here rather
+    /// than in the UI so the addressing convention lives next to its parser.
+    ///
+    /// [`SpawnSpec::model`]: crate::agent_source::SpawnSpec
+    pub spec: String,
+    /// The effort scale this model accepts, flattened out of the wire's
+    /// optional `reasoning` object. **Empty means the model has no reasoning
+    /// control at all** (most openrouter entries), which is a real state the UI
+    /// must render as "no effort menu" — not as "the menu failed to load".
+    pub efforts: Vec<DshEffort>,
+    /// The effort dsh picks when the caller names none. `None` even for models
+    /// that *do* have an effort scale (openrouter reports scales without a
+    /// default), so the UI cannot assume one exists.
+    pub default_effort: Option<String>,
+}
+
+/// One provider's slice of the catalogue.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DshModelGroup {
+    /// The provider id — the first segment of every member's
+    /// [`DshModelEntry::spec`] (`"deepseek-official"`, `"openrouter"`).
+    pub id: String,
+    /// Display label.
+    pub name: String,
+    pub models: Vec<DshModelEntry>,
+}
+
+/// A provider that could not be enumerated at all.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DshModelCatalogFailure {
+    pub id: String,
+    pub name: String,
+    pub message: String,
+}
+
+/// dsh's session-independent model catalogue: what the launcher can offer.
+///
+/// Partial success is the normal case, not an error: `llm.models` answers `ok`
+/// with the providers it *could* reach in `groups` and the ones it could not in
+/// `failures`. A caller that treated a non-empty `failures` as a hard error
+/// would blank a working DeepSeek list because some third-party route was
+/// misconfigured, so both halves come back and the UI decides.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DshModelCatalog {
+    pub groups: Vec<DshModelGroup>,
+    pub failures: Vec<DshModelCatalogFailure>,
+}
+
+/// Map an `llm.models` answer onto [`DshModelCatalog`].
+///
+/// Split from [`dsh_models`] so the mapping is unit-testable against a recorded
+/// payload. Tolerant by construction — a group or model missing `id` is dropped
+/// rather than failing the whole catalogue, because a single unparseable route
+/// should not cost the user every other model on the machine.
+fn parse_model_catalog(value: &Value) -> DshModelCatalog {
+    /// A non-empty string field, or `None`.
+    fn text(v: &Value, key: &str) -> Option<String> {
+        v.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    }
+    fn rows(v: &Value, key: &str) -> Vec<Value> {
+        v.get(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    let groups = rows(value, "groups")
+        .iter()
+        .filter_map(|g| {
+            let id = text(g, "id")?;
+            let models = rows(g, "models")
+                .iter()
+                .filter_map(|m| {
+                    let model_id = text(m, "id")?;
+                    // dsh's `reasoning` is optional, and so is the `defaultEffort`
+                    // inside it — flattened here so the UI reads one shape.
+                    let reasoning = m.get("reasoning");
+                    let efforts = reasoning
+                        .map(|r| rows(r, "efforts"))
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|e| {
+                            let id = text(e, "id")?;
+                            let name = text(e, "name").unwrap_or_else(|| id.clone());
+                            Some(DshEffort { id, name })
+                        })
+                        .collect();
+                    Some(DshModelEntry {
+                        spec: format!("{id}/{model_id}"),
+                        name: text(m, "name").unwrap_or_else(|| model_id.clone()),
+                        description: text(m, "description"),
+                        id: model_id,
+                        efforts,
+                        default_effort: reasoning.and_then(|r| text(r, "defaultEffort")),
+                    })
+                })
+                .collect();
+            Some(DshModelGroup {
+                name: text(g, "name").unwrap_or_else(|| id.clone()),
+                id,
+                models,
+            })
+        })
+        .collect();
+
+    let failures = rows(value, "failures")
+        .iter()
+        .filter_map(|f| {
+            let id = text(f, "id")?;
+            Some(DshModelCatalogFailure {
+                name: text(f, "name").unwrap_or_else(|| id.clone()),
+                id,
+                message: text(f, "message").unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    DshModelCatalog { groups, failures }
+}
+
+/// dsh's model catalogue, for the launcher's model / effort menus.
+///
+/// Session-independent: `llm.models` takes an empty payload and describes the
+/// machine's configured providers, so the answer is the same for every session
+/// and needs no id. Reached through [`DshSource::with_client`] like every other
+/// read, which starts `dsh web` if it is not already up.
+pub fn dsh_models() -> Result<DshModelCatalog, String> {
+    let value = DshSource::new()
+        .with_client(|client| client.call("llm.models", json!({})).map_err(Into::into))?;
+    Ok(parse_model_catalog(&value))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1286,5 +1452,178 @@ mod tests {
             DshSource::new().resolve_file_path("dsh://session-abc"),
             None
         );
+    }
+
+    /// Verbatim `llm.models` value observed live (dsh 0.1.0-rc.7), trimmed to
+    /// one model per interesting shape. The three openrouter rows are the whole
+    /// reason this mapping is not a one-liner: a model may carry no `reasoning`
+    /// object at all, or carry `efforts` with no `defaultEffort`.
+    fn live_models_value() -> Value {
+        json!({
+            "groups": [
+                {
+                    "id": "deepseek-official",
+                    "name": "DeepSeek",
+                    "models": [{
+                        "id": "deepseek-v4-pro",
+                        "name": "DeepSeek-V4-Pro",
+                        "reasoning": {
+                            "efforts": [
+                                { "id": "off", "name": "Off" },
+                                { "id": "low", "name": "Low" },
+                                { "id": "high", "name": "High" },
+                                { "id": "max", "name": "Max" }
+                            ],
+                            "defaultEffort": "high"
+                        }
+                    }]
+                },
+                {
+                    "id": "openrouter",
+                    "name": "openrouter",
+                    "models": [
+                        { "id": "ai21/jamba-large-1.7", "name": "AI21: Jamba Large 1.7" },
+                        {
+                            "id": "aion-labs/aion-2.0",
+                            "name": "AionLabs: Aion-2.0",
+                            "reasoning": {
+                                "efforts": [
+                                    { "id": "off", "name": "Off" },
+                                    { "id": "minimal", "name": "Minimal" }
+                                ]
+                            }
+                        },
+                        {
+                            "id": "anthropic/claude-haiku-4.5",
+                            "name": "Anthropic: Claude Haiku 4.5",
+                            "description": "Fast and cheap."
+                        }
+                    ]
+                }
+            ],
+            "failures": []
+        })
+    }
+
+    #[test]
+    /// The catalogue's whole job is to hand the launcher strings that survive
+    /// the round trip back into dsh's two fields, so every mapped model's
+    /// `spec` must re-split into exactly the provider + model it came from.
+    fn the_catalogue_maps_every_group_and_round_trips_each_spec() {
+        let cat = parse_model_catalog(&live_models_value());
+
+        assert_eq!(cat.groups.len(), 2, "both providers must survive mapping");
+        assert!(cat.failures.is_empty());
+
+        let deepseek = &cat.groups[0];
+        assert_eq!(deepseek.id, "deepseek-official");
+        assert_eq!(deepseek.name, "DeepSeek");
+        assert_eq!(deepseek.models.len(), 1);
+        assert_eq!(cat.groups[1].models.len(), 3);
+
+        for group in &cat.groups {
+            for model in &group.models {
+                assert_eq!(
+                    split_model(&model.spec),
+                    Some((group.id.as_str(), model.id.as_str())),
+                    "{} must address {}/{}",
+                    model.spec,
+                    group.id,
+                    model.id
+                );
+            }
+        }
+        // openrouter ids carry their own slash, so the spec is three segments —
+        // the case that makes `split_model`'s split-on-*first*-slash load-bearing.
+        assert_eq!(
+            cat.groups[1].models[2].spec,
+            "openrouter/anthropic/claude-haiku-4.5"
+        );
+    }
+
+    #[test]
+    /// dsh publishes a per-model effort scale, which is why Fleet cannot reuse
+    /// Claude's or codex's fixed ladder here. The three states a model can be
+    /// in — full scale with a default, scale without a default, and no
+    /// reasoning control at all — must all come through distinguishable.
+    fn effort_scales_come_through_per_model() {
+        let cat = parse_model_catalog(&live_models_value());
+
+        let pro = &cat.groups[0].models[0];
+        assert_eq!(
+            pro.efforts.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            ["off", "low", "high", "max"]
+        );
+        assert_eq!(pro.efforts[3].name, "Max");
+        assert_eq!(pro.default_effort.as_deref(), Some("high"));
+
+        // No `reasoning` object: an empty scale, not a missing one. The UI hides
+        // the effort menu rather than showing a stale ladder from another model.
+        let jamba = &cat.groups[1].models[0];
+        assert!(jamba.efforts.is_empty());
+        assert_eq!(jamba.default_effort, None);
+
+        // A scale with no default — dsh decides, so Fleet must not invent one.
+        let aion = &cat.groups[1].models[1];
+        assert_eq!(aion.efforts.len(), 2);
+        assert_eq!(aion.default_effort, None);
+
+        assert_eq!(
+            cat.groups[1].models[2].description.as_deref(),
+            Some("Fast and cheap.")
+        );
+        assert_eq!(cat.groups[0].models[0].description, None);
+    }
+
+    #[test]
+    /// `failures` is an **array** of per-provider errors, not a count, and it
+    /// arrives alongside a populated `groups` — a route Fleet cannot reach must
+    /// not blank the routes it can. (Also the guard against an earlier reading
+    /// of this field as a number, which would have parsed to nothing.)
+    fn a_failed_provider_does_not_cost_the_working_ones() {
+        let mut value = live_models_value();
+        value["failures"] = json!([{
+            "id": "moonshot",
+            "name": "Moonshot",
+            "message": "missing credential"
+        }]);
+
+        let cat = parse_model_catalog(&value);
+        assert_eq!(cat.groups.len(), 2, "the reachable providers still list");
+        assert_eq!(cat.failures.len(), 1);
+        assert_eq!(cat.failures[0].id, "moonshot");
+        assert_eq!(cat.failures[0].message, "missing credential");
+    }
+
+    #[test]
+    /// An unusable row is dropped, never mapped to a spec that would silently
+    /// no-op at `session.selectModel`: `split_model` ignores a string without a
+    /// provider prefix, so an id-less model offered in the menu would look
+    /// selectable and change nothing.
+    fn rows_without_an_id_are_dropped_rather_than_offered() {
+        let value = json!({
+            "groups": [
+                { "name": "no id here", "models": [{ "id": "m", "name": "M" }] },
+                {
+                    "id": "ok",
+                    "name": "OK",
+                    "models": [
+                        { "name": "nameless" },
+                        { "id": "", "name": "blank" },
+                        { "id": "good", "name": "Good" }
+                    ]
+                }
+            ],
+            "failures": []
+        });
+
+        let cat = parse_model_catalog(&value);
+        assert_eq!(cat.groups.len(), 1, "the id-less group is dropped");
+        assert_eq!(cat.groups[0].id, "ok");
+        assert_eq!(cat.groups[0].models.len(), 1);
+        assert_eq!(cat.groups[0].models[0].spec, "ok/good");
+
+        // A shape with nothing recognisable is an empty catalogue, not a panic.
+        assert_eq!(parse_model_catalog(&json!({})), DshModelCatalog::default());
     }
 }

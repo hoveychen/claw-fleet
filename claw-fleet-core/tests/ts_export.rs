@@ -111,6 +111,15 @@ fn build_bundle() -> String {
         claw_fleet_core::dsh_cost::DshSessionCost,
     );
 
+    // ── dsh model catalogue ──────────────────────────────────────────────────
+    emit!(
+        claw_fleet_core::dsh_source::DshEffort,
+        claw_fleet_core::dsh_source::DshModelEntry,
+        claw_fleet_core::dsh_source::DshModelGroup,
+        claw_fleet_core::dsh_source::DshModelCatalogFailure,
+        claw_fleet_core::dsh_source::DshModelCatalog,
+    );
+
     // ── todos / bg / prd / handoff / live thinking ───────────────────────────
     emit!(
         claw_fleet_core::session_todos::TodoItem,

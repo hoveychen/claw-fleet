@@ -767,6 +767,12 @@ pub trait Backend: Send + Sync {
     fn get_dsh_session_cost(&self, uri: &str)
         -> Result<crate::dsh_cost::DshSessionCost, String>;
 
+    /// dsh's model catalogue, so the launcher can offer real `provider/model`
+    /// pairs and each model's own effort scale. Session-independent — dsh
+    /// describes the host's configured providers, so there is nothing to key
+    /// on. See `dsh_source::dsh_models`.
+    fn dsh_models(&self) -> Result<crate::dsh_source::DshModelCatalog, String>;
+
     // ── Plugins ──────────────────────────────────────────────────────────────
     /// Scan `~/.claude/plugins/` for installed Claude Code plugins.
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem>;

@@ -981,6 +981,8 @@ fn handle_request(
 
             crate::routes::DSH_SESSION_COST => route_dsh_session_cost(ctx, request, &query, json_header, path),
 
+            crate::routes::DSH_MODELS => route_dsh_models(ctx, request, json_header),
+
             crate::routes::EXPLORER_ROOTS | crate::routes::EXPLORER_DIR | crate::routes::EXPLORER_FILE | crate::routes::SCRATCHPAD_DIR
             | crate::routes::SCRATCHPAD_FILE | crate::routes::EXPLORER_EXTERNAL_FILE => route_explorer_roots(ctx, request, &query, json_header, path),
 
