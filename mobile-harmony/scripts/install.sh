@@ -13,6 +13,10 @@
 set -e
 cd "$(dirname "$0")/.."
 
+# DevEco 自带 Node 18,而 pnpm 要 22+ —— 下面会把 DevEco 的 node 顶到 PATH 最
+# 前面(hvigor 需要它),所以先留一份系统 PATH 给 web 构建用,否则 sync-web 会以
+# "pnpm requires at least Node.js v22" 挂掉。
+SYSTEM_PATH="$PATH"
 DEVECO="/Applications/DevEco-Studio.app/Contents/tools"
 export DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
 export JAVA_HOME="/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home"
@@ -42,8 +46,9 @@ fi
 echo "→ 设备: $TARGET"
 
 if (( BUILD && SYNC_WEB )); then
-  # 必须在 assembleHap 之前:rawfile 是构建的输入,晚同步就会把旧 web 打进包里
-  zsh scripts/sync-web.sh
+  # 必须在 assembleHap 之前:rawfile 是构建的输入,晚同步就会把旧 web 打进包里。
+  # 用系统 PATH 跑,避开 DevEco 的 Node 18。
+  PATH="$SYSTEM_PATH" zsh scripts/sync-web.sh
 fi
 
 if (( BUILD )); then
