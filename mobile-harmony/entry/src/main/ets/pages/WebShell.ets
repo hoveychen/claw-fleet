@@ -3,6 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { RelayStore, RelayPairing } from '../common/RelayStore';
 import { saveBase64File } from '../common/FileTransfer';
 import { setKeepScreenOn } from '../common/WakeLock';
+import { shareFile } from '../common/SystemShare';
 
 /// 鸿蒙端的 WebView 外壳：把打包进 rawfile 的 mobile-web 跑起来，原生只做
 /// 三件 web 做不到的事（配对密钥注入、安全区、后续的推送）。
@@ -32,6 +33,11 @@ class NativeBridge {
   /// navigator.wakeLock 在 ArkWeb 未必可用；不可用时页面回退调这里。
   keepAwake(on: boolean): void {
     setKeepScreenOn(this.ctx, on);
+  }
+
+  /// navigator.share 的原生一端，转调 ShareKit 拉起系统分享面板。
+  shareContent(filename: string, mimeType: string, base64: string): void {
+    shareFile(this.ctx, filename, mimeType, base64).catch(() => {});
   }
 }
 
@@ -110,6 +116,27 @@ struct WebShell {
         }).catch(function(){});
       }, true);
 
+      // 系统分享：ArkWeb 没有 Web Share 时补一个转调 ShareKit 的垫片。
+      if (!navigator.share && window.fleetNative) {
+        navigator.canShare = function(d){ return !!(d && d.files && d.files.length); };
+        navigator.share = function(d){
+          var f = d && d.files && d.files[0];
+          if (!f) return Promise.reject(new Error('nothing to share'));
+          return new Promise(function(res, rej){
+            var fr = new FileReader();
+            fr.onload = function(){
+              var s = String(fr.result || '');
+              var i = s.indexOf(',');
+              if (i < 0) { rej(new Error('bad data url')); return; }
+              window.fleetNative.shareContent(f.name || 'share', f.type || '', s.slice(i+1));
+              res();
+            };
+            fr.onerror = function(){ rej(fr.error); };
+            fr.readAsDataURL(f);
+          });
+        };
+      }
+
       // 保持常亮：ArkWeb 若没有 navigator.wakeLock，就补一个转调原生的垫片，
       // 这样 wakeLock.ts 的既有逻辑无需知道自己跑在鸿蒙里。
       if (!navigator.wakeLock && window.fleetNative) {
@@ -155,7 +182,7 @@ struct WebShell {
           .javaScriptProxy({
             object: this.bridge,
             name: 'fleetNative',
-            methodList: ['saveFile', 'keepAwake'],
+            methodList: ['saveFile', 'keepAwake', 'shareContent'],
             controller: this.controller,
           })
           .onInterceptRequest((event) => {
