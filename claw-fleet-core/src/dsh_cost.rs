@@ -11,6 +11,23 @@
 //!
 //! So this asks the provider what it actually charged.
 //!
+//! # …except where the price list is fixed and public
+//!
+//! That reasoning turns on the word *different*: it is the open model space that
+//! makes a table untrustworthy. dsh's built-in `deepseek-official` route has no
+//! such variable — one seller, one published price list — so tokens × rate is
+//! exact there, not a guess, and it is the only number available: that adapter
+//! emits no replay envelope and keeps no response id on success (verified in
+//! dsh's source: `llm-deepseek` contains no `replayState`, and the
+//! `x-request-id` it reads is attached to errors only), and DeepSeek publishes
+//! no receipt endpoint to ask anyway.
+//!
+//! So the module has two pricing paths, disjoint by construction — receipts
+//! keyed on a generation id, and a table keyed on the provider name — and a
+//! session that mixes providers is summed once per call. The note always says
+//! which calls came from which, because "an invoice said so" and "we applied a
+//! published rate to counted tokens" are different kinds of number.
+//!
 //! # How a session's calls are found (measured)
 //!
 //! Every successful model call leaves a durable `assistant/message` event whose
@@ -111,6 +128,11 @@ pub struct DshSessionCost {
     pub total_usd: Option<f64>,
     /// Model calls whose real cost was obtained.
     pub priced_calls: u32,
+    /// The subset of `priced_calls` costed from a published rate table rather
+    /// than from the provider's own receipt. The panel must say which it is
+    /// showing: "the seller told us" and "we applied a published rate to counted
+    /// tokens" are both honest, but they are not the same claim.
+    pub table_priced_calls: u32,
     /// OpenRouter calls the API would not price (unknown id, request failed).
     pub unpriced_calls: u32,
     /// Calls through a provider with no cost API — counted, never guessed at.
@@ -118,6 +140,150 @@ pub struct DshSessionCost {
     /// Why the total is absent or partial, for the panel to show verbatim.
     /// Empty when every call was priced.
     pub note: String,
+}
+
+// ── Fixed-price routes ───────────────────────────────────────────────────────
+
+/// dsh's built-in DeepSeek route (plugin `llm-deepseek`), as it names itself in
+/// `assistant/message.source.provider`.
+const DEEPSEEK_OFFICIAL: &str = "deepseek-official";
+
+/// One model call Fleet can price from a published table instead of a receipt.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeteredCall {
+    pub provider: String,
+    pub model: String,
+    /// The durable event's `time`, in ms since the epoch — what decides the tier.
+    pub at_ms: i64,
+    /// Input tokens that were NOT served from cache. dsh reports the two
+    /// separately and they do not overlap (measured: a call with
+    /// `inputTokens: 3` alongside `cacheReadTokens: 6756`).
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// USD per 1M tokens at **peak** rates for one model. Off-peak is exactly half,
+/// so only one row per model is stored.
+struct PeakRates {
+    model: &'static str,
+    cache_hit_input: f64,
+    cache_miss_input: f64,
+    output: f64,
+}
+
+/// DeepSeek's published rates, effective 2026-08-16 16:00 UTC (the release that
+/// introduced peak/off-peak). Cross-checked against the official pricing page
+/// and DeepSeek's own announcement.
+///
+/// A model absent from this table is **not** priced — see [`price_metered`].
+const DEEPSEEK_PEAK_RATES: &[PeakRates] = &[
+    PeakRates {
+        model: "deepseek-v4-flash",
+        cache_hit_input: 0.014,
+        cache_miss_input: 0.44,
+        output: 1.32,
+    },
+    PeakRates {
+        model: "deepseek-v4-pro",
+        cache_hit_input: 0.044,
+        cache_miss_input: 1.32,
+        output: 3.96,
+    },
+];
+
+/// Is `at_ms` inside DeepSeek's peak window?
+///
+/// Peak is 01:00–04:00 and 06:00–10:00 UTC — 7 hours a day; the other 17 are
+/// off-peak at half price. (The 16:30–00:30 window that discounted V3/R1 is
+/// retired and must not be used.)
+fn is_peak(at_ms: i64) -> bool {
+    let hour = at_ms.div_euclid(3_600_000).rem_euclid(24);
+    (1..4).contains(&hour) || (6..10).contains(&hour)
+}
+
+/// Sum what a fixed-price route charged, tier chosen per call.
+///
+/// Returns the total plus the tally the panel reports: how many calls were
+/// priced at each tier, and how many named a model this table does not know.
+/// An unknown model is counted, never estimated — the module's whole reason for
+/// asking the provider is that a plausible-looking wrong number is worse than
+/// an absent one, and that applies just as much to a stale price table.
+pub fn price_metered(calls: &[MeteredCall]) -> (f64, u32, u32, u32) {
+    let mut total = 0.0;
+    let (mut peak, mut off_peak, mut unknown) = (0, 0, 0);
+    for call in calls {
+        let Some(rates) = DEEPSEEK_PEAK_RATES
+            .iter()
+            .find(|r| r.model == call.model)
+        else {
+            unknown += 1;
+            continue;
+        };
+        let at_peak = is_peak(call.at_ms);
+        let scale = if at_peak { 1.0 } else { 0.5 };
+        total += scale
+            * (rates.cache_miss_input * call.input_tokens as f64
+                + rates.cache_hit_input * call.cache_read_tokens as f64
+                + rates.output * call.output_tokens as f64)
+            / 1_000_000.0;
+        if at_peak {
+            peak += 1;
+        } else {
+            off_peak += 1;
+        }
+    }
+    (total, peak, off_peak, unknown)
+}
+
+/// Pull the calls that a published table can price out of a session's events.
+///
+/// Only `deepseek-official`: its adapter emits no replay envelope and keeps no
+/// response id on success (verified in dsh's own source — `llm-deepseek` has no
+/// `replayState` at all, and the `x-request-id` it reads is attached to errors
+/// only), so [`generation_refs`] cannot see these calls and a receipt lookup has
+/// nothing to ask for. Its price list, unlike OpenRouter's open model space, is
+/// fixed and public, so tokens × rate is exact rather than a guess.
+pub fn metered_calls(events: &[Value]) -> Vec<MeteredCall> {
+    let mut out = Vec::new();
+    for event in events {
+        if event.get("type").and_then(Value::as_str) != Some("assistant/message") {
+            continue;
+        }
+        let Some(source) = event.pointer("/data/message/source") else {
+            continue;
+        };
+        if source.get("kind").and_then(Value::as_str) != Some("model") {
+            continue;
+        }
+        let provider = source
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if provider != DEEPSEEK_OFFICIAL {
+            continue;
+        }
+        let usage = event.pointer("/data/usage");
+        let tokens = |name: &str| -> u64 {
+            usage
+                .and_then(|u| u.get(name))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        };
+        out.push(MeteredCall {
+            provider: provider.to_string(),
+            model: source
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            at_ms: event.get("time").and_then(Value::as_i64).unwrap_or(0),
+            input_tokens: tokens("inputTokens"),
+            cache_read_tokens: tokens("cacheReadTokens"),
+            output_tokens: tokens("outputTokens"),
+        });
+    }
+    out
 }
 
 // ── Extraction ───────────────────────────────────────────────────────────────
@@ -387,6 +553,8 @@ fn tally(
         DshSessionCost {
             total_usd: (priced > 0).then_some(total),
             priced_calls: priced,
+            // Everything `tally` prices came from a receipt lookup by definition.
+            table_priced_calls: 0,
             unpriced_calls: unpriced,
             unpriceable_calls: unpriceable,
             note: notes.join("; "),
@@ -405,12 +573,19 @@ fn tally(
 pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
     let events = crate::dsh_source::session_events(uri)?;
     let refs = generation_refs(&events);
-    if refs.is_empty() {
+    // Calls a published table can price. Disjoint from `refs` by construction —
+    // one is keyed on a receipt id the fixed-price routes never emit, the other
+    // on the provider name — so a session that mixes both is summed, not
+    // double-charged.
+    let metered = metered_calls(&events);
+    if refs.is_empty() && metered.is_empty() {
         return Ok(DshSessionCost {
             note: "no model calls in this session yet".to_string(),
             ..Default::default()
         });
     }
+
+    let (table_total, peak_n, off_peak_n, unknown_model_n) = price_metered(&metered);
 
     let needs_openrouter = refs.iter().any(|r| r.provider == OPENROUTER);
     let key = openrouter_api_key();
@@ -418,6 +593,11 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
         return Ok(DshSessionCost {
             unpriced_calls: refs.iter().filter(|r| r.provider == OPENROUTER).count() as u32,
             unpriceable_calls: refs.iter().filter(|r| r.provider != OPENROUTER).count() as u32,
+            // The table-priced calls still count: a missing OpenRouter key says
+            // nothing about a route that needs no key at all.
+            total_usd: (peak_n + off_peak_n > 0).then_some(table_total),
+            priced_calls: peak_n + off_peak_n,
+            table_priced_calls: peak_n + off_peak_n,
             // Names the exact line to write. A desktop-launched dsh inherits the
             // app's environment, which has no shell profile in it, so the file is
             // the option that actually works there — and it is keyed by the
@@ -426,7 +606,6 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
                    `OPENROUTER_API_KEY: <key>` to ~/.dsh/.credentials.yaml \
                    (or export that variable before launching)"
                 .to_string(),
-            ..Default::default()
         });
     }
 
@@ -436,7 +615,58 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
         None => Err("no OpenRouter API key configured".to_string()),
     });
     store_cache(&fresh);
-    Ok(cost)
+    Ok(merge_metered(cost, table_total, peak_n, off_peak_n, unknown_model_n))
+}
+
+/// Fold the table-priced calls into the receipt-priced result.
+///
+/// Kept separate from [`dsh_session_cost`] so the composition is unit-testable
+/// without a live dsh or a network round trip.
+fn merge_metered(
+    receipts: DshSessionCost,
+    table_total: f64,
+    peak_n: u32,
+    off_peak_n: u32,
+    unknown_model_n: u32,
+) -> DshSessionCost {
+    let table_priced = peak_n + off_peak_n;
+    if table_priced == 0 && unknown_model_n == 0 {
+        return receipts;
+    }
+    let mut notes: Vec<String> = receipts
+        .note
+        .split("; ")
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if table_priced > 0 {
+        // Says where the figure came from, because it is a different kind of
+        // number than the receipt total next to it: a published rate applied to
+        // counted tokens, not what an invoice reported.
+        notes.push(format!(
+            "{table_priced} call(s) priced from DeepSeek's published rates \
+             ({peak_n} peak / {off_peak_n} off-peak)"
+        ));
+    }
+    if unknown_model_n > 0 {
+        notes.push(format!(
+            "{unknown_model_n} call(s) on a model with no published rate in this \
+             build are not included"
+        ));
+    }
+    let total = match receipts.total_usd {
+        Some(receipt_total) => Some(receipt_total + table_total),
+        None if table_priced > 0 => Some(table_total),
+        None => None,
+    };
+    DshSessionCost {
+        total_usd: total,
+        priced_calls: receipts.priced_calls + table_priced,
+        table_priced_calls: receipts.table_priced_calls + table_priced,
+        unpriced_calls: receipts.unpriced_calls,
+        unpriceable_calls: receipts.unpriceable_calls + unknown_model_n,
+        note: notes.join("; "),
+    }
 }
 
 #[cfg(test)]
@@ -585,6 +815,190 @@ mod tests {
             vec!["gen-1", "gen-2", "gen-1787026253-Te7maM1es7yqmeDdhUS6"],
             "old flat sessions must keep pricing alongside the new envelope"
         );
+    }
+
+    /// One `deepseek-official` `assistant/message`, verbatim off the wire (the
+    /// probe session run against dsh's built-in route). Note what is *not* here:
+    /// no `replayState`, so no id — which is why these calls need a table rather
+    /// than a receipt.
+    fn official_event(at_ms: i64, model: &str, input: u64, cache_read: u64, output: u64) -> Value {
+        json!({
+            "type": "assistant/message",
+            "seq": 20,
+            "time": at_ms,
+            "data": {
+                "turn": 1,
+                "step": 1,
+                "usage": {
+                    "inputTokens": input,
+                    "outputTokens": output,
+                    "cacheReadTokens": cache_read
+                },
+                "message": {
+                    "role": "assistant",
+                    "id": "msg-official",
+                    "source": {
+                        "kind": "model",
+                        "provider": "deepseek-official",
+                        "model": model
+                    }
+                }
+            }
+        })
+    }
+
+    /// 2026-08-18 19:47:32 UTC — the probe call's real timestamp. Off-peak.
+    const OFF_PEAK_MS: i64 = 1_787_082_452_518;
+    /// Same day, 02:00 UTC. Inside the 01:00–04:00 peak window.
+    const PEAK_MS: i64 = 1_787_022_000_000;
+
+    #[test]
+    fn extracts_official_calls_with_their_tokens_and_timestamp() {
+        let calls = metered_calls(&[
+            official_event(OFF_PEAK_MS, "deepseek-v4-flash", 12938, 0, 1),
+            // Another provider's call must not be swept in — it is priced by
+            // receipt, and counting it here would double-charge the session.
+            v2_envelope_event(),
+        ]);
+        assert_eq!(
+            calls,
+            vec![MeteredCall {
+                provider: "deepseek-official".into(),
+                model: "deepseek-v4-flash".into(),
+                at_ms: OFF_PEAK_MS,
+                input_tokens: 12938,
+                cache_read_tokens: 0,
+                output_tokens: 1,
+            }],
+            "only the fixed-price route's calls, with the event's own timestamp"
+        );
+    }
+
+    #[test]
+    fn prices_off_peak_at_half_the_peak_rate() {
+        // 1M cache-miss input + 1M output on flash, so the arithmetic is the
+        // published rate itself: peak 0.44 + 1.32 = 1.76, off-peak half of that.
+        let call = |at_ms| MeteredCall {
+            provider: "deepseek-official".into(),
+            model: "deepseek-v4-flash".into(),
+            at_ms,
+            input_tokens: 1_000_000,
+            cache_read_tokens: 0,
+            output_tokens: 1_000_000,
+        };
+        let (peak_total, peak_n, off_n, unknown) = price_metered(&[call(PEAK_MS)]);
+        assert!(
+            (peak_total - 1.76).abs() < 1e-9,
+            "peak flash 1M in + 1M out must be $1.76, got {peak_total}"
+        );
+        assert_eq!((peak_n, off_n, unknown), (1, 0, 0));
+
+        let (off_total, peak_n, off_n, _) = price_metered(&[call(OFF_PEAK_MS)]);
+        assert!(
+            (off_total - 0.88).abs() < 1e-9,
+            "off-peak is exactly half — $0.88 expected, got {off_total}"
+        );
+        assert_eq!((peak_n, off_n), (0, 1));
+    }
+
+    #[test]
+    fn prices_the_three_token_classes_separately() {
+        // Cache hits are an order of magnitude cheaper than misses, so folding
+        // them together would overstate a cache-heavy session by ~30×.
+        let (total, _, off_n, _) = price_metered(&[MeteredCall {
+            provider: "deepseek-official".into(),
+            model: "deepseek-v4-pro".into(),
+            at_ms: OFF_PEAK_MS,
+            input_tokens: 1_000_000,
+            cache_read_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+        }]);
+        // Off-peak pro: 0.66 miss + 0.022 hit + 1.98 out.
+        assert!(
+            (total - 2.662).abs() < 1e-9,
+            "expected 0.66 + 0.022 + 1.98 = $2.662, got {total}"
+        );
+        assert_eq!(off_n, 1);
+    }
+
+    #[test]
+    fn an_unknown_model_is_counted_not_estimated() {
+        let (total, peak_n, off_n, unknown) = price_metered(&[MeteredCall {
+            provider: "deepseek-official".into(),
+            model: "deepseek-v5-unreleased".into(),
+            at_ms: OFF_PEAK_MS,
+            input_tokens: 1_000_000,
+            cache_read_tokens: 0,
+            output_tokens: 1_000_000,
+        }]);
+        assert_eq!(
+            (total, peak_n, off_n, unknown),
+            (0.0, 0, 0, 1),
+            "a model the table does not know must not be guessed at"
+        );
+    }
+
+    /// The window boundaries themselves, since an off-by-one hour would misprice
+    /// every call in a whole hour by 2×.
+    #[test]
+    fn peak_window_covers_exactly_0104_and_0610_utc() {
+        let at = |hour: i64| hour * 3_600_000;
+        for h in [1, 2, 3, 6, 7, 8, 9] {
+            assert!(is_peak(at(h)), "{h:02}:00 UTC is peak");
+        }
+        for h in [0, 4, 5, 10, 11, 16, 23] {
+            assert!(!is_peak(at(h)), "{h:02}:00 UTC is off-peak");
+        }
+    }
+
+    /// A session that used both routes must have its two totals added, each
+    /// counted once — the failure this guards is a double charge or a lost half.
+    #[test]
+    fn merges_receipt_and_table_totals_without_double_counting() {
+        let receipts = DshSessionCost {
+            total_usd: Some(0.05),
+            priced_calls: 2,
+            table_priced_calls: 0,
+            unpriced_calls: 1,
+            unpriceable_calls: 0,
+            note: "1 call(s) could not be priced: 404".to_string(),
+        };
+        let merged = merge_metered(receipts, 0.25, 1, 2, 0);
+        assert_eq!(merged.total_usd, Some(0.30), "0.05 receipt + 0.25 table");
+        assert_eq!(merged.priced_calls, 5, "2 by receipt + 3 by table");
+        assert_eq!(merged.unpriced_calls, 1, "the receipt gap is untouched");
+        assert!(
+            merged.note.contains("could not be priced")
+                && merged.note.contains("1 peak / 2 off-peak"),
+            "both stories must survive the merge: {}",
+            merged.note
+        );
+    }
+
+    /// The common case for a DeepSeek-official-only session: there is no receipt
+    /// total at all, so the table total must become the total rather than being
+    /// dropped next to a `None`.
+    #[test]
+    fn a_table_only_session_gets_a_total() {
+        let merged = merge_metered(DshSessionCost::default(), 0.017, 0, 1, 0);
+        assert_eq!(merged.total_usd, Some(0.017));
+        assert_eq!(merged.priced_calls, 1);
+        assert!(merged.note.contains("published rates"), "{}", merged.note);
+    }
+
+    /// Nothing to fold in must leave the receipt result byte-identical, so the
+    /// OpenRouter-only path cannot be perturbed by this feature.
+    #[test]
+    fn merging_nothing_leaves_the_receipt_result_alone() {
+        let receipts = DshSessionCost {
+            total_usd: Some(0.05),
+            priced_calls: 2,
+            table_priced_calls: 0,
+            unpriced_calls: 0,
+            unpriceable_calls: 1,
+            note: "1 call(s) went through a provider with no cost API".to_string(),
+        };
+        assert_eq!(merge_metered(receipts.clone(), 0.0, 0, 0, 0), receipts);
     }
 
     #[test]
