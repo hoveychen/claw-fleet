@@ -20,9 +20,15 @@
 // FLEET_SERVE_WORKERS (sampling /health every 0.5s alongside):
 //   1 worker  — roster 11.2s, conversation 2.71s, /health max 9.82s
 //   8 workers — roster 11.1s, conversation 0.67s, /health max 1.2ms
-// The roster number is the dsh RPC plus the frontend's poll cadence, so the
-// pool does not move it; what the pool buys is every *other* request no longer
-// waiting behind that scan.
+// Do NOT read the roster number as a backend latency. The four fixed waits
+// below (3000 + 4000 + 2500 + 1500) are 11s on their own, so "roster listed at
+// 11.1s" means the session was already there the first time the loop looked —
+// the metric is saturated and cannot show further improvement. It only
+// distinguishes "data arrived within the scripted walk-through" (11s) from "it
+// did not" (42.7s, pre-dsh-fix). For backend latency, sample the endpoints:
+// with a 5s dsh, /sessions went 5.0s per poll → 1.2ms (max, n=57) once the
+// session list moved to a background-refreshed snapshot, and dsh saw 6
+// session.list calls across the whole run instead of one per poll.
 //
 // Clicks go through `page.evaluate` DOM dispatch rather than Playwright locators;
 // see the note in live-ui-journey.js for why.
