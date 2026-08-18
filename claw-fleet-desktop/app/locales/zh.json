@@ -761,7 +761,9 @@
     "col_tokens": "Token",
     "kpi_cost": "真实花费",
     "cost_calls": "已向 provider 取到 {{count}} 次调用的实价",
-    "caveat": "token 数取自 dsh 自己的会话 projections：计费桶是整个会话的累计值，上下文构成是当前窗口的快照，两者不能相加。花费是 provider 实际收取的金额，不是按 token 反推的——同一个模型经不同 provider 价格不同。"
+    "cost_calls_rates": "{{count}} 次调用按公开价目算出",
+    "cost_calls_mixed": "{{receipt}} 次取自 provider 实价 / {{rates}} 次按公开价目",
+    "caveat": "Token 计数来自 dsh 自己的会话投影。计费桶是整个会话的累计值，上下文构成是此刻窗口的快照，两者不会相加对齐。花费有两种来路，上方数字会标明是哪一种：对每次生成都开发票的 provider（OpenRouter），显示的是它实际收取的金额，绝不由 token 数推导 —— 因为同一模型经不同 provider 价钱不同；对只有一个卖方且价目公开的路线（DeepSeek 官方，它不开发票），显示的是把公开价目套在已计数的 token 上的结果，并逐次调用区分峰时/闲时。既无价目又无发票的调用只计数，绝不估价。"
   },
   "inspect": {
     "close": "关闭",

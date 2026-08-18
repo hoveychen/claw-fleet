@@ -128,6 +128,11 @@ pub struct DshSessionCost {
     pub total_usd: Option<f64>,
     /// Model calls whose real cost was obtained.
     pub priced_calls: u32,
+    /// The subset of `priced_calls` costed from a published rate table rather
+    /// than from the provider's own receipt. The panel must say which it is
+    /// showing: "the seller told us" and "we applied a published rate to counted
+    /// tokens" are both honest, but they are not the same claim.
+    pub table_priced_calls: u32,
     /// OpenRouter calls the API would not price (unknown id, request failed).
     pub unpriced_calls: u32,
     /// Calls through a provider with no cost API — counted, never guessed at.
@@ -548,6 +553,8 @@ fn tally(
         DshSessionCost {
             total_usd: (priced > 0).then_some(total),
             priced_calls: priced,
+            // Everything `tally` prices came from a receipt lookup by definition.
+            table_priced_calls: 0,
             unpriced_calls: unpriced,
             unpriceable_calls: unpriceable,
             note: notes.join("; "),
@@ -590,6 +597,7 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
             // nothing about a route that needs no key at all.
             total_usd: (peak_n + off_peak_n > 0).then_some(table_total),
             priced_calls: peak_n + off_peak_n,
+            table_priced_calls: peak_n + off_peak_n,
             // Names the exact line to write. A desktop-launched dsh inherits the
             // app's environment, which has no shell profile in it, so the file is
             // the option that actually works there — and it is keyed by the
@@ -654,6 +662,7 @@ fn merge_metered(
     DshSessionCost {
         total_usd: total,
         priced_calls: receipts.priced_calls + table_priced,
+        table_priced_calls: receipts.table_priced_calls + table_priced,
         unpriced_calls: receipts.unpriced_calls,
         unpriceable_calls: receipts.unpriceable_calls + unknown_model_n,
         note: notes.join("; "),
@@ -949,6 +958,7 @@ mod tests {
         let receipts = DshSessionCost {
             total_usd: Some(0.05),
             priced_calls: 2,
+            table_priced_calls: 0,
             unpriced_calls: 1,
             unpriceable_calls: 0,
             note: "1 call(s) could not be priced: 404".to_string(),
@@ -983,6 +993,7 @@ mod tests {
         let receipts = DshSessionCost {
             total_usd: Some(0.05),
             priced_calls: 2,
+            table_priced_calls: 0,
             unpriced_calls: 0,
             unpriceable_calls: 1,
             note: "1 call(s) went through a provider with no cost API".to_string(),
