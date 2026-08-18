@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   AGENT_TOOL_CHOICES,
   CLAUDE_EFFORT_CHOICES,
@@ -9,9 +10,12 @@ import {
   CODEX_EFFORT_CHOICES,
   CODEX_MODEL_CHOICES,
   codexProfileChoices,
+  dshFindPick,
+  dshModelMenu,
   type CodexProfile,
 } from "../modelChoices";
-import { PillMenu } from "./PillMenu";
+import type { DshModelCatalog } from "../generated/types";
+import { PillMenu, type PillMenuItem } from "./PillMenu";
 
 /** The model / effort / permission-mode ghost pills shared by the new-session
  *  modal and the history panel's resume composer. `""` means "don't pass the
@@ -92,27 +96,110 @@ export function SessionOptionPills({
   }, [isCodex]);
   // dsh addresses a model as `provider/model` and publishes the pair — plus a
   // per-model effort scale — through its own `llm.models` RPC, so neither of
-  // Fleet's two curated lists applies to it. Until that catalogue is wired
-  // through the Backend trait, dsh offers only "default", which is honest: the
-  // session then runs on whatever `~/.dsh/settings.yaml` selects. Offering
-  // Claude's list here would be worse than offering nothing — picking
-  // `claude-opus-5` for a dsh session silently does nothing, because
-  // `dsh_source::split_model` needs a provider prefix and drops a bare name.
+  // Fleet's two curated lists applies to it. The catalogue is fetched instead,
+  // and best-effort like Codex's profiles: a failure (no dsh on the host, the
+  // server not starting, a `fleet serve` too old to know the route) leaves the
+  // menu with only its "default" item, which is honest — the session then runs
+  // on whatever `~/.dsh/settings.yaml` selects. Offering Claude's list here
+  // would be worse than offering nothing: picking `claude-opus-5` for a dsh
+  // session silently does nothing, because `dsh_source::split_model` needs a
+  // provider prefix and drops a bare name.
+  const [dshCatalog, setDshCatalog] = useState<DshModelCatalog | null>(null);
+  useEffect(() => {
+    if (!isDsh) return;
+    let live = true;
+    invoke<DshModelCatalog>("dsh_models")
+      .then((c) => {
+        if (live) setDshCatalog(c ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [isDsh]);
+  const dshMenu = useMemo(() => dshModelMenu(isDsh ? dshCatalog : null), [isDsh, dshCatalog]);
+  // Which vendor folder the model menu is currently showing, `null` for the top
+  // level. Deliberately *not* reset when the popover closes: after picking a
+  // Claude model out of the `anthropic` folder, the next open lands back in that
+  // folder, which is where the next pick almost always is.
+  const [dshFolder, setDshFolder] = useState<string | null>(null);
   const modelChoices = useMemo(() => {
     if (isDsh) return [];
     return isCodex
       ? [...CODEX_MODEL_CHOICES, ...codexProfileChoices(codexProfiles)]
       : CLAUDE_MODEL_CHOICES;
   }, [isCodex, isDsh, codexProfiles]);
-  const effortChoices = isDsh ? [] : isCodex ? CODEX_EFFORT_CHOICES : CLAUDE_EFFORT_CHOICES;
+  // dsh publishes the ladder per model, so the effort menu follows the current
+  // pick rather than a fixed table. A model with no reasoning control offers
+  // nothing but "default" — the honest rendering of "this model has no effort
+  // knob", where showing the previous model's ladder would invite a value dsh
+  // will not honour.
+  const dshPick = useMemo(() => dshFindPick(dshMenu, model), [dshMenu, model]);
+  const effortChoices = isDsh
+    ? (dshPick?.efforts ?? [])
+    : isCodex
+      ? CODEX_EFFORT_CHOICES
+      : CLAUDE_EFFORT_CHOICES;
   // In the un-chosen ("") state a pill shows only its bare category name
   // ("Model" / "模型"), not a "…: default" value: the prefix+value form made the
   // toolbar too wide to hold one row (English overflowed outright). The menu's
   // own default item still spells out what "no choice" means, and picking a
   // value replaces the label with that value.
-  const modelLabel =
-    modelChoices.find((m) => m.value === model)?.label ?? t("new_session.model_pill_default");
+  const modelLabel = isDsh
+    ? (dshPick?.label ?? (model || t("new_session.model_pill_default")))
+    : (modelChoices.find((m) => m.value === model)?.label ??
+      t("new_session.model_pill_default"));
   const effortLabel = effort || t("new_session.effort_pill_default");
+  // dsh names a per-model default, so the un-chosen effort item can say which
+  // one it means instead of a bare "Default".
+  const effortDefaultLabel =
+    isDsh && dshPick?.defaultEffort
+      ? `${t("new_session.effort_default")} (${dshPick.defaultEffort})`
+      : t("new_session.effort_default");
+  // The model menu's rows. Every agent but dsh has one flat list; dsh gets two
+  // levels because its catalogue is the host's whole provider space (278 models
+  // across 43 vendors on the machine this was built against), and a flat popover
+  // of that is not a menu.
+  const openFolder = dshFolder ? dshMenu.folders.find((f) => f.id === dshFolder) : undefined;
+  const folderLabel = (vendor: string, count: number) =>
+    vendor ? `${vendor} (${count})` : t("new_session.model_other_vendors", { count });
+  const modelItems: PillMenuItem[] = openFolder
+    ? [
+        {
+          id: "..",
+          label: folderLabel(openFolder.vendor, openFolder.models.length),
+          icon: <ChevronLeft size={13} strokeWidth={2.2} />,
+          keepOpen: true,
+          onSelect: () => setDshFolder(null),
+        },
+        ...openFolder.models.map((m) => ({
+          id: m.value,
+          label: m.label,
+          checked: m.value === model,
+          onSelect: () => onModelChange(m.value),
+        })),
+      ]
+    : [
+        {
+          id: "",
+          label: t("new_session.model_default"),
+          checked: model === "",
+          onSelect: () => onModelChange(""),
+        },
+        ...(isDsh ? dshMenu.inline : modelChoices).map((m) => ({
+          id: m.value,
+          label: m.label,
+          checked: m.value === model,
+          onSelect: () => onModelChange(m.value),
+        })),
+        ...dshMenu.folders.map((f) => ({
+          id: f.id,
+          label: folderLabel(f.vendor, f.models.length),
+          icon: <ChevronRight size={13} strokeWidth={2.2} />,
+          keepOpen: true,
+          onSelect: () => setDshFolder(f.id),
+        })),
+      ];
   const permissionLabel = permissionMode
     ? t(`new_session.permission_${permissionMode}`)
     : t("new_session.permission_pill_default");
@@ -139,32 +226,21 @@ export function SessionOptionPills({
         compact={compact}
         label={modelLabel}
         title={t("new_session.model")}
+        testId="model-pill"
         disabled={disabled}
-        items={[
-          {
-            id: "",
-            label: t("new_session.model_default"),
-            checked: model === "",
-            onSelect: () => onModelChange(""),
-          },
-          ...modelChoices.map((m) => ({
-            id: m.value,
-            label: m.label,
-            checked: m.value === model,
-            onSelect: () => onModelChange(m.value),
-          })),
-        ]}
+        items={modelItems}
       />
       <PillMenu
         placement={placement}
         compact={compact}
         label={effortLabel}
         title={t("new_session.effort")}
+        testId="effort-pill"
         disabled={disabled}
         items={[
           {
             id: "",
-            label: t("new_session.effort_default"),
+            label: effortDefaultLabel,
             checked: effort === "",
             onSelect: () => onEffortChange(""),
           },
