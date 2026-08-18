@@ -87,21 +87,43 @@ export async function sharedFilesToFiles(shared: SharedFile[]): Promise<File[]> 
  *
  * No-op on web and on iOS (no Share Extension). Returns an unsubscribe function.
  */
+/** 原生壳注入分享内容的入口。
+ *
+ *  Capacitor 有插件可以监听，但不是每种壳都有——鸿蒙的 WebShell 跑在 ArkWeb
+ *  里，没有 Capacitor 运行时，它接到系统分享后只能从原生侧调进来。挂一个具名
+ *  全局函数是两边都能用的最小公约数，也避免为某个平台在业务代码里开分支。
+ *
+ *  壳侧约定：`window.__fleetShare({ title, texts, files })`。 */
+const NATIVE_SHARE_HOOK = "__fleetShare";
+
 export function onShareReceived(handler: (share: IncomingShare) => void): () => void {
-  if (!Capacitor.isNativePlatform()) return () => {};
+  const deliver = (raw: Partial<IncomingShare> | undefined) => {
+    handler({
+      title: raw?.title ?? "",
+      texts: raw?.texts ?? [],
+      files: raw?.files ?? [],
+    });
+  };
+
+  // 原生壳注入通道。先装：它不依赖 Capacitor，鸿蒙 WebShell 只有这一条路。
+  const w = window as unknown as Record<string, unknown>;
+  w[NATIVE_SHARE_HOOK] = (payload: Partial<IncomingShare>) => deliver(payload);
+
+  if (!Capacitor.isNativePlatform()) {
+    return () => {
+      delete w[NATIVE_SHARE_HOOK];
+    };
+  }
 
   let cancelled = false;
   const listener = CapacitorShareTarget.addListener("shareReceived", (event) => {
     if (cancelled) return;
-    handler({
-      title: event.title ?? "",
-      texts: event.texts ?? [],
-      files: event.files ?? [],
-    });
+    deliver({ title: event.title, texts: event.texts, files: event.files });
   });
 
   return () => {
     cancelled = true;
+    delete w[NATIVE_SHARE_HOOK];
     listener.then((handle) => handle.remove()).catch(() => {});
   };
 }

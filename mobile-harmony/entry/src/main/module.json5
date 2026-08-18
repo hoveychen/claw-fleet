@@ -37,6 +37,18 @@
             "actions": [
               "ohos.want.action.home"
             ]
+          },
+          {
+            // 让 Fleet 出现在别的 app 的系统分享列表里(接收方)。这与
+            // SystemShare.ets 是反方向:那个是 Fleet 主动分享出去。
+            "actions": [
+              "ohos.want.action.sendData"
+            ],
+            "uris": [
+              { "type": "text/plain" },
+              { "type": "image/*" },
+              { "type": "*/*" }
+            ]
           }
         ]
       }
