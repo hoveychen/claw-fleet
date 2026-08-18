@@ -2253,6 +2253,18 @@ impl Backend for LocalBackend {
         crate::wiki::export_doc(slug, version)
     }
 
+    fn publish_wiki_text(
+        &self,
+        slug: &str,
+        title: &str,
+        text: &str,
+        workspace_path: &str,
+        mode: crate::wiki::TextPublishMode,
+    ) -> Result<crate::wiki::WikiDoc, String> {
+        let title = (!title.trim().is_empty()).then_some(title);
+        crate::wiki::publish_text(slug, title, text, std::path::Path::new(workspace_path), mode)
+    }
+
     fn get_task_plans(
         &self,
         workspace_path: &str,
