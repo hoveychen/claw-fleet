@@ -16,6 +16,14 @@
 //   before — roster listed at 42.7s, conversation fell open (stalled) after 20.1s
 //   after  — roster listed at 11.1s, conversation had data in 0.65s
 //
+// Then across the serve worker-pool fix, same binary, arms selected with
+// FLEET_SERVE_WORKERS (sampling /health every 0.5s alongside):
+//   1 worker  — roster 11.2s, conversation 2.71s, /health max 9.82s
+//   8 workers — roster 11.1s, conversation 0.67s, /health max 1.2ms
+// The roster number is the dsh RPC plus the frontend's poll cadence, so the
+// pool does not move it; what the pool buys is every *other* request no longer
+// waiting behind that scan.
+//
 // Clicks go through `page.evaluate` DOM dispatch rather than Playwright locators;
 // see the note in live-ui-journey.js for why.
 async (page) => {
@@ -106,9 +114,13 @@ async (page) => {
   }
   const elapsedMs = Date.now() - tOpen;
   steps.push(`${at()} outcome=${outcome} after ${(elapsedMs / 1000).toFixed(2)}s`);
-  // Name the shot after the outcome: an A/B run would otherwise overwrite the
-  // previous binary's evidence with the current one's.
-  await page.screenshot({ path: `${shots}/p5-conversation-${outcome}.png` });
+  // Name the shot after the outcome *and* the measurement: naming it after the
+  // outcome alone still collides when both arms of an A/B end in `data` (a
+  // 0.67s conversation and a 2.71s one are the same word), and the second run
+  // then overwrites the first arm's evidence.
+  await page.screenshot({
+    path: `${shots}/p5-conversation-${outcome}-${elapsedMs}ms.png`,
+  });
 
   return { steps, listed, outcome, elapsedMs, body: await bodyText() };
 }
