@@ -44,10 +44,14 @@
             "actions": [
               "ohos.want.action.sendData"
             ],
+            // 必须用 utd(统一数据类型)而不是 mime type —— 第一版写成
+            // "type": "text/plain" 系统压根不认,Fleet 不出现在分享面板里。
+            // 每个条目都必须带 scheme,少了会在构建期 schema 校验直接失败。
+            // general.object 覆盖全部类型,前两条明确常用的文本与图片。
             "uris": [
-              { "type": "text/plain" },
-              { "type": "image/*" },
-              { "type": "*/*" }
+              { "scheme": "file", "utd": "general.text" },
+              { "scheme": "file", "utd": "general.image" },
+              { "scheme": "file", "utd": "general.object" }
             ]
           }
         ]
