@@ -444,6 +444,9 @@ impl Backend for NullBackend {
     ) -> Result<claw_fleet_core::dsh_cost::DshSessionCost, String> {
         Err("backend not ready".into())
     }
+    fn dsh_models(&self) -> Result<claw_fleet_core::dsh_source::DshModelCatalog, String> {
+        Err("backend not ready".into())
+    }
     fn list_plugins(&self) -> Vec<claw_fleet_core::plugins::PluginItem> {
         vec![]
     }

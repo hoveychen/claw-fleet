@@ -2156,7 +2156,93 @@ export const MOCK_MANAGED_LESSONS = [
 export const MOCK_SOURCES_CONFIG = [
   { name: "claude-code", enabled: true, available: true },
   { name: "codex", enabled: true, available: true },
+  // dsh too, so the launcher's tool pill offers it and screenshots can reach
+  // its two-level model menu. `agentToolsForSources` hides a source that is
+  // disabled or missing, which is what keeps it out on a real machine with no
+  // dsh installed.
+  { name: "dsh", enabled: true, available: true },
 ];
+
+// ── dsh model catalogue ─────────────────────────────────────────────────────
+
+// Trimmed from the live `/dsh_models` payload (dsh 0.1.0-rc.7). The 24-model
+// openrouter group is just over `DSH_INLINE_GROUP_CAP`, so it folds by vendor —
+// which is what makes the picker's second level visible in a screenshot without
+// shipping all 276 real rows. The three reasoning shapes are all represented:
+// a full ladder with a default, a ladder without one, and no ladder at all.
+const orModel = (id: string, efforts: string[] = [], defaultEffort: string | null = null) => ({
+  id,
+  name: id,
+  description: null,
+  spec: `openrouter/${id}`,
+  efforts: efforts.map((e) => ({ id: e, name: e[0].toUpperCase() + e.slice(1) })),
+  defaultEffort,
+});
+
+const DEEPSEEK_EFFORTS = [
+  { id: "off", name: "Off" },
+  { id: "low", name: "Low" },
+  { id: "high", name: "High" },
+  { id: "max", name: "Max" },
+];
+
+export const MOCK_DSH_MODELS = {
+  groups: [
+    {
+      id: "deepseek-official",
+      name: "DeepSeek",
+      models: [
+        {
+          id: "deepseek-v4-flash",
+          name: "DeepSeek-V4-Flash",
+          description: null,
+          spec: "deepseek-official/deepseek-v4-flash",
+          efforts: DEEPSEEK_EFFORTS,
+          defaultEffort: "high",
+        },
+        {
+          id: "deepseek-v4-pro",
+          name: "DeepSeek-V4-Pro",
+          description: null,
+          spec: "deepseek-official/deepseek-v4-pro",
+          efforts: DEEPSEEK_EFFORTS,
+          defaultEffort: "high",
+        },
+      ],
+    },
+    {
+      id: "openrouter",
+      name: "openrouter",
+      models: [
+        orModel("ai21/jamba-large-1.7"),
+        orModel("anthropic/claude-fable-5", ["off", "low", "medium", "high"], "high"),
+        orModel("anthropic/claude-haiku-4.5", ["off", "low", "medium", "high"]),
+        orModel("anthropic/claude-opus-5", ["off", "low", "medium", "high"], "high"),
+        orModel("anthropic/claude-sonnet-5", ["off", "low", "medium", "high"], "high"),
+        orModel("deepseek/deepseek-r1", ["off", "low", "medium", "high"]),
+        orModel("deepseek/deepseek-v4-flash", ["off", "low", "high", "max"], "high"),
+        orModel("deepseek/deepseek-v4-pro", ["off", "low", "high", "max"], "high"),
+        orModel("google/gemini-3.6-flash", ["off", "low", "medium", "high"]),
+        orModel("google/gemma-4-31b-it"),
+        orModel("minimax/minimax-m2"),
+        orModel("mistralai/mistral-large-2411"),
+        orModel("moonshotai/kimi-k2.7-code", ["off", "low", "medium", "high"]),
+        orModel("moonshotai/kimi-k3", ["off", "low", "medium", "high"]),
+        orModel("nvidia/nemotron-4-340b-instruct"),
+        orModel("openai/gpt-5.6-sol", ["low", "medium", "high"], "medium"),
+        orModel("openai/gpt-5.6-terra", ["low", "medium", "high"], "medium"),
+        orModel("openai/gpt-oss-120b", ["off", "low", "medium", "high"]),
+        orModel("poolside/malibu"),
+        orModel("qwen/qwen3-coder", ["off", "low", "medium", "high"]),
+        orModel("qwen/qwen3-max"),
+        orModel("z-ai/glm-5", ["off", "low", "medium", "high"]),
+        orModel("amazon/nova-pro-v1"),
+        orModel("cohere/command-a"),
+      ],
+    },
+  ],
+  failures: [],
+};
 
 // ── Setup status ────────────────────────────────────────────────────────────
 

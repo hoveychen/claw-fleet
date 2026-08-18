@@ -185,6 +185,26 @@ unpricedCalls: number,
 unpriceableCalls: number, 
 note: string, };
 
+export type DshEffort = { 
+id: string, 
+name: string, };
+
+export type DshModelEntry = { 
+id: string, 
+name: string, 
+description: string | null, 
+spec: string, 
+efforts: Array<DshEffort>, 
+defaultEffort: string | null, };
+
+export type DshModelGroup = { 
+id: string, 
+name: string, models: Array<DshModelEntry>, };
+
+export type DshModelCatalogFailure = { id: string, name: string, message: string, };
+
+export type DshModelCatalog = { groups: Array<DshModelGroup>, failures: Array<DshModelCatalogFailure>, };
+
 export type SessionTodo = { content: string, activeForm: string, 
 status: string, };
 

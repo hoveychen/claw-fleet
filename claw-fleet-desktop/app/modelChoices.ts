@@ -1,3 +1,5 @@
+import type { DshModelCatalog } from "./generated/types";
+
 // Shared catalog of selectable Claude models. Consumers prepend their own
 // "default" entry, since the default differs per surface (the new-session
 // launcher, for one, follows the CLI's own configured model).
@@ -67,6 +69,126 @@ export function codexProfileChoices(
 // Codex reasoning effort (`-c model_reasoning_effort=<level>`). Distinct from
 // Claude's --effort scale (no "xhigh"/"max"); Codex adds "minimal".
 export const CODEX_EFFORT_CHOICES: string[] = ["minimal", "low", "medium", "high"];
+
+// ── dsh model catalogue → menu ───────────────────────────────────────────────
+//
+// dsh is the one agent whose model list is not curated by Fleet: it publishes
+// the host's own configured providers through `llm.models`, which on this
+// machine means 2 DeepSeek models and 276 openrouter ones across 43 vendors.
+// A flat 278-item popover is unusable, so the menu is two levels — the shaping
+// rules below are what turn the catalogue into that.
+
+/** openrouter vendors pinned to the model menu's top level. Chosen by the boss,
+ *  not derived: the wire carries no popularity or recency signal to rank by
+ *  (`description` is null for every openrouter row, and whether a model has a
+ *  `reasoning` block says nothing about how much anyone wants it). */
+export const DSH_FEATURED_VENDORS: string[] = [
+  "anthropic",
+  "deepseek",
+  "openai",
+  "google",
+  "moonshotai",
+];
+
+/** A provider group with at most this many models is listed inline, whole:
+ *  folding two DeepSeek models behind a submenu would cost a click and save
+ *  nothing. Above it the group folds by vendor. */
+export const DSH_INLINE_GROUP_CAP = 20;
+
+/** One selectable dsh model, flattened for the picker. */
+export interface DshModelPick {
+  /** The `provider/model` string that goes into the spawn spec. */
+  value: string;
+  label: string;
+  /** This model's own effort ladder — empty when it has no reasoning control. */
+  efforts: string[];
+  /** dsh's own default, or `""` when it publishes none. Shown on the effort
+   *  menu's "default" item so the un-chosen state names what will happen. */
+  defaultEffort: string;
+}
+
+/** A second-level group of models. */
+export interface DshModelFolder {
+  /** Stable React key. */
+  id: string;
+  /** The vendor prefix this folder collects, or `""` for the catch-all of
+   *  unfeatured vendors (the label for that one is localized by the caller). */
+  vendor: string;
+  models: DshModelPick[];
+}
+
+export interface DshModelMenu {
+  /** Offered at the top level, in catalogue order. */
+  inline: DshModelPick[];
+  /** Featured vendors in `DSH_FEATURED_VENDORS` order, then the catch-all. */
+  folders: DshModelFolder[];
+}
+
+/** The vendor prefix of a provider-scoped model id (`anthropic/claude-opus-5`
+ *  → `anthropic`), or `""` for an id that carries none. */
+function vendorOf(modelId: string): string {
+  const i = modelId.indexOf("/");
+  return i > 0 ? modelId.slice(0, i) : "";
+}
+
+/** Shape a `llm.models` catalogue into the launcher's two-level model menu.
+ *
+ *  Total by construction: every model in the catalogue comes out either inline
+ *  or in exactly one folder. A model that were dropped here would be
+ *  unreachable from the UI while dsh happily accepts it.
+ *
+ *  A missing / empty catalogue yields an empty menu rather than an error — the
+ *  picker then offers only its own "default" item, which is honest: the session
+ *  runs on whatever `~/.dsh/settings.yaml` selects. Fields are read
+ *  defensively because RemoteBackend fetches this from *another* host's
+ *  `fleet serve`, whose build may predate any of them.
+ */
+export function dshModelMenu(catalog: DshModelCatalog | null | undefined): DshModelMenu {
+  const inline: DshModelPick[] = [];
+  const folders: DshModelFolder[] = [];
+
+  const pick = (m: DshModelCatalog["groups"][number]["models"][number]): DshModelPick => ({
+    value: m.spec,
+    label: m.name || m.id,
+    efforts: (m.efforts ?? []).map((e) => e.id),
+    defaultEffort: m.defaultEffort ?? "",
+  });
+
+  for (const group of catalog?.groups ?? []) {
+    const models = group.models ?? [];
+    if (models.length <= DSH_INLINE_GROUP_CAP) {
+      inline.push(...models.map(pick));
+      continue;
+    }
+    // Bucket by vendor once, then emit featured vendors in the boss's order so
+    // the menu does not reshuffle as the catalogue grows.
+    const byVendor = new Map<string, DshModelPick[]>();
+    for (const m of models) {
+      const vendor = DSH_FEATURED_VENDORS.includes(vendorOf(m.id)) ? vendorOf(m.id) : "";
+      const bucket = byVendor.get(vendor) ?? [];
+      bucket.push(pick(m));
+      byVendor.set(vendor, bucket);
+    }
+    for (const vendor of DSH_FEATURED_VENDORS) {
+      const models = byVendor.get(vendor);
+      if (models?.length) folders.push({ id: `${group.id}:${vendor}`, vendor, models });
+    }
+    const rest = byVendor.get("");
+    if (rest?.length) folders.push({ id: `${group.id}:*`, vendor: "", models: rest });
+  }
+
+  return { inline, folders };
+}
+
+/** Look a spec up across both menu levels — the selected model may live in a
+ *  folder, and the pill label plus the effort ladder both need it. */
+export function dshFindPick(menu: DshModelMenu, spec: string): DshModelPick | undefined {
+  if (!spec) return undefined;
+  return (
+    menu.inline.find((p) => p.value === spec) ??
+    menu.folders.flatMap((f) => f.models).find((p) => p.value === spec)
+  );
+}
 
 // The agent tools Fleet can launch a new session with. `agentToolsForSources`
 // filters this down to the sources actually enabled + available, so listing a
