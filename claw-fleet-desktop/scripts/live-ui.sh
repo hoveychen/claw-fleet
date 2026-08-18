@@ -25,11 +25,24 @@ if [ -z "${FLEET_DSH_BIN:-}" ] && command -v dsh >/dev/null 2>&1; then
   export FLEET_DSH_BIN="$(command -v dsh)"
 fi
 
+# `fleet serve` unconditionally rewrites ~/.fleet/{port,token} — the discovery
+# files a session's `fleet session status` reads. A throwaway harness must not
+# leave the machine pointing at a port that dies with it, so snapshot and put
+# them back on exit.
+for f in port token; do
+  [ -f "$HOME/.fleet/$f" ] && cp "$HOME/.fleet/$f" "$LOGDIR/$f.bak"
+done
+
 echo "→ probe:  $FLEET_BIN serve --port $PROBE_PORT  (log: $LOGDIR/probe.log)"
 "$FLEET_BIN" serve --port "$PROBE_PORT" --token "$TOKEN" >"$LOGDIR/probe.log" 2>&1 &
 PROBE_PID=$!
 
-cleanup() { kill "$PROBE_PID" "${VITE_PID:-}" 2>/dev/null; }
+cleanup() {
+  kill "$PROBE_PID" "${VITE_PID:-}" 2>/dev/null
+  for f in port token; do
+    [ -f "$LOGDIR/$f.bak" ] && cp "$LOGDIR/$f.bak" "$HOME/.fleet/$f"
+  done
+}
 trap cleanup EXIT INT TERM
 
 for _ in $(seq 1 40); do
