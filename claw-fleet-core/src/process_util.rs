@@ -112,6 +112,61 @@ pub fn detach_process_group(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// Restore `SIG_DFL` for any of SIGINT / SIGTERM / SIGHUP this process inherited
+/// as `SIG_IGN`, and report which ones were cleared.
+///
+/// A Fleet process that installs a termination handler has to call this first.
+/// `ctrlc::try_set_handler` refuses to install when any of those three has a
+/// non-`SIG_DFL` disposition (`platform::unix::init_os_handler` returns `EEXIST`,
+/// surfaced as `MultipleHandlers`), and an inherited `SIG_IGN` is exactly that.
+///
+/// It is reachable in ordinary use, not a corner case: a non-interactive shell
+/// sets SIGINT to `SIG_IGN` for background jobs and `nohup` does the same for
+/// SIGHUP, so `fleet serve &` from a script — how Fleet's own harnesses and
+/// launchers start it — lands here. Measured: `fleet serve` started that way
+/// logged "ctrlc handler install failed" and left its `dsh web` reparented to
+/// init on SIGTERM; started with default dispositions, the same binary and the
+/// same signal reaped the child.
+///
+/// Only `SIG_IGN` can arrive this way — `execve` resets handlers to `SIG_DFL` and
+/// keeps only ignores — so nothing else is touched, and a deliberate in-process
+/// handler installed later is unaffected.
+#[cfg(unix)]
+pub fn clear_inherited_signal_ignores() -> Vec<&'static str> {
+    let mut cleared = Vec::new();
+    for (sig, name) in [
+        (libc::SIGINT, "SIGINT"),
+        (libc::SIGTERM, "SIGTERM"),
+        (libc::SIGHUP, "SIGHUP"),
+    ] {
+        // SAFETY: `sigaction` with a null `act` only queries; the write that
+        // follows installs `SIG_DFL`, the disposition the process would have had
+        // if nothing had ignored the signal for us.
+        unsafe {
+            let mut current: libc::sigaction = std::mem::zeroed();
+            if libc::sigaction(sig, std::ptr::null(), &mut current) != 0 {
+                continue;
+            }
+            if current.sa_sigaction != libc::SIG_IGN {
+                continue;
+            }
+            let mut default: libc::sigaction = std::mem::zeroed();
+            default.sa_sigaction = libc::SIG_DFL;
+            if libc::sigaction(sig, &default, std::ptr::null_mut()) == 0 {
+                cleared.push(name);
+            }
+        }
+    }
+    cleared
+}
+
+/// No-op on Windows: there is no `SIG_IGN` inheritance, and ctrlc uses the
+/// console control handler rather than `sigaction`.
+#[cfg(not(unix))]
+pub fn clear_inherited_signal_ignores() -> Vec<&'static str> {
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
