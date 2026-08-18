@@ -147,6 +147,83 @@ fn an_interactive_read_does_not_queue_behind_the_roster_poll() {
     );
 }
 
+/// How many `session.list` calls actually reached the fixture server.
+fn list_calls(log: &std::path::Path) -> usize {
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.contains("enter session.list"))
+        .count()
+}
+
+/// Concurrent roster scans must collapse into one `session.list`.
+///
+/// Several Fleet call sites scan the roster — the registry watch loop, the
+/// desktop rescan, and (in `fleet serve`) one per scan-bearing HTTP route. When
+/// dsh is slow each of those used to mean its own multi-second RPC, so a
+/// frontend polling faster than the RPC completes drove an unbounded queue:
+/// measured through `fleet serve`, `/sessions` took 61s and even `/health`
+/// waited 26–29s behind the pile. Collapsing concurrent scans onto one in-flight
+/// call bounds that pile at the cost of a single call.
+#[test]
+fn concurrent_roster_scans_collapse_into_one_dsh_call() {
+    let _serial = serial();
+    let log = std::env::temp_dir().join("fake-dsh-singleflight.log");
+    let _ = std::fs::remove_file(&log);
+    let Some(_fleet_home) = arrange(LIST_DELAY_MS, Some(&log)) else {
+        eprintln!("skipped: node not on PATH, the dsh fixture cannot run");
+        return;
+    };
+
+    // Boot the server on an interactive read, so the roster call count starts at
+    // zero rather than counting a warm-up scan.
+    let source = DshSource::new();
+    let _ = source.get_messages_tail("dsh://session-probe", 50);
+    assert_eq!(list_calls(&log), 0, "warm-up must not have scanned");
+
+    // Eight scanners released at the same instant.
+    let gate = Arc::new(std::sync::Barrier::new(8));
+    let scanners: Vec<_> = (0..8)
+        .map(|_| {
+            let gate = gate.clone();
+            std::thread::spawn(move || {
+                let s = DshSource::new();
+                gate.wait();
+                s.scan_sessions()
+            })
+        })
+        .collect();
+    let rosters: Vec<_> = scanners
+        .into_iter()
+        .map(|h| h.join().expect("scanner thread"))
+        .collect();
+
+    assert_eq!(
+        list_calls(&log),
+        1,
+        "8 simultaneous roster scans must share one session.list"
+    );
+    assert!(
+        rosters.iter().all(|r| r.len() == 1),
+        "every scanner must still get the roster back, not an empty list: \
+         {:?}",
+        rosters.iter().map(Vec::len).collect::<Vec<_>>()
+    );
+
+    // A scan inside the freshness window reuses the answer rather than asking
+    // again…
+    let _ = source.scan_sessions();
+    assert_eq!(list_calls(&log), 1, "a scan within the TTL must reuse it");
+
+    // …and one past it goes back to dsh, so the roster cannot freeze.
+    std::thread::sleep(claw_fleet_core::dsh_source::ROSTER_TTL + Duration::from_millis(300));
+    let refreshed = source.scan_sessions();
+    assert_eq!(list_calls(&log), 2, "a scan past the TTL must refresh");
+    assert_eq!(refreshed.len(), 1, "the refreshed roster still has the session");
+
+    claw_fleet_core::dsh_source::shutdown();
+}
+
 fn summarize(label: &str, samples: &[Duration]) {
     let ms: Vec<u128> = samples.iter().map(Duration::as_millis).collect();
     let max = ms.iter().copied().max().unwrap_or(0);

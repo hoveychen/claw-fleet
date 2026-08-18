@@ -69,6 +69,15 @@ pub const DSH_URI_PREFIX: &str = "dsh://";
 /// what it returns.
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 
+/// How long one `session.list` answer may be reused for a later roster scan.
+///
+/// Deliberately shorter than [`POLL_INTERVAL`], so the registry's own cadence
+/// always reaches dsh and the roster cannot freeze behind the cache; what it
+/// absorbs is the *extra* scans — the desktop rescan and, in `fleet serve`, one
+/// per scan-bearing HTTP route — that pile up while a slow dsh call is in
+/// flight.
+pub const ROSTER_TTL: Duration = Duration::from_secs(2);
+
 /// Fleet's single `dsh web` instance, shared by every [`DshSource`] in the
 /// process rather than owned by one.
 ///
@@ -89,12 +98,28 @@ static SERVER: OnceLock<Mutex<Option<DshServer>>> = OnceLock::new();
 /// a new port.
 static WATCHER: OnceLock<Mutex<Option<DshEventWatcher>>> = OnceLock::new();
 
+/// The last `session.list` answer, with the instant it landed. Shared by every
+/// roster scan in the process — see [`DshSource::roster`].
+static ROSTER: OnceLock<Mutex<Option<(std::time::Instant, Value)>>> = OnceLock::new();
+
+/// Held by whoever is currently fetching the roster, so simultaneous scans wait
+/// on that one flight instead of each starting its own.
+static ROSTER_FETCH: OnceLock<Mutex<()>> = OnceLock::new();
+
 fn server_slot() -> &'static Mutex<Option<DshServer>> {
     SERVER.get_or_init(|| Mutex::new(None))
 }
 
 fn watcher_slot() -> &'static Mutex<Option<DshEventWatcher>> {
     WATCHER.get_or_init(|| Mutex::new(None))
+}
+
+fn roster_slot() -> &'static Mutex<Option<(std::time::Instant, Value)>> {
+    ROSTER.get_or_init(|| Mutex::new(None))
+}
+
+fn roster_fetch_slot() -> &'static Mutex<()> {
+    ROSTER_FETCH.get_or_init(|| Mutex::new(()))
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -111,6 +136,9 @@ pub fn shutdown() {
     if let Some(mut server) = lock(server_slot()).take() {
         server.stop();
     }
+    // The roster described sessions as one server saw them; a later server is a
+    // different view, so it must not inherit this one.
+    *lock(roster_slot()) = None;
 }
 
 pub struct DshSource;
@@ -176,6 +204,52 @@ impl DshSource {
         };
 
         f(&client)
+    }
+
+    /// The session roster, shared across simultaneous scans.
+    ///
+    /// Fleet scans the roster from several places at once — the registry watch
+    /// loop, the desktop's rescan, and one per scan-bearing `fleet serve` route.
+    /// Each used to mean its own `session.list`, which is fine against a fast dsh
+    /// and ruinous against a slow one: a frontend polling faster than the call
+    /// completes queues scans without bound (measured through `fleet serve` with
+    /// a 5s dsh: `/sessions` 61s, `/health` 26–29s behind the pile).
+    ///
+    /// So a scan either reuses an answer younger than [`ROSTER_TTL`], or — when
+    /// another scan is already fetching — waits for that flight and reuses its
+    /// answer. N simultaneous scans cost one call, and because the TTL is shorter
+    /// than [`POLL_INTERVAL`] the registry's own cadence still reaches dsh, so the
+    /// roster cannot freeze.
+    ///
+    /// Only the roster takes this path. Interactive reads (`session.history`,
+    /// `dsh_token_breakdown`) go straight to [`with_client`] as before: making
+    /// them queue behind a scan's in-flight call is the very thing this module
+    /// just stopped doing.
+    ///
+    /// [`with_client`]: Self::with_client
+    fn roster(&self) -> Result<Value, String> {
+        if let Some(fresh) = Self::fresh_roster() {
+            return Ok(fresh);
+        }
+
+        let _flight = lock(roster_fetch_slot());
+        // Another scan's flight may have landed while this one queued for it.
+        if let Some(fresh) = Self::fresh_roster() {
+            return Ok(fresh);
+        }
+
+        let value =
+            self.with_client(|client| client.call("session.list", json!({})).map_err(Into::into))?;
+        *lock(roster_slot()) = Some((std::time::Instant::now(), value.clone()));
+        Ok(value)
+    }
+
+    /// The cached roster, if it is younger than [`ROSTER_TTL`].
+    fn fresh_roster() -> Option<Value> {
+        lock(roster_slot())
+            .as_ref()
+            .filter(|(at, _)| at.elapsed() < ROSTER_TTL)
+            .map(|(_, value)| value.clone())
     }
 
     /// Point the downlink follower at `port`, replacing one that is following a
@@ -449,10 +523,7 @@ impl AgentSource for DshSource {
     }
 
     fn scan_sessions(&self) -> Vec<SessionInfo> {
-        let listed =
-            self.with_client(|client| client.call("session.list", json!({})).map_err(Into::into));
-
-        match listed {
+        match self.roster() {
             Ok(value) => value
                 .get("items")
                 .and_then(Value::as_array)
