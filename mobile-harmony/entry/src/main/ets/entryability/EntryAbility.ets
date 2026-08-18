@@ -1,6 +1,7 @@
 import { AbilityConstant, ConfigurationConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { unifiedDataChannel } from '@kit.ArkData';
 import { initTheme, setSystemDark } from '../common/Theme';
 import { initSafeArea } from '../common/SafeArea';
 import { initWakeLock } from '../common/WakeLock';
@@ -22,7 +23,52 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('fgNonce', Date.now());
   }
 
-  onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+  /// 别的 app 分享进来时，内容不在 want 参数里，而是放进 UDMF：want 只带一把
+  /// key，真正的数据要用那把 key 去 unifiedDataChannel 查。冷启动走 onCreate、
+  /// app 已在后台走 onNewWant —— 两条都要接，否则「app 开着时分享」会静默丢。
+  ///
+  /// 结果存进 AppStorage 而不是直接喂 WebView：这一刻页面可能还没加载好，由
+  /// WebShell 自己挑时机取走。nonce 用来区分「同样的文本又分享了一次」。
+  private stashSharedWant(want: Want): void {
+    if (want.action !== 'ohos.want.action.sendData') {
+      return;
+    }
+    const params = want.parameters as Record<string, Object> | undefined;
+    const key = params?.['ability.want.params.udKey'];
+    if (typeof key !== 'string' || key.length === 0) {
+      return;
+    }
+    const options: unifiedDataChannel.Options = {
+      intention: unifiedDataChannel.Intention.DATA_HUB,
+      key: key,
+    };
+    unifiedDataChannel.queryData(options).then((list: Array<unifiedDataChannel.UnifiedData>) => {
+      const texts: string[] = [];
+      for (const data of list) {
+        for (const rec of data.getRecords()) {
+          const plain = rec as unifiedDataChannel.PlainText;
+          if (plain.textContent !== undefined && plain.textContent.length > 0) {
+            texts.push(plain.textContent);
+          }
+        }
+      }
+      if (texts.length === 0) {
+        return;
+      }
+      AppStorage.setOrCreate('sharedText', texts.join('\n\n'));
+      const n: number = AppStorage.get<number>('sharedNonce') ?? 0;
+      AppStorage.setOrCreate('sharedNonce', n + 1);
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'share query failed: %{public}s', e.message);
+    });
+  }
+
+  onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    this.stashSharedWant(want);
+  }
+
+  onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    this.stashSharedWant(want);
     const cfg = this.context.config;
     // 语言与主题现在都归 web 层：mobile-web 自己读 navigator.language 和
     // prefers-color-scheme。这里只保留 initTheme —— 它喂的是 AppStorage 里的

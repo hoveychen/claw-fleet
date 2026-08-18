@@ -53,6 +53,11 @@ struct WebShell {
   /// web 侧一行都不用改。
   @StorageProp('safeTop') safeTop: number = 0;
   @StorageProp('safeBottom') safeBottom: number = 0;
+  /// EntryAbility 收到系统分享后把内容放这里；nonce 变化即代表「又分享了一次」，
+  /// 哪怕文本和上次一模一样。@Watch 是为了让 app 已经开着时的分享也能送达。
+  @StorageProp('sharedText') sharedText: string = '';
+  @StorageProp('sharedNonce') @Watch('onSharedChanged') sharedNonce: number = 0;
+  private webReady: boolean = false;
   @State private src: string = '';
   /// null = 还在读配对状态；'' = 未配对（显示配对入口）；其余 = 已配对的 src。
   /// 分三态是因为「还没读完」和「读完了没有」必须区别对待 —— 否则冷启动会
@@ -107,6 +112,18 @@ struct WebShell {
     } catch (e) {
       this.pairError = '扫码取消或失败';
     }
+  }
+
+  /// 把分享内容交给页面。走 shareTarget.ts 约定的 window.__fleetShare —— 那是
+  /// 给所有原生壳用的通用入口，不是鸿蒙专用分支；Capacitor 侧同样认它。
+  private onSharedChanged(): void {
+    if (!this.webReady || this.sharedText.length === 0) {
+      return;
+    }
+    const payload: string = JSON.stringify({ title: '', texts: [this.sharedText], files: [] });
+    this.controller.runJavaScript(
+      `window.__fleetShare && window.__fleetShare(` + payload + `)`,
+    ).catch(() => {});
   }
 
   private mime(path: string): string {
@@ -262,6 +279,12 @@ struct WebShell {
             } catch (e) {
               return null;
             }
+          })
+          .onPageEnd(() => {
+            // 页面就绪后再补投一次：分享很可能是冷启动带进来的，那时 web 还没
+            // 加载完，@Watch 早就烧过了。
+            this.webReady = true;
+            this.onSharedChanged();
           })
           .width('100%')
           .height('100%')
