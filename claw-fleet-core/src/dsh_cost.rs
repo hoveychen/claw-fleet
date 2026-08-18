@@ -69,6 +69,10 @@ const OPENROUTER: &str = "openrouter";
 
 const GENERATION_ENDPOINT: &str = "https://openrouter.ai/api/v1/generation";
 
+/// The env var holding the OpenRouter secret when `settings.yaml` does not name
+/// one — dsh's own conventional choice, and the key `.credentials.yaml` uses.
+const DEFAULT_KEY_ENV: &str = "OPENROUTER_API_KEY";
+
 /// Cache file under `~/.fleet`. Generation records are immutable, so an entry
 /// never expires.
 const CACHE_FILE: &str = "dsh-generation-cost.json";
@@ -156,12 +160,26 @@ pub fn generation_refs(events: &[Value]) -> Vec<GenerationRef> {
 /// Resolve the OpenRouter key **the way dsh itself resolves it**, so a user who
 /// already configured dsh does not configure Fleet a second time.
 ///
-/// dsh's `settings.yaml` declares the provider under
-/// `llm-pi-ai.providers.openrouter`, either as an inline `apiKey` or — the shape
-/// on a real install — as `apiKeyEnv: OPENROUTER_API_KEY`, naming the variable
-/// to read. `.credentials.yaml` is the other store dsh writes. All three are
-/// tried; the env var named by `apiKeyEnv` wins because that is what dsh uses
-/// when both are present.
+/// `settings.yaml` declares the provider under `llm-pi-ai.providers.openrouter`,
+/// either as an inline `apiKey` or — the shape on a real install — as
+/// `apiKeyEnv: OPENROUTER_API_KEY`, *naming the variable that holds the secret*.
+/// That name is the lookup key everywhere else:
+///
+/// 1. the process environment, and
+/// 2. `$DSH_HOME/.credentials.yaml`, which per `@deepseek-ai/dsh-credentials-local`
+///    is "a YAML mapping of credential reference to value, and nothing else" —
+///    **keyed by env-var name, not by provider name**.
+///
+/// Measured against a real `dsh web`: with `OPENROUTER_API_KEY: sk-…` in that
+/// file, `credentials.describe` answers
+/// `{configured: true, source: "file", writable: true}` with no env var set.
+/// An `openrouter: sk-…` entry is *accepted* by the file (a valid POSIX
+/// identifier, so the server still boots) but no provider ever looks that name
+/// up — the key silently does nothing. This function used to read exactly that
+/// wrong name, which is why it is now derived from `apiKeyEnv`.
+///
+/// The env layer wins over the file, matching dsh's own documented precedence
+/// (a per-run `VAR=… dsh` is operator intent for that run).
 ///
 /// Returns `None` when no key is configured, which is a normal state (the user
 /// may not use OpenRouter at all), not an error.
@@ -169,35 +187,40 @@ pub fn openrouter_api_key() -> Option<String> {
     let dsh_home = crate::session::get_dsh_dir()?;
 
     let settings = read_yaml(&dsh_home.join("settings.yaml"));
-    if let Some(settings) = settings.as_ref() {
-        let provider = settings
-            .pointer("/llm-pi-ai/providers/openrouter")
-            .cloned()
-            .unwrap_or(Value::Null);
-        if let Some(var) = provider.get("apiKeyEnv").and_then(Value::as_str) {
-            if let Some(key) = non_empty(std::env::var(var).ok()) {
-                return Some(key);
-            }
-        }
-        if let Some(key) = provider.get("apiKey").and_then(Value::as_str) {
-            if let Some(key) = non_empty(Some(key.to_string())) {
-                return Some(key);
-            }
-        }
-    }
+    let provider = settings
+        .as_ref()
+        .and_then(|s| s.pointer("/llm-pi-ai/providers/openrouter").cloned())
+        .unwrap_or(Value::Null);
 
-    // `.credentials.yaml` is a flat map of provider → credential. An empty `{}`
-    // (the shipped default) yields nothing.
-    let creds = read_yaml(&dsh_home.join(".credentials.yaml"))?;
-    let entry = creds.get(OPENROUTER)?;
-    let key = match entry {
-        Value::String(s) => Some(s.clone()),
-        other => other
+    // The variable that holds the secret. `OPENROUTER_API_KEY` is the
+    // conventional name and the one a bare install uses, but honour whatever
+    // the user pointed `apiKeyEnv` at.
+    let var = provider
+        .get("apiKeyEnv")
+        .and_then(Value::as_str)
+        .unwrap_or(DEFAULT_KEY_ENV);
+
+    if let Some(key) = non_empty(std::env::var(var).ok()) {
+        return Some(key);
+    }
+    if let Some(key) = non_empty(
+        provider
             .get("apiKey")
             .and_then(Value::as_str)
             .map(str::to_string),
-    };
-    non_empty(key)
+    ) {
+        return Some(key);
+    }
+
+    // The managed credential store, keyed by that same env-var name. An empty
+    // `{}` (the shipped default) yields nothing.
+    let creds = read_yaml(&dsh_home.join(".credentials.yaml"))?;
+    non_empty(
+        creds
+            .get(var)
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    )
 }
 
 fn non_empty(v: Option<String>) -> Option<String> {
@@ -375,9 +398,13 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
         return Ok(DshSessionCost {
             unpriced_calls: refs.iter().filter(|r| r.provider == OPENROUTER).count() as u32,
             unpriceable_calls: refs.iter().filter(|r| r.provider != OPENROUTER).count() as u32,
-            note: "no OpenRouter API key configured — set `OPENROUTER_API_KEY` \
-                   (the variable dsh's settings.yaml names) or put the key in \
-                   ~/.dsh/.credentials.yaml"
+            // Names the exact line to write. A desktop-launched dsh inherits the
+            // app's environment, which has no shell profile in it, so the file is
+            // the option that actually works there — and it is keyed by the
+            // env-var name, not by "openrouter".
+            note: "no OpenRouter API key configured — add a line \
+                   `OPENROUTER_API_KEY: <key>` to ~/.dsh/.credentials.yaml \
+                   (or export that variable before launching)"
                 .to_string(),
             ..Default::default()
         });
@@ -568,6 +595,41 @@ mod tests {
         });
     }
 
+    /// The credential store is keyed by **environment-variable name**, not by
+    /// provider name. Measured against a real `dsh web`: with
+    /// `OPENROUTER_API_KEY: sk-…` in `$DSH_HOME/.credentials.yaml`,
+    /// `credentials.describe` reports `{configured: true, source: "file"}`.
+    /// A `openrouter: sk-…` entry is accepted by the file (it is a valid POSIX
+    /// identifier) but nothing ever looks it up — measured too: the server still
+    /// boots, the key is simply never used.
+    #[test]
+    fn key_comes_from_the_credentials_file_under_its_env_var_name() {
+        with_temp_dsh_home(|base| {
+            std::fs::write(
+                base.join("settings.yaml"),
+                "llm-pi-ai:\n  providers:\n    openrouter:\n      apiKeyEnv: FLEET_TEST_CRED_VAR\n",
+            )
+            .unwrap();
+            std::env::remove_var("FLEET_TEST_CRED_VAR");
+
+            // The provider-named form dsh never reads must NOT be picked up.
+            std::fs::write(base.join(".credentials.yaml"), "openrouter: wrong-form\n").unwrap();
+            assert_eq!(
+                openrouter_api_key(),
+                None,
+                "a provider-named entry is not a credential dsh would use"
+            );
+
+            // The real form: the env-var name settings.yaml points at.
+            std::fs::write(
+                base.join(".credentials.yaml"),
+                "FLEET_TEST_CRED_VAR: sk-from-file\n",
+            )
+            .unwrap();
+            assert_eq!(openrouter_api_key().as_deref(), Some("sk-from-file"));
+        });
+    }
+
     #[test]
     fn key_falls_back_to_inline_settings_then_credentials() {
         with_temp_dsh_home(|base| {
@@ -578,8 +640,14 @@ mod tests {
             .unwrap();
             assert_eq!(openrouter_api_key().as_deref(), Some("inline-key"));
 
+            // No provider block at all: the lookup falls back to the
+            // conventional env-var name, which is also the credential-file key.
             std::fs::write(base.join("settings.yaml"), "llm-pi-ai: {}\n").unwrap();
-            std::fs::write(base.join(".credentials.yaml"), "openrouter: cred-key\n").unwrap();
+            std::fs::write(
+                base.join(".credentials.yaml"),
+                "OPENROUTER_API_KEY: cred-key\n",
+            )
+            .unwrap();
             assert_eq!(openrouter_api_key().as_deref(), Some("cred-key"));
         });
     }
