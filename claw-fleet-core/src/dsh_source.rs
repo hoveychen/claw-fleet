@@ -381,11 +381,23 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         + projection_u64(&projections, "tokenUsage", "cacheReadTokens")
         + projection_u64(&projections, "tokenUsage", "cacheWriteTokens");
 
+    // Fleet ownership. dsh has no originator channel of its own (every session
+    // runs inside one shared server, so there is no per-session environment to
+    // stamp), so the spawn note written by `DshSource::spawn` is the only
+    // evidence — and the desktop's Tasks list needs *both* fields, not one.
+    let fleet_spawned = crate::launch_spec::was_fleet_spawned(&id);
+    let entrypoint = fleet_spawned.then(|| {
+        crate::launch_spec::entrypoint_of(&id)
+            .unwrap_or_else(|| crate::session_launch::NEW_SESSION_ENTRYPOINT.to_string())
+    });
+
     Some(SessionInfo {
         id: id.clone(),
         workspace_name: crate::session::workspace_name(&workspace_path),
         workspace_path,
         ai_title: title,
+        entrypoint,
+        fleet_spawned,
         // `running` is the only liveness bit `session.list` carries. Finer
         // phases (Thinking / Streaming / Executing / Processing) come off the
         // mux downlink and are overlaid by `scan_sessions`.
@@ -529,6 +541,23 @@ impl AgentSource for DshSource {
                 maybe_prepend_active_plans(&spec.workspace_path, &session_id, &spec.prompt);
             Self::prompt(client, &session_id, &prompt)
         })?;
+
+        // Mark it as Fleet's, the way every other spawn path does. Without this
+        // the session is created and healthy but never enters the Tasks list
+        // (`isFleetOwnedTask` needs both `fleet_spawned` and a known
+        // `entrypoint`), so the "新建会话" dialog waits for an id that can never
+        // arrive and spins forever. dsh has no per-session process to stamp an
+        // entrypoint on — its turns run inside the shared server — so the note
+        // carries the launcher surface too.
+        let entrypoint = Some(spec.entrypoint.trim())
+            .filter(|e| !e.is_empty())
+            .unwrap_or(crate::session_launch::NEW_SESSION_ENTRYPOINT);
+        crate::launch_spec::record_with_entrypoint(
+            &session_id,
+            spec.model.as_deref(),
+            spec.effort.as_deref(),
+            Some(entrypoint),
+        );
 
         Ok(crate::session_launch::SpawnSessionResponse {
             // Every dsh session shares the server's pid — there is no per-session
@@ -799,6 +828,60 @@ mod tests {
                 }
             }
         })
+    }
+
+    #[test]
+    /// A dsh session Fleet spawned must read back as a Fleet-owned task, or the
+    /// desktop's "新建会话" dialog spins forever.
+    ///
+    /// The 启动台 list is `sessions.filter(isFleetOwnedTask)` =
+    /// `!isSubagent && isFleetOwnedEntrypoint(entrypoint) && fleetSpawned`, and
+    /// the dialog waits for the id it just spawned to appear in *that* list
+    /// before swapping the spinner for the session view. dsh sessions came back
+    /// `entrypoint: None, fleet_spawned: false` (measured on the installed
+    /// build), so the id could never arrive and the spinner never stopped —
+    /// while `dsh web` was healthy and the session existed, which is what made
+    /// it look like a hang rather than a mismatch.
+    #[test]
+    fn a_fleet_spawned_session_reads_back_as_a_fleet_owned_task() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        let item = live_list_item();
+        let id = item.get("sessionId").and_then(Value::as_str).unwrap().to_string();
+
+        // Not spawned by Fleet (a session the user started in dsh's own UI):
+        // it belongs in the sessions list, never in the Tasks list.
+        let foreign = session_info_from_list_item(&item).expect("mapped");
+        assert!(!foreign.fleet_spawned, "an unrecorded session is not Fleet's");
+        assert_eq!(foreign.entrypoint, None);
+
+        // Spawned by Fleet: the spawn path records the marker, and the mapping
+        // has to reflect it.
+        crate::launch_spec::record_with_entrypoint(
+            &id,
+            None,
+            None,
+            Some(crate::session_launch::NEW_SESSION_ENTRYPOINT),
+        );
+        let owned = session_info_from_list_item(&item).expect("mapped");
+        assert!(
+            owned.fleet_spawned,
+            "a recorded spawn must set fleet_spawned, or isFleetOwnedTask() is false"
+        );
+        assert_eq!(
+            owned.entrypoint.as_deref(),
+            Some(crate::session_launch::NEW_SESSION_ENTRYPOINT),
+            "entrypoint must be one isFleetOwnedEntrypoint() accepts"
+        );
+        assert!(!owned.is_subagent, "a spawned dsh session is a main session");
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
     }
 
     #[test]
