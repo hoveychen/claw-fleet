@@ -275,6 +275,18 @@ pub(crate) struct WikiDeleteFolderReq<'a> {
     pub prefix: &'a str,
 }
 
+/// Body of `POST /wiki_publish_text`. The markdown travels in the body because
+/// on a remote workspace there is no local path the server could read.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WikiPublishTextReq<'a> {
+    pub slug: &'a str,
+    pub title: &'a str,
+    pub text: &'a str,
+    pub workspace_path: &'a str,
+    pub mode: claw_fleet_core::wiki::TextPublishMode,
+}
+
 /// Response of `POST /wiki_delete_folder`.
 #[derive(serde::Deserialize, Debug)]
 pub(crate) struct WikiDeleteFolderResp {
@@ -843,6 +855,20 @@ impl crate::backend::Backend for RemoteBackend {
             mime,
             bytes,
         })
+    }
+
+    fn publish_wiki_text(
+        &self,
+        slug: &str,
+        title: &str,
+        text: &str,
+        workspace_path: &str,
+        mode: crate::wiki::TextPublishMode,
+    ) -> Result<crate::wiki::WikiDoc, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::WIKI_PUBLISH_TEXT,
+            &WikiPublishTextReq { slug, title, text, workspace_path, mode },
+        )
     }
 
     fn get_task_plans(
@@ -3667,6 +3693,77 @@ mod tests {
 
         assert!(err.contains("no wiki docs under"), "unexpected error: {err}");
         assert_eq!(fx.slugs(), vec!["keeper"]);
+    }
+
+    // ── /wiki_publish_text ──────────────────────────────────────────────────
+
+    /// The remote transport for the reader's "publish this message": text goes
+    /// over the wire, the server writes it, and a second call with `Append`
+    /// grows the same doc instead of replacing it.
+    #[test]
+    fn wiki_publish_text_creates_then_appends_over_http() {
+        let fx = boot();
+        let ws = fx.home.path().display().to_string();
+        let req = |text: &'static str, mode| super::WikiPublishTextReq {
+            slug: "notes/from-reader",
+            title: "",
+            text,
+            workspace_path: &ws,
+            mode,
+        };
+
+        let created: claw_fleet_core::wiki::WikiDoc = fx
+            .probe
+            .post_json(
+                claw_fleet_core::routes::WIKI_PUBLISH_TEXT,
+                &req("# First\n\nentry one\n", claw_fleet_core::wiki::TextPublishMode::Replace),
+            )
+            .unwrap();
+        assert_eq!(created.slug, "notes/from-reader");
+        assert_eq!(created.kind, "markdown");
+        // Title was left empty on the wire, so the server derived it.
+        assert_eq!(created.title, "First");
+
+        let appended: claw_fleet_core::wiki::WikiDoc = fx
+            .probe
+            .post_json(
+                claw_fleet_core::routes::WIKI_PUBLISH_TEXT,
+                &req("entry two\n", claw_fleet_core::wiki::TextPublishMode::Append),
+            )
+            .unwrap();
+        assert_eq!(appended.versions.len(), 2, "a note keeps its history");
+
+        let body = claw_fleet_core::wiki::get_file_in(
+            &fx.wiki_root(),
+            "notes/from-reader",
+            &appended.current_version,
+            &appended.entry,
+        )
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(body.bytes).unwrap(),
+            "# First\n\nentry one\n\n---\n\nentry two\n"
+        );
+    }
+
+    #[test]
+    fn wiki_publish_text_rejects_an_unusable_slug_with_a_400() {
+        let fx = boot();
+        let err = fx
+            .probe
+            .post_json::<_, claw_fleet_core::wiki::WikiDoc>(
+                claw_fleet_core::routes::WIKI_PUBLISH_TEXT,
+                &super::WikiPublishTextReq {
+                    slug: "汉字",
+                    title: "",
+                    text: "x",
+                    workspace_path: "",
+                    mode: claw_fleet_core::wiki::TextPublishMode::Replace,
+                },
+            )
+            .unwrap_err();
+        assert!(err.contains("cannot derive a slug"), "unexpected error: {err}");
+        assert!(fx.slugs().is_empty(), "nothing must be written");
     }
 
     /// A malformed body must be rejected by the route, not panic the server.
