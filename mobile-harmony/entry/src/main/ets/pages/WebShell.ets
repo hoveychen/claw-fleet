@@ -7,6 +7,10 @@ import { shareFile } from '../common/SystemShare';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { parsePairingUrl, RelayPairing as ParsedPairing } from '../common/RelayStore';
 import { themeTokens } from '../common/Theme';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const DOMAIN_W = 0x0000;
+const TAG_W = 'fleet';
 
 /// 鸿蒙端的 WebView 外壳：把打包进 rawfile 的 mobile-web 跑起来，原生只做
 /// 三件 web 做不到的事（配对密钥注入、安全区、后续的推送）。
@@ -118,16 +122,45 @@ struct WebShell {
     }
   }
 
+  private onSharedChanged(): void {
+    this.deliverShare(0);
+  }
+
   /// 把分享内容交给页面。走 shareTarget.ts 约定的 window.__fleetShare —— 那是
   /// 给所有原生壳用的通用入口，不是鸿蒙专用分支；Capacitor 侧同样认它。
-  private onSharedChanged(): void {
+  ///
+  /// 必须重试：onPageEnd 只代表页面加载完成，而那个 hook 是 React 在
+  /// useEffect 里挂的，effect 比 onPageEnd 晚。第一版只投一次，真机日志里
+  /// 就是 `injected result="NO_HOOK"` —— 内容备齐了、web 也就绪了，只差 hook
+  /// 还没注册，然后就再没有下一次机会。
+  private deliverShare(attempt: number): void {
     if (!this.webReady || this.sharedText.length === 0) {
+      hilog.info(DOMAIN_W, TAG_W, 'share-diag deliver skipped ready=%{public}s len=%{public}d',
+        this.webReady ? 'yes' : 'no', this.sharedText.length);
       return;
     }
     const payload: string = JSON.stringify({ title: '', texts: [this.sharedText], files: [] });
     this.controller.runJavaScript(
-      `window.__fleetShare && window.__fleetShare(` + payload + `)`,
-    ).catch(() => {});
+      `(function(){ if(!window.__fleetShare) return 'NO_HOOK';` +
+      ` window.__fleetShare(` + payload + `); return 'OK'; })()`,
+    ).then((r: string) => {
+      const ok: boolean = r.indexOf('OK') >= 0;
+      hilog.info(DOMAIN_W, TAG_W, 'share-diag injected attempt=%{public}d result=%{public}s',
+        attempt, r);
+      if (ok) {
+        // 投递成功后清掉，避免下次前台又投一遍同样的内容。
+        this.sharedText = '';
+        return;
+      }
+      // 每 300ms 再试，最多 ~6 秒。够 React 挂完 effect，又不会无限占着。
+      if (attempt < 20) {
+        setTimeout(() => { this.deliverShare(attempt + 1); }, 300);
+      } else {
+        hilog.warn(DOMAIN_W, TAG_W, 'share-diag gave up: hook never appeared');
+      }
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN_W, TAG_W, 'share-diag inject failed: %{public}s', e.message);
+    });
   }
 
   private mime(path: string): string {
@@ -289,7 +322,7 @@ struct WebShell {
             // 页面就绪后再补投一次：分享很可能是冷启动带进来的，那时 web 还没
             // 加载完，@Watch 早就烧过了。
             this.webReady = true;
-            this.onSharedChanged();
+            this.deliverShare(0);
           })
           .width('100%')
           .height('100%')
