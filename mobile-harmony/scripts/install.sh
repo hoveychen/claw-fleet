@@ -1,11 +1,11 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # ClawFleet 一键 构建 + 安装 + 启动(真机)。
 #
 # 用法:
-#   zsh scripts/install.sh                # 构建后装到第一台已连接设备并启动
-#   zsh scripts/install.sh <hdc-target>   # 指定设备(hdc list targets 里的串号)
-#   zsh scripts/install.sh --no-build     # 跳过构建,直接装当前产物
-#   zsh scripts/install.sh --no-web       # 跳过 web 同步(只重编 ArkTS 时用)
+#   bash scripts/install.sh                # 构建后装到第一台已连接设备并启动
+#   bash scripts/install.sh <hdc-target>   # 指定设备(hdc list targets 里的串号)
+#   bash scripts/install.sh --no-build     # 跳过构建,直接装当前产物
+#   bash scripts/install.sh --no-web       # 跳过 web 同步(只重编 ArkTS 时用)
 #
 # 依赖 DevEco Studio 默认安装路径;签名材料来自 build-profile.json5(本地
 # 未提交的 signingConfigs,发布仓里是剥离的——没有它产物是未签名 hap,装不上)。
@@ -48,7 +48,7 @@ echo "→ 设备: $TARGET"
 if (( BUILD && SYNC_WEB )); then
   # 必须在 assembleHap 之前:rawfile 是构建的输入,晚同步就会把旧 web 打进包里。
   # 用系统 PATH 跑,避开 DevEco 的 Node 18。
-  PATH="$SYSTEM_PATH" zsh scripts/sync-web.sh
+  PATH="$SYSTEM_PATH" bash scripts/sync-web.sh
 fi
 
 if (( BUILD )); then
