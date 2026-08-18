@@ -13,6 +13,12 @@ on:
     paths:
       - 'fleet-relay/**'
       - 'mobile-web/**'
+      # The native shell projects ship no code into this image (.dockerignore
+      # drops them from the build context), so a change there must not spend a
+      # full relay rebuild. Order matters: these negations follow the broad
+      # mobile-web/** glob they carve out of.
+      - '!mobile-web/android/**'
+      - '!mobile-web/ios/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/relay-image.yml'
