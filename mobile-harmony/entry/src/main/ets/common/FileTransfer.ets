@@ -101,6 +101,34 @@ export function withContextFiles(prompt: string, attachments: Attachment[]): str
 /// Export a wiki-doc version: fetch its bytes via `wiki_export`, let the user pick
 /// a save location (DocumentViewPicker.save), and write the bytes there. Returns
 /// true when saved, false when the user cancelled the save dialog.
+/// 把一段 base64 存成用户选定位置的文件。
+///
+/// 从 exportWikiDoc 里抽出来的后半段：WebShell 下 relay 连接归 web 层，原生
+/// 拿不到 RelayClient，但「让用户挑个位置把字节写下去」这件事仍然只有原生
+/// 能做（WebView 里 <a download> 不会触发系统下载）。web 侧通过
+/// javaScriptProxy 把文件名和 base64 递过来调这里。
+export async function saveBase64File(
+  context: common.UIAbilityContext,
+  filename: string,
+  base64: string,
+): Promise<boolean> {
+  const opts = new picker.DocumentSaveOptions();
+  opts.newFileNames = [filename];
+  const vp = new picker.DocumentViewPicker(context);
+  const uris = await vp.save(opts);
+  if (uris.length === 0) {
+    return false;
+  }
+  const bytes = new util.Base64Helper().decodeSync(base64);
+  const dst = fs.openSync(uris[0], fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+  try {
+    fs.writeSync(dst.fd, bytes.buffer);
+  } finally {
+    fs.closeSync(dst);
+  }
+  return true;
+}
+
 export async function exportWikiDoc(
   client: RelayClient,
   slug: string,
