@@ -80,9 +80,13 @@ export interface Attachment {
 /** Push files through the relay's `upload_attachment` (bytes → the desktop's
  *  user-attachments store) and return the persistent paths. Oversize files
  *  are skipped with an alert; a failed upload aborts the rest. */
+/** `files` is a `FileList` from an `<input type="file">`, or a plain array when
+ *  the files came from somewhere without one — e.g. a share from another app,
+ *  whose content:// URIs are fetched into `File`s (see shareTarget.ts). Both
+ *  are handled by the `Array.from` below. */
 export async function uploadAttachmentFiles(
   client: RelayClient,
-  files: FileList,
+  files: FileList | File[],
 ): Promise<Attachment[]> {
   const out: Attachment[] = [];
   for (const file of Array.from(files)) {
@@ -137,7 +141,7 @@ function useAttachments(client: RelayClient | null, draftKey: string) {
   }, [client, attachments, setAttachments]);
 
   const addFiles = useCallback(
-    async (files: FileList | null) => {
+    async (files: FileList | File[] | null) => {
       if (!client || !files || files.length === 0) return;
       setUploading(true);
       try {
@@ -296,13 +300,16 @@ function OptionSelects({
 interface NewSessionProps {
   sessions: SessionInfo[];
   client: RelayClient | null;
+  /** 别的 app 分享进来的文件（见 shareTarget.ts）。附件状态住在本组件里，
+   *  所以 App 只把 File 递过来，由这里在 client 就绪后走正常上传路径。 */
+  initialFiles?: File[];
   onClose: () => void;
 }
 
 /** 新会话表单的未提交草稿 key。全局唯一（同时只有一个新会话 sheet），意外关闭
  *  sheet / 切标签 / iOS 杀 PWA 后回来原样恢复；只有创建成功才清空。附件不入草稿——
  *  它们是已上传到 relay 的产物，重开时重新挑选即可。 */
-const NEW_SESSION_DRAFT_KEY = "new-session";
+export const NEW_SESSION_DRAFT_KEY = "new-session";
 const NEW_SESSION_ATTACH_KEY = "new-session:attachments";
 
 /** 把 repo 内的 worktree checkout 折叠回 repo 根。Fleet 在 `<repo-root>/.worktrees/<task-id>`
@@ -399,7 +406,7 @@ const NEW_SESSION_DEFAULT = {
   permissionMode: "acceptEdits",
 };
 
-export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) {
+export function NewSessionSheet({ sessions, client, initialFiles, onClose }: NewSessionProps) {
   // 纯聊天 workspace：不绑定项目，没有「最近会话」可被发现，必须显式钉在选项首位。
   const chatPath = useChatWorkspace(client);
 
@@ -415,6 +422,16 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
     client,
     NEW_SESSION_ATTACH_KEY,
   );
+
+  // 分享进来的文件走一次正常上传。要等 client 就绪——addFiles 在 client 为空时
+  // 直接返回，那样文件就悄无声息地没了。ref 保证只上传一次，避免 client 重连
+  // 触发的重跑把同一批文件传第二遍。
+  const sharedUploadedRef = useRef(false);
+  useEffect(() => {
+    if (sharedUploadedRef.current || !client || !initialFiles?.length) return;
+    sharedUploadedRef.current = true;
+    void addFiles(initialFiles);
+  }, [client, initialFiles, addFiles]);
 
   const { customWorkspace, prompt, model, effort, permissionMode } = draft;
   // Older persisted drafts predate the tool field → default to Claude.

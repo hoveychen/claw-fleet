@@ -6,3 +6,12 @@ node_modules/
 .worktrees/
 .git/
 .playwright-cli/
+
+# Native shell projects (~45MB). The relay image only needs the web bundle;
+# `COPY mobile-web/ ./` would otherwise drag both platform trees through the
+# build context and into the web stage on every CI run.
+mobile-web/android/
+mobile-web/ios/
+
+# App signing keys — must never enter a build context, let alone an image.
+.signing/
