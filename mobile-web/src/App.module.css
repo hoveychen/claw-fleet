@@ -117,13 +117,7 @@
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-glass);
   backdrop-filter: blur(12px);
-  /* 安全区那段不能用 padding：--color-bg-glass 是半透明的，导航条本体下面垫着
-     页面内容，而安全区下面什么都没有，于是透出宿主底色（原生壳里就是 WebView
-     的白底），两段呈现成灰/白两种颜色。改用不透明同色的 border-bottom：
-     背景默认按 border-box 绘制，半透明层照样盖在它上面，叠加结果与导航条本体
-     一致。 */
-  padding-bottom: 0;
-  border-bottom: var(--safe-bottom) solid var(--color-bg);
+  padding-bottom: var(--safe-bottom);
 }
 
 .tabButton {

@@ -297,5 +297,14 @@ struct WebShell {
     }
     .width('100%')
     .height('100%')
+    // 只向下扩展到手势条那一段。ArkUI 组件默认避开安全区，于是 WebView 的
+    // 底边停在手势条上沿，那条缝显示的是窗口底色（白），而不是网页——网页
+    // 里怎么调 CSS 都够不着它，这正是「导航条是灰的、最下面一条是白的」的
+    // 由来。扩展之后网页自己铺到屏幕底部，--safe-bottom 的内边距继续负责
+    // 让导航条内容避开手势条。
+    //
+    // 不扩顶部：顶部框架已经 inset 过（见 SafeArea.ets 里 2026-07-15 那笔
+    // 账），再扩会把页头顶到状态栏底下。
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 }
