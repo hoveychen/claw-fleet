@@ -74,11 +74,16 @@ async (page) => {
   steps.push(`${ids.length} cards in the roster`);
   await page.screenshot({ path: `${shots}/cost-0-roster.png` });
 
-  // Try the session the backend was verified against first (it summed to
-  // $0.0751 through the live OpenRouter API), then fall back to walking the
-  // roster — a card is only in the DOM if the roster scan surfaced it.
-  const KNOWN = "session-edde1334-3364-47bc-8428-6bd38553f8ff";
-  const order = ids.includes(KNOWN) ? [KNOWN, ...ids.filter((i) => i !== KNOWN)] : ids;
+  // Try the sessions the backend was verified against first, then fall back to
+  // walking the roster — a card is only in the DOM if the roster scan surfaced
+  // it. Both pricing paths are represented, official first: it is the one whose
+  // figure comes from a published rate table rather than a provider receipt.
+  const KNOWN = [
+    "session-7c50f2aa-62f5-47f8-b8f6-8d98ee789454", // deepseek-official, table-priced
+    "session-edde1334-3364-47bc-8428-6bd38553f8ff", // openrouter, receipt-priced
+  ];
+  const known = KNOWN.filter((k) => ids.includes(k));
+  const order = [...known, ...ids.filter((i) => !known.includes(i))];
 
   // "no model calls in this session yet" is the note the bug produced. A panel
   // still showing it has not been fixed — or that session genuinely never called
