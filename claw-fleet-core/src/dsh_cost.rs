@@ -11,6 +11,23 @@
 //!
 //! So this asks the provider what it actually charged.
 //!
+//! # …except where the price list is fixed and public
+//!
+//! That reasoning turns on the word *different*: it is the open model space that
+//! makes a table untrustworthy. dsh's built-in `deepseek-official` route has no
+//! such variable — one seller, one published price list — so tokens × rate is
+//! exact there, not a guess, and it is the only number available: that adapter
+//! emits no replay envelope and keeps no response id on success (verified in
+//! dsh's source: `llm-deepseek` contains no `replayState`, and the
+//! `x-request-id` it reads is attached to errors only), and DeepSeek publishes
+//! no receipt endpoint to ask anyway.
+//!
+//! So the module has two pricing paths, disjoint by construction — receipts
+//! keyed on a generation id, and a table keyed on the provider name — and a
+//! session that mixes providers is summed once per call. The note always says
+//! which calls came from which, because "an invoice said so" and "we applied a
+//! published rate to counted tokens" are different kinds of number.
+//!
 //! # How a session's calls are found (measured)
 //!
 //! Every successful model call leaves a durable `assistant/message` event whose
@@ -188,12 +205,7 @@ fn is_peak(at_ms: i64) -> bool {
 /// asking the provider is that a plausible-looking wrong number is worse than
 /// an absent one, and that applies just as much to a stale price table.
 pub fn price_metered(calls: &[MeteredCall]) -> (f64, u32, u32, u32) {
-    // STUB — filled in after the tests below are red.
-    let _ = calls;
-    return (0.0, 0, 0, 0);
-    #[allow(unreachable_code)]
     let mut total = 0.0;
-    #[allow(unreachable_code)]
     let (mut peak, mut off_peak, mut unknown) = (0, 0, 0);
     for call in calls {
         let Some(rates) = DEEPSEEK_PEAK_RATES
@@ -228,10 +240,6 @@ pub fn price_metered(calls: &[MeteredCall]) -> (f64, u32, u32, u32) {
 /// nothing to ask for. Its price list, unlike OpenRouter's open model space, is
 /// fixed and public, so tokens × rate is exact rather than a guess.
 pub fn metered_calls(events: &[Value]) -> Vec<MeteredCall> {
-    // STUB — filled in after the tests below are red.
-    let _ = events;
-    return Vec::new();
-    #[allow(unreachable_code)]
     let mut out = Vec::new();
     for event in events {
         if event.get("type").and_then(Value::as_str) != Some("assistant/message") {
@@ -558,12 +566,19 @@ fn tally(
 pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
     let events = crate::dsh_source::session_events(uri)?;
     let refs = generation_refs(&events);
-    if refs.is_empty() {
+    // Calls a published table can price. Disjoint from `refs` by construction —
+    // one is keyed on a receipt id the fixed-price routes never emit, the other
+    // on the provider name — so a session that mixes both is summed, not
+    // double-charged.
+    let metered = metered_calls(&events);
+    if refs.is_empty() && metered.is_empty() {
         return Ok(DshSessionCost {
             note: "no model calls in this session yet".to_string(),
             ..Default::default()
         });
     }
+
+    let (table_total, peak_n, off_peak_n, unknown_model_n) = price_metered(&metered);
 
     let needs_openrouter = refs.iter().any(|r| r.provider == OPENROUTER);
     let key = openrouter_api_key();
@@ -571,6 +586,10 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
         return Ok(DshSessionCost {
             unpriced_calls: refs.iter().filter(|r| r.provider == OPENROUTER).count() as u32,
             unpriceable_calls: refs.iter().filter(|r| r.provider != OPENROUTER).count() as u32,
+            // The table-priced calls still count: a missing OpenRouter key says
+            // nothing about a route that needs no key at all.
+            total_usd: (peak_n + off_peak_n > 0).then_some(table_total),
+            priced_calls: peak_n + off_peak_n,
             // Names the exact line to write. A desktop-launched dsh inherits the
             // app's environment, which has no shell profile in it, so the file is
             // the option that actually works there — and it is keyed by the
@@ -579,7 +598,6 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
                    `OPENROUTER_API_KEY: <key>` to ~/.dsh/.credentials.yaml \
                    (or export that variable before launching)"
                 .to_string(),
-            ..Default::default()
         });
     }
 
@@ -589,7 +607,57 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
         None => Err("no OpenRouter API key configured".to_string()),
     });
     store_cache(&fresh);
-    Ok(cost)
+    Ok(merge_metered(cost, table_total, peak_n, off_peak_n, unknown_model_n))
+}
+
+/// Fold the table-priced calls into the receipt-priced result.
+///
+/// Kept separate from [`dsh_session_cost`] so the composition is unit-testable
+/// without a live dsh or a network round trip.
+fn merge_metered(
+    receipts: DshSessionCost,
+    table_total: f64,
+    peak_n: u32,
+    off_peak_n: u32,
+    unknown_model_n: u32,
+) -> DshSessionCost {
+    let table_priced = peak_n + off_peak_n;
+    if table_priced == 0 && unknown_model_n == 0 {
+        return receipts;
+    }
+    let mut notes: Vec<String> = receipts
+        .note
+        .split("; ")
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if table_priced > 0 {
+        // Says where the figure came from, because it is a different kind of
+        // number than the receipt total next to it: a published rate applied to
+        // counted tokens, not what an invoice reported.
+        notes.push(format!(
+            "{table_priced} call(s) priced from DeepSeek's published rates \
+             ({peak_n} peak / {off_peak_n} off-peak)"
+        ));
+    }
+    if unknown_model_n > 0 {
+        notes.push(format!(
+            "{unknown_model_n} call(s) on a model with no published rate in this \
+             build are not included"
+        ));
+    }
+    let total = match receipts.total_usd {
+        Some(receipt_total) => Some(receipt_total + table_total),
+        None if table_priced > 0 => Some(table_total),
+        None => None,
+    };
+    DshSessionCost {
+        total_usd: total,
+        priced_calls: receipts.priced_calls + table_priced,
+        unpriced_calls: receipts.unpriced_calls,
+        unpriceable_calls: receipts.unpriceable_calls + unknown_model_n,
+        note: notes.join("; "),
+    }
 }
 
 #[cfg(test)]
@@ -872,6 +940,54 @@ mod tests {
         for h in [0, 4, 5, 10, 11, 16, 23] {
             assert!(!is_peak(at(h)), "{h:02}:00 UTC is off-peak");
         }
+    }
+
+    /// A session that used both routes must have its two totals added, each
+    /// counted once — the failure this guards is a double charge or a lost half.
+    #[test]
+    fn merges_receipt_and_table_totals_without_double_counting() {
+        let receipts = DshSessionCost {
+            total_usd: Some(0.05),
+            priced_calls: 2,
+            unpriced_calls: 1,
+            unpriceable_calls: 0,
+            note: "1 call(s) could not be priced: 404".to_string(),
+        };
+        let merged = merge_metered(receipts, 0.25, 1, 2, 0);
+        assert_eq!(merged.total_usd, Some(0.30), "0.05 receipt + 0.25 table");
+        assert_eq!(merged.priced_calls, 5, "2 by receipt + 3 by table");
+        assert_eq!(merged.unpriced_calls, 1, "the receipt gap is untouched");
+        assert!(
+            merged.note.contains("could not be priced")
+                && merged.note.contains("1 peak / 2 off-peak"),
+            "both stories must survive the merge: {}",
+            merged.note
+        );
+    }
+
+    /// The common case for a DeepSeek-official-only session: there is no receipt
+    /// total at all, so the table total must become the total rather than being
+    /// dropped next to a `None`.
+    #[test]
+    fn a_table_only_session_gets_a_total() {
+        let merged = merge_metered(DshSessionCost::default(), 0.017, 0, 1, 0);
+        assert_eq!(merged.total_usd, Some(0.017));
+        assert_eq!(merged.priced_calls, 1);
+        assert!(merged.note.contains("published rates"), "{}", merged.note);
+    }
+
+    /// Nothing to fold in must leave the receipt result byte-identical, so the
+    /// OpenRouter-only path cannot be perturbed by this feature.
+    #[test]
+    fn merging_nothing_leaves_the_receipt_result_alone() {
+        let receipts = DshSessionCost {
+            total_usd: Some(0.05),
+            priced_calls: 2,
+            unpriced_calls: 0,
+            unpriceable_calls: 1,
+            note: "1 call(s) went through a provider with no cost API".to_string(),
+        };
+        assert_eq!(merge_metered(receipts.clone(), 0.0, 0, 0, 0), receipts);
     }
 
     #[test]
