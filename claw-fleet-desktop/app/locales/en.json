@@ -764,7 +764,9 @@
     "col_tokens": "Tokens",
     "kpi_cost": "Real spend",
     "cost_calls": "{{count}} call(s) priced by the provider",
-    "caveat": "Token counts come from dsh's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. The spend figure is what the provider actually charged for this session's generations — it is never derived from the token counts, because the same model costs different amounts through different providers."
+    "cost_calls_rates": "{{count}} call(s) priced from published rates",
+    "cost_calls_mixed": "{{receipt}} by the provider / {{rates}} from published rates",
+    "caveat": "Token counts come from dsh's own session projections. The billed buckets are cumulative over the whole session; the context composition is a snapshot of the window right now, so the two do not add up. Spend is obtained one of two ways, and the figure above says which: for providers that issue a receipt per generation (OpenRouter) it is what they actually charged, never derived from the token counts, because the same model costs different amounts through different providers; for a route with one seller and a published price list (DeepSeek official, which issues no receipt) it is those rates applied to the counted tokens, peak or off-peak per call. Calls on a model with no rate and no receipt are counted, never guessed at."
   },
   "inspect": {
     "close": "Close",
