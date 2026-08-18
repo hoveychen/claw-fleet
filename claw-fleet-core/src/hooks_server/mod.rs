@@ -173,18 +173,19 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         crate::audit::AuditHistory::load(),
     ));
 
-    // Open the full-text search index (stored on the remote host).
-    let search_index = {
-        let db_path = crate::session::real_home_dir()
-            .expect("cannot determine home dir")
-            .join(".fleet")
-            .join("fleet-search.db");
-        SearchIndex::open_at(&db_path).unwrap_or_else(|e| {
-            eprintln!("[fleet serve] search index open failed, retrying fresh: {e}");
-            let _ = std::fs::remove_file(&db_path);
-            SearchIndex::open_at(&db_path).expect("search index open failed twice")
-        })
-    };
+    // Open the full-text search index (stored on the remote host). This handle
+    // exists to run the create-or-repair pass exactly once; the request workers
+    // below each open their own connection onto the same file (a rusqlite
+    // `Connection` is Send but not Sync, so it cannot be shared by reference).
+    let search_db_path = crate::session::real_home_dir()
+        .expect("cannot determine home dir")
+        .join(".fleet")
+        .join("fleet-search.db");
+    let search_index = SearchIndex::open_at(&search_db_path).unwrap_or_else(|e| {
+        eprintln!("[fleet serve] search index open failed, retrying fresh: {e}");
+        let _ = std::fs::remove_file(&search_db_path);
+        SearchIndex::open_at(&search_db_path).expect("search index open failed twice")
+    });
 
     let sse = SseBroadcaster::new();
 
@@ -250,9 +251,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     // and interruption of hung Codex turns. A headless host (this serve
     // process — the sole control plane in the Fleet Cloud lean container) has
     // no desktop backend, so it must drive that reconciliation itself. The
-    // ticker builds its own source set (trait objects aren't Send, mirroring
-    // the SSE thread below) and scans via the same scan_all_sources path the
-    // request handlers use. Runs for the life of the process — serve() never
+    // ticker builds its own source set (`AgentSource` is Send+Sync, so this is
+    // about not borrowing serve()'s set from a thread that outlives the call
+    // frame — the same reason the SSE thread below builds its own) and scans via
+    // the same scan_all_sources path the request handlers use. Runs for the life of the process — serve() never
     // returns — so the running flag stays true.
     {
         std::thread::spawn(move || {
@@ -594,6 +596,115 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         eprintln!("[fleet serve] scoped public token enabled (FLEET_PUBLIC_TOKEN); external callers limited to the public API surface");
     }
 
+    // ── Request worker pool ────────────────────────────────────────────────
+    // Every request used to be served from one `for request in
+    // server.incoming_requests()` loop on this thread, which made the whole
+    // HTTP surface a single queue: a route that scans every agent source
+    // (`/sessions`, `/today_usage`, `/guard_pending`, …) is only as fast as the
+    // slowest source's RPC, and everything queued behind it inherited that
+    // latency — with a 5s dsh, `/health` (one const string) measured 4.25s and,
+    // before dsh's own single-flight fix, 26–29s. See
+    // fleet-cli/tests/serve_request_concurrency.rs.
+    //
+    // tiny_http's `Server` is a `Mutex`+`Condvar` queue internally and its
+    // `Request` is Send, so N threads can each call `recv()` and be handed a
+    // different request. What each worker cannot share is a `rusqlite`
+    // `Connection` (Send, not Sync), so every worker opens its own
+    // `SearchIndex` handle onto the same WAL database; the pre-flight open
+    // above already did the schema/repair pass, so these are plain opens.
+    //
+    // The main thread runs one worker inline rather than parking, which keeps
+    // serve()'s "never returns" contract and the ctrlc handler's ownership of
+    // process exit unchanged.
+    drop(search_index);
+    let workers = worker_count();
+    eprintln!("[fleet serve] {workers} request worker(s)");
+    let server = Arc::new(server);
+    let sources = Arc::new(sources);
+    for _ in 1..workers {
+        let server = server.clone();
+        let sources = sources.clone();
+        let report_store = report_store.clone();
+        let llm_config = llm_config.clone();
+        let audit_history = audit_history.clone();
+        let db_path = search_db_path.clone();
+        let token = token.clone();
+        let public_token = public_token.clone();
+        let sse = sse.clone();
+        std::thread::spawn(move || {
+            run_request_worker(
+                server,
+                sources,
+                report_store,
+                llm_config,
+                audit_history,
+                db_path,
+                token,
+                public_token,
+                sse,
+            )
+        });
+    }
+    run_request_worker(
+        server,
+        sources,
+        report_store,
+        llm_config,
+        audit_history,
+        search_db_path,
+        token,
+        public_token,
+        sse,
+    );
+}
+
+/// How many threads serve requests.
+///
+/// Sized to the machine but bounded: the work is mostly waiting on agent-source
+/// RPCs and file reads, so a handful is plenty, and each worker costs one
+/// SQLite connection plus its share of concurrent scans. `FLEET_SERVE_WORKERS`
+/// overrides it (0 or unparseable is ignored) — mainly so a test can pin the
+/// pool to one thread and reproduce the serial behaviour on purpose.
+fn worker_count() -> usize {
+    if let Some(n) = std::env::var("FLEET_SERVE_WORKERS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+    {
+        return n;
+    }
+    std::thread::available_parallelism()
+        .map(|n| n.get().clamp(4, 8))
+        .unwrap_or(4)
+}
+
+/// One request worker: owns the per-thread state a `ServeCtx` borrows, then
+/// serves requests until the server shuts down.
+#[allow(clippy::too_many_arguments)]
+fn run_request_worker(
+    server: Arc<tiny_http::Server>,
+    sources: Arc<Vec<Box<dyn crate::agent_source::AgentSource>>>,
+    report_store: Arc<Mutex<ReportStore>>,
+    llm_config: Arc<Mutex<LlmConfig>>,
+    audit_history: Arc<Mutex<crate::audit::AuditHistory>>,
+    search_db_path: std::path::PathBuf,
+    token: String,
+    public_token: Option<String>,
+    sse: SseBroadcaster,
+) {
+    let search_index = match SearchIndex::open_at(&search_db_path) {
+        Ok(idx) => idx,
+        Err(e) => {
+            // The pre-flight open in serve() already created and repaired this
+            // database, so a failure here is not the "stale schema" case and
+            // must not re-run the wipe-and-retry (the other workers are using
+            // the file). Serving search routes from a worker with no index
+            // would answer "no results" instead of failing, so the worker
+            // stands down and the rest of the pool carries the load.
+            eprintln!("[fleet serve] worker search index open failed, worker not started: {e}");
+            return;
+        }
+    };
     let ctx = &ServeCtx {
         sources: &sources,
         report_store: &report_store,
@@ -601,8 +712,26 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         audit_history: &audit_history,
         search_index: &search_index,
     };
+    loop {
+        match server.recv() {
+            Ok(request) => handle_request(ctx, request, &token, public_token.as_deref(), &sse),
+            Err(e) => {
+                eprintln!("[fleet serve] recv failed, worker stopping: {e}");
+                return;
+            }
+        }
+    }
+}
 
-    for request in server.incoming_requests() {
+/// Serve one request: authorize, then dispatch to its route handler.
+fn handle_request(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    token: &str,
+    public_token: Option<&str>,
+    sse: &SseBroadcaster,
+) {
+    {
         let url = request.url().to_string();
         let (path, query_str) = match url.split_once('?') {
             Some((p, q)) => (p, q),
@@ -631,13 +760,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // is wrong or a scoped token reached a non-public path.
             let status = if presented.is_some() { 403 } else { 401 };
             let _ = request.respond(tiny_http::Response::empty(status));
-            continue;
+            return;
         }
 
-        // Handle SSE endpoint — takes over the connection.
+        // Handle SSE endpoint — takes over the connection. Cheap: it upgrades
+        // and hands the stream to the broadcaster, so it does not pin a worker.
         if path == "/events" {
-            handle_sse_upgrade(request, &sse);
-            continue;
+            handle_sse_upgrade(request, sse);
+            return;
         }
 
         let json_header: tiny_http::Header = "Content-Type: application/json".parse().unwrap();
