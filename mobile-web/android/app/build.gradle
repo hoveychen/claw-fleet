@@ -16,10 +16,37 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing comes from the environment, never from a file in the repo:
+    // the keystore and its password live in .signing/ (gitignored) and the app's
+    // SHA-256 is what Push Kit and the App Link verifier check, so leaking it
+    // would let anyone ship a build that impersonates this one.
+    //
+    // Unset env → no signingConfig, and `assembleRelease` produces an unsigned
+    // APK instead of failing the whole build (debug builds are unaffected).
+    //   FLEET_KEYSTORE_PATH=/abs/path/fleet-release.jks
+    //   FLEET_KEYSTORE_PASSWORD=…      (store and key password are the same)
+    def keystorePath = System.getenv("FLEET_KEYSTORE_PATH")
+    def keystorePassword = System.getenv("FLEET_KEYSTORE_PASSWORD")
+    def canSignRelease = keystorePath && keystorePassword && file(keystorePath).exists()
+
+    if (canSignRelease) {
+        signingConfigs {
+            release {
+                storeFile file(keystorePath)
+                storePassword keystorePassword
+                keyAlias "fleet"
+                keyPassword keystorePassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (canSignRelease) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
