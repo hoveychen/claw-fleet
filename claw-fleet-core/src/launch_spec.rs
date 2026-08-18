@@ -36,6 +36,16 @@ pub struct LaunchSpec {
     /// The `--effort` value, same contract as `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// The launcher surface this session came from
+    /// (`claw-fleet-newsession` / handoff / schedule / loop). Only the sources
+    /// that have no originator channel of their own record it — Claude carries
+    /// it in `CLAUDE_CODE_ENTRYPOINT` and Codex in its originator override, but
+    /// dsh has neither, so for dsh this note *is* the entrypoint.
+    ///
+    /// `#[serde(default)]` so notes written before this field existed still
+    /// parse — they simply report no entrypoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<String>,
 }
 
 fn spec_dir() -> Option<PathBuf> {
@@ -64,9 +74,25 @@ fn spec_path(session_id: &str) -> Option<PathBuf> {
 /// note still reads back as "no override" (`model_of`/`effort_of` return `None`),
 /// so the CLI default stays dynamic — the two concerns are decoupled.
 pub fn record(session_id: &str, model: Option<&str>, effort: Option<&str>) {
+    record_with_entrypoint(session_id, model, effort, None)
+}
+
+/// [`record`] plus the launcher surface, for a source that cannot carry the
+/// entrypoint on the child process itself (dsh: its sessions live inside a
+/// shared server, so there is no per-session environment to stamp).
+pub fn record_with_entrypoint(
+    session_id: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    entrypoint: Option<&str>,
+) {
+    let clean = |v: Option<&str>| {
+        v.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+    };
     let spec = LaunchSpec {
-        model: model.map(str::trim).filter(|m| !m.is_empty()).map(str::to_string),
-        effort: effort.map(str::trim).filter(|e| !e.is_empty()).map(str::to_string),
+        model: clean(model),
+        effort: clean(effort),
+        entrypoint: clean(entrypoint),
     };
     let Some(path) = spec_path(session_id) else {
         return;
@@ -103,6 +129,12 @@ pub fn model_of(session_id: &str) -> Option<String> {
 }
 
 /// The recorded `--effort`.
+/// The launcher surface recorded for `session_id`, when the spawn path stored
+/// one. Feeds `SessionInfo::entrypoint` for sources with no originator channel.
+pub fn entrypoint_of(session_id: &str) -> Option<String> {
+    get(session_id).and_then(|s| s.entrypoint)
+}
+
 pub fn effort_of(session_id: &str) -> Option<String> {
     get(session_id)?.effort
 }
