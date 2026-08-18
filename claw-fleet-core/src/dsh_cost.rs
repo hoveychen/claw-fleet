@@ -14,13 +14,26 @@
 //! # How a session's calls are found (measured)
 //!
 //! Every successful model call leaves a durable `assistant/message` event whose
-//! `data.message.source` is
-//! `{kind: "model", provider, model, replayState: {responseId, …}}`. Measured
-//! against a real 120-event session: three model calls, three distinct
+//! `data.message.source` is `{kind: "model", provider, model, replayState}`.
+//! Measured against a real 120-event session: three model calls, three distinct
 //! `responseId`s of the form `gen-1786757116-pDmWgCIKXi2AWZCPaQTI`, each tagged
 //! `provider: "openrouter"`. The same id also rides the preceding
 //! `assistant/chunk` `finish` frame; this module reads it off the **message**
 //! because that is the durable record and there is exactly one per call.
+//!
+//! ## Where the id sits: two shapes, both live
+//!
+//! dsh later wrapped the adapter's response record in a replay *envelope* —
+//! `interface ReplayEnvelope { response: unknown; blocks?: readonly unknown[] }`
+//! in `@deepseek-ai/dsh-llm/lib/types/types.d.ts` — moving the id one level in:
+//!
+//! - flat (the payload carries `version: 1`): `replayState.responseId`
+//! - envelope (`version: 2`): `replayState.response.responseId`
+//!
+//! Measured on one real install: 64 sessions, 35 flat and 14 envelope, and the
+//! envelope ones were the newest — so reading only the flat path meant every
+//! session a user was likely to open reported "no model calls" while its ids sat
+//! right there on the wire. Both paths are read, and old sessions keep pricing.
 //!
 //! A session's real spend is therefore the sum over its `responseId`s.
 //!
@@ -128,8 +141,15 @@ pub fn generation_refs(events: &[Value]) -> Vec<GenerationRef> {
         if source.get("kind").and_then(Value::as_str) != Some("model") {
             continue;
         }
+        // Two shapes, both live on one machine. dsh wrapped the adapter's
+        // response record in a replay envelope — `{response, blocks?}`, typed in
+        // `@deepseek-ai/dsh-llm`'s `ReplayEnvelope` — so what used to sit
+        // directly on `replayState` now sits one level in. Sessions written
+        // before the change keep the flat shape and must keep pricing, so both
+        // are read; the envelope first, because that is what dsh writes now.
         let Some(id) = source
-            .pointer("/replayState/responseId")
+            .pointer("/replayState/response/responseId")
+            .or_else(|| source.pointer("/replayState/responseId"))
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
         else {
@@ -485,6 +505,85 @@ mod tests {
                 },
             ],
             "one ref per distinct responseId, chunk frames and non-model sources ignored"
+        );
+    }
+
+    /// One `assistant/message` source copied verbatim off the wire from a
+    /// current dsh session (`session-edde1334-…`, read through
+    /// `POST /api/session.history`).
+    ///
+    /// dsh wrapped the adapter's response record in a replay *envelope*: what
+    /// used to sit directly on `replayState` now sits on `replayState.response`,
+    /// alongside a `blocks` array. The installed package types it as
+    /// `interface ReplayEnvelope { response: unknown; blocks?: readonly unknown[] }`
+    /// (`@deepseek-ai/dsh-llm/lib/types/types.d.ts`), and the payload inside
+    /// carries `version: 2` where the old flat one carried `version: 1`.
+    fn v2_envelope_event() -> Value {
+        json!({"type": "assistant/message", "data": {
+            "turn": 1,
+            "step": 1,
+            "usage": {"inputTokens": 3, "outputTokens": 14, "cacheWriteTokens": 15069},
+            "message": {
+                "role": "assistant",
+                "id": "msg-v2",
+                "source": {
+                    "kind": "model",
+                    "provider": "openrouter",
+                    "model": "anthropic/claude-haiku-4.5",
+                    "replayState": {
+                        "response": {
+                            "kind": "pi-ai",
+                            "version": 2,
+                            "api": "openai-completions",
+                            "provider": "openrouter",
+                            "model": "anthropic/claude-haiku-4.5",
+                            "responseId": "gen-1787026253-Te7maM1es7yqmeDdhUS6",
+                            "stopReason": "stop"
+                        },
+                        "blocks": [{"type": "text"}]
+                    }
+                }
+            }
+        }})
+    }
+
+    /// The regression: every session dsh writes now uses the v2 envelope, so
+    /// reading only the flat v1 path priced nothing and the panel said "no model
+    /// calls" for all of them.
+    ///
+    /// Measured on a real install: of 64 sessions, 35 were v1 (priced fine — one
+    /// summed to $0.0048613 through the live OpenRouter API) and 14 were v2 with
+    /// a real `gen-…` id that Fleet could not see. The v2 ones were the newest,
+    /// which is why every session the user opened looked unpriced.
+    #[test]
+    fn extracts_the_id_from_the_v2_replay_envelope() {
+        let refs = generation_refs(&[v2_envelope_event()]);
+        assert_eq!(
+            refs,
+            vec![GenerationRef {
+                id: "gen-1787026253-Te7maM1es7yqmeDdhUS6".into(),
+                provider: "openrouter".into(),
+                model: "anthropic/claude-haiku-4.5".into(),
+            }],
+            "a current dsh session's generation id lives at \
+             replayState.response.responseId"
+        );
+    }
+
+    /// Both shapes coexist on one machine — a fix that only reads v2 would stop
+    /// pricing the sessions that used to work.
+    #[test]
+    fn extracts_ids_from_both_replay_shapes_in_one_log() {
+        let mut events = recorded_events();
+        events.push(v2_envelope_event());
+        let ids: Vec<String> = generation_refs(&events)
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["gen-1", "gen-2", "gen-1787026253-Te7maM1es7yqmeDdhUS6"],
+            "old flat sessions must keep pricing alongside the new envelope"
         );
     }
 
