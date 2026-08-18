@@ -7,6 +7,7 @@ import { isFleetOwnedTask } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
+import { TAIL_LOAD_DEADLINE_MS, withStallWatch } from "./loadDeadline";
 
 // ── Connection store ──────────────────────────────────────────────────────────
 
@@ -548,6 +549,10 @@ interface DetailState {
   session: SessionInfo | null;
   messages: RawMessage[];
   isLoading: boolean;
+  /** The transcript fetch blew its deadline or failed outright, and there is
+   *  nothing to render. The pane must say so (and offer a retry) instead of
+   *  spinning forever — see `TAIL_LOAD_DEADLINE_MS`. */
+  loadStalled: boolean;
   searchQuery: string | null;
   /** How many tail messages we are currently displaying. Grows when the user
    * presses "load earlier" or null when the full transcript has been loaded. */
@@ -559,6 +564,7 @@ interface DetailState {
    * the card's plan-progress row). Consumed once on mount, then irrelevant. */
   initialTab: string | null;
   open: (session: SessionInfo, searchQuery?: string, initialTab?: string) => Promise<void>;
+  retryLoad: () => Promise<void>;
   close: () => Promise<void>;
   loadEarlier: () => Promise<void>;
   appendMessages: (msgs: RawMessage[]) => void;
@@ -579,12 +585,15 @@ export const INITIAL_TAIL = 150;
 /** How much further back we go each time the user clicks "load earlier". */
 export const LOAD_EARLIER_STEP = 1000;
 
+export { TAIL_LOAD_DEADLINE_MS };
+
 let tailUnlisten: UnlistenFn | null = null;
 
 export const useDetailStore = create<DetailState>((set, get) => ({
   session: null,
   messages: [],
   isLoading: false,
+  loadStalled: false,
   searchQuery: null,
   loadedTail: null,
   fullyLoaded: false,
@@ -605,6 +614,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       session,
       messages: [],
       isLoading: true,
+      loadStalled: false,
       searchQuery: searchQuery ?? null,
       loadedTail: INITIAL_TAIL,
       fullyLoaded: false,
@@ -615,10 +625,20 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     // clear `isLoading` — otherwise the detail view is stuck on "加载中…"
     // forever. Mirrors the standalone-mode fetch's `.catch` in SessionDetail.
     try {
-      const rawMessages = await invoke<RawMessage[]>("get_messages_tail", {
-        jsonlPath: session.jsonlPath,
-        tail: INITIAL_TAIL,
-      });
+      // …and neither may a fetch that simply never answers. `get_messages_tail`
+      // has no abort and no timeout of its own: with an unresponsive backend
+      // (proven by freezing the dsh web server) the promise stays pending and
+      // the pane spun on 「加载中…」 indefinitely. The deadline doesn't cancel
+      // anything — it just stops the lie; a late result still renders below.
+      const rawMessages = await withStallWatch(
+        invoke<RawMessage[]>("get_messages_tail", {
+          jsonlPath: session.jsonlPath,
+          tail: INITIAL_TAIL,
+        }),
+        () => {
+          if (get().session === session) set({ isLoading: false, loadStalled: true });
+        },
+      );
 
       await invoke("start_watching_session", { jsonlPath: session.jsonlPath });
 
@@ -629,6 +649,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       set({
         messages: rawMessages,
         isLoading: false,
+        loadStalled: false,
         fullyLoaded: rawMessages.length < INITIAL_TAIL,
       });
     } catch (err) {
@@ -636,9 +657,17 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       // Only clear loading if this open() is still the active one — a newer
       // open()/close() may have superseded us while awaiting.
       if (get().session === session) {
-        set({ isLoading: false, fullyLoaded: true });
+        set({ isLoading: false, loadStalled: true, fullyLoaded: true });
       }
     }
+  },
+
+  /** Re-run the tail fetch for the session already open — the retry the stalled
+   *  pane offers. Reuses `open()` so watcher and listener are rebuilt too. */
+  retryLoad: async () => {
+    const { session, searchQuery } = get();
+    if (!session) return;
+    await get().open(session, searchQuery ?? undefined);
   },
 
   close: async () => {
@@ -651,6 +680,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       session: null,
       messages: [],
       isLoading: false,
+      loadStalled: false,
       searchQuery: null,
       loadedTail: null,
       fullyLoaded: false,
