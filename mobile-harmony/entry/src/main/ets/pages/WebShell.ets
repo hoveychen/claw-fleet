@@ -4,6 +4,8 @@ import { RelayStore, RelayPairing } from '../common/RelayStore';
 import { saveBase64File } from '../common/FileTransfer';
 import { setKeepScreenOn } from '../common/WakeLock';
 import { shareFile } from '../common/SystemShare';
+import { scanBarcode, scanCore } from '@kit.ScanKit';
+import { parsePairingUrl, RelayPairing as ParsedPairing } from '../common/RelayStore';
 
 /// 鸿蒙端的 WebView 外壳：把打包进 rawfile 的 mobile-web 跑起来，原生只做
 /// 三件 web 做不到的事（配对密钥注入、安全区、后续的推送）。
@@ -52,18 +54,59 @@ struct WebShell {
   @StorageProp('safeTop') safeTop: number = 0;
   @StorageProp('safeBottom') safeBottom: number = 0;
   @State private src: string = '';
+  /// null = 还在读配对状态；'' = 未配对（显示配对入口）；其余 = 已配对的 src。
+  /// 分三态是因为「还没读完」和「读完了没有」必须区别对待 —— 否则冷启动会
+  /// 闪一下配对页再跳走。
+  @State private pairChecked: boolean = false;
+  @State private pairError: string = '';
   private bridge: NativeBridge = new NativeBridge(getContext(this) as common.UIAbilityContext);
 
   aboutToAppear(): void {
+    this.loadPairing();
+  }
+
+  private loadPairing(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     RelayStore.loadPairing(ctx).then((p: RelayPairing | null) => {
+      this.pairChecked = true;
       // 密钥走 URL fragment：mobile-web 的 loadSecretSync 本来就从
       // window.location.hash 读 `#k=`（桌面二维码就是这个形状），所以这里
       // 复用同一条路径，web 侧无需为鸿蒙加任何分支。fragment 也不会进
       // 请求行，拦截器按路径取资源不受影响。
-      this.src = p === null ? ORIGIN + 'index.html'
-                            : ORIGIN + 'index.html#k=' + p.secret;
-    }).catch(() => { this.src = ORIGIN + 'index.html'; });
+      // 未配对时留空 src，让 build() 走原生配对页。
+      //
+      // 早先这里在 p === null 时也给了 ORIGIN + 'index.html'，结果 src 永远
+      // 非空、配对页永远进不去，页面就停在 mobile-web 那张为 PWA 写的引导页
+      // 上（它假设用户是扫码打开带密钥的网址，因此没有扫码按钮）——等于没有
+      // 任何配对入口。
+      this.src = p === null ? '' : ORIGIN + 'index.html#k=' + p.secret;
+    }).catch(() => { this.pairChecked = true; this.src = ''; });
+  }
+
+  /// 配对入口。删掉原生 UI 时把 GateView 一起删了，而 mobile-web 的配对页是
+  /// 为 PWA 写的——它假设用户是「扫码打开一个带密钥的网址」，壳里没有那个入口，
+  /// 于是新装的 app 无路可配对。这里补回最小的一个：扫码写进 RelayStore，
+  /// 再让 WebView 带着 #k= 重新加载。
+  private async startPairing(): Promise<void> {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    try {
+      const options: scanBarcode.ScanOptions = {
+        scanTypes: [scanCore.ScanType.QR_CODE],
+        enableMultiMode: false,
+        enableAlbum: true,
+      };
+      const result = await scanBarcode.startScanForResult(ctx, options);
+      const pairing: ParsedPairing | null = parsePairingUrl(result.originalValue);
+      if (pairing === null) {
+        this.pairError = '这个二维码不是 Fleet 的配对码';
+        return;
+      }
+      await RelayStore.savePairing(ctx, pairing);
+      this.pairError = '';
+      this.loadPairing();
+    } catch (e) {
+      this.pairError = '扫码取消或失败';
+    }
   }
 
   private mime(path: string): string {
@@ -93,7 +136,10 @@ struct WebShell {
   private bootScript(): string {
     return `(function(){
       var s = document.documentElement.style;
-      s.setProperty('--safe-top', '` + this.safeTop.toString() + `px');
+      // 只给底部。顶部由框架自己 inset 过了 —— SafeArea.ets 的注释记着这笔账:
+      // 2026-07-15 就因为应用侧又加了一次 top inset，导致每个页头被整整推下
+      // 一行。我第一版照抄注入 safeTop，等于把那个已修的 bug 重新引了回来。
+      // safeTop 仍然发布在 AppStorage 里，留作诊断，但不喂给页面。
       s.setProperty('--safe-bottom', '` + this.safeBottom.toString() + `px');
 
       // 下载：拦 a[download] 的点击，把 blob/data 读成 base64 交给原生落盘。
@@ -169,7 +215,20 @@ struct WebShell {
 
   build() {
     Column() {
-      if (this.src.length > 0) {
+      if (this.pairChecked && this.src.length === 0) {
+        Column({ space: 16 }) {
+          Text('Fleet').fontSize(28).fontWeight(FontWeight.Bold)
+          Text('扫描桌面端 Fleet「移动端」面板里的二维码完成配对')
+            .fontSize(14).opacity(0.7).textAlign(TextAlign.Center)
+          Button('扫码配对').onClick(() => { this.startPairing(); })
+          if (this.pairError.length > 0) {
+            Text(this.pairError).fontSize(12).fontColor(Color.Red)
+          }
+        }
+        .width('100%').height('100%')
+        .justifyContent(FlexAlign.Center)
+        .padding(32)
+      } else if (this.src.length > 0) {
         Web({ src: this.src, controller: this.controller })
           .javaScriptAccess(true)
           .domStorageAccess(true)
