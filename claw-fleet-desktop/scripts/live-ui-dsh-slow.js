@@ -106,7 +106,9 @@ async (page) => {
   }
   const elapsedMs = Date.now() - tOpen;
   steps.push(`${at()} outcome=${outcome} after ${(elapsedMs / 1000).toFixed(2)}s`);
-  await page.screenshot({ path: `${shots}/p5-2-conversation.png` });
+  // Name the shot after the outcome: an A/B run would otherwise overwrite the
+  // previous binary's evidence with the current one's.
+  await page.screenshot({ path: `${shots}/p5-conversation-${outcome}.png` });
 
   return { steps, listed, outcome, elapsedMs, body: await bodyText() };
 }
