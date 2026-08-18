@@ -29,6 +29,8 @@ export default class EntryAbility extends UIAbility {
   /// 这里只在前台时取走 —— 两者不同进程，AppStorage 传不过来。
   private drainSharedInbox(): void {
     SharedInbox.take(this.context).then((item: SharedItem | null) => {
+      hilog.info(DOMAIN, TAG, 'share-diag drain item=%{public}s',
+        item === null ? '(empty)' : ('text=' + item.text.length + ' files=' + item.fileNames.length));
       if (item === null) {
         return;
       }
@@ -40,6 +42,7 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate('sharedText', parts.join('\n\n'));
       const n: number = AppStorage.get<number>('sharedNonce') ?? 0;
       AppStorage.setOrCreate('sharedNonce', n + 1);
+      hilog.info(DOMAIN, TAG, 'share-diag published to AppStorage nonce=%{public}d', n + 1);
     }).catch((e: Error) => {
       hilog.warn(DOMAIN, TAG, 'drain share inbox failed: %{public}s', e.message);
     });
