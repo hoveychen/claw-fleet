@@ -2,8 +2,6 @@ import { AbilityConstant, ConfigurationConstant, Configuration, UIAbility, Want 
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { initTheme, setSystemDark } from '../common/Theme';
-import { initI18n } from '../common/I18n';
-import { selfTest } from '../common/RelayCrypto';
 import { initSafeArea } from '../common/SafeArea';
 import { initWakeLock } from '../common/WakeLock';
 
@@ -26,19 +24,12 @@ export default class EntryAbility extends UIAbility {
 
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     const cfg = this.context.config;
-    const deviceIsZh = (cfg.language ?? 'zh').toLowerCase().startsWith('zh');
-    initI18n(deviceIsZh);
+    // 语言与主题现在都归 web 层：mobile-web 自己读 navigator.language 和
+    // prefers-color-scheme。这里只保留 initTheme —— 它喂的是 AppStorage 里的
+    // resolvedTheme，原生启动画面/窗口背景仍要用，避免冷启动闪白。
     initTheme(isDark(cfg.colorMode));
-    // One-shot relay-crypto byte-alignment check against the frozen vector; the
-    // verdict lands in hilog (grep 'crypto selfTest'). This is the only runtime
-    // proof that AES-GCM interops with the Rust/WebCrypto peers.
-    selfTest().then((verdict: string) => {
-      hilog.info(DOMAIN, TAG, 'crypto selfTest: %{public}s', verdict);
-    });
-    // No launch-route parsing: the 元服务 service_notification channel cannot
-    // carry tap data (verified 2026-07-14), so a notification tap only foregrounds
-    // the app — there is no decision id to route to. See TASKS.md plan
-    // harmony-native-client P7.
+    // 原先这里还有一次 relay-crypto 自检；加解密已随 RelayCrypto.ets 一起交回
+    // web 层（relayCrypto.ts + crypto.subtle），自检也就没有对象了。
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {
