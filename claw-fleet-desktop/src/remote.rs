@@ -1208,6 +1208,13 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn dsh_models(&self) -> Result<claw_fleet_core::dsh_source::DshModelCatalog, String> {
+        // The catalogue describes the *remote* host's providers, which is the
+        // right answer: a session launched into a remote workspace runs on that
+        // host's dsh, so its models are the selectable ones.
+        self.probe.get(claw_fleet_core::routes::DSH_MODELS)
+    }
+
     fn get_waiting_alerts(&self) -> Vec<crate::backend::WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

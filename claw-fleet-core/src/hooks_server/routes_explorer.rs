@@ -152,6 +152,36 @@ pub(crate) fn route_dsh_session_cost(
     }
 }
 
+/// dsh's model catalogue, for the desktop launcher's model / effort menus.
+///
+/// No query params: `llm.models` is session-independent, so the answer is the
+/// same for every caller. The lookup happens on *this* host because the dsh
+/// install and its provider credentials live here, not on the remote client.
+pub(crate) fn route_dsh_models(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let _ = ctx;
+    match crate::dsh_source::dsh_models() {
+        Ok(c) => {
+            let body = serde_json::to_string(&c).unwrap_or_default();
+            let _ = request
+                .respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let _ = request.respond(
+                tiny_http::Response::from_string(format!(
+                    "{{\"error\":{}}}",
+                    serde_json::to_string(&e).unwrap_or_default()
+                ))
+                .with_status_code(500)
+                .with_header(json_header),
+            );
+        }
+    }
+}
+
 pub(crate) fn route_explorer_roots(
     ctx: &ServeCtx,
     request: tiny_http::Request,
