@@ -42,6 +42,10 @@ export interface PillMenuProps {
    */
   menuHeader?: (close: () => void) => ReactNode;
   className?: string;
+  /** Stable hook for UI automation (the live-data browser harness drives these
+   *  pills; matching on their label breaks the moment the label localizes or
+   *  the selected value changes). */
+  testId?: string;
   /** Tighter padding / smaller font for narrow hosts (e.g. lite mode's 340px
    *  strip) where the full-size pill row would wrap to three lines. */
   compact?: boolean;
@@ -57,6 +61,7 @@ export function PillMenu({
   footerItems,
   menuHeader,
   className,
+  testId,
   compact,
 }: PillMenuProps) {
   const [open, setOpen] = useState(false);
@@ -114,6 +119,7 @@ export function PillMenu({
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
         title={title}
+        data-testid={testId}
         aria-haspopup="menu"
         aria-expanded={open}
       >

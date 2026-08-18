@@ -124,6 +124,7 @@ export function SessionOptionPills({
           compact={compact}
           label={toolLabel}
           title={t("new_session.tool")}
+          testId="agent-pill"
           disabled={disabled}
           items={toolChoices.map((x) => ({
             id: x.value,

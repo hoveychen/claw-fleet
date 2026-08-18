@@ -12,6 +12,7 @@ import type { LiveThinking } from "../generated/types";
 import type { PromoScene } from "./promo-scene";
 import { DEMO_BOARD, RELAY_CHAINS, RELAY_PATH_TO_ID, RELAY_SESSIONS } from "./demoData";
 import { RELAY_SCRIPTS } from "./demoScripts";
+import { LIVE_MODE, installLiveProxy, liveInvoke } from "./liveProxy";
 import {
   MOCK_QA_DELAY_MS,
   MOCK_QA_MARKETPLACES,
@@ -956,18 +957,28 @@ export function installMocks({ qaMode = false }: { qaMode?: boolean } = {}) {
   // Must call mockWindows first to set up __TAURI_INTERNALS__.metadata
   mockWindows("main");
 
+  // `?mock&live` — data commands go to a real `fleet serve` probe instead of
+  // the fixtures; everything else still answers from the mock. See liveProxy.ts.
+  if (LIVE_MODE) installLiveProxy();
+
   // Install IPC handler with event mocking enabled
   mockIPC(async (cmd, args) => {
     if (qaMode && shouldDelayMockQaCommand(cmd)) {
       await delay(MOCK_QA_DELAY_MS);
     }
-    return handleIPC(cmd, (args ?? {}) as Record<string, unknown>, qaMode);
+    const a = (args ?? {}) as Record<string, unknown>;
+    if (LIVE_MODE) {
+      const live = await liveInvoke(cmd, a);
+      if (live.handled) return live.value;
+    }
+    return handleIPC(cmd, a, qaMode);
   }, {
     shouldMockEvents: true,
   });
 
-  // Start ticking sessions every 2s
-  setInterval(tickSessions, 2000);
+  // Start ticking sessions every 2s. In live mode the board comes from the
+  // probe poller, so the fixture ticker would fight it.
+  if (!LIVE_MODE) setInterval(tickSessions, 2000);
 
   // Install screenplay driver for video pipeline
   installScreenplayDriver();
