@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Claw Fleet 移动端：在手机上查看并处理桌面端 Claude Code 会话的决策卡、任务进度与知识库。"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Claw Fleet 移动端主界面"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Claw Fleet"
+    }
+  ]
+}
