@@ -38,15 +38,70 @@ function delayFor(method) {
   return 0;
 }
 
+// One session, shaped like a real `session.list` item, so the desktop UI has
+// something to select when this fixture stands in for a slow dsh.
+const SESSION_ID = process.env.FAKE_DSH_SESSION_ID ?? 'session-fake-slow';
+const SESSION_CWD = process.env.FAKE_DSH_SESSION_CWD ?? process.cwd();
+
 function valueFor(method) {
   switch (method) {
     case 'session.list':
-      return { items: [] };
-    case 'session.history':
-      // One durable event wrapped the way dsh pages them, so the normaliser on
-      // the Fleet side has something real to chew on.
       return {
-        events: [{ event: { type: 'user/message', seq: 1, content: [{ type: 'text', text: 'hi' }] } }],
+        items: [
+          {
+            sessionId: SESSION_ID,
+            cwd: SESSION_CWD,
+            updatedAt: Date.now(),
+            running: false,
+            projections: {
+              values: {
+                title: '慢 dsh 探针会话',
+                tokenUsage: {
+                  uncachedInputTokens: 120,
+                  cacheReadTokens: 6756,
+                  cacheWriteTokens: 1789,
+                  outputTokens: 103,
+                },
+              },
+            },
+          },
+        ],
+      };
+    case 'session.history':
+      // Durable events wrapped the way dsh pages them, in the shapes
+      // `dsh_messages::normalize` was written against.
+      return {
+        events: [
+          {
+            event: {
+              type: 'user/message',
+              seq: 7,
+              time: Date.now() - 60000,
+              data: {
+                content: [{ type: 'text', text: '这条消息来自 fake dsh,用来验证对话区能立刻拿到数据' }],
+                source: { kind: 'user', rpcId: 'fake-1' },
+                role: 'user',
+                id: 'fake-user-1',
+              },
+            },
+          },
+          {
+            event: {
+              type: 'assistant/message',
+              seq: 8,
+              time: Date.now() - 59000,
+              data: {
+                turn: 1,
+                step: 1,
+                message: {
+                  role: 'assistant',
+                  content: [{ type: 'text', text: '收到 —— 对话区没有卡在加载中。' }],
+                },
+                usage: { inputTokens: 3, outputTokens: 103, cacheReadTokens: 6756, cacheWriteTokens: 1789 },
+              },
+            },
+          },
+        ],
         hasMore: false,
       };
     default:
