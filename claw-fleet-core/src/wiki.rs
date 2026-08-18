@@ -501,10 +501,30 @@ pub fn publish_in(
         source_path: source.display().to_string(),
     };
 
+    let doc = assemble_doc(existing, &slug, title, kind, entry, workspace, now, version);
+
+    write_doc_json(&doc_dir, &doc)?;
+    Ok(doc)
+}
+
+/// Fold a fresh version into the doc record — a re-publish keeps the doc's
+/// identity (`created_ms`, history) and re-stamps everything the new version
+/// decides; a first publish builds the record from scratch.
+#[allow(clippy::too_many_arguments)]
+fn assemble_doc(
+    existing: Option<WikiDoc>,
+    slug: &str,
+    title: String,
+    kind: &str,
+    entry: String,
+    workspace: &Path,
+    now: u64,
+    version: WikiVersion,
+) -> WikiDoc {
     let workspace_path = resolve_workspace_path(workspace);
     let workspace_name = workspace_name_of(&workspace_path);
 
-    let doc = match existing {
+    match existing {
         Some(mut old) => {
             old.title = title;
             old.kind = kind.to_string();
@@ -512,12 +532,12 @@ pub fn publish_in(
             old.workspace_path = workspace_path;
             old.workspace_name = workspace_name;
             old.updated_ms = now;
-            old.current_version = version_id;
+            old.current_version = version.id.clone();
             old.versions.insert(0, version);
             old
         }
         None => WikiDoc {
-            slug: slug.clone(),
+            slug: slug.to_string(),
             title,
             kind: kind.to_string(),
             entry,
@@ -525,14 +545,123 @@ pub fn publish_in(
             workspace_name,
             created_ms: now,
             updated_ms: now,
-            current_version: version_id,
+            current_version: version.id.clone(),
             versions: vec![version],
         },
+    }
+}
+
+// ── Publish text ─────────────────────────────────────────────────────────────
+
+/// What [`publish_text`] does when the slug is already taken.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TextPublishMode {
+    /// The new version holds exactly the passed text — the same
+    /// version-on-top-of-version shape a re-publish from disk has.
+    #[default]
+    Replace,
+    /// The new version holds the current version's markdown, a `---` rule, then
+    /// the passed text. This is what turns one slug into a running note a
+    /// reader can keep appending messages to.
+    Append,
+}
+
+/// Publish markdown that has no file behind it — the desktop reader's "publish
+/// this message" path. Everything a file publish derives from the source path
+/// (kind, entry name) is decided here instead: the kind is always `markdown`
+/// and the entry name comes from the slug.
+pub fn publish_text(
+    slug: &str,
+    title: Option<&str>,
+    text: &str,
+    workspace: &Path,
+    mode: TextPublishMode,
+) -> Result<WikiDoc, String> {
+    publish_text_in(&wiki_dir_or_err()?, slug, title, text, workspace, mode)
+}
+
+/// [`publish_text`] against an explicit wiki root (unit-testable).
+pub fn publish_text_in(
+    root: &Path,
+    slug: &str,
+    title: Option<&str>,
+    text: &str,
+    workspace: &Path,
+    mode: TextPublishMode,
+) -> Result<WikiDoc, String> {
+    let slug = normalize_slug(slug)?;
+    let doc_dir = root.join(slug_to_dirname(&slug));
+    let existing = read_doc_json(&doc_dir).ok();
+
+    // Appending onto an HTML doc has no meaning — its entry is a document with
+    // a head and a body, not a stream of prose another chunk can follow.
+    if mode == TextPublishMode::Append {
+        if let Some(old) = &existing {
+            if old.kind != "markdown" {
+                return Err(format!(
+                    "cannot append to '{slug}' — it is a {} doc, not markdown",
+                    old.kind
+                ));
+            }
+        }
+    }
+
+    // Keep the entry filename stable across a doc's versions, so `fleet wiki
+    // cat --file` and anything else that learned the name keeps resolving.
+    let entry = match &existing {
+        Some(old) if old.kind == "markdown" => old.entry.clone(),
+        _ => format!("{}.md", slug_basename(&slug)),
     };
 
+    let body = match (mode, &existing) {
+        (TextPublishMode::Append, Some(old)) => {
+            let prev = get_file_in(root, &slug, &old.current_version, &old.entry)?;
+            let prev = String::from_utf8(prev.bytes)
+                .map_err(|_| format!("'{slug}' is not valid UTF-8 — cannot append"))?;
+            let prev = prev.trim_end();
+            if prev.is_empty() {
+                text.to_string()
+            } else {
+                format!("{prev}\n\n---\n\n{}", text.trim_start())
+            }
+        }
+        _ => text.to_string(),
+    };
+
+    let versions_dir = doc_dir.join("versions");
+    let now = now_ms();
+    let version_id = next_version_id(&versions_dir, now);
+    let version_dir = versions_dir.join(&version_id);
+    fs::create_dir_all(&version_dir).map_err(|e| format!("create wiki dirs: {e}"))?;
+    let entry_abs = version_dir.join(&entry);
+    fs::write(&entry_abs, body.as_bytes())
+        .map_err(|e| format!("write '{}': {e}", entry_abs.display()))?;
+
+    let title = match title {
+        Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+        _ => extract_title(&entry_abs, "markdown")
+            .or_else(|| existing.as_ref().map(|d| d.title.clone()))
+            .unwrap_or_else(|| slug_basename(&slug).to_string()),
+    };
+
+    let version = WikiVersion {
+        id: version_id,
+        published_ms: now,
+        size_bytes: body.len() as u64,
+        file_count: 1,
+        // There is no file on disk to point back at, so name the origin instead
+        // of inventing a path that would then read as provenance.
+        source_path: TEXT_SOURCE_PATH.to_string(),
+    };
+
+    let doc = assemble_doc(existing, &slug, title, "markdown", entry, workspace, now, version);
     write_doc_json(&doc_dir, &doc)?;
     Ok(doc)
 }
+
+/// `source_path` marker for versions published from text rather than a file.
+pub const TEXT_SOURCE_PATH: &str = "<text>";
 
 /// Root-level entry detection for a directory source: `index.html` wins,
 /// otherwise exactly one root-level `*.html`/`*.htm`; zero or several → error.
@@ -2021,5 +2150,168 @@ mod tests {
         let (d, sub) = (dir.display().to_string(), dir.join("sub").display().to_string());
         assert!(workspace_contains(&d, &d));
         assert!(!workspace_contains(&d, &sub));
+    }
+
+    // ── publish_text ─────────────────────────────────────────────────────────
+
+    /// Read the current version's entry, the way the UI's preview would.
+    fn current_text(root: &Path, slug: &str) -> String {
+        let doc = get_doc_in(root, slug).unwrap();
+        let f = get_file_in(root, slug, &doc.current_version, &doc.entry).unwrap();
+        String::from_utf8(f.bytes).unwrap()
+    }
+
+    #[test]
+    fn publish_text_creates_markdown_doc_from_a_string() {
+        let root = tmp();
+        let ws = tmp();
+        let doc = publish_text_in(
+            root.path(),
+            "notes/msg",
+            None,
+            "# Hello\n\nbody text\n",
+            ws.path(),
+            TextPublishMode::Replace,
+        )
+        .unwrap();
+
+        assert_eq!(doc.slug, "notes/msg");
+        assert_eq!(doc.kind, "markdown");
+        // Entry name comes from the slug's last segment, not from a file path.
+        assert_eq!(doc.entry, "msg.md");
+        // Title falls back to the first `# ` heading, like a file publish.
+        assert_eq!(doc.title, "Hello");
+        assert_eq!(doc.versions.len(), 1);
+        assert_eq!(doc.versions[0].source_path, TEXT_SOURCE_PATH);
+        assert_eq!(current_text(root.path(), "notes/msg"), "# Hello\n\nbody text\n");
+        // Directory slugs stay flat on disk, same as a file publish.
+        assert!(root.path().join("notes%2Fmsg").join("doc.json").is_file());
+    }
+
+    #[test]
+    fn publish_text_replace_supersedes_the_body() {
+        let root = tmp();
+        let ws = tmp();
+        let m = TextPublishMode::Replace;
+        publish_text_in(root.path(), "note", Some("Note"), "first", ws.path(), m).unwrap();
+        let doc = publish_text_in(root.path(), "note", Some("Note"), "second", ws.path(), m).unwrap();
+
+        assert_eq!(doc.versions.len(), 2, "re-publish keeps history");
+        assert_eq!(current_text(root.path(), "note"), "second");
+    }
+
+    #[test]
+    fn publish_text_append_concatenates_onto_the_current_version() {
+        let root = tmp();
+        let ws = tmp();
+        publish_text_in(
+            root.path(),
+            "note",
+            Some("Note"),
+            "first entry\n",
+            ws.path(),
+            TextPublishMode::Replace,
+        )
+        .unwrap();
+        let doc = publish_text_in(
+            root.path(),
+            "note",
+            Some("Note"),
+            "second entry\n",
+            ws.path(),
+            TextPublishMode::Append,
+        )
+        .unwrap();
+
+        // A running note: one doc, two versions, the newest holding both entries
+        // separated by a rule.
+        assert_eq!(doc.versions.len(), 2);
+        assert_eq!(
+            current_text(root.path(), "note"),
+            "first entry\n\n---\n\nsecond entry\n"
+        );
+        // The older version is untouched — history still shows entry one alone.
+        let first = &doc.versions[1];
+        let old = get_file_in(root.path(), "note", &first.id, &doc.entry).unwrap();
+        assert_eq!(String::from_utf8(old.bytes).unwrap(), "first entry\n");
+    }
+
+    #[test]
+    fn publish_text_append_onto_nothing_just_creates_the_doc() {
+        let root = tmp();
+        let ws = tmp();
+        let doc = publish_text_in(
+            root.path(),
+            "fresh",
+            None,
+            "only entry",
+            ws.path(),
+            TextPublishMode::Append,
+        )
+        .unwrap();
+        assert_eq!(doc.versions.len(), 1);
+        assert_eq!(current_text(root.path(), "fresh"), "only entry");
+    }
+
+    #[test]
+    fn publish_text_refuses_to_append_onto_an_html_doc() {
+        let root = tmp();
+        let ws = tmp();
+        let html = ws.path().join("report.html");
+        fs::write(&html, "<title>Report</title><p>hi</p>").unwrap();
+        publish_in(root.path(), &html, Some("report"), None, ws.path()).unwrap();
+
+        let err = publish_text_in(
+            root.path(),
+            "report",
+            None,
+            "appended prose",
+            ws.path(),
+            TextPublishMode::Append,
+        )
+        .unwrap_err();
+        assert!(err.contains("not markdown"), "unexpected error: {err}");
+        // The HTML doc is left exactly as it was — no stray version dir.
+        let doc = get_doc_in(root.path(), "report").unwrap();
+        assert_eq!(doc.kind, "html");
+        assert_eq!(doc.versions.len(), 1);
+    }
+
+    #[test]
+    fn publish_text_keeps_the_entry_name_when_a_file_publish_came_first() {
+        let root = tmp();
+        let ws = tmp();
+        // A doc first published from `overview.md` under slug `note` has an
+        // entry name the slug alone would not produce.
+        let md = ws.path().join("overview.md");
+        fs::write(&md, "# Overview\n\nfrom a file\n").unwrap();
+        publish_in(root.path(), &md, Some("note"), None, ws.path()).unwrap();
+
+        let doc = publish_text_in(
+            root.path(),
+            "note",
+            None,
+            "appended prose\n",
+            ws.path(),
+            TextPublishMode::Append,
+        )
+        .unwrap();
+        assert_eq!(doc.entry, "overview.md", "entry name must stay stable");
+        assert_eq!(
+            current_text(root.path(), "note"),
+            "# Overview\n\nfrom a file\n\n---\n\nappended prose\n"
+        );
+        // Title had no explicit value and the body still leads with the same
+        // heading, so it is re-derived rather than lost.
+        assert_eq!(doc.title, "Overview");
+    }
+
+    #[test]
+    fn publish_text_rejects_an_unusable_slug() {
+        let root = tmp();
+        let ws = tmp();
+        let err = publish_text_in(root.path(), "汉字", None, "x", ws.path(), TextPublishMode::Replace)
+            .unwrap_err();
+        assert!(err.contains("cannot derive a slug"), "unexpected error: {err}");
     }
 }
