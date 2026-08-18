@@ -5,6 +5,27 @@ import react from "@vitejs/plugin-react";
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+// ── Live-probe proxy (browser harness only) ─────────────────────────────────
+// `?mock&live` makes the app's data commands fetch `/__live/*` instead of
+// answering from fixtures. This forwards those to a real `fleet serve` and
+// adds the bearer token, so the page stays same-origin (the probe emits no
+// CORS headers) and never sees the token. Dev-server only — `vite build`
+// ignores `server.proxy`, so nothing ships.
+// @ts-expect-error process is a nodejs global
+const liveProbe = process.env.FLEET_LIVE_PROBE;
+// @ts-expect-error process is a nodejs global
+const liveToken = process.env.FLEET_LIVE_TOKEN ?? "";
+const liveProxy = liveProbe
+  ? {
+      "/__live": {
+        target: liveProbe,
+        changeOrigin: true,
+        rewrite: (p: string) => p.replace(/^\/__live/, ""),
+        headers: { Authorization: `Bearer ${liveToken}` },
+      },
+    }
+  : undefined;
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
@@ -30,6 +51,7 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    proxy: liveProxy,
     hmr: host
       ? {
           protocol: "ws",

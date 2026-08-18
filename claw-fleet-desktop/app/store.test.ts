@@ -257,3 +257,89 @@ describe("gallery 默认会话视图", () => {
     expect(getItem("viewMode")).toBe("list");
   });
 });
+
+/**
+ * 「对话」Tab 永远卡在「加载中…」。
+ *
+ * 受控复现(2026-08-17,P1 harness + `kill -STOP` 掉 dsh web):后端一旦不
+ * 响应,`get_messages_tail` 就永远不 settle,而详情页对这次取数**没有任何
+ * 期限** —— 标题 / tok / 四个 Tab 照常渲染,只有对话区一直是「加载中…」,
+ * 80s 不动,单条 /messages 120s 未返回。老板看到的正是这一幕。
+ *
+ * 契约:超过期限还没拿到 transcript 就必须停下转圈、把状态摊开(stalled),
+ * 让 UI 能给出解释和重试;迟到的结果照常渲染,不能因为标了 stalled 就丢掉。
+ */
+describe("详情取数期限", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useRealTimers();
+  });
+
+  const session = {
+    id: "session-dsh-1",
+    jsonlPath: "dsh://session-dsh-1",
+    entrypoint: null,
+    isSubagent: false,
+    fleetSpawned: true,
+  } as unknown as SessionInfo;
+
+  it("后端永不返回时,到期停止转圈并标记 stalled", async () => {
+    vi.useFakeTimers();
+    const { invoke } = await import("@tauri-apps/api/core");
+    (invoke as unknown as { mockImplementation: (f: unknown) => void }).mockImplementation(
+      (cmd: string) =>
+        cmd === "get_messages_tail" ? new Promise(() => {}) : Promise.resolve(undefined),
+    );
+
+    const { useDetailStore, TAIL_LOAD_DEADLINE_MS } = await import("./store");
+    void useDetailStore.getState().open(session);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useDetailStore.getState().isLoading).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(TAIL_LOAD_DEADLINE_MS + 100);
+
+    expect(useDetailStore.getState().isLoading).toBe(false);
+    expect(useDetailStore.getState().loadStalled).toBe(true);
+  });
+
+  it("迟到的 transcript 仍会渲染并清掉 stalled", async () => {
+    vi.useFakeTimers();
+    let land: (v: unknown) => void = () => {};
+    const { invoke } = await import("@tauri-apps/api/core");
+    (invoke as unknown as { mockImplementation: (f: unknown) => void }).mockImplementation(
+      (cmd: string) =>
+        cmd === "get_messages_tail"
+          ? new Promise((res) => {
+              land = res;
+            })
+          : Promise.resolve(undefined),
+    );
+
+    const { useDetailStore, TAIL_LOAD_DEADLINE_MS } = await import("./store");
+    void useDetailStore.getState().open(session);
+    await vi.advanceTimersByTimeAsync(TAIL_LOAD_DEADLINE_MS + 100);
+    expect(useDetailStore.getState().loadStalled).toBe(true);
+
+    land([{ type: "user" }]);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(useDetailStore.getState().loadStalled).toBe(false);
+    expect(useDetailStore.getState().messages).toHaveLength(1);
+  });
+
+  it("取数直接失败时也摊开状态,而不是留一片静默的空白", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    (invoke as unknown as { mockImplementation: (f: unknown) => void }).mockImplementation(
+      (cmd: string) =>
+        cmd === "get_messages_tail"
+          ? Promise.reject(new Error("No agent source can handle path"))
+          : Promise.resolve(undefined),
+    );
+
+    const { useDetailStore } = await import("./store");
+    await useDetailStore.getState().open(session);
+
+    expect(useDetailStore.getState().isLoading).toBe(false);
+    expect(useDetailStore.getState().loadStalled).toBe(true);
+  });
+});
