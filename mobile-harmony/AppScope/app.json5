@@ -1,7 +1,7 @@
 {
   "app": {
     "bundleName": "com.atomicservice.6917610791622358675",
-    "bundleType": "atomicService",
+    "bundleType": "app",
     "vendor": "example",
     "versionCode": 1000000,
     "versionName": "1.0.0",
