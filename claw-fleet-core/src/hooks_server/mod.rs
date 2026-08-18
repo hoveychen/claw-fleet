@@ -140,6 +140,22 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         eprintln!("[fleet serve] reaped {reaped} orphaned dsh web process(es)");
     }
 
+    // A `serve` started as a background job (`fleet serve &` from a script, or
+    // under `nohup`) inherits SIGINT — and with nohup SIGHUP — as SIG_IGN, and
+    // ctrlc refuses to install a handler when any of the three signals it manages
+    // is not SIG_DFL. That failure is silent apart from the log line below, and it
+    // takes the whole exit path with it: the injector releases never run and the
+    // `dsh web` this process started is left reparented to init, still holding its
+    // port. Twelve such orphans had piled up on one machine. Fleet owns these
+    // signals in its own process, so an inherited ignore is cleared first.
+    let cleared = crate::process_util::clear_inherited_signal_ignores();
+    if !cleared.is_empty() {
+        eprintln!(
+            "[fleet serve] cleared inherited SIG_IGN for {} so the exit path can install",
+            cleared.join(", ")
+        );
+    }
+
     if let Err(e) = ctrlc::try_set_handler(move || {
         let _ = crate::permissions_injector::release(serve_pid);
         let _ = crate::mcp_injector::release(serve_pid);
