@@ -6,6 +6,7 @@ import { setKeepScreenOn } from '../common/WakeLock';
 import { shareFile } from '../common/SystemShare';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { parsePairingUrl, RelayPairing as ParsedPairing } from '../common/RelayStore';
+import { themeTokens } from '../common/Theme';
 
 /// 鸿蒙端的 WebView 外壳：把打包进 rawfile 的 mobile-web 跑起来，原生只做
 /// 三件 web 做不到的事（配对密钥注入、安全区、后续的推送）。
@@ -53,6 +54,9 @@ struct WebShell {
   /// web 侧一行都不用改。
   @StorageProp('safeTop') safeTop: number = 0;
   @StorageProp('safeBottom') safeBottom: number = 0;
+  /// Web 组件默认白底。页面还没绘出来的那一瞬、以及任何页面没铺满的边角，
+  /// 透出来的就是这层白 —— 深色主题下格外扎眼。跟随 resolvedTheme 兜一层底色。
+  @StorageProp('resolvedTheme') resolvedTheme: string = 'dark';
   /// EntryAbility 收到系统分享后把内容放这里；nonce 变化即代表「又分享了一次」，
   /// 哪怕文本和上次一模一样。@Watch 是为了让 app 已经开着时的分享也能送达。
   @StorageProp('sharedText') sharedText: string = '';
@@ -247,6 +251,7 @@ struct WebShell {
         .padding(32)
       } else if (this.src.length > 0) {
         Web({ src: this.src, controller: this.controller })
+          .backgroundColor(themeTokens(this.resolvedTheme).bg)
           .javaScriptAccess(true)
           .domStorageAccess(true)
           .fileAccess(true)
