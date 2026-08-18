@@ -510,6 +510,23 @@ fn close_preview_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Hand the calling webview to the OS print pipeline — how the reader's
+/// "导出 PDF" works: macOS opens the system print panel (whose `PDF ▾ → Save as
+/// PDF` is the actual export), Windows opens the WebView2 print dialog.
+///
+/// There is deliberately no JS route. `window.print()` is a no-op inside
+/// WKWebView, so a frontend-only implementation would silently do nothing on
+/// macOS; wry only reaches `NSPrintOperation` from the Rust side. Sync on
+/// purpose — Tauri runs sync commands on the main thread, which is where
+/// AppKit's print operation must be created.
+///
+/// What lands on the page is whatever the print stylesheet leaves visible, so
+/// the reader's `@media print` rules decide the artifact, not this command.
+#[tauri::command]
+fn print_webview(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|e| e.to_string())
+}
+
 // ── Decision float window (shown when main is minimized) ─────────────────────
 
 const DECISION_FLOAT_LABEL: &str = "decision-float";
@@ -1946,6 +1963,8 @@ pub fn run() {
             delete_wiki_folder,
             search_wiki_docs,
             export_wiki_doc,
+            publish_wiki_text,
+            print_webview,
             list_browse_paths,
             add_browse_path,
             remove_browse_path,
