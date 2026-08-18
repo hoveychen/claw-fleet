@@ -67,7 +67,7 @@ import styles from "./HistoryView.module.css";
 
 /** A session spawned but not yet discovered by the scanner. We poll the session
  *  list for the matching `SessionInfo` and swap the detail column over to it. */
-interface PendingSpawn extends NewSessionCreated {
+export interface PendingSpawn extends NewSessionCreated {
   /** Ad-hoc session ids that already existed when the spawn returned. The new
    *  session is the one whose id is NOT in this set — pid can't identify it
    *  (see `matchSpawnedSession`). */
@@ -110,7 +110,7 @@ export function sessionPaneStyle(visible: boolean): CSSProperties {
  * pid. We still deliberately do NOT match on pid — see `resolve_pid` in
  * session.rs: a cwd-shared pid can tag several sessions at once.
  */
-function matchSpawnedSession(
+export function matchSpawnedSession(
   adhocSessions: SessionInfo[],
   pending: PendingSpawn,
 ): SessionInfo | undefined {
