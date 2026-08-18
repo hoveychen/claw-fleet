@@ -131,32 +131,50 @@ impl DshSource {
     /// The client is rebuilt per call on purpose: a restart lands on a fresh
     /// OS-assigned port, so a memoized client would silently point at a dead
     /// listener.
+    ///
+    /// **The lock is released before `f` runs.** It guards the `Option<DshServer>`
+    /// — the start / restart / port handoff — and nothing about an in-flight RPC
+    /// needs it: a [`DshClient`] is just a port plus an HTTP client, and `dsh web`
+    /// answers concurrent requests. Holding it across the call instead made every
+    /// dsh RPC in the process serial, so the `session.history` behind the 对话 tab
+    /// queued behind the 3s roster poll — measured at 4.15s for a call that costs
+    /// 50ms, and worse than one poll's worth because `std`'s mutex lets a later
+    /// poller barge past a waiting reader (`tests/dsh_read_starvation.rs`).
+    ///
+    /// The narrow race this opens: another thread may restart the server while
+    /// `f` is on the wire, and that call then fails against a dead port. That is
+    /// the same outcome the call had before — the restart happens precisely
+    /// because the server died under it — and the next call rebuilds its client
+    /// off the new port.
     fn with_client<T>(&self, f: impl FnOnce(&DshClient) -> Result<T, String>) -> Result<T, String> {
-        let mut guard = lock(server_slot());
+        let client = {
+            let mut guard = lock(server_slot());
 
-        match guard.as_mut() {
-            Some(server) => server.ensure_alive()?,
-            None => {
-                let binary = crate::dsh_server::discover().ok_or_else(|| {
-                    "dsh is not installed (npm i -g @deepseek-ai/dsh)".to_string()
-                })?;
-                // Before adding one, take away any this machine is still
-                // carrying from a Fleet that died without stopping its own.
-                // Servers whose owner is alive are left alone, so this never
-                // touches a concurrently running Fleet's instance.
-                crate::dsh_server::reap_orphans();
-                // Root the server at the harness home rather than a project:
-                // observation spans every workspace, and a server rooted in a
-                // directory that later disappears would fail to restart.
-                let cwd = crate::session::real_home_dir()
-                    .ok_or_else(|| "cannot determine home dir".to_string())?;
-                *guard = Some(DshServer::start(&binary, &cwd)?);
+            match guard.as_mut() {
+                Some(server) => server.ensure_alive()?,
+                None => {
+                    let binary = crate::dsh_server::discover().ok_or_else(|| {
+                        "dsh is not installed (npm i -g @deepseek-ai/dsh)".to_string()
+                    })?;
+                    // Before adding one, take away any this machine is still
+                    // carrying from a Fleet that died without stopping its own.
+                    // Servers whose owner is alive are left alone, so this never
+                    // touches a concurrently running Fleet's instance.
+                    crate::dsh_server::reap_orphans();
+                    // Root the server at the harness home rather than a project:
+                    // observation spans every workspace, and a server rooted in a
+                    // directory that later disappears would fail to restart.
+                    let cwd = crate::session::real_home_dir()
+                        .ok_or_else(|| "cannot determine home dir".to_string())?;
+                    *guard = Some(DshServer::start(&binary, &cwd)?);
+                }
             }
-        }
 
-        let server = guard.as_ref().expect("server started above");
-        Self::ensure_watcher(server.port());
-        let client = server.client()?;
+            let server = guard.as_ref().expect("server started above");
+            Self::ensure_watcher(server.port());
+            server.client()?
+        };
+
         f(&client)
     }
 
