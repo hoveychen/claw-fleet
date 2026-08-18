@@ -111,6 +111,7 @@ pub mod session;
 pub mod session_launch;
 pub mod session_mark;
 pub mod session_read;
+pub mod session_snapshot;
 pub mod session_title;
 pub mod session_todos;
 pub mod skill_history;
