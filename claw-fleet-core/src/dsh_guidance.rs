@@ -825,20 +825,30 @@ pub fn reconcile_dsh_from_claude_state(user_title: &str, locale: &str) -> Result
         return Ok(());
     }
     let set = dsh_guidance_set(dsh_present);
-    reconcile_dsh_agents_md(set, user_title, locale)?;
 
-    // Fleet's cordis plugin rides the same switch as the PRD block, because the
-    // plugin is what delivers the PRD block's dynamic half (the active-plans
-    // reminder). Reported rather than swallowed: with the plugin uninstalled
-    // there is no fallback channel, so a silent failure would mean a dsh session
-    // quietly running without Fleet's context.
+    // AGENTS.md is now a migration-cleanup target, not a delivery channel: every
+    // Fleet block is stripped and the file is removed if nothing of the user's is
+    // left. Guidance reaches the session through the plugin instead, because dsh's
+    // instruction loader drops the *user-global* file first under budget pressure
+    // — in a repo with large project instructions, Fleet's rules were the first
+    // thing to silently disappear.
+    reconcile_dsh_agents_md(DshGuidanceSet::default(), user_title, locale)?;
+
+    // Fleet's cordis plugin rides the PRD switch, since the plugin is what
+    // delivers both halves of PRD injection now. Reported rather than swallowed:
+    // there is no fallback channel any more, so a silent failure here would mean
+    // dsh sessions quietly running without any Fleet context at all.
     crate::dsh_plugin::reconcile_dsh_patch(set.prd, user_title, locale)
 }
 
-/// Whether the dsh PRD-discipline block is present in `$DSH_HOME/AGENTS.md`.
+/// Whether the dsh PRD-discipline block is still present in
+/// `$DSH_HOME/AGENTS.md`.
 ///
-/// Also the gate on the dynamic half of PRD injection: [`crate::dsh_source`]
-/// prepends the active-plans reminder only when this is true.
+/// Reads a *legacy* carrier: guidance now reaches dsh through
+/// [`crate::dsh_plugin`], and [`reconcile_dsh_from_claude_state`] strips these
+/// blocks. So this reports "a pre-plugin Fleet install has not been reconciled
+/// yet", not "the concept is on" — for the latter, read the Claude-side toggle
+/// through [`dsh_guidance_set`].
 pub fn is_dsh_prd_installed() -> bool {
     agents_md_contains(PRD_BEGIN)
 }
