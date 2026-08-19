@@ -11,6 +11,7 @@ import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useSourcesConfig } from "../useSourcesConfig";
+import { toolChoicesForSources } from "../agentSource";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
@@ -56,12 +57,6 @@ const CODEX_EFFORT_CHOICES: Array<[string, string]> = [
   ["low", "low"],
   ["medium", "medium"],
   ["high", "high"],
-];
-
-// The agent tools Fleet can launch a new session with (mirrors AGENT_TOOL_CHOICES).
-const AGENT_TOOL_CHOICES: Array<[string, string]> = [
-  ["claude", "Claude"],
-  ["codex", "Codex"],
 ];
 
 const PERMISSION_LABEL: Record<string, string> = {
@@ -493,15 +488,7 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
   // would only fail at spawn. `null` = config not loaded yet → Claude-only so we
   // never flash Codex then hide it.
   const sources = useSourcesConfig(client);
-  const toolChoices = useMemo(() => {
-    const active = new Set(
-      (sources ?? [])
-        .filter((s) => s.enabled && s.available)
-        .map((s) => (s.name === "claude-code" ? "claude" : s.name)),
-    );
-    const filtered = AGENT_TOOL_CHOICES.filter(([v]) => active.has(v));
-    return filtered.length ? filtered : [AGENT_TOOL_CHOICES[0]];
-  }, [sources]);
+  const toolChoices = useMemo(() => toolChoicesForSources(sources), [sources]);
   // A stale draft (or a since-disabled source) may leave `tool` pointing at a
   // tool that's no longer offered — snap it back to the first available one.
   useEffect(() => {
