@@ -67,6 +67,7 @@ pub mod relay_crypto;
 pub mod model_cost;
 pub mod model_guidance;
 pub mod launch_spec;
+pub mod off_runtime;
 pub mod parked;
 pub mod pending_message;
 pub mod pattern_update;
