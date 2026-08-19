@@ -25,6 +25,8 @@
  * discrimination rules can be tested without a browser.
  */
 
+import { reviveScrollLayer } from "./scrollLayerRevive";
+
 /** How the viewport responded to one scroll gesture. */
 export type FreezeVerdict =
   /** Moved as asked. Nothing to report. */
@@ -122,6 +124,7 @@ export function installScrollFreezeProbe(
   ctx: ProbeContext,
   sink: DiagSink,
   now: () => number = () => Date.now(),
+  revive: (el: HTMLElement) => boolean = reviveScrollLayer,
 ): () => void {
   let gestureTimer: number | null = null;
   let startTop: number | null = null;
@@ -153,6 +156,29 @@ export function installScrollFreezeProbe(
     const verdict = classifyScrollAttempt(attempt);
     if (!isFaultVerdict(verdict)) return;
 
+    // A frozen container is the one fault this can actually repair: the scroll
+    // layer is stale, so rebuild it and finish the gesture the reader made —
+    // reviving alone would leave them looking at the same unmoved viewport,
+    // having to scroll again. The other verdicts are our own bugs, and
+    // rebuilding the layer would just paper over them.
+    //
+    // Repair on every frozen gesture, not just the ones that get logged: the
+    // log is throttled so a stuck pane can't flood it, but each gesture the
+    // reader makes deserves an attempt.
+    let repair = "";
+    if (verdict === "frozen") {
+      const before = el.scrollTop;
+      if (revive(el)) {
+        el.scrollTop = Math.max(0, Math.min(overflow, beganAt + gestureIntent));
+        const landed = el.scrollTop;
+        // Says in the log whether the repair actually repaired anything,
+        // rather than leaving that claim to rest on anyone's say-so.
+        repair = ` revive=${landed !== before ? "recovered" : "failed"} landed=${Math.round(landed)}`;
+      } else {
+        repair = " revive=skipped";
+      }
+    }
+
     const at = now();
     if (at - lastReportAt < REPORT_COOLDOWN_MS) return;
     lastReportAt = at;
@@ -179,7 +205,7 @@ export function installScrollFreezeProbe(
         `rectBottom=${Math.round(rect.bottom)}`,
         `winHeight=${Math.round(window.innerHeight)}`,
         `pins=${ctx.pinCount()}`,
-      ].join(" "),
+      ].join(" ") + repair,
     );
   };
 
