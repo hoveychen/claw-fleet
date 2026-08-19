@@ -1805,6 +1805,8 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "chat_workspace" => serve_chat_workspace(params),
         "sources_config" => serve_sources_config(params),
         "codex_profiles" => serve_codex_profiles(params),
+        "dsh_models" => serve_dsh_models(params),
+        "dsh_token_breakdown" => serve_dsh_token_breakdown(params),
         "browse_dir" => serve_browse_dir(params),
         // ── Write methods ────────────────────────────────────────────────
         "spawn_session" => serve_spawn_session(params),
@@ -2334,6 +2336,29 @@ fn serve_sources_config(_params: &Value) -> Result<Value, String> {
 fn serve_codex_profiles(_params: &Value) -> Result<Value, String> {
     let profiles = crate::codex_launch::list_codex_profiles();
     serde_json::to_value(profiles).map_err(|e| e.to_string())
+}
+
+/// dsh's model catalogue for the phone's model/effort menus — the dsh parallel
+/// of `codex_profiles`. dsh is the one source whose model list Fleet does not
+/// curate: it comes from whatever providers `~/.dsh/settings.yaml` configures on
+/// the *host*, so the phone has no way to enumerate it and was offering Claude's
+/// models for dsh sessions instead. Session-independent, hence no params.
+///
+/// Blocking is fine here: every handler runs inside `spawn_blocking` (see
+/// `ws_connect_once`), and the first call may have to start `dsh web` — the same
+/// wait the desktop's `dsh_models` command takes.
+fn serve_dsh_models(_params: &Value) -> Result<Value, String> {
+    let catalog = crate::dsh_source::dsh_models()?;
+    serde_json::to_value(catalog).map_err(|e| e.to_string())
+}
+
+/// Token usage for one dsh session. Not reachable through `token_breakdown`:
+/// that one parses a Claude JSONL off disk, and a dsh session has no transcript
+/// file at all — its id is a `dsh://<session-id>` URI answered over RPC.
+fn serve_dsh_token_breakdown(params: &Value) -> Result<Value, String> {
+    let uri = params.get("uri").and_then(Value::as_str).ok_or("missing uri")?;
+    let breakdown = crate::dsh_source::dsh_token_breakdown(uri)?;
+    serde_json::to_value(breakdown).map_err(|e| e.to_string())
 }
 
 // Directory picker for the new-session composer. Deliberately NOT gated
@@ -5024,6 +5049,27 @@ mod tests {
             .expect("codex_usage_history dispatches");
         let rows = v.as_array().expect("an array");
         assert!(rows.is_empty(), "no codex points fall in [0, 1] ms");
+    }
+
+    /// The two dsh reads the phone cannot do for itself must be *dispatchable*.
+    /// Whether they succeed depends on a `dsh web` this machine may not be able
+    /// to start, so the assertion is only that the method is routed at all —
+    /// "unknown method" is the regression this pins (the phone's dsh sessions
+    /// silently fell back to Claude's model list and a jsonl token panel before
+    /// these existed). The catalogue/breakdown parsing is tested in `dsh_source`.
+    #[test]
+    fn dsh_reads_are_dispatched_even_when_dsh_is_unreachable() {
+        for (method, params) in [
+            ("dsh_models", json!({})),
+            ("dsh_token_breakdown", json!({ "uri": "dsh://nonexistent" })),
+        ] {
+            if let Err(e) = serve_request(method, &params) {
+                assert!(
+                    !e.contains("unknown method"),
+                    "{method} must be routed, got: {e}"
+                );
+            }
+        }
     }
 
     /// The real `account_usage` path, driven the way the ws loop drives it:
