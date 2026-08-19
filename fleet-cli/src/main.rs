@@ -175,6 +175,12 @@ enum Commands {
         /// The dsh session id, used to mark which plan this session owns.
         #[arg(long)]
         session: Option<String>,
+        /// How the assistant addresses the user (interpolated into the guidance).
+        #[arg(long, default_value = "Boss")]
+        title: String,
+        /// Guidance locale: `en` or `zh`.
+        #[arg(long, default_value = "en")]
+        locale: String,
     },
     /// [internal] Wakeup guard — denies ScheduleWakeup/CronCreate in Fleet sessions
     #[command(hide = true)]
@@ -907,7 +913,12 @@ fn main() {
         Commands::Mcp => commands::guard::cmd_mcp(),
         Commands::PlanApproval => commands::guard::cmd_plan_approval(),
         Commands::PrdContext => commands::prd::cmd_prd_context(),
-        Commands::DshContext { cwd, session } => commands::dsh::cmd_dsh_context(cwd, session),
+        Commands::DshContext {
+            cwd,
+            session,
+            title,
+            locale,
+        } => commands::dsh::cmd_dsh_context(cwd, session, &title, &locale),
         Commands::WakeupGuard => commands::guard::cmd_wakeup_guard(),
         // Best-effort like the unix `cat >>` hook it replaces: a failed append
         // must not surface as a hook error to Claude Code.
