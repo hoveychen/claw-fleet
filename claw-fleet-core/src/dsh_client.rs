@@ -171,7 +171,8 @@ pub struct DshClient {
     http: reqwest::blocking::Client,
 }
 
-/// Run `f` on a fresh plain thread and hand its result back.
+/// Run `f` on a fresh plain thread and hand its result back; `Err` when the
+/// thread itself panicked.
 ///
 /// reqwest's blocking carrier refuses to be built or driven from inside a
 /// tokio runtime (`wait::enter` → "Cannot drop a runtime in a context where
@@ -181,12 +182,16 @@ pub struct DshClient {
 /// which the UI shows as an eternal 「加载中…」. The hop is unconditional: a
 /// thread spawn is microseconds against an HTTP round-trip, and a context
 /// check would just be one more branch to get wrong.
-fn off_runtime<T: Send>(f: impl FnOnce() -> Result<T, DshRpcError> + Send) -> Result<T, DshRpcError> {
+///
+/// `pub(crate)`: every `reqwest::blocking` use reachable from a tauri
+/// `(async)` command must go through this — [`crate::dsh_cost`]'s pricing
+/// fetch is the other current caller.
+pub(crate) fn off_runtime<T: Send>(f: impl FnOnce() -> T + Send) -> Result<T, String> {
     std::thread::scope(|scope| {
         scope
             .spawn(f)
             .join()
-            .unwrap_or_else(|_| Err(DshRpcError::Transport("dsh http thread panicked".into())))
+            .map_err(|_| "blocking-http helper thread panicked".to_string())
     })
 }
 
@@ -202,7 +207,8 @@ impl DshClient {
                 .timeout(DEFAULT_TIMEOUT)
                 .build()
                 .map_err(|e| DshRpcError::Transport(format!("http client: {e}")))
-        })?;
+        })
+        .map_err(DshRpcError::Transport)??;
         Ok(Self {
             base: format!("http://127.0.0.1:{port}/api"),
             http,
@@ -233,7 +239,8 @@ impl DshClient {
                 .text()
                 .map_err(|e| DshRpcError::Transport(format!("{method} body: {e}")))?;
             Ok((status, text))
-        })?;
+        })
+        .map_err(DshRpcError::Transport)??;
 
         if !status.is_success() {
             return Err(DshRpcError::Transport(format!(
@@ -297,7 +304,8 @@ impl DshClient {
                 .text()
                 .map_err(|e| DshRpcError::Transport(format!("respond body: {e}")))?;
             Ok((status, text))
-        })?;
+        })
+        .map_err(DshRpcError::Transport)??;
 
         if !status.is_success() {
             return Err(DshRpcError::Transport(format!("respond: HTTP {status}")));
