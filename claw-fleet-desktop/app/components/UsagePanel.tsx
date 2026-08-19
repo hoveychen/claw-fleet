@@ -281,6 +281,13 @@ function CodexUsageSection() {
       <div className={styles.tool_header}>
         <CodexIcon /> Codex
         {data?.planType && <span className={styles.plan_badge}>{data.planType}</span>}
+        {data?.usageSource && (
+          <span className={styles.plan_badge} title={t("account.usage_source")}>
+            {data.usageSource === "foxy-switcher"
+              ? t("account.usage_source_foxy")
+              : t("account.usage_source_codex_app_server")}
+          </span>
+        )}
       </div>
       {loading && !data && <p className={styles.dim}>{t("account.loading")}</p>}
       {error && (

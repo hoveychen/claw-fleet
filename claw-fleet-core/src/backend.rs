@@ -158,6 +158,12 @@ pub struct SourceUsageSummary {
     pub plan: Option<String>,
     /// Rate-limit windows, each with a utilization bar.
     pub bars: Vec<UsageBar>,
+    /// Where the numbers came from — `"foxy-switcher"` when read from the local
+    /// foxy daemon, else the provider's own path (`"anthropic"` /
+    /// `"codex-app-server"`). `None` when the source reported nothing.
+    /// `#[serde(default)]` keeps older serialized payloads deserializable.
+    #[serde(default)]
+    pub usage_source: Option<String>,
 }
 
 impl SourceUsageSummary {
@@ -189,6 +195,11 @@ impl SourceUsageSummary {
             source: "claude".into(),
             plan: if info.plan.is_empty() { None } else { Some(info.plan.clone()) },
             bars,
+            usage_source: if info.usage_source.is_empty() {
+                None
+            } else {
+                Some(info.usage_source.clone())
+            },
         }
     }
 
@@ -224,6 +235,7 @@ impl SourceUsageSummary {
             source: "codex".into(),
             plan,
             bars,
+            usage_source: val["usageSource"].as_str().map(|s| s.to_string()),
         }
     }
 }

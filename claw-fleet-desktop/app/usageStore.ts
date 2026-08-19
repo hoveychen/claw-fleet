@@ -51,6 +51,11 @@ export interface CodexUsageItem {
   primary?: CodexRateLimitWindow | null;
   secondary?: CodexRateLimitWindow | null;
   credits?: { hasCredits: boolean; unlimited: boolean; balance?: string | null } | null;
+  /** Where the numbers came from: "foxy-switcher" (read from the local foxy
+   *  daemon) or "codex-app-server" (queried from codex itself). The codex
+   *  parallel of AccountInfoData.usage_source. Optional so payloads from an
+   *  older backend still typecheck. */
+  usageSource?: string | null;
 }
 
 export type UsageSourceKey = "claude" | "codex";
