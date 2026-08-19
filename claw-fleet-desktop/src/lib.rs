@@ -372,6 +372,16 @@ impl Backend for NullBackend {
     fn export_wiki_doc(&self, _: &str, _: &str) -> Result<claw_fleet_core::wiki::WikiExport, String> {
         Err("backend not ready".into())
     }
+    fn publish_wiki_text(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: claw_fleet_core::wiki::TextPublishMode,
+    ) -> Result<claw_fleet_core::wiki::WikiDoc, String> {
+        Err("backend not ready".into())
+    }
     fn get_task_plans(
         &self,
         _: &str,

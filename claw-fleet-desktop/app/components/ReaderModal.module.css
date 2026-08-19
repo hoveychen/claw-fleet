@@ -50,7 +50,8 @@
   flex-shrink: 0;
 }
 
-.close {
+.close,
+.action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -66,9 +67,26 @@
   cursor: pointer;
 }
 
-.close:hover {
+.close:hover,
+.action:hover {
   color: var(--color-text);
   border-color: var(--color-accent);
+}
+
+.action_failed {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+
+/* Publish confirmation. Lives in the header rather than as a floating toast so
+   it cannot cover the prose the reader is here to read. */
+.toast {
+  max-width: 320px;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--color-success);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .body {
@@ -114,4 +132,89 @@
 
 .paper .body :global(table) {
   font-size: 14px;
+}
+
+/* ── Print / export-PDF ─────────────────────────────────────────────────────
+   `print_webview` hands the whole webview to the OS print pipeline, so what
+   lands on the page is decided here: the reader becomes the document and
+   everything else is removed. The companion rules that hide the app behind the
+   overlay live in App.css, because they select the portal root rather than any
+   class of this module.
+
+   Colours are hardcoded, not tokens, on purpose — paper is white regardless of
+   the app theme, and the dark theme's near-white body text would print as
+   invisible on it. This is the one place where theming must not reach. */
+@media print {
+  .paper {
+    width: auto;
+    max-height: none;
+    overflow: visible;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: #fff;
+  }
+
+  /* Keep the timestamp — it says which message this page is — and drop the
+     controls, which mean nothing on paper. */
+  .header {
+    padding: 0 0 8px;
+    border-bottom: 1px solid #ddd;
+    background: none;
+  }
+
+  .title {
+    color: #555;
+    white-space: normal;
+  }
+
+  .actions {
+    display: none;
+  }
+
+  .body {
+    overflow: visible;
+    padding: 20px 0 0;
+  }
+
+  /* The prose inherits theme colours from TextBlock; force it legible on white
+     and let the print engine drop the surface fills it would otherwise ink. */
+  .paper .body,
+  .paper .body :global(*) {
+    color: #000 !important;
+    background: transparent !important;
+  }
+
+  /* Code still needs to read as code, so it keeps a light surface and a rule. */
+  .paper .body :global(pre),
+  .paper .body :global(code) {
+    background: #f4f4f4 !important;
+    border-color: #ddd !important;
+  }
+
+  .paper .body :global(pre) {
+    /* A snippet split across a page break is unreadable; keep it whole when it
+       fits on one page. */
+    break-inside: avoid;
+  }
+
+  .paper .body :global(a) {
+    color: #000 !important;
+    text-decoration: underline;
+  }
+
+  /* Diagrams keep their dark canvas instead of being forced onto white.
+     Measured: a mermaid sequence diagram printed with near-invisible arrow
+     labels, because SVG paints text with `fill`, which the `color: #000` rule
+     above cannot reach — the labels stayed at the dark theme's light grey on
+     white paper. Repainting every `fill` would destroy whatever the diagram
+     encodes in colour, so the figure travels as its own dark plate, which keeps
+     its built-in contrast. `print-color-adjust: exact` is required: engines drop
+     background fills when printing by default, which is what left the labels
+     stranded on white in the first place. */
+  .paper .body :global(svg) {
+    background: #16181a !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 }

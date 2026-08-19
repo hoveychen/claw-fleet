@@ -180,6 +180,7 @@ pub const WIKI_EXPORT: &str = "/wiki_export";
 pub const WIKI_FILE: &str = "/wiki_file";
 pub const WIKI_MOVE: &str = "/wiki_move";
 pub const WIKI_MOVE_FOLDER: &str = "/wiki_move_folder";
+pub const WIKI_PUBLISH_TEXT: &str = "/wiki_publish_text";
 pub const WIKI_SEARCH: &str = "/wiki_search";
 pub const WORKFLOW_TREES: &str = "/workflow_trees";
 

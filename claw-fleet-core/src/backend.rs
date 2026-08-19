@@ -564,6 +564,18 @@ pub trait Backend: Send + Sync {
     /// docs, a zip of the version dir for "htmlDir".
     fn export_wiki_doc(&self, slug: &str, version: &str)
         -> Result<crate::wiki::WikiExport, String>;
+    /// Publish markdown that has no file behind it — how the desktop reader
+    /// sends one message into the knowledge base. `title` empty derives it from
+    /// the body; `mode` `Append` folds the text onto the doc's current version
+    /// (a running note) instead of superseding it.
+    fn publish_wiki_text(
+        &self,
+        slug: &str,
+        title: &str,
+        text: &str,
+        workspace_path: &str,
+        mode: crate::wiki::TextPublishMode,
+    ) -> Result<crate::wiki::WikiDoc, String>;
 
     // ── Decision-card assets (fleet__ask images) ─────────────────────────────
     /// Raw bytes + mime of one file in a `fleet__ask` question's decision-asset

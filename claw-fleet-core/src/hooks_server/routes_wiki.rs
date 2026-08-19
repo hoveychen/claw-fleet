@@ -263,3 +263,57 @@ pub(crate) fn route_wiki_delete_folder(
                     }
                 }
             }
+
+/// Publish markdown carried in the request body. The desktop reader has the
+/// text, not a path, and on a remote workspace the file would be on the wrong
+/// host — so content travels over the wire and the server owns the write.
+pub(crate) fn route_wiki_publish_text(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let mut body_bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Req {
+        slug: String,
+        /// Empty derives the title from the body.
+        #[serde(default)]
+        title: String,
+        text: String,
+        /// Tags the doc with its origin; empty falls back to the server's cwd.
+        #[serde(default)]
+        workspace_path: String,
+        #[serde(default)]
+        mode: crate::wiki::TextPublishMode,
+    }
+    let published = serde_json::from_slice::<Req>(&body_bytes)
+        .map_err(|e| format!("bad /wiki_publish_text body: {e}"))
+        .and_then(|r| {
+            let workspace = if r.workspace_path.trim().is_empty() {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            } else {
+                std::path::PathBuf::from(&r.workspace_path)
+            };
+            let title = (!r.title.trim().is_empty()).then_some(r.title.as_str());
+            crate::wiki::publish_text(&r.slug, title, &r.text, &workspace, r.mode)
+        });
+    match published {
+        Ok(doc) => {
+            let body = serde_json::to_string(&doc).unwrap_or_default();
+            let _ = request
+                .respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
