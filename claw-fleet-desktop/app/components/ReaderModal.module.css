@@ -202,4 +202,19 @@
     color: #000 !important;
     text-decoration: underline;
   }
+
+  /* Diagrams keep their dark canvas instead of being forced onto white.
+     Measured: a mermaid sequence diagram printed with near-invisible arrow
+     labels, because SVG paints text with `fill`, which the `color: #000` rule
+     above cannot reach — the labels stayed at the dark theme's light grey on
+     white paper. Repainting every `fill` would destroy whatever the diagram
+     encodes in colour, so the figure travels as its own dark plate, which keeps
+     its built-in contrast. `print-color-adjust: exact` is required: engines drop
+     background fills when printing by default, which is what left the labels
+     stranded on white in the first place. */
+  .paper .body :global(svg) {
+    background: #16181a !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 }

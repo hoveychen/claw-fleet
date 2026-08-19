@@ -495,6 +495,16 @@ html.os-windows::-webkit-scrollbar-thumb:hover,
     background: #fff !important;
   }
 
+  /* The macOS solid-body rule above is `[data-platform="macos"] …` + !important,
+     which outranks a bare `html, body` even with !important — measured: the
+     printed page kept the dark theme's rgb(8, 9, 10). Re-state the override at
+     matching specificity, or the whole sheet inks a dark canvas. */
+  html[data-platform],
+  html[data-platform] body,
+  html[data-platform] #root {
+    background: #fff !important;
+  }
+
   body > *:not([data-reader-overlay]) {
     display: none !important;
   }
