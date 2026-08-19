@@ -268,6 +268,7 @@
     "usage_source": "数据来源",
     "usage_source_foxy": "Foxy Switcher",
     "usage_source_anthropic": "Anthropic API",
+    "usage_source_codex_app_server": "Codex app-server",
     "usage": "用量",
     "five_hour": "会话 (5小时)",
     "seven_day": "每周 (7天)",

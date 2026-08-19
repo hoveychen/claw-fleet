@@ -447,6 +447,9 @@ export interface SourceUsage {
   source: string;
   plan: string | null;
   bars: UsageBar[];
+  /** 数字的来源："foxy-switcher" 读本地守护进程，否则是各家自己的通道
+   *  （"anthropic" / "codex-app-server"）。旧后端不带此字段。 */
+  usageSource?: string | null;
 }
 
 /** `account_usage` 回包。Claude 拉取失败时只填 `claudeError`，其余照常渲染。 */
