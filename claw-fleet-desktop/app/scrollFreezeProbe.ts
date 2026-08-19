@@ -112,10 +112,15 @@ const GESTURE_IDLE_MS = 140;
 const REPORT_COOLDOWN_MS = 30_000;
 
 /**
- * Watch `el` for scroll gestures that don't land, reporting through `sink`.
+ * Watch `el` for scroll gestures that don't land, repairing and reporting them.
  *
- * Listeners are passive: the probe must never change how scrolling behaves,
- * or it becomes a suspect in the fault it is meant to diagnose.
+ * The listeners are registered passive — the probe never cancels a wheel event,
+ * so a healthy pane scrolls exactly as it would without this installed. What it
+ * does do, once a gesture is judged frozen, is drive `scrollTop` itself for the
+ * rest of that gesture. That judgement is made **one frame after the first
+ * wheel event**, not when the gesture ends: repairing from the gesture-end
+ * timer left a frozen pane visually dead for the entire swipe and then jumped
+ * it into place on release, which reads as a worse bug than the freeze.
  *
  * Returns a teardown function.
  */
@@ -131,6 +136,62 @@ export function installScrollFreezeProbe(
   let startPins = 0;
   let intent = 0;
   let lastReportAt = 0;
+  /** Whether this gesture's scrolling is being driven by us. */
+  let takeover = false;
+  /** How far the pane had moved on its own when the takeover began. */
+  let nativeMoved = 0;
+  /** One pending frame check per gesture, not one per wheel event. */
+  let framePending = false;
+  /** Set by teardown, so a queued frame callback can't act on a dead pane. */
+  let stopped = false;
+
+  const overflowOf = () => el.scrollHeight - el.clientHeight;
+
+  /**
+   * Put the viewport where the reader's wheels have asked for.
+   *
+   * Absolute — `gesture start + total intent` — never `scrollTop += delta`. If
+   * WebKit was merely reporting a stale `scrollTop` and later applies the same
+   * wheel events itself, a relative step would land the reader twice as far as
+   * they asked; recomputing from the gesture's origin is idempotent, so the
+   * worst case is agreeing with the browser.
+   */
+  const driveToIntent = () => {
+    if (startTop === null) return;
+    el.scrollTop = Math.max(0, Math.min(overflowOf(), startTop + intent));
+  };
+
+  /**
+   * A frame after the gesture began: did the pane move on its own?
+   *
+   * Runs the same verdict rules as the gesture-end report, so "frozen" means
+   * one thing in this file. Anything else — it scrolled, there was nowhere to
+   * go, the auto-follow pin grabbed it — is left alone: driving `scrollTop`
+   * against a working pane, or against the pin, would be its own bug.
+   */
+  const considerTakeover = () => {
+    framePending = false;
+    if (stopped || takeover || startTop === null) return;
+
+    const overflow = overflowOf();
+    const moved = el.scrollTop - startTop;
+    const verdict = classifyScrollAttempt({
+      overflow,
+      room: intent > 0 ? overflow - startTop : startTop,
+      moved,
+      intent,
+      pinFired: ctx.pinCount() > startPins,
+    });
+    if (verdict !== "frozen") return;
+
+    // Rebuild the stale scroll layer first: writing `scrollTop` is what moves
+    // the reader, but leaving the layer stale means every later frame of this
+    // gesture — and the next one — starts from the same dead state.
+    if (!revive(el)) return;
+    nativeMoved = moved;
+    takeover = true;
+    driveToIntent();
+  };
 
   const finish = () => {
     gestureTimer = null;
@@ -139,11 +200,18 @@ export function installScrollFreezeProbe(
     const beganAt = startTop;
     const beganPins = startPins;
     const gestureIntent = intent;
+    const tookOver = takeover;
+    const movedBeforeTakeover = nativeMoved;
     startTop = null;
     intent = 0;
+    // Each gesture re-tests the pane. A latched takeover would keep overriding
+    // native scrolling once it recovers, and one misjudgement would then last
+    // the rest of the session.
+    takeover = false;
+    nativeMoved = 0;
 
     const scrollTop = el.scrollTop;
-    const overflow = el.scrollHeight - el.clientHeight;
+    const overflow = overflowOf();
     const room = gestureIntent > 0 ? overflow - beganAt : beganAt;
     const attempt: ScrollAttempt = {
       overflow,
@@ -153,7 +221,11 @@ export function installScrollFreezeProbe(
       pinFired: ctx.pinCount() > beganPins,
     };
 
-    const verdict = classifyScrollAttempt(attempt);
+    // A gesture we drove is a freeze by definition — the frame check already
+    // said so. Re-classifying it would read our own `scrollTop` writes as a
+    // healthy `moved` and quietly drop every repaired freeze from the log,
+    // leaving no evidence that the fault is still happening.
+    const verdict = tookOver ? "frozen" : classifyScrollAttempt(attempt);
     if (!isFaultVerdict(verdict)) return;
 
     // A frozen container is the one fault this can actually repair: the scroll
@@ -166,7 +238,16 @@ export function installScrollFreezeProbe(
     // log is throttled so a stuck pane can't flood it, but each gesture the
     // reader makes deserves an attempt.
     let repair = "";
-    if (verdict === "frozen") {
+    if (tookOver) {
+      // Already repaired mid-gesture. `nativeMoved` is what the pane managed on
+      // its own before we stepped in, so a log full of `nativeMoved=0` says the
+      // freeze is untouched underneath and only the symptom is being handled.
+      repair =
+        ` takeover=1 nativeMoved=${Math.round(movedBeforeTakeover)}` +
+        ` landed=${Math.round(el.scrollTop)}`;
+    } else if (verdict === "frozen") {
+      // Reached when the frame check never ran — a backgrounded window pauses
+      // rAF, so the gesture-end timer stays the backstop.
       const before = el.scrollTop;
       if (revive(el)) {
         el.scrollTop = Math.max(0, Math.min(overflow, beganAt + gestureIntent));
@@ -214,14 +295,27 @@ export function installScrollFreezeProbe(
       startTop = el.scrollTop;
       startPins = ctx.pinCount();
       intent = 0;
+      takeover = false;
+      nativeMoved = 0;
     }
     intent += ev.deltaY;
+
+    if (takeover) {
+      // Straight through, no frame wait: this is what makes a repaired pane
+      // track the wheel in real time instead of catching up on release.
+      driveToIntent();
+    } else if (!framePending) {
+      framePending = true;
+      window.requestAnimationFrame(considerTakeover);
+    }
+
     if (gestureTimer !== null) window.clearTimeout(gestureTimer);
     gestureTimer = window.setTimeout(finish, GESTURE_IDLE_MS);
   };
 
   el.addEventListener("wheel", onWheel, { passive: true });
   return () => {
+    stopped = true;
     el.removeEventListener("wheel", onWheel);
     if (gestureTimer !== null) window.clearTimeout(gestureTimer);
   };
