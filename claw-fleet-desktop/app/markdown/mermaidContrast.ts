@@ -140,3 +140,24 @@ export function repairMermaidLabelContrast(root: ParentNode): void {
     }
   }
 }
+
+/**
+ * 同样的修复，但作用在 mermaid 吐出的 SVG **字符串**上。
+ *
+ * 挂载后再改 DOM 是脆的：决策卡那条路径实测会在效果跑完之后重新注入一次同一
+ * 段 SVG，把补好的标签色整片冲掉（`data-repair` 属性还在、里面的 span 却又变
+ * 回没样式）。把颜色烤进字符串里，谁再注入一次都还是修好的那份。
+ */
+export function repairMermaidContrastInSvg(svgText: string): string {
+  if (typeof document === "undefined") return svgText;
+  // 用 HTML 解析器而不是 XML 解析器：mermaid 的多行标签里是裸 `<br>`，
+  // `DOMParser(..., "image/svg+xml")` 会直接判成 parsererror 整段放弃修复
+  // （实测桌面 wiki 那张图就是这样漏掉的）。innerHTML 走的是宽容的 HTML 路径，
+  // 和 React 注入这段 SVG 时用的是同一套解析。
+  const host = document.createElement("div");
+  host.innerHTML = svgText;
+  const svg = host.querySelector("svg");
+  if (!svg) return svgText;
+  repairMermaidLabelContrast(svg);
+  return host.innerHTML;
+}
