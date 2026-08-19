@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use claw_fleet_core::off_runtime::off_runtime;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -53,11 +54,19 @@ pub(crate) struct ProbeClient {
 }
 
 impl ProbeClient {
+    // Every network-touching method below (and the client construction) runs
+    // inside `off_runtime`: these are called from tauri `(async)` commands on
+    // tokio workers, where reqwest::blocking panics and the swallowed panic
+    // leaves the invoke pending forever — the same mechanism as the dsh
+    // 「永久加载中」 bug (see claw_fleet_core::off_runtime).
     fn new(base_url: String, token: &str) -> Self {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap();
+        let client = off_runtime(|| {
+            reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .unwrap()
+        })
+        .expect("building the probe http client panicked");
         Self {
             base_url,
             auth_header: format!("Bearer {}", token),
@@ -66,118 +75,130 @@ impl ProbeClient {
     }
 
     /// GET endpoint and deserialize the JSON response body.
-    fn get<T: serde::de::DeserializeOwned>(&self, endpoint: &str) -> Result<T, String> {
+    fn get<T: serde::de::DeserializeOwned + Send>(&self, endpoint: &str) -> Result<T, String> {
         let url = format!("{}{}", self.base_url, endpoint);
-        let resp = self.client
-            .get(&url)
-            .header("Authorization", &self.auth_header)
-            .send()
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
-        }
-        resp.json::<T>().map_err(|e| e.to_string())
+        off_runtime(|| {
+            let resp = self.client
+                .get(&url)
+                .header("Authorization", &self.auth_header)
+                .send()
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            resp.json::<T>().map_err(|e| e.to_string())
+        })?
     }
 
     /// GET endpoint, return the raw body bytes plus the `Content-Type` header
     /// value (used for wiki file proxying where the body is not JSON).
     fn get_bytes(&self, endpoint: &str) -> Result<(Vec<u8>, String), String> {
         let url = format!("{}{}", self.base_url, endpoint);
-        let resp = self.client
-            .get(&url)
-            .header("Authorization", &self.auth_header)
-            .send()
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
-        }
-        let mime = resp
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("application/octet-stream")
-            .to_string();
-        let bytes = resp.bytes().map_err(|e| e.to_string())?.to_vec();
-        Ok((bytes, mime))
+        off_runtime(|| {
+            let resp = self.client
+                .get(&url)
+                .header("Authorization", &self.auth_header)
+                .send()
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            let mime = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("application/octet-stream")
+                .to_string();
+            let bytes = resp.bytes().map_err(|e| e.to_string())?.to_vec();
+            Ok((bytes, mime))
+        })?
     }
 
     /// GET endpoint, only check that the status is 2xx.
     fn get_ok(&self, endpoint: &str) -> Result<(), String> {
         let url = format!("{}{}", self.base_url, endpoint);
-        let resp = self.client
-            .get(&url)
-            .header("Authorization", &self.auth_header)
-            .send()
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
-        }
-        Ok(())
+        off_runtime(|| {
+            let resp = self.client
+                .get(&url)
+                .header("Authorization", &self.auth_header)
+                .send()
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            Ok(())
+        })?
     }
 
     /// POST endpoint.  On failure, tries to extract `{"error":"…"}` from the
     /// response body for a better error message.
     fn post_ok(&self, endpoint: &str) -> Result<(), String> {
         let url = format!("{}{}", self.base_url, endpoint);
-        let resp = self.client
-            .post(&url)
-            .header("Authorization", &self.auth_header)
-            .send()
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            let body = resp.text().unwrap_or_default();
-            let err = serde_json::from_str::<serde_json::Value>(&body)
-                .ok()
-                .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
-                .unwrap_or(body);
-            return Err(err);
-        }
-        Ok(())
+        off_runtime(|| {
+            let resp = self.client
+                .post(&url)
+                .header("Authorization", &self.auth_header)
+                .send()
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                let body = resp.text().unwrap_or_default();
+                let err = serde_json::from_str::<serde_json::Value>(&body)
+                    .ok()
+                    .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+                    .unwrap_or(body);
+                return Err(err);
+            }
+            Ok(())
+        })?
     }
 
     /// POST endpoint with a JSON body, only check that the status is 2xx.
-    fn post_json_ok<B: serde::Serialize>(&self, endpoint: &str, body: &B) -> Result<(), String> {
+    fn post_json_ok<B: serde::Serialize + Sync>(&self, endpoint: &str, body: &B) -> Result<(), String> {
         let url = format!("{}{}", self.base_url, endpoint);
-        let resp = self.client
-            .post(&url)
-            .header("Authorization", &self.auth_header)
-            .json(body)
-            .send()
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            let body_text = resp.text().unwrap_or_default();
-            let err = serde_json::from_str::<serde_json::Value>(&body_text)
-                .ok()
-                .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
-                .unwrap_or(body_text);
-            return Err(err);
-        }
-        Ok(())
+        off_runtime(|| {
+            let resp = self.client
+                .post(&url)
+                .header("Authorization", &self.auth_header)
+                .json(body)
+                .send()
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                let body_text = resp.text().unwrap_or_default();
+                let err = serde_json::from_str::<serde_json::Value>(&body_text)
+                    .ok()
+                    .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+                    .unwrap_or(body_text);
+                return Err(err);
+            }
+            Ok(())
+        })?
     }
 
     /// POST endpoint with a JSON body, deserialize the JSON response.
-    fn post_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+    fn post_json<B: serde::Serialize + Sync, T: serde::de::DeserializeOwned + Send>(
         &self,
         endpoint: &str,
         body: &B,
     ) -> Result<T, String> {
         let url = format!("{}{}", self.base_url, endpoint);
-        let resp = self.client
-            .post(&url)
-            .header("Authorization", &self.auth_header)
-            .timeout(Duration::from_secs(90))
-            .json(body)
-            .send()
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            let body_text = resp.text().unwrap_or_default();
-            let err = serde_json::from_str::<serde_json::Value>(&body_text)
-                .ok()
-                .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
-                .unwrap_or(body_text);
-            return Err(err);
-        }
-        resp.json::<T>().map_err(|e| e.to_string())
+        off_runtime(|| {
+            let resp = self.client
+                .post(&url)
+                .header("Authorization", &self.auth_header)
+                .timeout(Duration::from_secs(90))
+                .json(body)
+                .send()
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                let body_text = resp.text().unwrap_or_default();
+                let err = serde_json::from_str::<serde_json::Value>(&body_text)
+                    .ok()
+                    .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+                    .unwrap_or(body_text);
+                return Err(err);
+            }
+            resp.json::<T>().map_err(|e| e.to_string())
+        })?
     }
 
     /// GET endpoint and return the raw `serde_json::Value`.
@@ -186,29 +207,31 @@ impl ProbeClient {
     }
 
     /// POST raw bytes (e.g. a file upload) and deserialize the JSON response.
-    fn post_bytes<T: serde::de::DeserializeOwned>(
+    fn post_bytes<T: serde::de::DeserializeOwned + Send>(
         &self,
         endpoint: &str,
         body: Vec<u8>,
     ) -> Result<T, String> {
         let url = format!("{}{}", self.base_url, endpoint);
-        let resp = self.client
-            .post(&url)
-            .header("Authorization", &self.auth_header)
-            .header("Content-Type", "application/octet-stream")
-            .timeout(Duration::from_secs(120))
-            .body(body)
-            .send()
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            let body_text = resp.text().unwrap_or_default();
-            let err = serde_json::from_str::<serde_json::Value>(&body_text)
-                .ok()
-                .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
-                .unwrap_or(body_text);
-            return Err(err);
-        }
-        resp.json::<T>().map_err(|e| e.to_string())
+        off_runtime(move || {
+            let resp = self.client
+                .post(&url)
+                .header("Authorization", &self.auth_header)
+                .header("Content-Type", "application/octet-stream")
+                .timeout(Duration::from_secs(120))
+                .body(body)
+                .send()
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                let body_text = resp.text().unwrap_or_default();
+                let err = serde_json::from_str::<serde_json::Value>(&body_text)
+                    .ok()
+                    .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+                    .unwrap_or(body_text);
+                return Err(err);
+            }
+            resp.json::<T>().map_err(|e| e.to_string())
+        })?
     }
 }
 
@@ -3332,6 +3355,31 @@ mod tests {
     use std::sync::MutexGuard;
 
     const TOKEN: &str = "integration-test-token";
+
+    /// tauri `(async)` commands run their sync bodies on tokio runtime workers,
+    /// where reqwest::blocking panics ("Cannot drop a runtime…") and the panic
+    /// is swallowed into a forever-pending invoke — the exact mechanism behind
+    /// the dsh 永久「加载中」 bug. RemoteBackend serves the same commands, so
+    /// ProbeClient must survive that context: a clean transport Err (nothing
+    /// listens on the probed port), never a panic.
+    #[test]
+    fn probe_client_survives_tokio_worker_context() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let joined = rt.block_on(async {
+            tokio::spawn(async {
+                let client = ProbeClient::new("http://127.0.0.1:1".into(), TOKEN);
+                client.get::<serde_json::Value>("/health").map(|_| ())
+            })
+            .await
+        });
+        let inner = joined.expect("probe client must not panic inside a tokio worker");
+        // Port 1 has no listener: the healthy outcome is a transport error.
+        assert!(inner.is_err());
+    }
 
     #[test]
     fn rca_release_slug_maps_uname() {

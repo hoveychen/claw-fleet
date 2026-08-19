@@ -23,6 +23,8 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use crate::off_runtime::off_runtime;
+
 /// Default per-call timeout. `session.prompt` returns as soon as the turn is
 /// admitted (not when it finishes), so no call on this face is long-polling.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -169,30 +171,6 @@ fn parse_receipt(body: &str) -> Result<(), DshRpcError> {
 pub struct DshClient {
     base: String,
     http: reqwest::blocking::Client,
-}
-
-/// Run `f` on a fresh plain thread and hand its result back; `Err` when the
-/// thread itself panicked.
-///
-/// reqwest's blocking carrier refuses to be built or driven from inside a
-/// tokio runtime (`wait::enter` → "Cannot drop a runtime in a context where
-/// blocking is not allowed") — and tauri `(async)` commands run their sync
-/// bodies exactly there, so every UI-triggered dsh RPC used to panic. Worse,
-/// the task harness swallows that panic and the invoke promise never settles,
-/// which the UI shows as an eternal 「加载中…」. The hop is unconditional: a
-/// thread spawn is microseconds against an HTTP round-trip, and a context
-/// check would just be one more branch to get wrong.
-///
-/// `pub(crate)`: every `reqwest::blocking` use reachable from a tauri
-/// `(async)` command must go through this — [`crate::dsh_cost`]'s pricing
-/// fetch is the other current caller.
-pub(crate) fn off_runtime<T: Send>(f: impl FnOnce() -> T + Send) -> Result<T, String> {
-    std::thread::scope(|scope| {
-        scope
-            .spawn(f)
-            .join()
-            .map_err(|_| "blocking-http helper thread panicked".to_string())
-    })
 }
 
 impl DshClient {
