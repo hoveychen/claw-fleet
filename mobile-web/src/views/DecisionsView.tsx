@@ -13,6 +13,7 @@ import {
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { fetchDecisionAsset } from "../decisionAsset";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
@@ -426,7 +427,12 @@ function GuardAnalysis({
         <div className={styles.analysisLoading}>{t("分析中…")}</div>
       ) : (
         <div className={styles.markdown}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{state}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={mermaidMarkdownComponents}
+          >
+            {state}
+          </ReactMarkdown>
         </div>
       )}
     </div>
@@ -629,7 +635,12 @@ function PlanCard({
         />
       ) : (
         <div className={styles.markdown}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={mermaidMarkdownComponents}
+          >
+            {content}
+          </ReactMarkdown>
           {long && (
             <button className={styles.expandButton} onClick={() => setExpanded((v) => !v)}>
               {expanded ? t("收起") : t("展开完整计划")}
@@ -876,7 +887,12 @@ function PrecedingNarration({
         <div className={styles.precedingBody}>
           {chunks.map((c) => (
             <div key={c.key} className={styles.markdown}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.text}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={mermaidMarkdownComponents}
+              >
+                {c.text}
+              </ReactMarkdown>
             </div>
           ))}
         </div>
@@ -1087,7 +1103,12 @@ function QuestionsCard({
         <div key={qi} className={styles.question}>
           {q.header && <div className={styles.questionHeader}>{q.header}</div>}
           <div className={styles.markdown}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripTtsDivider(q.question)}</ReactMarkdown>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={mermaidMarkdownComponents}
+            >
+              {stripTtsDivider(q.question)}
+            </ReactMarkdown>
           </div>
           {isFleetAsk && (q as FleetAskQuestion).html && (
             <HtmlPreview
@@ -1153,7 +1174,12 @@ function QuestionsCard({
                 </div>
                 {previewShown && o.preview && (
                   <div className={styles.optionPreview}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{o.preview}</ReactMarkdown>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={mermaidMarkdownComponents}
+                    >
+                      {o.preview}
+                    </ReactMarkdown>
                   </div>
                 )}
               </div>

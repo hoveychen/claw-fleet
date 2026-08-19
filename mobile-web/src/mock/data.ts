@@ -231,7 +231,7 @@ export const MOCK_ELICITATION: ElicitationRequest = {
   questions: [
     {
       question:
-        "The checkout spec fails 1 in 8 runs on a race in cart totals. Pick my move:",
+        "The checkout spec fails 1 in 8 runs on a race in cart totals. Pick my move:\n\n```mermaid\nflowchart TB\n  A[普通节点] --> CAN[Canonicalize]\n  style CAN fill:#4a3728,stroke:#c9a227\n```",
       header: "Flaky spec",
       multiSelect: false,
       options: [

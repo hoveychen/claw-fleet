@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import styles from "./MermaidBlock.module.css";
-import { repairMermaidLabelContrast } from "./mermaidContrast";
+import { repairMermaidContrastInSvg } from "./mermaidContrast";
 
 /** Distinct ids per render — mermaid mounts a scratch node keyed by this. */
 let seq = 0;
@@ -24,7 +24,6 @@ export function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState(currentTheme);
-  const holder = useRef<HTMLDivElement>(null);
 
   // Re-render on theme flips so a diagram doesn't stay dark-on-paper.
   useEffect(() => {
@@ -55,7 +54,9 @@ export function MermaidBlock({ code }: { code: string }) {
         });
         const { svg } = await mermaid.render(`mermaid-${seq++}`, code);
         if (cancelled) return;
-        setSvg(svg);
+        // 对比度自愈烤进字符串：一张按深色主题硬编码 `style X fill:#4a3728` 的
+        // 图，在 light 主题下标签仍是主题色 #333，整块糊成黑砖（见 mermaidContrast）。
+        setSvg(repairMermaidContrastInSvg(svg));
         setError(null);
       } catch (e) {
         if (cancelled) return;
@@ -68,14 +69,6 @@ export function MermaidBlock({ code }: { code: string }) {
     };
   }, [code, theme]);
 
-  // 图注进 DOM 之后再补对比度：一张按深色主题硬编码 `style X fill:#4a3728`
-  // 的图，在 light 主题下标签仍是主题色 #333，整块糊成黑砖（见 mermaidContrast）。
-  useEffect(() => {
-    if (svg !== null && holder.current) {
-      repairMermaidLabelContrast(holder.current);
-    }
-  }, [svg]);
-
   if (error !== null) {
     return (
       <div className={styles.failed}>
@@ -87,7 +80,6 @@ export function MermaidBlock({ code }: { code: string }) {
 
   return (
     <div
-      ref={holder}
       className={styles.diagram}
       // Trusted: the SVG string comes straight out of mermaid's own sanitizing
       // renderer (securityLevel "strict"), not from the model.
