@@ -1356,6 +1356,44 @@ mod tests {
     }
 
     #[test]
+    fn from_codex_carries_the_usage_source_through() {
+        // The normalised summary feeds the tray menu and the mobile usage view;
+        // dropping the label there would leave those two surfaces unable to say
+        // whether the numbers came from foxy.
+        let val = json!({
+            "planType": "team",
+            "primary": {"usedPercent": 1, "resetsAt": 1_787_622_736_i64},
+            "usageSource": "foxy-switcher"
+        });
+        let s = SourceUsageSummary::from_codex(&val);
+        assert_eq!(s.usage_source.as_deref(), Some("foxy-switcher"));
+    }
+
+    #[test]
+    fn from_codex_without_a_usage_source_reports_none() {
+        // An older backend (or a payload predating the field) must not surface
+        // an empty-string source the UI would try to translate.
+        let s = SourceUsageSummary::from_codex(&json!({ "planType": "team" }));
+        assert_eq!(s.usage_source, None);
+    }
+
+    #[test]
+    fn from_claude_carries_the_usage_source_through() {
+        let info = AccountInfo {
+            usage_source: "foxy-switcher".into(),
+            ..AccountInfo::default()
+        };
+        let s = SourceUsageSummary::from_claude(&info);
+        assert_eq!(s.usage_source.as_deref(), Some("foxy-switcher"));
+    }
+
+    #[test]
+    fn from_claude_empty_usage_source_reports_none() {
+        let s = SourceUsageSummary::from_claude(&AccountInfo::default());
+        assert_eq!(s.usage_source, None);
+    }
+
+    #[test]
     fn from_codex_missing_plan() {
         let val = json!({});
         let s = SourceUsageSummary::from_codex(&val);
