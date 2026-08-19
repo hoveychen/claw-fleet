@@ -1683,8 +1683,9 @@ mod tests {
         build_session_from_sqlite, clamp_dead_session_status, codex_cost_and_input,
         codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
-        codex_token_breakdown_from_lines, compute_token_stats, determine_status,
-        exec_note_from_script, parse_codex_session,
+        codex_token_breakdown_from_lines, codex_usage_from_foxy, compute_token_stats,
+        determine_status, exec_note_from_script, parse_codex_session, plan_type_from_foxy_label,
+        USAGE_SOURCE_FOXY,
         derive_codex_title,
         extract_context_percent, extract_first_user_prompt, last_rollout_rate_limits,
         latest_total_token_usage, normalize_messages, strip_leading_system_reminder,
@@ -3576,6 +3577,111 @@ mod tests {
             window_duration_mins: Some(window_mins),
             resets_at: Some(resets_at_secs),
         }
+    }
+
+    // ── foxy-sourced snapshots ───────────────────────────────────────────────
+
+    fn foxy_codex_account() -> crate::foxy::FoxyCodexAccount {
+        crate::foxy::FoxyCodexAccount {
+            email: "you@example.com".into(),
+            plan: "Codex Team".into(),
+            full_name: "Harry C".into(),
+            primary: Some(CodexRateLimitWindow {
+                used_percent: 1,
+                window_duration_mins: None,
+                resets_at: Some(1_787_622_736),
+            }),
+            secondary: None,
+        }
+    }
+
+    #[test]
+    fn foxy_snapshot_is_labelled_with_its_source() {
+        let item = codex_usage_from_foxy(foxy_codex_account());
+        assert_eq!(item.usage_source, USAGE_SOURCE_FOXY);
+    }
+
+    #[test]
+    fn foxy_snapshot_carries_the_primary_window_through() {
+        let item = codex_usage_from_foxy(foxy_codex_account());
+        let primary = item.primary.expect("primary preserved");
+        assert_eq!(primary.used_percent, 1);
+        assert_eq!(primary.resets_at, Some(1_787_622_736));
+        assert!(item.secondary.is_none());
+    }
+
+    #[test]
+    fn foxy_plan_label_is_normalised_to_the_app_server_spelling() {
+        // foxy stores "Codex Team"; codex itself reports "team". The plan badge
+        // must not change depending on which source served the panel.
+        assert_eq!(plan_type_from_foxy_label("Codex Team"), Some("team".into()));
+        assert_eq!(plan_type_from_foxy_label("Codex Plus"), Some("plus".into()));
+        assert_eq!(plan_type_from_foxy_label("Codex Pro"), Some("pro".into()));
+    }
+
+    #[test]
+    fn foxy_plan_label_without_the_prefix_is_lowercased_as_is() {
+        assert_eq!(plan_type_from_foxy_label("Team"), Some("team".into()));
+    }
+
+    #[test]
+    fn foxy_empty_plan_label_yields_no_plan_type() {
+        // Matches a Codex response that omits `planType` entirely.
+        assert_eq!(plan_type_from_foxy_label(""), None);
+        assert_eq!(plan_type_from_foxy_label("Codex "), None);
+    }
+
+    /// A foxy account with the given window percentages and nothing else.
+    fn foxy_codex_account_at(primary: Option<i32>, secondary: Option<i32>)
+        -> crate::foxy::FoxyCodexAccount
+    {
+        let w = |used_percent: i32| CodexRateLimitWindow {
+            used_percent,
+            window_duration_mins: None,
+            resets_at: Some(1_787_622_736),
+        };
+        crate::foxy::FoxyCodexAccount {
+            email: "you@example.com".into(),
+            plan: "Codex Team".into(),
+            full_name: "Harry C".into(),
+            primary: primary.map(w),
+            secondary: secondary.map(w),
+        }
+    }
+
+    #[test]
+    fn foxy_snapshot_is_limited_when_the_primary_window_is_exhausted() {
+        // foxy serves no `rateLimitReachedType`, so it is derived from the
+        // percentages — otherwise `llm_provider::codex_quota_state` (its only
+        // production consumer) would call an exhausted account Healthy.
+        let item = codex_usage_from_foxy(foxy_codex_account_at(Some(100), None));
+        assert_eq!(item.rate_limit_reached_type.as_deref(), Some("primary"));
+    }
+
+    #[test]
+    fn foxy_snapshot_is_limited_when_the_secondary_window_is_exhausted() {
+        let item = codex_usage_from_foxy(foxy_codex_account_at(Some(3), Some(100)));
+        assert_eq!(item.rate_limit_reached_type.as_deref(), Some("secondary"));
+    }
+
+    #[test]
+    fn foxy_snapshot_is_not_limited_just_below_full() {
+        let item = codex_usage_from_foxy(foxy_codex_account_at(Some(99), Some(99)));
+        assert_eq!(item.rate_limit_reached_type, None);
+    }
+
+    #[test]
+    fn foxy_snapshot_is_not_limited_when_windows_are_absent() {
+        let item = codex_usage_from_foxy(foxy_codex_account_at(None, None));
+        assert_eq!(item.rate_limit_reached_type, None);
+    }
+
+    #[test]
+    fn foxy_snapshot_leaves_credits_unknown() {
+        // foxy polls no credits balance; inventing `has_credits: false` would
+        // read as "confirmed no credits" in the panel.
+        let item = codex_usage_from_foxy(foxy_codex_account());
+        assert!(item.credits.is_none());
     }
 
     #[test]
@@ -5713,6 +5819,84 @@ pub struct CodexUsageItem {
     /// eligibility rather than guessing from a per-session transcript line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit_reached_type: Option<String>,
+    /// Where these numbers came from: [`USAGE_SOURCE_FOXY`] when read from a
+    /// running foxy-switcher daemon, [`USAGE_SOURCE_APP_SERVER`] when queried
+    /// from Codex itself. The Claude parallel is `AccountInfo::usage_source`.
+    /// `#[serde(default)]` keeps older serialized payloads deserializable.
+    #[serde(default)]
+    pub usage_source: String,
+}
+
+/// `usage_source` when the snapshot came from foxy-switcher's local API. Matches
+/// the string `AccountInfo::usage_source` uses, so the frontend can test both
+/// providers' panels against one constant.
+pub const USAGE_SOURCE_FOXY: &str = "foxy-switcher";
+
+/// `usage_source` when the snapshot came from `codex app-server` directly.
+pub const USAGE_SOURCE_APP_SERVER: &str = "codex-app-server";
+
+/// Project a foxy-sourced Codex account onto the app-server's snapshot shape, so
+/// every consumer downstream is source-agnostic.
+///
+/// Two fields cannot be filled from foxy and are deliberately left at their
+/// defaults rather than guessed:
+/// - `window_duration_mins` (already `None` per
+///   [`crate::foxy::FoxyCodexAccount`]) — foxy stores no window length.
+/// - `credits` — foxy polls no credits balance.
+///
+/// `plan_type` is normalised back to the app-server's spelling: foxy stores the
+/// display label (`"Codex Team"`, built as `"Codex " + titlecase(plan_type)` in
+/// its `pollCodex`), while Codex reports the bare `"team"`. Normalising here
+/// keeps the plan badge identical whichever source served the panel.
+fn codex_usage_from_foxy(a: crate::foxy::FoxyCodexAccount) -> CodexUsageItem {
+    CodexUsageItem {
+        plan_type: plan_type_from_foxy_label(&a.plan),
+        rate_limit_reached_type: reached_window_from_percentages(&a.primary, &a.secondary),
+        primary: a.primary,
+        secondary: a.secondary,
+        usage_source: USAGE_SOURCE_FOXY.to_string(),
+        ..Default::default()
+    }
+}
+
+/// Derive Codex's `rateLimitReachedType` from the window percentages.
+///
+/// foxy re-serves usage numbers but not Codex's own "which window did I hit"
+/// flag, so it is reconstructed here: a window at 100% is exhausted. Without
+/// this, [`crate::llm_provider`]'s `codex_quota_state` — the only production
+/// consumer of this field on a `fetch_codex_usage` snapshot — would report an
+/// exhausted account as `Healthy`.
+///
+/// Codex reports at most one reached window, so primary is checked first; the
+/// consumer only distinguishes limited from not, and codex auto-resume reads its
+/// reached window from the session rollout
+/// ([`codex_rate_limit_state_from_rollout`]) rather than from here, so the
+/// choice between two simultaneously-full windows changes no behaviour.
+fn reached_window_from_percentages(
+    primary: &Option<CodexRateLimitWindow>,
+    secondary: &Option<CodexRateLimitWindow>,
+) -> Option<String> {
+    let exhausted = |w: &Option<CodexRateLimitWindow>| {
+        w.as_ref().is_some_and(|w| w.used_percent >= 100)
+    };
+    if exhausted(primary) {
+        Some("primary".to_string())
+    } else if exhausted(secondary) {
+        Some("secondary".to_string())
+    } else {
+        None
+    }
+}
+
+/// `"Codex Team"` → `"team"`; anything not carrying foxy's `"Codex "` prefix is
+/// lowercased as-is. Empty label → `None`, matching a Codex response that omits
+/// `planType`.
+fn plan_type_from_foxy_label(label: &str) -> Option<String> {
+    let bare = label.strip_prefix("Codex ").unwrap_or(label).trim();
+    if bare.is_empty() {
+        return None;
+    }
+    Some(bare.to_lowercase())
 }
 
 /// Build a Claude-shaped [`crate::session::RateLimitState`] from a Codex
@@ -5960,11 +6144,33 @@ pub fn find_codex_binary() -> Option<std::path::PathBuf> {
     None
 }
 
-/// Query rate limits from the Codex app-server via its JSON-RPC stdio protocol.
+/// Query Codex rate limits, preferring a running foxy-switcher daemon and
+/// falling back to asking Codex itself.
 ///
-/// Spawns a short-lived `codex app-server` process, sends `initialize` +
-/// `account/rateLimits/read`, and returns the snapshot.
+/// **Why foxy wins when it's up.** The fallback spawns `codex app-server`, whose
+/// every authenticated call runs `AuthManager::auth()` →
+/// `should_refresh_proactively()`: within five minutes of the access token's
+/// expiry (or eight days since the last refresh) it performs an OAuth refresh
+/// and `persist_tokens()` writes the *rotated* refresh token back into
+/// `auth.json`. OpenAI's refresh tokens are single-use, so that rotation
+/// silently invalidates the copy foxy holds in its vault — after which foxy's
+/// own poll, and any other device leasing the same account, get
+/// `refresh_token_reused` / `token_expired` 401s. Because the usage panel polls
+/// on a ~5-minute cadence, the fallback path is by far the most frequent local
+/// refresh trigger on a foxy-managed machine. Reading foxy's cache instead means
+/// zero local token rotations, and it is the same reasoning as Claude's
+/// `account::fetch_account_info` (foxy already holds fresh numbers; a second
+/// poll is redundant).
+///
+/// A snapshot is recorded for the 24h occupancy chart either way, so the chart
+/// stays continuous across a source switch.
 pub async fn fetch_codex_usage() -> Result<CodexUsageItem, String> {
+    if let Some(account) = crate::foxy::fetch_in_use_codex_account().await {
+        let item = codex_usage_from_foxy(account);
+        crate::codex_usage_history::record_snapshot(&item);
+        return Ok(item);
+    }
+
     let bin = find_codex_binary().ok_or("Codex binary not found")?;
 
     // Run blocking I/O in a background thread to avoid blocking the async runtime.
@@ -5979,7 +6185,16 @@ pub async fn fetch_codex_usage() -> Result<CodexUsageItem, String> {
 }
 
 /// Blocking wrapper for use in fleet CLI (no tauri async runtime).
+///
+/// Same foxy-first ordering as [`fetch_codex_usage`] — see its doc comment for
+/// why the fallback is the expensive one.
 pub fn fetch_codex_usage_blocking() -> Result<CodexUsageItem, String> {
+    if let Some(account) = crate::foxy::fetch_in_use_codex_account_blocking() {
+        let item = codex_usage_from_foxy(account);
+        crate::codex_usage_history::record_snapshot(&item);
+        return Ok(item);
+    }
+
     let bin = find_codex_binary().ok_or("Codex binary not found")?;
     let result = fetch_codex_usage_blocking_impl(&bin);
     if let Ok(ref item) = result {
@@ -6095,13 +6310,16 @@ fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageIt
                         let result = msg
                             .get("result")
                             .ok_or("Missing result in response")?;
-                        let snapshot: CodexUsageItem = serde_json::from_value(
+                        let mut snapshot: CodexUsageItem = serde_json::from_value(
                             result
                                 .get("rateLimits")
                                 .cloned()
                                 .unwrap_or_else(|| result.clone()),
                         )
                         .map_err(|e| format!("parse rate-limit: {e}"))?;
+                        // Codex has no notion of Fleet's source labels, so the
+                        // field arrives at its serde default and is stamped here.
+                        snapshot.usage_source = USAGE_SOURCE_APP_SERVER.to_string();
                         return Ok(snapshot);
                     }
                 }

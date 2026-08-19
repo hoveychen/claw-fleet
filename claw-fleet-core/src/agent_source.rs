@@ -689,6 +689,7 @@ mod tests {
                         source: "a".into(),
                         plan: Some("pro".into()),
                         bars: vec![],
+                        usage_source: None,
                     }),
             ),
             Box::new(
@@ -698,6 +699,7 @@ mod tests {
                         source: "b".into(),
                         plan: Some("free".into()),
                         bars: vec![],
+                        usage_source: None,
                     }),
             ),
             Box::new(
