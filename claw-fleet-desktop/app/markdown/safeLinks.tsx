@@ -1,6 +1,7 @@
 import type { Components } from "react-markdown";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { MermaidBlock } from "./MermaidBlock";
+import { isMermaidPre } from "./mermaidPre";
 import { PathChip, type PathLinkContext } from "./pathLinks";
 import { parsePathRef } from "./pathRef";
 import styles from "./markdown.module.css";
@@ -75,6 +76,12 @@ function codeText(children: React.ReactNode): string {
 
 export const safeMarkdownComponents: Components = {
   a: safeLinkComponent(),
+  // The `code` branch below swaps a ```mermaid fence for <MermaidBlock>, but
+  // react-markdown's outer <pre> would still wrap it — a monospace, boxed
+  // container the diagram then inherits from. Unwrap it for mermaid only;
+  // every other fence still needs its <pre> to keep whitespace.
+  pre: ({ node, children, ...props }) =>
+    isMermaidPre(node) ? <>{children}</> : <pre {...props}>{children}</pre>,
   table: ({ children }) => (
     <div className={styles.table_wrap}>
       <table className={styles.table}>{children}</table>

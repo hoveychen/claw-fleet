@@ -9,6 +9,7 @@ import { ChevronLeft } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { MermaidBlock } from "../markdown/MermaidBlock";
+import { isMermaidPre } from "../markdown/mermaidPre";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { WikiDoc } from "../types";
@@ -174,6 +175,10 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
           </a>
         );
       },
+      // mermaid fence 的外层 <pre> 会把图裹进等宽字体的框里（字体继承会让 mermaid
+      // 量出的标签宽度对不上，见 MermaidBlock），只对它脱一层，别的 fence 照旧。
+      pre: ({ node, children, ...rest }: ComponentPropsWithoutRef<"pre"> & { node?: unknown }) =>
+        isMermaidPre(node) ? <>{children}</> : <pre {...rest}>{children}</pre>,
       code: ({ className, children, ...rest }: ComponentPropsWithoutRef<"code">) => {
         if (/(^|\s)language-mermaid(\s|$)/.test(className ?? "")) {
           return <MermaidBlock code={String(children).replace(/\n$/, "")} />;
