@@ -46,6 +46,7 @@ import type {
   SessionStatus,
 } from "../types";
 import { canResumeSession, canEnqueueSession } from "../types";
+import { detailPathForSession } from "../agentSource";
 import { ResumeComposer } from "./Composer";
 import {
   basename,
@@ -1135,9 +1136,10 @@ export function SessionDetailView({
   const rows = useMemo(() => (messages ?? []).filter(isRenderableRow), [messages]);
 
   // tool_detail reads the Claude jsonl by tool_use_id; a codex rollout has no
-  // toolUseResult and its folded format defeats the scan — leave codex tool
-  // lines non-expandable (digest chips never arrive for codex either).
-  const detailPath = session.agentSource === "codex" ? undefined : session.jsonlPath;
+  // toolUseResult and its folded format defeats the scan, and a dsh session has
+  // no transcript file at all — its `jsonlPath` is a `dsh://` uri. Both leave
+  // tool lines non-expandable (digest chips never arrive for either).
+  const detailPath = detailPathForSession(session.agentSource, session.jsonlPath);
 
   // Text of every real user row, to tell which optimistic echoes have landed.
   const realUserTexts = useMemo(() => {
