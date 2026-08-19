@@ -50,6 +50,29 @@
   font-size: 11px;
 }
 
+/* Wraps a tile so the composer's remove button can sit on its corner. */
+.tileWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tileRemove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-card);
+  color: var(--color-text-dim);
+  line-height: 1;
+}
+
 /* Non-image attachments, and images whose bytes we couldn't pull — a filename
    is still more than the raw absolute path the bubble used to print. */
 .chip {
@@ -74,4 +97,28 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The chip's own body when tapping it means "retry the fetch". */
+.chipRetry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.remove {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 0 0 0 2px;
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  line-height: 1;
 }

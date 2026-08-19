@@ -16,6 +16,7 @@ import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
+import { AttachmentThumbs } from "./AttachmentThumb";
 
 const MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
@@ -77,6 +78,15 @@ export interface Attachment {
   path: string;
 }
 
+/** An upload plus the `blob:` URL of the very bytes that were uploaded, when
+ *  they were an image. The chip row shows that instead of asking the relay for
+ *  a thumbnail of a file this device is literally holding. Kept out of
+ *  [`Attachment`] because that one is persisted as a draft, and a `blob:` URL
+ *  dies with the page. */
+export interface UploadedAttachment extends Attachment {
+  previewUrl?: string;
+}
+
 /** Push files through the relay's `upload_attachment` (bytes → the desktop's
  *  user-attachments store) and return the persistent paths. Oversize files
  *  are skipped with an alert; a failed upload aborts the rest. */
@@ -87,8 +97,8 @@ export interface Attachment {
 export async function uploadAttachmentFiles(
   client: RelayClient,
   files: FileList | File[],
-): Promise<Attachment[]> {
-  const out: Attachment[] = [];
+): Promise<UploadedAttachment[]> {
+  const out: UploadedAttachment[] = [];
   for (const file of Array.from(files)) {
     if (file.size > MAX_UPLOAD_BYTES) {
       window.alert(t("「{0}」超过 10 MB 上限，已跳过", file.name));
@@ -108,7 +118,11 @@ export async function uploadAttachmentFiles(
       { name: file.name, base64: b64 },
       UPLOAD_REQUEST_TIMEOUT_MS,
     );
-    out.push({ name: file.name, path });
+    out.push({
+      name: file.name,
+      path,
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+    });
   }
   return out;
 }
@@ -119,6 +133,11 @@ export async function uploadAttachmentFiles(
 function useAttachments(client: RelayClient | null, draftKey: string) {
   const [attachments, setAttachments, clearAttachments] = useDraft<Attachment[]>(draftKey, []);
   const [uploading, setUploading] = useState(false);
+  // path → `blob:` URL for files picked in *this* page life. Not state: it is
+  // only ever read during a render that `attachments` already triggered, and
+  // deliberately not persisted — a restored draft has no bytes here, so those
+  // chips fall back to the relay thumbnail.
+  const previews = useRef(new Map<string, string>());
 
   // 从草稿恢复的附件路径可能已在桌面端被清掉。挂载后（client 就绪时）校验一次，
   // 剔除失效的 chip，避免恢复的 `Context files:` 指向不存在的文件。校验失败（离线等）
@@ -148,7 +167,9 @@ function useAttachments(client: RelayClient | null, draftKey: string) {
         const uploaded = await uploadAttachmentFiles(client, files);
         setAttachments((prev) => {
           const next = [...prev];
-          for (const a of uploaded) {
+          for (const { previewUrl, ...a } of uploaded) {
+            // The blob URL is held aside, never in the persisted draft.
+            if (previewUrl) previews.current.set(a.path, previewUrl);
             if (!next.some((x) => x.path === a.path)) next.push(a);
           }
           return next;
@@ -164,12 +185,24 @@ function useAttachments(client: RelayClient | null, draftKey: string) {
 
   const remove = useCallback(
     (path: string) => {
+      const url = previews.current.get(path);
+      if (url) {
+        URL.revokeObjectURL(url);
+        previews.current.delete(path);
+      }
       setAttachments((prev) => prev.filter((a) => a.path !== path));
     },
     [setAttachments],
   );
 
-  return { attachments, uploading, addFiles, remove, reset: clearAttachments };
+  return {
+    attachments,
+    uploading,
+    addFiles,
+    remove,
+    reset: clearAttachments,
+    previews: previews.current,
+  };
 }
 
 function withContextFiles(prompt: string, attachments: Attachment[]): string {
@@ -182,23 +215,28 @@ function AttachmentRow({
   uploading,
   onPick,
   onRemove,
+  client,
+  previews,
 }: {
   attachments: Attachment[];
   uploading: boolean;
   onPick: (files: FileList | null) => void;
   onRemove: (path: string) => void;
+  client: RelayClient | null;
+  previews?: Map<string, string>;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   return (
     <div className={styles.attachRow}>
-      {attachments.map((a) => (
-        <span key={a.path} className={styles.attachChip}>
-          <span className={styles.attachName}>{a.name}</span>
-          <button className={styles.attachRemove} onClick={() => onRemove(a.path)}>
-            <X size={12} />
-          </button>
-        </span>
-      ))}
+      {/* Images show as thumbnails (tap to enlarge), everything else keeps the
+          filename chip — same component the transcript and decision history
+          use, so a picture looks the same before and after it is sent. */}
+      <AttachmentThumbs
+        paths={attachments.map((a) => a.path)}
+        client={client}
+        previews={previews}
+        onRemove={onRemove}
+      />
       <button
         className={styles.attachAdd}
         disabled={uploading}
@@ -418,7 +456,7 @@ export function NewSessionSheet({ sessions, client, initialFiles, onClose }: New
   const patch = (p: Partial<typeof NEW_SESSION_DEFAULT>) => setDraft((d) => ({ ...d, ...p }));
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
-  const { attachments, uploading, addFiles, remove, reset } = useAttachments(
+  const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
     client,
     NEW_SESSION_ATTACH_KEY,
   );
@@ -614,6 +652,8 @@ export function NewSessionSheet({ sessions, client, initialFiles, onClose }: New
           uploading={uploading}
           onPick={(f) => void addFiles(f)}
           onRemove={remove}
+          client={client}
+          previews={previews}
         />
         {toolChoices.length > 1 && (
           <div className={styles.optionRow}>
@@ -695,7 +735,7 @@ export function ResumeComposer({
   // it for real; keyed by index+content so a stale key never hides the wrong row
   // after the list re-indexes.
   const [cancelledKeys, setCancelledKeys] = useState<Set<string>>(new Set());
-  const { attachments, uploading, addFiles, remove, reset } = useAttachments(
+  const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
     client,
     `resume:${session.id}:attachments`,
   );
@@ -823,6 +863,8 @@ export function ResumeComposer({
         uploading={uploading}
         onPick={(f) => void addFiles(f)}
         onRemove={remove}
+        client={client}
+        previews={previews}
       />
       <div className={styles.resumeActions}>
         {!enqueueing && (

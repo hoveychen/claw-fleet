@@ -19,6 +19,8 @@ import type {
   WorkflowTree,
 } from "../types";
 import { useAgentNav } from "./AgentNavContext";
+import { AttachmentThumbs } from "./AttachmentThumb";
+import { splitAnswerAttachments } from "../userAttachments";
 import styles from "./SessionDetailTabs.module.css";
 
 /** One-shot fetch helper: "loading" → data | "error". */
@@ -275,7 +277,13 @@ export function DecisionHistoryTab({
             {expanded && r.kind === "fleet-ask" && (
               <div className={styles.recordBody} onClick={(e) => e.stopPropagation()}>
                 {r.questions.map((q, i) => {
-                  const raw = r.answers[q.question] ?? "";
+                  // An answer can carry `@/path` mentions for the files the user
+                  // attached. They are part of the answer string, so they have to
+                  // come off before the label matching below — and they are what
+                  // the thumbnails at the end of the block render.
+                  const { core: raw, attachments } = splitAnswerAttachments(
+                    r.answers[q.question] ?? "",
+                  );
                   const opts = q.options ?? [];
                   const fields = q.formFields ?? [];
                   const selectedLabels = raw
@@ -323,6 +331,7 @@ export function DecisionHistoryTab({
                       {opts.length === 0 && fields.length === 0 && raw && (
                         <div className={styles.preWrap}>{raw}</div>
                       )}
+                      <AttachmentThumbs paths={attachments} client={client} />
                     </div>
                   );
                 })}
