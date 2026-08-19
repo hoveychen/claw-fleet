@@ -519,3 +519,15 @@ html.os-windows::-webkit-scrollbar-thumb:hover,
     backdrop-filter: none !important;
   }
 }
+
+/* Page geometry. The real cause of the edge-to-edge first version was on the
+   Rust side — wry stamps zero margins onto NSPrintInfo — and `print_webview`
+   now sets them itself. This stays as the cross-platform floor: it is what
+   gives Windows/Chromium a margin, and it covers macOS too if WebKit honours
+   `@page` (uncertain, hence deliberately modest — where both apply they add up,
+   and 10mm + 8mm still reads as a normal page rather than a stamp).
+
+   Outside @media print because `@page` only ever applies to paged output. */
+@page {
+  margin: 10mm 8mm;
+}
