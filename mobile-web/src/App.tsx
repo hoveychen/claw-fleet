@@ -775,6 +775,7 @@ export function App() {
             sessions={mergedSessions}
             client={clientRef.current}
             initialFiles={sharedFiles}
+            relayReady={connected}
             onClose={() => {
               setShowNewSession(false);
               // Consumed by the sheet — don't re-upload them if it reopens.

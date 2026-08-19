@@ -1,6 +1,6 @@
 import { common, Want } from '@kit.AbilityKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { SharedInbox } from '../common/SharedInbox';
 
 const DOMAIN = 0x0000;
 const TAG = 'fleet';
@@ -38,12 +38,34 @@ struct SharePanel {
       // 内容」的真正原因。
       const stream = params?.['ability.params.stream'];
       if (Array.isArray(stream)) {
+        // 必须**在这里**把字节拷走。分享给的是媒体库 uri，读权限是临时授给
+        // 本次分享的；面板一关、或换到主应用进程，再去读同一个 uri 就未必有
+        // 权限了。拷进应用沙箱（同 bundle 的进程共享文件目录）之后，主应用
+        // 才能稳稳读到。
+        const dir: string = ctx.filesDir + '/shared';
+        if (!fs.accessSync(dir)) {
+          fs.mkdirSync(dir);
+        }
         for (const entry of stream as Object[]) {
           const uri: string = String(entry);
           if (uri.length === 0) { continue; }
           const slash: number = uri.lastIndexOf('/');
           const name: string = slash >= 0 ? uri.substring(slash + 1) : uri;
-          files.push(name + '|' + uri);
+          try {
+            const srcFile = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+            const dstPath: string = dir + '/' + name;
+            try {
+              fs.copyFileSync(srcFile.fd, dstPath);
+            } finally {
+              fs.closeSync(srcFile);
+            }
+            const stat = fs.statSync(dstPath);
+            hilog.info(DOMAIN, TAG, 'share-diag copied %{public}s bytes=%{public}d', name, stat.size);
+            files.push(name);
+          } catch (err) {
+            const e2 = err as Error;
+            hilog.warn(DOMAIN, TAG, 'share-diag copy failed %{public}s: %{public}s', name, e2.message);
+          }
         }
       }
 
@@ -71,12 +93,23 @@ struct SharePanel {
         this.status = '没有可接收的内容';
         return;
       }
-      await SharedInbox.put(ctx, text, files);
-      // 拉起主应用去处理；分享面板本身随即关闭。
+      hilog.info(DOMAIN, TAG, 'share-diag extracted text=%{public}d files=%{public}d',
+        text.length, files.length);
+      // 内容直接挂在 startAbility 的 parameters 上，不走跨进程存储。
+      //
+      // 先前用 preferences 交接，真机日志里主应用 drain 到的却是 (empty) ——
+      // UIExtension 与 UIAbility 是两个进程，preferences 未必落在同一沙箱路径，
+      // 而且还要赌「extension 写完」早于「主应用读取」。want 参数没有这两个
+      // 问题：内容跟着拉起动作一起过去，天然有序。
       await ctx.startAbility({
         bundleName: 'com.atomicservice.6917610791622358675',
         abilityName: 'EntryAbility',
+        parameters: {
+          'fleet.share.text': text,
+          'fleet.share.files': files.join('\n'),
+        },
       });
+      hilog.info(DOMAIN, TAG, 'share-diag startAbility done');
       storage.get<UIExtensionContentSessionLike>('shareSession')?.terminateSelf();
     } catch (e) {
       const err = e as Error;
