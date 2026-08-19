@@ -8,7 +8,6 @@ import {
   Eye,
   Pencil,
   Plus,
-  X,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
@@ -36,6 +35,7 @@ import type {
 } from "../types";
 import type { Attachment } from "./Composer";
 import { uploadAttachmentFiles } from "./Composer";
+import { AttachmentThumbs } from "./AttachmentThumb";
 import styles from "./DecisionsView.module.css";
 import { StructuredCommand } from "./StructuredCommand";
 import { basename } from "./taskNotification";
@@ -926,6 +926,10 @@ function QuestionsCard({
   const [multiOverride, setMultiOverride] = useState<Record<string, boolean>>({});
   // question text → uploaded attachments appended to the answer as @path
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
+  // path → `blob:` URL of the bytes just picked, so the thumbnail is instant and
+  // costs no round trip. A card lives and dies inside one page life, so unlike
+  // the composer's draft there is no restore path to fall back from.
+  const previews = useRef(new Map<string, string>());
   const [uploadingQ, setUploadingQ] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
@@ -1017,7 +1021,8 @@ function QuestionsCard({
       setAttachments((prev) => {
         const cur = prev[question] ?? [];
         const next = [...cur];
-        for (const a of uploaded) {
+        for (const { previewUrl, ...a } of uploaded) {
+          if (previewUrl) previews.current.set(a.path, previewUrl);
           if (!next.some((x) => x.path === a.path)) next.push(a);
         }
         return { ...prev, [question]: next };
@@ -1203,13 +1208,20 @@ function QuestionsCard({
             question={q.question}
             attachments={attachments[q.question] ?? []}
             uploading={uploadingQ === q.question}
+            client={client}
+            previews={previews.current}
             onPick={(files) => void addQuestionFiles(q.question, files)}
-            onRemove={(path) =>
+            onRemove={(path) => {
+              const url = previews.current.get(path);
+              if (url) {
+                URL.revokeObjectURL(url);
+                previews.current.delete(path);
+              }
               setAttachments((prev) => ({
                 ...prev,
                 [q.question]: (prev[q.question] ?? []).filter((a) => a.path !== path),
-              }))
-            }
+              }));
+            }}
           />
           {(q.options?.length ?? 0) > 0 && !q.multiSelect && (
             <div className={styles.questionTools}>
@@ -1277,6 +1289,8 @@ function OtherComposer({
   question,
   attachments,
   uploading,
+  client,
+  previews,
   onPick,
   onRemove,
 }: {
@@ -1287,6 +1301,8 @@ function OtherComposer({
   question: string;
   attachments: Attachment[];
   uploading: boolean;
+  client: RelayClient | null;
+  previews: Map<string, string>;
   onPick: (files: FileList | null) => void;
   onRemove: (path: string) => void;
 }) {
@@ -1295,16 +1311,18 @@ function OtherComposer({
     <div className={styles.otherBlock}>
       {label && <span className={styles.otherLabel}>{label}</span>}
       <div className={styles.otherBox}>
+        {/* Same tiles as the transcript and the composer: an image the user
+            just attached is worth seeing before they send the answer, not just
+            its filename. Non-images still render as a removable name chip. */}
         {attachments.length > 0 && (
           <div className={styles.otherChips}>
-            {attachments.map((a) => (
-              <span key={a.path} className={styles.attachChip}>
-                {a.name}
-                <button className={styles.attachRemove} onClick={() => onRemove(a.path)}>
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
+            <AttachmentThumbs
+              paths={attachments.map((a) => a.path)}
+              client={client}
+              previews={previews}
+              onRemove={onRemove}
+              compact
+            />
           </div>
         )}
         <div className={styles.otherRow}>
