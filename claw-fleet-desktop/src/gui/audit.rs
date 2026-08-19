@@ -149,11 +149,29 @@ pub(crate) fn start_watching_session(
     jsonl_path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<u64, String> {
-    state.backend.write().unwrap().start_watch(jsonl_path)
+    // Watched, not just timed: this takes the backend **write** lock while the
+    // detail pane's read-lock pollers are running, and a call that never returns
+    // would never reach a completion log. It fires once per session open, so a
+    // watchdog thread here is cheap. See `cmd_probe`.
+    let mut probe = crate::cmd_probe::CmdProbe::start_watched("start_watching_session", &jsonl_path);
+    let backend = state.backend.write().unwrap();
+    probe.locked();
+    let out = backend.start_watch(jsonl_path);
+    probe.done(|| match &out {
+        Ok(size) => format!("watching from byte {size}"),
+        Err(e) => format!("error: {e}"),
+    });
+    out
 }
 
 #[tauri::command(async)]
 pub(crate) fn stop_watching_session(state: tauri::State<'_, AppState>) {
-    state.backend.write().unwrap().stop_watch();
+    // Same write lock, and it runs *before* the fetch on every `open()` — a hang
+    // here delays the pane before it ever says 「加载中…」.
+    let mut probe = crate::cmd_probe::CmdProbe::start_watched("stop_watching_session", "");
+    let backend = state.backend.write().unwrap();
+    probe.locked();
+    backend.stop_watch();
+    probe.done(|| "stopped".into());
 }
 
