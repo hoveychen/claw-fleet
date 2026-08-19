@@ -25,6 +25,7 @@ pub mod decision_history;
 pub mod decision_panel_config;
 #[cfg(windows)]
 pub mod dpapi;
+pub mod dsh_chat_preset;
 pub mod dsh_client;
 pub mod dsh_cost;
 pub mod dsh_decisions;
