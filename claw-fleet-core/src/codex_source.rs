@@ -340,7 +340,11 @@ fn extract_model(lines: &[Value]) -> Option<String> {
 /// so a genuine prompt that merely mentions `<system-reminder>` mid-sentence, or
 /// a malformed unterminated block, is returned untouched. When the message is
 /// nothing but the reminder, returns `""` so callers can fold it as meta.
-fn strip_leading_system_reminder(text: &str) -> &str {
+///
+/// Shared with [`crate::dsh_messages`]: dsh has no additional-context channel
+/// either, so `dsh_source::maybe_prepend_active_plans` prepends the same block
+/// into the same place and needs the same peel at the display layer.
+pub(crate) fn strip_leading_system_reminder(text: &str) -> &str {
     const OPEN: &str = "<system-reminder>";
     const CLOSE: &str = "</system-reminder>";
     let trimmed = text.trim_start();
