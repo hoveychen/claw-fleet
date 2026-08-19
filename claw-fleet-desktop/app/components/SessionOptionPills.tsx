@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -16,6 +16,7 @@ import {
 } from "../modelChoices";
 import type { DshModelCatalog } from "../generated/types";
 import { PillMenu, type PillMenuItem } from "./PillMenu";
+import pillStyles from "./PillMenu.module.css";
 
 /** The model / effort / permission-mode ghost pills shared by the new-session
  *  modal and the history panel's resume composer. `""` means "don't pass the
@@ -104,20 +105,46 @@ export function SessionOptionPills({
   // would be worse than offering nothing: picking `claude-opus-5` for a dsh
   // session silently does nothing, because `dsh_source::split_model` needs a
   // provider prefix and drops a bare name.
+  //
+  // The fetch is NOT one-shot, though. The first load can land in `dsh web`'s
+  // boot window right after the desktop relaunches (the server is reaped and
+  // restarted on every app start), and a menu that never retries then lies —
+  // "no options" — until the whole dialog is remounted. So the catalogue is
+  // re-pulled every time the model popover opens (PillMenu.onOpen), and a
+  // failure — transport error, or a partial catalogue whose per-provider
+  // `failures` the harness answered — is shown in the menu with a retry,
+  // instead of being swallowed.
   const [dshCatalog, setDshCatalog] = useState<DshModelCatalog | null>(null);
-  useEffect(() => {
+  /** Last transport failure of `dsh_models`, or null when the last attempt
+   *  succeeded. The last good catalogue survives a failed refetch, so a flaky
+   *  retry never blanks a menu that already rendered. */
+  const [dshError, setDshError] = useState<string | null>(null);
+  const [dshLoading, setDshLoading] = useState(false);
+  /** Latest attempt wins — an older response never overwrites a newer one. */
+  const dshFetchSeq = useRef(0);
+  const loadDshCatalog = useCallback(() => {
     if (!isDsh) return;
-    let live = true;
+    const seq = ++dshFetchSeq.current;
+    setDshLoading(true);
     invoke<DshModelCatalog>("dsh_models")
       .then((c) => {
-        if (live) setDshCatalog(c ?? null);
+        if (seq !== dshFetchSeq.current) return;
+        setDshCatalog(c ?? null);
+        setDshError(null);
       })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
+      .catch((e: unknown) => {
+        if (seq !== dshFetchSeq.current) return;
+        setDshError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (seq === dshFetchSeq.current) setDshLoading(false);
+      });
   }, [isDsh]);
+  useEffect(() => {
+    loadDshCatalog();
+  }, [loadDshCatalog]);
   const dshMenu = useMemo(() => dshModelMenu(isDsh ? dshCatalog : null), [isDsh, dshCatalog]);
+  const dshFailures = dshCatalog?.failures ?? [];
   // Which vendor folder the model menu is currently showing, `null` for the top
   // level. Deliberately *not* reset when the popover closes: after picking a
   // Claude model out of the `anthropic` folder, the next open lands back in that
@@ -203,6 +230,40 @@ export function SessionOptionPills({
   const permissionLabel = permissionMode
     ? t(`new_session.permission_${permissionMode}`)
     : t("new_session.permission_pill_default");
+  // The dsh catalogue's fetch status, pinned above the model menu's rows. A
+  // transport failure and the harness's own per-provider failures both show
+  // here with one shared retry; a quiet "refreshing" note covers the in-flight
+  // state. The last good catalogue stays listed under it, so a failed refetch
+  // degrades to "stale + why", never to a bare "default".
+  const dshStatusHeader = () => (
+    <>
+      {dshLoading && <div className={pillStyles.menu_note}>{t("new_session.model_loading")}</div>}
+      {(dshError !== null || dshFailures.length > 0) && (
+        <div className={pillStyles.menu_error}>
+          <span className={pillStyles.menu_error_text}>
+            {dshError !== null
+              ? t("new_session.model_load_error", { message: dshError })
+              : dshFailures
+                  .map((f) =>
+                    t("new_session.model_provider_failed", {
+                      name: f.name,
+                      message: f.message,
+                    }),
+                  )
+                  .join("\n")}
+          </span>
+          <button
+            type="button"
+            className={pillStyles.menu_retry}
+            disabled={dshLoading}
+            onClick={() => loadDshCatalog()}
+          >
+            {t("new_session.model_retry")}
+          </button>
+        </div>
+      )}
+    </>
+  );
   return (
     <>
       {onToolChange && toolChoices.length > 1 && (
@@ -229,6 +290,8 @@ export function SessionOptionPills({
         testId="model-pill"
         disabled={disabled}
         items={modelItems}
+        onOpen={isDsh ? () => loadDshCatalog() : undefined}
+        menuHeader={isDsh ? dshStatusHeader : undefined}
       />
       <PillMenu
         placement={placement}
