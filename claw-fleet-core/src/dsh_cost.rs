@@ -481,7 +481,7 @@ fn fetch_generation_cost(key: &str, id: &str) -> Result<f64, String> {
     // Off the async runtime for the same reason as `DshClient`: this runs
     // inside `get_dsh_session_cost`, a tauri `(async)` command on a tokio
     // worker, where reqwest::blocking panics and the panic is swallowed.
-    crate::dsh_client::off_runtime(|| {
+    crate::off_runtime::off_runtime(|| {
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(15))
             .build()
