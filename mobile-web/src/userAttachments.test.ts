@@ -4,6 +4,7 @@ import {
   attachmentRef,
   fetchAttachmentImage,
   isRenderableImage,
+  splitAnswerAttachments,
   splitContextFiles,
 } from "./userAttachments";
 import type { RelayClient } from "./relay";
@@ -56,6 +57,27 @@ describe("splitContextFiles —— 剥掉 composer 拼的尾巴", () => {
   it("尾块后面还有正文时不匹配（只认结尾）", () => {
     const text = "a\n\nContext files:\n- /a/one.png\n\n然后我又打了字";
     expect(splitContextFiles(text).paths).toEqual([]);
+  });
+});
+
+describe("splitAnswerAttachments —— 剥掉决策答复里的 @path", () => {
+  it("选项标签与附件路径分离", () => {
+    expect(splitAnswerAttachments("好的 @/Users/x/.fleet/user-attachments/k/a.png")).toEqual({
+      core: "好的",
+      attachments: ["/Users/x/.fleet/user-attachments/k/a.png"],
+    });
+  });
+
+  it("@~ 开头的家目录路径也认", () => {
+    expect(splitAnswerAttachments("@~/shot.png").attachments).toEqual(["~/shot.png"]);
+  });
+
+  it("没有附件时原样返回", () => {
+    expect(splitAnswerAttachments("方案 A")).toEqual({ core: "方案 A", attachments: [] });
+  });
+
+  it("正文里的 @mention（非路径）不当成附件", () => {
+    expect(splitAnswerAttachments("问问 @someone").attachments).toEqual([]);
   });
 });
 

@@ -97,6 +97,31 @@ export function splitContextFiles(text: string): SplitContextFiles {
   return { body: text.slice(0, m.index), paths };
 }
 
+export interface SplitAnswer {
+  /** The option label / free text, with the mentions removed. */
+  core: string;
+  /** Paths named by the `@` mentions, in order. */
+  attachments: string[];
+}
+
+/**
+ * Split the `@/path` / `@~/path` mention suffixes a `fleet__ask` answer carries
+ * from the label or free text in front of them — the desktop's `splitAttachments`
+ * in decisionText.ts, which the history view there feeds to its `AttachmentRow`.
+ *
+ * Without this the mobile decision history printed the raw answer, so an answer
+ * with a picture attached read as `好的 @/Users/…/.fleet/user-attachments/…png`.
+ */
+export function splitAnswerAttachments(raw: string): SplitAnswer {
+  const attachments: string[] = [];
+  const kept: string[] = [];
+  for (const tok of raw.trim().split(/\s+/)) {
+    if (tok.startsWith("@/") || tok.startsWith("@~")) attachments.push(tok.slice(1));
+    else kept.push(tok);
+  }
+  return { core: kept.join(" "), attachments };
+}
+
 export interface AttachmentImage {
   mime: string;
   base64: string;

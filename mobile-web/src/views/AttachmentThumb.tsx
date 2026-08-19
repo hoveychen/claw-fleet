@@ -9,7 +9,7 @@
 // only when tapped — the stored bytes for the lightbox.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Paperclip } from "lucide-react";
+import { Paperclip, X } from "lucide-react";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import {
@@ -62,9 +62,17 @@ export function __clearAttachmentCache(): void {
 export function AttachmentThumbs({
   paths,
   client,
+  previews,
+  onRemove,
 }: {
   paths: string[];
   client: RelayClient | null;
+  /** Local `blob:` previews keyed by path, for files this device just picked —
+   *  the bytes are already here, so the composer shows them without a round
+   *  trip. Absent (and stale after a reload) previews fall back to the relay. */
+  previews?: Map<string, string>;
+  /** Composer only: turns each tile into a removable chip. */
+  onRemove?: (path: string) => void;
 }) {
   if (paths.length === 0) return null;
   return (
@@ -72,13 +80,33 @@ export function AttachmentThumbs({
       {paths.map((path) => {
         const name = attachmentName(path);
         const ref = isRenderableImage(name) ? attachmentRef(path) : null;
+        const remove = onRemove ? () => onRemove(path) : undefined;
         if (ref && client) {
-          return <AttachmentThumb key={path} refr={ref} alt={name} client={client} />;
+          return (
+            <AttachmentThumb
+              key={path}
+              refr={ref}
+              alt={name}
+              client={client}
+              preview={previews?.get(path)}
+              onRemove={remove}
+            />
+          );
         }
         return (
           <span key={path} className={styles.chip} title={path}>
             <Paperclip size={12} className={styles.chipIcon} />
             <span className={styles.chipName}>{name}</span>
+            {remove && (
+              <button
+                type="button"
+                className={styles.remove}
+                aria-label={t("移除")}
+                onClick={remove}
+              >
+                <X size={12} />
+              </button>
+            )}
           </span>
         );
       })}
@@ -96,19 +124,29 @@ function AttachmentThumb({
   refr,
   alt,
   client,
+  preview,
+  onRemove,
 }: {
   refr: AttachmentRef;
   alt: string;
   client: RelayClient;
+  preview?: string;
+  onRemove?: () => void;
 }) {
   const { open } = useLightbox();
   const holder = useRef<HTMLButtonElement | null>(null);
   const [src, setSrc] = useState<string | null>(() => cacheGet(refr, false) ?? null);
   const [failed, setFailed] = useState(false);
   const [loadingFull, setLoadingFull] = useState(false);
+  // A `blob:` preview dies with the page that created it, and the composer
+  // persists its attachment chips across reloads — so a restored draft holds
+  // URLs that no longer resolve. Treat that like any other miss and fall back
+  // to the relay rather than showing a broken tile.
+  const [previewDead, setPreviewDead] = useState(false);
+  const local = preview && !previewDead ? preview : null;
 
   useEffect(() => {
-    if (src || failed) return;
+    if (src || failed || local) return;
     const el = holder.current;
     if (!el) return;
     let alive = true;
@@ -152,12 +190,17 @@ function AttachmentThumb({
       alive = false;
       io.disconnect();
     };
-  }, [client, refr, src, failed]);
+  }, [client, refr, src, failed, local]);
 
   // Tapping enlarges the *stored* bytes, not the thumbnail: the thumb is a
   // ~16 KB JPEG sized for a 160px tile, and zooming that is a blurry mess for
-  // the screenshot-of-text case this feature mostly serves.
+  // the screenshot-of-text case this feature mostly serves. A local preview is
+  // the original file itself, so it beats both.
   const enlarge = useCallback(() => {
+    if (local) {
+      open(local, alt);
+      return;
+    }
     const hit = cacheGet(refr, true);
     if (hit) {
       open(hit, alt);
@@ -176,38 +219,70 @@ function AttachmentThumb({
         if (src) open(src, alt);
       })
       .finally(() => setLoadingFull(false));
-  }, [alt, client, open, refr, src]);
+  }, [alt, client, local, open, refr, src]);
 
+  // A failed pull stays visible as its filename: collapsing it to nothing would
+  // turn every upstream fault — offline desktop, pruned store, corrupt file —
+  // into the same empty gap no one can diagnose. Tapping retries.
   if (failed) {
     return (
-      <button
-        type="button"
-        className={styles.chip}
-        title={alt}
-        onClick={() => setFailed(false)}
-      >
-        <Paperclip size={12} className={styles.chipIcon} />
-        <span className={styles.chipName}>{alt}</span>
-      </button>
+      <span className={styles.chip} title={alt}>
+        <button
+          type="button"
+          className={styles.chipRetry}
+          onClick={() => setFailed(false)}
+        >
+          <Paperclip size={12} className={styles.chipIcon} />
+          <span className={styles.chipName}>{alt}</span>
+        </button>
+        {onRemove && (
+          <button
+            type="button"
+            className={styles.remove}
+            aria-label={t("移除")}
+            onClick={onRemove}
+          >
+            <X size={12} />
+          </button>
+        )}
+      </span>
     );
   }
 
+  const shown = local ?? src;
   return (
-    <button
-      ref={holder}
-      type="button"
-      className={styles.tile}
-      title={alt}
-      aria-label={alt}
-      onClick={src ? enlarge : undefined}
-      data-testid="attachment-thumb"
-    >
-      {src ? (
-        <img src={src} alt={alt} className={styles.img} />
-      ) : (
-        <span className={styles.placeholder}>{t("加载中…")}</span>
+    <span className={styles.tileWrap}>
+      <button
+        ref={holder}
+        type="button"
+        className={styles.tile}
+        title={alt}
+        aria-label={alt}
+        onClick={shown ? enlarge : undefined}
+        data-testid="attachment-thumb"
+      >
+        {shown ? (
+          <img
+            src={shown}
+            alt={alt}
+            className={styles.img}
+            onError={() => (local ? setPreviewDead(true) : setFailed(true))}
+          />
+        ) : (
+          <span className={styles.placeholder}>{t("加载中…")}</span>
+        )}
+        {loadingFull && <span className={styles.busy}>{t("加载中…")}</span>}
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          className={styles.tileRemove}
+          aria-label={t("移除")}
+          onClick={onRemove}
+        >
+          <X size={12} />
+        </button>
       )}
-      {loadingFull && <span className={styles.busy}>{t("加载中…")}</span>}
-    </button>
+    </span>
   );
 }
