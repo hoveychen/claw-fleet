@@ -95,6 +95,8 @@ export async function sharedFilesToFiles(shared: SharedFile[]): Promise<File[]> 
  *
  *  壳侧约定：`window.__fleetShare({ title, texts, files })`。 */
 const NATIVE_SHARE_HOOK = "__fleetShare";
+/** 壳在页面脚本之前把早到的分享堆在这里，等真 hook 注册后消费。 */
+const NATIVE_SHARE_PENDING = "__fleetSharePending";
 
 export function onShareReceived(handler: (share: IncomingShare) => void): () => void {
   const deliver = (raw: Partial<IncomingShare> | undefined) => {
@@ -107,7 +109,17 @@ export function onShareReceived(handler: (share: IncomingShare) => void): () => 
 
   // 原生壳注入通道。先装：它不依赖 Capacitor，鸿蒙 WebShell 只有这一条路。
   const w = window as unknown as Record<string, unknown>;
+
+  // 壳可能在这个 hook 注册之前就投递了——分享往往是冷启动带进来的，而这里跑在
+  // React 的 effect 里，必然晚于页面加载完成。所以约定壳先挂一个占位实现把内容
+  // 推进 __fleetSharePending，我们接手时把积压的一并消费掉。少了这一步，冷启动
+  // 分享会静默丢失：内容备齐、页面就绪，只是没人接。
+  const pending = w[NATIVE_SHARE_PENDING];
   w[NATIVE_SHARE_HOOK] = (payload: Partial<IncomingShare>) => deliver(payload);
+  if (Array.isArray(pending)) {
+    for (const item of pending as Partial<IncomingShare>[]) deliver(item);
+    (pending as unknown[]).length = 0;
+  }
 
   if (!Capacitor.isNativePlatform()) {
     return () => {

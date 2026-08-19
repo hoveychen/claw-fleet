@@ -8,6 +8,7 @@ import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { parsePairingUrl, RelayPairing as ParsedPairing } from '../common/RelayStore';
 import { themeTokens } from '../common/Theme';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
 
 const DOMAIN_W = 0x0000;
 const TAG_W = 'fleet';
@@ -20,6 +21,22 @@ const TAG_W = 'fleet';
 /// 都是真机实测出来的，不是查文档）。https 而非 http 也是硬性的：mobile-web
 /// 的 relayCrypto 依赖 crypto.subtle，Web Crypto 只在安全上下文可用。
 const ORIGIN = 'https://fleet.local/';
+/// 分享进来的文件挂在这个前缀下，与 rawfile 里的站点资源区分开。
+const SHARED_PREFIX = '__shared/';
+
+/// 交给 web 的文件条目，字段名对齐 shareTarget.ts 的 SharedFile。
+interface SharedFileEntry {
+  uri: string;
+  name: string;
+  mimeType: string;
+}
+
+/// __fleetShare 的载荷，形状对齐 shareTarget.ts 的 IncomingShare。
+interface SharePayload {
+  title: string;
+  texts: string[];
+  files: SharedFileEntry[];
+}
 
 
 /// 暴露给页面的原生桥。只放 web 在 WebView 里确实做不到的事——每多一个方法，
@@ -64,6 +81,9 @@ struct WebShell {
   /// EntryAbility 收到系统分享后把内容放这里；nonce 变化即代表「又分享了一次」，
   /// 哪怕文本和上次一模一样。@Watch 是为了让 app 已经开着时的分享也能送达。
   @StorageProp('sharedText') sharedText: string = '';
+  /// 分享进来的文件名（换行分隔）。字节由 SharePanel 拷进沙箱，这里只把名字
+  /// 拼成 __shared/ 的 URL 交给 web，取字节的活由 onInterceptRequest 干。
+  @StorageProp('sharedFiles') sharedFiles: string = '';
   @StorageProp('sharedNonce') @Watch('onSharedChanged') sharedNonce: number = 0;
   private webReady: boolean = false;
   @State private src: string = '';
@@ -129,17 +149,37 @@ struct WebShell {
   /// 把分享内容交给页面。走 shareTarget.ts 约定的 window.__fleetShare —— 那是
   /// 给所有原生壳用的通用入口，不是鸿蒙专用分支；Capacitor 侧同样认它。
   ///
-  /// 必须重试：onPageEnd 只代表页面加载完成，而那个 hook 是 React 在
-  /// useEffect 里挂的，effect 比 onPageEnd 晚。第一版只投一次，真机日志里
-  /// 就是 `injected result="NO_HOOK"` —— 内容备齐了、web 也就绪了，只差 hook
-  /// 还没注册，然后就再没有下一次机会。
+  /// 不再重试：bootScript 已在页面任何脚本之前占好 __fleetShare 的位，早到的
+  /// 内容先进 __fleetSharePending，shareTarget.ts 注册真 hook 时消费。时序
+  /// 依赖因此消失。
+  ///
+  /// 之所以不靠重试：真机日志里只有 attempt=0，setTimeout 在 ArkTS struct
+  /// 方法里根本没回调 —— 那版重试写了等于没写。
   private deliverShare(attempt: number): void {
-    if (!this.webReady || this.sharedText.length === 0) {
+    if (!this.webReady || (this.sharedText.length === 0 && this.sharedFiles.length === 0)) {
       hilog.info(DOMAIN_W, TAG_W, 'share-diag deliver skipped ready=%{public}s len=%{public}d',
         this.webReady ? 'yes' : 'no', this.sharedText.length);
       return;
     }
-    const payload: string = JSON.stringify({ title: '', texts: [this.sharedText], files: [] });
+    const fileEntries: SharedFileEntry[] = [];
+    for (const name of this.sharedFiles.split('\n')) {
+      if (name.length === 0) { continue; }
+      // 给 web 一个它能直接 fetch 的 URL。shareTarget.ts 里的
+      // sharedFilesToFiles 会 fetch 它 → 拦截器从沙箱返回字节 → 变成 File →
+      // 走既有的附件上传链路。web 侧因此一行都不用改。
+      const entry: SharedFileEntry = {
+        uri: ORIGIN + SHARED_PREFIX + name,
+        name: name,
+        mimeType: this.mime(name),
+      };
+      fileEntries.push(entry);
+    }
+    const share: SharePayload = {
+      title: '',
+      texts: this.sharedText.length > 0 ? [this.sharedText] : [],
+      files: fileEntries,
+    };
+    const payload: string = JSON.stringify(share);
     this.controller.runJavaScript(
       `(function(){ if(!window.__fleetShare) return 'NO_HOOK';` +
       ` window.__fleetShare(` + payload + `); return 'OK'; })()`,
@@ -150,17 +190,44 @@ struct WebShell {
       if (ok) {
         // 投递成功后清掉，避免下次前台又投一遍同样的内容。
         this.sharedText = '';
+        this.sharedFiles = '';
         return;
       }
-      // 每 300ms 再试，最多 ~6 秒。够 React 挂完 effect，又不会无限占着。
-      if (attempt < 20) {
-        setTimeout(() => { this.deliverShare(attempt + 1); }, 300);
-      } else {
-        hilog.warn(DOMAIN_W, TAG_W, 'share-diag gave up: hook never appeared');
-      }
+      // 走到这里说明连占位 hook 都不在（bootScript 没跑成），那是别的问题，
+      // 重试也救不回来 —— 留日志比空转有用。
+      hilog.warn(DOMAIN_W, TAG_W, 'share-diag no hook at all — bootScript may not have run');
     }).catch((e: Error) => {
       hilog.warn(DOMAIN_W, TAG_W, 'share-diag inject failed: %{public}s', e.message);
     });
+  }
+
+  /// 从沙箱读一个分享进来的文件，喂给 WebView。
+  private serveSharedFile(name: string): WebResourceResponse | null {
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const path: string = ctx.filesDir + '/shared/' + name;
+      const stat = fs.statSync(path);
+      const buf = new ArrayBuffer(stat.size);
+      const file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      try {
+        fs.readSync(file.fd, buf);
+      } finally {
+        fs.closeSync(file);
+      }
+      const resp = new WebResourceResponse();
+      resp.setResponseData(buf);
+      resp.setResponseMimeType(this.mime(name));
+      resp.setResponseEncoding('utf-8');
+      resp.setResponseCode(200);
+      resp.setReasonMessage('OK');
+      resp.setResponseIsReady(true);
+      hilog.info(DOMAIN_W, TAG_W, 'share-diag served %{public}s bytes=%{public}d', name, stat.size);
+      return resp;
+    } catch (e) {
+      const err = e as Error;
+      hilog.warn(DOMAIN_W, TAG_W, 'share-diag serve failed %{public}s: %{public}s', name, err.message);
+      return null;
+    }
   }
 
   private mime(path: string): string {
@@ -170,6 +237,10 @@ struct WebShell {
     if (path.endsWith('.json') || path.endsWith('.webmanifest')) return 'application/json';
     if (path.endsWith('.svg')) return 'image/svg+xml';
     if (path.endsWith('.png')) return 'image/png';
+    if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg';
+    if (path.endsWith('.gif')) return 'image/gif';
+    if (path.endsWith('.webp')) return 'image/webp';
+    if (path.endsWith('.pdf')) return 'application/pdf';
     if (path.endsWith('.ico')) return 'image/x-icon';
     if (path.endsWith('.woff2')) return 'font/woff2';
     if (path.endsWith('.woff')) return 'font/woff';
@@ -189,6 +260,17 @@ struct WebShell {
   /// 两个补丁也要早于页面代码注册。全部是运行时补丁，mobile-web 源码不动。
   private bootScript(): string {
     return `(function(){
+      // 先把 __fleetShare 占上位，投递就不必再跟 React 的 useEffect 赛跑。
+      //
+      // 之前靠「注入失败就 setTimeout 重试」，真机日志里只有 attempt=0 ——
+      // ArkTS struct 方法里的 setTimeout 压根没回调，重试等于没写。占位 hook
+      // 把内容先收进队列，等 shareTarget.ts 注册真 hook 时一次性消费，时序
+      // 依赖就整个消失了。
+      if (!window.__fleetShare) {
+        window.__fleetSharePending = window.__fleetSharePending || [];
+        window.__fleetShare = function(p){ window.__fleetSharePending.push(p); };
+      }
+
       var s = document.documentElement.style;
       // 只给底部。顶部由框架自己 inset 过了 —— SafeArea.ets 的注释记着这笔账:
       // 2026-07-15 就因为应用侧又加了一次 top inset，导致每个页头被整整推下
@@ -302,7 +384,12 @@ struct WebShell {
           .onInterceptRequest((event) => {
             const url: string = event.request.getRequestUrl();
             if (!url.startsWith(ORIGIN)) return null;
-            const rel: string = 'web/' + this.strip(url.substring(ORIGIN.length));
+            const tail: string = this.strip(url.substring(ORIGIN.length));
+            // 分享进来的文件不在 rawfile 里，而在应用沙箱 files/shared/。
+            if (tail.startsWith(SHARED_PREFIX)) {
+              return this.serveSharedFile(tail.substring(SHARED_PREFIX.length));
+            }
+            const rel: string = 'web/' + tail;
             try {
               const ctx = getContext(this) as common.UIAbilityContext;
               const bytes: Uint8Array = ctx.resourceManager.getRawFileContentSync(rel);

@@ -1,7 +1,6 @@
 import { AbilityConstant, ConfigurationConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
-import { SharedInbox, SharedItem } from '../common/SharedInbox';
 import { initTheme, setSystemDark, themeTokens } from '../common/Theme';
 import { initSafeArea } from '../common/SafeArea';
 import { initWakeLock } from '../common/WakeLock';
@@ -21,34 +20,41 @@ export default class EntryAbility extends UIAbility {
   /// @Watch-es it and kicks the relay client if it isn't authed.
   onForeground(): void {
     AppStorage.setOrCreate('fgNonce', Date.now());
-    // 分享扩展可能在本应用不在前台时投递过内容，每次回前台都取一次。
-    this.drainSharedInbox();
   }
 
-  /// 分享由独立的 ShareExtAbility 进程接收并写进 SharedInbox（preferences），
-  /// 这里只在前台时取走 —— 两者不同进程，AppStorage 传不过来。
-  private drainSharedInbox(): void {
-    SharedInbox.take(this.context).then((item: SharedItem | null) => {
-      hilog.info(DOMAIN, TAG, 'share-diag drain item=%{public}s',
-        item === null ? '(empty)' : ('text=' + item.text.length + ' files=' + item.fileNames.length));
-      if (item === null) {
-        return;
-      }
-      // 图片本体还没有通道送进 WebView（那要给拦截器加一条沙箱映射），先把
-      // 文件名并进正文 —— 用户至少看得见自己分享了什么，而不是一片空白。
-      const parts: string[] = [];
-      if (item.text.length > 0) { parts.push(item.text); }
-      if (item.fileNames.length > 0) { parts.push('[共享文件] ' + item.fileNames.join(', ')); }
-      AppStorage.setOrCreate('sharedText', parts.join('\n\n'));
-      const n: number = AppStorage.get<number>('sharedNonce') ?? 0;
-      AppStorage.setOrCreate('sharedNonce', n + 1);
-      hilog.info(DOMAIN, TAG, 'share-diag published to AppStorage nonce=%{public}d', n + 1);
-    }).catch((e: Error) => {
-      hilog.warn(DOMAIN, TAG, 'drain share inbox failed: %{public}s', e.message);
-    });
+  /// 分享内容随 startAbility 的 want 参数一起过来（见 SharePanel）。
+  ///
+  /// 早先走 preferences 跨进程交接，真机日志里主应用读到的一直是 (empty)：
+  /// UIExtension 与 UIAbility 是两个进程，preferences 未必落在同一沙箱路径，
+  /// 而且还要赌「extension 写完」早于「主应用读取」。want 参数跟着拉起动作
+  /// 一起过去，天然有序，也不依赖沙箱共享。
+  private takeSharedFromWant(want: Want): void {
+    const params = want.parameters as Record<string, Object> | undefined;
+    const text = params?.['fleet.share.text'];
+    const rawFiles = params?.['fleet.share.files'];
+    const textStr: string = typeof text === 'string' ? text : '';
+    const filesStr: string = typeof rawFiles === 'string' ? rawFiles : '';
+    hilog.info(DOMAIN, TAG, 'share-diag want text=%{public}d files=%{public}d',
+      textStr.length, filesStr.length);
+    if (textStr.length === 0 && filesStr.length === 0) {
+      return;
+    }
+    // 文件名列表原样传给 WebShell —— 它会拼成 https://fleet.local/__shared/<name>
+    // 交给 web，由拦截器从沙箱把字节喂回去，最终走 web 既有的附件上传链路。
+    AppStorage.setOrCreate('sharedFiles', filesStr);
+    AppStorage.setOrCreate('sharedText', textStr);
+    const n: number = AppStorage.get<number>('sharedNonce') ?? 0;
+    AppStorage.setOrCreate('sharedNonce', n + 1);
+    hilog.info(DOMAIN, TAG, 'share-diag published nonce=%{public}d', n + 1);
   }
 
-  onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+  /// app 已在后台时，分享走这条路而不是 onCreate。
+  onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    this.takeSharedFromWant(want);
+  }
+
+  onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    this.takeSharedFromWant(want);
     const cfg = this.context.config;
     // 语言与主题现在都归 web 层：mobile-web 自己读 navigator.language 和
     // prefers-color-scheme。这里只保留 initTheme —— 它喂的是 AppStorage 里的
@@ -79,7 +85,6 @@ export default class EntryAbility extends UIAbility {
     // mirror of the web client's initWakeLock on startup).
     initWakeLock(this.context);
     this.applyWindowBackground();
-    this.drainSharedInbox();
   }
 
   /// 窗口底色。安全区那一条(手势条所在的位置)由**窗口**绘制，不是网页——
