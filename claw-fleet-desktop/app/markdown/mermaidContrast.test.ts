@@ -4,6 +4,7 @@ import {
   contrastRatio,
   legibleInkFor,
   parseColor,
+  repairMermaidContrastInSvg,
   repairMermaidLabelContrast,
 } from "./mermaidContrast";
 
@@ -144,5 +145,45 @@ describe("repairMermaidLabelContrast", () => {
     const once = g.querySelector("span")?.getAttribute("style");
     repairMermaidLabelContrast(svg);
     expect(g.querySelector("span")?.getAttribute("style")).toBe(once);
+  });
+});
+
+describe("repairMermaidContrastInSvg", () => {
+  const svg = (labelStyle = "") =>
+    `<svg xmlns="http://www.w3.org/2000/svg"><g class="node default">` +
+    `<rect style="fill:#4a3728 !important"></rect>` +
+    `<g class="label"><foreignObject><span class="nodeLabel"${labelStyle}>x</span>` +
+    `</foreignObject></g></g></svg>`;
+
+  it("把可读的墨色烤进字符串里（这样谁再注入一次都还是修好的）", () => {
+    const out = repairMermaidContrastInSvg(svg());
+    expect(out).toContain("color:#f5f5f5");
+  });
+
+  it("作者写了 color 的照旧不碰", () => {
+    const out = repairMermaidContrastInSvg(svg(' style="color:#ffd166"'));
+    expect(out).toContain("#ffd166");
+    expect(out).not.toContain("#f5f5f5");
+  });
+
+  it("标签里带 <br> 也照修（mermaid 的多行标签就是这样，不是合法 XML）", () => {
+    const withBr =
+      `<svg xmlns="http://www.w3.org/2000/svg"><g class="node default">` +
+      `<rect style="fill:#4a3728 !important"></rect>` +
+      `<g class="label"><foreignObject><span class="nodeLabel">` +
+      `<p>④ Canonicalize<br>subject → LEI/FIGI</p></span></foreignObject></g></g></svg>`;
+    expect(repairMermaidContrastInSvg(withBr)).toContain("color:#f5f5f5");
+  });
+
+  it("里面根本没有 <svg> 时原样退回，不把内容弄丢", () => {
+    expect(repairMermaidContrastInSvg("mermaid 渲染失败了")).toBe(
+      "mermaid 渲染失败了",
+    );
+  });
+
+  it("残缺的 svg 不会被丢掉（HTML 解析会补全，但图还在）", () => {
+    const out = repairMermaidContrastInSvg("<svg><g class=\"node\"></g>");
+    expect(out).toContain("<svg");
+    expect(out).toContain("node");
   });
 });

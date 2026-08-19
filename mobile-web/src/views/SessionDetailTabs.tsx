@@ -8,6 +8,7 @@ import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type {
@@ -109,15 +110,17 @@ function recordSummary(r: DecisionHistoryRecord): string {
   return r.aiTitle ?? r.workspaceName ?? t("计划审批");
 }
 
-// Markdown for decision bodies: the shared full chain (GFM + CJK bold + KaTeX +
-// mermaid + sanitize), same as the wiki/message views. Links are rendered inert
-// (mobile has no in-app path navigation in this tab). The inline variant unwraps
-// <p> so it can sit inside the option label/description <span>s.
+// Markdown for decision bodies: the shared plugin chain (GFM + CJK bold + KaTeX
+// + sanitize) plus mermaidMarkdownComponents, which is what actually turns a
+// ```mermaid fence into a diagram — the plugin chain alone leaves it as code.
+// Links are rendered inert (mobile has no in-app path navigation in this tab).
+// The inline variant unwraps <p> so it can sit inside the option
+// label/description <span>s.
 const mdLink: Components["a"] = ({ children }) => (
   <span className={styles.mdLink}>{children}</span>
 );
-const MD_BLOCK: Components = { a: mdLink };
-const MD_INLINE: Components = { a: mdLink, p: ({ children }) => <>{children}</> };
+export const MD_BLOCK: Components = { ...mermaidMarkdownComponents, a: mdLink };
+export const MD_INLINE: Components = { ...MD_BLOCK, p: ({ children }) => <>{children}</> };
 
 function Md({ text, inline }: { text: string; inline?: boolean }) {
   return (
@@ -589,7 +592,12 @@ function HandoffLinkCard({
       )}
       {open ? (
         <div className={styles.markdown}>
-          <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>{link.note}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}
+            components={mermaidMarkdownComponents}
+          >
+            {link.note}
+          </ReactMarkdown>
         </div>
       ) : (
         <div className={styles.notePreview}>{preview}</div>

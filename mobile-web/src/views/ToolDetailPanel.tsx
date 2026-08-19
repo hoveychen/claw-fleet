@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import { useLightbox } from "./Lightbox";
@@ -114,7 +115,11 @@ function AgentBody({ result, fallback }: { result: Record<string, unknown> | nul
       )}
       {text && (
         <div className={styles.markdownBody}>
-          <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>
+          <ReactMarkdown
+            remarkPlugins={mdRemarkPlugins}
+            rehypePlugins={mdRehypePlugins}
+            components={mermaidMarkdownComponents}
+          >
             {text}
           </ReactMarkdown>
         </div>
@@ -269,7 +274,11 @@ function WebFetchBody({
       )}
       {summary ? (
         <div className={styles.fetchSummary}>
-          <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>
+          <ReactMarkdown
+            remarkPlugins={mdRemarkPlugins}
+            rehypePlugins={mdRehypePlugins}
+            components={mermaidMarkdownComponents}
+          >
             {summary}
           </ReactMarkdown>
         </div>
