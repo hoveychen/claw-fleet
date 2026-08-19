@@ -775,7 +775,14 @@ pub fn reconcile_dsh_from_claude_state(user_title: &str, locale: &str) -> Result
         model: crate::model_guidance::is_model_guidance_installed(),
         lessons: dsh_present && !crate::lessons_store::list_lessons().is_empty(),
     };
-    reconcile_dsh_agents_md(set, user_title, locale)
+    reconcile_dsh_agents_md(set, user_title, locale)?;
+
+    // Fleet's cordis plugin rides the same switch as the PRD block, because the
+    // plugin is what delivers the PRD block's dynamic half (the active-plans
+    // reminder). Reported rather than swallowed: with the plugin uninstalled
+    // there is no fallback channel, so a silent failure would mean a dsh session
+    // quietly running without Fleet's context.
+    crate::dsh_plugin::reconcile_dsh_patch(set.prd)
 }
 
 /// Whether the dsh PRD-discipline block is present in `$DSH_HOME/AGENTS.md`.
