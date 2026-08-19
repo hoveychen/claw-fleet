@@ -32,6 +32,10 @@ use crate::frames::PushPayload;
 
 /// Account service-notification send endpoint base (元服务 channel).
 const SVC_API_BASE: &str = "https://push-api.cloud.huawei.com/v1";
+/// Device-token send endpoint base (普通应用 channel). Same host, same JWT auth,
+/// different major version and a completely different body shape — see
+/// [`build_app_notification`].
+const APP_API_BASE: &str = "https://push-api.cloud.huawei.com/v3";
 /// The `aud` every Push Kit service-account JWT must carry — the OAuth token
 /// endpoint. Omitting it makes the send 401 even though we never call this URL
 /// directly (the self-signed JWT is used as the Bearer verbatim).
@@ -67,13 +71,45 @@ fn is_dead_openid_code(code: &str) -> bool {
     DEAD_OPENID_CODES.contains(&code)
 }
 
+/// Codes that mean a device push token will never deliver again.
+///
+/// Only `80300007` (invalid token). Deliberately narrower than it could be: we
+/// send exactly one token per request, so the multi-token "partial success"
+/// code `80100000` — whose invalid entries live in a separate `illegal_tokens`
+/// field — never applies here. Same bias as [`DEAD_OPENID_CODES`]: under-pruning
+/// leaves a dead entry that keeps getting skipped, over-pruning silently drops
+/// a working device.
+const DEAD_TOKEN_CODES: &[&str] = &["80300007"];
+
+fn is_dead_token_code(code: &str) -> bool {
+    DEAD_TOKEN_CODES.contains(&code)
+}
+
+/// Notification category for the app channel.
+///
+/// `WORK` matches what the 元服务 template (「工作事项提醒」) was approved for and
+/// is the right classification for a decision card — it is a work item awaiting
+/// the user, not marketing.
+///
+/// CAVEAT (unverified on device): Huawei gates every category except `MARKETING`
+/// behind 自分类权益 approval, applied for per app in AGC. Without it the send is
+/// expected to fail — loudly, as a `Transient` error in the logs, which is why
+/// this defaults to the value we actually want rather than silently degrading.
+/// `MARKETING` does get accepted without approval but is rate-limited to a
+/// handful of messages per device per day, which would drop decision cards on
+/// the floor and look like a bug. Override with `RELAY_HARMONY_CATEGORY` if the
+/// approval is still pending.
+const DEFAULT_CATEGORY: &str = "WORK";
+
 /// Why a [`HarmonyPush::send`] failed, so the caller can decide whether to
 /// prune the OpenID. The inner `String` is a human-readable detail for logs.
 #[derive(Debug)]
 pub enum SendError {
-    /// Push Kit reported the OpenID as permanently invalid / unsubscribed —
-    /// the caller should remove this subscription. See [`DEAD_OPENID_CODES`].
-    DeadOpenId(String),
+    /// Push Kit reported this recipient as permanently invalid / unsubscribed —
+    /// the caller should remove the subscription. Which codes count depends on
+    /// the channel: [`DEAD_OPENID_CODES`] for 元服务, [`DEAD_TOKEN_CODES`] for the
+    /// app channel.
+    DeadRecipient(String),
     /// Transport / auth / unknown-code failure — keep the subscription, retry
     /// on the next notify.
     Transient(String),
@@ -82,7 +118,7 @@ pub enum SendError {
 impl std::fmt::Display for SendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SendError::DeadOpenId(d) => write!(f, "dead openId: {d}"),
+            SendError::DeadRecipient(d) => write!(f, "dead recipient: {d}"),
             SendError::Transient(d) => write!(f, "{d}"),
         }
     }
@@ -117,7 +153,10 @@ pub struct HarmonyPush {
     /// Application-side App ID — goes into the request body's `appId`.
     app_id: String,
     /// Subscription template id claimed in AGC — the body's `templateId`.
+    /// 元服务 channel only; the app channel has no templates.
     template_id: String,
+    /// Notification category for the app channel — see [`DEFAULT_CATEGORY`].
+    category: String,
     /// Service-account key id — the JWT header `kid`.
     key_id: String,
     /// Service-account `sub_account` — the JWT `iss`.
@@ -141,6 +180,8 @@ impl HarmonyPush {
         let project_id = nonblank("RELAY_HARMONY_PROJECT_ID")?;
         let app_id = nonblank("RELAY_HARMONY_APP_ID")?;
         let template_id = nonblank("RELAY_HARMONY_TEMPLATE_ID")?;
+        let category = nonblank("RELAY_HARMONY_CATEGORY")
+            .unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
         let key_id = nonblank("RELAY_HARMONY_KEY_ID")?;
         let sub_account = nonblank("RELAY_HARMONY_SUB_ACCOUNT")?;
         // The PEM is multi-line; docker/compose commonly delivers it with the
@@ -149,7 +190,7 @@ impl HarmonyPush {
             .ok()
             .map(|s| s.replace("\\n", "\n"))
             .filter(|s| !s.trim().is_empty())?;
-        Self::new(project_id, app_id, template_id, key_id, sub_account, &private_key)
+        Self::new(project_id, app_id, template_id, category, key_id, sub_account, &private_key)
             .map_err(|e| log::warn!("HarmonyOS Push Kit disabled — bad private key: {e}"))
             .ok()
     }
@@ -160,6 +201,7 @@ impl HarmonyPush {
         project_id: String,
         app_id: String,
         template_id: String,
+        category: String,
         key_id: String,
         sub_account: String,
         private_key_pem: &str,
@@ -170,6 +212,7 @@ impl HarmonyPush {
             project_id,
             app_id,
             template_id,
+            category,
             key_id,
             sub_account,
             encoding_key,
@@ -205,11 +248,52 @@ impl HarmonyPush {
         Ok(token)
     }
 
-    /// Send one service notification to a Huawei-account OpenID. On failure
-    /// returns a [`SendError`] classifying whether the OpenID is dead (caller
-    /// should prune) or the failure is transient (caller keeps + retries).
-    pub async fn send(&self, open_id: &str, payload: &PushPayload<'_>) -> Result<(), SendError> {
+    /// POST one Push Kit request and classify the outcome.
+    ///
+    /// Push Kit answers HTTP 200 with a business `code` on both success and
+    /// failure, so the code — not the HTTP status — is authoritative. The two
+    /// channels differ only in which codes mean "this recipient is gone", hence
+    /// `is_dead` as a parameter rather than a fixed list.
+    async fn post(
+        &self,
+        what: &str,
+        url: String,
+        body: Value,
+        is_dead: fn(&str) -> bool,
+    ) -> Result<(), SendError> {
         let jwt = self.jwt().map_err(SendError::Transient)?;
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(jwt)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| SendError::Transient(format!("{what} request failed: {e}")))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| SendError::Transient(format!("{what} response body: {e}")))?;
+        let code = serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|v| v.get("code").and_then(Value::as_str).map(str::to_string));
+        match code.as_deref() {
+            Some(SUCCESS_CODE) => Ok(()),
+            Some(c) if is_dead(c) => {
+                Err(SendError::DeadRecipient(format!("code {c}: {text} (http {status})")))
+            }
+            Some(c) => Err(SendError::Transient(format!(
+                "{what} code {c}: {text} (http {status})"
+            ))),
+            None => Err(SendError::Transient(format!(
+                "{what} unexpected response (http {status}): {text}"
+            ))),
+        }
+    }
+
+    /// Send one service notification to a Huawei-account OpenID (元服务 channel).
+    pub async fn send(&self, open_id: &str, payload: &PushPayload<'_>) -> Result<(), SendError> {
         let url = format!("{SVC_API_BASE}/{}/service_notification/send", self.project_id);
         let body = build_service_notification(
             &gen_msg_id(),
@@ -218,36 +302,18 @@ impl HarmonyPush {
             open_id,
             payload,
         );
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(jwt)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| SendError::Transient(format!("service_notification request failed: {e}")))?;
-        let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| SendError::Transient(format!("service_notification response body: {e}")))?;
-        // Push Kit returns HTTP 200 with a business `code` on both success and
-        // failure, so the code — not the HTTP status — is authoritative.
-        let code = serde_json::from_str::<Value>(&text)
-            .ok()
-            .and_then(|v| v.get("code").and_then(Value::as_str).map(str::to_string));
-        match code.as_deref() {
-            Some(SUCCESS_CODE) => Ok(()),
-            Some(c) if is_dead_openid_code(c) => {
-                Err(SendError::DeadOpenId(format!("code {c}: {text} (http {status})")))
-            }
-            Some(c) => Err(SendError::Transient(format!(
-                "service_notification code {c}: {text} (http {status})"
-            ))),
-            None => Err(SendError::Transient(format!(
-                "service_notification unexpected response (http {status}): {text}"
-            ))),
-        }
+        self.post("service_notification", url, body, is_dead_openid_code).await
+    }
+
+    /// Send one notification to a device push token (普通应用 channel).
+    ///
+    /// This is the channel the HarmonyOS **app** build and the Android shell
+    /// both use — same endpoint, same body, only the token differs — which is
+    /// why there is one implementation rather than one per platform.
+    pub async fn send_token(&self, token: &str, payload: &PushPayload<'_>) -> Result<(), SendError> {
+        let url = format!("{APP_API_BASE}/{}/messages:send", self.project_id);
+        let body = build_app_notification(&self.category, token, payload);
+        self.post("messages:send", url, body, is_dead_token_code).await
     }
 }
 
@@ -288,6 +354,29 @@ fn build_service_notification(
             "thing_0": payload.body,
             "thing_4": payload.title,
         }
+    })
+}
+
+/// App-channel notification body.
+///
+/// Nothing is shared with the 元服务 shape: no `msgId`, no `appId`, no template —
+/// the title/body are free-form, and the recipient is a device token array.
+///
+/// `clickAction.actionType: 0` opens the app's home page. Deep-linking straight
+/// to the decision card would need a custom action plus an on-device check that
+/// the parameters survive the launch, so that is left to a follow-up rather than
+/// asserted here — `payload.url` is deliberately not wired up yet.
+fn build_app_notification(category: &str, token: &str, payload: &PushPayload<'_>) -> Value {
+    serde_json::json!({
+        "payload": {
+            "notification": {
+                "category": category,
+                "title": payload.title,
+                "body": payload.body,
+                "clickAction": { "actionType": 0 }
+            }
+        },
+        "target": { "token": [token] }
     })
 }
 
@@ -332,6 +421,7 @@ cHMuOFehtqcSyMaY3z552xNj
             "PROJ".into(),
             "APP123".into(),
             "TPL456".into(),
+            "WORK".into(),
             "KEYID789".into(),
             "sub-acct-1".into(),
             TEST_RSA_PEM,
@@ -438,6 +528,7 @@ cHMuOFehtqcSyMaY3z552xNj
             "P".into(),
             "A".into(),
             "T".into(),
+            "C".into(),
             "K".into(),
             "S".into(),
             "not a pem",

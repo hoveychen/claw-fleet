@@ -4,6 +4,7 @@ import { RelayStore, RelayPairing } from '../common/RelayStore';
 import { saveBase64File } from '../common/FileTransfer';
 import { setKeepScreenOn } from '../common/WakeLock';
 import { shareFile } from '../common/SystemShare';
+import { acquirePushToken } from '../common/PushRegister';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { parsePairingUrl, RelayPairing as ParsedPairing } from '../common/RelayStore';
 import { themeTokens } from '../common/Theme';
@@ -86,6 +87,9 @@ struct WebShell {
   @StorageProp('sharedFiles') sharedFiles: string = '';
   @StorageProp('sharedNonce') @Watch('onSharedChanged') sharedNonce: number = 0;
   private webReady: boolean = false;
+  /// 设备 push token，取到一次就缓存 —— getToken 会拉起系统通知授权，重复调
+  /// 没意义。空串表示还没取到或这台设备取不到（模拟器/未开通推送权益）。
+  private pushToken: string = '';
   @State private src: string = '';
   /// null = 还在读配对状态；'' = 未配对（显示配对入口）；其余 = 已配对的 src。
   /// 分三态是因为「还没读完」和「读完了没有」必须区别对待 —— 否则冷启动会
@@ -201,6 +205,47 @@ struct WebShell {
     });
   }
 
+  /// 取设备 push token 并交给页面。原生只负责「拿到 token」，上报 relay 那半边
+  /// 归 web（nativePush.ts → push.ts）—— 它才握着 relay 连接、channel token 和
+  /// 用户的通知开关状态。元服务时代这里是自己开 WebSocket 报 openId，为此在
+  /// ArkTS 里重写了一份 HKDF，两套实现各自漂移；那两个文件已随本次一起删掉。
+  ///
+  /// 只在已配对时做：未配对时 web 根本没有可注册的 channel，提前弹通知授权
+  /// 也只会打扰用户。
+  private deliverPushToken(): void {
+    if (!this.webReady) { return; }
+    if (this.pushToken.length > 0) {
+      this.injectPushToken();
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    acquirePushToken(ctx).then((t: string) => {
+      if (t.length === 0) {
+        hilog.info(DOMAIN_W, TAG_W, 'push-diag no token on this device — skip register');
+        return;
+      }
+      this.pushToken = t;
+      this.injectPushToken();
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN_W, TAG_W, 'push-diag acquire failed: %{public}s', e.message);
+    });
+  }
+
+  /// 与 __fleetShare 同一套约定：bootScript 已提前占位 + 排队，所以这里不需要
+  /// 重试，也不能靠 setTimeout 重试（ArkTS struct 方法里的 setTimeout 不回调，
+  /// 分享那六个坑里已经栽过一次）。
+  private injectPushToken(): void {
+    this.controller.runJavaScript(
+      `(function(){ if(!window.__fleetPushToken) return 'NO_HOOK';` +
+      ` window.__fleetPushToken(` + JSON.stringify(this.pushToken) + `); return 'OK'; })()`,
+    ).then((r: string) => {
+      hilog.info(DOMAIN_W, TAG_W, 'push-diag injected len=%{public}d result=%{public}s',
+        this.pushToken.length, r);
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN_W, TAG_W, 'push-diag inject failed: %{public}s', e.message);
+    });
+  }
+
   /// 从沙箱读一个分享进来的文件，喂给 WebView。
   private serveSharedFile(name: string): WebResourceResponse | null {
     try {
@@ -269,6 +314,14 @@ struct WebShell {
       if (!window.__fleetShare) {
         window.__fleetSharePending = window.__fleetSharePending || [];
         window.__fleetShare = function(p){ window.__fleetSharePending.push(p); };
+      }
+
+      // 推送 token 同理占位：原生取 token 要等系统通知授权，必然晚于首帧，
+      // 而 nativePush.ts 的 hook 又挂在 React effect 里 —— 两头都不确定，
+      // 于是两头都走队列。
+      if (!window.__fleetPushToken) {
+        window.__fleetPushTokenPending = window.__fleetPushTokenPending || [];
+        window.__fleetPushToken = function(t){ window.__fleetPushTokenPending.push(t); };
       }
 
       var s = document.documentElement.style;
@@ -410,6 +463,7 @@ struct WebShell {
             // 加载完，@Watch 早就烧过了。
             this.webReady = true;
             this.deliverShare(0);
+            this.deliverPushToken();
           })
           .width('100%')
           .height('100%')

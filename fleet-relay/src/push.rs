@@ -115,18 +115,12 @@ impl Push {
     /// `harmony_push.rs`. A subscription with no explicit `platform` is treated
     /// as Web Push for backward compat.
     pub fn subscribe(&self, channel: &str, subscription: Value) -> Result<(), String> {
-        if subscription.get("platform").and_then(Value::as_str) == Some("harmony") {
-            let open_id = subscription
-                .get("openId")
-                .and_then(Value::as_str)
-                .ok_or("harmony subscription has no openId")?
-                .to_string();
+        if Self::is_harmony(&subscription) {
+            let key = Self::harmony_key(&subscription)
+                .ok_or("harmony subscription has neither token nor openId")?;
             let _g = self.file_lock.lock().unwrap();
             let mut subs = self.load_subs(channel);
-            subs.retain(|s| {
-                !(s.get("platform").and_then(Value::as_str) == Some("harmony")
-                    && s.get("openId").and_then(Value::as_str) == Some(open_id.as_str()))
-            });
+            subs.retain(|s| Self::harmony_key(s).as_deref() != Some(key.as_str()));
             subs.push(subscription);
             self.save_subs(channel, &subs);
             return Ok(());
@@ -160,19 +154,13 @@ impl Push {
     /// present is a no-op (`Ok`). When the last subscription goes, the channel
     /// file is deleted (via `save_subs`).
     pub fn unsubscribe(&self, channel: &str, subscription: &Value) -> Result<(), String> {
-        if subscription.get("platform").and_then(Value::as_str) == Some("harmony") {
-            let open_id = subscription
-                .get("openId")
-                .and_then(Value::as_str)
-                .ok_or("harmony unsubscribe has no openId")?
-                .to_string();
+        if Self::is_harmony(subscription) {
+            let key = Self::harmony_key(subscription)
+                .ok_or("harmony unsubscribe has neither token nor openId")?;
             let _g = self.file_lock.lock().unwrap();
             let mut subs = self.load_subs(channel);
             let before = subs.len();
-            subs.retain(|s| {
-                !(s.get("platform").and_then(Value::as_str) == Some("harmony")
-                    && s.get("openId").and_then(Value::as_str) == Some(open_id.as_str()))
-            });
+            subs.retain(|s| Self::harmony_key(s).as_deref() != Some(key.as_str()));
             if subs.len() != before {
                 self.save_subs(channel, &subs);
             }
@@ -197,6 +185,29 @@ impl Push {
     /// True if the subscription is a HarmonyOS Push Kit registration.
     fn is_harmony(sub: &Value) -> bool {
         sub.get("platform").and_then(Value::as_str) == Some("harmony")
+    }
+
+    /// Identity of a harmony subscription, used for dedup and for pruning.
+    ///
+    /// Two Push Kit channels land in the same store: the 元服务 account channel
+    /// keys on `openId`, the 普通应用 device channel on `token`. Prefixing keeps
+    /// them from ever colliding, and the prefix is what `notify` reads back to
+    /// decide which endpoint to call — so the wire shape alone determines the
+    /// channel and no extra discriminator field has to be kept in sync.
+    ///
+    /// `token` wins when both are present: a device that has migrated from the
+    /// 元服务 build should be reached the new way.
+    fn harmony_key(sub: &Value) -> Option<String> {
+        if !Self::is_harmony(sub) {
+            return None;
+        }
+        if let Some(t) = sub.get("token").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            return Some(format!("token:{t}"));
+        }
+        sub.get("openId")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(|o| format!("openid:{o}"))
     }
 
     pub fn subscription_count(&self, channel: &str) -> usize {
@@ -239,18 +250,23 @@ impl Push {
         // / harmony. Wall-clock becomes the slowest single send, not their sum.
         let outcomes = futures_util::future::join_all(subs.iter().map(|sub| async move {
             if Self::is_harmony(sub) {
-                // 元服务 account service-notification path. No-op when the
-                // channel is disabled (creds absent → harmony is None).
-                let (Some(hp), Some(open_id)) =
-                    (harmony, sub.get("openId").and_then(Value::as_str))
-                else {
+                // Two Push Kit channels, picked by the subscription's own shape:
+                // a device `token` goes to the 普通应用 endpoint
+                // (`v3/messages:send`), an `openId` to the 元服务
+                // service-notification endpoint. No-op when the channel is
+                // disabled (creds absent → harmony is None).
+                let (Some(hp), Some(key)) = (harmony, Self::harmony_key(sub)) else {
                     return SendOutcome::Ok;
                 };
-                return match hp.send(open_id, payload).await {
+                let sent = match key.strip_prefix("token:") {
+                    Some(token) => hp.send_token(token, payload).await,
+                    None => hp.send(key.trim_start_matches("openid:"), payload).await,
+                };
+                return match sent {
                     Ok(()) => SendOutcome::Ok,
-                    Err(SendError::DeadOpenId(detail)) => {
-                        log::info!("harmony openId dead on channel {channel}, pruning: {detail}");
-                        SendOutcome::DeadHarmony(open_id.to_string())
+                    Err(SendError::DeadRecipient(detail)) => {
+                        log::info!("harmony recipient dead on channel {channel}, pruning: {detail}");
+                        SendOutcome::DeadHarmony(key)
                     }
                     Err(SendError::Transient(detail)) => {
                         log::warn!("harmony push failed on channel {channel}: {detail}");
@@ -317,10 +333,11 @@ impl Push {
         subs.into_iter()
             .filter(|s| {
                 if Self::is_harmony(s) {
-                    return s
-                        .get("openId")
-                        .and_then(Value::as_str)
-                        .map(|o| !dead_harmony.iter().any(|d| d == o))
+                    // Prefixed key (see `harmony_key`), so a dead device token
+                    // can never evict an account subscription that happens to
+                    // carry the same string.
+                    return Self::harmony_key(s)
+                        .map(|k| !dead_harmony.iter().any(|d| *d == k))
                         .unwrap_or(true);
                 }
                 s.get("endpoint")
@@ -372,6 +389,11 @@ mod tests {
 
     fn mk_harmony(open_id: &str) -> Value {
         json!({ "platform": "harmony", "openId": open_id })
+    }
+
+    /// 普通应用 channel registration (device push token) — see `harmony_key`.
+    fn mk_harmony_token(token: &str) -> Value {
+        json!({ "platform": "harmony", "token": token })
     }
 
     #[test]
@@ -504,7 +526,7 @@ mod tests {
     #[test]
     fn retain_live_prunes_only_dead_harmony_open_ids() {
         let subs = vec![mk_harmony("OID-A"), mk_harmony("OID-B"), mk_sub("https://push/a")];
-        let kept = Push::retain_live(subs, &[], &["OID-A".to_string()]);
+        let kept = Push::retain_live(subs, &[], &["openid:OID-A".to_string()]);
         assert_eq!(kept.len(), 2);
         assert_eq!(open_ids(&kept), vec!["OID-B"]); // OID-B kept
         assert!(kept
@@ -525,7 +547,70 @@ mod tests {
     fn retain_live_keeps_harmony_without_open_id() {
         // A malformed harmony sub (no openId) can't match a dead id → kept.
         let subs = vec![json!({ "platform": "harmony" })];
-        let kept = Push::retain_live(subs, &[], &["OID-A".to_string()]);
+        let kept = Push::retain_live(subs, &[], &["openid:OID-A".to_string()]);
         assert_eq!(kept.len(), 1);
+    }
+
+    // ── 普通应用 (device token) channel ────────────────────────────────────
+
+    #[test]
+    fn harmony_key_prefers_token_over_open_id() {
+        // A device that migrated from the 元服务 build can report both; the new
+        // channel must win, otherwise it keeps getting the (now dead) account
+        // service-notification.
+        let both = json!({ "platform": "harmony", "openId": "OID-A", "token": "TOK-A" });
+        assert_eq!(Push::harmony_key(&both).as_deref(), Some("token:TOK-A"));
+    }
+
+    #[test]
+    fn harmony_key_ignores_blank_values() {
+        let blank = json!({ "platform": "harmony", "token": "", "openId": "OID-A" });
+        assert_eq!(Push::harmony_key(&blank).as_deref(), Some("openid:OID-A"));
+        let empty = json!({ "platform": "harmony", "token": "", "openId": "" });
+        assert_eq!(Push::harmony_key(&empty), None);
+    }
+
+    #[test]
+    fn subscribe_dedups_harmony_by_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        push.subscribe("chan", mk_harmony_token("TOK-A")).unwrap();
+        push.subscribe("chan", mk_harmony_token("TOK-A")).unwrap();
+        push.subscribe("chan", mk_harmony_token("TOK-B")).unwrap();
+        assert_eq!(push.subscription_count("chan"), 2);
+    }
+
+    #[test]
+    fn unsubscribe_removes_harmony_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        push.subscribe("chan", mk_harmony_token("TOK-A")).unwrap();
+        push.subscribe("chan", mk_harmony("OID-A")).unwrap();
+        push.unsubscribe("chan", &mk_harmony_token("TOK-A")).unwrap();
+        assert_eq!(open_ids(&push.load_subs("chan")), vec!["OID-A"]);
+    }
+
+    #[test]
+    fn retain_live_prunes_dead_token_without_touching_same_named_open_id() {
+        // Exactly what the `token:` / `openid:` prefixes exist for: the two
+        // channels share one store, and an unprefixed key would let a dead
+        // device token evict an unrelated account subscription (or vice versa)
+        // whenever the two strings happened to match.
+        let subs = vec![mk_harmony_token("SAME"), mk_harmony("SAME")];
+        let kept = Push::retain_live(subs, &[], &["token:SAME".to_string()]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(open_ids(&kept), vec!["SAME"], "the openId sub survives");
+    }
+
+    #[test]
+    fn retain_live_dead_open_id_never_evicts_token_sub() {
+        let subs = vec![mk_harmony_token("SAME"), mk_harmony("SAME")];
+        let kept = Push::retain_live(subs, &[], &["openid:SAME".to_string()]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(
+            kept[0].get("token").and_then(Value::as_str),
+            Some("SAME"),
+            "the token sub survives"
+        );
     }
 }

@@ -4,6 +4,15 @@
     "type": "entry",
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
+    // Push Kit 的应用标识。pushService.getToken() 从这里读,缺了直接取不到 token。
+    // 值取 AGC「常规 → 应用 → Client ID」;官方明确说这里**不能**用 $string: 之类
+    // 的资源引用,只能写字面量(引用形式解析不了)。
+    "metadata": [
+      {
+        "name": "client_id",
+        "value": "6917614058134462223"
+      }
+    ],
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"

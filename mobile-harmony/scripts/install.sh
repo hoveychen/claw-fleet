@@ -22,7 +22,11 @@ export DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
 export JAVA_HOME="/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home"
 export PATH="$DEVECO/node/bin:$DEVECO/ohpm/bin:$JAVA_HOME/bin:$PATH"
 HDC="$DEVECO_SDK_HOME/default/openharmony/toolchains/hdc"
-BUNDLE="com.atomicservice.6917610791622358675"
+# 从 app.json5 读,不再写死 —— 换包名时只改一处。
+BUNDLE=$(sed -n 's/.*"bundleName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' AppScope/app.json5 | head -1)
+# 元服务时代的旧包名。换成普通应用后它不会被覆盖安装,留着会在桌面上多一个
+# 装不进新数据的僵尸图标,所以每次安装前顺手清掉(没装过则静默跳过)。
+LEGACY_BUNDLE="com.atomicservice.6917610791622358675"
 HAP="entry/build/default/outputs/default/entry-default-signed.hap"
 
 TARGET=""
@@ -72,7 +76,14 @@ if [[ ! -f "$HAP" ]]; then
   exit 1
 fi
 
-echo "→ 安装 $HAP"
+if [[ -z "$BUNDLE" ]]; then
+  echo "✗ 没能从 AppScope/app.json5 解析出 bundleName" >&2
+  exit 1
+fi
+
+"$HDC" -t "$TARGET" uninstall "$LEGACY_BUNDLE" >/dev/null 2>&1 || true
+
+echo "→ 安装 $HAP ($BUNDLE)"
 "$HDC" -t "$TARGET" install "$HAP"
 
 echo "→ 启动 $BUNDLE"

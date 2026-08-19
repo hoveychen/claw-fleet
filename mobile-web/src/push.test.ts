@@ -17,6 +17,7 @@ const base = (over: Partial<PushEnv>): PushEnv => ({
   permission: "default",
   ua: CHROME_ANDROID_UA,
   standalone: false,
+  hasNativePush: false,
   ...over,
 });
 
@@ -57,6 +58,22 @@ describe("classifyPush", () => {
 
   it("无 Service Worker 的桌面浏览器 → unsupported", () => {
     expect(classifyPush(base({ hasServiceWorker: false }))).toBe("unsupported");
+  });
+
+  // 原生壳（鸿蒙 WebShell / Capacitor）拿到厂商推送 token 后，推送整条链路都不
+  // 经过 Web Push。鸿蒙壳的 UA 里带 ArkWeb、permission 又恒为 denied，正好命中
+  // 上面那条 unsupported-harmony —— 若不优先判 token，能收推送的壳会被判成
+  // 「不支持」，UI 连开关都不给。
+  it("原生 token 在手 → granted（哪怕 UA 是鸿蒙且 permission 为 denied）", () => {
+    expect(
+      classifyPush(base({ ua: HARMONY_UA, permission: "denied", hasNativePush: true })),
+    ).toBe("granted");
+  });
+
+  it("原生 token 在手 → granted（哪怕连 Service Worker 都没有）", () => {
+    expect(
+      classifyPush(base({ hasServiceWorker: false, hasPushManager: false, hasNativePush: true })),
+    ).toBe("granted");
   });
 });
 
