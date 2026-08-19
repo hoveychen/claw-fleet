@@ -206,6 +206,24 @@ impl DshSource {
         f(&client)
     }
 
+    /// One `session.history` page: the tail, either whole (`max` = `None`) or
+    /// the last `max` append-origin messages.
+    ///
+    /// dsh's answer is the *raw* event stream, chunks and all — the reason
+    /// [`history_with`] folds pages onto a cache rather than asking for the
+    /// whole thing on every poll.
+    fn fetch_history(&self, id: &str, max: Option<usize>) -> Result<Value, String> {
+        let payload = match max {
+            Some(n) => json!({ "sessionId": id, "maxMessages": n }),
+            None => json!({ "sessionId": id }),
+        };
+        self.with_client(|client| {
+            client
+                .call("session.history", payload.clone())
+                .map_err(Into::into)
+        })
+    }
+
     /// The session roster, shared across simultaneous scans.
     ///
     /// Fleet scans the roster from several places at once — the registry watch
@@ -551,36 +569,12 @@ impl AgentSource for DshSource {
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
         let id = Self::session_id_of(path).ok_or_else(|| format!("invalid dsh URI: {path}"))?;
-        // `maxMessages` is absent, so this is the tail page: dsh pages by whole
-        // append-origin messages and the tail additionally carries the
-        // in-flight partial.
-        let value = self.with_client(|client| {
-            client
-                .call("session.history", json!({ "sessionId": id }))
-                .map_err(Into::into)
-        })?;
-
-        // Normalised, not raw: every Fleet client reads Claude Code's message
-        // vocabulary, and dsh's own records match none of it. See
-        // `crate::dsh_messages`.
-        Ok(crate::dsh_messages::normalize(&history_events(&value)))
+        history_with(id, None, |max| self.fetch_history(id, max))
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
         let id = Self::session_id_of(path).ok_or_else(|| format!("invalid dsh URI: {path}"))?;
-        let value = self.with_client(|client| {
-            client
-                .call(
-                    "session.history",
-                    json!({ "sessionId": id, "maxMessages": n }),
-                )
-                .map_err(Into::into)
-        })?;
-
-        // Normalised, not raw: every Fleet client reads Claude Code's message
-        // vocabulary, and dsh's own records match none of it. See
-        // `crate::dsh_messages`.
-        Ok(crate::dsh_messages::normalize(&history_events(&value)))
+        history_with(id, Some(n), |max| self.fetch_history(id, max))
     }
 
     fn watch_strategy(&self) -> WatchStrategy {
@@ -876,6 +870,173 @@ pub fn session_events(uri: &str) -> Result<Vec<Value>, String> {
 ///
 /// Each entry pairs the durable event with an optional host-computed tool view;
 /// only the event is durable, so that is what Fleet keeps.
+/// How many trailing append-origin messages a live-tail refresh asks for.
+///
+/// The unit is dsh's, not Fleet's: one `maxMessages` is a whole append-origin
+/// message *and every raw event it owns*, streaming chunks included. Measured on
+/// a 130-step session, `maxMessages: 150` (what `get_messages_tail(…, 150)` used
+/// to send verbatim) answered 13.3 MB / 63,534 events — of which 62,853 were
+/// `assistant/chunk` that [`crate::dsh_messages::normalize`] drops on the floor.
+/// A refresh only has to cover what changed since the last poll, so it asks for
+/// a handful of trailing messages and [`history_with`] rebuilds from cache when
+/// that window turns out not to reach back far enough.
+const TAIL_REFRESH_MESSAGES: usize = 4;
+
+/// How many sessions keep a normalized history in memory.
+///
+/// A cached transcript is the *normalized* form (463 KB for the 130-step session
+/// above, against the 13.3 MB of wire events it came from), and only sessions
+/// someone is actually reading get one.
+const HISTORY_CACHE_CAP: usize = 8;
+
+/// One session's normalized transcript, plus the dsh `seq` it covers up to.
+struct CachedHistory {
+    /// Highest `seq` folded in so far. dsh stamps every durable event with a
+    /// monotonically increasing `seq` (verified across a 63,534-event history:
+    /// no gaps, no event without one), so it is the resume point.
+    last_seq: i64,
+    messages: Vec<Value>,
+    touched: std::time::Instant,
+}
+
+static HISTORY: OnceLock<Mutex<std::collections::HashMap<String, CachedHistory>>> = OnceLock::new();
+
+fn history_slot() -> &'static Mutex<std::collections::HashMap<String, CachedHistory>> {
+    HISTORY.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Drop this session's cached transcript, so the next read rebuilds it.
+pub fn forget_history(session_id: &str) {
+    lock(history_slot()).remove(session_id);
+}
+
+fn seq_of(event: &Value) -> Option<i64> {
+    event.get("seq").and_then(Value::as_i64)
+}
+
+/// The highest `seq` in a page, if any event carries one.
+fn max_seq(events: &[Value]) -> Option<i64> {
+    events.iter().filter_map(seq_of).max()
+}
+
+/// Does this tail page reach back far enough to append onto a cache that ends at
+/// `last_seq`?
+///
+/// It does when the page either overlaps the cache (some event at or below
+/// `last_seq`) or starts exactly where the cache stopped. Anything else means
+/// more messages landed between two polls than the refresh window covers, and
+/// appending would silently skip the events in between — so the caller refetches
+/// in full instead.
+fn page_continues(last_seq: i64, page: &[Value]) -> bool {
+    match page.iter().filter_map(seq_of).min() {
+        Some(min) => min <= last_seq + 1,
+        // A page with no sequenced event adds nothing; treating it as continuous
+        // keeps the cache as it is rather than triggering a pointless refetch.
+        None => true,
+    }
+}
+
+/// The events of `page` a cache ending at `last_seq` has not folded in yet.
+fn events_after(last_seq: i64, page: &[Value]) -> Vec<Value> {
+    page.iter()
+        .filter(|e| seq_of(e).is_some_and(|s| s > last_seq))
+        .cloned()
+        .collect()
+}
+
+/// Read a session's transcript, folding a small tail refresh onto what is
+/// already cached instead of re-reading the whole history every poll.
+///
+/// `fetch` takes the `maxMessages` to ask dsh for (`None` = the whole history)
+/// and returns the raw `session.history` answer; it is a parameter so the cache
+/// contract is testable without a live server.
+///
+/// `n` is Fleet's tail length — a count of *normalized* records, which is not
+/// dsh's `maxMessages` unit (see [`TAIL_REFRESH_MESSAGES`]) — or `None` for the
+/// whole transcript.
+fn history_with<F>(session_id: &str, n: Option<usize>, fetch: F) -> Result<Vec<Value>, String>
+where
+    F: Fn(Option<usize>) -> Result<Value, String>,
+{
+    let cached_seq = lock(history_slot()).get(session_id).map(|c| c.last_seq);
+
+    let messages = match cached_seq {
+        // First read of this session: one full history, cached for the polls
+        // that follow.
+        None => rebuild_history(session_id, &fetch)?,
+        Some(last_seq) => {
+            let page = history_events(&fetch(Some(TAIL_REFRESH_MESSAGES))?);
+            if page_continues(last_seq, &page) {
+                append_history(session_id, last_seq, &page)
+                    // The entry can vanish between the two locks (cap eviction,
+                    // or `forget_history`); rebuilding is always correct.
+                    .map_or_else(|| rebuild_history(session_id, &fetch), Ok)?
+            } else {
+                rebuild_history(session_id, &fetch)?
+            }
+        }
+    };
+
+    Ok(match n {
+        Some(n) if messages.len() > n => messages[messages.len() - n..].to_vec(),
+        _ => messages,
+    })
+}
+
+/// Re-read the whole history and replace whatever was cached for this session.
+fn rebuild_history<F>(session_id: &str, fetch: &F) -> Result<Vec<Value>, String>
+where
+    F: Fn(Option<usize>) -> Result<Value, String>,
+{
+    let events = history_events(&fetch(None)?);
+    let messages = crate::dsh_messages::normalize(&events);
+    let mut map = lock(history_slot());
+    evict_cold(&mut map);
+    map.insert(
+        session_id.to_string(),
+        CachedHistory {
+            last_seq: max_seq(&events).unwrap_or(-1),
+            messages: messages.clone(),
+            touched: std::time::Instant::now(),
+        },
+    );
+    Ok(messages)
+}
+
+/// Fold a continuous tail page onto the cached transcript, returning the result.
+///
+/// `None` when the entry is gone — the caller rebuilds. The `last_seq` recheck
+/// inside the lock is what makes two concurrent readers safe: whoever gets there
+/// second sees the first one's events already folded in and skips them.
+fn append_history(session_id: &str, last_seq: i64, page: &[Value]) -> Option<Vec<Value>> {
+    let mut map = lock(history_slot());
+    let entry = map.get_mut(session_id)?;
+    let fresh = events_after(entry.last_seq.max(last_seq), page);
+    if !fresh.is_empty() {
+        entry.messages.extend(crate::dsh_messages::normalize(&fresh));
+        if let Some(top) = max_seq(&fresh) {
+            entry.last_seq = entry.last_seq.max(top);
+        }
+    }
+    entry.touched = std::time::Instant::now();
+    Some(entry.messages.clone())
+}
+
+/// Keep the cache at [`HISTORY_CACHE_CAP`] by dropping the least recently read
+/// session — the one nobody has open.
+fn evict_cold(map: &mut std::collections::HashMap<String, CachedHistory>) {
+    while map.len() >= HISTORY_CACHE_CAP {
+        let Some(coldest) = map
+            .iter()
+            .min_by_key(|(_, c)| c.touched)
+            .map(|(id, _)| id.clone())
+        else {
+            return;
+        };
+        map.remove(&coldest);
+    }
+}
+
 fn history_events(value: &Value) -> Vec<Value> {
     value
         .get("events")
@@ -1284,6 +1445,179 @@ mod tests {
         // id, so this must fail before `with_client` tries to start one.
         let err = dsh_token_breakdown("dsh://").expect_err("no id");
         assert!(err.contains("invalid dsh URI"), "got {err}");
+    }
+
+    // ── History cache ─────────────────────────────────────────────────────
+
+    /// One durable `user/message` event, wrapped the way `session.history`
+    /// entries are (`{event, view?}`).
+    fn wire_user_event(seq: i64, text: &str) -> Value {
+        json!({
+            "event": {
+                "type": "user/message",
+                "seq": seq,
+                "time": 1787109640994u64,
+                "data": {
+                    "source": { "kind": "user" },
+                    "content": [{ "type": "text", "text": text }],
+                },
+            }
+        })
+    }
+
+    /// A streaming chunk: carried by every page, dropped by `normalize`. This is
+    /// the bulk of what a full re-read pays for (62,853 of 63,534 events on the
+    /// session that motivated the cache).
+    fn wire_chunk_event(seq: i64) -> Value {
+        json!({ "event": { "type": "assistant/chunk", "seq": seq, "data": { "delta": "…" } } })
+    }
+
+    fn wire_history(events: Vec<Value>) -> Value {
+        json!({ "events": events, "hasMore": false })
+    }
+
+    /// Record every `maxMessages` a reader asked for, and answer with a
+    /// caller-supplied page.
+    struct FakeHistory {
+        calls: Mutex<Vec<Option<usize>>>,
+        pages: Mutex<std::collections::VecDeque<Value>>,
+    }
+
+    impl FakeHistory {
+        fn new(pages: Vec<Value>) -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                pages: Mutex::new(pages.into()),
+            }
+        }
+
+        fn fetch(&self, max: Option<usize>) -> Result<Value, String> {
+            self.calls.lock().unwrap().push(max);
+            self.pages
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| "fake history: no page left".to_string())
+        }
+
+        fn calls(&self) -> Vec<Option<usize>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    /// The regression this cache exists for: a live-tail poll used to re-request
+    /// the caller's tail length as dsh `maxMessages`, and dsh answers that with
+    /// every raw event those messages own — 13.3 MB per poll, 99% of it chunks
+    /// `normalize` throws away. The second read must ask for the small refresh
+    /// window instead, and must not re-read the whole history.
+    #[test]
+    fn a_second_read_refreshes_only_the_tail_window() {
+        let id = "session-cache-tail-window";
+        forget_history(id);
+        let fake = FakeHistory::new(vec![
+            wire_history(vec![
+                wire_user_event(1, "first"),
+                wire_chunk_event(2),
+                wire_user_event(3, "second"),
+            ]),
+            // The refresh window: overlaps the cache by one event, adds one.
+            wire_history(vec![wire_user_event(3, "second"), wire_user_event(4, "third")]),
+        ]);
+
+        let first = history_with(id, Some(150), |max| fake.fetch(max)).unwrap();
+        assert_eq!(first.len(), 2, "two user messages, the chunk is dropped");
+
+        let second = history_with(id, Some(150), |max| fake.fetch(max)).unwrap();
+        assert_eq!(
+            fake.calls(),
+            vec![None, Some(TAIL_REFRESH_MESSAGES)],
+            "full read once, then only the refresh window"
+        );
+        assert_eq!(second.len(), 3, "the new message appended, none duplicated");
+        assert_eq!(second[2]["message"]["content"][0]["text"], "third");
+    }
+
+    /// A page that starts past where the cache stops means messages landed
+    /// between two polls that the refresh window does not reach. Appending would
+    /// silently skip them, so the read falls back to a full one.
+    #[test]
+    fn a_gapped_refresh_falls_back_to_a_full_read() {
+        let id = "session-cache-gap";
+        forget_history(id);
+        let fake = FakeHistory::new(vec![
+            wire_history(vec![wire_user_event(1, "first")]),
+            // Nothing at or below seq 2: everything between 1 and 40 is missing.
+            wire_history(vec![wire_user_event(40, "far later")]),
+            wire_history(vec![
+                wire_user_event(1, "first"),
+                wire_user_event(20, "middle"),
+                wire_user_event(40, "far later"),
+            ]),
+        ]);
+
+        history_with(id, None, |max| fake.fetch(max)).unwrap();
+        let after = history_with(id, None, |max| fake.fetch(max)).unwrap();
+
+        assert_eq!(
+            fake.calls(),
+            vec![None, Some(TAIL_REFRESH_MESSAGES), None],
+            "the gapped window is discarded and the history re-read"
+        );
+        assert_eq!(after.len(), 3, "nothing skipped");
+    }
+
+    /// A poll that finds nothing new must not grow the transcript.
+    #[test]
+    fn a_refresh_with_no_new_events_changes_nothing() {
+        let id = "session-cache-idle";
+        forget_history(id);
+        let fake = FakeHistory::new(vec![
+            wire_history(vec![wire_user_event(1, "only")]),
+            wire_history(vec![wire_user_event(1, "only")]),
+        ]);
+
+        let first = history_with(id, None, |max| fake.fetch(max)).unwrap();
+        let second = history_with(id, None, |max| fake.fetch(max)).unwrap();
+        assert_eq!(first, second);
+    }
+
+    /// `n` counts normalized records — the tail Fleet's UI asked for — and is
+    /// applied after the fold, not passed to dsh.
+    #[test]
+    fn the_tail_length_trims_normalized_records() {
+        let id = "session-cache-trim";
+        forget_history(id);
+        let fake = FakeHistory::new(vec![wire_history(vec![
+            wire_user_event(1, "a"),
+            wire_user_event(2, "b"),
+            wire_user_event(3, "c"),
+        ])]);
+
+        let tail = history_with(id, Some(2), |max| fake.fetch(max)).unwrap();
+        assert_eq!(tail.len(), 2);
+        assert_eq!(tail[0]["message"]["content"][0]["text"], "b");
+    }
+
+    #[test]
+    fn continuity_is_overlap_or_the_very_next_seq() {
+        let page = vec![wire_user_event(10, "x"), wire_user_event(11, "y")];
+        let events = history_events(&wire_history(page));
+        assert!(page_continues(10, &events), "overlapping page");
+        assert!(page_continues(9, &events), "starts exactly after the cache");
+        assert!(!page_continues(8, &events), "seq 9 would be skipped");
+        assert!(page_continues(5, &[]), "an empty page adds nothing");
+    }
+
+    #[test]
+    fn only_events_past_the_cache_are_folded_in() {
+        let events = history_events(&wire_history(vec![
+            wire_user_event(1, "old"),
+            wire_user_event(2, "new"),
+        ]));
+        let fresh = events_after(1, &events);
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0]["seq"], 2);
+        assert_eq!(max_seq(&events), Some(2));
     }
 
     #[test]
