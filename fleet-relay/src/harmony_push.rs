@@ -101,6 +101,10 @@ fn is_dead_token_code(code: &str) -> bool {
 /// approval is still pending.
 const DEFAULT_CATEGORY: &str = "WORK";
 
+/// `push-type` header value for a user-visible notification message on the app
+/// channel. Required by `v3/messages:send`; omitting it fails with 80100003.
+const PUSH_TYPE_NOTIFICATION: &str = "0";
+
 /// Why a [`HarmonyPush::send`] failed, so the caller can decide whether to
 /// prune the OpenID. The inner `String` is a human-readable detail for logs.
 #[derive(Debug)]
@@ -259,14 +263,21 @@ impl HarmonyPush {
         what: &str,
         url: String,
         body: Value,
+        push_type: Option<&str>,
         is_dead: fn(&str) -> bool,
     ) -> Result<(), SendError> {
         let jwt = self.jwt().map_err(SendError::Transient)?;
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(jwt)
-            .json(&body)
+        let mut req = self.http.post(&url).bearer_auth(jwt).json(&body);
+        // The app channel demands a `push-type` header; without it the send is
+        // rejected with 80100003 "Illegal payload, The header does not contain
+        // valid push-type" — a header problem reported as a payload problem,
+        // which is exactly why this is worth a comment. Observed live on
+        // 2026-08-18 before the header was added. The 元服务 endpoint takes no
+        // such header, hence `Option`.
+        if let Some(pt) = push_type {
+            req = req.header("push-type", pt);
+        }
+        let resp = req
             .send()
             .await
             .map_err(|e| SendError::Transient(format!("{what} request failed: {e}")))?;
@@ -302,7 +313,7 @@ impl HarmonyPush {
             open_id,
             payload,
         );
-        self.post("service_notification", url, body, is_dead_openid_code).await
+        self.post("service_notification", url, body, None, is_dead_openid_code).await
     }
 
     /// Send one notification to a device push token (普通应用 channel).
@@ -313,7 +324,8 @@ impl HarmonyPush {
     pub async fn send_token(&self, token: &str, payload: &PushPayload<'_>) -> Result<(), SendError> {
         let url = format!("{APP_API_BASE}/{}/messages:send", self.project_id);
         let body = build_app_notification(&self.category, token, payload);
-        self.post("messages:send", url, body, is_dead_token_code).await
+        self.post("messages:send", url, body, Some(PUSH_TYPE_NOTIFICATION), is_dead_token_code)
+            .await
     }
 }
 
