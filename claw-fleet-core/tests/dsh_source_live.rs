@@ -227,3 +227,69 @@ fn live_token_breakdown_reports_an_unknown_session() {
         .expect_err("unknown id");
     assert!(err.contains("not found"), "{err}");
 }
+
+/// The model chip's data path, end to end against a real server.
+///
+/// `session.list` names no route, so `SessionInfo::model` can only be filled by
+/// reading a session's own durable events — which is what the desktop's detail
+/// pane does the moment a session is opened. This proves the sequence: a fresh
+/// scan carries no model, reading the history teaches the process the route,
+/// and the next scan hands it to the UI.
+#[test]
+#[ignore = "starts a real `dsh web`; run manually with --ignored"]
+fn live_reading_a_session_teaches_the_scan_its_model() {
+    let _guard = ServerGuard;
+    let source = DshSource::new();
+    assert!(
+        source.is_available(),
+        "set FLEET_DSH_BIN to a dsh executable"
+    );
+
+    // A session that has actually run a turn: a blank one has no route to name.
+    let sessions = source.scan_sessions();
+    let busiest = sessions
+        .iter()
+        .max_by_key(|s| s.total_input_tokens + s.total_output_tokens)
+        .cloned()
+        .expect("at least one session");
+    assert!(
+        busiest.total_input_tokens + busiest.total_output_tokens > 0,
+        "every dsh session on this machine is blank — run a turn first"
+    );
+
+    let records = source
+        .get_messages_tail(&busiest.jsonl_path, 20)
+        .expect("history tail");
+
+    let after = source
+        .scan_sessions()
+        .into_iter()
+        .find(|s| s.id == busiest.id)
+        .expect("the session is still on the roster");
+    let model = after
+        .model
+        .as_deref()
+        .expect("reading the history must leave a route behind");
+    println!("{} → model={model}", after.id);
+
+    let (provider, id) = model
+        .split_once('/')
+        .unwrap_or_else(|| panic!("not a provider/model spec: {model}"));
+    assert!(
+        !provider.is_empty() && !id.is_empty(),
+        "both halves must be present: {model}"
+    );
+
+    // The same route rides every assembled reply, which is what the transcript
+    // rows render. The last one must agree with the session-level chip.
+    let last_reply_model = records
+        .iter()
+        .rev()
+        .find(|r| r["type"] == "assistant" && r["message"]["model"].is_string())
+        .map(|r| r["message"]["model"].as_str().unwrap_or_default().to_string())
+        .expect("an assistant record must name the route that produced it");
+    assert_eq!(
+        last_reply_model, model,
+        "the row's model and the header chip must be the same reading"
+    );
+}

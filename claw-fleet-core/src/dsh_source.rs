@@ -546,7 +546,7 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
     });
 
     Some(SessionInfo {
-        // The roster names no route (see `model_from_events`), so this is
+        // The roster names no route (see `latest_route`), so this is
         // whatever reading the session's own history last taught this process.
         // `None` until something reads it — the desktop's detail pane does so
         // the moment a session is opened.
@@ -808,7 +808,7 @@ impl AgentSource for DshSource {
 /// Fleet's price table only knows Claude and GPT tiers, so an unknown model
 /// would silently price at the Opus fallback. A wrong number is worse than none.
 /// No model id either: the roster carries none, and the durable log's route
-/// evidence is reached by reading history — which [`model_from_events`] already
+/// evidence is reached by reading history — which [`latest_route`] already
 /// harvests on every read, so `SessionInfo::model` is where the route shows up.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -1013,12 +1013,8 @@ pub fn forget_history(session_id: &str) {
 /// call and its tokens, rather than the one route the session is on now.
 ///
 /// [`SpawnSpec::model`]: crate::agent_source::SpawnSpec
-pub(crate) fn model_from_events(events: &[Value]) -> Option<String> {
-    latest_route(events).map(|(_, spec)| spec)
-}
-
-/// [`model_from_events`] plus the `seq` the winning evidence sat at, so a
-/// backfill page (older events, fetched later) cannot overwrite a newer route.
+/// Returned with the `seq` the winning evidence sat at, so a backfill page
+/// (older events, fetched later) cannot overwrite a newer route.
 fn latest_route(events: &[Value]) -> Option<(i64, String)> {
     /// The route one event names, if it is one of the three that carry one.
     fn route_of(event: &Value) -> Option<String> {
@@ -1681,6 +1677,11 @@ mod tests {
     // units publishes one either — read off `@deepseek-ai/dsh-host-apiproxy`
     // and confirmed against a live 75-session roster). The durable log does, in
     // three places; these fixtures are verbatim events off `session.history`.
+
+    /// [`latest_route`] without its `seq`, which only `remember_model` needs.
+    fn model_from_events(events: &[Value]) -> Option<String> {
+        latest_route(events).map(|(_, spec)| spec)
+    }
 
     fn header_event() -> Value {
         json!({
