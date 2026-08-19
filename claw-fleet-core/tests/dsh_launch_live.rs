@@ -300,3 +300,136 @@ fn live_interrupt_cancels_the_turn_without_touching_the_server() {
         "the server must still be answering after the interrupt"
     );
 }
+
+/// The chat workspace's whole point: a dsh session there must NOT be handed
+/// Fleet's engineering doctrine.
+///
+/// This is the piece unit tests cannot reach. `dsh_chat_preset`'s tests prove the
+/// composition text comes out right, and `dsh_source`'s prove the two RPCs are
+/// walked — but only a live turn answers the two questions that matter: does dsh
+/// actually mount a preset Fleet wrote to disk while it was running (discovery is
+/// unmemoized, so it should), and does redirecting that one `dshHome` really drop
+/// the user-global `AGENTS.md` while keeping the workspace's own `CLAUDE.md`?
+///
+/// Reads the answer out of the durable history rather than out of Fleet's own
+/// belief: the `agent-instructions` baseline is a `user/message` whose text names
+/// each file it loaded, so "the doctrine is gone" is checkable, not inferred.
+#[test]
+#[ignore = "runs a real dsh turn in the chat workspace (costs model credits); run manually with --ignored"]
+fn live_a_chat_session_is_not_handed_the_doctrine() {
+    let _guard = ServerGuard;
+    let workspace = claw_fleet_core::chat_workspace::ensure_chat_workspace()
+        .expect("the chat workspace must exist");
+    let source = DshSource::new();
+    let spec = SpawnSpec {
+        workspace_path: workspace.clone(),
+        prompt: PROBE_PROMPT.into(),
+        ..Default::default()
+    };
+
+    let spawned = source.spawn(&spec).expect("spawn");
+    let session_id = spawned.session_id.clone().expect("spawn must report an id");
+    println!("spawned chat session {session_id}");
+
+    // Wait until the baseline has entered history (it rides the first step).
+    let baseline = wait_for(Duration::from_secs(120), || {
+        let messages = source.get_messages(&format!("dsh://{session_id}")).ok()?;
+        messages.into_iter().find(|m| {
+            m.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true)
+                && m["message"]["content"][0]["text"]
+                    .as_str()
+                    .is_some_and(|t| t.contains("Instructions from:"))
+        })
+    })
+    .expect("the agent-instructions baseline never arrived");
+
+    let text = baseline["message"]["content"][0]["text"].as_str().unwrap();
+    println!("--- baseline ({} chars) ---\n{text}", text.chars().count());
+
+    // 1. Folded, not a bubble — the transcript fix.
+    assert_eq!(baseline["isMeta"], serde_json::json!(true));
+
+    // 2. The chat brief still loads: dropping the user-global file must not drop
+    //    the workspace's own instructions with it.
+    assert!(
+        text.contains("纯聊天工作区"),
+        "the chat brief must still reach the model",
+    );
+
+    // 3. And the doctrine is gone. Each Fleet block carries its own sentinel
+    //    heading, so naming them is exact rather than a length heuristic.
+    for doctrine in [
+        "Fleet PRD Discipline for dsh",
+        "Fleet Interaction Mode for dsh",
+        "Rule 3 — Worktree-based workflow",
+    ] {
+        assert!(
+            !text.contains(doctrine),
+            "the chat session was handed the doctrine block {doctrine:?}",
+        );
+    }
+
+    // 4. dsh really mounted Fleet's preset, not the default.
+    let listed = source.scan_sessions();
+    let found = listed.iter().find(|s| s.id == session_id);
+    assert!(found.is_some(), "the chat session must show up in a scan");
+
+    // ── the other two transcript fixes, on the same real turn ──────────────
+    //
+    // Waiting for the assistant's assembled message rather than asserting on
+    // what is already there: the baseline lands in step 1, the reply later.
+    let messages = wait_for(Duration::from_secs(180), || {
+        let all = source.get_messages(&format!("dsh://{session_id}")).ok()?;
+        all.iter()
+            .any(|m| {
+                m["type"] == "assistant"
+                    && m["message"]["content"]
+                        .as_array()
+                        .is_some_and(|c| c.iter().any(|b| b["type"] == "text"))
+            })
+            .then_some(all)
+    })
+    .expect("the assistant never answered");
+
+    for m in &messages {
+        for block in m["message"]["content"].as_array().into_iter().flatten() {
+            assert_ne!(
+                block["type"], "reasoning",
+                "a raw dsh reasoning block reached the renderer, which draws it as \
+                 a wrench-icon tool card instead of a thinking fold: {block}",
+            );
+        }
+    }
+
+    // Every non-human record folds; the human's own prompt does not.
+    let human: Vec<_> = messages
+        .iter()
+        .filter(|m| m["type"] == "user" && m.get("isMeta").is_none())
+        .collect();
+    assert_eq!(
+        human.len(),
+        1,
+        "exactly one un-folded user bubble (the prompt) — got {}: {human:#?}",
+        human.len(),
+    );
+    assert_eq!(human[0]["message"]["content"][0]["text"], PROBE_PROMPT);
+
+    // The runtime-context snapshot is folded rather than dropped, so it is still
+    // readable — that was the deliberate contract change.
+    assert!(
+        messages.iter().any(|m| {
+            m.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true)
+                && m["message"]["content"][0]["text"]
+                    .as_str()
+                    .is_some_and(|t| t.contains("runtime context"))
+        }),
+        "the dsh-system-prompt runtime snapshot must survive as a folded record",
+    );
+
+    let thinking = messages
+        .iter()
+        .flat_map(|m| m["message"]["content"].as_array().into_iter().flatten())
+        .filter(|b| b["type"] == "thinking")
+        .count();
+    println!("folded meta records + {thinking} thinking block(s) on a real turn");
+}
