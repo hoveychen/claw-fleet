@@ -1,0 +1,164 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  /* Above the reader (2100) it is opened from. */
+  z-index: 2300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: var(--color-bg-modal-overlay);
+  backdrop-filter: blur(2px);
+}
+
+.dialog {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 480px;
+  padding: 20px 24px;
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.hint {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-dim);
+}
+
+.label {
+  display: block;
+  margin: 12px 0 5px;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-text-dim);
+}
+
+.normalized {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-dim);
+  word-break: break-all;
+}
+
+/* The append/replace choice only appears once the slug names a real doc, so it
+   reads as a consequence of the slug rather than a permanent field. */
+.modes {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+}
+
+.exists {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.radio input {
+  margin: 2px 0 0;
+  accent-color: var(--color-accent);
+}
+
+.radio span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.radio strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.radio em {
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.45;
+  color: var(--color-text-dim);
+}
+
+.error {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--color-error);
+  word-break: break-word;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.btn {
+  padding: 6px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.btn_primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.btn_primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.btn_primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

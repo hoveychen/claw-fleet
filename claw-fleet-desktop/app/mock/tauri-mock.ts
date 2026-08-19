@@ -317,6 +317,33 @@ function handleIPC(
       return MOCK_WIKI_DOCS;
     case "search_wiki_docs":
       return [];
+    // The reader's publish dialog reads the returned doc's slug back into its
+    // confirmation, so this must be a WikiDoc rather than the `default: null`.
+    case "publish_wiki_text": {
+      const slug = (args.slug as string) ?? "notes/mock";
+      const now = Date.now();
+      const existing = MOCK_WIKI_DOCS.find((d) => d.slug === slug);
+      const versions = [
+        { id: `v${(existing?.versions.length ?? 0) + 1}`, publishedMs: now, sizeBytes: ((args.text as string) ?? "").length, fileCount: 1, sourcePath: "<text>" },
+        ...(existing?.versions ?? []),
+      ];
+      return {
+        slug,
+        title: ((args.title as string) || existing?.title || slug.split("/").pop()) ?? slug,
+        kind: "markdown",
+        entry: existing?.entry ?? `${slug.split("/").pop()}.md`,
+        workspacePath: (args.workspacePath as string) ?? "/Users/demo/workspace/claw-fleet",
+        workspaceName: "claw-fleet",
+        createdMs: existing?.createdMs ?? now,
+        updatedMs: now,
+        currentVersion: versions[0].id,
+        versions,
+      };
+    }
+    // Printing is a host-side panel with nothing to mock; resolving is enough
+    // for the reader to treat the click as handled.
+    case "print_webview":
+      return null;
     case "get_wiki_file_text":
       return MOCK_WIKI_BODIES[(args.slug as string) ?? ""]
         ?? "# Not published\n\nThis document has no mock body.";
