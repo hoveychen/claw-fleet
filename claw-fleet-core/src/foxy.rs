@@ -244,6 +244,21 @@ pub async fn fetch_in_use_codex_account() -> Option<FoxyCodexAccount> {
     map_in_use_codex(&accounts, codex_managed_id)
 }
 
+/// Blocking bridge for [`fetch_in_use_codex_account`], for the fleet CLI and
+/// background sampler threads. Mirrors
+/// `account::fetch_account_info_blocking`'s runtime handling: reuse the ambient
+/// tokio runtime via `block_in_place` when there is one, else stand up a
+/// short-lived runtime.
+pub fn fetch_in_use_codex_account_blocking() -> Option<FoxyCodexAccount> {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(fetch_in_use_codex_account()))
+    } else {
+        tokio::runtime::Runtime::new()
+            .ok()?
+            .block_on(fetch_in_use_codex_account())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
