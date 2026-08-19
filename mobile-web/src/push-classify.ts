@@ -16,6 +16,8 @@ export type PushEnv = {
   permission: NotificationPermission;
   ua: string;
   standalone: boolean;
+  /** 原生壳是否已交来厂商推送的设备 token（见 nativePush.ts）。 */
+  hasNativePush: boolean;
 };
 
 function isIos(ua: string): boolean {
@@ -31,6 +33,14 @@ function isHarmonyArkWeb(ua: string): boolean {
 
 /** Pure classification of the push capability from the ambient environment. */
 export function classifyPush(env: PushEnv): PushState {
+  // 原生壳的厂商推送 token 优先于一切浏览器能力判断：它绕开 Web Push 整条链路
+  // （service worker / VAPID / Notification.permission 全不参与），由 relay 直接
+  // 调厂商下行接口。鸿蒙壳恰恰会同时满足下面那条 unsupported-harmony ——
+  // UA 里有 ArkWeb、permission 恒为 denied —— 所以这一判断必须在最前面，否则
+  // 明明能收推送的壳会被判成「不支持」，UI 连开关都不给。
+  if (env.hasNativePush) {
+    return "granted";
+  }
   if (!env.hasServiceWorker || !env.hasPushManager) {
     return isIos(env.ua) && !env.standalone ? "ios-needs-a2hs" : "unsupported";
   }
