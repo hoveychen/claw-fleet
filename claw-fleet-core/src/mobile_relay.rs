@@ -1818,6 +1818,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "upload_attachment" => serve_upload_attachment(params),
         "decision_answer" => serve_decision_answer(params),
         "attachments_exist" => serve_attachments_exist(params),
+        "user_attachment" => serve_user_attachment(params),
         "session_read" => serve_session_read(params),
         // ── Repository "仓库" surface ─────────────────────────────────────
         "repo_list" => serve_repo_list(params),
@@ -2544,6 +2545,65 @@ fn serve_attachments_exist(params: &Value) -> Result<Value, String> {
         .map(str::to_string)
         .collect();
     Ok(json!({ "existing": existing }))
+}
+
+/// A user-attachment preview sits in a chat bubble or a decision record next to
+/// text, and several can share one turn — the same ladder as the transcript
+/// thumbs, sized for a slightly larger tile.
+const ATTACHMENT_THUMB_TARGET_BYTES: usize = 16 * 1024;
+const ATTACHMENT_THUMB_HARD_CAP_BYTES: usize = 28 * 1024;
+const ATTACHMENT_THUMB_MIN_DIM: u32 = 256;
+
+/// A `full: true` request ships the stored bytes untouched — that is the point
+/// of tapping a thumbnail. The desktop side of the store accepts up to
+/// [`crate::backend::MAX_ATTACHMENT_BYTES`] (50 MiB) though, while the relay's
+/// WS frame budget is 32 MiB *before* base64 inflates it by a third. Anything
+/// past this ceiling is squeezed like a decision asset rather than failing the
+/// tap outright.
+const ATTACHMENT_FULL_MAX_BYTES: usize = 12 * 1024 * 1024;
+
+/// Read one image back out of the user-attachment store: a JPEG thumbnail by
+/// default, the stored bytes when `full`.
+///
+/// The desktop reaches these same files through the `fleet-attachment://`
+/// protocol. Mobile has no custom protocol, so until now history there showed a
+/// bare filename where the desktop shows the picture.
+///
+/// `key`/`name` cross the wire rather than a path, so this inherits
+/// [`crate::user_attachments::read_user_attachment`]'s traversal defense
+/// verbatim — a client can only ever name a file inside one store key.
+fn serve_user_attachment(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+    let key = params.get("key").and_then(Value::as_str).ok_or("missing key")?;
+    let name = params.get("name").and_then(Value::as_str).ok_or("missing name")?;
+    let full = params.get("full").and_then(Value::as_bool).unwrap_or(false);
+    let asset = crate::user_attachments::read_user_attachment(key, name)?;
+    // Images only. The store also holds the PDFs and archives a user picked, and
+    // this endpoint's entire contract is "give me something an <img> can show" —
+    // shipping arbitrary stored bytes under that name buys nothing the client
+    // can render and widens what one relay method can hand out.
+    if !asset.mime.starts_with("image/") {
+        return Err(format!("not an image: {}", asset.mime));
+    }
+    let (bytes, mime) = if full {
+        if asset.bytes.len() > ATTACHMENT_FULL_MAX_BYTES {
+            downscale_decision_asset(asset.bytes, &asset.mime)
+        } else {
+            (asset.bytes, asset.mime)
+        }
+    } else {
+        downscale_image(
+            asset.bytes,
+            &asset.mime,
+            ATTACHMENT_THUMB_TARGET_BYTES,
+            ATTACHMENT_THUMB_HARD_CAP_BYTES,
+            ATTACHMENT_THUMB_MIN_DIM,
+        )
+    };
+    Ok(json!({
+        "mime": mime,
+        "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
 }
 
 fn serve_session_read(params: &Value) -> Result<Value, String> {
@@ -4220,6 +4280,89 @@ mod tests {
             // and the out-of-store probe are dropped.
             assert_eq!(existing.len(), 1);
             assert!(existing[0].ends_with("a.png"));
+        });
+    }
+
+    /// The read-back counterpart of `upload_attachment`: a thumbnail by default
+    /// (that is what a chat bubble renders), the stored bytes on `full` (that is
+    /// what tapping it enlarges).
+    #[test]
+    fn request_user_attachment_serves_thumb_and_full() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let mut buf = image::RgbImage::new(900, 600);
+            for (x, y, px) in buf.enumerate_pixels_mut() {
+                *px = image::Rgb([(x / 4) as u8, (y / 3) as u8, ((x + y) / 8) as u8]);
+            }
+            let png = png_of(buf);
+            let uploaded = request_ok(
+                "upload_attachment",
+                json!({
+                    "name": "shot.png",
+                    "base64": base64::engine::general_purpose::STANDARD.encode(&png),
+                }),
+            );
+            // The client derives key/name from the stored path exactly as the
+            // desktop's `userAttachmentUrl` does.
+            let path = std::path::PathBuf::from(uploaded["path"].as_str().unwrap());
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let key = path.parent().unwrap().file_name().unwrap().to_string_lossy().to_string();
+
+            let thumb = request_ok("user_attachment", json!({"key": key, "name": name}));
+            assert_eq!(thumb["mime"], json!("image/jpeg"));
+            let thumb_bytes = base64::engine::general_purpose::STANDARD
+                .decode(thumb["base64"].as_str().expect("thumb base64"))
+                .expect("thumb decodes");
+            assert!(
+                thumb_bytes.len() <= ATTACHMENT_THUMB_HARD_CAP_BYTES,
+                "thumb ({}B) must respect the hard cap",
+                thumb_bytes.len()
+            );
+            image::load_from_memory(&thumb_bytes).expect("thumb is a valid image");
+
+            let full = request_ok(
+                "user_attachment",
+                json!({"key": key, "name": name, "full": true}),
+            );
+            assert_eq!(full["mime"], json!("image/png"), "full keeps the stored type");
+            let full_bytes = base64::engine::general_purpose::STANDARD
+                .decode(full["base64"].as_str().expect("full base64"))
+                .unwrap();
+            assert_eq!(full_bytes, png, "full ships the stored bytes untouched");
+        });
+    }
+
+    /// Traversal and non-image reads are refused: the method hands out pictures
+    /// from inside one store key, nothing else.
+    #[test]
+    fn request_user_attachment_rejects_traversal_and_non_images() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let uploaded = request_ok(
+                "upload_attachment",
+                json!({
+                    "name": "notes.txt",
+                    "base64": base64::engine::general_purpose::STANDARD.encode(b"plain text"),
+                }),
+            );
+            let path = std::path::PathBuf::from(uploaded["path"].as_str().unwrap());
+            let key = path.parent().unwrap().file_name().unwrap().to_string_lossy().to_string();
+
+            let reply = request_raw("user_attachment", json!({"key": key, "name": "notes.txt"}));
+            assert_eq!(reply["ok"], false, "a text file is not previewable");
+            assert!(reply["error"].as_str().unwrap().contains("not an image"));
+
+            for (k, n) in [
+                (key.as_str(), "../../etc/passwd"),
+                ("../..", "passwd"),
+                (key.as_str(), "missing.png"),
+            ] {
+                let reply = request_raw("user_attachment", json!({"key": k, "name": n}));
+                assert_eq!(reply["ok"], false, "key={k} name={n} must be refused");
+            }
+
+            let reply = request_raw("user_attachment", json!({"key": key}));
+            assert_eq!(reply["ok"], false, "missing name must fail");
         });
     }
 
