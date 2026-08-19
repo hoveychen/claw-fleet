@@ -980,4 +980,12 @@ fn main() {
             }
         },
     }
+
+    // One-shot commands that scanned sources (agents / audit / search / …) may
+    // have started a `dsh web` on first dsh touch; without this, every such run
+    // leaked it as an orphan (proven live: one `fleet agents --all` = one leaked
+    // `dsh web --port 0` at ppid 1). Idempotent no-op when dsh was never
+    // touched. Error paths that `std::process::exit` bypass this — the
+    // signature sweep in `reap_orphans` mops those up on the next spawn.
+    claw_fleet_core::dsh_source::shutdown();
 }
