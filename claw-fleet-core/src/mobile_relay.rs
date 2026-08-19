@@ -759,8 +759,36 @@ fn decode_inbound_payload(payload: &Value) -> Option<Value> {
     serde_json::from_slice(&json).ok()
 }
 
+/// The notify frame's `url` is the single routing field every
+/// notification-click path reads: the web service worker opens it verbatim
+/// (`sw.js` notificationclick), and the relay forwards it into the HarmonyOS
+/// `clickAction` so the native shell can hand it to the same web code.
+///
+/// It carries the decision identity as a fragment (`/#d=<kind>:<id>`) rather
+/// than a query, so it never reaches a server and costs nothing to route
+/// client-side. `tag` already held that identity — it just had no consumer for
+/// navigation, which is why a click used to land on the home screen regardless
+/// of which card fired it.
+///
+/// One field, one meaning: with both `tag` and `url` on the wire it would be
+/// easy to drift into "web routes on url, harmony routes on tag" — two parallel
+/// implementations of the same thing.
+fn notify_url(tag: &str) -> String {
+    if tag.is_empty() {
+        return "/".to_string();
+    }
+    format!("/#d={tag}")
+}
+
 fn build_notify_frame(title: &str, body: &str, tag: &str) -> String {
-    json!({ "type": "notify", "title": title, "body": body, "tag": tag, "url": "/" }).to_string()
+    json!({
+        "type": "notify",
+        "title": title,
+        "body": body,
+        "tag": tag,
+        "url": notify_url(tag),
+    })
+    .to_string()
 }
 
 pub fn build_decision_created_payload(kind: &str, request: Value) -> Value {
@@ -4821,6 +4849,20 @@ mod tests {
         let frame: Value = serde_json::from_str(&build_notify_frame("t", "b", "guard:g1")).unwrap();
         assert_eq!(frame["type"], "notify");
         assert_eq!(frame["tag"], "guard:g1");
+        // `url` is what every notification-click path routes on: the web service
+        // worker opens it verbatim, and the relay forwards it into the
+        // HarmonyOS clickAction. It used to be a hardcoded "/", so clicking any
+        // notification landed on the home screen no matter which card fired it.
+        assert_eq!(frame["url"], "/#d=guard:g1");
+    }
+
+    #[test]
+    fn notify_url_falls_back_to_home_without_a_tag() {
+        // publish_decision_created degrades `tag` to the bare kind when the
+        // request carries no id. A fragment is still fine, but an empty tag must
+        // not produce a dangling "/#d=".
+        let frame: Value = serde_json::from_str(&build_notify_frame("t", "b", "")).unwrap();
+        assert_eq!(frame["url"], "/");
     }
 
     fn hello(client_id: &str, label: &str, push: bool) -> Value {

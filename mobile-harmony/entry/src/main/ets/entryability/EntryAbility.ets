@@ -48,13 +48,36 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'share-diag published nonce=%{public}d', n + 1);
   }
 
-  /// app 已在后台时，分享走这条路而不是 onCreate。
+  /// 点推送通知带进来的路由目标。
+  ///
+  /// relay 把 notify 帧的 url 放进鸿蒙报文的 clickAction.data.fleetUrl(见
+  /// harmony_push 的 build_app_notification),Push Kit 再把整个 data 作为 want
+  /// 参数交给本 Ability —— 所以这里读的 key 就是 relay 那边写的那个。
+  ///
+  /// 与分享同一套路数:内容跟着拉起动作走,不依赖任何跨进程存储。
+  private takeDeepLinkFromWant(want: Want): void {
+    const params = want.parameters as Record<string, Object> | undefined;
+    const raw = params?.['fleetUrl'];
+    const url: string = typeof raw === 'string' ? raw : '';
+    hilog.info(DOMAIN, TAG, 'deeplink-diag want url len=%{public}d', url.length);
+    if (url.length === 0) {
+      return;
+    }
+    AppStorage.setOrCreate('deepLinkUrl', url);
+    // nonce:连点同一条通知时 url 一模一样，只看 url 的 @Watch 不会再触发。
+    const n: number = AppStorage.get<number>('deepLinkNonce') ?? 0;
+    AppStorage.setOrCreate('deepLinkNonce', n + 1);
+  }
+
+  /// app 已在后台时，分享和推送点击都走这条路而不是 onCreate。
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     this.takeSharedFromWant(want);
+    this.takeDeepLinkFromWant(want);
   }
 
   onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     this.takeSharedFromWant(want);
+    this.takeDeepLinkFromWant(want);
     const cfg = this.context.config;
     // 语言与主题现在都归 web 层：mobile-web 自己读 navigator.language 和
     // prefers-color-scheme。这里只保留 initTheme —— 它喂的是 AppStorage 里的

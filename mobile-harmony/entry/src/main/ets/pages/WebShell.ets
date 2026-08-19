@@ -86,6 +86,10 @@ struct WebShell {
   /// 拼成 __shared/ 的 URL 交给 web，取字节的活由 onInterceptRequest 干。
   @StorageProp('sharedFiles') sharedFiles: string = '';
   @StorageProp('sharedNonce') @Watch('onSharedChanged') sharedNonce: number = 0;
+  /// 点推送通知带进来的路由目标(EntryAbility 从 want 里取,见 takeDeepLinkFromWant)。
+  /// nonce 变化即代表「又点了一次」，哪怕目标与上次相同。
+  @StorageProp('deepLinkUrl') deepLinkUrl: string = '';
+  @StorageProp('deepLinkNonce') @Watch('onDeepLinkChanged') deepLinkNonce: number = 0;
   private webReady: boolean = false;
   /// 设备 push token，取到一次就缓存 —— getToken 会拉起系统通知授权，重复调
   /// 没意义。空串表示还没取到或这台设备取不到（模拟器/未开通推送权益）。
@@ -148,6 +152,33 @@ struct WebShell {
 
   private onSharedChanged(): void {
     this.deliverShare(0);
+  }
+
+  private onDeepLinkChanged(): void {
+    this.deliverDeepLink();
+  }
+
+  /// 把点击目标交给页面。走 decisionDeepLink.ts 约定的 window.__fleetDeepLink ——
+  /// 与 __fleetShare / __fleetPushToken 同一套约定,bootScript 已提前占位并排队,
+  /// 所以冷启动(点通知拉起 app)时不必跟 React 的 effect 赛跑。
+  private deliverDeepLink(): void {
+    if (!this.webReady || this.deepLinkUrl.length === 0) {
+      hilog.info(DOMAIN_W, TAG_W, 'deeplink-diag deliver skipped ready=%{public}s len=%{public}d',
+        this.webReady ? 'yes' : 'no', this.deepLinkUrl.length);
+      return;
+    }
+    this.controller.runJavaScript(
+      `(function(){ if(!window.__fleetDeepLink) return 'NO_HOOK';` +
+      ` window.__fleetDeepLink(` + JSON.stringify(this.deepLinkUrl) + `); return 'OK'; })()`,
+    ).then((r: string) => {
+      hilog.info(DOMAIN_W, TAG_W, 'deeplink-diag injected result=%{public}s', r);
+      if (r.indexOf('OK') >= 0) {
+        // 投递成功即清掉，避免下次回前台又跳一次同样的卡。
+        this.deepLinkUrl = '';
+      }
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN_W, TAG_W, 'deeplink-diag inject failed: %{public}s', e.message);
+    });
   }
 
   /// 把分享内容交给页面。走 shareTarget.ts 约定的 window.__fleetShare —— 那是
@@ -324,6 +355,12 @@ struct WebShell {
         window.__fleetPushToken = function(t){ window.__fleetPushTokenPending.push(t); };
       }
 
+      // 点通知拉起 app 时,目标必然早于页面脚本 —— 同样先占位排队。
+      if (!window.__fleetDeepLink) {
+        window.__fleetDeepLinkPending = window.__fleetDeepLinkPending || [];
+        window.__fleetDeepLink = function(u){ window.__fleetDeepLinkPending.push(u); };
+      }
+
       var s = document.documentElement.style;
       // 只给底部。顶部由框架自己 inset 过了 —— SafeArea.ets 的注释记着这笔账:
       // 2026-07-15 就因为应用侧又加了一次 top inset，导致每个页头被整整推下
@@ -464,6 +501,7 @@ struct WebShell {
             this.webReady = true;
             this.deliverShare(0);
             this.deliverPushToken();
+            this.deliverDeepLink();
           })
           .width('100%')
           .height('100%')
