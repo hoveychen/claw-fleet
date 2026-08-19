@@ -214,6 +214,18 @@ export function SessionDetail({
     const tail = localTailRef.current;
     setLocalLoading(true);
     setLocalStalled(false);
+    // dsh:// fetches log their whole lifecycle: the Rust side of this command
+    // logs entry/exit for the same paths, so if a request goes dark the log
+    // says on which side of the IPC boundary it happened. Claude paths stay
+    // quiet — they poll every 1.5s and would flood the log.
+    const probeDsh = localSession.jsonlPath?.startsWith("dsh://")
+      ? (event: string) => {
+          void invoke("log_frontend_debug", {
+            msg: `tail-fetch ${event} tail=${tail} [${localSession.jsonlPath}]`,
+          }).catch(() => {});
+        }
+      : null;
+    probeDsh?.("fired");
     // Deadline, not abort: `get_messages_tail` can stay pending forever when the
     // backend stops answering (proven by freezing dsh's web server — the pane
     // sat on 「加载中…」 for 80s+ with no error). A late result still renders.
@@ -223,19 +235,22 @@ export function SessionDetail({
         tail,
       }),
       () => {
+        probeDsh?.(cancelled ? "stalled(cancelled)" : "stalled");
         if (cancelled) return;
         setLocalLoading(false);
         setLocalStalled(true);
       },
     )
       .then((msgs) => {
+        probeDsh?.(`resolved ${msgs.length} msgs${cancelled ? " (cancelled)" : ""}`);
         if (cancelled) return;
         setLocalMessages((prev) => reconcileMessages(prev, msgs));
         setLocalFullyLoaded(msgs.length < tail);
         setLocalLoading(false);
         setLocalStalled(false);
       })
-      .catch(() => {
+      .catch((e) => {
+        probeDsh?.(`rejected ${String(e).slice(0, 200)}${cancelled ? " (cancelled)" : ""}`);
         if (cancelled) return;
         setLocalLoading(false);
         // A rejection with nothing on screen used to render as a silent blank
