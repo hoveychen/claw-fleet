@@ -305,7 +305,10 @@ function OptionSelects({
   // ~/.dsh/settings.yaml 选中的档位上。
   const effortChoices: Array<[string, string]> = isDsh
     ? [
-        ["", dshEffort.defaultEffort ? `默认（${dshEffort.defaultEffort}）` : "默认努力度"],
+        [
+          "",
+          dshEffort.defaultEffort ? t("默认（{0}）", dshEffort.defaultEffort) : "默认努力度",
+        ],
         ...dshEffort.efforts,
       ]
     : isCodex
