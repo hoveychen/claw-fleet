@@ -640,18 +640,32 @@ export const useDetailStore = create<DetailState>((set, get) => ({
         },
       );
 
-      await invoke("start_watching_session", { jsonlPath: session.jsonlPath });
-
-      tailUnlisten = await listen<RawMessage[]>("session-tail", (event) => {
-        get().appendMessages(event.payload);
-      });
-
+      // Render the moment the transcript is in hand. Nothing below may hold it
+      // back: `start_watching_session` takes the backend **write** lock, while
+      // `get_messages_tail` (1.5s) and `read_live_thinking` (700ms) take read
+      // locks — so on an *active* session the write lock's wait is set by other
+      // pollers, not by this fetch. Awaiting it before this `set` is what left
+      // the pane on 「加载中…」 with the messages already fetched, and it sat
+      // outside `withStallWatch` (disarmed the moment the fetch landed), so no
+      // deadline and no retry button ever fired. See store.test.ts.
       set({
         messages: rawMessages,
         isLoading: false,
         loadStalled: false,
         fullyLoaded: rawMessages.length < INITIAL_TAIL,
       });
+
+      // The live tail is an enhancement on top of a pane that already renders.
+      // Its own try/catch: a failure here must not blank or re-stall the
+      // transcript above.
+      try {
+        tailUnlisten = await listen<RawMessage[]>("session-tail", (event) => {
+          get().appendMessages(event.payload);
+        });
+        await invoke("start_watching_session", { jsonlPath: session.jsonlPath });
+      } catch (err) {
+        console.error("Failed to arm the live tail:", err);
+      }
     } catch (err) {
       console.error("Failed to open session detail:", err);
       // Only clear loading if this open() is still the active one — a newer

@@ -327,6 +327,43 @@ describe("详情取数期限", () => {
     expect(useDetailStore.getState().messages).toHaveLength(1);
   });
 
+  /**
+   * 同一幕的第二个入口,期限机制盖不到的那个。
+   *
+   * `open()` 里 `isLoading` 要等两个 await 都回来:`get_messages_tail`(有
+   * 20s 期限保护)之后还有一个 `start_watching_session`。后者取的是 backend
+   * 的**写锁**,而 `get_messages_tail` / `read_live_thinking` 取读锁 —— 活跃
+   * 会话上这两个轮询分别是 1.5s / 700ms 一发,所以写锁这一步的等待时间由别人
+   * 的读锁决定,不由 transcript 取数决定。
+   *
+   * 而 `withStallWatch` 只包了第一个 await:transcript 一旦取回来,期限就被
+   * disarm 了。于是卡在第二个 await 上的症状是**永久「加载中…」且不出重试
+   * 按钮** —— 消息其实已经在手里,只是没被 set 进 store。
+   *
+   * 契约:watcher 注册不在渲染关键路径上。transcript 到手就渲染,注册失败或
+   * 迟到都不许扣着已经取到的消息。
+   */
+  it("watcher 注册永不返回时,已取到的 transcript 仍须渲染", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    (invoke as unknown as { mockImplementation: (f: unknown) => void }).mockImplementation(
+      (cmd: string) => {
+        if (cmd === "get_messages_tail") return Promise.resolve([{ type: "user" }]);
+        // 写锁一直拿不到 —— 命令发出去了,永远不 settle。
+        if (cmd === "start_watching_session") return new Promise(() => {});
+        return Promise.resolve(undefined);
+      },
+    );
+
+    const { useDetailStore } = await import("./store");
+    // 不 await open():它本身就挂在那个永不 settle 的注册上,await 会把这个
+    // 测试变成超时而不是一次干净的断言失败。
+    void useDetailStore.getState().open(session);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+
+    expect(useDetailStore.getState().messages).toHaveLength(1);
+    expect(useDetailStore.getState().isLoading).toBe(false);
+  });
+
   it("取数直接失败时也摊开状态,而不是留一片静默的空白", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     (invoke as unknown as { mockImplementation: (f: unknown) => void }).mockImplementation(
