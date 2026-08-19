@@ -374,18 +374,28 @@ fn build_service_notification(
 /// Nothing is shared with the 元服务 shape: no `msgId`, no `appId`, no template —
 /// the title/body are free-form, and the recipient is a device token array.
 ///
-/// `clickAction.actionType: 0` opens the app's home page. Deep-linking straight
-/// to the decision card would need a custom action plus an on-device check that
-/// the parameters survive the launch, so that is left to a follow-up rather than
-/// asserted here — `payload.url` is deliberately not wired up yet.
+/// `clickAction.actionType: 0` means "open the app's default ability" — the
+/// routing target does NOT go in the action type but rides along in
+/// `clickAction.data`, which Push Kit hands to the UIAbility as want parameters
+/// (read in `onCreate` / `onNewWant`). That is the documented way to open a
+/// specific in-app page, and it keeps every platform on the one routing field:
+/// `payload.url` is the same string the web service worker opens.
+///
+/// `data` is omitted entirely when there is no url — `url` is optional on the
+/// wire, and an empty `data` object would hand the shell a blank target that
+/// looks like a failed route rather than an absent one.
 fn build_app_notification(category: &str, token: &str, payload: &PushPayload<'_>) -> Value {
+    let mut click = serde_json::json!({ "actionType": 0 });
+    if let Some(url) = payload.url {
+        click["data"] = serde_json::json!({ "fleetUrl": url });
+    }
     serde_json::json!({
         "payload": {
             "notification": {
                 "category": category,
                 "title": payload.title,
                 "body": payload.body,
-                "clickAction": { "actionType": 0 }
+                "clickAction": click
             }
         },
         "target": { "token": [token] }
@@ -457,6 +467,40 @@ cHMuOFehtqcSyMaY3z552xNj
         // thing_0 = reminder content (body); thing_4 = publishing unit (title).
         assert_eq!(body["templateParams"]["thing_0"], "有一个 AI 任务待确认");
         assert_eq!(body["templateParams"]["thing_4"], "netferry");
+    }
+
+    #[test]
+    fn app_notification_carries_the_click_target() {
+        let payload = PushPayload {
+            title: "netferry",
+            body: "有一个 AI 任务待确认",
+            tag: Some("fleet-ask:42"),
+            url: Some("/#d=fleet-ask:42"),
+        };
+        let body = build_app_notification("WORK", "TOK-A", &payload);
+        assert_eq!(body["payload"]["notification"]["category"], "WORK");
+        assert_eq!(body["payload"]["notification"]["title"], "netferry");
+        assert_eq!(body["target"]["token"][0], "TOK-A");
+        // actionType stays 0 (open the default ability); the routing target
+        // rides in clickAction.data, which the UIAbility reads back out of the
+        // want. Without this the notification opens the app on its home screen
+        // no matter which card fired it.
+        assert_eq!(body["payload"]["notification"]["clickAction"]["actionType"], 0);
+        assert_eq!(
+            body["payload"]["notification"]["clickAction"]["data"]["fleetUrl"],
+            "/#d=fleet-ask:42"
+        );
+    }
+
+    #[test]
+    fn app_notification_omits_click_data_without_a_url() {
+        // `url` is Option on the wire; an older desktop may not send one. An
+        // empty `data` object is worse than none — the shell would hand the web
+        // an empty target and it would look like a failed route.
+        let payload = PushPayload { title: "t", body: "b", tag: None, url: None };
+        let body = build_app_notification("WORK", "TOK-A", &payload);
+        assert_eq!(body["payload"]["notification"]["clickAction"]["actionType"], 0);
+        assert!(body["payload"]["notification"]["clickAction"]["data"].is_null());
     }
 
     #[test]
