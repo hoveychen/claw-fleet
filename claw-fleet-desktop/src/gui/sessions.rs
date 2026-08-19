@@ -70,6 +70,20 @@ pub(crate) fn get_messages_tail(
     // Probed: this is the call behind 「对话」Tab, and when it goes slow the log
     // has to say whether the time went to the backend or to queueing for
     // `AppState::backend`. See `cmd_probe`.
+    //
+    // dsh:// additionally logs unconditionally at entry AND completion. The
+    // slow-only probe is blind to the two states the eternal 「加载中…」 hunt
+    // must distinguish: a call that never arrived and a call that finished
+    // under the 1s threshold both leave zero lines. These entry/exit lines are
+    // the missing half of the split — the frontend logs the same request id on
+    // its side (SessionDetail's standalone fetch), so the log shows exactly
+    // which hop of webview → IPC → command → response went dark.
+    let is_dsh = jsonl_path.starts_with("dsh://");
+    if is_dsh {
+        claw_fleet_core::log_debug(&format!(
+            "get_messages_tail[dsh] enter tail={tail} [{jsonl_path}]"
+        ));
+    }
     let mut probe = crate::cmd_probe::CmdProbe::start("get_messages_tail", &jsonl_path);
     let backend = state.backend.read().unwrap();
     probe.locked();
@@ -78,6 +92,15 @@ pub(crate) fn get_messages_tail(
         Ok(msgs) => format!("{} msgs", msgs.len()),
         Err(e) => format!("error: {e}"),
     });
+    if is_dsh {
+        claw_fleet_core::log_debug(&format!(
+            "get_messages_tail[dsh] done {} [{jsonl_path}]",
+            match &out {
+                Ok(msgs) => format!("{} msgs", msgs.len()),
+                Err(e) => format!("error: {e}"),
+            }
+        ));
+    }
     out
 }
 
