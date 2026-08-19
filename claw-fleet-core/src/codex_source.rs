@@ -3507,6 +3507,51 @@ mod tests {
         assert_eq!(plan_type_from_foxy_label("Codex "), None);
     }
 
+    /// A foxy account with the given window percentages and nothing else.
+    fn foxy_codex_account_at(primary: Option<i32>, secondary: Option<i32>)
+        -> crate::foxy::FoxyCodexAccount
+    {
+        let w = |used_percent: i32| CodexRateLimitWindow {
+            used_percent,
+            window_duration_mins: None,
+            resets_at: Some(1_787_622_736),
+        };
+        crate::foxy::FoxyCodexAccount {
+            email: "you@example.com".into(),
+            plan: "Codex Team".into(),
+            full_name: "Harry C".into(),
+            primary: primary.map(w),
+            secondary: secondary.map(w),
+        }
+    }
+
+    #[test]
+    fn foxy_snapshot_is_limited_when_the_primary_window_is_exhausted() {
+        // foxy serves no `rateLimitReachedType`, so it is derived from the
+        // percentages — otherwise `llm_provider::codex_quota_state` (its only
+        // production consumer) would call an exhausted account Healthy.
+        let item = codex_usage_from_foxy(foxy_codex_account_at(Some(100), None));
+        assert_eq!(item.rate_limit_reached_type.as_deref(), Some("primary"));
+    }
+
+    #[test]
+    fn foxy_snapshot_is_limited_when_the_secondary_window_is_exhausted() {
+        let item = codex_usage_from_foxy(foxy_codex_account_at(Some(3), Some(100)));
+        assert_eq!(item.rate_limit_reached_type.as_deref(), Some("secondary"));
+    }
+
+    #[test]
+    fn foxy_snapshot_is_not_limited_just_below_full() {
+        let item = codex_usage_from_foxy(foxy_codex_account_at(Some(99), Some(99)));
+        assert_eq!(item.rate_limit_reached_type, None);
+    }
+
+    #[test]
+    fn foxy_snapshot_is_not_limited_when_windows_are_absent() {
+        let item = codex_usage_from_foxy(foxy_codex_account_at(None, None));
+        assert_eq!(item.rate_limit_reached_type, None);
+    }
+
     #[test]
     fn foxy_snapshot_leaves_credits_unknown() {
         // foxy polls no credits balance; inventing `has_credits: false` would
@@ -5610,10 +5655,40 @@ pub const USAGE_SOURCE_APP_SERVER: &str = "codex-app-server";
 fn codex_usage_from_foxy(a: crate::foxy::FoxyCodexAccount) -> CodexUsageItem {
     CodexUsageItem {
         plan_type: plan_type_from_foxy_label(&a.plan),
+        rate_limit_reached_type: reached_window_from_percentages(&a.primary, &a.secondary),
         primary: a.primary,
         secondary: a.secondary,
         usage_source: USAGE_SOURCE_FOXY.to_string(),
         ..Default::default()
+    }
+}
+
+/// Derive Codex's `rateLimitReachedType` from the window percentages.
+///
+/// foxy re-serves usage numbers but not Codex's own "which window did I hit"
+/// flag, so it is reconstructed here: a window at 100% is exhausted. Without
+/// this, [`crate::llm_provider`]'s `codex_quota_state` — the only production
+/// consumer of this field on a `fetch_codex_usage` snapshot — would report an
+/// exhausted account as `Healthy`.
+///
+/// Codex reports at most one reached window, so primary is checked first; the
+/// consumer only distinguishes limited from not, and codex auto-resume reads its
+/// reached window from the session rollout
+/// ([`codex_rate_limit_state_from_rollout`]) rather than from here, so the
+/// choice between two simultaneously-full windows changes no behaviour.
+fn reached_window_from_percentages(
+    primary: &Option<CodexRateLimitWindow>,
+    secondary: &Option<CodexRateLimitWindow>,
+) -> Option<String> {
+    let exhausted = |w: &Option<CodexRateLimitWindow>| {
+        w.as_ref().is_some_and(|w| w.used_percent >= 100)
+    };
+    if exhausted(primary) {
+        Some("primary".to_string())
+    } else if exhausted(secondary) {
+        Some("secondary".to_string())
+    } else {
+        None
     }
 }
 
