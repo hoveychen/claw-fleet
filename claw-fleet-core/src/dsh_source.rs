@@ -990,6 +990,47 @@ pub fn forget_history(session_id: &str) {
     lock(history_slot()).remove(session_id);
 }
 
+/// What one page of durable events says about how a session is configured:
+/// its route, and the reasoning effort that route runs at.
+///
+/// The two resolve independently because they live in different places (see
+/// [`latest_route`] and [`latest_effort`]), each carrying the `seq` of the
+/// event that supplied it so a later backfill page of *older* events cannot
+/// overwrite a newer reading.
+#[derive(Debug, Default, PartialEq)]
+struct Seen {
+    route: Option<(i64, String)>,
+    effort: Option<(i64, String)>,
+}
+
+/// Read both readings off one page.
+fn seen_in(events: &[Value]) -> Seen {
+    Seen {
+        route: latest_route(events),
+        effort: latest_effort(events),
+    }
+}
+
+/// The reasoning effort one page records, latest wins.
+///
+/// Unlike the route, this rides **only** `request/header`
+/// (`data.header.config.reasoningEffort`) — measured against a live server: a
+/// long session's tail page held 7,877 events and zero headers, while a short
+/// session's whole log carried one with `reasoningEffort: "high"`. dsh appends a
+/// header at `initial` / `resume` / `change`, so the value shows up for short
+/// sessions, for resumed ones, and for anyone who reads a transcript back to
+/// its head — and stays unknown otherwise. `session.models` would answer
+/// authoritatively for every session, but it **attaches an agent** to the
+/// session it is asked about (measured: `host.describe.attachedSessions` 2 → 3)
+/// and dsh publishes no detach call, so paying that for a chip is not on.
+///
+/// Absent is a legitimate answer, not a failure: a model with no reasoning
+/// ladder (measured: `openrouter/anthropic/claude-haiku-4.5`) carries no
+/// `reasoningEffort` at all.
+fn latest_effort(_events: &[Value]) -> Option<(i64, String)> {
+    None
+}
+
 /// The `provider/model` route one page of durable events records, latest wins.
 ///
 /// Three event types carry the route, all verbatim off a live `session.history`:
@@ -1012,9 +1053,10 @@ pub fn forget_history(session_id: &str) {
 /// same `assistant/message.source` for a different question: every *priceable*
 /// call and its tokens, rather than the one route the session is on now.
 ///
+/// Reasoning effort rides only `request/header`, so it resolves separately —
+/// see [`Seen`].
+///
 /// [`SpawnSpec::model`]: crate::agent_source::SpawnSpec
-/// Returned with the `seq` the winning evidence sat at, so a backfill page
-/// (older events, fetched later) cannot overwrite a newer route.
 fn latest_route(events: &[Value]) -> Option<(i64, String)> {
     /// The route one event names, if it is one of the three that carry one.
     fn route_of(event: &Value) -> Option<String> {
@@ -1058,42 +1100,58 @@ fn latest_route(events: &[Value]) -> Option<(i64, String)> {
     best
 }
 
-/// Every session's newest known route as `(seq, "provider/model")`, keyed by
-/// session id.
+/// Every session's newest known [`Seen`], keyed by session id.
 ///
 /// Separate from [`history_slot`] on purpose: a transcript is hundreds of KB
-/// and gets evicted at [`HISTORY_CACHE_CAP`], while a route is one short string
+/// and gets evicted at [`HISTORY_CACHE_CAP`], while this is two short strings
 /// per session and there is no reason to make the model chip flicker off just
 /// because someone opened a ninth session. Bounded by the number of dsh
 /// sessions read in one process lifetime — a few dozen strings.
-static MODELS: OnceLock<Mutex<std::collections::HashMap<String, (i64, String)>>> = OnceLock::new();
+static MODELS: OnceLock<Mutex<std::collections::HashMap<String, Seen>>> = OnceLock::new();
 
-fn models_slot() -> &'static Mutex<std::collections::HashMap<String, (i64, String)>> {
+fn models_slot() -> &'static Mutex<std::collections::HashMap<String, Seen>> {
     MODELS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
-/// Remember the route a session's events showed, for a later scan to read.
+/// Fold what a page showed into what is already known, for a later scan to read.
 ///
-/// Older evidence loses: history pages arrive in both directions (a tail
-/// refresh, then `beforeSeq` backfill walking away from the present), so
+/// Older evidence loses, per field: history pages arrive in both directions (a
+/// tail refresh, then `beforeSeq` backfill walking away from the present), so
 /// last-write-wins would let a backfill page re-pin a session to the model it
-/// started on.
-fn remember_model(session_id: &str, seq: i64, spec: &str) {
-    let mut map = lock(models_slot());
-    match map.get(session_id) {
-        Some((at, _)) if *at > seq => {}
-        _ => {
-            map.insert(session_id.to_string(), (seq, spec.to_string()));
+/// started on. Per *field* because the two readings come from different events —
+/// a page that names a route but no effort must not erase a known effort.
+fn remember_seen(session_id: &str, seen: Seen) {
+    fn newer(prev: &mut Option<(i64, String)>, found: Option<(i64, String)>) {
+        let Some((seq, value)) = found else { return };
+        match prev {
+            Some((at, _)) if *at > seq => {}
+            _ => *prev = Some((seq, value)),
         }
     }
+    let mut map = lock(models_slot());
+    let entry = map.entry(session_id.to_string()).or_default();
+    newer(&mut entry.route, seen.route);
+    newer(&mut entry.effort, seen.effort);
 }
 
 /// The route last seen for `session_id`, or `None` when Fleet has never read
 /// this session's history in this process.
 fn known_model(session_id: &str) -> Option<String> {
     lock(models_slot())
-        .get(session_id)
+        .get(session_id)?
+        .route
+        .as_ref()
         .map(|(_, spec)| spec.clone())
+}
+
+/// The reasoning effort last seen for `session_id`. `None` both when nothing
+/// has been read and when the log has no header in the pages that were.
+fn known_effort(session_id: &str) -> Option<String> {
+    lock(models_slot())
+        .get(session_id)?
+        .effort
+        .as_ref()
+        .map(|(_, effort)| effort.clone())
 }
 
 fn seq_of(event: &Value) -> Option<i64> {
@@ -1150,13 +1208,12 @@ fn events_before(first_seq: i64, page: &[Value]) -> Vec<Value> {
 /// believed it was, which is what makes concurrent readers safe: whoever gets
 /// the lock second sees the first one's events already in and skips them.
 fn merge_page(session_id: &str, events: &[Value], has_more: bool) -> (usize, Option<i64>, bool) {
-    // Every history read is also the one chance to learn the session's route:
-    // the roster carries none, and asking per session would be a `session.list`
-    // sized cost on every scan. Recorded before the fold so a page that turns
-    // out to be entirely already-cached still teaches the scan something.
-    if let Some((seq, spec)) = latest_route(events) {
-        remember_model(session_id, seq, &spec);
-    }
+    // Every history read is also the one chance to learn how the session is
+    // configured: the roster names neither route nor effort, and asking per
+    // session would be a `session.list` sized cost on every scan. Recorded
+    // before the fold so a page that turns out to be entirely already-cached
+    // still teaches the scan something.
+    remember_seen(session_id, seen_in(events));
 
     let mut map = lock(history_slot());
     evict_cold(&mut map, session_id);
@@ -1796,13 +1853,139 @@ mod tests {
         // opening it in the desktop does.
         let item = live_list_item();
         let id = item.get("sessionId").and_then(Value::as_str).unwrap();
-        remember_model(id, 86, "deepseek-official/deepseek-v4-pro");
+        remember_seen(
+            id,
+            Seen {
+                route: Some((86, "deepseek-official/deepseek-v4-pro".into())),
+                effort: None,
+            },
+        );
         let info = session_info_from_list_item(&item).expect("mapped");
         assert_eq!(
             info.model.as_deref(),
             Some("deepseek-official/deepseek-v4-pro"),
             "the detail header's model chip reads SessionInfo::model"
         );
+    }
+
+    // ── Reasoning effort ─────────────────────────────────────────────────────
+
+    #[test]
+    fn reads_the_effort_off_a_request_header() {
+        assert_eq!(
+            latest_effort(&[header_event()]),
+            Some((11, "high".to_string()))
+        );
+    }
+
+    #[test]
+    fn the_latest_header_wins_when_the_effort_changed() {
+        // dsh appends a fresh header at `change`, so a session that switched
+        // effort mid-run has two — the newer one is the one in force.
+        let mut changed = header_event();
+        changed["seq"] = json!(400);
+        changed["data"]["header"]["config"]["reasoningEffort"] = json!("max");
+        changed["data"]["reason"] = json!("change");
+        assert_eq!(
+            latest_effort(&[header_event(), changed.clone()]).map(|(_, e)| e),
+            Some("max".to_string())
+        );
+        // …and the same in the order a `beforeSeq` backfill delivers them.
+        assert_eq!(
+            latest_effort(&[changed, header_event()]).map(|(_, e)| e),
+            Some("max".to_string())
+        );
+    }
+
+    #[test]
+    fn a_model_with_no_reasoning_ladder_reports_no_effort() {
+        // Measured: `openrouter/anthropic/claude-haiku-4.5` carries no
+        // `reasoningEffort` at all. Absent must stay absent, not become "".
+        let mut no_ladder = header_event();
+        no_ladder["data"]["header"]["config"]
+            .as_object_mut()
+            .unwrap()
+            .remove("reasoningEffort");
+        assert_eq!(latest_effort(&[no_ladder]), None);
+        // Nor does a reply or a context event carry one.
+        assert_eq!(
+            latest_effort(&[context_event(), reply_event(86, "p", "m")]),
+            None
+        );
+    }
+
+    #[test]
+    fn folding_a_history_page_records_the_effort_too() {
+        let id = "session-effort-fold";
+        merge_page(id, &[header_event()], false);
+        assert_eq!(
+            known_effort(id).as_deref(),
+            Some("high"),
+            "the effort chip needs the same free ride as the model chip"
+        );
+        // A later page that names a route but no effort must not erase it.
+        merge_page(id, &[reply_event(900, "deepseek-official", "deepseek-v4-pro")], false);
+        assert_eq!(known_effort(id).as_deref(), Some("high"));
+        forget_history(id);
+    }
+
+    #[test]
+    fn the_effort_reaches_the_session_info() {
+        let item = live_list_item();
+        let id = item.get("sessionId").and_then(Value::as_str).unwrap();
+        remember_seen(
+            id,
+            Seen {
+                route: None,
+                effort: Some((11, "high".into())),
+            },
+        );
+        let info = session_info_from_list_item(&item).expect("mapped");
+        assert_eq!(
+            info.thinking_level.as_deref(),
+            Some("high"),
+            "the header's effort chip reads SessionInfo::thinking_level"
+        );
+    }
+
+    /// For a session Fleet spawned with an explicit `--effort`, the launch spec
+    /// already knows — no transcript read needed. It only fills in what the log
+    /// has not shown: the header wins when both are known, because it is the
+    /// effort a real request went out with.
+    #[test]
+    fn a_fleet_spawned_session_falls_back_to_its_launch_spec_effort() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        let mut item = live_list_item();
+        let id = format!("session-effort-spec-{}", uuid::Uuid::new_v4());
+        item["sessionId"] = json!(id);
+        crate::launch_spec::record(&id, Some("deepseek-official/deepseek-v4-pro"), Some("max"));
+
+        let info = session_info_from_list_item(&item).expect("mapped");
+        assert_eq!(
+            info.thinking_level.as_deref(),
+            Some("max"),
+            "a spawn Fleet recorded needs no transcript read to name its effort"
+        );
+
+        // The log's own header outranks the spawn record.
+        remember_seen(
+            &id,
+            Seen {
+                route: None,
+                effort: Some((400, "high".into())),
+            },
+        );
+        let info = session_info_from_list_item(&item).expect("mapped");
+        assert_eq!(info.thinking_level.as_deref(), Some("high"));
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
     }
 
     #[test]
