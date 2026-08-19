@@ -551,6 +551,12 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         // `None` until something reads it — the desktop's detail pane does so
         // the moment a session is opened.
         model: known_model(&id),
+        // Same story for the effort, with one extra source: for a session Fleet
+        // spawned with an explicit `--effort`, the launch spec is a record of
+        // what Fleet asked for (and applied via `session.selectModel`). The log
+        // header wins when known — it is the effort a real request went out
+        // with, and it tracks a later change the spawn record cannot.
+        thinking_level: known_effort(&id).or_else(|| crate::launch_spec::effort_of(&id)),
         id: id.clone(),
         workspace_name: crate::session::workspace_name(&workspace_path),
         workspace_path,
@@ -1027,8 +1033,25 @@ fn seen_in(events: &[Value]) -> Seen {
 /// Absent is a legitimate answer, not a failure: a model with no reasoning
 /// ladder (measured: `openrouter/anthropic/claude-haiku-4.5`) carries no
 /// `reasoningEffort` at all.
-fn latest_effort(_events: &[Value]) -> Option<(i64, String)> {
-    None
+fn latest_effort(events: &[Value]) -> Option<(i64, String)> {
+    let mut best: Option<(i64, String)> = None;
+    for event in events {
+        if event.get("type").and_then(Value::as_str) != Some("request/header") {
+            continue;
+        }
+        let effort = event
+            .pointer("/data/header/config/reasoningEffort")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|e| !e.is_empty());
+        if let Some(effort) = effort {
+            let seq = seq_of(event).unwrap_or(i64::MIN);
+            if best.as_ref().is_none_or(|(at, _)| seq >= *at) {
+                best = Some((seq, effort.to_string()));
+            }
+        }
+    }
+    best
 }
 
 /// The `provider/model` route one page of durable events records, latest wins.
