@@ -6,6 +6,7 @@ pub use claw_fleet_core::*;
 // ── Desktop-only modules ────────────────────────────────────────────────────
 // These are always compiled — this crate IS the GUI app, so no #[cfg] gates.
 pub mod app_nap;
+mod cmd_probe;
 pub mod fleet_binary;
 mod gui;
 pub mod keep_awake;
