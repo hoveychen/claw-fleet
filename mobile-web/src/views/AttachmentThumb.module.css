@@ -1,0 +1,77 @@
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+/* Sized to match the transcript thumbnails in SessionDetailView so a turn that
+   mixes a pasted screenshot and a picked file reads as one row. */
+.tile {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  min-height: 56px;
+  max-width: 160px;
+  max-height: 120px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-card);
+  cursor: zoom-in;
+  overflow: hidden;
+}
+
+.img {
+  display: block;
+  max-width: 160px;
+  max-height: 120px;
+  object-fit: cover;
+}
+
+.placeholder {
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+/* Shown over the tile while the full-size bytes are on their way, so a tap on a
+   slow link doesn't look like it did nothing. */
+.busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 11px;
+}
+
+/* Non-image attachments, and images whose bytes we couldn't pull — a filename
+   is still more than the raw absolute path the bubble used to print. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  max-width: 60vw;
+}
+
+.chipIcon {
+  flex: none;
+}
+
+.chipName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

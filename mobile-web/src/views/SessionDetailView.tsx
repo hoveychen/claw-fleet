@@ -36,6 +36,8 @@ import { isMermaidPre } from "../markdown/mermaidPre";
 import { dateLocale, t } from "../i18n";
 import { CopyButton } from "./CopyButton";
 import { useLightbox } from "./Lightbox";
+import { AttachmentThumbs } from "./AttachmentThumb";
+import { splitContextFiles } from "../userAttachments";
 import type { RelayClient } from "../relay";
 import type {
   ContentBlock,
@@ -803,9 +805,13 @@ const MessageRow = memo(function MessageRow({
   jsonlPath,
 }: MessageRowProps) {
   if (msg.type === "user") {
-    const text = userText(msg);
+    // The composers staple picked files onto the prompt as a trailing
+    // `Context files:` block, which Claude Code freezes into the transcript
+    // verbatim. Peel it back off: the paths become thumbnails, and the bubble
+    // shows what the person actually typed instead of a wall of absolute paths.
+    const { body: text, paths: attachments } = splitContextFiles(userText(msg));
     const thumbs = imageThumbs(msg);
-    if (!text && thumbs.length === 0) return null;
+    if (!text && thumbs.length === 0 && attachments.length === 0) return null;
     // Every synthetic `isMeta` user turn — a SKILL.md body a `Skill` load
     // injects, or codex's developer-role boilerplate — is harness/runtime
     // content, not a user turn. Fold them all into one card that self-labels
@@ -833,6 +839,7 @@ const MessageRow = memo(function MessageRow({
         <div className={styles.userBubble}>
           {thumbs.length > 0 && <ThumbRow srcs={thumbs} />}
           {text && <LazyMarkdown text={text} bare />}
+          <AttachmentThumbs paths={attachments} client={client ?? null} />
         </div>
         <div className={styles.rowTime}>
           {text && <CopyButton text={text} />}
