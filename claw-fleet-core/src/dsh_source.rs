@@ -985,6 +985,38 @@ pub fn forget_history(session_id: &str) {
     lock(history_slot()).remove(session_id);
 }
 
+/// The `provider/model` route one page of durable events records, latest wins.
+///
+/// Three event types carry the route, all verbatim off a live `session.history`:
+///
+/// * `assistant/message` — `data.message.source` is
+///   `{kind:"model", provider, model}` on every assembled model reply. This is
+///   the one that exists per *step*, so it tracks a mid-session model switch.
+/// * `request/context` — `{provider, model, contextWindow}`, appended only when
+///   the route or the capacity changes.
+/// * `request/header` — `data.header.config` carries `{provider, model,
+///   reasoningEffort, …}`. Near the head of the log, so it is the only evidence
+///   a session that has not finished a step yet can offer.
+///
+/// The composed string is deliberately dsh's *spec* form — the same
+/// `provider/model` [`split_model`] parses back and [`SpawnSpec::model`]
+/// carries — so what the UI shows is exactly what would relaunch the session on
+/// the same route.
+///
+/// [`SpawnSpec::model`]: crate::agent_source::SpawnSpec
+pub(crate) fn model_from_events(_events: &[Value]) -> Option<String> {
+    None
+}
+
+/// Remember the route a session's events showed, for a later scan to read.
+fn remember_model(_session_id: &str, _spec: &str) {}
+
+/// The route last seen for `session_id`, or `None` when Fleet has never read
+/// this session's history in this process.
+fn known_model(_session_id: &str) -> Option<String> {
+    None
+}
+
 fn seq_of(event: &Value) -> Option<i64> {
     event.get("seq").and_then(Value::as_i64)
 }
@@ -1548,6 +1580,156 @@ mod tests {
     #[test]
     fn rejects_an_item_without_a_session_id() {
         assert!(session_info_from_list_item(&json!({ "cwd": "/tmp" })).is_none());
+    }
+
+    // ── Which model a session runs on ────────────────────────────────────────
+    //
+    // `session.list` names no route (the `SessionSummary` contract carries
+    // sessionId / updatedAt / running / blank / parentSessionId / origin / cwd /
+    // agentPreset / projections and nothing else, and none of the projection
+    // units publishes one either — read off `@deepseek-ai/dsh-host-apiproxy`
+    // and confirmed against a live 75-session roster). The durable log does, in
+    // three places; these fixtures are verbatim events off `session.history`.
+
+    fn header_event() -> Value {
+        json!({
+            "type": "request/header",
+            "seq": 11,
+            "time": 1787168057902i64,
+            "data": {
+                "header": {
+                    "config": {
+                        "provider": "deepseek-official",
+                        "model": "deepseek-v4-flash",
+                        "reasoningEffort": "high",
+                        "maxTokens": 256000
+                    },
+                    "adapterDefaults": { "maxTokens": true },
+                    "system": "…",
+                    "tools": []
+                },
+                "reason": "initial"
+            }
+        })
+    }
+
+    fn context_event() -> Value {
+        json!({
+            "type": "request/context",
+            "seq": 12,
+            "time": 1787168057903i64,
+            "data": {
+                "provider": "deepseek-official",
+                "model": "deepseek-v4-flash",
+                "contextWindow": 1000000
+            }
+        })
+    }
+
+    fn reply_event(seq: i64, provider: &str, model: &str) -> Value {
+        json!({
+            "type": "assistant/message",
+            "seq": seq,
+            "time": 1787168059480i64,
+            "data": {
+                "turn": 1,
+                "step": 1,
+                "message": {
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": "嗨，老板！" }],
+                    "source": { "kind": "model", "provider": provider, "model": model },
+                    "id": "bbb00ec3"
+                },
+                "usage": { "inputTokens": 14184, "outputTokens": 66 }
+            }
+        })
+    }
+
+    #[test]
+    fn reads_the_route_off_an_assistant_reply() {
+        let events = vec![reply_event(86, "deepseek-official", "deepseek-v4-pro")];
+        assert_eq!(
+            model_from_events(&events).as_deref(),
+            Some("deepseek-official/deepseek-v4-pro")
+        );
+    }
+
+    #[test]
+    fn a_session_that_has_not_replied_yet_still_names_its_route() {
+        // The header lands before the first request goes out, so a session
+        // caught mid-first-step has evidence while it has no reply.
+        assert_eq!(
+            model_from_events(&[header_event()]).as_deref(),
+            Some("deepseek-official/deepseek-v4-flash")
+        );
+        assert_eq!(
+            model_from_events(&[context_event()]).as_deref(),
+            Some("deepseek-official/deepseek-v4-flash")
+        );
+    }
+
+    #[test]
+    fn the_latest_route_wins_when_the_model_changed_mid_session() {
+        // dsh lets a session switch model between turns; the chip must name the
+        // one it is on now, not the one it started on.
+        let events = vec![
+            header_event(),
+            context_event(),
+            reply_event(86, "deepseek-official", "deepseek-v4-flash"),
+            reply_event(140, "openrouter", "anthropic/claude-opus-5"),
+        ];
+        assert_eq!(
+            model_from_events(&events).as_deref(),
+            Some("openrouter/anthropic/claude-opus-5"),
+            "a page must resolve to its newest route"
+        );
+    }
+
+    #[test]
+    fn a_page_with_no_route_evidence_claims_none() {
+        // Chunks, tool traffic and bookkeeping carry no route — and a guess
+        // would be shown to the user as fact.
+        let events = vec![json!({
+            "type": "assistant/chunk",
+            "seq": 20,
+            "data": { "turn": 1, "step": 1, "chunk": { "type": "text-delta" } }
+        })];
+        assert_eq!(model_from_events(&events), None);
+    }
+
+    #[test]
+    fn a_session_whose_history_was_read_reports_its_model() {
+        // The roster names no route, so the mapping can only carry one once the
+        // session's own events have been through Fleet — which is exactly what
+        // opening it in the desktop does.
+        let item = live_list_item();
+        let id = item.get("sessionId").and_then(Value::as_str).unwrap();
+        remember_model(id, "deepseek-official/deepseek-v4-pro");
+        let info = session_info_from_list_item(&item).expect("mapped");
+        assert_eq!(
+            info.model.as_deref(),
+            Some("deepseek-official/deepseek-v4-pro"),
+            "the detail header's model chip reads SessionInfo::model"
+        );
+    }
+
+    #[test]
+    fn folding_a_history_page_records_its_route() {
+        let id = "session-model-fold";
+        merge_page(
+            id,
+            &[
+                header_event(),
+                reply_event(86, "deepseek-official", "deepseek-v4-pro"),
+            ],
+            false,
+        );
+        assert_eq!(
+            known_model(id).as_deref(),
+            Some("deepseek-official/deepseek-v4-pro"),
+            "every history read must leave the route behind for the next scan"
+        );
+        forget_history(id);
     }
 
     /// Verbatim projections of a session that has run four turns, copied off a
