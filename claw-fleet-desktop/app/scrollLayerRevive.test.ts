@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { reviveScrollLayer } from "./scrollLayerRevive";
+import { installScrollBoxResizeRevive, reviveScrollLayer } from "./scrollLayerRevive";
 
 describe("reviveScrollLayer", () => {
   let el: HTMLDivElement;
@@ -94,5 +94,101 @@ describe("reviveScrollLayer", () => {
     reviveScrollLayer(el);
 
     expect(inner).toBe(false);
+  });
+});
+
+describe("installScrollBoxResizeRevive", () => {
+  let el: HTMLDivElement;
+  let revived: number;
+  let fire: (() => void) | null;
+  let observed: Element[];
+  let disconnected: number;
+  let teardown: () => void;
+
+  const heightIs = (h: number) => {
+    Object.defineProperty(el, "clientHeight", { value: h, configurable: true });
+  };
+
+  beforeEach(() => {
+    revived = 0;
+    fire = null;
+    observed = [];
+    disconnected = 0;
+
+    // jsdom ships no ResizeObserver, and never lays out anyway, so stand one
+    // in that the test drives by hand.
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      constructor(cb: () => void) {
+        fire = cb;
+      }
+      observe(target: Element) {
+        observed.push(target);
+      }
+      disconnect() {
+        disconnected += 1;
+      }
+    };
+
+    el = document.createElement("div");
+    document.body.appendChild(el);
+    heightIs(500);
+    teardown = installScrollBoxResizeRevive(el, () => {
+      revived += 1;
+      return true;
+    });
+  });
+
+  afterEach(() => {
+    teardown();
+    el.remove();
+  });
+
+  it("watches the scroll box itself, not its contents", () => {
+    // The squeeze comes from a *sibling* — the resume dock appearing under it
+    // — so the box's own border box is the thing that changes. Observing the
+    // children (which is what the auto-follow pin does) would never see it.
+    expect(observed).toEqual([el]);
+  });
+
+  it("rebuilds the layer when the box gets squeezed", () => {
+    // thinking -> waitingInput swaps the dock below and takes 40px off the
+    // scroll area. Measured in the field: clientHeight 509 -> 469.
+    heightIs(469);
+    fire!();
+
+    expect(revived).toBe(1);
+  });
+
+  it("ignores resize callbacks that didn't change the height", () => {
+    // Width-only changes (window resize, sidebar toggle) don't disturb the
+    // vertical extent, and reviving on each one would churn layout for nothing.
+    fire!();
+    fire!();
+
+    expect(revived).toBe(0);
+  });
+
+  it("does not fire again for a height it has already handled", () => {
+    heightIs(469);
+    fire!();
+    fire!();
+
+    expect(revived).toBe(1);
+  });
+
+  it("keeps up with a box that changes height repeatedly", () => {
+    heightIs(469);
+    fire!();
+    heightIs(509);
+    fire!();
+    heightIs(441);
+    fire!();
+
+    expect(revived).toBe(3);
+  });
+
+  it("disconnects on teardown", () => {
+    teardown();
+    expect(disconnected).toBe(1);
   });
 });
