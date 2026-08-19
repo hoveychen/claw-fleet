@@ -102,7 +102,8 @@ struct SharePanel {
       // 而且还要赌「extension 写完」早于「主应用读取」。want 参数没有这两个
       // 问题：内容跟着拉起动作一起过去，天然有序。
       await ctx.startAbility({
-        bundleName: 'com.atomicservice.6917610791622358675',
+        // 从自身 context 读,不写字面量 —— 改包名时这里跟着走,不会漏。
+        bundleName: ctx.extensionAbilityInfo.bundleName,
         abilityName: 'EntryAbility',
         parameters: {
           'fleet.share.text': text,

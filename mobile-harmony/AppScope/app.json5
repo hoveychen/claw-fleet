@@ -1,8 +1,14 @@
 {
   "app": {
-    "bundleName": "com.atomicservice.6917610791622358675",
+    // 普通应用包名。原先是 com.atomicservice.6917610791622358675 —— 那是元服务
+    // 专用格式(尾数即元服务 ID),普通应用的 Push Kit 认不了。2026-08-18 在 AGC
+    // 原项目下新建 HarmonyOS 应用条目后换成这个(见 module.json5 的 client_id)。
+    //
+    // 换包名等于换一个应用:旧包不会被覆盖安装,配对密钥也不跟着走,装新包后要
+    // 重新扫码配对。install.sh 会先卸旧包。
+    "bundleName": "com.hoveychen.clawfleet",
     "bundleType": "app",
-    "vendor": "example",
+    "vendor": "hoveychen",
     "versionCode": 1000000,
     "versionName": "1.0.0",
     "buildVersion": "1",

@@ -45,6 +45,7 @@ import { HistoryLayer, setRootBackHandler } from "./useNavStack";
 import { NEW_SESSION_DRAFT_KEY, NewSessionSheet } from "./views/Composer";
 import { loadDraft, saveDraft } from "./draft";
 import { onShareReceived, shareToPrompt, sharedFilesToFiles } from "./shareTarget";
+import { onNativePushToken } from "./nativePush";
 import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
@@ -482,6 +483,14 @@ export function App() {
       void enablePush(clientRef.current);
     }
   }, [push, pushOptedOut]);
+
+  // 原生壳交来厂商推送 token。到达时机不定（壳要先过系统通知授权），所以只
+  // 重算一次 push 状态 —— classifyPush 见到 token 就返回 granted，随后那个
+  // "granted 且未 opt-out 就 enablePush" 的 effect 会把它注册到 relay。注册
+  // 逻辑因此只有一份，不必在这里重复一遍。
+  useEffect(() => {
+    return onNativePushToken(() => setPush(pushState()));
+  }, []);
 
   const handleEnablePush = useCallback(async () => {
     if (!clientRef.current) return;
