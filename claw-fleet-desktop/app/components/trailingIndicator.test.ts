@@ -51,4 +51,38 @@ describe("trailingIndicator", () => {
   it("returns null for an empty transcript", () => {
     expect(trailingIndicator([], null)).toBeNull();
   });
+
+  // The backstop. A turn that died without ever writing a terminal record —
+  // codex killed mid-flight, a crashed harness — leaves a user prompt at the
+  // tail forever. The resume-gap rule above then pins 「处理中…」 on a session
+  // where nothing is running, with no timeout to clear it. Once the prompt is
+  // minutes old and the scanner does not claim the agent is working, it is not
+  // a resume gap any more.
+  describe("stale trailing prompt", () => {
+    const NOW = 1_700_000_000_000;
+    const at = (msAgo: number, uuid = "u2") =>
+      userMsg({ timestamp: new Date(NOW - msAgo).toISOString() }, uuid);
+
+    it("stops working after the prompt goes stale with no live status", () => {
+      const msgs = [asst("end_turn", "a1"), at(10 * 60_000)];
+      expect(trailingIndicator(msgs, null, NOW)).toBe("waiting");
+      expect(trailingIndicator(msgs, "idle", NOW)).toBe("waiting");
+    });
+
+    it("keeps working while the scanner says the agent is live", () => {
+      const msgs = [asst("end_turn", "a1"), at(10 * 60_000)];
+      expect(trailingIndicator(msgs, "thinking", NOW)).toBe("working");
+      expect(trailingIndicator(msgs, "executing", NOW)).toBe("working");
+    });
+
+    it("keeps working during a genuinely fresh resume gap", () => {
+      const msgs = [asst("end_turn", "a1"), at(3_000)];
+      expect(trailingIndicator(msgs, null, NOW)).toBe("working");
+    });
+
+    it("keeps working when the prompt carries no timestamp", () => {
+      const msgs = [asst("end_turn", "a1"), userMsg({}, "u2")];
+      expect(trailingIndicator(msgs, null, NOW)).toBe("working");
+    });
+  });
 });

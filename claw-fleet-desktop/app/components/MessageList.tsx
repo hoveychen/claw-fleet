@@ -149,6 +149,26 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     );
   }
 
+  // A turn that failed instead of replying (expired credentials, a stream
+  // error). The backend synthesises this row from the rollout's turn-boundary
+  // error — see `codex_turn_error_text`. It is not something the model said, so
+  // it gets its own banner rather than an assistant bubble.
+  if (msg.isTurnError) {
+    return (
+      <div className={styles.turn_error} data-msg-idx={msgIdx} data-testid="turn-error">
+        <span className={styles.turn_error_icon} aria-hidden>
+          ⚠
+        </span>
+        <div className={styles.turn_error_body}>
+          <div className={styles.turn_error_label}>
+            {t("detail.turn_failed", "This turn failed")}
+          </div>
+          <div className={styles.turn_error_text}>{messageToText(msg)}</div>
+        </div>
+      </div>
+    );
+  }
+
   const isPartial =
     isAssistant && msg.message.stop_reason === null;
 

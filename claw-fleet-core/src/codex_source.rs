@@ -2532,6 +2532,130 @@ mod tests {
     }
 
     #[test]
+    fn task_complete_error_becomes_a_visible_message() {
+        // A codex turn that dies before the model produces anything (expired
+        // credentials, a 401, a stream error) leaves a rollout whose last line
+        // is `task_complete` carrying an `error` object and a null
+        // `last_agent_message`. That branch used to fall into the catch-all
+        // `_ => {}` and get dropped, so the transcript ended on the user's
+        // prompt with nothing after it — which the frontend reads as "a turn
+        // about to run" and pins an eternal 「处理中…」 spinner over, with the
+        // actual reason nowhere on screen (real case: two 2026-08-19 codex
+        // sessions that died in ~1.3s on "refresh token was already used").
+        let lines = vec![
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "why is the graph mocked?" }]
+                }
+            }),
+            json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
+                        "codex_error_info": "unauthorized"
+                    }
+                }
+            }),
+        ];
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 2, "the error must be emitted alongside the prompt");
+
+        let err = &out[1];
+        assert_eq!(err["type"], json!("assistant"), "renders in the agent lane");
+        assert_eq!(
+            err["isTurnError"],
+            json!(true),
+            "flagged so the frontend can style it as a failure, not a reply"
+        );
+        assert_eq!(
+            err["message"]["stop_reason"],
+            json!("end_turn"),
+            "a closed turn — this is what stops the trailing spinner"
+        );
+        let text = err["message"]["content"][0]["text"].as_str().unwrap_or_default();
+        assert!(
+            text.contains("refresh token was already used"),
+            "the operator needs the actual reason, got: {text}"
+        );
+    }
+
+    #[test]
+    fn task_complete_without_error_emits_nothing() {
+        // The overwhelmingly common case: a turn that ended normally. Its
+        // `task_complete` must stay invisible — the assistant's reply is
+        // already in the transcript as a response_item.
+        let lines = vec![
+            json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{ "type": "output_text", "text": "done" }]
+                }
+            }),
+            json!({
+                "type": "event_msg",
+                "payload": { "type": "task_complete", "last_agent_message": "done" }
+            }),
+        ];
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 1, "a clean task_complete adds no row");
+        assert_eq!(out[0]["type"], json!("assistant"));
+    }
+
+    #[test]
+    fn standalone_error_event_becomes_a_visible_message() {
+        // Older codex builds (verified on a 2026-04-04 rollout) emit the
+        // failure as its own `error` event and leave `task_complete` bare.
+        let lines = vec![
+            json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "error",
+                    "message": "stream disconnected before completion",
+                    "codex_error_info": "stream"
+                }
+            }),
+            json!({
+                "type": "event_msg",
+                "payload": { "type": "task_complete", "last_agent_message": null }
+            }),
+        ];
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 1, "the bare task_complete must not add a second row");
+        assert_eq!(out[0]["isTurnError"], json!(true));
+        assert_eq!(
+            out[0]["message"]["content"][0]["text"],
+            json!("stream disconnected before completion")
+        );
+    }
+
+    #[test]
+    fn repeated_turn_error_is_emitted_once() {
+        // A codex build that reports the same failure both ways would
+        // otherwise stack two identical red rows on the transcript.
+        let err = "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.";
+        let lines = vec![
+            json!({
+                "type": "event_msg",
+                "payload": { "type": "error", "message": err }
+            }),
+            json!({
+                "type": "event_msg",
+                "payload": { "type": "task_complete", "error": { "message": err } }
+            }),
+        ];
+        let out = normalize_messages(lines);
+        assert_eq!(out.len(), 1, "the same failure must not render twice");
+    }
+
+    #[test]
     fn recommended_plugins_user_context_is_tagged_is_meta() {
         // Codex injects this runtime block with role=user (unlike its other
         // role=developer boilerplate), but it still must render as a collapsed
@@ -4327,6 +4451,39 @@ fn exec_note_from_script(script: &str) -> Option<String> {
 ///
 /// Codex format: `{"timestamp":"...","type":"<variant>","payload":{...}}`
 /// Fleet format: `{"type":"user|assistant","message":{...},"timestamp":"..."}`
+/// The human-readable failure reason on a turn-boundary `event_msg`, or `None`
+/// when the turn ended cleanly.
+///
+/// Two shapes in the wild, both verified against real rollouts:
+/// - codex ≥ 0.145 folds it into the boundary event:
+///   `task_complete { error: { message, codex_error_info } }`
+/// - older builds emit a standalone `error { message, codex_error_info }`
+///   event and leave `task_complete` bare.
+///
+/// `error` is also accepted as a plain string, since that costs one line and
+/// the field is not part of any documented contract.
+fn codex_turn_error_text(payload: &Value) -> Option<String> {
+    let from_error_field = payload.get("error").and_then(|e| {
+        e.get("message")
+            .and_then(|m| m.as_str())
+            .or_else(|| e.as_str())
+            .map(str::to_owned)
+    });
+    let text = from_error_field.or_else(|| {
+        // Standalone `error` / `stream_error` events carry the text at the top
+        // level. Guard on the event type so a future boundary event with an
+        // unrelated `message` field never renders as a failure.
+        matches!(
+            payload.get("type").and_then(|t| t.as_str()),
+            Some("error") | Some("stream_error")
+        )
+        .then(|| payload.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+        .flatten()
+    })?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
 fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
     // Codex persists every finalized assistant turn TWICE in the rollout:
     //   - as an `event_msg/agent_message` (the UI event-timeline mirror), and
@@ -4717,6 +4874,45 @@ fn normalize_messages(lines: Vec<Value>) -> Vec<Value> {
                                 "tool_use_id": call_id,
                                 "content": content,
                                 "is_error": is_error,
+                                "timestamp": timestamp
+                            }));
+                        }
+                    }
+                    // A turn that failed instead of replying. `task_complete`
+                    // normally needs no row (the reply is already in the
+                    // transcript as a response_item), but when it carries an
+                    // `error` the turn produced NOTHING — dropping it left the
+                    // transcript ending on the user's prompt, which the
+                    // frontend reads as "a turn about to run" and covers with a
+                    // spinner that never clears, the failure reason nowhere on
+                    // screen. Codex also emits standalone `error` /
+                    // `stream_error` events for mid-turn failures; same
+                    // treatment. `stop_reason: end_turn` is what tells the
+                    // trailing-indicator logic the turn is over.
+                    "task_complete" | "turn_complete" | "error" | "stream_error" => {
+                        let text = codex_turn_error_text(payload);
+                        // A build that reports the same failure both ways (a
+                        // standalone `error` event AND the boundary event's
+                        // `error` field) would otherwise stack two identical
+                        // red rows.
+                        let already_shown = |text: &str| {
+                            messages.last().is_some_and(|last| {
+                                last.get("isTurnError").and_then(Value::as_bool) == Some(true)
+                                    && last
+                                        .pointer("/message/content/0/text")
+                                        .and_then(|t| t.as_str())
+                                        == Some(text)
+                            })
+                        };
+                        if let Some(text) = text.filter(|t| !already_shown(t)) {
+                            messages.push(json!({
+                                "type": "assistant",
+                                "isTurnError": true,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": [{"type": "text", "text": text}],
+                                    "stop_reason": "end_turn"
+                                },
                                 "timestamp": timestamp
                             }));
                         }
