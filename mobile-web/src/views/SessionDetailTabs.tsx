@@ -22,6 +22,8 @@ import type {
 import { useAgentNav } from "./AgentNavContext";
 import { AttachmentThumbs } from "./AttachmentThumb";
 import { splitAnswerAttachments } from "../userAttachments";
+import { tokenRequestFor, toolForAgentSource } from "../agentSource";
+import type { DshTokenBreakdown } from "../generated/types";
 import styles from "./SessionDetailTabs.module.css";
 
 /** One-shot fetch helper: "loading" → data | "error". */
@@ -398,6 +400,55 @@ function fmtTokens(n?: number): string {
   return String(n);
 }
 
+/** dsh 会话的用量面板。字段和 Claude 那套不通用:dsh 按「未命中缓存的输入」
+ *  记账,还额外报了上下文窗口占用。刻意不显示成本 —— Fleet 的价格表只认 Claude
+ *  和 GPT 档位,给 dsh 的模型算钱会静默按 Opus 兜底,错的数字比没有更糟。 */
+function DshTokenTab({
+  session,
+  client,
+}: {
+  session: SessionInfo;
+  client: RelayClient | null;
+}) {
+  const req = tokenRequestFor(session);
+  const data = useRelayData<DshTokenBreakdown>(client, req.method, req.params);
+
+  if (data === "loading") return <Hint>{t("分析 token 用量…")}</Hint>;
+  if (data === "error") return <Hint>{t("分析失败（桌面端可能离线）")}</Hint>;
+
+  const rows: Array<[string, string]> = [
+    [t("输入 tokens"), fmtTokens(data.uncachedInputTokens)],
+    [t("输出 tokens"), fmtTokens(data.outputTokens)],
+    [t("缓存写入"), fmtTokens(data.cacheWriteTokens)],
+    [t("缓存读取"), fmtTokens(data.cacheReadTokens)],
+  ];
+  return (
+    <div className={styles.stack}>
+      <div className={styles.statGrid}>
+        {rows.map(([label, value]) => (
+          <div key={label} className={styles.statTile}>
+            <div className={styles.statValue}>{value}</div>
+            <div className={styles.statLabel}>{label}</div>
+          </div>
+        ))}
+      </div>
+      {data.contextPercent != null && (
+        <div className={styles.costLine}>
+          {t("上下文占用")} <strong>{data.contextPercent.toFixed(1)}%</strong>
+          <span className={styles.dimNote}>
+            {t(
+              "（系统 {0} · 工具 {1} · 消息 {2}）",
+              fmtTokens(data.systemTokens),
+              fmtTokens(data.toolsTokens),
+              fmtTokens(data.messageTokens),
+            )}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TokenTab({
   session,
   client,
@@ -405,10 +456,22 @@ export function TokenTab({
   session: SessionInfo;
   client: RelayClient | null;
 }) {
-  const data = useRelayData<TokenBreakdown>(client, "token_breakdown", {
-    path: session.jsonlPath,
-    projectRoot: session.workspacePath,
-  });
+  // dsh 没有 transcript 文件,用量走 RPC 问,字段也和 Claude 那套不通用。
+  if (toolForAgentSource(session.agentSource) === "dsh") {
+    return <DshTokenTab session={session} client={client} />;
+  }
+  return <ClaudeTokenTab session={session} client={client} />;
+}
+
+function ClaudeTokenTab({
+  session,
+  client,
+}: {
+  session: SessionInfo;
+  client: RelayClient | null;
+}) {
+  const req = tokenRequestFor(session);
+  const data = useRelayData<TokenBreakdown>(client, req.method, req.params);
 
   if (data === "loading") return <Hint>{t("分析 token 用量…")}</Hint>;
   if (data === "error") return <Hint>{t("分析失败（桌面端可能离线）")}</Hint>;

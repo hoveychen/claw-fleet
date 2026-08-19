@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TOOL_CHOICES,
   detailPathForSession,
+  tokenRequestFor,
   toolChoicesForSources,
   toolForAgentSource,
 } from "./agentSource";
@@ -45,6 +46,24 @@ describe("toolForAgentSource", () => {
     expect(toolForAgentSource("codex")).toBe("codex");
     expect(toolForAgentSource(undefined)).toBe("claude");
     expect(toolForAgentSource("who-knows")).toBe("claude");
+  });
+});
+
+describe("tokenRequestFor", () => {
+  it("dsh 会话走 RPC 问用量,不拿 dsh:// 去读文件", () => {
+    const r = tokenRequestFor({ agentSource: "dsh", jsonlPath: "dsh://abc" });
+    expect(r.method).toBe("dsh_token_breakdown");
+    expect(r.params).toEqual({ uri: "dsh://abc" });
+  });
+
+  it("其余源仍走读 jsonl 的那条", () => {
+    const r = tokenRequestFor({
+      agentSource: "claude-code",
+      jsonlPath: "/x/s.jsonl",
+      workspacePath: "/repo",
+    });
+    expect(r.method).toBe("token_breakdown");
+    expect(r.params).toEqual({ path: "/x/s.jsonl", projectRoot: "/repo" });
   });
 });
 

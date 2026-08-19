@@ -54,3 +54,23 @@ export function detailPathForSession(
 ): string | undefined {
   return toolForAgentSource(agentSource) === "claude" ? jsonlPath : undefined;
 }
+
+/** Token 页签该向 relay 要哪个方法。
+ *
+ *  每个源用自己的词汇记 token、走自己的通道,面板并不通用:Claude 的从会话
+ *  JSONL 里解析出来(`token_breakdown`),dsh 压根没有 transcript 文件,它的
+ *  用量要拿 `dsh://<id>` 的 uri 走 RPC 问(`dsh_token_breakdown`)——把 uri 当
+ *  路径喂给读文件的那条,只会稳定地显示「分析失败」。 */
+export function tokenRequestFor(session: {
+  agentSource?: string;
+  jsonlPath?: string;
+  workspacePath?: string;
+}): { method: string; params: Record<string, unknown> } {
+  if (toolForAgentSource(session.agentSource) === "dsh") {
+    return { method: "dsh_token_breakdown", params: { uri: session.jsonlPath } };
+  }
+  return {
+    method: "token_breakdown",
+    params: { path: session.jsonlPath, projectRoot: session.workspacePath },
+  };
+}
