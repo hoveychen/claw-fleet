@@ -67,6 +67,18 @@ fn usage_of(data: &Value) -> Option<Value> {
     }))
 }
 
+/// The `provider/model` route an assembled reply names, or `None` when the
+/// message carries no model source (an older log, or a future shape). Absent
+/// rather than a placeholder: the row simply shows no model, which is honest.
+fn model_of(message: &Value) -> Option<String> {
+    let source = message
+        .get("source")
+        .filter(|s| s.get("kind").and_then(Value::as_str) == Some("model"))?;
+    let provider = source.get("provider")?.as_str()?.trim();
+    let model = source.get("model")?.as_str()?.trim();
+    (!provider.is_empty() && !model.is_empty()).then(|| format!("{provider}/{model}"))
+}
+
 /// Convert one assistant content block.
 ///
 /// Text passes through unchanged (dsh and Claude agree on that shape). A
@@ -238,6 +250,16 @@ fn normalize_event(event: &Value) -> Option<Value> {
             });
             if let Some(usage) = usage_of(data) {
                 out["usage"] = usage;
+            }
+            // Which route assembled this reply. dsh records it per message
+            // (`source` = `{kind:"model", provider, model}`), exactly where
+            // Claude Code puts `message.model`, and `MessageList` renders that
+            // field on the row's usage line — so the mapping is a rename.
+            // Composed as dsh's own `provider/model` spec: the provider is half
+            // the answer to "what is this running on", and the same string is
+            // what would relaunch the session on that route.
+            if let Some(model) = model_of(message) {
+                out["model"] = json!(model);
             }
             Some(json!({
                 "type": "assistant",
@@ -481,6 +503,37 @@ mod tests {
         assert_eq!(usage["output_tokens"], 103);
         assert_eq!(usage["cache_read_input_tokens"], 6756);
         assert_eq!(usage["cache_creation_input_tokens"], 1789);
+    }
+
+    /// Every assembled reply names the route that produced it
+    /// (`data.message.source` = `{kind:"model", provider, model}`, verbatim off
+    /// a live `session.history`). `MessageList` renders `message.model` on the
+    /// usage line of each assistant row, so dropping it is why a dsh transcript
+    /// showed `↑45 ↓1328` with no model while a Claude one names it.
+    #[test]
+    fn an_assistant_record_names_the_route_that_produced_it() {
+        let mut event = assistant_with_tool_call();
+        event["data"]["message"]["source"] = json!({
+            "kind": "model",
+            "provider": "deepseek-official",
+            "model": "deepseek-v4-pro"
+        });
+        let out = normalize(&[event]);
+        assert_eq!(
+            out[0]["message"]["model"], "deepseek-official/deepseek-v4-pro",
+            "the row's model comes from message.model"
+        );
+    }
+
+    /// A reply with no `source` (an older log, or a future shape) must still
+    /// render — the model slot simply stays empty rather than reading `null`.
+    #[test]
+    fn a_reply_without_a_source_carries_no_model_field() {
+        let out = normalize(&[assistant_with_tool_call()]);
+        assert!(
+            out[0]["message"].get("model").is_none(),
+            "absent evidence must not become a rendered `null`"
+        );
     }
 
     /// `MessageList.buildResultMap` only looks at `tool_result` blocks inside a
