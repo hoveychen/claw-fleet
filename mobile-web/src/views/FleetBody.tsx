@@ -6,6 +6,7 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { t } from "../i18n";
 import { classifyResult, type FleetResult, type FleetTool } from "./fleetTools";
 import styles from "./FleetBody.module.css";
@@ -319,7 +320,11 @@ function ResultView({ result, tool }: { result: FleetResult; tool: FleetTool }) 
     case "wiki-cat":
       return (
         <div className={styles.markdown}>
-          <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>
+          <ReactMarkdown
+            remarkPlugins={mdRemarkPlugins}
+            rehypePlugins={mdRehypePlugins}
+            components={mermaidMarkdownComponents}
+          >
             {result.body}
           </ReactMarkdown>
         </div>
