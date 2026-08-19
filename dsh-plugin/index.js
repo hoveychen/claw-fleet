@@ -47,16 +47,23 @@ function deepFreeze(value) {
  * resolve to an empty list: a context source that cannot answer must not stall
  * or fail the turn it is decorating.
  *
- * @param {{fleetBin: string, timeoutMs: number}} config
+ * `userTitle` and `locale` are forwarded from this entry's config rather than
+ * left to the CLI's defaults, which would render English guidance addressing the
+ * user as "Boss".
+ *
+ * @param {{fleetBin: string, timeoutMs: number, userTitle?: string, locale?: string}} config
  * @param {string} cwd - the session's working directory
  * @param {string} sessionId
  * @returns {Promise<Array<{name: string, text: string}>>}
  */
 export function fetchSections(config, cwd, sessionId) {
+  const args = ['dsh-context', '--cwd', cwd, '--session', sessionId]
+  if (config.userTitle) args.push('--title', config.userTitle)
+  if (config.locale) args.push('--locale', config.locale)
   return new Promise((resolve) => {
     execFile(
       config.fleetBin,
-      ['dsh-context', '--cwd', cwd, '--session', sessionId],
+      args,
       { timeout: config.timeoutMs, maxBuffer: 4 * 1024 * 1024 },
       (error, stdout) => {
         if (error) return resolve([])
@@ -84,35 +91,50 @@ export function fetchSections(config, cwd, sessionId) {
 }
 
 /**
- * Render sections into the one text body the injected message carries.
- * @param {Array<{name: string, text: string}>} sections
- * @returns {string}
- */
-export function renderSections(sections) {
-  return sections.map((s) => s.text).join('\n\n')
-}
-
-/**
- * Find this plugin's latest injected text in the durable log, including a
+ * Find the latest text this plugin injected for one section name, including a
  * reading compaction has shadowed.
  *
  * Scanning the log rather than caching in memory is what makes the
  * inject-only-on-change rule survive resume and a server restart — the same
  * reason dsh-time-context scans events for its refresh interval.
  *
+ * Per-section rather than whole-message: the guidance sections are static and
+ * should enter a session once, while the plan section changes as boxes get
+ * ticked. Keyed on one body they would re-enter together every time a checkbox
+ * moved.
+ *
  * @param {{session: {events: Array<any>}}} agent
+ * @param {string} sectionName
  * @returns {string | undefined}
  */
-export function latestInjectedText(agent) {
+export function latestInjectedText(agent, sectionName) {
   const events = agent.session.events
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]
     if (event.type !== 'user/message') continue
     const source = event.data.source
-    if (source?.kind === 'plugin' && source.plugin === name) {
-      return source.sections?.map((s) => s.text).join('\n\n')
-    }
+    if (source?.kind !== 'plugin' || source.plugin !== name) continue
+    const section = source.sections?.find((s) => s.name === sectionName)
+    if (section !== undefined) return section.text
   }
+}
+
+/**
+ * Build the message carrying one section.
+ * @param {{name: string, text: string}} section
+ */
+function sectionMessage(section) {
+  return deepFreeze({
+    id: crypto.randomUUID(),
+    role: 'user',
+    content: [{ type: 'text', text: section.text }],
+    source: {
+      kind: 'plugin',
+      plugin: name,
+      form: 'snapshot',
+      sections: [{ name: section.name, text: section.text }],
+    },
+  })
 }
 
 /**
@@ -125,6 +147,8 @@ export function apply(ctx, config) {
   const resolved = {
     fleetBin: config?.fleetBin ?? 'fleet',
     timeoutMs: config?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    userTitle: config?.userTitle,
+    locale: config?.locale,
   }
 
   ctx.on(
@@ -139,27 +163,17 @@ export function apply(ctx, config) {
       const sections = await fetchSections(resolved, cwd, agent.session.id)
       if (sections.length === 0 || signal.aborted) return decision
 
-      const text = renderSections(sections)
+      // Re-injecting an unchanged section every step would spend the whole
+      // context window on the same few kilobytes. dsh keeps the message in
+      // derived history until compaction shadows it, so an identical latest
+      // reading is still in front of the model and this step needs nothing.
+      const fresh = sections.filter((s) => latestInjectedText(agent, s.name) !== s.text)
+      if (fresh.length === 0) return decision
 
-      // Re-injecting an unchanged body every step would spend the whole context
-      // window on the same few kilobytes. dsh keeps the message in derived
-      // history until compaction shadows it, so an identical latest reading is
-      // still in front of the model and this step needs nothing.
-      if (latestInjectedText(agent) === text) return decision
-
-      const message = deepFreeze({
-        id: crypto.randomUUID(),
-        role: 'user',
-        content: [{ type: 'text', text }],
-        source: {
-          kind: 'plugin',
-          plugin: name,
-          form: 'snapshot',
-          sections: sections.map((s) => ({ name: s.name, text: s.text })),
-        },
-      })
-
-      return { kind: 'enter', messages: [...decision.messages, message] }
+      return {
+        kind: 'enter',
+        messages: [...decision.messages, ...fresh.map(sectionMessage)],
+      }
     },
     { prepend: true },
   )

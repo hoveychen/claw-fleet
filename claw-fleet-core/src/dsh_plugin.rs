@@ -90,20 +90,34 @@ pub fn materialize() -> Result<PathBuf, String> {
 /// `fleet_bin` is passed through as the plugin's `fleetBin` config so the plugin
 /// does not depend on `fleet` being on the PATH of whatever shell launched
 /// `dsh web` (a GUI-launched app inherits a minimal PATH).
-fn render_block(entry_path: &std::path::Path, fleet_bin: Option<&std::path::Path>) -> String {
+///
+/// `user_title` and `locale` are frozen into the config for the same reason: the
+/// plugin runs inside dsh with no access to Fleet's settings, and `fleet
+/// dsh-context` defaults to `Boss` / `en` when nobody tells it otherwise — which
+/// would silently render the guidance in English and address the user as "Boss".
+/// The desktop already holds the real values when it reconciles, so they travel
+/// with the entry and refresh on every reconcile.
+fn render_block(
+    entry_path: &std::path::Path,
+    fleet_bin: Option<&std::path::Path>,
+    user_title: &str,
+    locale: &str,
+) -> String {
     let mut out = String::new();
     out.push_str(SENTINEL_BEGIN);
     out.push_str("\n# Managed by Claw Fleet — do not edit. Injects Fleet's per-turn context.\n");
     out.push_str("- insert:\n");
     out.push_str(&format!("    - id: {ENTRY_ID}\n"));
     out.push_str(&format!("      name: {}\n", yaml_scalar(&entry_path.to_string_lossy())));
+    out.push_str("      config:\n");
     if let Some(bin) = fleet_bin {
-        out.push_str("      config:\n");
         out.push_str(&format!(
             "        fleetBin: {}\n",
             yaml_scalar(&bin.to_string_lossy())
         ));
     }
+    out.push_str(&format!("        userTitle: {}\n", yaml_scalar(user_title)));
+    out.push_str(&format!("        locale: {}\n", yaml_scalar(locale)));
     out.push_str(SENTINEL_END);
     out.push('\n');
     out
@@ -148,7 +162,7 @@ fn has_user_entries(text: &str) -> bool {
 /// `enabled` installs (materializing the plugin first) or removes the Fleet
 /// block. Idempotent in both directions, and preserves user-authored entries
 /// outside the sentinels.
-pub fn reconcile_dsh_patch(enabled: bool) -> Result<(), String> {
+pub fn reconcile_dsh_patch(enabled: bool, user_title: &str, locale: &str) -> Result<(), String> {
     let path = patch_path().ok_or("cannot determine dsh home")?;
     let existing = fs::read_to_string(&path).unwrap_or_default();
     let user = strip_block(&existing);
@@ -156,7 +170,7 @@ pub fn reconcile_dsh_patch(enabled: bool) -> Result<(), String> {
     let next = if enabled {
         let entry = materialize()?;
         let fleet_bin = crate::fleet_cli::resolve_fleet_binary();
-        let block = render_block(&entry, fleet_bin.as_deref());
+        let block = render_block(&entry, fleet_bin.as_deref(), user_title, locale);
         if has_user_entries(&user) {
             format!("{}\n{block}", user.trim_end())
         } else {
@@ -207,6 +221,8 @@ mod tests {
         let block = render_block(
             std::path::Path::new("/home/u/.fleet/dsh-plugin/index.js"),
             Some(std::path::Path::new("/usr/local/bin/fleet")),
+            "老板",
+            "zh",
         );
         assert!(block.starts_with(SENTINEL_BEGIN));
         assert!(block.trim_end().ends_with(SENTINEL_END));
@@ -216,11 +232,17 @@ mod tests {
         assert!(block.contains("fleetBin: \"/usr/local/bin/fleet\""));
     }
 
+    /// No `fleet` on disk drops only that key — the plugin then falls back to
+    /// its own `'fleet'` default and looks the binary up on PATH. `userTitle` and
+    /// `locale` must survive regardless, since their CLI defaults (`Boss` / `en`)
+    /// are wrong for anyone who configured otherwise.
     #[test]
-    fn block_omits_the_config_when_no_fleet_binary_was_found() {
-        let block = render_block(std::path::Path::new("/p/index.js"), None);
-        assert!(!block.contains("config:"));
+    fn block_omits_only_the_fleet_binary_when_none_was_found() {
+        let block = render_block(std::path::Path::new("/p/index.js"), None, "老板", "zh");
         assert!(!block.contains("fleetBin"));
+        assert!(block.contains("config:"));
+        assert!(block.contains("userTitle: \"老板\""));
+        assert!(block.contains("locale: \"zh\""));
     }
 
     #[test]
@@ -234,7 +256,7 @@ mod tests {
     fn strip_block_removes_only_the_fleet_region() {
         let text = format!(
             "- id: mine\n  name: user-plugin\n{}\n{}",
-            render_block(std::path::Path::new("/p/index.js"), None).trim_end(),
+            render_block(std::path::Path::new("/p/index.js"), None, "Boss", "en").trim_end(),
             "- id: after\n  name: other\n"
         );
         let stripped = strip_block(&text);
@@ -268,7 +290,7 @@ mod tests {
     /// must never leave a file that dsh would throw on.
     #[test]
     fn install_then_uninstall_round_trips_user_entries() {
-        let block = render_block(std::path::Path::new("/p/index.js"), None);
+        let block = render_block(std::path::Path::new("/p/index.js"), None, "Boss", "en");
 
         // Fresh file (dsh's template is a lone `[]`).
         let installed = {
