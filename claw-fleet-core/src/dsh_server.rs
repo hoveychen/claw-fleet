@@ -199,7 +199,7 @@ fn deregister(server_pid: u32) {
 /// a server whose owner is still alive belongs to a running Fleet (possibly this
 /// one) and is left strictly alone.
 pub fn reap_orphans() -> usize {
-    let mut killed = edit_registry(|registry| {
+    edit_registry(|registry| {
         let mut killed = 0;
         registry.servers.retain(|record| {
             if !is_live(&record.server) {
@@ -219,9 +219,7 @@ pub fn reap_orphans() -> usize {
         });
         killed
     })
-    .unwrap_or(0);
-    killed += sweep_unregistered_orphans();
-    killed
+    .unwrap_or(0)
 }
 
 /// Kill leaked `dsh web` servers the registry never heard of.
@@ -236,7 +234,13 @@ pub fn reap_orphans() -> usize {
 /// ownerless by construction, whoever started it. 13 such invisible orphans
 /// accumulated on 2026-08-18 alone; this sweep is what makes the leak class
 /// self-healing instead of hand-cleaned.
-fn sweep_unregistered_orphans() -> usize {
+///
+/// A sibling of [`reap_orphans`], not part of it: the registry reap has
+/// count-exact unit tests and runs under the registry lock, while this sweep
+/// is machine-global and non-deterministic there (it would also cross-kill
+/// other tests' fixtures). Production calls both, side by side, at the one
+/// place a server is first started (`DshSource::with_client`).
+pub fn sweep_unregistered_orphans() -> usize {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
     let mut sys = System::new();
@@ -524,7 +528,7 @@ mod tests {
         });
         assert!(orphaned, "fake dsh web (pid {pid}) never reparented to 1");
 
-        reap_orphans();
+        sweep_unregistered_orphans();
 
         // SIGKILL delivery is asynchronous; give it a moment.
         let dead = (0..50).any(|_| {
