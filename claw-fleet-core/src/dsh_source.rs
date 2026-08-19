@@ -187,8 +187,11 @@ impl DshSource {
                     // Before adding one, take away any this machine is still
                     // carrying from a Fleet that died without stopping its own.
                     // Servers whose owner is alive are left alone, so this never
-                    // touches a concurrently running Fleet's instance.
+                    // touches a concurrently running Fleet's instance. The
+                    // signature sweep additionally catches servers the registry
+                    // never heard of (temp-FLEET_HOME spawns, dropped records).
                     crate::dsh_server::reap_orphans();
+                    crate::dsh_server::sweep_unregistered_orphans();
                     // Root the server at the harness home rather than a project:
                     // observation spans every workspace, and a server rooted in a
                     // directory that later disappears would fail to restart.
