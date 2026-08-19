@@ -40,7 +40,11 @@ export function MermaidBlock({ code }: { code: string }) {
           startOnLoad: false,
           theme,
           securityLevel: "strict",
-          fontFamily: "inherit",
+          // 不能用 "inherit"：mermaid 量文字宽度时把图挂在 document.body 下
+          // （那里是 sans），而渲染出来的图可能落在 markdown 的 <pre> 里继承到
+          // 等宽字体 —— 量出来 92px 的标签实际画 116px，直接被节点框切掉。
+          // 给一个两处都解析成同一个栈的 CSS 变量，量和画就对得上了。
+          fontFamily: "var(--font-sans)",
         });
         const { svg } = await mermaid.render(`mermaid-${seq++}`, code);
         if (cancelled) return;

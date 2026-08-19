@@ -32,6 +32,7 @@ import { fleetSummary } from "./FleetBody";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { MermaidBlock } from "../markdown/MermaidBlock";
+import { isMermaidPre } from "../markdown/mermaidPre";
 import { dateLocale, t } from "../i18n";
 import { CopyButton } from "./CopyButton";
 import { useLightbox } from "./Lightbox";
@@ -371,6 +372,10 @@ function LazyMarkdown({ text, bare }: { text: string; bare?: boolean }) {
           rehypePlugins={mdRehypePlugins}
           components={{
             a: ({ children }) => <span className={styles.mdLink}>{children}</span>,
+            // mermaid fence 的外层 <pre> 会把图裹进等宽字体的框里（字体继承会让
+            // mermaid 量出的标签宽度对不上，见 MermaidBlock），只对它脱一层。
+            pre: ({ node, children, ...rest }) =>
+              isMermaidPre(node) ? <>{children}</> : <pre {...rest}>{children}</pre>,
             code: ({ className, children, ...rest }) =>
               /(^|\s)language-mermaid(\s|$)/.test(className ?? "") ? (
                 <MermaidBlock code={String(children).replace(/\n$/, "")} />
