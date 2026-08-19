@@ -2935,6 +2935,7 @@ flowchart LR
   R --> UI
   UI --> SUP[Supervisor<br/>spawn / stop / handoff]
   SUP --> T
+  style SUP fill:#4a3728,stroke:#c9a227
 \`\`\`
 
 A no-language fence keeps its fixed-width layout (horizontal scroll, no wrap):
