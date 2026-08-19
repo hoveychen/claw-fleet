@@ -79,12 +79,16 @@ describe("installScrollFreezeProbe", () => {
     el.scrollTop = scrollTop;
   };
 
+  /** Stand-in for the content-height watcher SessionDetail owns. */
+  let growth: { sinceMs: number; byPx: number } | null;
+
   const ctx = (): ProbeContext => ({
     sessionId: () => "sess-1",
     status: () => "waiting",
     messageCount: () => 420,
     isFollowing: () => true,
     pinCount: () => pins,
+    contentGrowth: () => growth,
   });
 
   const wheel = (deltaY: number) => {
@@ -121,6 +125,7 @@ describe("installScrollFreezeProbe", () => {
     pins = 0;
     clock = 1_000_000;
     revives = 0;
+    growth = null;
     // Stand in for the real revive so tests decide whether the scroll layer
     // comes back: `reviveReanimates` false models a container that stays dead.
     teardown = installScrollFreezeProbe(el, ctx(), (l) => lines.push(l), () => clock, () => {
@@ -429,6 +434,38 @@ describe("installScrollFreezeProbe", () => {
 
     expect(lines).toHaveLength(1);
     expect(revives).toBe(4);
+  });
+
+  describe("content-growth timing, to test the WebKit #150974 hypothesis", () => {
+    // WebKit bug 150974 — "dynamic content in a scrollable container breaks
+    // scrolling" — would explain this freeze, and our prevention layer has the
+    // matching gap: `installScrollBoxResizeRevive` watches the box's *own*
+    // height, nothing watches the content's. Before acting on that, the log has
+    // to say whether freezes actually follow content changes. No hypothesis
+    // gets a fix until the field data backs it.
+
+    it("reports how recently the content changed height, and by how much", () => {
+      sizeAs(9000, 800, 8200);
+      growth = { sinceMs: 180, byPx: 1240 };
+      wheel(-300);
+      vi.advanceTimersByTime(200);
+
+      expect(lines[0]).toContain("sinceGrow=180");
+      expect(lines[0]).toContain("growBy=1240");
+    });
+
+    it("says so when the content has not changed at all", () => {
+      // An idle session whose transcript settled long ago still freezes — field
+      // logs show status=idle freezes — so "no growth" has to be reportable and
+      // distinguishable from "grew 0px just now", or the hypothesis can't fail.
+      sizeAs(9000, 800, 8200);
+      growth = null;
+      wheel(-300);
+      vi.advanceTimersByTime(200);
+
+      expect(lines[0]).toContain("sinceGrow=none");
+      expect(lines[0]).toContain("growBy=0");
+    });
   });
 
   it("stops listening after teardown", () => {
