@@ -67,6 +67,18 @@ fn usage_of(data: &Value) -> Option<Value> {
     }))
 }
 
+/// The `provider/model` route an assembled reply names, or `None` when the
+/// message carries no model source (an older log, or a future shape). Absent
+/// rather than a placeholder: the row simply shows no model, which is honest.
+fn model_of(message: &Value) -> Option<String> {
+    let source = message
+        .get("source")
+        .filter(|s| s.get("kind").and_then(Value::as_str) == Some("model"))?;
+    let provider = source.get("provider")?.as_str()?.trim();
+    let model = source.get("model")?.as_str()?.trim();
+    (!provider.is_empty() && !model.is_empty()).then(|| format!("{provider}/{model}"))
+}
+
 /// Convert one assistant content block.
 ///
 /// Text passes through unchanged (dsh and Claude agree on that shape). A
@@ -238,6 +250,16 @@ fn normalize_event(event: &Value) -> Option<Value> {
             });
             if let Some(usage) = usage_of(data) {
                 out["usage"] = usage;
+            }
+            // Which route assembled this reply. dsh records it per message
+            // (`source` = `{kind:"model", provider, model}`), exactly where
+            // Claude Code puts `message.model`, and `MessageList` renders that
+            // field on the row's usage line — so the mapping is a rename.
+            // Composed as dsh's own `provider/model` spec: the provider is half
+            // the answer to "what is this running on", and the same string is
+            // what would relaunch the session on that route.
+            if let Some(model) = model_of(message) {
+                out["model"] = json!(model);
             }
             Some(json!({
                 "type": "assistant",

@@ -546,6 +546,11 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
     });
 
     Some(SessionInfo {
+        // The roster names no route (see `model_from_events`), so this is
+        // whatever reading the session's own history last taught this process.
+        // `None` until something reads it — the desktop's detail pane does so
+        // the moment a session is opened.
+        model: known_model(&id),
         id: id.clone(),
         workspace_name: crate::session::workspace_name(&workspace_path),
         workspace_path,
@@ -802,9 +807,9 @@ impl AgentSource for DshSource {
 /// No cost figure: dsh routes through OpenRouter to an open model space, and
 /// Fleet's price table only knows Claude and GPT tiers, so an unknown model
 /// would silently price at the Opus fallback. A wrong number is worse than none.
-/// No model id either — a session's model appears only in its single
-/// `request/header` event near the head of the log, which would cost a full
-/// `session.history` fetch to reach.
+/// No model id either: the roster carries none, and the durable log's route
+/// evidence is reached by reading history — which [`model_from_events`] already
+/// harvests on every read, so `SessionInfo::model` is where the route shows up.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -1003,18 +1008,96 @@ pub fn forget_history(session_id: &str) {
 /// carries — so what the UI shows is exactly what would relaunch the session on
 /// the same route.
 ///
+/// Not to be confused with [`crate::dsh_cost::metered_calls`], which walks the
+/// same `assistant/message.source` for a different question: every *priceable*
+/// call and its tokens, rather than the one route the session is on now.
+///
 /// [`SpawnSpec::model`]: crate::agent_source::SpawnSpec
-pub(crate) fn model_from_events(_events: &[Value]) -> Option<String> {
-    None
+pub(crate) fn model_from_events(events: &[Value]) -> Option<String> {
+    latest_route(events).map(|(_, spec)| spec)
+}
+
+/// [`model_from_events`] plus the `seq` the winning evidence sat at, so a
+/// backfill page (older events, fetched later) cannot overwrite a newer route.
+fn latest_route(events: &[Value]) -> Option<(i64, String)> {
+    /// The route one event names, if it is one of the three that carry one.
+    fn route_of(event: &Value) -> Option<String> {
+        fn spec(provider: Option<&Value>, model: Option<&Value>) -> Option<String> {
+            let provider = provider?.as_str()?.trim();
+            let model = model?.as_str()?.trim();
+            (!provider.is_empty() && !model.is_empty()).then(|| format!("{provider}/{model}"))
+        }
+        let data = event.get("data")?;
+        match event.get("type").and_then(Value::as_str)? {
+            "assistant/message" => {
+                let source = data
+                    .get("message")
+                    .and_then(|m| m.get("source"))
+                    .filter(|s| s.get("kind").and_then(Value::as_str) == Some("model"))?;
+                spec(source.get("provider"), source.get("model"))
+            }
+            "request/context" => spec(data.get("provider"), data.get("model")),
+            "request/header" => {
+                let config = data.get("header").and_then(|h| h.get("config"))?;
+                spec(config.get("provider"), config.get("model"))
+            }
+            _ => None,
+        }
+    }
+
+    // Ordered by `seq` rather than by position: `merge_page` hands over whole
+    // pages, and a backfill page walking `beforeSeq` arrives newest-first.
+    let mut best: Option<(i64, String)> = None;
+    for event in events {
+        if let Some(found) = route_of(event) {
+            // `seq` is contiguous and monotonic across a session's whole log
+            // (verified on a 63,534-event history), so it totally orders the
+            // evidence. An event without one loses to anything that has one.
+            let seq = seq_of(event).unwrap_or(i64::MIN);
+            if best.as_ref().is_none_or(|(at, _)| seq >= *at) {
+                best = Some((seq, found));
+            }
+        }
+    }
+    best
+}
+
+/// Every session's newest known route as `(seq, "provider/model")`, keyed by
+/// session id.
+///
+/// Separate from [`history_slot`] on purpose: a transcript is hundreds of KB
+/// and gets evicted at [`HISTORY_CACHE_CAP`], while a route is one short string
+/// per session and there is no reason to make the model chip flicker off just
+/// because someone opened a ninth session. Bounded by the number of dsh
+/// sessions read in one process lifetime — a few dozen strings.
+static MODELS: OnceLock<Mutex<std::collections::HashMap<String, (i64, String)>>> = OnceLock::new();
+
+fn models_slot() -> &'static Mutex<std::collections::HashMap<String, (i64, String)>> {
+    MODELS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
 /// Remember the route a session's events showed, for a later scan to read.
-fn remember_model(_session_id: &str, _spec: &str) {}
+///
+/// Older evidence loses: history pages arrive in both directions (a tail
+/// refresh, then `beforeSeq` backfill walking away from the present), so
+/// last-write-wins would let a backfill page re-pin a session to the model it
+/// started on.
+fn remember_model(session_id: &str, seq: i64, spec: &str) {
+    let mut map = lock(models_slot());
+    match map.get(session_id) {
+        Some((at, _)) if *at > seq => {}
+        _ => {
+            map.insert(session_id.to_string(), (seq, spec.to_string()));
+        }
+    }
+}
 
 /// The route last seen for `session_id`, or `None` when Fleet has never read
 /// this session's history in this process.
-fn known_model(_session_id: &str) -> Option<String> {
-    None
+fn known_model(session_id: &str) -> Option<String> {
+    lock(models_slot())
+        .get(session_id)
+        .map(|(_, spec)| spec.clone())
 }
 
 fn seq_of(event: &Value) -> Option<i64> {
@@ -1071,6 +1154,14 @@ fn events_before(first_seq: i64, page: &[Value]) -> Vec<Value> {
 /// believed it was, which is what makes concurrent readers safe: whoever gets
 /// the lock second sees the first one's events already in and skips them.
 fn merge_page(session_id: &str, events: &[Value], has_more: bool) -> (usize, Option<i64>, bool) {
+    // Every history read is also the one chance to learn the session's route:
+    // the roster carries none, and asking per session would be a `session.list`
+    // sized cost on every scan. Recorded before the fold so a page that turns
+    // out to be entirely already-cached still teaches the scan something.
+    if let Some((seq, spec)) = latest_route(events) {
+        remember_model(session_id, seq, &spec);
+    }
+
     let mut map = lock(history_slot());
     evict_cold(&mut map, session_id);
     let entry = map.entry(session_id.to_string()).or_default();
@@ -1704,7 +1795,7 @@ mod tests {
         // opening it in the desktop does.
         let item = live_list_item();
         let id = item.get("sessionId").and_then(Value::as_str).unwrap();
-        remember_model(id, "deepseek-official/deepseek-v4-pro");
+        remember_model(id, 86, "deepseek-official/deepseek-v4-pro");
         let info = session_info_from_list_item(&item).expect("mapped");
         assert_eq!(
             info.model.as_deref(),
