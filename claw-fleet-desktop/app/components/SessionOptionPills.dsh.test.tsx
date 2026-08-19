@@ -128,19 +128,84 @@ describe("SessionOptionPills — dsh", () => {
     expect(rows()).toEqual(["Default"]);
   });
 
-  it("degrades to Default-only when the catalogue cannot be fetched", async () => {
+  it("degrades to Default-only but says why, when the catalogue cannot be fetched", async () => {
     // No dsh on the host, the server failing to start, or a `fleet serve` too
-    // old to know the route. The pill row must still render.
+    // old to know the route. The pill row must still render, and the menu must
+    // no longer silently pretend "no options" — the reason and a retry show.
     invoke.mockImplementation(async () => {
       throw new Error("dsh is not installed");
     });
     await render();
     await clickPill("Model");
     expect(rows()).toEqual(["Default (CLI setting)"]);
+    expect(container!.textContent).toContain("dsh is not installed");
+    expect([...container!.querySelectorAll("button")].some((b) => b.textContent === "Retry")).toBe(
+      true,
+    );
 
     await clickPill("Model");
     await clickPill("Effort");
     expect(rows()).toEqual(["Default"]);
+  });
+
+  it("refetches the catalogue every time the model menu opens", async () => {
+    // The launch race this exists for: the first fetch fires while `dsh web` is
+    // still booting after an app relaunch. Opening the menu must retry instead
+    // of settling for "no options" until the dialog is remounted.
+    let calls = 0;
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd !== "dsh_models") return null;
+      calls += 1;
+      if (calls <= 2) throw new Error("dsh web not up yet");
+      return MOCK_DSH_MODELS;
+    });
+    await render();
+    // Mount fetch + first open both land in the failure window…
+    await clickPill("Model");
+    expect(rows()).toEqual(["Default (CLI setting)"]);
+    expect(container!.textContent).toContain("dsh web not up yet");
+    // …close, reopen, and the same menu instance recovers without a remount.
+    await clickPill("Model");
+    await clickPill("Model");
+    expect(invoke.mock.calls.filter((c) => c[0] === "dsh_models").length).toBe(3);
+    expect(rows()).toContain("DeepSeek-V4-Pro");
+    expect(container!.textContent).not.toContain("dsh web not up yet");
+  });
+
+  it("retry from the failure block recovers the catalogue without closing the menu", async () => {
+    let calls = 0;
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd !== "dsh_models") return null;
+      calls += 1;
+      if (calls < 3) throw new Error("dsh is not installed");
+      return MOCK_DSH_MODELS;
+    });
+    await render();
+    await clickPill("Model");
+    expect(rows()).toEqual(["Default (CLI setting)"]);
+
+    const retry = [...container!.querySelectorAll("button")].find((b) => b.textContent === "Retry");
+    expect(retry).toBeTruthy();
+    await act(async () => retry!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(rows()).toContain("DeepSeek-V4-Pro");
+    expect(container!.textContent).not.toContain("dsh is not installed");
+  });
+
+  it("surfaces per-provider failures from a partial catalogue while keeping the sound groups", async () => {
+    // llm.models answers ok with the providers it could not reach in
+    // `failures` — that is normal partial success, and it must be visible
+    // rather than silently dropped, next to the models that did load.
+    invoke.mockImplementation(async (cmd: string) =>
+      cmd === "dsh_models"
+        ? { ...MOCK_DSH_MODELS, failures: [{ id: "openrouter", name: "OpenRouter", message: "network down" }] }
+        : null,
+    );
+    await render();
+    await clickPill("Model");
+    expect(rows()).toContain("DeepSeek-V4-Pro");
+    expect(container!.textContent).toContain("OpenRouter");
+    expect(container!.textContent).toContain("network down");
   });
 
   it("hides the permission pill — dsh has no --permission-mode analogue", async () => {
