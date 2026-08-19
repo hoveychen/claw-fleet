@@ -45,6 +45,7 @@ import { NEW_SESSION_DRAFT_KEY, NewSessionSheet } from "./views/Composer";
 import { loadDraft, saveDraft } from "./draft";
 import { onShareReceived, shareToPrompt, sharedFilesToFiles } from "./shareTarget";
 import { onNativePushToken } from "./nativePush";
+import { onDecisionDeepLink } from "./decisionDeepLink";
 import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
@@ -140,6 +141,8 @@ export function App() {
   }, []);
 
   const [tab, setTab] = useState<Tab>("decisions");
+  /// 通知点击要聚焦的决策卡。nonce 让「同一张卡被连点两次」也能触发。
+  const [focusDecision, setFocusDecision] = useState<{ id: string; nonce: number } | null>(null);
   const [connected, setConnected] = useState(false);
   const [agentOnline, setAgentOnline] = useState(false);
   // Whether the desktop's sessions delta path is engaged, surfaced in More.
@@ -501,6 +504,18 @@ export function App() {
     return onNativePushToken(() => setPush(pushState()));
   }, []);
 
+  // 点通知 → 直达那张决策卡。三条投递路径(冷启动 URL / SW 前台补发 /
+  // 原生壳注入)都汇进 onDecisionDeepLink,这里只管拿到目标后切页+聚焦。
+  //
+  // 用 nonce 而不是只存 id:连点同一条通知时 id 不变,单靠 id 的话 DecisionsView
+  // 那边的 effect 不会重跑,表现为「第二次点没反应」。
+  useEffect(() => {
+    return onDecisionDeepLink((target) => {
+      setTab("decisions");
+      setFocusDecision({ id: target.id, nonce: Date.now() });
+    });
+  }, []);
+
   const handleEnablePush = useCallback(async () => {
     if (!clientRef.current) return;
     setPush(await enablePush(clientRef.current));
@@ -693,6 +708,7 @@ export function App() {
             workspaceOf={workspaceOf}
             onAnswered={markAnswered}
             onOpenSession={openSessionRoot}
+            focusDecision={focusDecision}
           />
         ) : tab === "tasks" ? (
           <TasksView

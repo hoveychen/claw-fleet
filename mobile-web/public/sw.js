@@ -35,7 +35,13 @@ self.addEventListener("notificationclick", (event) => {
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((list) => {
         for (const client of list) {
-          if ("focus" in client) return client.focus();
+          if ("focus" in client) {
+            // 已经开着的窗口 focus 后 URL 一动不动 —— openWindow 那条路才会把
+            // fragment 带进地址栏。所以把目标 url 单独投一份过去,否则「app 开
+            // 着时点通知」永远停在当前页面。
+            client.postMessage({ type: "fleet-deeplink", url });
+            return client.focus();
+          }
         }
         return self.clients.openWindow(url);
       }),

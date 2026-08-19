@@ -59,6 +59,8 @@ interface Props {
   workspaceOf: (sessionId: string) => SessionInfo | undefined;
   onAnswered: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
+  /** 通知点击要聚焦的卡。`nonce` 使连点同一张卡也能重新触发。 */
+  focusDecision?: { id: string; nonce: number } | null;
 }
 
 export function DecisionsView({
@@ -70,6 +72,7 @@ export function DecisionsView({
   workspaceOf,
   onAnswered,
   onOpenSession,
+  focusDecision,
 }: Props) {
   // One focused card at a time + a queue bar, mirroring the desktop panel's
   // active-card/tab model. When the active card resolves, focus falls to the
@@ -93,6 +96,19 @@ export function DecisionsView({
   // the next card mounts under that same offset with its head off-screen. Snap
   // back to the top whenever the focused card changes (answered, or picked from
   // the queue bar) so each card starts from its head.
+  // 通知点击指定的卡。只在它确实存在于当前队列里时才切 —— 卡可能已被别处答掉
+  // (桌面端答了、或超时消失),那时保持现状比跳到一张空卡好。
+  //
+  // 依赖里放 nonce 而不是 focusDecision 本身:后者是每次渲染新建的对象,会让
+  // effect 每帧重跑;而只依赖 id 又会让「连点同一条通知」第二次失效。
+  const focusId = focusDecision?.id;
+  const focusNonce = focusDecision?.nonce;
+  useEffect(() => {
+    if (!focusId) return;
+    if (!decisions.some((d) => d.id === focusId)) return;
+    setActiveId(focusId);
+  }, [focusId, focusNonce, decisions]);
+
   const activeCardId = active?.id ?? null;
   useEffect(() => {
     if (activeCardId === null || window.scrollY === 0) return;
