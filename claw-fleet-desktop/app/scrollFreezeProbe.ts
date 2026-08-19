@@ -93,6 +93,12 @@ export function isFaultVerdict(v: FreezeVerdict): boolean {
   return v === "no-overflow" || v === "yanked" || v === "frozen";
 }
 
+/** How long ago the scroll content last changed height, and by how much. */
+export interface ContentGrowth {
+  sinceMs: number;
+  byPx: number;
+}
+
 /** Live state the probe reads at fault time, supplied by `SessionDetail`. */
 export interface ProbeContext {
   sessionId: () => string | null;
@@ -101,6 +107,23 @@ export interface ProbeContext {
   isFollowing: () => boolean;
   /** Total auto-follow pin writes since mount. */
   pinCount: () => number;
+  /**
+   * The content's last height change, or null if it hasn't changed since this
+   * transcript was opened.
+   *
+   * Here to test one hypothesis and nothing else. WebKit bug 150974 —
+   * "dynamic content in a scrollable container breaks scrolling" — would
+   * explain the freeze, and the prevention layer has exactly the matching gap:
+   * `installScrollBoxResizeRevive` watches the scroll box's *own* height, so a
+   * transcript appending messages, or markdown / highlighting / images settling
+   * over later frames, changes the content height with nothing reviving the
+   * layer. If frozen gestures turn out to cluster right after a height change,
+   * that gap is worth closing; if they don't, the hypothesis is dead and no one
+   * has to guess at it again. Supplied by the caller because the auto-follow
+   * pin already observes the content — a second ResizeObserver on the same
+   * children would be duplicate machinery.
+   */
+  contentGrowth: () => ContentGrowth | null;
 }
 
 /** Writes one line to the host debug log. Injected so tests stay off Tauri. */
@@ -265,6 +288,7 @@ export function installScrollFreezeProbe(
     lastReportAt = at;
 
     const rect = el.getBoundingClientRect();
+    const growth = ctx.contentGrowth();
     sink(
       [
         `scroll-freeze verdict=${verdict}`,
@@ -286,6 +310,11 @@ export function installScrollFreezeProbe(
         `rectBottom=${Math.round(rect.bottom)}`,
         `winHeight=${Math.round(window.innerHeight)}`,
         `pins=${ctx.pinCount()}`,
+        // "none" rather than a number: an idle transcript that settled long ago
+        // still freezes, so "never grew" has to stay distinguishable from
+        // "grew 0px just now" or the hypothesis can't be falsified.
+        `sinceGrow=${growth ? Math.round(growth.sinceMs) : "none"}`,
+        `growBy=${growth ? Math.round(growth.byPx) : 0}`,
       ].join(" ") + repair,
     );
   };
