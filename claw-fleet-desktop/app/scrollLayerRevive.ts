@@ -24,6 +24,40 @@
  */
 
 /**
+ * Watch a scroll container's own height and rebuild its layer whenever it
+ * changes — the prevention half of the fix.
+ *
+ * The freeze correlates with a specific transition. A session going from
+ * `thinking` to `waitingInput` swaps the composer dock beneath the scroll
+ * area (`waitingInput` is not an in-flight status, so the dock changes from
+ * "queue a follow-up" to "resume", or appears outright), and that takes ~40px
+ * off the `flex: 1` scroll box. The probe's own field data shows exactly this:
+ * `clientHeight` is 509 on thinking-state samples and 469 on waitingInput
+ * ones. Reviving right after the squeeze means the reader never meets a dead
+ * viewport in the first place.
+ *
+ * This observes the box itself, unlike the auto-follow pin, which observes its
+ * children: the squeeze comes from a *sibling*, so only the box's own border
+ * box changes and a children-observer would never see it.
+ */
+export function installScrollBoxResizeRevive(
+  el: HTMLElement,
+  revive: (el: HTMLElement) => boolean = reviveScrollLayer,
+): () => void {
+  let lastHeight = el.clientHeight;
+  const ro = new ResizeObserver(() => {
+    const height = el.clientHeight;
+    // Width-only changes (window resize, sidebar toggle) leave the vertical
+    // extent alone; reviving on those would churn layout for nothing.
+    if (height === lastHeight) return;
+    lastHeight = height;
+    revive(el);
+  });
+  ro.observe(el);
+  return () => ro.disconnect();
+}
+
+/**
  * Guards against re-entry. Both callers act on signals a revive can itself
  * produce (a ResizeObserver on the very element being restyled, a scroll
  * that lands after the extent is refreshed), so without this a revive can
