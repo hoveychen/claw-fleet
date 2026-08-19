@@ -401,33 +401,15 @@ impl DshSource {
 /// it, so it fires exactly once.
 type ArmedCallback = Arc<Mutex<Option<Box<dyn FnOnce(bool) + Send>>>>;
 
-/// Channel B (prompt-prepend) of dsh guidance: if the dsh **PRD** block is
-/// installed (its `$DSH_HOME/AGENTS.md` sentinel is present) AND the workspace
-/// has active TASKS.md plans, prepend the same `<system-reminder>` block Claude
-/// gets via the `fleet prd-context` UserPromptSubmit hook.
-///
-/// Channel A ([`crate::dsh_guidance`]) is static: the AGENTS.md blocks enter a
-/// session's history once, as the agent-instructions baseline. The macro plan is
-/// not static — it changes as boxes get ticked — so it rides the prompt instead,
-/// exactly as [`crate::codex_launch`] does for codex. Every Fleet-driven dsh turn
-/// goes through `session.prompt`, so prepending at both prompt sites gives the
-/// per-turn re-injection Claude's hook provides.
-///
-/// Gated on the dsh PRD concept specifically: static and dynamic injection move
-/// together with the PRD toggle. No PRD block / no active plan → the prompt is
-/// returned unchanged.
-fn maybe_prepend_active_plans(workspace_path: &str, session_id: &str, prompt: &str) -> String {
-    if workspace_path.trim().is_empty() || !crate::dsh_guidance::is_dsh_prd_installed() {
-        return prompt.to_string();
-    }
-    match crate::prd_tasks::render_active_plans_reminder(
-        std::path::Path::new(workspace_path),
-        Some(session_id),
-    ) {
-        Some(reminder) => format!("{reminder}\n\n{prompt}"),
-        None => prompt.to_string(),
-    }
-}
+// PRD/TASKS.md injection for dsh lives in `dsh-plugin/index.js`, fed by
+// `fleet dsh-context` (see [`crate::dsh_plugin`]). It used to be prepended to
+// the prompt here, which made it part of a `source.kind = "user"` message —
+// and dsh's session-title provider frames the first such message for its title
+// model under a hard 4096-byte budget that rejects rather than truncates. The
+// plan block alone runs 4.7-5.3 KB, so every Fleet-spawned dsh session lost its
+// LLM title and was named `<system-reminder> The workspace `TASKS.m` instead.
+// A plugin-sourced message reaches the same request without being an eligible
+// title message.
 
 /// The agent preset a new session in `workspace_path` should be created under,
 /// or `None` to let dsh mount its own default.
@@ -700,9 +682,7 @@ impl AgentSource for DshSource {
                 ));
             }
             Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
-            let prompt =
-                maybe_prepend_active_plans(&spec.workspace_path, &session_id, &spec.prompt);
-            Self::prompt(client, &session_id, &prompt)
+            Self::prompt(client, &session_id, &spec.prompt)
         })?;
 
         // Mark it as Fleet's, the way every other spawn path does. Without this
@@ -761,8 +741,7 @@ impl AgentSource for DshSource {
 
         let started = self.with_client(|client| {
             Self::select_model(client, &session_id, spec.model.as_deref(), spec.effort.as_deref())?;
-            let prompt = maybe_prepend_active_plans(&spec.workspace_path, &session_id, prompt);
-            Self::prompt(client, &session_id, &prompt)
+            Self::prompt(client, &session_id, prompt)
         });
 
         if let Err(e) = started {
@@ -2030,70 +2009,6 @@ mod tests {
             .spawn(&crate::agent_source::SpawnSpec::default())
             .unwrap_err();
         assert!(err.contains("workspace_path"), "unexpected error: {err}");
-    }
-
-    /// Channel B: the active-plans reminder rides the prompt, but only when the
-    /// dsh PRD block is installed. Both branches, against a temp `$DSH_HOME` and
-    /// a temp workspace holding a real TASKS.md.
-    ///
-    /// Self-guarding on the shared home lock (see `tests/home_env_lock_guard.rs`)
-    /// because it repoints `DSH_HOME`.
-    #[test]
-    fn active_plans_ride_the_prompt_only_when_the_prd_block_is_installed() {
-        let _guard = crate::session::fleet_home_lock();
-        let base = std::env::temp_dir()
-            .join(format!("fleet-dsh-prepend-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let home = base.join("dsh-home");
-        let ws = base.join("ws");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::create_dir_all(&ws).unwrap();
-        std::fs::write(
-            ws.join("TASKS.md"),
-            "# TASKS\n\n<!-- fleet:prd:begin id=\"demo-plan\" v=\"2\" -->\n\n\
-             **Plan:** Demo\n\n- [ ] **P1** — do the thing\n\n\
-             <!-- fleet:prd:end id=\"demo-plan\" -->\n",
-        )
-        .unwrap();
-
-        let prev = std::env::var_os("DSH_HOME");
-        std::env::set_var("DSH_HOME", &home);
-        let ws_str = ws.to_string_lossy().to_string();
-
-        // No AGENTS.md at all → the PRD concept is off, so nothing is prepended
-        // even though the workspace has a live plan.
-        assert_eq!(
-            maybe_prepend_active_plans(&ws_str, "session-x", "hello"),
-            "hello",
-            "no dsh PRD block installed → prompt untouched"
-        );
-
-        crate::dsh_guidance::reconcile_dsh_agents_md(
-            crate::dsh_guidance::DshGuidanceSet {
-                prd: true,
-                ..Default::default()
-            },
-            "Boss",
-            "en",
-        )
-        .unwrap();
-
-        let out = maybe_prepend_active_plans(&ws_str, "session-x", "hello");
-        assert!(out.ends_with("hello"), "the original prompt stays at the tail");
-        assert!(
-            out.contains("demo-plan") && out.contains("P1"),
-            "the active plan must reach the model: {out}"
-        );
-
-        // An empty workspace path is the resume-without-a-workspace case: there is
-        // no TASKS.md to resolve, and Path::new("") would resolve against cwd.
-        assert_eq!(maybe_prepend_active_plans("", "session-x", "hello"), "hello");
-
-        match prev {
-            Some(v) => std::env::set_var("DSH_HOME", v),
-            None => std::env::remove_var("DSH_HOME"),
-        }
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The chat preset orchestration, end to end against a scripted `call`: an

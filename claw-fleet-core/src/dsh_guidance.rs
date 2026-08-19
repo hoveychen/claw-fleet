@@ -677,6 +677,81 @@ fn wrap(begin: &str, end: &str, body: &str) -> String {
     format!("{begin}\n{body}\n{end}\n")
 }
 
+/// Stable section names. These are the de-dup keys
+/// [`crate::dsh_plugin`]'s plugin uses to decide whether a section already sits
+/// in a session's history, so renaming one re-injects it for every live session.
+pub const SECTION_PRD: &str = "fleet-guidance-prd";
+pub const SECTION_INTERACTION: &str = "fleet-guidance-interaction";
+pub const SECTION_WIKI: &str = "fleet-guidance-wiki";
+pub const SECTION_MODEL: &str = "fleet-guidance-model";
+pub const SECTION_LESSONS: &str = "fleet-guidance-lessons";
+
+/// The AGENTS.md sentinel pair carrying a given section, if it has one.
+fn sentinels_for(name: &str) -> Option<(&'static str, &'static str)> {
+    match name {
+        SECTION_PRD => Some((PRD_BEGIN, PRD_END)),
+        SECTION_INTERACTION => Some((INTERACTION_BEGIN, INTERACTION_END)),
+        SECTION_WIKI => Some((WIKI_BEGIN, WIKI_END)),
+        SECTION_MODEL => Some((MODEL_BEGIN, MODEL_END)),
+        SECTION_LESSONS => Some((LESSONS_BEGIN, LESSONS_END)),
+        _ => None,
+    }
+}
+
+/// Render the enabled guidance blocks in their stable order, as
+/// `(section name, body)` pairs.
+///
+/// The one renderer behind both delivery channels: [`reconcile_dsh_agents_md`]
+/// wraps each body in its AGENTS.md sentinels, and `fleet dsh-context` hands the
+/// same bodies to Fleet's cordis plugin. Adding a concept in one place therefore
+/// cannot leave the other behind.
+pub fn render_dsh_sections(
+    set: DshGuidanceSet,
+    user_title: &str,
+    locale: &str,
+) -> Vec<(&'static str, String)> {
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    if set.prd {
+        out.push((SECTION_PRD, render_dsh_prd_block(user_title, locale)));
+    }
+    if set.interaction {
+        out.push((
+            SECTION_INTERACTION,
+            render_dsh_interaction_block(user_title, locale),
+        ));
+    }
+    if set.wiki {
+        out.push((SECTION_WIKI, render_dsh_wiki_block(locale)));
+    }
+    if set.model {
+        out.push((SECTION_MODEL, render_dsh_model_block(locale)));
+    }
+    if set.lessons {
+        let lessons = crate::lessons_store::list_lessons();
+        if let Some(body) = render_dsh_lessons_block(&lessons, locale) {
+            out.push((SECTION_LESSONS, body));
+        }
+    }
+    out
+}
+
+/// Which concepts are currently enabled, read from their Claude carriers.
+///
+/// Shared by [`reconcile_dsh_from_claude_state`] (which writes AGENTS.md) and
+/// `fleet dsh-context` (which feeds the plugin), so the two channels cannot
+/// disagree about what is switched on. `lessons` needs the caller's view of
+/// whether dsh exists at all, since an empty lesson list and "no dsh" are
+/// different states.
+pub fn dsh_guidance_set(dsh_present: bool) -> DshGuidanceSet {
+    DshGuidanceSet {
+        prd: crate::prd_discipline::is_prd_discipline_installed(),
+        interaction: crate::interaction_mode::is_interaction_mode_installed(),
+        wiki: crate::wiki_guidance::is_wiki_guidance_installed(),
+        model: crate::model_guidance::is_model_guidance_installed(),
+        lessons: dsh_present && !crate::lessons_store::list_lessons().is_empty(),
+    }
+}
+
 /// Which per-concept dsh guidance blocks should be present in AGENTS.md.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DshGuidanceSet {
@@ -704,33 +779,14 @@ pub fn reconcile_dsh_agents_md(
     let user_content = strip_all_fleet_blocks(&existing);
 
     let mut blocks = String::new();
-    let mut push = |begin: &str, end: &str, body: String| {
+    for (name, body) in render_dsh_sections(set, user_title, locale) {
+        let Some((begin, end)) = sentinels_for(name) else {
+            continue;
+        };
         if !blocks.is_empty() {
             blocks.push('\n');
         }
         blocks.push_str(&wrap(begin, end, &body));
-    };
-    if set.prd {
-        push(PRD_BEGIN, PRD_END, render_dsh_prd_block(user_title, locale));
-    }
-    if set.interaction {
-        push(
-            INTERACTION_BEGIN,
-            INTERACTION_END,
-            render_dsh_interaction_block(user_title, locale),
-        );
-    }
-    if set.wiki {
-        push(WIKI_BEGIN, WIKI_END, render_dsh_wiki_block(locale));
-    }
-    if set.model {
-        push(MODEL_BEGIN, MODEL_END, render_dsh_model_block(locale));
-    }
-    if set.lessons {
-        let lessons = crate::lessons_store::list_lessons();
-        if let Some(body) = render_dsh_lessons_block(&lessons, locale) {
-            push(LESSONS_BEGIN, LESSONS_END, body);
-        }
     }
 
     let new_content = compose(&user_content, &blocks);
@@ -768,20 +824,31 @@ pub fn reconcile_dsh_from_claude_state(user_title: &str, locale: &str) -> Result
     if !dsh_present && !has_file {
         return Ok(());
     }
-    let set = DshGuidanceSet {
-        prd: crate::prd_discipline::is_prd_discipline_installed(),
-        interaction: crate::interaction_mode::is_interaction_mode_installed(),
-        wiki: crate::wiki_guidance::is_wiki_guidance_installed(),
-        model: crate::model_guidance::is_model_guidance_installed(),
-        lessons: dsh_present && !crate::lessons_store::list_lessons().is_empty(),
-    };
-    reconcile_dsh_agents_md(set, user_title, locale)
+    let set = dsh_guidance_set(dsh_present);
+
+    // AGENTS.md is now a migration-cleanup target, not a delivery channel: every
+    // Fleet block is stripped and the file is removed if nothing of the user's is
+    // left. Guidance reaches the session through the plugin instead, because dsh's
+    // instruction loader drops the *user-global* file first under budget pressure
+    // — in a repo with large project instructions, Fleet's rules were the first
+    // thing to silently disappear.
+    reconcile_dsh_agents_md(DshGuidanceSet::default(), user_title, locale)?;
+
+    // Fleet's cordis plugin rides the PRD switch, since the plugin is what
+    // delivers both halves of PRD injection now. Reported rather than swallowed:
+    // there is no fallback channel any more, so a silent failure here would mean
+    // dsh sessions quietly running without any Fleet context at all.
+    crate::dsh_plugin::reconcile_dsh_patch(set.prd, user_title, locale)
 }
 
-/// Whether the dsh PRD-discipline block is present in `$DSH_HOME/AGENTS.md`.
+/// Whether the dsh PRD-discipline block is still present in
+/// `$DSH_HOME/AGENTS.md`.
 ///
-/// Also the gate on the dynamic half of PRD injection: [`crate::dsh_source`]
-/// prepends the active-plans reminder only when this is true.
+/// Reads a *legacy* carrier: guidance now reaches dsh through
+/// [`crate::dsh_plugin`], and [`reconcile_dsh_from_claude_state`] strips these
+/// blocks. So this reports "a pre-plugin Fleet install has not been reconciled
+/// yet", not "the concept is on" — for the latter, read the Claude-side toggle
+/// through [`dsh_guidance_set`].
 pub fn is_dsh_prd_installed() -> bool {
     agents_md_contains(PRD_BEGIN)
 }
