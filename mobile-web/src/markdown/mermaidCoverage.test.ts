@@ -33,4 +33,20 @@ describe("mermaid 渲染面覆盖", () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  // 决策卡那五处曾经只挂 remarkGfm，于是同一段文字在会话里 CJK 加粗、公式、软换行
+  // 都对，进了决策卡就全不认。渲染面之间的差异应该只体现在组件表上，不该体现在
+  // 插件链上。
+  it("每个 <ReactMarkdown> 都用共享的插件链", () => {
+    const offenders: string[] = [];
+    for (const [path, src] of Object.entries(FILES)) {
+      if (path.endsWith(".test.tsx")) continue;
+      for (const m of src.matchAll(/<ReactMarkdown\b[\s\S]*?>/g)) {
+        if (!m[0].includes("remarkPlugins={mdRemarkPlugins}")) {
+          offenders.push(`${path}:${src.slice(0, m.index).split("\n").length}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });
