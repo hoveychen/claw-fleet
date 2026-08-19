@@ -1,6 +1,10 @@
 .row {
   display: flex;
   flex-wrap: wrap;
+  /* Without this the flex default (`stretch`) inflates a filename chip to the
+     height of the tallest tile next to it, turning its 999px radius into a
+     giant lozenge. */
+  align-items: center;
   gap: 6px;
   padding: 4px 0;
 }
@@ -48,6 +52,21 @@
   background: rgba(0, 0, 0, 0.45);
   color: #fff;
   font-size: 11px;
+}
+
+/* The composer sits in a fixed-height strip above the keyboard and the pending
+   decision dock, so its tiles are half-size — a transcript-sized tile pushes
+   the send row off screen. */
+.compact .tile {
+  min-width: 56px;
+  min-height: 44px;
+  max-width: 88px;
+  max-height: 64px;
+}
+
+.compact .img {
+  max-width: 88px;
+  max-height: 64px;
 }
 
 /* Wraps a tile so the composer's remove button can sit on its corner. */

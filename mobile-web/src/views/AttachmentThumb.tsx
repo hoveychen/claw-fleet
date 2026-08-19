@@ -64,6 +64,7 @@ export function AttachmentThumbs({
   client,
   previews,
   onRemove,
+  compact,
 }: {
   paths: string[];
   client: RelayClient | null;
@@ -73,10 +74,12 @@ export function AttachmentThumbs({
   previews?: Map<string, string>;
   /** Composer only: turns each tile into a removable chip. */
   onRemove?: (path: string) => void;
+  /** Half-size tiles, for the cramped composer strip. */
+  compact?: boolean;
 }) {
   if (paths.length === 0) return null;
   return (
-    <div className={styles.row}>
+    <div className={compact ? `${styles.row} ${styles.compact}` : styles.row}>
       {paths.map((path) => {
         const name = attachmentName(path);
         const ref = isRenderableImage(name) ? attachmentRef(path) : null;
