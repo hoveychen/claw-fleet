@@ -23,6 +23,7 @@ import {
   type FollowState,
 } from "../followState";
 import { installScrollFreezeProbe } from "../scrollFreezeProbe";
+import { installScrollBoxResizeRevive } from "../scrollLayerRevive";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
@@ -762,6 +763,18 @@ export function SessionDetail({
         invoke("log_frontend_debug", { msg: line }).catch(() => {});
       },
     );
+  }, [viewTab, liveSession?.id]);
+
+  // Rebuild the scroll layer whenever the box itself gets resized — the
+  // squeeze from the composer dock swapping underneath is the transition the
+  // freeze correlates with. Separate from the pin's ResizeObserver above,
+  // which watches the *children*: this squeeze comes from a sibling, so only
+  // this box's own border box changes.
+  useEffect(() => {
+    if (viewTab !== "messages") return;
+    const el = scrollRef.current;
+    if (!el) return;
+    return installScrollBoxResizeRevive(el);
   }, [viewTab, liveSession?.id]);
 
   const scrollToBottom = useCallback(() => {
