@@ -316,6 +316,43 @@
   font-size: 12px;
 }
 
+/* A turn that failed instead of replying. Deliberately not an assistant
+   bubble — the model never said this. */
+.turn_error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--color-error-rgb), 0.35);
+  border-radius: 8px;
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.turn_error_icon {
+  flex: none;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.turn_error_body {
+  min-width: 0;
+}
+
+.turn_error_label {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.turn_error_text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  opacity: 0.9;
+}
+
 .waiting_dot {
   width: 8px;
   height: 8px;

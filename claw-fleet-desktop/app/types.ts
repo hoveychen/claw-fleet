@@ -268,6 +268,10 @@ export interface RawMessage {
    *  system reminders) with this. A skill-body injection also carries
    *  `sourceToolUseID`; see `skillInjection.ts`. */
   isMeta?: boolean;
+  /** Synthesised by the backend from a codex turn-boundary error (a turn that
+   *  failed before producing any reply — expired credentials, a stream error).
+   *  Renders as a failure banner, not as an assistant bubble. */
+  isTurnError?: boolean;
   sourceToolUseID?: string;
   isVisibleInTranscriptOnly?: boolean;
   agentId?: string;
