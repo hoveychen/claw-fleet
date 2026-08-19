@@ -1,0 +1,143 @@
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  /* Without this the flex default (`stretch`) inflates a filename chip to the
+     height of the tallest tile next to it, turning its 999px radius into a
+     giant lozenge. */
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+/* Sized to match the transcript thumbnails in SessionDetailView so a turn that
+   mixes a pasted screenshot and a picked file reads as one row. */
+.tile {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  min-height: 56px;
+  max-width: 160px;
+  max-height: 120px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-card);
+  cursor: zoom-in;
+  overflow: hidden;
+}
+
+.img {
+  display: block;
+  max-width: 160px;
+  max-height: 120px;
+  object-fit: cover;
+}
+
+.placeholder {
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+/* Shown over the tile while the full-size bytes are on their way, so a tap on a
+   slow link doesn't look like it did nothing. */
+.busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 11px;
+}
+
+/* The composer sits in a fixed-height strip above the keyboard and the pending
+   decision dock, so its tiles are half-size — a transcript-sized tile pushes
+   the send row off screen. */
+.compact .tile {
+  min-width: 56px;
+  min-height: 44px;
+  max-width: 88px;
+  max-height: 64px;
+}
+
+.compact .img {
+  max-width: 88px;
+  max-height: 64px;
+}
+
+/* Wraps a tile so the composer's remove button can sit on its corner. */
+.tileWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tileRemove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-card);
+  color: var(--color-text-dim);
+  line-height: 1;
+}
+
+/* Non-image attachments, and images whose bytes we couldn't pull — a filename
+   is still more than the raw absolute path the bubble used to print. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  max-width: 60vw;
+}
+
+.chipIcon {
+  flex: none;
+}
+
+.chipName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The chip's own body when tapping it means "retry the fetch". */
+.chipRetry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.remove {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 0 0 0 2px;
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  line-height: 1;
+}
