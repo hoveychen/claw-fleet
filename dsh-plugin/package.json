@@ -1,0 +1,15 @@
+{
+  "name": "fleet-dsh-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fleet's cordis plugin for dsh: injects Fleet's per-turn context on agent/pre-step",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
