@@ -93,22 +93,6 @@ export async function enablePush(client: RelayClient): Promise<PushState> {
   return "granted";
 }
 
-/** Re-register an existing subscription after a reconnect (no prompts). */
-export async function resyncPush(client: RelayClient): Promise<void> {
-  if (pushState() !== "granted" || isPushOptedOut()) return;
-  if (hasNativePushToken()) {
-    client.pushSubscribe({ platform: "harmony", token: nativePushToken() });
-    return;
-  }
-  try {
-    const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.getSubscription();
-    if (subscription) client.pushSubscribe({ ...subscription.toJSON(), platform: "web" });
-  } catch {
-    // best-effort
-  }
-}
-
 /** Turn notifications off: tell the relay to drop the subscription, unsubscribe
  *  in the browser, and persist the opt-out so nothing re-subscribes. Sends the
  *  unsubscribe frame BEFORE `subscription.unsubscribe()` so the endpoint the

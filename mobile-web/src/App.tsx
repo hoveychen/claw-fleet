@@ -6,7 +6,6 @@ import {
   enablePush,
   isPushOptedOut,
   pushState,
-  resyncPush,
   type PushState,
 } from "./push";
 import { deviceLabel } from "./deviceLabel";
@@ -369,7 +368,6 @@ export function App() {
         );
     clientRef.current = client;
     client.connect();
-    if (!MOCK) void resyncPush(client);
     // Mobile browsers may never run React cleanup on tab close — tell the
     // desktop we're leaving on pagehide too (desktop timeout is the backstop).
     const onPageHide = () => client.sayGoodbye();
@@ -478,11 +476,22 @@ export function App() {
   // Skip the auto-(re)subscribe when the user has explicitly opted out —
   // otherwise a mount/focus would immediately resurrect the subscription they
   // just turned off (browser permission stays "granted" after disabling).
+  //
+  // `connected` is a dependency, not a convenience: `pushSubscribe` writes
+  // straight to the socket and returns false when it isn't OPEN, with no queue
+  // and no retry. This effect used to run only on `[push, pushOptedOut]`, and
+  // the reconnect path was a lone `resyncPush(client)` fired immediately after
+  // `client.connect()` — i.e. before the socket could possibly be open. So the
+  // very first registration raced the handshake, and every later reconnect
+  // (relay redeploy, network flap, waking from the background freeze) re-sent
+  // nothing at all. Observed on-device: the phone held a valid push token,
+  // reported itself subscribed, and the relay's subscription store never
+  // gained the entry.
   useEffect(() => {
-    if (push === "granted" && !pushOptedOut && clientRef.current) {
+    if (connected && push === "granted" && !pushOptedOut && clientRef.current) {
       void enablePush(clientRef.current);
     }
-  }, [push, pushOptedOut]);
+  }, [connected, push, pushOptedOut]);
 
   // 原生壳交来厂商推送 token。到达时机不定（壳要先过系统通知授权），所以只
   // 重算一次 push 状态 —— classifyPush 见到 token 就返回 granted，随后那个
