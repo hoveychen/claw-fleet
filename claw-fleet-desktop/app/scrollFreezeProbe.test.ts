@@ -68,6 +68,9 @@ describe("installScrollFreezeProbe", () => {
   let pins: number;
   let clock: number;
   let teardown: () => void;
+  let revives: number;
+  /** Whether the stand-in revive actually brings the scroll layer back. */
+  let reviveReanimates = true;
 
   /** jsdom gives every element zero metrics; stand in for a real layout. */
   const sizeAs = (scrollHeight: number, clientHeight: number, scrollTop: number) => {
@@ -99,12 +102,19 @@ describe("installScrollFreezeProbe", () => {
     lines = [];
     pins = 0;
     clock = 1_000_000;
-    teardown = installScrollFreezeProbe(el, ctx(), (l) => lines.push(l), () => clock);
+    revives = 0;
+    // Stand in for the real revive so tests decide whether the scroll layer
+    // comes back: `reviveReanimates` false models a container that stays dead.
+    teardown = installScrollFreezeProbe(el, ctx(), (l) => lines.push(l), () => clock, () => {
+      revives += 1;
+      return reviveReanimates;
+    });
   });
 
   afterEach(() => {
     teardown();
     el.remove();
+    reviveReanimates = true;
     vi.useRealTimers();
   });
 
@@ -183,6 +193,98 @@ describe("installScrollFreezeProbe", () => {
     wheel(-300);
     vi.advanceTimersByTime(200);
     expect(lines).toHaveLength(2);
+  });
+
+  it("revives the scroll layer when it finds one frozen", () => {
+    sizeAs(9000, 800, 8200);
+    wheel(-300);
+    vi.advanceTimersByTime(200);
+
+    expect(revives).toBe(1);
+  });
+
+  it("finishes the scroll the reader asked for, so the gesture isn't lost", () => {
+    // Reviving alone would leave them staring at the same unmoved viewport and
+    // having to scroll again. Apply the intent they already expressed.
+    sizeAs(9000, 800, 8200);
+    reviveReanimates = true;
+    wheel(-300);
+    vi.advanceTimersByTime(200);
+
+    expect(el.scrollTop).toBe(7900); // 8200 - 300
+  });
+
+  it("clamps the recovered position to the scrollable range", () => {
+    sizeAs(9000, 800, 100);
+    wheel(-4000); // far past the top
+    vi.advanceTimersByTime(200);
+
+    expect(el.scrollTop).toBe(0);
+  });
+
+  it("records whether the revive actually worked", () => {
+    // This is the self-check: it says in the log whether the fix fixed it,
+    // rather than leaving the claim to rest on my say-so.
+    sizeAs(9000, 800, 8200);
+    wheel(-300);
+    vi.advanceTimersByTime(200);
+
+    expect(lines[0]).toContain("revive=recovered");
+  });
+
+  it("says so when the revive did not bring it back", () => {
+    sizeAs(9000, 800, 8200);
+    // A dead container: the stand-in reports it ran, but scrollTop is frozen
+    // solid, so writing it changes nothing.
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => 8200,
+      set: () => {},
+    });
+    wheel(-300);
+    vi.advanceTimersByTime(200);
+
+    expect(lines[0]).toContain("revive=failed");
+  });
+
+  it("leaves a healthy container alone", () => {
+    sizeAs(9000, 800, 8200);
+    el.addEventListener("wheel", () => {
+      el.scrollTop = 7900;
+    });
+    wheel(-300);
+    vi.advanceTimersByTime(200);
+
+    expect(revives).toBe(0);
+  });
+
+  it("does not revive when the pin was the one holding it", () => {
+    // A yank is a behaviour bug in our own code; rebuilding the scroll layer
+    // would be treating a symptom that has nothing to do with the compositor.
+    sizeAs(9000, 800, 8200);
+    el.addEventListener("wheel", () => {
+      el.scrollTop = 7900;
+      el.scrollTop = 8200;
+      pins += 1;
+    });
+    wheel(-300);
+    vi.advanceTimersByTime(200);
+
+    expect(revives).toBe(0);
+  });
+
+  it("keeps trying on later gestures even while the log is rate-limited", () => {
+    // The log is throttled to one line per 30s so a stuck pane can't flood it,
+    // but every gesture the reader makes still deserves a repair attempt.
+    sizeAs(9000, 800, 8200);
+    for (let i = 0; i < 4; i++) {
+      sizeAs(9000, 800, 8200);
+      wheel(-300);
+      vi.advanceTimersByTime(200);
+    }
+
+    expect(lines).toHaveLength(1);
+    expect(revives).toBe(4);
   });
 
   it("stops listening after teardown", () => {
