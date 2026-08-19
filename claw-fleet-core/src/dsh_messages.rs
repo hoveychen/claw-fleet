@@ -246,6 +246,65 @@ mod tests {
         })
     }
 
+    /// Verbatim seq 8 of every captured session: dsh's own agent-instructions
+    /// baseline, `$DSH_HOME/AGENTS.md` + the workspace memory file, wrapped by
+    /// dsh in one `<system-reminder>`. 19,397 characters in the real capture.
+    fn agent_instructions() -> Value {
+        json!({
+            "type": "user/message",
+            "seq": 8,
+            "time": 1786756088880i64,
+            "data": {
+                "content": [{
+                    "type": "text",
+                    "text": "<system-reminder>\n# Fleet PRD Discipline for dsh\n…\n</system-reminder>",
+                }],
+                "source": { "kind": "agent-instructions" },
+                "role": "user"
+            }
+        })
+    }
+
+    /// Verbatim seq 9: the runtime-context snapshot
+    /// `@deepseek-ai/dsh-system-prompt` splices in as a `user/message`.
+    fn plugin_snapshot() -> Value {
+        json!({
+            "type": "user/message",
+            "seq": 9,
+            "time": 1786756088900i64,
+            "data": {
+                "content": [{ "type": "text", "text": "Current runtime context. This snapshot…" }],
+                "source": {
+                    "kind": "plugin",
+                    "plugin": "@deepseek-ai/dsh-system-prompt",
+                    "form": "snapshot"
+                },
+                "role": "user"
+            }
+        })
+    }
+
+    /// Verbatim seq 86 of a captured chat session: reasoning and prose in one
+    /// assembled message. dsh's reasoning block carries `text`, not `thinking`.
+    fn assistant_with_reasoning() -> Value {
+        json!({
+            "type": "assistant/message",
+            "seq": 86,
+            "time": 1786756092485i64,
+            "data": {
+                "turn": 1,
+                "step": 1,
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "reasoning", "text": "The user just said \"hi\"." },
+                        { "type": "text", "text": "嗨，老板！" }
+                    ]
+                }
+            }
+        })
+    }
+
     fn assistant_with_tool_call() -> Value {
         json!({
             "type": "assistant/message",
@@ -466,36 +525,132 @@ mod tests {
     }
 
     /// Verbatim: dsh injects its runtime-context snapshot as a `user/message`
-    /// too. Rendering it would put a wall of environment text in the transcript
-    /// as if the user had typed it.
+    /// too. Rendering it as a bubble would put a wall of environment text in the
+    /// transcript as if the user had typed it — so it is folded, not dropped:
+    /// the collapsed card keeps it readable on demand.
     #[test]
-    fn the_injected_runtime_context_snapshot_is_not_shown_as_user_speech() {
-        let injected = json!({
-            "type": "user/message",
-            "seq": 8,
-            "time": 1786756088900i64,
-            "data": {
-                "content": [{ "type": "text", "text": "Current runtime context. This snapshot…" }],
-                "source": {
-                    "kind": "plugin",
-                    "plugin": "@deepseek-ai/dsh-system-prompt",
-                    "form": "snapshot"
-                },
-                "role": "user"
-            }
-        });
-        assert!(normalize(&[injected]).is_empty());
-        // …while the human's own prompt, one seq earlier, survives.
-        assert_eq!(normalize(&[user_message()]).len(), 1);
+    fn the_injected_runtime_context_snapshot_is_folded_not_shown_as_user_speech() {
+        let out = normalize(&[plugin_snapshot()]);
+        assert_eq!(out.len(), 1, "the snapshot must survive as a folded record");
+        assert_eq!(out[0]["type"], "user");
+        assert_eq!(
+            out[0]["isMeta"],
+            json!(true),
+            "the runtime snapshot must be flagged isMeta so the frontend folds it",
+        );
+        // …while the human's own prompt, one seq earlier, stays a real bubble.
+        let human = normalize(&[user_message()]);
+        assert_eq!(human.len(), 1);
+        assert!(
+            human[0].get("isMeta").is_none(),
+            "a human prompt must NOT be folded",
+        );
     }
 
-    /// A kind this release has never seen stays visible: silently swallowing
-    /// something a human might have said is the worse failure.
+    /// dsh's own agent-instructions message is the whole of `$DSH_HOME/AGENTS.md`
+    /// plus the workspace memory file — 19,397 characters in a captured chat
+    /// session — already wrapped by dsh in one `<system-reminder>`. Rendered as a
+    /// bubble it buries the conversation.
     #[test]
-    fn an_unrecognised_source_kind_is_still_shown() {
+    fn the_agent_instructions_baseline_is_folded() {
+        let out = normalize(&[agent_instructions()]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["type"], "user");
+        assert_eq!(out[0]["isMeta"], json!(true));
+        // Folded, not truncated: expanding the card must still show the text.
+        assert!(out[0]["message"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("<system-reminder>"));
+    }
+
+    /// A kind this release has never seen stays visible — silently swallowing
+    /// something a human might have said is the worse failure — but it is folded
+    /// rather than presented as speech, because only `kind:"user"` is speech.
+    #[test]
+    fn an_unrecognised_source_kind_is_folded_not_dropped() {
         let mut event = user_message();
         event["data"]["source"]["kind"] = json!("some-future-kind");
-        assert_eq!(normalize(&[event]).len(), 1);
+        let out = normalize(&[event]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["isMeta"], json!(true));
+    }
+
+    /// Fleet has no additional-context channel into dsh, so
+    /// `dsh_source::maybe_prepend_active_plans` prepends the TASKS.md
+    /// active-plans block into the prompt string itself. Left in place the
+    /// transcript opens with two `<system-reminder>` walls back to back — Fleet's
+    /// inside the human's own bubble, then dsh's agent-instructions record.
+    /// Strip Fleet's from the bubble, exactly as `codex_source` already does.
+    #[test]
+    fn a_prompt_has_fleets_prepended_active_plans_reminder_stripped() {
+        let mut event = user_message();
+        event["data"]["content"] = json!([{
+            "type": "text",
+            "text": "<system-reminder>\nThe workspace `TASKS.md` holds 14 active plans.\n\
+                     ## Plan: foo\n- [ ] **P1** — bar\n</system-reminder>\n\n\
+                     Run this exact shell command",
+        }]);
+        let out = normalize(&[event]);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].get("isMeta").is_none(), "still a human bubble");
+        assert_eq!(
+            out[0]["message"]["content"][0]["text"], "Run this exact shell command",
+            "the prepended Fleet reminder must not reach the bubble",
+        );
+    }
+
+    /// A turn whose prompt is *nothing but* the reminder has no human speech in
+    /// it at all, so the whole record folds instead of rendering an empty bubble.
+    #[test]
+    fn a_prompt_that_is_only_the_reminder_folds_entirely() {
+        let mut event = user_message();
+        event["data"]["content"] = json!([{
+            "type": "text",
+            "text": "<system-reminder>\nplans\n</system-reminder>",
+        }]);
+        let out = normalize(&[event]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["isMeta"], json!(true));
+    }
+
+    /// A prompt that merely *mentions* the tag mid-sentence is a genuine
+    /// question about it and must survive byte-for-byte.
+    #[test]
+    fn a_prompt_merely_mentioning_the_tag_is_untouched() {
+        let mut event = user_message();
+        let text = "why does dsh show the <system-reminder> block in my session?";
+        event["data"]["content"] = json!([{ "type": "text", "text": text }]);
+        let out = normalize(&[event]);
+        assert_eq!(out[0]["message"]["content"][0]["text"], text);
+        assert!(out[0].get("isMeta").is_none());
+    }
+
+    /// dsh's reasoning block is `{type:"reasoning",text}`; the renderer keys off
+    /// Claude's `{type:"thinking",thinking}`. Passed through untranslated it
+    /// falls to `ContentBlocks`' unknown-block shell and renders as a wrench-icon
+    /// "REASONING" tool card instead of a thinking fold.
+    #[test]
+    fn a_reasoning_block_becomes_a_thinking_block() {
+        let out = normalize(&[assistant_with_reasoning()]);
+        assert_eq!(out.len(), 1);
+        let content = &out[0]["message"]["content"];
+        assert_eq!(content[0]["type"], "thinking");
+        assert_eq!(content[0]["thinking"], "The user just said \"hi\".");
+        // The prose that followed it in the same message is untouched.
+        assert_eq!(content[1]["type"], "text");
+        assert_eq!(content[1]["text"], "嗨，老板！");
+    }
+
+    /// An empty reasoning payload has no summary to show; Claude's own
+    /// vocabulary for that is `redacted_thinking`, which the renderer already
+    /// labels "reasoning summary unavailable".
+    #[test]
+    fn an_empty_reasoning_block_becomes_redacted_thinking() {
+        let mut event = assistant_with_reasoning();
+        event["data"]["message"]["content"][0]["text"] = json!("   ");
+        let out = normalize(&[event]);
+        assert_eq!(out[0]["message"]["content"][0]["type"], "redacted_thinking");
     }
 
     #[test]
