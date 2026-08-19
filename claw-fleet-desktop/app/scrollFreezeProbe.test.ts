@@ -93,8 +93,26 @@ describe("installScrollFreezeProbe", () => {
     el.dispatchEvent(ev);
   };
 
+  /** rAF callbacks the probe queued, run on demand by `flushFrames`. */
+  let frames: FrameRequestCallback[];
+
+  /** Run every frame callback queued so far — one animation frame passing. */
+  const flushFrames = () => {
+    const due = frames;
+    frames = [];
+    for (const cb of due) cb(0);
+  };
+
   beforeEach(() => {
     vi.useFakeTimers();
+    frames = [];
+    // Held rather than executed, so a test can say "one frame passed" without
+    // also letting the 140ms gesture-end timer fire. Telling those two apart is
+    // the whole point of the in-gesture tests below.
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      frames.push(cb);
+      return frames.length;
+    });
     el = document.createElement("div");
     // jsdom's scrollTop is a plain property, so assignment sticks — which is
     // what lets a test model "the browser moved it" vs "nothing moved".
@@ -115,7 +133,133 @@ describe("installScrollFreezeProbe", () => {
     teardown();
     el.remove();
     reviveReanimates = true;
+    vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  describe("keeping up with the gesture instead of waiting for it to end", () => {
+    // The repair used to run only from the gesture-end timer, so a frozen pane
+    // stayed visually dead for the whole swipe and then jumped once the reader
+    // stopped — reported as "视图没更新，只有滚动停止后就忽然间更新到新的位置".
+    // Field line behind it (2026-08-19 14:47:49): intent=-1163 moved=0
+    // room=15625, then revive=recovered landed=14462.
+
+    it("moves the viewport one frame in, without the gesture ending", () => {
+      sizeAs(9000, 800, 8200);
+      wheel(-300);
+      flushFrames();
+
+      // No timer advance: the gesture is still going.
+      expect(el.scrollTop).toBe(7900);
+    });
+
+    it("follows every later wheel event in the same gesture immediately", () => {
+      sizeAs(9000, 800, 8200);
+      wheel(-100);
+      flushFrames(); // freeze detected here; the pane is under our control now
+      wheel(-100);
+      wheel(-100);
+
+      // Each event lands as it arrives — no second frame, no gesture end.
+      expect(el.scrollTop).toBe(7900);
+    });
+
+    it("does not double-apply when the browser's own scroll lands late", () => {
+      // The danger of driving scrollTop by hand: if WebKit was merely reporting
+      // a stale scrollTop and later applies the same wheels, a relative `+=`
+      // would move the reader twice as far as they asked. Absolute targets make
+      // that impossible.
+      sizeAs(9000, 800, 8200);
+      wheel(-100);
+      flushFrames();
+      expect(el.scrollTop).toBe(8100);
+
+      el.scrollTop = 8000; // the browser catches up on its own
+      wheel(-100); // reader has now asked for 200 total
+
+      expect(el.scrollTop).toBe(8000); // 8200 - 200, not 7900
+    });
+
+    it("clamps the in-gesture position to the scrollable range", () => {
+      sizeAs(9000, 800, 100);
+      wheel(-4000);
+      flushFrames();
+
+      expect(el.scrollTop).toBe(0);
+    });
+
+    it("leaves a healthy pane to scroll itself", () => {
+      sizeAs(9000, 800, 8200);
+      el.addEventListener("wheel", () => {
+        el.scrollTop = 7900; // the browser honours the wheel, as it should
+      });
+      wheel(-300);
+      flushFrames();
+      wheel(-300);
+
+      expect(revives).toBe(0);
+      // Untouched by us: 7900 from the listener above, not a driven 7600.
+      expect(el.scrollTop).toBe(7900);
+    });
+
+    it("stays out of the way at the end stop", () => {
+      sizeAs(9000, 800, 8200);
+      wheel(300); // already parked at the bottom
+      flushFrames();
+
+      expect(revives).toBe(0);
+      expect(el.scrollTop).toBe(8200);
+    });
+
+    it("still reports the freeze it took over, so the log keeps its evidence", () => {
+      // Driving scrollTop ourselves makes `moved` look healthy by the time the
+      // gesture ends. Without saying so explicitly, every taken-over freeze
+      // would classify as "ok" and vanish from the log.
+      sizeAs(9000, 800, 8200);
+      wheel(-300);
+      flushFrames();
+      vi.advanceTimersByTime(200);
+
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("verdict=frozen");
+      expect(lines[0]).toContain("takeover=1");
+      expect(lines[0]).toContain("nativeMoved=0");
+    });
+
+    it("re-tests each gesture rather than latching onto the pane forever", () => {
+      // A pane that recovers must get its native scrolling back: a latched
+      // takeover would keep overriding it, and one misjudgement would then
+      // last for the rest of the session.
+      sizeAs(9000, 800, 8200);
+      wheel(-100);
+      flushFrames();
+      expect(revives).toBe(1);
+
+      vi.advanceTimersByTime(200); // gesture over
+      el.addEventListener("wheel", () => {
+        el.scrollTop = el.scrollTop - 100; // healthy again
+      });
+      wheel(-100);
+      flushFrames();
+
+      expect(revives).toBe(1); // no second takeover
+    });
+
+    it("does not fight the auto-follow pin", () => {
+      // A yank is our own bug. Driving scrollTop against the pin would just
+      // start a tug of war on every frame.
+      sizeAs(9000, 800, 8200);
+      el.addEventListener("wheel", () => {
+        el.scrollTop = 7900;
+        el.scrollTop = 8200;
+        pins += 1;
+      });
+      wheel(-300);
+      flushFrames();
+
+      expect(revives).toBe(0);
+      expect(el.scrollTop).toBe(8200);
+    });
   });
 
   it("logs a frozen verdict with the metrics needed to tell layout from compositor", () => {
