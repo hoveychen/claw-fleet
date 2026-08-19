@@ -10,6 +10,15 @@
 //! records are typed `user/message` / `assistant/chunk` / `tool/result` and
 //! match nothing the renderer looks for.
 //!
+//! ## What is folded rather than shown
+//!
+//! A `user/message` whose `source.kind` is anything but `user` is not speech —
+//! dsh uses that record type for its agent-instructions baseline, its
+//! runtime-context snapshot and its skill catalogue. Those keep their record but
+//! gain `isMeta: true`, which the frontend collapses into one expandable card.
+//! Fleet's own prepended active-plans `<system-reminder>` is peeled off the
+//! human's bubble for the same reason (see [`strip_prepended_reminder`]).
+//!
 //! ## What is dropped, and why that is not data loss
 //!
 //! * `assistant/chunk` — the streaming deltas. One turn here produced 97 chunks
@@ -81,10 +90,50 @@ fn assistant_block(block: &Value) -> Option<Value> {
                 "input": input,
             }))
         }
-        // Reasoning blocks and anything a later dsh release adds: keep the
-        // block rather than silently swallowing the turn's content.
+        // dsh's reasoning block carries `text`; the renderer keys off Claude's
+        // `thinking`. Untranslated it falls through `ContentBlocks`' unknown-block
+        // shell and renders as a wrench-icon "REASONING" tool card. An empty
+        // payload has no summary to show, which is what `redacted_thinking`
+        // means — the same mapping `codex_source` uses for a missing summary.
+        "reasoning" => {
+            let text = block.get("text").and_then(Value::as_str).unwrap_or("").trim();
+            Some(if text.is_empty() {
+                json!({ "type": "redacted_thinking", "reason": "summary_unavailable" })
+            } else {
+                json!({ "type": "thinking", "thinking": text })
+            })
+        }
+        // Anything a later dsh release adds: keep the block rather than silently
+        // swallowing the turn's content.
         _ => Some(block.clone()),
     }
+}
+
+/// Peel Fleet's own prepended `<system-reminder>` block off a human prompt's
+/// content blocks.
+///
+/// Returns `None` when nothing was prepended, `Some(blocks)` with the peeled
+/// content otherwise. The block only ever lands at the very front of the prompt
+/// string (`format!("{reminder}\n\n{prompt}")`), so only the first text block is
+/// examined; an empty remainder means the turn carried no human speech at all
+/// and the caller folds the whole record.
+fn strip_prepended_reminder(content: &[Value]) -> Option<Vec<Value>> {
+    let (idx, text) = content.iter().enumerate().find_map(|(i, b)| {
+        (b.get("type").and_then(Value::as_str) == Some("text"))
+            .then(|| b.get("text").and_then(Value::as_str).map(|t| (i, t)))
+            .flatten()
+    })?;
+    let stripped = crate::codex_source::strip_leading_system_reminder(text);
+    if stripped.len() == text.len() {
+        return None;
+    }
+    let mut out = content.to_vec();
+    if stripped.is_empty() {
+        out.remove(idx);
+    } else {
+        out[idx] = json!({ "type": "text", "text": stripped });
+    }
+    Some(out)
 }
 
 /// Flatten a `tool-result`'s content blocks into the string the result cards
@@ -124,31 +173,56 @@ fn normalize_event(event: &Value) -> Option<Value> {
 
     match kind {
         "user/message" => {
-            // Not every `user/message` came from a human. dsh injects its
-            // runtime-context snapshot as one, tagged
-            // `source.kind = "plugin"` (`@deepseek-ai/dsh-system-prompt`) —
-            // a wall of environment text that would read as if the user had
-            // typed it. Captured live: seq 7 `kind:"user"` is the prompt, seq 8
-            // `kind:"plugin"` is the snapshot.
+            // Not every `user/message` came from a human. Captured across 70
+            // sessions, `source.kind` is one of four values: `user` (the human's
+            // prompt), `agent-instructions` (all of `$DSH_HOME/AGENTS.md` plus the
+            // workspace memory file — 19,397 characters, already wrapped by dsh in
+            // its own `<system-reminder>`), `plugin` (the runtime-context snapshot
+            // `@deepseek-ai/dsh-system-prompt` splices in), and `skill-catalog`.
             //
-            // Only the injection is dropped, rather than keeping only
-            // `kind:"user"`: an unrecognised kind from a later dsh release is
-            // better shown as noise than silently swallowed, because the one
-            // thing that must never disappear is something a human said.
-            if data.get("source").and_then(|s| s.get("kind")).and_then(Value::as_str)
-                == Some("plugin")
-            {
-                return None;
-            }
-            Some(json!({
+            // Only `user` is speech. The rest are flagged `isMeta`, the same flag
+            // Claude Code stamps on harness-injected records and `codex_source`
+            // stamps on codex's boilerplate: the frontend folds a run of them into
+            // one collapsed, expandable card (`metaGrouping.ts` / `MetaFoldBlock`)
+            // instead of a full-width bubble. Folded rather than dropped so the
+            // text stays readable on demand, and so an unrecognised kind from a
+            // later dsh release degrades into the fold rather than disappearing —
+            // the one thing that must never vanish is something a human said.
+            let kind = data
+                .get("source")
+                .and_then(|s| s.get("kind"))
+                .and_then(Value::as_str);
+            let content = data.get("content").cloned().unwrap_or_else(|| json!([]));
+            let mut out = json!({
                 "type": "user",
                 "message": {
                     "role": "user",
                     // dsh's user content blocks are already `{type:"text",text}`.
-                    "content": data.get("content").cloned().unwrap_or_else(|| json!([])),
+                    "content": content,
                 },
                 "timestamp": timestamp,
-            }))
+            });
+            if kind != Some("user") {
+                out["isMeta"] = json!(true);
+                return Some(out);
+            }
+            // A human prompt, but Fleet prepended the TASKS.md active-plans block
+            // into the prompt string itself (no additional-context channel into
+            // dsh; see `dsh_source::maybe_prepend_active_plans`). Left in place the
+            // transcript opens with two `<system-reminder>` walls back to back.
+            // Peel Fleet's off the bubble; a prompt that was *only* the reminder
+            // carries no speech and folds like the injections above.
+            if let Some(blocks) = out["message"]["content"]
+                .as_array()
+                .and_then(|c| strip_prepended_reminder(c))
+            {
+                if blocks.is_empty() {
+                    out["isMeta"] = json!(true);
+                } else {
+                    out["message"]["content"] = json!(blocks);
+                }
+            }
+            Some(out)
         }
 
         "assistant/message" => {
