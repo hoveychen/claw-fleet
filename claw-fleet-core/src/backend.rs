@@ -158,6 +158,12 @@ pub struct SourceUsageSummary {
     pub plan: Option<String>,
     /// Rate-limit windows, each with a utilization bar.
     pub bars: Vec<UsageBar>,
+    /// Where the numbers came from — `"foxy-switcher"` when read from the local
+    /// foxy daemon, else the provider's own path (`"anthropic"` /
+    /// `"codex-app-server"`). `None` when the source reported nothing.
+    /// `#[serde(default)]` keeps older serialized payloads deserializable.
+    #[serde(default)]
+    pub usage_source: Option<String>,
 }
 
 impl SourceUsageSummary {
@@ -189,6 +195,11 @@ impl SourceUsageSummary {
             source: "claude".into(),
             plan: if info.plan.is_empty() { None } else { Some(info.plan.clone()) },
             bars,
+            usage_source: if info.usage_source.is_empty() {
+                None
+            } else {
+                Some(info.usage_source.clone())
+            },
         }
     }
 
@@ -224,6 +235,7 @@ impl SourceUsageSummary {
             source: "codex".into(),
             plan,
             bars,
+            usage_source: val["usageSource"].as_str().map(|s| s.to_string()),
         }
     }
 }
@@ -1341,6 +1353,44 @@ mod tests {
         assert!((s.bars[0].utilization - 0.45).abs() < f64::EPSILON);
         assert!((s.bars[1].utilization - 0.10).abs() < f64::EPSILON);
         assert!(s.bars[0].resets_at.is_some());
+    }
+
+    #[test]
+    fn from_codex_carries_the_usage_source_through() {
+        // The normalised summary feeds the tray menu and the mobile usage view;
+        // dropping the label there would leave those two surfaces unable to say
+        // whether the numbers came from foxy.
+        let val = json!({
+            "planType": "team",
+            "primary": {"usedPercent": 1, "resetsAt": 1_787_622_736_i64},
+            "usageSource": "foxy-switcher"
+        });
+        let s = SourceUsageSummary::from_codex(&val);
+        assert_eq!(s.usage_source.as_deref(), Some("foxy-switcher"));
+    }
+
+    #[test]
+    fn from_codex_without_a_usage_source_reports_none() {
+        // An older backend (or a payload predating the field) must not surface
+        // an empty-string source the UI would try to translate.
+        let s = SourceUsageSummary::from_codex(&json!({ "planType": "team" }));
+        assert_eq!(s.usage_source, None);
+    }
+
+    #[test]
+    fn from_claude_carries_the_usage_source_through() {
+        let info = AccountInfo {
+            usage_source: "foxy-switcher".into(),
+            ..AccountInfo::default()
+        };
+        let s = SourceUsageSummary::from_claude(&info);
+        assert_eq!(s.usage_source.as_deref(), Some("foxy-switcher"));
+    }
+
+    #[test]
+    fn from_claude_empty_usage_source_reports_none() {
+        let s = SourceUsageSummary::from_claude(&AccountInfo::default());
+        assert_eq!(s.usage_source, None);
     }
 
     #[test]

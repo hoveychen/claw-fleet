@@ -236,6 +236,16 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
             <div className={styles.sectionLabel}>{SOURCE_LABEL[s.source] ?? s.source}</div>
             <div className={styles.card}>
               {s.plan && <Row label={t("套餐")} value={s.plan} />}
+              {s.usageSource && (
+                <Row
+                  label={t("用量来源")}
+                  value={
+                    s.usageSource === "foxy-switcher"
+                      ? t("foxy-switcher（本地守护进程）")
+                      : t("Codex app-server")
+                  }
+                />
+              )}
               {s.bars.length > 0 ? (
                 <div className={styles.bars}>
                   {s.bars.map((b) => (

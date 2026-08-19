@@ -2048,6 +2048,7 @@ export const MOCK_CODEX_USAGE = {
   primary: { usedPercent: 35, windowDurationMins: 300, resetsAt: NOW + 2 * HOUR },
   secondary: { usedPercent: 18, windowDurationMins: 10080, resetsAt: NOW + 4 * 24 * HOUR },
   credits: { hasCredits: true, unlimited: false, balance: "$42.50" },
+  usageSource: "codex-app-server",
 };
 
 // ── Memory panel ────────────────────────────────────────────────────────────
