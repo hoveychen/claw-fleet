@@ -222,6 +222,62 @@ pub fn reap_orphans() -> usize {
     .unwrap_or(0)
 }
 
+/// Kill leaked `dsh web` servers the registry never heard of.
+///
+/// The registry is blind to a whole class of leaks: a server spawned under a
+/// throwaway `FLEET_HOME` (tests, harness scripts) records itself into a temp
+/// registry that evaporates with the run, and a one-shot CLI whose record was
+/// dropped without a kill leaves nothing behind either. The processes are
+/// still identifiable: Fleet always launches `dsh web --port 0` (an
+/// OS-assigned port is the spawn contract) and always keeps the server as a
+/// direct child — so a `… dsh web --port 0` whose parent died (ppid 1) is
+/// ownerless by construction, whoever started it. 13 such invisible orphans
+/// accumulated on 2026-08-18 alone; this sweep is what makes the leak class
+/// self-healing instead of hand-cleaned.
+///
+/// A sibling of [`reap_orphans`], not part of it: the registry reap has
+/// count-exact unit tests and runs under the registry lock, while this sweep
+/// is machine-global and non-deterministic there (it would also cross-kill
+/// other tests' fixtures). Production calls both, side by side, at the one
+/// place a server is first started (`DshSource::with_client`).
+pub fn sweep_unregistered_orphans() -> usize {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    let mut sys = System::new();
+    // cmd only, no cwd: refreshing cwd for every process on macOS triggers TCC
+    // consent dialogs for unrelated apps (see `scan_codex_processes`).
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+    );
+
+    let mut killed = 0;
+    for (pid, process) in sys.processes() {
+        let cmd = process
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !cmd.contains("dsh web --port 0") {
+            continue;
+        }
+        // Parent alive = that process owns it (Fleet keeps its server as a
+        // direct child); only the reparented-to-init ones are ownerless.
+        let orphaned = process.parent().map(|p| p.as_u32() == 1).unwrap_or(false);
+        if !orphaned {
+            continue;
+        }
+        crate::log_debug(&format!(
+            "dsh sweep: killing registry-invisible orphaned dsh web pid={pid} ({cmd})"
+        ));
+        crate::llm_provider::kill_process(pid.as_u32());
+        killed += 1;
+    }
+    killed
+}
+
 /// A running `dsh web` instance owned by this process.
 pub struct DshServer {
     child: Child,
@@ -423,6 +479,71 @@ fn read_port(child: &mut Child) -> Result<u16, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The registry is blind to servers spawned under a throwaway `FLEET_HOME`
+    /// (tests, harness scripts): their records evaporate with the temp dir and
+    /// the real `dsh web` lives on forever — 13 such invisible orphans piled up
+    /// on 2026-08-18 alone. `reap_orphans` must therefore ALSO sweep by
+    /// signature: any `… dsh web --port 0` process whose parent died (ppid 1)
+    /// is ownerless by construction — Fleet always keeps its server as a
+    /// direct child — and gets killed even when no registry record names it.
+    #[cfg(unix)]
+    #[test]
+    fn reap_sweeps_a_registry_invisible_orphan_by_signature() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        // A fake `dsh` that just sleeps, so the sweep's target exists without
+        // touching a real dsh install.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("dsh");
+        {
+            let mut f = std::fs::File::create(&fake).unwrap();
+            writeln!(f, "#!/bin/sh\nsleep 300").unwrap();
+        }
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Double-fork through `sh`: the intermediate shell prints the child's
+        // pid and exits, so the fake server reparents to pid 1 — the exact
+        // shape of a leaked orphan.
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "\"{}\" web --port 0 >/dev/null 2>&1 & echo $!",
+                fake.display()
+            ))
+            .output()
+            .unwrap();
+        let pid: u32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+
+        // Wait until it is actually orphaned (ppid == 1).
+        let orphaned = (0..50).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::process::Command::new("ps")
+                .args(["-o", "ppid=", "-p", &pid.to_string()])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
+                .unwrap_or(false)
+        });
+        assert!(orphaned, "fake dsh web (pid {pid}) never reparented to 1");
+
+        sweep_unregistered_orphans();
+
+        // SIGKILL delivery is asynchronous; give it a moment.
+        let dead = (0..50).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            unsafe { libc::kill(pid as i32, 0) != 0 }
+        });
+        // Clean up on failure so a red run doesn't itself leak the fake.
+        if !dead {
+            unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        }
+        assert!(
+            dead,
+            "reap_orphans left the registry-invisible orphan (pid {pid}) alive"
+        );
+    }
 
     #[test]
     fn parses_the_launcher_url_line() {
