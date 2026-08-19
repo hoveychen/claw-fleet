@@ -171,6 +171,30 @@ pub struct DshClient {
     http: reqwest::blocking::Client,
 }
 
+/// Run `f` on a fresh plain thread and hand its result back; `Err` when the
+/// thread itself panicked.
+///
+/// reqwest's blocking carrier refuses to be built or driven from inside a
+/// tokio runtime (`wait::enter` → "Cannot drop a runtime in a context where
+/// blocking is not allowed") — and tauri `(async)` commands run their sync
+/// bodies exactly there, so every UI-triggered dsh RPC used to panic. Worse,
+/// the task harness swallows that panic and the invoke promise never settles,
+/// which the UI shows as an eternal 「加载中…」. The hop is unconditional: a
+/// thread spawn is microseconds against an HTTP round-trip, and a context
+/// check would just be one more branch to get wrong.
+///
+/// `pub(crate)`: every `reqwest::blocking` use reachable from a tauri
+/// `(async)` command must go through this — [`crate::dsh_cost`]'s pricing
+/// fetch is the other current caller.
+pub(crate) fn off_runtime<T: Send>(f: impl FnOnce() -> T + Send) -> Result<T, String> {
+    std::thread::scope(|scope| {
+        scope
+            .spawn(f)
+            .join()
+            .map_err(|_| "blocking-http helper thread panicked".to_string())
+    })
+}
+
 impl DshClient {
     /// Build a client for `127.0.0.1:<port>`.
     ///
@@ -178,10 +202,13 @@ impl DshClient {
     /// (or an explicitly declared `--trusted-host`), and Fleet always runs the
     /// server it talks to on the same machine.
     pub fn new(port: u16) -> Result<Self, DshRpcError> {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(DEFAULT_TIMEOUT)
-            .build()
-            .map_err(|e| DshRpcError::Transport(format!("http client: {e}")))?;
+        let http = off_runtime(|| {
+            reqwest::blocking::Client::builder()
+                .timeout(DEFAULT_TIMEOUT)
+                .build()
+                .map_err(|e| DshRpcError::Transport(format!("http client: {e}")))
+        })
+        .map_err(DshRpcError::Transport)??;
         Ok(Self {
             base: format!("http://127.0.0.1:{port}/api"),
             http,
@@ -198,18 +225,22 @@ impl DshClient {
         let rpc_id = uuid::Uuid::new_v4().to_string();
         let body = build_request(&rpc_id, method, &payload);
 
-        let resp = self
-            .http
-            .post(format!("{}/{}", self.base, method))
-            .header("content-type", "application/json")
-            .body(body)
-            .send()
-            .map_err(|e| DshRpcError::Transport(format!("{method}: {e}")))?;
+        let (status, text) = off_runtime(|| {
+            let resp = self
+                .http
+                .post(format!("{}/{}", self.base, method))
+                .header("content-type", "application/json")
+                .body(body)
+                .send()
+                .map_err(|e| DshRpcError::Transport(format!("{method}: {e}")))?;
 
-        let status = resp.status();
-        let text = resp
-            .text()
-            .map_err(|e| DshRpcError::Transport(format!("{method} body: {e}")))?;
+            let status = resp.status();
+            let text = resp
+                .text()
+                .map_err(|e| DshRpcError::Transport(format!("{method} body: {e}")))?;
+            Ok((status, text))
+        })
+        .map_err(DshRpcError::Transport)??;
 
         if !status.is_success() {
             return Err(DshRpcError::Transport(format!(
@@ -259,18 +290,22 @@ impl DshClient {
     fn post_response(&self, rpc_id: &str, result: Value) -> Result<(), DshRpcError> {
         let body = build_client_response(rpc_id, result);
 
-        let resp = self
-            .http
-            .post(format!("{}/respond", self.base))
-            .header("content-type", "application/json")
-            .body(body)
-            .send()
-            .map_err(|e| DshRpcError::Transport(format!("respond: {e}")))?;
+        let (status, text) = off_runtime(|| {
+            let resp = self
+                .http
+                .post(format!("{}/respond", self.base))
+                .header("content-type", "application/json")
+                .body(body)
+                .send()
+                .map_err(|e| DshRpcError::Transport(format!("respond: {e}")))?;
 
-        let status = resp.status();
-        let text = resp
-            .text()
-            .map_err(|e| DshRpcError::Transport(format!("respond body: {e}")))?;
+            let status = resp.status();
+            let text = resp
+                .text()
+                .map_err(|e| DshRpcError::Transport(format!("respond body: {e}")))?;
+            Ok((status, text))
+        })
+        .map_err(DshRpcError::Transport)??;
 
         if !status.is_success() {
             return Err(DshRpcError::Transport(format!("respond: HTTP {status}")));
@@ -283,6 +318,35 @@ impl DshClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tauri `(async)` commands run their sync bodies on tokio runtime workers,
+    /// and that is where every UI-triggered dsh RPC executes. reqwest's blocking
+    /// carrier refuses that context (`wait::enter` → "Cannot drop a runtime…"),
+    /// and the panic is swallowed by the task harness, so the invoke promise
+    /// hangs forever — the 「永久加载中」 bug. Construct + call must therefore
+    /// survive inside a tokio worker: a clean transport Err (nothing listens on
+    /// the probed port), never a panic.
+    #[test]
+    fn client_survives_tokio_worker_context() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let joined = rt.block_on(async {
+            tokio::spawn(async {
+                let client = DshClient::new(1).map_err(|e| e.to_string())?;
+                client
+                    .call("session.list", json!({}))
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            })
+            .await
+        });
+        let inner = joined.expect("dsh client must not panic inside a tokio worker");
+        // Port 1 has no listener: the healthy outcome is a transport error.
+        assert!(inner.is_err());
+    }
 
     #[test]
     fn build_request_carries_method_and_id() {

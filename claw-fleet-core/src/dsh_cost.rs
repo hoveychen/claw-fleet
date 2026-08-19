@@ -478,22 +478,27 @@ fn parse_total_cost(body: &str) -> Result<f64, String> {
 }
 
 fn fetch_generation_cost(key: &str, id: &str) -> Result<f64, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("http client: {e}"))?;
-    let resp = client
-        .get(GENERATION_ENDPOINT)
-        .query(&[("id", id)])
-        .bearer_auth(key)
-        .send()
-        .map_err(|e| format!("{id}: {e}"))?;
-    let status = resp.status();
-    let body = resp.text().map_err(|e| format!("{id} body: {e}"))?;
-    if !status.is_success() {
-        return Err(format!("{id}: HTTP {status}"));
-    }
-    parse_total_cost(&body)
+    // Off the async runtime for the same reason as `DshClient`: this runs
+    // inside `get_dsh_session_cost`, a tauri `(async)` command on a tokio
+    // worker, where reqwest::blocking panics and the panic is swallowed.
+    crate::dsh_client::off_runtime(|| {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|e| format!("http client: {e}"))?;
+        let resp = client
+            .get(GENERATION_ENDPOINT)
+            .query(&[("id", id)])
+            .bearer_auth(key)
+            .send()
+            .map_err(|e| format!("{id}: {e}"))?;
+        let status = resp.status();
+        let body = resp.text().map_err(|e| format!("{id} body: {e}"))?;
+        if !status.is_success() {
+            return Err(format!("{id}: HTTP {status}"));
+        }
+        parse_total_cost(&body)
+    })?
 }
 
 // ── Public entry point ───────────────────────────────────────────────────────
