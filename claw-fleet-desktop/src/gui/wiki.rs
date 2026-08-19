@@ -51,6 +51,25 @@ pub(crate) fn export_wiki_doc(
     std::fs::write(&dest, export.bytes).map_err(|e| format!("write '{dest}': {e}"))
 }
 
+/// Publish markdown the frontend already holds — the full-screen reader's
+/// "发布到 wiki". `mode` `"append"` grows the doc at `slug` into a running note
+/// instead of superseding its body; an empty `title` is derived from the text.
+#[tauri::command(async)]
+pub(crate) fn publish_wiki_text(
+    slug: String,
+    title: String,
+    text: String,
+    workspace_path: String,
+    mode: claw_fleet_core::wiki::TextPublishMode,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::wiki::WikiDoc, String> {
+    state
+        .backend
+        .write()
+        .unwrap()
+        .publish_wiki_text(&slug, &title, &text, &workspace_path, mode)
+}
+
 #[tauri::command(async)]
 pub(crate) fn search_wiki_docs(
     query: String,

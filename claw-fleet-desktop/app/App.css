@@ -477,3 +477,45 @@ html.os-windows::-webkit-scrollbar-thumb:hover,
   background-color: #facc15;
   color: #000;
 }
+
+/* ── Print: only the reader goes on the page ─────────────────────────────────
+   `print_webview` prints the whole webview, so an unconstrained print would ink
+   the sidebar, the transcript behind the overlay, and the dimming layer. The
+   reader portals itself to <body> and marks its root `data-reader-overlay`, so
+   the app is every other body child — hide those and un-fix the overlay so its
+   page can flow across as many sheets as it needs.
+
+   Hardcoded white, not a token: paper has no theme. The reader's own module
+   stylesheet carries the matching text rules. */
+@media print {
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /* The macOS solid-body rule above is `[data-platform="macos"] …` + !important,
+     which outranks a bare `html, body` even with !important — measured: the
+     printed page kept the dark theme's rgb(8, 9, 10). Re-state the override at
+     matching specificity, or the whole sheet inks a dark canvas. */
+  html[data-platform],
+  html[data-platform] body,
+  html[data-platform] #root {
+    background: #fff !important;
+  }
+
+  body > *:not([data-reader-overlay]) {
+    display: none !important;
+  }
+
+  [data-reader-overlay] {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    display: block !important;
+    padding: 0 !important;
+    background: none !important;
+    backdrop-filter: none !important;
+  }
+}

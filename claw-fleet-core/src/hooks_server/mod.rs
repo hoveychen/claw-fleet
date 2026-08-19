@@ -906,6 +906,11 @@ fn handle_request(
 
             crate::routes::WIKI_DELETE_FOLDER if request.method() == &tiny_http::Method::Post => route_wiki_delete_folder(ctx, request, &query, json_header, path),
 
+            // Publish from text rather than a path: the desktop reader has the
+            // markdown in hand, and on a remote workspace there is no local file
+            // for the server to read anyway.
+            crate::routes::WIKI_PUBLISH_TEXT if request.method() == &tiny_http::Method::Post => route_wiki_publish_text(ctx, request, &query, json_header, path),
+
             crate::routes::TASK_PLANS => route_task_plans(ctx, request, &query, json_header, path),
 
             crate::routes::SKILLS => route_skills(ctx, request, &query, json_header, path),
