@@ -203,18 +203,36 @@
     text-decoration: underline;
   }
 
-  /* Diagrams keep their dark canvas instead of being forced onto white.
-     Measured: a mermaid sequence diagram printed with near-invisible arrow
-     labels, because SVG paints text with `fill`, which the `color: #000` rule
-     above cannot reach — the labels stayed at the dark theme's light grey on
-     white paper. Repainting every `fill` would destroy whatever the diagram
-     encodes in colour, so the figure travels as its own dark plate, which keeps
-     its built-in contrast. `print-color-adjust: exact` is required: engines drop
-     background fills when printing by default, which is what left the labels
-     stranded on white in the first place. */
+  /* Diagrams. What a figure needs on paper depends on which palette mermaid
+     rendered it with, and MermaidBlock picks that from `[data-theme]`:
+     light → mermaid's "default" (pale nodes, dark labels), otherwise → its
+     "dark" theme (dark nodes, pale labels).
+
+     So the canvas has to follow the theme. An earlier revision gave every
+     diagram a dark plate unconditionally, having only checked the dark theme;
+     on a light-theme desktop that painted a black slab behind an already-pale
+     diagram. `color: #000` cannot fix either case — SVG paints text with
+     `fill`, which that rule never reaches. */
   .paper .body :global(svg) {
+    /* Dark theme: the diagram's own palette is pale-on-dark, so it travels as
+       its own plate. print-color-adjust is required — engines drop background
+       fills by default, which would strand pale labels on white.
+
+       A diagram taller than the sheet also gets sliced mid-figure, which is how
+       the first version printed: a flowchart ran off the bottom of page one and
+       resumed headless on page two. Bound it to the printable height and let the
+       viewBox scale it down instead. */
     background: #16181a !important;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
+    max-width: 100% !important;
+    max-height: 225mm !important;
+    height: auto !important;
+    break-inside: avoid;
+  }
+
+  html[data-theme="light"] .paper .body :global(svg) {
+    /* Light theme: the diagram is already dark-on-pale. Paper is its canvas. */
+    background: transparent !important;
   }
 }

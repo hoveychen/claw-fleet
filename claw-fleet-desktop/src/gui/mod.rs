@@ -510,6 +510,69 @@ fn close_preview_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Page margin AppKit gets for the reader's print job, in points (72pt = 1in).
+/// 28pt ≈ 10mm. Only a floor: the print panel still lets the user change it.
+#[cfg(target_os = "macos")]
+const PRINT_MARGIN_PT: f64 = 28.0;
+
+/// Run the print operation ourselves so the sheet gets real page margins.
+///
+/// `WebviewWindow::print()` forwards to wry's `print_with_options(&default())`,
+/// and `PrintMargin` derives `Default` over four `f32`s — so wry explicitly
+/// stamps **zero** margins onto `NSPrintInfo` before creating the operation.
+/// That is why the first version printed with prose running into both paper
+/// edges. Everything else here mirrors wry's implementation (wry 0.55.1,
+/// `src/wkwebview/mod.rs::print_with_options`).
+///
+/// Unlike wry we copy `sharedPrintInfo` instead of mutating it: it is an
+/// app-wide object, and editing it in place would leave our margins on every
+/// later print job the app runs.
+#[cfg(target_os = "macos")]
+unsafe fn print_with_margins(
+    wk_webview: *mut std::ffi::c_void,
+    ns_window: *mut std::ffi::c_void,
+) -> Result<(), String> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send, sel};
+
+    if wk_webview.is_null() || ns_window.is_null() {
+        return Err("no native webview/window handle".into());
+    }
+    let webview: *mut AnyObject = wk_webview.cast();
+
+    // printOperationWithPrintInfo: is macOS 11+; without it there is nothing to
+    // fall back to on this path, so let the caller use the plain wry route.
+    let can_print: bool = msg_send![webview, respondsToSelector: sel!(printOperationWithPrintInfo:)];
+    if !can_print {
+        return Err("this WKWebView cannot print".into());
+    }
+
+    let shared: *mut AnyObject = msg_send![class!(NSPrintInfo), sharedPrintInfo];
+    let info: *mut AnyObject = msg_send![shared, copy];
+    let _: () = msg_send![info, setTopMargin: PRINT_MARGIN_PT];
+    let _: () = msg_send![info, setRightMargin: PRINT_MARGIN_PT];
+    let _: () = msg_send![info, setBottomMargin: PRINT_MARGIN_PT];
+    let _: () = msg_send![info, setLeftMargin: PRINT_MARGIN_PT];
+
+    let op: *mut AnyObject = msg_send![webview, printOperationWithPrintInfo: info];
+    if op.is_null() {
+        return Err("could not create the print operation".into());
+    }
+    // Lets the modal detach from this thread so the panel is not blocking.
+    let _: () = msg_send![op, setCanSpawnSeparateThread: true];
+
+    let win: *mut AnyObject = ns_window.cast();
+    let nil: *mut AnyObject = std::ptr::null_mut();
+    let _: () = msg_send![
+        op,
+        runOperationModalForWindow: win,
+        delegate: nil,
+        didRunSelector: std::ptr::null_mut::<std::ffi::c_void>(),
+        contextInfo: std::ptr::null_mut::<std::ffi::c_void>(),
+    ];
+    Ok(())
+}
+
 /// Hand the calling webview to the OS print pipeline — how the reader's
 /// "导出 PDF" works: macOS opens the system print panel (whose `PDF ▾ → Save as
 /// PDF` is the actual export), Windows opens the WebView2 print dialog.
@@ -518,12 +581,44 @@ fn close_preview_window(app: tauri::AppHandle) -> Result<(), String> {
 /// WKWebView, so a frontend-only implementation would silently do nothing on
 /// macOS; wry only reaches `NSPrintOperation` from the Rust side. Sync on
 /// purpose — Tauri runs sync commands on the main thread, which is where
-/// AppKit's print operation must be created.
+/// AppKit's print operation must be created. (Measured with an isolated probe:
+/// called off the main thread, print() returns Ok and no panel ever appears.)
+///
+/// On macOS the operation is built by hand to get non-zero page margins — see
+/// [`print_with_margins`]. Everywhere else `WebviewWindow::print()` is right:
+/// on Windows it injects `window.print()`, and the WebView2 dialog brings its
+/// own margin control.
 ///
 /// What lands on the page is whatever the print stylesheet leaves visible, so
 /// the reader's `@media print` rules decide the artifact, not this command.
 #[tauri::command]
 fn print_webview(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // Carried as an address because `with_webview` wants a Send closure and
+        // a raw pointer is not: it is re-formed inside, on the main thread.
+        let ns_window = window.ns_window().map_err(|e| e.to_string())? as usize;
+        // with_webview hands over the raw WKWebView; the closure runs on the
+        // main thread, which is also where NSPrintOperation must be created.
+        let outcome = std::sync::Arc::new(std::sync::Mutex::new(None::<Result<(), String>>));
+        let sink = outcome.clone();
+        window
+            .with_webview(move |webview| {
+                let r = unsafe {
+                    print_with_margins(webview.inner(), ns_window as *mut std::ffi::c_void)
+                };
+                *sink.lock().unwrap() = Some(r);
+            })
+            .map_err(|e| e.to_string())?;
+        // `with_webview` dispatches to the main thread; when the command is
+        // already on it (the normal case for a sync command) the closure has run
+        // by now. If it hasn't, fall through to the plain route rather than
+        // blocking the main thread waiting on ourselves.
+        let done = outcome.lock().unwrap().take();
+        if let Some(r) = done {
+            return r;
+        }
+    }
     window.print().map_err(|e| e.to_string())
 }
 
