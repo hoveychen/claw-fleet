@@ -931,6 +931,22 @@ export function SessionDetail({
                   {formatModel(liveSession.model)}
                 </span>
               )}
+              {/* Reasoning effort, when the session names a specific level —
+                  same field and tooltip the cards use, with the same lightbulb.
+                  `thinkingLevel` doubles as Claude's "this transcript has
+                  thinking blocks" marker, which names no level and would be a
+                  chip that says nothing, so that one value is filtered out. */}
+              {liveSession.thinkingLevel && liveSession.thinkingLevel !== "thinking" && (
+                <span
+                  className={styles.meta_chip}
+                  title={t("card.tip_thinking", { level: liveSession.thinkingLevel })}
+                >
+                  <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
+                    <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
+                  </svg>
+                  {liveSession.thinkingLevel}
+                </span>
+              )}
               {liveSession.contextPercent != null && (
                 <span
                   className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
