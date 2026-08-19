@@ -4,6 +4,15 @@
     "type": "entry",
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
+    // Push Kit 的应用标识。pushService.getToken() 从这里读,缺了直接取不到 token。
+    // 值取 AGC「常规 → 应用 → Client ID」;官方明确说这里**不能**用 $string: 之类
+    // 的资源引用,只能写字面量(引用形式解析不了)。
+    "metadata": [
+      {
+        "name": "client_id",
+        "value": "6917614058134462223"
+      }
+    ],
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
@@ -19,6 +28,41 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
+    "extensionAbilities": [
+      {
+        // 系统分享的接收端。只在 UIAbility 上声明 sendData skill 不够 —— 真机
+        // 上 utd 已登记进 bm dump,分享面板里依然没有 Fleet;面板要求接收方
+        // 提供一个 share 类型的 UIExtension(SDK 的 ShareExtensionAbility)。
+        "name": "ShareExtAbility",
+        "srcEntry": "./ets/shareability/ShareExtAbility.ets",
+        "icon": "$media:icon",
+        "label": "$string:EntryAbility_label",
+        "type": "share",
+        "exported": true,
+        "skills": [
+          {
+            "actions": ["ohos.want.action.sendData"],
+            // utd 而非 mime type;每条都必须带 scheme,否则构建期 schema 就挂。
+            //
+            // 要**穷举**具体类型:只写笼统的 general.image 时,真机上分享一张图
+            // 依然看不到 Fleet。系统按精确 utd 匹配,所以 jpeg/png/gif 各列一条,
+            // 笼统类型留着兜底。maxFileSupported 是 SkillUri 的正式字段
+            // (SDK bundleManager/Skill.d.ts),不给的话等于没声明能收几个。
+            "uris": [
+              { "scheme": "file", "utd": "general.text", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.plain-text", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.image", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.jpeg", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.png", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.gif", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.media", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.file", "maxFileSupported": 10 },
+              { "scheme": "file", "utd": "general.object", "maxFileSupported": 10 }
+            ]
+          }
+        ]
+      }
+    ],
     "abilities": [
       {
         "name": "EntryAbility",
@@ -26,7 +70,7 @@
         "description": "$string:EntryAbility_desc",
         "icon": "$media:icon",
         "label": "$string:EntryAbility_label",
-        "startWindowIcon": "$media:startIcon",
+        "startWindowIcon": "$media:icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
         "skills": [

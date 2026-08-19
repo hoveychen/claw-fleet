@@ -1,7 +1,7 @@
 import { AbilityConstant, ConfigurationConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
-import { initTheme, setSystemDark } from '../common/Theme';
+import { initTheme, setSystemDark, themeTokens } from '../common/Theme';
 import { initSafeArea } from '../common/SafeArea';
 import { initWakeLock } from '../common/WakeLock';
 
@@ -22,7 +22,39 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('fgNonce', Date.now());
   }
 
-  onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+  /// 分享内容随 startAbility 的 want 参数一起过来（见 SharePanel）。
+  ///
+  /// 早先走 preferences 跨进程交接，真机日志里主应用读到的一直是 (empty)：
+  /// UIExtension 与 UIAbility 是两个进程，preferences 未必落在同一沙箱路径，
+  /// 而且还要赌「extension 写完」早于「主应用读取」。want 参数跟着拉起动作
+  /// 一起过去，天然有序，也不依赖沙箱共享。
+  private takeSharedFromWant(want: Want): void {
+    const params = want.parameters as Record<string, Object> | undefined;
+    const text = params?.['fleet.share.text'];
+    const rawFiles = params?.['fleet.share.files'];
+    const textStr: string = typeof text === 'string' ? text : '';
+    const filesStr: string = typeof rawFiles === 'string' ? rawFiles : '';
+    hilog.info(DOMAIN, TAG, 'share-diag want text=%{public}d files=%{public}d',
+      textStr.length, filesStr.length);
+    if (textStr.length === 0 && filesStr.length === 0) {
+      return;
+    }
+    // 文件名列表原样传给 WebShell —— 它会拼成 https://fleet.local/__shared/<name>
+    // 交给 web，由拦截器从沙箱把字节喂回去，最终走 web 既有的附件上传链路。
+    AppStorage.setOrCreate('sharedFiles', filesStr);
+    AppStorage.setOrCreate('sharedText', textStr);
+    const n: number = AppStorage.get<number>('sharedNonce') ?? 0;
+    AppStorage.setOrCreate('sharedNonce', n + 1);
+    hilog.info(DOMAIN, TAG, 'share-diag published nonce=%{public}d', n + 1);
+  }
+
+  /// app 已在后台时，分享走这条路而不是 onCreate。
+  onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    this.takeSharedFromWant(want);
+  }
+
+  onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    this.takeSharedFromWant(want);
     const cfg = this.context.config;
     // 语言与主题现在都归 web 层：mobile-web 自己读 navigator.language 和
     // prefers-color-scheme。这里只保留 initTheme —— 它喂的是 AppStorage 里的
@@ -35,6 +67,7 @@ export default class EntryAbility extends UIAbility {
   onConfigurationUpdate(newConfig: Configuration): void {
     // Follow OS light/dark flips while the app is running.
     setSystemDark(isDark(newConfig.colorMode));
+    this.applyWindowBackground();
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -51,5 +84,18 @@ export default class EntryAbility extends UIAbility {
     // Restore the persisted screen-keep-awake flag onto the fresh window (native
     // mirror of the web client's initWakeLock on startup).
     initWakeLock(this.context);
+    this.applyWindowBackground();
+  }
+
+  /// 窗口底色。安全区那一条(手势条所在的位置)由**窗口**绘制，不是网页——
+  /// ArkUI 组件默认避开安全区，WebView 的底边停在手势条上沿，那条缝露出的
+  /// 是窗口默认底色(白)。给 Web 组件设背景、或在 CSS 里改，都够不着它；
+  /// 唯一管用的是 setWindowBackgroundColor。
+  private applyWindowBackground(): void {
+    window.getLastWindow(this.context).then((win: window.Window) => {
+      win.setWindowBackgroundColor(themeTokens(AppStorage.get<string>('resolvedTheme') ?? 'dark').bg);
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN, TAG, 'set window bg failed: %{public}s', e.message);
+    });
   }
 }

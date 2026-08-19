@@ -342,6 +342,9 @@ interface NewSessionProps {
   /** 别的 app 分享进来的文件（见 shareTarget.ts）。附件状态住在本组件里，
    *  所以 App 只把 File 递过来，由这里在 client 就绪后走正常上传路径。 */
   initialFiles?: File[];
+  /** relay 是否已连上。`client` 非空只说明对象建好了，连接可能还在握手——
+   *  分享是冷启动带进来的，那一刻上传必然撞上「尚未连接 relay」。 */
+  relayReady?: boolean;
   onClose: () => void;
 }
 
@@ -445,7 +448,7 @@ const NEW_SESSION_DEFAULT = {
   permissionMode: "acceptEdits",
 };
 
-export function NewSessionSheet({ sessions, client, initialFiles, onClose }: NewSessionProps) {
+export function NewSessionSheet({ sessions, client, initialFiles, relayReady, onClose }: NewSessionProps) {
   // 纯聊天 workspace：不绑定项目，没有「最近会话」可被发现，必须显式钉在选项首位。
   const chatPath = useChatWorkspace(client);
 
@@ -462,15 +465,18 @@ export function NewSessionSheet({ sessions, client, initialFiles, onClose }: New
     NEW_SESSION_ATTACH_KEY,
   );
 
-  // 分享进来的文件走一次正常上传。要等 client 就绪——addFiles 在 client 为空时
-  // 直接返回，那样文件就悄无声息地没了。ref 保证只上传一次，避免 client 重连
-  // 触发的重跑把同一批文件传第二遍。
+  // 分享进来的文件走一次正常上传。
+  //
+  // 必须等 `relayReady` 而不只是 `client` 非空：client 对象在连接建立前就存在，
+  // 那时 request 会直接抛「尚未连接 relay」。分享几乎总是冷启动带进来的，正好
+  // 撞上握手那一小段——真机日志里就是 `upload FAILED: 尚未连接 relay`，一次
+  // 失败后文件就再也没人管了。ref 保证连上后只传一次，不因重连重复上传。
   const sharedUploadedRef = useRef(false);
   useEffect(() => {
-    if (sharedUploadedRef.current || !client || !initialFiles?.length) return;
+    if (sharedUploadedRef.current || !client || !relayReady || !initialFiles?.length) return;
     sharedUploadedRef.current = true;
     void addFiles(initialFiles);
-  }, [client, initialFiles, addFiles]);
+  }, [client, relayReady, initialFiles, addFiles]);
 
   const { customWorkspace, prompt, model, effort, permissionMode } = draft;
   // Older persisted drafts predate the tool field → default to Claude.

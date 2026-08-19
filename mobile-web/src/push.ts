@@ -6,6 +6,7 @@
 
 import { RelayClient, relayHttpBase } from "./relay";
 import { classifyPush, type PushState } from "./push-classify";
+import { hasNativePushToken, nativePushToken } from "./nativePush";
 
 export type { PushState } from "./push-classify";
 
@@ -23,6 +24,7 @@ export function pushState(): PushState {
     permission: typeof Notification !== "undefined" ? Notification.permission : "denied",
     ua: navigator.userAgent,
     standalone: isStandalone(),
+    hasNativePush: hasNativePushToken(),
   });
 }
 
@@ -53,6 +55,14 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
 
 /** Subscribe and register on the relay. Returns the resulting PushState. */
 export async function enablePush(client: RelayClient): Promise<PushState> {
+  // 原生壳：token 已由壳交来（系统通知授权也在壳里问过了），这里只剩注册。
+  // 不走 Notification.requestPermission —— WebView 里那个 API 要么不存在、要么
+  // 恒返回 denied，调了只会把已经能用的推送判死。
+  if (hasNativePushToken()) {
+    client.pushSubscribe({ platform: "harmony", token: nativePushToken() });
+    setPushOptedOut(false);
+    return "granted";
+  }
   const state = pushState();
   if (
     state === "unsupported" ||
@@ -86,6 +96,10 @@ export async function enablePush(client: RelayClient): Promise<PushState> {
 /** Re-register an existing subscription after a reconnect (no prompts). */
 export async function resyncPush(client: RelayClient): Promise<void> {
   if (pushState() !== "granted" || isPushOptedOut()) return;
+  if (hasNativePushToken()) {
+    client.pushSubscribe({ platform: "harmony", token: nativePushToken() });
+    return;
+  }
   try {
     const registration = await navigator.serviceWorker.ready;
     const subscription = await registration.pushManager.getSubscription();
@@ -101,6 +115,11 @@ export async function resyncPush(client: RelayClient): Promise<void> {
  *  relay keys on is still available. Best-effort — always records the opt-out. */
 export async function disablePush(client: RelayClient): Promise<void> {
   setPushOptedOut(true);
+  if (hasNativePushToken()) {
+    // 原生 token 由系统签发，web 侧撤不掉，只能让 relay 别再往它发。
+    client.pushUnsubscribe({ platform: "harmony", token: nativePushToken() });
+    return;
+  }
   try {
     const registration = await navigator.serviceWorker.ready;
     const subscription = await registration.pushManager.getSubscription();
