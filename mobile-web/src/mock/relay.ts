@@ -13,6 +13,8 @@
 import { RelayClient, type RelayHandlers } from "../relay";
 import type { DecisionKind } from "../types";
 import {
+  MOCK_ATTACHMENT_BYTES,
+  MOCK_ATTACHMENT_STORE_DIR,
   MOCK_CHAT_WORKSPACE,
   mockBrowseDir,
   MOCK_DECISION_HISTORY,
@@ -144,8 +146,34 @@ export class MockRelayClient extends RelayClient {
         return MOCK_WIKI_DOCS;
       case "account_usage":
         return { claude: null, claudeError: null, sources: [] };
+      // Everything under the mock store dir is "still there". Returning a blank
+      // list (the old fixture) made the composer's restore-validation prune
+      // every chip the moment it was added, so attachments never rendered here.
       case "attachments_exist":
-        return { existing: [] };
+        return {
+          existing: ((params?.paths as string[]) ?? []).filter((p) =>
+            p.startsWith(MOCK_ATTACHMENT_STORE_DIR),
+          ),
+        };
+      // Land the upload in the store the way the desktop does, so the composer
+      // chip that follows is a real store path and resolves to a thumbnail.
+      case "upload_attachment":
+        return {
+          path: `${MOCK_ATTACHMENT_STORE_DIR}/${String(params?.name ?? "attachment.bin")}`,
+        };
+      // Attachment bytes, with a delay so the tile's loading state is real —
+      // the desktop has to read the file and re-encode a thumbnail.
+      case "user_attachment":
+        return new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                mime: params?.full ? "image/png" : "image/jpeg",
+                base64: MOCK_ATTACHMENT_BYTES,
+              }),
+            180,
+          ),
+        );
       case "browse_dir":
         return mockBrowseDir(params?.path as string | undefined);
       // Write methods: acknowledge without doing anything. The UI's optimistic

@@ -236,6 +236,7 @@ function AttachmentRow({
         client={client}
         previews={previews}
         onRemove={onRemove}
+        compact
       />
       <button
         className={styles.attachAdd}

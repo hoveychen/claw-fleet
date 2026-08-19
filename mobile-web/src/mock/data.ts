@@ -24,6 +24,17 @@ const NOW = Date.now();
 /** 240×150 gradient PNG standing in for a relay-side thumbnail (the real
  *  relay re-encodes screenshots to ~256px JPEG; any data URI works here). */
 const MOCK_THUMB = "iVBORw0KGgoAAAANSUhEUgAAAPAAAACWCAIAAABvmpKCAAAC8klEQVR42u3ChZYQBABE0fkmE1vAbkWM7e7u7t7Z7k4DMLFbFPW3/I85756rBwpMxtSDBSZj6qFCkzH1cKHJmHqkyGRMPVpkMqauFJuMqceKTcbU4yUmY+qJEpMx9WSpyZh6qtRkTD1dZjKmnikzGVPPlpuMqavlJmPqWoXJmLpeYTKmnqs0GVPPV5qMqReqTMbUi1UmY+qlapMx9XK1yZh6pcZkTL1aYzKmXqs1GVOv15qMqTfqTMbUm3UmY+qtepMx9Xa9yZh6p8FkTN1oMBlT7zaajKmbjSZj6r0mkzH1fpPJmPqg2WRMfdhsMqYKWkzGVGGLyZgqajUZU8WtJmOqpM1kTJW2mYypsnaTMVXebjKmKjpMxlRlh8mYquo0GVPVnSZjqqbLZEzVdpmMqbpukzFV320yphp6TMZUY4/JmGrqNRlTzb0mY6qlz2RMtfaZjKm2fpMx1d5vMqY6BkzGVOeAyZjqGjQZU92DJmOqZ8hkTPUOmYypvmGTMdU/bDKmBkZMxtTgiMmYGho1GVPDoyZjamTMZEyNjpmMqbFxkzE1Pm4ypiYmTMbU5ITJmJqaNBlT05MmY2pmymRMzU6ZjKm5aZMxNT9tMqYWZkzG1OKMyZjyrMmYWpo1GVPLcyZjamXOZEytzpuMqbV5kzG1vmAypjYWTMbU5qLJmNpaNBlT2zYZUzs2GVO7SyZjam/JZEztL5uMqYNlkzF1uGIypo5WTMbU8arJmDpZNRlTp2smY+pszWRMna+bjKmLdZMxdblhMqY+2jAZUx9vmoypTzZNxtSnWyZj6taWyZi6vW0ypu5sm4ypz3ZMxtTnOyZj6otdkzH15a7JmPpqz2RMfb1nMqbu7puMqW/2TcbUtwcmY+q7A5Mx9f2hyZj64dBkTP14ZDKmfjoyGVM/H5uMqV+OTcbUrycmY+q3E5Mx9fupyZj649RkTP15ZjKm7p2ZjKm/zk3G1N/nJmPq/oXJmPrnwmRM/XtpMqb+uzQZ839CdhtKFcdvEgAAAABJRU5ErkJggg==";
+/** A path in the desktop's user-attachment store, the shape the composer writes
+ *  into a `Context files:` block. `user_attachment` serves its bytes below. */
+export const MOCK_ATTACHMENT_STORE_DIR =
+  "/Users/demo/.fleet/user-attachments/4b7c9e1a2d3f5068";
+export const MOCK_ATTACHMENT_IMAGE_PATH = `${MOCK_ATTACHMENT_STORE_DIR}/design.png`;
+
+/** Bytes the mock `user_attachment` hands back — reusing MOCK_THUMB keeps the
+ *  fixture one image, and the `full` leg differs only in that it is not the
+ *  server-squeezed JPEG (which is the distinction the UI acts on). */
+export const MOCK_ATTACHMENT_BYTES = MOCK_THUMB;
+
 const MIN = 60_000;
 const HOUR = 3_600_000;
 
@@ -373,7 +384,10 @@ export const MOCK_DECISION_HISTORY: DecisionHistoryRecord[] = [
       },
     ],
     answers: {
-      "Backfill is validated (`2.1M` rows, **0 drift**). Pick the cutover window:": "Tonight 02:00 UTC",
+      // Answered with a screenshot attached — `@<path>` mention suffixes are how
+      // fleet__ask carries attachments, and the history view peels them back off
+      // into thumbnails.
+      "Backfill is validated (`2.1M` rows, **0 drift**). Pick the cutover window:": `Tonight 02:00 UTC @${MOCK_ATTACHMENT_IMAGE_PATH}`,
       rollout_note: "状态页挂公告，02:00 UTC 起 5 分钟只读窗口。",
     },
   },
@@ -429,6 +443,23 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           // A pasted screenshot as the relay ships it: thumbnail in the standard
           // image-block shape, marked _thumb.
           { type: "image", _thumb: true, source: { type: "base64", media_type: "image/png", data: MOCK_THUMB } },
+        ],
+      },
+    },
+    {
+      // A turn carrying *picked* files: the composer stapled them on as a
+      // `Context files:` block, which is exactly what the transcript freezes.
+      // The image resolves to a store thumbnail; the pdf stays a filename chip.
+      type: "user",
+      uuid: "am1b",
+      timestamp: new Date(NOW - 29 * MIN - 30_000).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `这是设计稿和需求文档，按这个改。\n\nContext files:\n- ${MOCK_ATTACHMENT_IMAGE_PATH}\n- /Users/demo/.fleet/user-attachments/9f3a1c2b7d4e5f60/spec.pdf`,
+          },
         ],
       },
     },
