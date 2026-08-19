@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { fetchDecisionAsset } from "../decisionAsset";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
@@ -428,7 +428,8 @@ function GuardAnalysis({
       ) : (
         <div className={styles.markdown}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={mdRemarkPlugins}
+            rehypePlugins={mdRehypePlugins}
             components={mermaidMarkdownComponents}
           >
             {state}
@@ -636,7 +637,8 @@ function PlanCard({
       ) : (
         <div className={styles.markdown}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={mdRemarkPlugins}
+            rehypePlugins={mdRehypePlugins}
             components={mermaidMarkdownComponents}
           >
             {content}
@@ -888,7 +890,8 @@ function PrecedingNarration({
           {chunks.map((c) => (
             <div key={c.key} className={styles.markdown}>
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={mdRemarkPlugins}
+            rehypePlugins={mdRehypePlugins}
                 components={mermaidMarkdownComponents}
               >
                 {c.text}
@@ -1104,7 +1107,8 @@ function QuestionsCard({
           {q.header && <div className={styles.questionHeader}>{q.header}</div>}
           <div className={styles.markdown}>
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={mdRemarkPlugins}
+            rehypePlugins={mdRehypePlugins}
               components={mermaidMarkdownComponents}
             >
               {stripTtsDivider(q.question)}
@@ -1175,7 +1179,8 @@ function QuestionsCard({
                 {previewShown && o.preview && (
                   <div className={styles.optionPreview}>
                     <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
+                      remarkPlugins={mdRemarkPlugins}
+            rehypePlugins={mdRehypePlugins}
                       components={mermaidMarkdownComponents}
                     >
                       {o.preview}
