@@ -11,6 +11,8 @@ import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useSourcesConfig } from "../useSourcesConfig";
+import { toolChoicesForSources, toolForAgentSource } from "../agentSource";
+import { dshEffortsFor, dshModelGroups, useDshModels } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
@@ -56,12 +58,6 @@ const CODEX_EFFORT_CHOICES: Array<[string, string]> = [
   ["low", "low"],
   ["medium", "medium"],
   ["high", "high"],
-];
-
-// The agent tools Fleet can launch a new session with (mirrors AGENT_TOOL_CHOICES).
-const AGENT_TOOL_CHOICES: Array<[string, string]> = [
-  ["claude", "Claude"],
-  ["codex", "Codex"],
 ];
 
 const PERMISSION_LABEL: Record<string, string> = {
@@ -267,7 +263,7 @@ function AttachmentRow({
 }
 
 function OptionSelects({
-  isCodex = false,
+  tool = "claude",
   client,
   model,
   effort,
@@ -275,10 +271,11 @@ function OptionSelects({
   permissionDefaultLabel,
   onChange,
 }: {
-  /** Codex has disjoint model/effort ids and no `--permission-mode` analogue,
-   *  so the permission select is hidden and the codex choice lists are used. */
-  isCodex?: boolean;
-  /** 用来向主机要 codex profile（第三方模型的唯一来源）。null 时只显示内置模型。 */
+  /** 三个源的 model/effort id 互不相交,且只有 Claude 有 `--permission-mode`
+   *  这个概念,所以清单和权限选择器都按 tool 分流。 */
+  tool?: string;
+  /** 用来向主机要 codex profile / dsh 模型目录（第三方模型的唯一来源）。
+   *  null 时只显示内置模型。 */
   client: RelayClient | null;
   model: string;
   effort: string;
@@ -286,12 +283,37 @@ function OptionSelects({
   permissionDefaultLabel: string;
   onChange: (patch: { model?: string; effort?: string; permissionMode?: string }) => void;
 }) {
+  const isCodex = tool === "codex";
+  const isDsh = tool === "dsh";
   // 主机上的 profile 文件补进 codex 模型清单；Claude 侧不受影响。
   const codexProfiles = useCodexProfiles(isCodex ? client : null);
+  // dsh 的模型清单由主机的 provider 配置决定，Fleet 不硬编码任何一条。
+  const dshCatalog = useDshModels(isDsh ? client : null);
+  const dshGroups = useMemo(
+    () => (isDsh ? dshModelGroups(dshCatalog) : []),
+    [isDsh, dshCatalog],
+  );
+  const dshEffort = useMemo(
+    () => (isDsh ? dshEffortsFor(dshCatalog, model) : { efforts: [], defaultEffort: "" }),
+    [isDsh, dshCatalog, model],
+  );
   const modelChoices = isCodex
     ? [...CODEX_MODEL_CHOICES, ...codexProfileChoices(codexProfiles)]
     : MODEL_CHOICES;
-  const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : EFFORT_CHOICES;
+  // dsh 的档位是**每个模型自己的**——发 Claude 那套固定档位它不认。目录还没到
+  // 或该模型没有推理控制时只剩「默认」，那是诚实的降级：会话跑在主机
+  // ~/.dsh/settings.yaml 选中的档位上。
+  const effortChoices: Array<[string, string]> = isDsh
+    ? [
+        [
+          "",
+          dshEffort.defaultEffort ? t("默认（{0}）", dshEffort.defaultEffort) : "默认努力度",
+        ],
+        ...dshEffort.efforts,
+      ]
+    : isCodex
+      ? CODEX_EFFORT_CHOICES
+      : EFFORT_CHOICES;
   return (
     <div className={styles.optionRow}>
       <select
@@ -299,11 +321,26 @@ function OptionSelects({
         value={model}
         onChange={(e) => onChange({ model: e.target.value })}
       >
-        {modelChoices.map(([v, label]) => (
-          <option key={v} value={v}>
-            {t(label)}
-          </option>
-        ))}
+        {isDsh ? (
+          <>
+            <option value="">{t("默认模型")}</option>
+            {dshGroups.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.models.map(([v, label]) => (
+                  <option key={v} value={v}>
+                    {label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </>
+        ) : (
+          modelChoices.map(([v, label]) => (
+            <option key={v} value={v}>
+              {t(label)}
+            </option>
+          ))
+        )}
       </select>
       <select
         className={styles.optionSelect}
@@ -316,7 +353,7 @@ function OptionSelects({
           </option>
         ))}
       </select>
-      {!isCodex && (
+      {!isCodex && !isDsh && (
         <select
           className={styles.optionSelect}
           value={permissionMode}
@@ -481,10 +518,11 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
   const { customWorkspace, prompt, model, effort, permissionMode } = draft;
   // Older persisted drafts predate the tool field → default to Claude.
   const tool = draft.tool || "claude";
-  const isCodex = tool === "codex";
-  // Claude and Codex model/effort ids are disjoint, so switching tool clears
-  // them — a leftover Claude model would otherwise reach `codex exec -m` (and
-  // vice versa). Mirrors the desktop NewSessionForm.
+  // 只有 Claude 有 --permission-mode 这个概念。
+  const sendsPermissionMode = tool === "claude";
+  // 三个源的 model/effort id 互不相交，所以切工具就清空它们——残留的 Claude
+  // 模型否则会走进 `codex exec -m`（反之亦然）。Mirrors the desktop
+  // NewSessionForm.
   const setTool = (v: string) => patch({ tool: v, model: "", effort: "" });
 
   // Only offer the agent tools whose source is actually being monitored (source
@@ -493,15 +531,7 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
   // would only fail at spawn. `null` = config not loaded yet → Claude-only so we
   // never flash Codex then hide it.
   const sources = useSourcesConfig(client);
-  const toolChoices = useMemo(() => {
-    const active = new Set(
-      (sources ?? [])
-        .filter((s) => s.enabled && s.available)
-        .map((s) => (s.name === "claude-code" ? "claude" : s.name)),
-    );
-    const filtered = AGENT_TOOL_CHOICES.filter(([v]) => active.has(v));
-    return filtered.length ? filtered : [AGENT_TOOL_CHOICES[0]];
-  }, [sources]);
+  const toolChoices = useMemo(() => toolChoicesForSources(sources), [sources]);
   // A stale draft (or a since-disabled source) may leave `tool` pointing at a
   // tool that's no longer offered — snap it back to the first available one.
   useEffect(() => {
@@ -537,8 +567,8 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
       tool,
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
-      // Codex has no --permission-mode analogue; only send it for Claude.
-      ...(!isCodex && permissionMode ? { permissionMode } : {}),
+      // Codex / dsh 都没有 --permission-mode 的对应物；只给 Claude 发。
+      ...(sendsPermissionMode && permissionMode ? { permissionMode } : {}),
     };
     setBusy(true);
     // 一旦确认(ack / reply / 快照)就乐观收尾一次;settled 防重复。
@@ -678,7 +708,7 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
           </div>
         )}
         <OptionSelects
-          isCodex={isCodex}
+          tool={tool}
           client={client}
           model={model}
           effort={effort}
@@ -728,7 +758,10 @@ export function ResumeComposer({
   onSubmitInFlight,
 }: ResumeProps) {
   const enqueueing = mode === "enqueue";
-  const isCodex = session.agentSource === "codex";
+  // 会话所属的源决定给哪套 model/effort 清单——认不出的源退回 Claude，那是
+  // 注册表自己的 fallback。dsh 接进来之前这里是个写死的 codex 三元判断，于是
+  // dsh 会话被默默塞了 Claude 的模型。
+  const tool = toolForAgentSource(session.agentSource);
   const pendingMessages = session.pendingMessages ?? [];
   // 每个会话各自的续写草稿，按 sessionId 分 key——切到别的会话再回来，
   // 各自的半截输入互不覆盖；发送成功后清空。
@@ -806,8 +839,8 @@ export function ResumeComposer({
           agentSource: session.agentSource ?? "",
           ...(model ? { model } : {}),
           ...(effort ? { effort } : {}),
-          // Codex has no --permission-mode analogue; only send it for Claude.
-          ...(!isCodex && permissionMode ? { permissionMode } : {}),
+          // Codex / dsh 都没有 --permission-mode 的对应物；只给 Claude 发。
+          ...(tool === "claude" && permissionMode ? { permissionMode } : {}),
         };
     try {
       // 5th arg = onAck: fired once when the desktop's early ack arrives.
@@ -876,7 +909,7 @@ export function ResumeComposer({
       <div className={styles.resumeActions}>
         {!enqueueing && (
           <OptionSelects
-            isCodex={isCodex}
+            tool={tool}
             client={client}
             model={model}
             effort={effort}

@@ -354,6 +354,8 @@ const DICT: Record<string, string> = {
   缓存读取: "Cache read",
   估算成本: "Est. cost",
   "（含 {0} 个子 agent）": "(incl. {0} subagents)",
+  上下文占用: "Context used",
+  "（系统 {0} · 工具 {1} · 消息 {2}）": "(system {0} · tools {1} · messages {2})",
   运行中: "Running",
   完成: "Done",
   出错: "Error",
@@ -436,6 +438,7 @@ const DICT: Record<string, string> = {
   // ── Composer ──
   默认模型: "Default model",
   默认努力度: "Default effort",
+  "默认（{0}）": "Default ({0})",
   自动接受编辑: "Auto-accept edits",
   计划模式: "Plan mode",
   跳过权限: "Bypass permissions",
