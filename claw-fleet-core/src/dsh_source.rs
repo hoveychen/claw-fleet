@@ -429,6 +429,56 @@ fn maybe_prepend_active_plans(workspace_path: &str, session_id: &str, prompt: &s
     }
 }
 
+/// The agent preset a new session in `workspace_path` should be created under,
+/// or `None` to let dsh mount its own default.
+///
+/// Only the chat workspace asks for one: dsh loads `$DSH_HOME/AGENTS.md` — where
+/// Fleet writes its engineering doctrine — unconditionally, and `session.create`
+/// carries no per-session instruction knob, so the preset is the only seam (see
+/// [`crate::dsh_chat_preset`]). Two RPCs: `agentPreset.list` to learn the
+/// deployment's own default, `agentPreset.read` to get its composition text,
+/// then Fleet re-authors `fleet-chat` from it.
+///
+/// `call` is a parameter so the orchestration is testable without a live server,
+/// the same way [`history_with`] takes its `fetch`.
+///
+/// Every failure degrades to `None` — a chat session that carries the doctrine
+/// is worse than one that doesn't, but no session at all is worse than both, and
+/// the chat brief still wins on precedence (dsh renders the project file after
+/// the user-global one and tells the model the specific file takes precedence).
+fn resolve_chat_preset<F>(workspace_path: &str, call: F) -> Option<String>
+where
+    F: Fn(&str, Value) -> Result<Value, String>,
+{
+    if !crate::dsh_chat_preset::wants_chat_preset(workspace_path) {
+        return None;
+    }
+    let listed = call("agentPreset.list", json!({}))
+        .inspect_err(|e| log_chat_preset_skip(&format!("agentPreset.list failed: {e}")))
+        .ok()?;
+    let source_id = crate::dsh_chat_preset::default_preset_id(&listed).or_else(|| {
+        log_chat_preset_skip("agentPreset.list reported no usable default preset");
+        None
+    })?;
+    let read = call("agentPreset.read", json!({ "agentPreset": source_id }))
+        .inspect_err(|e| log_chat_preset_skip(&format!("agentPreset.read failed: {e}")))
+        .ok()?;
+    let composition = read.get("content").and_then(Value::as_str).or_else(|| {
+        log_chat_preset_skip("agentPreset.read answered without a composition");
+        None
+    })?;
+    crate::dsh_chat_preset::ensure_chat_preset(composition)
+        .inspect_err(|e| log_chat_preset_skip(e))
+        .ok()
+}
+
+/// Say why a chat session is about to run with the doctrine loaded. Silent
+/// degradation here is exactly the failure the preset exists to prevent, so it
+/// is never swallowed.
+fn log_chat_preset_skip(reason: &str) {
+    eprintln!("fleet dsh: chat preset unavailable, session keeps the default composition — {reason}");
+}
+
 /// Split Fleet's single `model` string into dsh's `provider` + `model` pair.
 ///
 /// dsh addresses a model as two fields, Fleet's [`SpawnSpec`] carries one
@@ -613,12 +663,30 @@ impl AgentSource for DshSource {
         let session_id = normalize_session_id(spec.session_id.as_deref());
 
         self.with_client(|client| {
+            let mut payload = json!({ "cwd": spec.workspace_path, "sessionId": session_id });
+            let asked_preset = resolve_chat_preset(&spec.workspace_path, |m, p| {
+                client.call(m, p).map_err(String::from)
+            });
+            if let Some(preset) = &asked_preset {
+                payload["agentPreset"] = json!(preset);
+            }
             let created = client
-                .call(
-                    "session.create",
-                    json!({ "cwd": spec.workspace_path, "sessionId": session_id }),
-                )
+                .call("session.create", payload)
                 .map_err(String::from)?;
+            // `session.create` echoes the preset it mounted. A mismatch means the
+            // chat session silently kept the doctrine, which is the whole failure
+            // the preset exists to prevent — so it is said out loud rather than
+            // inferred later from a transcript. Not fatal: the session is healthy
+            // and the chat brief still wins on precedence.
+            if let Some(asked) = &asked_preset {
+                let got = created.get("agentPreset").and_then(Value::as_str);
+                if got != Some(asked.as_str()) {
+                    log_chat_preset_skip(&format!(
+                        "asked for preset {asked}, dsh mounted {}",
+                        got.unwrap_or("<none>")
+                    ));
+                }
+            }
             // dsh echoes the id it actually used. If it ever stopped honouring
             // the pre-assignment, silently returning our own id would hand the
             // caller a session that does not exist.
@@ -2024,6 +2092,85 @@ mod tests {
         match prev {
             Some(v) => std::env::set_var("DSH_HOME", v),
             None => std::env::remove_var("DSH_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The chat preset orchestration, end to end against a scripted `call`: an
+    /// ordinary workspace asks dsh nothing, and the chat workspace walks
+    /// `agentPreset.list` → `agentPreset.read` → author, then names the preset.
+    ///
+    /// Repoints both homes, so it holds the shared home lock.
+    #[test]
+    fn only_a_chat_workspace_resolves_a_preset_and_it_walks_both_rpcs() {
+        let _guard = crate::session::fleet_home_lock();
+        let base = std::env::temp_dir()
+            .join(format!("fleet-dsh-preset-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("dsh-home")).unwrap();
+        let prev_dsh = std::env::var_os("DSH_HOME");
+        let prev_fleet = std::env::var_os("FLEET_HOME");
+        std::env::set_var("DSH_HOME", base.join("dsh-home"));
+        std::env::set_var("FLEET_HOME", &base);
+
+        let calls = std::cell::RefCell::new(Vec::<String>::new());
+        let call = |method: &str, _payload: Value| -> Result<Value, String> {
+            calls.borrow_mut().push(method.to_string());
+            Ok(match method {
+                "agentPreset.list" => json!({
+                    "presets": [{ "id": "standard", "trust": "system", "isDefault": true }],
+                    "authorable": true,
+                    "hasDocument": true,
+                }),
+                "agentPreset.read" => json!({
+                    "agentPreset": "standard",
+                    "trust": "system",
+                    "content": "- id: agent-instructions\n  name: 'x'\n  config:\n    maxBytes: 65536\n",
+                }),
+                other => panic!("unexpected rpc {other}"),
+            })
+        };
+
+        // An ordinary workspace must not even ask.
+        assert_eq!(resolve_chat_preset("/Users/foo/my-project", &call), None);
+        assert!(calls.borrow().is_empty(), "no RPC for a normal workspace");
+
+        let chat = base.join(".fleet/chat");
+        std::fs::create_dir_all(&chat).unwrap();
+        let got = resolve_chat_preset(&chat.to_string_lossy(), &call);
+        assert_eq!(got.as_deref(), Some(crate::dsh_chat_preset::CHAT_PRESET_ID));
+        assert_eq!(
+            *calls.borrow(),
+            vec!["agentPreset.list", "agentPreset.read"],
+            "the deployment default is read, never hardcoded",
+        );
+
+        // The authored composition redirects the instruction plugin away from the
+        // real $DSH_HOME, which is the whole point.
+        let composed = std::fs::read_to_string(
+            base.join("dsh-home/.agent-presets")
+                .join(crate::dsh_chat_preset::CHAT_PRESET_ID)
+                .join("agent.cordis.yml"),
+        )
+        .unwrap();
+        assert!(composed.contains("dshHome:"), "{composed}");
+        assert!(composed.contains("dsh-chat-home"), "{composed}");
+        assert!(
+            !base.join("dsh-chat-home/AGENTS.md").exists(),
+            "the stand-in home must stay empty or the doctrine comes back",
+        );
+
+        // A transport failure degrades to "no preset" rather than failing a spawn.
+        let failing = |_: &str, _: Value| -> Result<Value, String> { Err("refused".into()) };
+        assert_eq!(resolve_chat_preset(&chat.to_string_lossy(), failing), None);
+
+        match prev_dsh {
+            Some(v) => std::env::set_var("DSH_HOME", v),
+            None => std::env::remove_var("DSH_HOME"),
+        }
+        match prev_fleet {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
         }
         let _ = std::fs::remove_dir_all(&base);
     }
