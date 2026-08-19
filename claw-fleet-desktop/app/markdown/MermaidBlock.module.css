@@ -6,6 +6,9 @@
   border-radius: 6px;
   overflow-x: auto;
   text-align: center;
+  /* 这个块常常挂在 markdown 的 <pre> 里面，会继承到等宽字体；图的排版是按
+     var(--font-sans) 量的，这里必须把它扳回来，否则标签宽度对不上被切掉。 */
+  font-family: var(--font-sans);
 }
 
 /* Let a wide diagram scroll rather than shrink itself into unreadability. */
