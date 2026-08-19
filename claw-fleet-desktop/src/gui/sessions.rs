@@ -67,7 +67,18 @@ pub(crate) fn get_messages_tail(
     tail: usize,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Value>, String> {
-    state.backend.read().unwrap().get_messages_tail(&jsonl_path, tail)
+    // Probed: this is the call behind 「对话」Tab, and when it goes slow the log
+    // has to say whether the time went to the backend or to queueing for
+    // `AppState::backend`. See `cmd_probe`.
+    let mut probe = crate::cmd_probe::CmdProbe::start("get_messages_tail", &jsonl_path);
+    let backend = state.backend.read().unwrap();
+    probe.locked();
+    let out = backend.get_messages_tail(&jsonl_path, tail);
+    probe.done(|| match &out {
+        Ok(msgs) => format!("{} msgs", msgs.len()),
+        Err(e) => format!("error: {e}"),
+    });
+    out
 }
 
 /// Full, untrimmed tool output for one `tool_use_id`. `get_messages_tail`
