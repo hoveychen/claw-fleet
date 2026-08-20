@@ -1010,6 +1010,12 @@ export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
   },
 };
 
+/** `currentVersion` / `versions` were previously omitted behind an `as WikiDoc`
+ *  cast, which left `version` undefined on every `wiki_file` / `wiki_export`
+ *  call — the doc page then failed to decode a body at all. Filled in so the
+ *  reader page has something real to render. */
+export const MOCK_WIKI_VERSION = "v2026-08-20T12-00-00";
+
 export const MOCK_WIKI_DOCS: WikiDoc[] = [
   {
     slug: "arch/overview",
@@ -1020,8 +1026,57 @@ export const MOCK_WIKI_DOCS: WikiDoc[] = [
     workspaceName: "api-server",
     createdMs: NOW - 30 * HOUR,
     updatedMs: NOW - 2 * HOUR,
-  } as WikiDoc,
+    currentVersion: MOCK_WIKI_VERSION,
+    versions: [
+      {
+        id: MOCK_WIKI_VERSION,
+        publishedMs: NOW - 2 * HOUR,
+        sizeBytes: 1_284,
+        fileCount: 1,
+        sourcePath: "/Users/demo/workspace/api-server/docs/overview.md",
+      },
+      {
+        id: "v2026-08-19T09-30-00",
+        publishedMs: NOW - 30 * HOUR,
+        sizeBytes: 902,
+        fileCount: 1,
+        sourcePath: "/Users/demo/workspace/api-server/docs/overview.md",
+      },
+    ],
+  },
 ];
+
+/** Body served by the mock `wiki_file` for the doc above. Base64 rather than
+ *  plain text because `fetchWikiFile` hands the payload to `base64ToBytes` —
+ *  the old missing fixture is exactly what surfaced as an `atob` failure. */
+export const MOCK_WIKI_ENTRY_MD = [
+  "# Architecture overview",
+  "",
+  "The v2.4 release train splits the API into three deploy units.",
+  "",
+  "| Unit | Owner | Deploy |",
+  "| --- | --- | --- |",
+  "| `api-server` | platform | blue/green |",
+  "| `billing-service` | billing | rolling |",
+  "| `web-dashboard` | web | static |",
+  "",
+  "## Auth",
+  "",
+  "JWT verification accepts both issuers during the rotation window; the legacy",
+  "issuer is dropped once the max TTL elapses.",
+  "",
+].join("\n");
+
+/** UTF-8 → base64, the framing every wiki relay method uses. Local rather than
+ *  reaching into relayCrypto's private `b64encode`: widening a crypto module's
+ *  surface for a fixture is the wrong trade. */
+function utf8ToBase64(text: string): string {
+  let bin = "";
+  for (const b of new TextEncoder().encode(text)) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+export const MOCK_WIKI_ENTRY_B64 = utf8ToBase64(MOCK_WIKI_ENTRY_MD);
 
 /** `repo_list` / `repo_detail` fixtures. Both the main checkout and one
  *  worktree carry a non-zero `dirtyCount`, because the "脏 N" chip is the only

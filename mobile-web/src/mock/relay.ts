@@ -31,6 +31,7 @@ import {
   MOCK_TODAY_USAGE,
   MOCK_TOOL_DETAILS,
   MOCK_WIKI_DOCS,
+  MOCK_WIKI_ENTRY_B64,
 } from "./data";
 
 export function isMockMode(): boolean {
@@ -148,6 +149,16 @@ export class MockRelayClient extends RelayClient {
           : null;
       case "wiki_list":
         return MOCK_WIKI_DOCS;
+      // The doc reader's body. Version-agnostic on purpose: the fixture has two
+      // versions so the selector renders, but both serve the same markdown.
+      case "wiki_file":
+        return { mime: "text/markdown", base64: MOCK_WIKI_ENTRY_B64 };
+      case "wiki_export":
+        return {
+          filename: "arch-overview.md",
+          mime: "text/markdown",
+          base64: MOCK_WIKI_ENTRY_B64,
+        };
       case "account_usage":
         return { claude: null, claudeError: null, sources: [] };
       // Everything under the mock store dir is "still there". Returning a blank
