@@ -293,3 +293,53 @@ fn live_reading_a_session_teaches_the_scan_its_model() {
         "the row's model and the header chip must be the same reading"
     );
 }
+
+/// The effort chip's data path, end to end against a real server.
+///
+/// Weaker than the model's on purpose: `reasoningEffort` rides only
+/// `request/header`, which a long session's tail page does not carry (measured:
+/// 7,877 tail events, zero headers). So this walks the roster for a session
+/// whose *read* history does contain one, and proves that when the evidence is
+/// there it reaches `SessionInfo::thinking_level`. A machine whose every dsh
+/// session is long and unread simply skips — reported, never silently passed.
+#[test]
+#[ignore = "starts a real `dsh web`; run manually with --ignored"]
+fn live_a_read_header_teaches_the_scan_its_effort() {
+    let _guard = ServerGuard;
+    let source = DshSource::new();
+    assert!(
+        source.is_available(),
+        "set FLEET_DSH_BIN to a dsh executable"
+    );
+
+    let mut found = 0usize;
+    for s in source.scan_sessions().iter().take(12) {
+        // A full read walks back to the head, where the `initial` header sits.
+        if source.get_messages(&s.jsonl_path).map(|m| m.is_empty()).unwrap_or(true) {
+            continue;
+        }
+        let after = source
+            .scan_sessions()
+            .into_iter()
+            .find(|x| x.id == s.id)
+            .expect("still on the roster");
+        if let Some(effort) = after.thinking_level.as_deref() {
+            println!(
+                "{} → model={:?} effort={effort}",
+                after.id, after.model
+            );
+            assert!(!effort.is_empty(), "an empty level must read as absent");
+            found += 1;
+            if found >= 2 {
+                break;
+            }
+        } else {
+            println!("{} → no effort in the pages read (model={:?})", after.id, after.model);
+        }
+    }
+    assert!(
+        found > 0,
+        "no session on this machine exposed a reasoningEffort — either every \
+         model here has no reasoning ladder, or the harvest is broken"
+    );
+}
