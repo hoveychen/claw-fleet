@@ -931,12 +931,14 @@ export function SessionDetail({
                   {formatModel(liveSession.model)}
                 </span>
               )}
-              {/* Reasoning effort, when the session names a specific level —
-                  same field and tooltip the cards use, with the same lightbulb.
-                  `thinkingLevel` doubles as Claude's "this transcript has
-                  thinking blocks" marker, which names no level and would be a
-                  chip that says nothing, so that one value is filtered out. */}
-              {liveSession.thinkingLevel && liveSession.thinkingLevel !== "thinking" && (
+              {/* Reasoning effort — same field, lightbulb and tooltip the cards
+                  use, and the same `medium` cut: that is Claude's default level
+                  and a chip on every session says nothing. Also filtered here:
+                  the bare `thinking` marker, which records that a transcript has
+                  thinking blocks and names no level at all. */}
+              {liveSession.thinkingLevel &&
+                liveSession.thinkingLevel !== "medium" &&
+                liveSession.thinkingLevel !== "thinking" && (
                 <span
                   className={styles.meta_chip}
                   title={t("card.tip_thinking", { level: liveSession.thinkingLevel })}
