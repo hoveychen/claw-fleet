@@ -173,6 +173,9 @@
   border: 0;
   cursor: pointer;
   font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 /* ── expanded uncommitted-file list (read-only on mobile) ── */

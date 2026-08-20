@@ -64,7 +64,8 @@
 
 .exportButton {
   flex-shrink: 0;
-  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
   line-height: 1;
   color: var(--color-accent);
   padding: 4px 6px;
@@ -72,6 +73,16 @@
 
 .exportButton:disabled {
   color: var(--color-text-dim);
+}
+
+.spinning {
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .body {

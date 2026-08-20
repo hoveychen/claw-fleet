@@ -5,7 +5,7 @@
 
 import type { ComponentPropsWithoutRef } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Loader2, Share2 } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
@@ -223,7 +223,7 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
           aria-label={t("导出 / 分享")}
           title={t("导出 / 分享")}
         >
-          {exporting ? "…" : "⤴"}
+          {exporting ? <Loader2 size={18} className={styles.spinning} /> : <Share2 size={18} />}
         </button>
       </header>
 

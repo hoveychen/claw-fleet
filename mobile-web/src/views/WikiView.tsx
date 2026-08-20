@@ -3,7 +3,7 @@
 // 顶部可按 workspace 筛选。点开进 WikiDocView 全屏阅读。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, ChevronRight, FileQuestion, Search, SearchX } from "lucide-react";
+import { BookOpen, ChevronRight, FileQuestion, RefreshCw, Search, SearchX } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
@@ -125,7 +125,7 @@ export function WikiView({ client, onOpenDoc }: Props) {
         <span className={styles.title}>{t("知识库")}</span>
         {total > 0 && <span className={styles.count}>{total}</span>}
         <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")}>
-          ⟳
+          <RefreshCw size={16} />
         </button>
       </div>
 

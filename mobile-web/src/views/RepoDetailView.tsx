@@ -4,7 +4,7 @@
 // 的 repo_detail / repo_push / repo_pull 打到 git_ops.rs。
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { DirtyFile, RepoDetail, RepoSummary, WorktreeHealth } from "../types";
@@ -119,7 +119,8 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
                         aria-expanded={showMainFiles}
                         onClick={() => setShowMainFiles((v) => !v)}
                       >
-                        {t("脏 {0}", detail.dirtyCount)} {showMainFiles ? "▾" : "▸"}
+                        {t("脏 {0}", detail.dirtyCount)}
+                        {showMainFiles ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                       </button>
                     )}
                     {(detail.unpushed ?? 0) === 0 &&
@@ -249,7 +250,8 @@ function WorktreeRow({ wt }: { wt: WorktreeHealth }) {
               aria-expanded={showFiles}
               onClick={() => setShowFiles((v) => !v)}
             >
-              {t("脏 {0}", wt.dirtyCount)} {showFiles ? "▾" : "▸"}
+              {t("脏 {0}", wt.dirtyCount)}
+              {showFiles ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             </button>
           )}
           {!pending && (
