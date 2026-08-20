@@ -75,12 +75,26 @@
   border-radius: 8px;
 }
 
+.permFileHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.permFileIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  margin-top: 1px;
+}
+
 .permFileName {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   word-break: break-all;
+  min-width: 0;
 }
 
 .permFilePath {
