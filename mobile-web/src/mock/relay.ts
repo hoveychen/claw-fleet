@@ -24,6 +24,9 @@ import {
   MOCK_GUARD_ANALYSIS,
   MOCK_HANDOFF_CHAIN,
   MOCK_MESSAGES,
+  MOCK_PERMISSION_PROMPT,
+  MOCK_REPO_DETAIL,
+  MOCK_REPOS,
   MOCK_SESSIONS,
   MOCK_TODAY_USAGE,
   MOCK_TOOL_DETAILS,
@@ -102,6 +105,7 @@ export class MockRelayClient extends RelayClient {
           guard: [MOCK_GUARD].filter((r) => !this.answered.has(r.id)),
           elicitation: [MOCK_ELICITATION].filter((r) => !this.answered.has(r.id)),
           fleetAsk: [MOCK_FLEET_ASK].filter((r) => !this.answered.has(r.id)),
+          permissionPrompt: [MOCK_PERMISSION_PROMPT].filter((r) => !this.answered.has(r.id)),
         };
       // Deliberately slow, like the real LLM round-trip — the card shows its
       // "Analyzing…" state first, which is part of what gets screenshotted.
@@ -176,6 +180,13 @@ export class MockRelayClient extends RelayClient {
         );
       case "browse_dir":
         return mockBrowseDir(params?.path as string | undefined);
+      case "repo_list":
+        return MOCK_REPOS;
+      case "repo_detail": {
+        const detail = MOCK_REPO_DETAIL[String(params?.root ?? "")];
+        if (!detail) throw new Error("repo root not found");
+        return detail;
+      }
       // Write methods: acknowledge without doing anything. The UI's optimistic
       // update is what we're exercising, not the desktop's side of it.
       case "session_mark":
@@ -188,7 +199,8 @@ export class MockRelayClient extends RelayClient {
       case "cancel_pending_message":
       case "spawn_session":
         return { ok: true };
-      // session_search / wiki_search / usage_history / repo_* — no fixture.
+      // session_search / wiki_search / usage_history / repo_push / repo_pull —
+      // no fixture.
       default:
         return [];
     }
