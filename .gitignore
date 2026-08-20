@@ -8,6 +8,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+# pnpm falls back to a cwd-local store when it can't reach the default one
+# (~/.local/share/pnpm/store) — e.g. under a sandboxed HOME.
+.pnpm-store/
 dist
 dist-ssr
 *.local
