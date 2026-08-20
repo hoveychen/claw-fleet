@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProcRecord } from "../types";
-import { groupProcs, parseProcShortcuts } from "./ProcPanel";
+import { groupProcs, parseProcShortcuts, shortcutsFor } from "./ProcPanel";
 
 function proc(id: string, command: string, status: ProcRecord["status"]): ProcRecord {
   return {
@@ -36,15 +36,29 @@ describe("repository command groups", () => {
 });
 
 describe("command shortcuts", () => {
-  it("loads unique, non-empty commands", () => {
-    expect(parseProcShortcuts('["pnpm test","","pnpm test","pnpm dev"]')).toEqual([
-      "pnpm test",
-      "pnpm dev",
-    ]);
+  it("loads unique, non-empty commands per repository", () => {
+    const map = parseProcShortcuts(
+      '{"/repo":["pnpm test","","pnpm test","pnpm dev"],"/other":["cargo build"]}',
+    );
+    expect(shortcutsFor(map, "/repo")).toEqual(["pnpm test", "pnpm dev"]);
+    expect(shortcutsFor(map, "/other")).toEqual(["cargo build"]);
+  });
+
+  // The bug this shape exists to prevent: a pin made in one repository must not
+  // show up (and be runnable at the wrong cwd) in every other repository.
+  it("keeps a pin out of repositories it was not pinned in", () => {
+    const map = parseProcShortcuts('{"/repo":["./scripts/build-local.sh"]}');
+    expect(shortcutsFor(map, "/other")).toEqual([]);
+  });
+
+  it("drops the legacy global array instead of leaking it everywhere", () => {
+    const map = parseProcShortcuts('["./scripts/build-local.sh"]');
+    expect(shortcutsFor(map, "/repo")).toEqual([]);
+    expect(shortcutsFor(map, "/other")).toEqual([]);
   });
 
   it("tolerates corrupt persisted data", () => {
-    expect(parseProcShortcuts("not json")).toEqual([]);
-    expect(parseProcShortcuts('{"command":"pnpm test"}')).toEqual([]);
+    expect(parseProcShortcuts("not json")).toEqual({});
+    expect(parseProcShortcuts('{"/repo":"pnpm test"}')).toEqual({});
   });
 });
