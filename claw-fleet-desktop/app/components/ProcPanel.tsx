@@ -40,19 +40,42 @@ export function groupProcs(procs: ProcRecord[]): ProcGroup[] {
   return [...groups.values()];
 }
 
-export function parseProcShortcuts(raw: string | null): string[] {
-  if (!raw) return [];
+/** Pinned commands, keyed by the absolute workspace path they were pinned in.
+ *
+ *  Pins MUST be per-repository: a shortcut is launched at the *current* panel's
+ *  workspace cwd (see `launch`), so a globally-shared list would offer to run
+ *  one repo's script inside an unrelated repo. */
+export type ProcShortcutMap = Record<string, string[]>;
+
+export function parseProcShortcuts(raw: string | null): ProcShortcutMap {
+  if (!raw) return {};
   try {
     const value: unknown = JSON.parse(raw);
-    if (!Array.isArray(value)) return [];
-    return [
-      ...new Set(
-        value.filter((item): item is string => typeof item === "string" && !!item.trim()),
-      ),
-    ];
+    // A bare array is the pre-per-workspace format: a flat global pin list with
+    // no way to tell which repository each command belonged to. Drop it rather
+    // than guess — a wrong guess re-creates the leak we are fixing.
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const map: ProcShortcutMap = {};
+    for (const [workspace, commands] of Object.entries(value as Record<string, unknown>)) {
+      if (!workspace.trim() || !Array.isArray(commands)) continue;
+      const cleaned = [
+        ...new Set(
+          commands.filter((item): item is string => typeof item === "string" && !!item.trim()),
+        ),
+      ];
+      if (cleaned.length > 0) map[workspace] = cleaned;
+    }
+    return map;
   } catch {
-    return [];
+    return {};
   }
+}
+
+/** One repository's pins. The panel reads through this on every render, so
+ *  switching repositories re-slices the same in-memory map — no remount and no
+ *  effect needed to keep the list in sync with `workspace`. */
+export function shortcutsFor(map: ProcShortcutMap, workspace: string): string[] {
+  return map[workspace] ?? [];
 }
 
 /** The "命令" tab of a workspace's 仓库 detail pane: quick command launcher at
@@ -76,9 +99,10 @@ export function ProcPanel({
   const [runError, setRunError] = useState<string | null>(null);
   const [openTermId, setOpenTermId] = useState<string | null>(null);
   const [openGroupCommand, setOpenGroupCommand] = useState<string | null>(null);
-  const [shortcuts, setShortcuts] = useState<string[]>(() =>
+  const [shortcutMap, setShortcutMap] = useState<ProcShortcutMap>(() =>
     parseProcShortcuts(getItem(SHORTCUTS_KEY)),
   );
+  const shortcuts = shortcutsFor(shortcutMap, workspace);
 
   const wsProcs = useMemo(
     () => procs.filter((p) => p.workspacePath === workspace),
@@ -87,9 +111,15 @@ export function ProcPanel({
   const hasFinished = wsProcs.some((p) => p.status === "exited");
   const procGroups = useMemo(() => groupProcs(wsProcs), [wsProcs]);
 
+  /** Replace *this* workspace's slot, leaving every other repository's pins
+   *  untouched. An emptied slot is deleted so the map doesn't accumulate a key
+   *  per repository the user ever visited. */
   const updateShortcuts = (next: string[]) => {
-    setShortcuts(next);
-    setItem(SHORTCUTS_KEY, JSON.stringify(next));
+    const nextMap = { ...shortcutMap };
+    if (next.length > 0) nextMap[workspace] = next;
+    else delete nextMap[workspace];
+    setShortcutMap(nextMap);
+    setItem(SHORTCUTS_KEY, JSON.stringify(nextMap));
   };
 
   const toggleShortcut = (cmd: string) => {
