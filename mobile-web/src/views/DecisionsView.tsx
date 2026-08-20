@@ -10,6 +10,7 @@ import {
   Plus,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
+import { fileExtIcon } from "./fileIcon";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
@@ -576,7 +577,12 @@ function PermissionCard({
       </div>
       {primary.kind === "file" ? (
         <div className={styles.permFile}>
-          <div className={styles.permFileName}>📄 {basename(primary.path)}</div>
+          <div className={styles.permFileHead}>
+            <span className={styles.permFileIcon} aria-hidden>
+              {fileExtIcon(primary.path)}
+            </span>
+            <span className={styles.permFileName}>{basename(primary.path)}</span>
+          </div>
           <div className={styles.permFilePath}>{primary.path}</div>
         </div>
       ) : primary.kind === "pattern" ? (

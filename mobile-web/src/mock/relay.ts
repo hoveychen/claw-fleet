@@ -24,10 +24,14 @@ import {
   MOCK_GUARD_ANALYSIS,
   MOCK_HANDOFF_CHAIN,
   MOCK_MESSAGES,
+  MOCK_PERMISSION_PROMPT,
+  MOCK_REPO_DETAIL,
+  MOCK_REPOS,
   MOCK_SESSIONS,
   MOCK_TODAY_USAGE,
   MOCK_TOOL_DETAILS,
   MOCK_WIKI_DOCS,
+  MOCK_WIKI_ENTRY_B64,
 } from "./data";
 
 export function isMockMode(): boolean {
@@ -102,6 +106,7 @@ export class MockRelayClient extends RelayClient {
           guard: [MOCK_GUARD].filter((r) => !this.answered.has(r.id)),
           elicitation: [MOCK_ELICITATION].filter((r) => !this.answered.has(r.id)),
           fleetAsk: [MOCK_FLEET_ASK].filter((r) => !this.answered.has(r.id)),
+          permissionPrompt: [MOCK_PERMISSION_PROMPT].filter((r) => !this.answered.has(r.id)),
         };
       // Deliberately slow, like the real LLM round-trip — the card shows its
       // "Analyzing…" state first, which is part of what gets screenshotted.
@@ -144,6 +149,16 @@ export class MockRelayClient extends RelayClient {
           : null;
       case "wiki_list":
         return MOCK_WIKI_DOCS;
+      // The doc reader's body. Version-agnostic on purpose: the fixture has two
+      // versions so the selector renders, but both serve the same markdown.
+      case "wiki_file":
+        return { mime: "text/markdown", base64: MOCK_WIKI_ENTRY_B64 };
+      case "wiki_export":
+        return {
+          filename: "arch-overview.md",
+          mime: "text/markdown",
+          base64: MOCK_WIKI_ENTRY_B64,
+        };
       case "account_usage":
         return { claude: null, claudeError: null, sources: [] };
       // Everything under the mock store dir is "still there". Returning a blank
@@ -176,6 +191,13 @@ export class MockRelayClient extends RelayClient {
         );
       case "browse_dir":
         return mockBrowseDir(params?.path as string | undefined);
+      case "repo_list":
+        return MOCK_REPOS;
+      case "repo_detail": {
+        const detail = MOCK_REPO_DETAIL[String(params?.root ?? "")];
+        if (!detail) throw new Error("repo root not found");
+        return detail;
+      }
       // Write methods: acknowledge without doing anything. The UI's optimistic
       // update is what we're exercising, not the desktop's side of it.
       case "session_mark":
@@ -188,7 +210,8 @@ export class MockRelayClient extends RelayClient {
       case "cancel_pending_message":
       case "spawn_session":
         return { ok: true };
-      // session_search / wiki_search / usage_history / repo_* — no fixture.
+      // session_search / wiki_search / usage_history / repo_push / repo_pull —
+      // no fixture.
       default:
         return [];
     }

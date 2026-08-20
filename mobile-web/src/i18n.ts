@@ -499,6 +499,7 @@ const DICT: Record<string, string> = {
   "worktree {0}": "{0} worktree",
   干净: "clean",
   当前分支: "Current branch",
+  远端地址: "Remote URL",
   无上游: "no upstream",
   "未推 / 落后": "Ahead / behind",
   "落后 {0}": "{0} behind",

@@ -13,7 +13,10 @@ import type {
   FleetAskRequest,
   GuardRequest,
   HandoffChain,
+  PermissionPromptRequest,
   RawMessage,
+  RepoDetail,
+  RepoSummary,
   SessionInfo,
   TodayUsage,
   WikiDoc,
@@ -233,6 +236,26 @@ export const MOCK_GUARD_ANALYSIS = [
   "",
   "**Recommendation:** allow once **after** confirming the 14:00 snapshot completed — the agent's plan already gates the drop behind a feature flag.",
 ].join("\n");
+
+/** A native Claude Code permission prompt on a *file* tool — the one card shape
+ *  that exercises the extension-driven file glyph (`views/fileIcon.tsx`). The
+ *  guard fixture above is a Bash command, so without this the file branch of
+ *  PermissionCard had no `?mock` coverage at all. `.tsx` lands in the code
+ *  bucket, which is what distinguishes the mapping from a blank file icon. */
+export const MOCK_PERMISSION_PROMPT: PermissionPromptRequest = {
+  id: "perm-1",
+  sessionId: "sess-api-main",
+  workspaceName: "api-server",
+  aiTitle: "Wants to edit the checkout totals component",
+  toolName: "Edit",
+  toolInput: {
+    file_path: "/Users/demo/work/api-server/src/components/CartTotals.tsx",
+    old_string: "const total = items.reduce(sum, 0)",
+    new_string: "const total = useMemo(() => items.reduce(sum, 0), [items])",
+  },
+  toolUseId: "toolu_perm_1",
+  timestamp: new Date(NOW - 90_000).toISOString(),
+};
 
 export const MOCK_ELICITATION: ElicitationRequest = {
   id: "elic-1",
@@ -987,6 +1010,12 @@ export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
   },
 };
 
+/** `currentVersion` / `versions` were previously omitted behind an `as WikiDoc`
+ *  cast, which left `version` undefined on every `wiki_file` / `wiki_export`
+ *  call — the doc page then failed to decode a body at all. Filled in so the
+ *  reader page has something real to render. */
+export const MOCK_WIKI_VERSION = "v2026-08-20T12-00-00";
+
 export const MOCK_WIKI_DOCS: WikiDoc[] = [
   {
     slug: "arch/overview",
@@ -997,8 +1026,147 @@ export const MOCK_WIKI_DOCS: WikiDoc[] = [
     workspaceName: "api-server",
     createdMs: NOW - 30 * HOUR,
     updatedMs: NOW - 2 * HOUR,
-  } as WikiDoc,
+    currentVersion: MOCK_WIKI_VERSION,
+    versions: [
+      {
+        id: MOCK_WIKI_VERSION,
+        publishedMs: NOW - 2 * HOUR,
+        sizeBytes: 1_284,
+        fileCount: 1,
+        sourcePath: "/Users/demo/workspace/api-server/docs/overview.md",
+      },
+      {
+        id: "v2026-08-19T09-30-00",
+        publishedMs: NOW - 30 * HOUR,
+        sizeBytes: 902,
+        fileCount: 1,
+        sourcePath: "/Users/demo/workspace/api-server/docs/overview.md",
+      },
+    ],
+  },
 ];
+
+/** Body served by the mock `wiki_file` for the doc above. Base64 rather than
+ *  plain text because `fetchWikiFile` hands the payload to `base64ToBytes` —
+ *  the old missing fixture is exactly what surfaced as an `atob` failure. */
+export const MOCK_WIKI_ENTRY_MD = [
+  "# Architecture overview",
+  "",
+  "The v2.4 release train splits the API into three deploy units.",
+  "",
+  "| Unit | Owner | Deploy |",
+  "| --- | --- | --- |",
+  "| `api-server` | platform | blue/green |",
+  "| `billing-service` | billing | rolling |",
+  "| `web-dashboard` | web | static |",
+  "",
+  "## Auth",
+  "",
+  "JWT verification accepts both issuers during the rotation window; the legacy",
+  "issuer is dropped once the max TTL elapses.",
+  "",
+].join("\n");
+
+/** UTF-8 → base64, the framing every wiki relay method uses. Local rather than
+ *  reaching into relayCrypto's private `b64encode`: widening a crypto module's
+ *  surface for a fixture is the wrong trade. */
+function utf8ToBase64(text: string): string {
+  let bin = "";
+  for (const b of new TextEncoder().encode(text)) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+export const MOCK_WIKI_ENTRY_B64 = utf8ToBase64(MOCK_WIKI_ENTRY_MD);
+
+/** `repo_list` / `repo_detail` fixtures. Both the main checkout and one
+ *  worktree carry a non-zero `dirtyCount`, because the "脏 N" chip is the only
+ *  way into the expandable file list — a clean fixture renders no toggle at
+ *  all, so the expand/collapse control would stay unverifiable under `?mock`. */
+export const MOCK_REPOS: RepoSummary[] = [
+  {
+    root: "/Users/demo/work/api-server",
+    label: "api-server",
+    branch: "main",
+    upstream: "origin/main",
+    unpushed: 2,
+    behind: 0,
+    dirtyCount: 3,
+    worktreeCount: 1,
+    pendingWorktrees: 1,
+    needsAttention: true,
+  },
+  {
+    root: "/Users/demo/work/web-dashboard",
+    label: "web-dashboard",
+    branch: "main",
+    upstream: "origin/main",
+    unpushed: 0,
+    behind: 0,
+    dirtyCount: 0,
+    worktreeCount: 0,
+    pendingWorktrees: 0,
+    needsAttention: false,
+  },
+];
+
+export const MOCK_REPO_DETAIL: Record<string, RepoDetail> = {
+  "/Users/demo/work/api-server": {
+    root: "/Users/demo/work/api-server",
+    label: "api-server",
+    branch: "main",
+    upstream: "origin/main",
+    remoteUrl: "git@github.com:demo/api-server.git",
+    unpushed: 2,
+    behind: 0,
+    dirtyCount: 3,
+    dirtyFiles: [
+      { path: "src/middleware/auth.ts", status: "M" },
+      { path: "src/components/CartTotals.tsx", status: "M" },
+      { path: "docs/migration-notes.md", status: "?" },
+    ],
+    worktrees: [
+      {
+        path: "/Users/demo/work/api-server/.worktrees/jwt-rotation",
+        branch: "prd/jwt-rotation",
+        unmerged: 4,
+        dirtyCount: 2,
+        dirtyFiles: [
+          { path: "src/auth/jwks.ts", status: "M" },
+          { path: "src/auth/jwks.test.ts", status: "A" },
+        ],
+        lastCommitSummary: "feat(auth): accept both issuers during rotation",
+        lastCommitTime: Math.floor((NOW - 4 * HOUR) / 1000),
+      },
+    ],
+    commits: [
+      {
+        hash: "9f3c1ab",
+        summary: "fix(checkout): memoize cart totals",
+        author: "demo",
+        time: Math.floor((NOW - 2 * HOUR) / 1000),
+      },
+      {
+        hash: "1de77c4",
+        summary: "chore: bump prisma to 6.2",
+        author: "demo",
+        time: Math.floor((NOW - 26 * HOUR) / 1000),
+      },
+    ],
+  },
+  "/Users/demo/work/web-dashboard": {
+    root: "/Users/demo/work/web-dashboard",
+    label: "web-dashboard",
+    branch: "main",
+    upstream: "origin/main",
+    remoteUrl: "git@github.com:demo/web-dashboard.git",
+    unpushed: 0,
+    behind: 0,
+    dirtyCount: 0,
+    dirtyFiles: [],
+    worktrees: [],
+    commits: [],
+  },
+};
 
 /** A slice of Boss's home directory, for the new-session directory picker.
  *  Keyed by the canonical path the desktop would return; mirrors what
