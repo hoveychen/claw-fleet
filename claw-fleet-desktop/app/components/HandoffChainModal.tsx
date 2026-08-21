@@ -13,6 +13,10 @@ interface Props {
   hop: number;
   len: number;
   onClose: () => void;
+  /** Make each leg clickable, handing back that leg's session id. Omitted by
+   *  the session detail (you are already inside one of these sessions); the
+   *  计划树 passes it so a relay leg jumps straight into that session. */
+  onOpenSession?: (sessionId: string) => void;
 }
 
 /**
@@ -24,7 +28,15 @@ interface Props {
  * Rendered through a portal to document.body so the fixed overlay covers the
  * whole viewport regardless of the clipping/transform of its DOM ancestors.
  */
-export function HandoffChainModal({ chain, loading, currentSessionId, hop, len, onClose }: Props) {
+export function HandoffChainModal({
+  chain,
+  loading,
+  currentSessionId,
+  hop,
+  len,
+  onClose,
+  onOpenSession,
+}: Props) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
 
@@ -73,7 +85,19 @@ export function HandoffChainModal({ chain, loading, currentSessionId, hop, len, 
           {loading && <div className={styles.handoff_note}>{t("card.handoff_loading")}</div>}
           {!loading && chain && legIds.map((sid, i) => (
             <div key={sid}>
-              <div className={`${styles.handoff_leg} ${sid === currentSessionId ? styles.handoff_current : ""}`}>
+              <div
+                className={`${styles.handoff_leg} ${sid === currentSessionId ? styles.handoff_current : ""} ${onOpenSession ? styles.handoff_leg_clickable : ""}`}
+                role={onOpenSession ? "button" : undefined}
+                tabIndex={onOpenSession ? 0 : undefined}
+                onClick={onOpenSession ? () => onOpenSession(sid) : undefined}
+                onKeyDown={
+                  onOpenSession
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") onOpenSession(sid);
+                      }
+                    : undefined
+                }
+              >
                 <span className={styles.handoff_leg_no}>{t("card.handoff_hop", { n: i + 1 })}</span>
                 <span className={styles.handoff_leg_title} title={sid}>{labelOf(sid)}</span>
               </div>

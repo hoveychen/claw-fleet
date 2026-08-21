@@ -111,6 +111,9 @@ export interface MainViewState {
   plans: {
     /** Repo whose plan forest is on screen. `null` = nothing picked yet. */
     selectedWorkspace: string | null;
+    /** Rail filter over the repo list. Deliberately NOT persisted: a restored
+     *  query would hide most repos on boot with no visible cause. */
+    query: string;
     /** Per-plan expand override. Absent = the default rule decides (a plan with
      *  pending P-tasks anywhere in its subtree opens; a finished one stays
      *  shut), so the map only ever holds the nodes the user disagreed with. */
@@ -177,14 +180,43 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     tab: "files",
     activeFilePath: null,
   },
-  plans: {
-    selectedWorkspace: null,
-    expandOverrides: {},
-    showCompletedRoots: false,
-    doneItemsShown: [],
-  },
+  plans: readPlansView(),
   mobile: { urlDraft: "", editingUrl: false },
 };
+
+/** Parse a persisted JSON blob, falling back when absent or corrupt. */
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** 计划树's slice of the (otherwise in-memory) main-view state. Its folds are
+ *  worth keeping across restarts: on a repo with hundreds of finished plans,
+ *  re-collapsing the tree by hand every launch is the whole cost of the view.
+ *  Every key here is also registered in storage.ts's ALL_KEYS — a key written
+ *  but not registered is saved and then never read back. */
+function readPlansView(): MainViewState["plans"] {
+  return {
+    selectedWorkspace: getItem("plans-workspace") ?? null,
+    query: "",
+    expandOverrides: readJson<Record<string, boolean>>("plans-expand-overrides", {}),
+    showCompletedRoots: getItem("plans-show-completed") === "true",
+    doneItemsShown: readJson<string[]>("plans-done-items", []),
+  };
+}
+
+function persistPlansView(s: MainViewState["plans"]): void {
+  setItem("plans-workspace", s.selectedWorkspace ?? "");
+  setItem("plans-expand-overrides", JSON.stringify(s.expandOverrides));
+  setItem("plans-show-completed", s.showCompletedRoots ? "true" : "false");
+  setItem("plans-done-items", JSON.stringify(s.doneItemsShown));
+}
 
 interface UIState {
   theme: Theme;
@@ -222,6 +254,10 @@ interface UIState {
     view: K,
     patch: Partial<MainViewState[K]>,
   ) => void;
+  /** 计划树's patcher. Separate from updateMainViewState because this slice is
+   *  the one that writes through to disk (see {@link persistPlansView}); going
+   *  through the generic setter would silently skip the write. */
+  updatePlansView: (patch: Partial<MainViewState["plans"]>) => void;
   setHistoryMarkFilter: (f: MarkFilter) => void;
   setHistoryWorkspaceFilter: (workspacePath: string) => void;
   setHistoryActiveOnly: (on: boolean) => void;
@@ -362,6 +398,12 @@ export const useUIStore = create<UIState>((set) => ({
         [view]: { ...state.mainViewState[view], ...patch },
       },
     })),
+  updatePlansView: (patch) =>
+    set((state) => {
+      const plans = { ...state.mainViewState.plans, ...patch };
+      persistPlansView(plans);
+      return { mainViewState: { ...state.mainViewState, plans } };
+    }),
   setHistoryMarkFilter: (f) => {
     setItem("history-mark-filter", f);
     set({ historyMarkFilter: f });

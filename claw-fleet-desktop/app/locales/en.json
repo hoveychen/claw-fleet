@@ -563,7 +563,8 @@
     "relay": "{{count}}-leg relay",
     "unattached": "Unattached relay chains",
     "anonymous": "Plus {{count}} legacy anonymous plan block(s) — no id, cannot join the tree",
-    "orphan_tip": "Parent plan {{parent}} does not exist; promoted to a root"
+    "orphan_tip": "Parent plan {{parent}} does not exist; promoted to a root",
+    "search_placeholder": "Filter repos…"
   },
   "memory": {
     "panel_title": "Memory",
