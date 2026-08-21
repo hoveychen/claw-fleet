@@ -48,6 +48,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use base64::Engine as _;
 use serde_json::{json, Value};
 
 use crate::agent_source::{AgentSource, WatchStrategy};
@@ -236,6 +237,30 @@ impl DshSource {
         })
     }
 
+    /// Turn the image references in one session's records into renderable store
+    /// paths (see [`crate::dsh_attachments::resolve_image_blocks`]).
+    ///
+    /// The fetch is `session.attachment`, which answers only for an attachment
+    /// the named session's log references — so this cannot be turned into a
+    /// read of arbitrary attachments by handing it another session's id. It runs
+    /// at most once per image ever, since the bytes then live in the store.
+    fn resolve_images(&self, session_id: &str, records: &mut [Value]) {
+        crate::dsh_attachments::resolve_image_blocks(records, |attachment_id| {
+            let answer = self
+                .with_client(|client| {
+                    client
+                        .call(
+                            "session.attachment",
+                            json!({ "sessionId": session_id, "attachmentId": attachment_id }),
+                        )
+                        .map_err(Into::into)
+                })
+                .ok()?;
+            let data = answer.get("data")?.as_str()?;
+            base64::engine::general_purpose::STANDARD.decode(data).ok()
+        });
+    }
+
     /// The session roster, shared across simultaneous scans.
     ///
     /// Fleet scans the roster from several places at once — the registry watch
@@ -356,21 +381,31 @@ impl DshSource {
 
     /// Hand a prompt to a session. Returns once dsh has admitted the turn, not
     /// when it finishes — completion arrives on the mux as `turn/end`.
+    ///
+    /// The content is built by [`crate::dsh_attachments::prompt_content`], which
+    /// lifts any attached images out of the composer's `Context files:` block
+    /// into real image parts: a path alone never reaches dsh's model, since dsh
+    /// admits images only as content parts on this call. A deployment that
+    /// refuses those images (a text-only model route, an over-limit batch) gets
+    /// the prompt again as plain text rather than losing the turn — see
+    /// [`crate::dsh_attachments::send_with_text_fallback`].
     fn prompt(client: &DshClient, session_id: &str, prompt: &str) -> Result<(), String> {
-        client
-            .call(
-                "session.prompt",
-                json!({
-                    "sessionId": session_id,
-                    // "queue" appends to the session's inbox; "steer" would cut
-                    // into a turn already running, which is not what either of
-                    // Fleet's launch paths means.
-                    "mode": "queue",
-                    "content": [{ "type": "text", "text": prompt }],
-                }),
-            )
-            .map(|_| ())
-            .map_err(Into::into)
+        crate::dsh_attachments::send_with_text_fallback(prompt, |content| {
+            client
+                .call(
+                    "session.prompt",
+                    json!({
+                        "sessionId": session_id,
+                        // "queue" appends to the session's inbox; "steer" would
+                        // cut into a turn already running, which is not what
+                        // either of Fleet's launch paths means.
+                        "mode": "queue",
+                        "content": content,
+                    }),
+                )
+                .map(|_| ())
+        })
+        .map_err(Into::into)
     }
 
     /// Arrange for `on_exit` to fire when `session_id`'s turn ends.
@@ -624,12 +659,17 @@ impl AgentSource for DshSource {
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
         let id = Self::session_id_of(path).ok_or_else(|| format!("invalid dsh URI: {path}"))?;
-        history_with(id, None, |before, max| self.fetch_history(id, before, max))
+        let mut records = history_with(id, None, |before, max| self.fetch_history(id, before, max))?;
+        self.resolve_images(id, &mut records);
+        Ok(records)
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
         let id = Self::session_id_of(path).ok_or_else(|| format!("invalid dsh URI: {path}"))?;
-        history_with(id, Some(n), |before, max| self.fetch_history(id, before, max))
+        let mut records =
+            history_with(id, Some(n), |before, max| self.fetch_history(id, before, max))?;
+        self.resolve_images(id, &mut records);
+        Ok(records)
     }
 
     fn watch_strategy(&self) -> WatchStrategy {

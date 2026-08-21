@@ -48,6 +48,23 @@ pub fn exists_in_store(path: &Path) -> bool {
     canon.starts_with(&base) && canon.is_file()
 }
 
+/// The path one `<key>/<name>` pair occupies in the store, whether or not the
+/// file is there yet.
+///
+/// The layout is this module's business, so callers that hold store coordinates
+/// rather than a path — the dsh transcript renderer derives them from an
+/// attachment digest ([`crate::dsh_attachments`]) — ask here instead of joining
+/// `.fleet/user-attachments` themselves.
+pub fn stored_path(key: &str, name: &str) -> Option<PathBuf> {
+    if key.is_empty() || key.contains('/') || key.contains('\\') || key.contains("..") {
+        return None;
+    }
+    if !valid_name(name) {
+        return None;
+    }
+    user_attachments_dir().map(|base| base.join(key).join(name))
+}
+
 /// Reject anything that isn't a bare filename (path separators, `..`, absolute).
 fn valid_name(name: &str) -> bool {
     !name.is_empty()

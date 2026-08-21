@@ -369,30 +369,10 @@ pub(crate) fn strip_leading_system_reminder(text: &str) -> &str {
 /// wall of absolute paths. This mirrors the frontend `CONTEXT_FILES_RE`
 /// (`userAttachments.ts`), which already does the same at the transcript layer.
 ///
-/// Anchored to the exact shape we emit: a `\n\nContext files:\n` marker followed
-/// by one-or-more `- <non-empty>` lines running to end of string. A prompt that
-/// merely mentions "Context files:" mid-sentence, or whose block is followed by
-/// more prose, is returned untouched.
+/// The block's exact shape lives in [`crate::context_files`], shared with the
+/// dsh source, which lifts the same paths into image content blocks.
 fn strip_trailing_context_files(text: &str) -> &str {
-    const MARKER: &str = "\n\nContext files:\n";
-    let Some(idx) = text.rfind(MARKER) else {
-        return text;
-    };
-    let tail = &text[idx + MARKER.len()..];
-    // Tolerate a single trailing newline (JS `$` matches before a final `\n`).
-    let tail = tail.strip_suffix('\n').unwrap_or(tail);
-    if tail.is_empty() {
-        return text;
-    }
-    // Every line in the block must be `- ` followed by at least one character.
-    let all_paths = tail
-        .split('\n')
-        .all(|line| line.starts_with("- ") && line.len() > 2);
-    if all_paths {
-        &text[..idx]
-    } else {
-        text
-    }
+    crate::context_files::split(text).0
 }
 
 /// Derive Fleet's display title from a raw Codex first prompt.

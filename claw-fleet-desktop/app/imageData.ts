@@ -1,16 +1,26 @@
 import type { ImageBlock, ToolResultBlock } from "./types";
+import { userAttachmentUrl } from "./userAttachments";
 
 /**
- * `data:` URI for an inline base64 image block, or null when the block carries
- * no usable payload.
+ * `src` for an image block — a `data:` URI for an inline one, a
+ * `fleet-attachment://` URL for one that names a file in the store — or null
+ * when the block carries no usable payload.
  *
- * Both places images appear in a transcript — a user's pasted screenshot and a
- * `Read` of an image file — carry the identical shape
- * `{type: "image", source: {type: "base64", media_type, data}}`.
+ * Two source shapes reach here. Claude Code's places — a user's pasted
+ * screenshot, a `Read` of an image file — carry the bytes inline as
+ * `{type: "base64", media_type, data}`. A dsh transcript instead carries
+ * `{type: "path", media_type, path}`: dsh's log holds only a durable attachment
+ * reference, and inlining the bytes would put them through the transport's
+ * 4 KiB string trim, which corrupts base64 beyond recovery. The store path goes
+ * through the same custom protocol the composer's own attachments render with.
  */
 export function imageDataUrl(block: ImageBlock): string | null {
   const source = block.source;
-  if (!source || source.type !== "base64" || !source.data) return null;
+  if (!source) return null;
+  if (source.type === "path") {
+    return source.path ? userAttachmentUrl(source.path) : null;
+  }
+  if (source.type !== "base64" || !source.data) return null;
   return `data:${source.media_type || "image/png"};base64,${source.data}`;
 }
 
