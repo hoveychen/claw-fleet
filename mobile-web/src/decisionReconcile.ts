@@ -54,7 +54,40 @@ export function reconcileDecisions({
   fresh,
   answeredAt,
   now,
+  agentKey,
+  trustedAgentKey,
 }: ReconcileInput): ReconcileResult {
+  // ── Untrustworthy-empty guard ─────────────────────────────────────────────
+  // Only "the snapshot says nothing is pending while we are showing something"
+  // is ever second-guessed. A snapshot that drops *some* cards is ordinary
+  // (they were answered), and one that adds cards can only come from an agent
+  // that sees real requests — neither is affected.
+  if (fresh.length === 0 && prev.length > 0) {
+    const attributable = !!agentKey && !!trustedAgentKey;
+    if (attributable && agentKey !== trustedAgentKey) {
+      // A different agent than the one that has been feeding us cards. It is
+      // answering out of a filesystem that isn't this desktop's, so its "empty"
+      // says nothing about our cards. Keep them, and keep trusting the old key —
+      // adopting the intruder's would flip the roles on the next snapshot.
+      return {
+        decisions: prev,
+        answeredAt,
+        ignored: { reason: "foreign-empty-snapshot", agentKey },
+        trustedAgentKey,
+      };
+    }
+    if (!attributable && prev.some((d) => now - d.arrivedAt < EMPTY_SNAPSHOT_COOLDOWN_MS)) {
+      // Can't tell who answered (no fingerprint on either side), so fall back to
+      // age: a card that arrived seconds ago being "already gone" is far more
+      // likely a stray agent than a real resolution. Bounded by the cooldown.
+      return {
+        decisions: prev,
+        answeredAt,
+        ignored: { reason: "fresh-card-cooldown", agentKey },
+        trustedAgentKey,
+      };
+    }
+  }
   const freshIds = new Set(fresh.map((d) => d.id));
   // Prune the in-flight-answer set: an id the desktop has dropped from the
   // snapshot is confirmed processed (clear it); an id still listed past the
@@ -69,5 +102,9 @@ export function reconcileDecisions({
     // just-sent answer on a slow link, and without this the card flickers back.
     .filter((d) => !nextAnswered.has(d.id))
     .map((d) => ({ ...d, arrivedAt: seen.get(d.id) ?? d.arrivedAt }));
-  return { decisions, answeredAt: nextAnswered };
+  // A snapshot that carried cards proves its sender can see this machine's
+  // pending requests — that's the agent to trust from here on. An empty one we
+  // *did* believe leaves the old key in place: there is nothing to promote.
+  const nextTrusted = fresh.length > 0 ? (agentKey ?? trustedAgentKey) : trustedAgentKey;
+  return { decisions, answeredAt: nextAnswered, trustedAgentKey: nextTrusted };
 }
