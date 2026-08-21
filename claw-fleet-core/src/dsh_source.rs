@@ -385,22 +385,27 @@ impl DshSource {
     /// The content is built by [`crate::dsh_attachments::prompt_content`], which
     /// lifts any attached images out of the composer's `Context files:` block
     /// into real image parts: a path alone never reaches dsh's model, since dsh
-    /// admits images only as content parts on this call.
+    /// admits images only as content parts on this call. A deployment that
+    /// refuses those images (a text-only model route, an over-limit batch) gets
+    /// the prompt again as plain text rather than losing the turn — see
+    /// [`crate::dsh_attachments::send_with_text_fallback`].
     fn prompt(client: &DshClient, session_id: &str, prompt: &str) -> Result<(), String> {
-        client
-            .call(
-                "session.prompt",
-                json!({
-                    "sessionId": session_id,
-                    // "queue" appends to the session's inbox; "steer" would cut
-                    // into a turn already running, which is not what either of
-                    // Fleet's launch paths means.
-                    "mode": "queue",
-                    "content": crate::dsh_attachments::prompt_content(prompt),
-                }),
-            )
-            .map(|_| ())
-            .map_err(Into::into)
+        crate::dsh_attachments::send_with_text_fallback(prompt, |content| {
+            client
+                .call(
+                    "session.prompt",
+                    json!({
+                        "sessionId": session_id,
+                        // "queue" appends to the session's inbox; "steer" would
+                        // cut into a turn already running, which is not what
+                        // either of Fleet's launch paths means.
+                        "mode": "queue",
+                        "content": content,
+                    }),
+                )
+                .map(|_| ())
+        })
+        .map_err(Into::into)
     }
 
     /// Arrange for `on_exit` to fire when `session_id`'s turn ends.

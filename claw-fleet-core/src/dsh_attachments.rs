@@ -150,6 +150,55 @@ pub fn prompt_content(prompt: &str) -> Vec<Value> {
     content
 }
 
+/// Whether this failure is the attachment layer refusing the images, as opposed
+/// to anything else that can fail a prompt.
+///
+/// `attachment-error` is dsh's own taxonomy entry for the whole family: the
+/// route's model has no vision (measured: `{"code":"attachment-error",
+/// "message":"Model \"deepseek-v4-flash\" does not support image input.",
+/// "details":{"reason":"MODEL_DOES_NOT_SUPPORT_IMAGES"}}`), a batch over the
+/// deployment's limits, bytes that fail validation. Keyed on the code rather
+/// than the message so it does not hinge on English prose, and treated as one
+/// family because the answer is the same for all of them — send the prose.
+pub fn is_attachment_refusal(err: &crate::dsh_client::DshRpcError) -> bool {
+    matches!(err, crate::dsh_client::DshRpcError::Rpc { code, .. } if code == "attachment-error")
+}
+
+/// Send one composer prompt, degrading to plain text if the deployment refuses
+/// its images.
+///
+/// dsh refuses the *entire* call when it will not take the attachments — the
+/// user's prose is rejected along with the image. That would be a regression
+/// against the behaviour this feature replaced, where an image was only ever a
+/// path in the text and a text-only model simply could not see it. So a refusal
+/// is retried once with the prompt exactly as the composer wrote it, block
+/// included: the turn still happens, and the model is still told which files
+/// were meant.
+///
+/// `send` is a parameter so the fallback is testable without a live server.
+pub fn send_with_text_fallback<S>(
+    prompt: &str,
+    mut send: S,
+) -> Result<(), crate::dsh_client::DshRpcError>
+where
+    S: FnMut(Vec<Value>) -> Result<(), crate::dsh_client::DshRpcError>,
+{
+    let content = prompt_content(prompt);
+    let carried_images = content
+        .iter()
+        .any(|b| b.get("type").and_then(Value::as_str) == Some("image"));
+    match send(content) {
+        Err(e) if carried_images && is_attachment_refusal(&e) => {
+            // Said out loud: the user attached an image and the model will not
+            // see it, which is worth knowing before wondering why the answer
+            // ignores the screenshot.
+            eprintln!("fleet dsh: attachments refused ({e}); resending the prompt as text");
+            send(vec![json!({ "type": "text", "text": prompt })])
+        }
+        other => other,
+    }
+}
+
 /// The `fleet-attachment://` path segment for one dsh image block, as
 /// `<key>/<name>`, or `None` when the block is not a resolvable image reference.
 ///
@@ -426,6 +475,85 @@ mod tests {
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["text"], prompt);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Measured against dsh 0.1.1-rc.2: a text-only route refuses the *whole*
+    /// call, prose included. The prose must still reach the model.
+    #[test]
+    fn an_attachment_refusal_resends_the_prompt_as_text() {
+        let dir = std::env::temp_dir().join(format!("fleet-dsh-fb-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shot = dir.join("shot.png");
+        std::fs::write(&shot, png()).unwrap();
+        let prompt = format!("这张图什么颜色\n\nContext files:\n- {}", shot.display());
+
+        let sent = std::cell::RefCell::new(Vec::new());
+        let result = send_with_text_fallback(&prompt, |content| {
+            sent.borrow_mut().push(content.clone());
+            if content
+                .iter()
+                .any(|b| b.get("type").and_then(Value::as_str) == Some("image"))
+            {
+                return Err(crate::dsh_client::DshRpcError::Rpc {
+                    code: "attachment-error".into(),
+                    message: "Model \"deepseek-v4-flash\" does not support image input.".into(),
+                });
+            }
+            Ok(())
+        });
+        assert!(result.is_ok(), "the turn must still happen: {result:?}");
+
+        let attempts = sent.borrow();
+        assert_eq!(attempts.len(), 2, "one image attempt, one text retry");
+        assert_eq!(attempts[1].len(), 1);
+        assert_eq!(
+            attempts[1][0]["text"], prompt,
+            "the retry is the composer's prompt verbatim, block included — the \
+             model is still told which file was meant"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Every other failure is the caller's to see. Retrying a busy agent or a
+    /// bad request as text would turn one real error into two attempts and a
+    /// misleading success.
+    #[test]
+    fn a_non_attachment_failure_is_not_retried() {
+        let dir = std::env::temp_dir().join(format!("fleet-dsh-busy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shot = dir.join("shot.png");
+        std::fs::write(&shot, png()).unwrap();
+
+        let calls = std::cell::Cell::new(0);
+        let err = send_with_text_fallback(
+            &format!("hi\n\nContext files:\n- {}", shot.display()),
+            |_| {
+                calls.set(calls.get() + 1);
+                Err(crate::dsh_client::DshRpcError::Rpc {
+                    code: "agent-busy".into(),
+                    message: "busy".into(),
+                })
+            },
+        );
+        assert_eq!(calls.get(), 1, "no retry");
+        assert!(err.is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A prompt that never carried an image cannot be degraded, so a refusal
+    /// there is just a failure — retrying identical content would be a loop.
+    #[test]
+    fn a_text_only_prompt_is_not_retried_on_refusal() {
+        let calls = std::cell::Cell::new(0);
+        let err = send_with_text_fallback("just prose", |_| {
+            calls.set(calls.get() + 1);
+            Err(crate::dsh_client::DshRpcError::Rpc {
+                code: "attachment-error".into(),
+                message: "refused".into(),
+            })
+        });
+        assert_eq!(calls.get(), 1);
+        assert!(err.is_err());
     }
 
     #[test]
