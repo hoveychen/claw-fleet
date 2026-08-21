@@ -6,7 +6,7 @@ import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { HandoffChainModal } from "./HandoffChainModal";
 import { distinctWorkspaces } from "./NewSessionForm";
-import { useSessionsStore, useUIStore } from "../store";
+import { useDetailStore, useSessionsStore, useUIStore } from "../store";
 import type { HandoffChain, PlanForest, PlanNode } from "../types";
 import styles from "./PlansView.module.css";
 
@@ -57,10 +57,9 @@ function subtreeSize(node: PlanNode): number {
 export function PlansView() {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
-  const { selectedWorkspace, expandOverrides, showCompletedRoots, doneItemsShown } = useUIStore(
-    (s) => s.mainViewState.plans,
-  );
-  const updateMainViewState = useUIStore((s) => s.updateMainViewState);
+  const { selectedWorkspace, query, expandOverrides, showCompletedRoots, doneItemsShown } =
+    useUIStore((s) => s.mainViewState.plans);
+  const updatePlansView = useUIStore((s) => s.updatePlansView);
 
   const [forest, setForest] = useState<PlanForest | null>(null);
   const [loading, setLoading] = useState(false);
@@ -71,14 +70,34 @@ export function PlansView() {
   // checkouts fold onto their repo root (a plan lives in the root's TASKS.md,
   // and the backend already merges sibling worktrees), temp cwds are dropped.
   const workspaces = useMemo(() => distinctWorkspaces(sessions, 60), [sessions]);
+  const shownWorkspaces = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return workspaces;
+    return workspaces.filter(
+      (w) => w.name.toLowerCase().includes(q) || w.path.toLowerCase().includes(q),
+    );
+  }, [workspaces, query]);
 
   // Default to the most recently active repo — the one whose plans you are
-  // most likely mid-way through.
+  // most likely mid-way through. Only when nothing was restored from disk.
   useEffect(() => {
     if (selectedWorkspace || workspaces.length === 0) return;
     const newest = workspaces.reduce((a, b) => (b.lastMs > a.lastMs ? b : a));
-    updateMainViewState("plans", { selectedWorkspace: newest.path });
-  }, [selectedWorkspace, workspaces, updateMainViewState]);
+    updatePlansView({ selectedWorkspace: newest.path });
+  }, [selectedWorkspace, workspaces, updatePlansView]);
+
+  // Jump from a relay leg into that session's detail. Mirrors ScheduleView's
+  // openFiredSession: the detail store needs the SessionInfo from the global
+  // scan, and a leg whose transcript is gone falls back to the session list.
+  const openSession = useCallback((sessionId: string) => {
+    const s = useSessionsStore.getState().sessions.find((x) => x.id === sessionId);
+    if (s) {
+      setOpenChain(null);
+      useDetailStore.getState().open(s);
+    } else {
+      useUIStore.getState().setViewMode(useUIStore.getState().lastSessionViewMode);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     if (!selectedWorkspace) return;
@@ -99,10 +118,10 @@ export function PlansView() {
   }, [load]);
 
   const setExpanded = (id: string, open: boolean) =>
-    updateMainViewState("plans", { expandOverrides: { ...expandOverrides, [id]: open } });
+    updatePlansView({ expandOverrides: { ...expandOverrides, [id]: open } });
 
   const toggleDoneItems = (id: string) =>
-    updateMainViewState("plans", {
+    updatePlansView({
       doneItemsShown: doneItemsShown.includes(id)
         ? doneItemsShown.filter((x) => x !== id)
         : [...doneItemsShown, id],
@@ -137,6 +156,11 @@ export function PlansView() {
       view="plans"
       title={t("plans.title", "计划树")}
       count={forest ? liveRoots.length : null}
+      search={{
+        value: query,
+        onChange: (v) => updatePlansView({ query: v }),
+        placeholder: t("plans.search_placeholder", "筛选仓库…"),
+      }}
       bannerCenter={
         <button className={styles.refresh} onClick={() => void load()} title={t("plans.refresh", "刷新")}>
           <RefreshCw size={14} strokeWidth={2} className={loading ? styles.spin : undefined} />
@@ -145,12 +169,12 @@ export function PlansView() {
       secondary={
         <div className={styles.rail}>
           <div className={styles.rail_label}>{t("plans.workspaces", "仓库")}</div>
-          {workspaces.map((ws) => (
+          {shownWorkspaces.map((ws) => (
             <button
               key={ws.path}
               className={`${styles.rail_item} ${ws.path === selectedWorkspace ? styles.rail_active : ""}`}
               title={ws.path}
-              onClick={() => updateMainViewState("plans", { selectedWorkspace: ws.path })}
+              onClick={() => updatePlansView({ selectedWorkspace: ws.path })}
             >
               {ws.name}
             </button>
@@ -174,7 +198,7 @@ export function PlansView() {
           <>
             <button
               className={styles.fold_row}
-              onClick={() => updateMainViewState("plans", { showCompletedRoots: !showCompletedRoots })}
+              onClick={() => updatePlansView({ showCompletedRoots: !showCompletedRoots })}
             >
               <ChevronRight
                 size={13}
@@ -214,6 +238,7 @@ export function PlansView() {
           hop={chainLegCount(openChain)}
           len={chainLegCount(openChain)}
           onClose={() => setOpenChain(null)}
+          onOpenSession={openSession}
         />
       )}
     </PageShell>

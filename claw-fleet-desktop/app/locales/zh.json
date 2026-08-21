@@ -560,7 +560,8 @@
     "relay": "接力 {{count}} 棒",
     "unattached": "未挂靠的接力链",
     "anonymous": "另有 {{count}} 个旧版匿名计划块（无 id，无法入树）",
-    "orphan_tip": "父计划 {{parent}} 不存在,已提升为根"
+    "orphan_tip": "父计划 {{parent}} 不存在,已提升为根",
+    "search_placeholder": "筛选仓库…"
   },
   "memory": {
     "panel_title": "Memory",
