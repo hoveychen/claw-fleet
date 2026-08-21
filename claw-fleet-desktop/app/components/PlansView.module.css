@@ -1,0 +1,300 @@
+/* 计划树 — the workspace's plan forest as an indented, self-drawn tree.
+   Every colour comes from an App.css token (check-css-tokens gates this). */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px 24px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+/* ── Banner ─────────────────────────────────────────────────────────────── */
+
+.refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+.refresh:hover {
+  color: var(--color-text);
+  background: var(--color-bg-card-hover);
+}
+.spin {
+  animation: plans_spin 0.9s linear infinite;
+}
+@keyframes plans_spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Workspace rail ─────────────────────────────────────────────────────── */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 8px;
+  overflow-y: auto;
+  height: 100%;
+}
+.rail_label {
+  padding: 0 6px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.rail_item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 12.5px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.rail_item:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.rail_active {
+  background: var(--color-bg-card-selected);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* ── Tree row ───────────────────────────────────────────────────────────── */
+
+.node {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 10px 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.row:hover {
+  background: var(--color-bg-hover);
+}
+.row_done {
+  color: var(--color-text-dim);
+}
+
+.caret {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform 0.12s ease;
+}
+.caret_open {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transform: rotate(90deg);
+  transition: transform 0.12s ease;
+}
+
+.title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46%;
+}
+.id {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.kind {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-teal);
+  background: color-mix(in srgb, var(--color-teal) 15%, transparent);
+}
+.orphan {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+.source {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+.spacer {
+  flex: 1;
+}
+.chain_count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-accent);
+}
+.progress {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.progress_live {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+/* ── Expanded body ──────────────────────────────────────────────────────── */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 4px;
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+.item_done {
+  color: var(--color-text-muted);
+}
+.box {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.marker {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+}
+.item_text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.done_fold,
+.fold_row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  padding: 3px 8px 3px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.done_fold:hover,
+.fold_row:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-dim);
+}
+.fold_row {
+  margin-top: 8px;
+}
+
+.chain {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin: 3px 0;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chain:hover {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+.chain_id {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+/* ── Tail sections ──────────────────────────────────────────────────────── */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-soft);
+}
+.section_label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.footnote {
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.error {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+  font-size: 12px;
+}

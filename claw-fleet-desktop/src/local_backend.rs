@@ -2273,6 +2273,17 @@ impl Backend for LocalBackend {
         crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace_path), session_id)
     }
 
+    fn get_plan_forest(&self, workspace_path: &str) -> claw_fleet_core::plan_forest::PlanForest {
+        // Chains are stored per-machine, not per-workspace, so scope them here
+        // before the join — otherwise another repo's relays would show up on a
+        // same-named plan id.
+        let chains = claw_fleet_core::handoff::list_chains()
+            .into_iter()
+            .filter(|c| c.workspace_path == workspace_path)
+            .collect();
+        claw_fleet_core::plan_forest::build(std::path::Path::new(workspace_path), chains)
+    }
+
     fn list_browse_paths(&self) -> Vec<String> {
         claw_fleet_core::browse_paths::list()
     }

@@ -137,6 +137,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { path: q(a.workspacePath), session: q(a.sessionId) },
   }),
 
+  get_plan_forest: (a) => ({
+    method: "GET",
+    path: "/plan_forest",
+    query: { path: q(a.workspacePath) },
+  }),
+
   today_usage: () => ({ method: "GET", path: "/today_usage" }),
 
   // The launcher builds its tool picker from the real source registry — with
