@@ -100,6 +100,7 @@ pub mod paths {
     }
 }
 pub mod plan_approval;
+pub mod plan_gate;
 pub mod plan_ops;
 pub mod plugins;
 pub mod prd_discipline;

@@ -25,11 +25,15 @@ pub(crate) fn cmd_plan(action: PlanCommands) {
             plan_id,
             title,
             parent,
+            root,
+            kind,
         } => emit(plan_ops::create(
             &cwd,
             &plan_id,
             &title,
             parent.as_deref(),
+            root,
+            claw_fleet_core::prd_tasks::PlanKind::from_attr(Some(&kind)),
             sid.as_deref(),
         )),
         PlanCommands::Add { plan_id, task, text } => {
