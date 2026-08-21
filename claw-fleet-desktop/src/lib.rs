@@ -390,6 +390,9 @@ impl Backend for NullBackend {
     ) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
         vec![]
     }
+    fn get_plan_forest(&self, _: &str) -> claw_fleet_core::plan_forest::PlanForest {
+        Default::default()
+    }
     fn list_skills(&self) -> Vec<SkillItem> {
         vec![]
     }

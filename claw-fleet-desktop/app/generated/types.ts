@@ -237,6 +237,18 @@ export type SessionHandoffInfo = { chainId: string,
 hop: number, 
 chainLen: number, };
 
+export type PlanKind = "exec" | "explore";
+
+export type PlanNode = { 
+id: string, title: string | null, 
+source: string | null, kind: PlanKind, items: Array<TaskItem>, done: number, total: number, 
+chains: Array<HandoffChain>, children: Array<PlanNode>, 
+orphanedParent: string | null, };
+
+export type PlanForest = { roots: Array<PlanNode>, 
+unattachedChains: Array<HandoffChain>, 
+anonymous: number, };
+
 export type WatchSummary = { id: string, 
 note?: string | null, 
 created: number, 

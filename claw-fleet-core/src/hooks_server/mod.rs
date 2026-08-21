@@ -912,6 +912,9 @@ fn handle_request(
             crate::routes::WIKI_PUBLISH_TEXT if request.method() == &tiny_http::Method::Post => route_wiki_publish_text(ctx, request, &query, json_header, path),
 
             crate::routes::TASK_PLANS => route_task_plans(ctx, request, &query, json_header, path),
+            crate::routes::PLAN_FOREST => {
+                route_plan_forest(ctx, request, &query, json_header, path)
+            }
 
             crate::routes::SKILLS => route_skills(ctx, request, &query, json_header, path),
 

@@ -106,6 +106,7 @@ pub const PERMISSION_PROMPT_PENDING: &str = "/permission-prompt/pending";
 pub const PERMISSION_PROMPT_RESPOND: &str = "/permission-prompt/respond";
 pub const PLAN_APPROVAL_PENDING: &str = "/plan-approval/pending";
 pub const PLAN_APPROVAL_RESPOND: &str = "/plan-approval/respond";
+pub const PLAN_FOREST: &str = "/plan_forest";
 pub const PLUGINS: &str = "/plugins";
 pub const PLUGINS_INSTALL: &str = "/plugins/install";
 pub const PLUGINS_MARKETPLACES: &str = "/plugins/marketplaces";

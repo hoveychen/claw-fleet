@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, ListChecks, Coffee } from "lucide-react";
+import { Menu, Shield, ListChecks, Coffee, ListTree } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
@@ -17,6 +17,7 @@ import { MemoryView } from "./MemoryView";
 import { WikiView } from "./WikiView";
 import { AuditView } from "./AuditView";
 import { ScheduleView } from "./ScheduleView";
+import { PlansView } from "./PlansView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
 import { FilesView } from "./FilesView";
@@ -336,6 +337,13 @@ export function SessionList() {
             <span className={styles.nav_label}>{t("view_schedule", "计划")}</span>
           </button>
           <button
+            className={`${styles.nav_item} ${viewMode === "plans" ? styles.nav_active : ""}`}
+            onClick={() => navTo("plans")}
+          >
+            <span className={styles.nav_icon}><ListTree size={14} strokeWidth={1.5} /></span>
+            <span className={styles.nav_label}>{t("view_plans", "计划树")}</span>
+          </button>
+          <button
             className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
             onClick={() => navTo("wiki")}
           >
@@ -517,6 +525,8 @@ export function SessionList() {
         <MemoryView />
       ) : viewMode === "schedule" ? (
         <ScheduleView />
+      ) : viewMode === "plans" ? (
+        <PlansView />
       ) : viewMode === "wiki" ? (
         <WikiView />
       ) : viewMode === "skills" ? (

@@ -38,6 +38,7 @@ import {
   MOCK_SKILLS,
   MOCK_SKILL_FILES,
   MOCK_MEMORY_CONTENT,
+  MOCK_PLAN_FOREST,
   MOCK_MEMORY_HISTORY,
   MOCK_DSH_MODELS,
   MOCK_SOURCES_CONFIG,
@@ -397,6 +398,8 @@ function handleIPC(
         : [];
     case "get_task_plans":
       return [];
+    case "get_plan_forest":
+      return MOCK_PLAN_FOREST;
     case "get_platform":
       return "macos";
     case "get_waiting_alerts":

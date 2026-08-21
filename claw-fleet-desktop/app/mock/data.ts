@@ -4,7 +4,7 @@
  * statuses, and workspaces to showcase all core features.
  */
 
-import type { AuditEvent, AuditRuleInfo, AuditSummary, DailyMetrics, DailyReport, DailyReportStats, HandoffChain, Lesson, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
+import type { AuditEvent, AuditRuleInfo, AuditSummary, DailyMetrics, DailyReport, DailyReportStats, HandoffChain, Lesson, PlanForest, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
 
 const NOW = Date.now();
 const MIN = 60_000;
@@ -835,6 +835,75 @@ export const MOCK_HANDOFF_CHAINS: Record<string, HandoffChain> = {
       },
     ],
   },
+};
+
+// ── Plan forest (计划树 view) ────────────────────────────────────────────────
+// One live root with a child plan and a relay folded onto it, plus a finished
+// root — enough to exercise every fold the view draws.
+
+export const MOCK_PLAN_FOREST: PlanForest = {
+  roots: [
+    {
+      id: "billing-migration",
+      title: "Move usage billing onto the v2 ledger",
+      source: null,
+      kind: "exec",
+      items: [
+        { text: "**P1** — Audit the current schema", done: true },
+        { text: "**P2** — Backfill into the shadow table", done: true },
+        { text: "**P3** — Validate drift on staging", done: true },
+        { text: "**P4** — Flip the read path behind usage_billing_v2", done: false },
+        { text: "**P5** — Drop the legacy tables after a 48h dual-write bake", done: false },
+      ],
+      done: 3,
+      total: 5,
+      chains: [MOCK_HANDOFF_CHAINS["chain-billing"]],
+      children: [
+        {
+          id: "ledger-index-fix",
+          title: "Add the (ts, idempotency_key) unique index first",
+          source: null,
+          kind: "explore",
+          items: [{ text: "**P1** — Measure the index build on a staging clone", done: false }],
+          done: 0,
+          total: 1,
+          chains: [],
+          children: [],
+          orphanedParent: null,
+        },
+      ],
+      orphanedParent: null,
+    },
+    {
+      id: "webhook-reconcile",
+      title: "Reconcile duplicated payment webhooks",
+      source: null,
+      kind: "exec",
+      items: [
+        { text: "**P1** — Dedupe by event id", done: true },
+        { text: "**P2** — Backfill the ledger", done: false },
+      ],
+      done: 1,
+      total: 2,
+      chains: [MOCK_HANDOFF_CHAINS["chain-payments"]],
+      children: [],
+      orphanedParent: "search-index-rebuild",
+    },
+    {
+      id: "search-facets",
+      title: "Rebuild the search facet index",
+      source: null,
+      kind: "exec",
+      items: [{ text: "**P1** — Reindex and verify facet counts", done: true }],
+      done: 1,
+      total: 1,
+      chains: [],
+      children: [],
+      orphanedParent: null,
+    },
+  ],
+  unattachedChains: [MOCK_HANDOFF_CHAINS["chain-search"]],
+  anonymous: 2,
 };
 
 // ── Messages (for session detail view) ──────────────────────────────────────

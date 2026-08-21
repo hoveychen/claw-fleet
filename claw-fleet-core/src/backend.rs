@@ -624,6 +624,13 @@ pub trait Backend: Send + Sync {
         session_id: Option<&str>,
     ) -> Vec<crate::prd_tasks::TaskPlanDetail>;
 
+    /// The workspace's whole execution chain: the `parent`-linked plan forest
+    /// with each plan's handoff relay chains folded onto its node.
+    ///
+    /// Deliberately abstract (no default body) so the compiler — not the drift
+    /// guard — forces every transport to implement it.
+    fn get_plan_forest(&self, workspace_path: &str) -> crate::plan_forest::PlanForest;
+
     // ── User-added browse paths ───────────────────────────────────────────────
     // Directories the user added by hand ("添加路径") or cloned from the 仓库
     // page. They have no sessions of their own, so without this registry the

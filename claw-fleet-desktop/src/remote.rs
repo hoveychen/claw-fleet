@@ -906,6 +906,15 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&url).unwrap_or_default()
     }
 
+    fn get_plan_forest(&self, workspace_path: &str) -> claw_fleet_core::plan_forest::PlanForest {
+        let url = format!(
+            "{}?path={}",
+            claw_fleet_core::routes::PLAN_FOREST,
+            encode_path(workspace_path)
+        );
+        self.probe.get(&url).unwrap_or_default()
+    }
+
     fn list_browse_paths(&self) -> Vec<String> {
         self.probe
             .get(claw_fleet_core::routes::BROWSE_PATHS)
