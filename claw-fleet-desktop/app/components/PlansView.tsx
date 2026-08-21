@@ -35,6 +35,19 @@ function chainLegCount(chain: HandoffChain): number {
   return ids.length;
 }
 
+/** Split a TASKS.md item into its `P<n>` marker and the rest.
+ *
+ *  Items are written `**P3** — do the thing`, so the raw string renders as
+ *  literal asterisks — the P-number, the one part you scan a tree by, is the
+ *  part that looks like noise. Pull it out as a badge and drop the emphasis
+ *  markers from the remainder. Anything that doesn't match keeps its text
+ *  verbatim rather than being mangled by a half-baked markdown pass. */
+function splitMarker(text: string): { marker: string | null; rest: string } {
+  const m = /^\*\*(P\d+[a-z]?)\*\*\s*(?:[—–-]\s*)?([\s\S]*)$/.exec(text.trim());
+  if (!m) return { marker: null, rest: text };
+  return { marker: m[1], rest: m[2].replace(/\*\*/g, "") };
+}
+
 /** Total plans in a subtree, for the 「已完成 N 个」 fold's count. */
 function subtreeSize(node: PlanNode): number {
   return 1 + node.children.reduce((n, c) => n + subtreeSize(c), 0);
@@ -306,12 +319,7 @@ function PlanRow({
       {open && (
         <div className={styles.body} style={{ paddingLeft: 8 + depth * 18 + 20 }}>
           {pendingItems.map((item, i) => (
-            <div key={`p${i}`} className={styles.item}>
-              <span className={styles.box} aria-hidden>
-                ☐
-              </span>
-              <span className={styles.item_text}>{item.text}</span>
-            </div>
+            <TaskLine key={`p${i}`} text={item.text} />
           ))}
           {doneItems.length > 0 && (
             <button className={styles.done_fold} onClick={() => onToggleDoneItems(node.id)}>
@@ -323,15 +331,7 @@ function PlanRow({
               {t("plans.done_items", { count: doneItems.length, defaultValue: "已完成 {{count}} 条" })}
             </button>
           )}
-          {showDone &&
-            doneItems.map((item, i) => (
-              <div key={`d${i}`} className={`${styles.item} ${styles.item_done}`}>
-                <span className={styles.box} aria-hidden>
-                  ☑
-                </span>
-                <span className={styles.item_text}>{item.text}</span>
-              </div>
-            ))}
+          {showDone && doneItems.map((item, i) => <TaskLine key={`d${i}`} text={item.text} done />)}
           {node.chains.map((c) => (
             <ChainChip key={c.chainId} chain={c} onOpen={onOpenChain} />
           ))}
@@ -349,6 +349,20 @@ function PlanRow({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** One P-task line: `P3` as a badge, then its prose. */
+function TaskLine({ text, done }: { text: string; done?: boolean }) {
+  const { marker, rest } = splitMarker(text);
+  return (
+    <div className={`${styles.item} ${done ? styles.item_done : ""}`}>
+      <span className={styles.box} aria-hidden>
+        {done ? "☑" : "☐"}
+      </span>
+      {marker && <span className={styles.marker}>{marker}</span>}
+      <span className={styles.item_text}>{rest}</span>
     </div>
   );
 }

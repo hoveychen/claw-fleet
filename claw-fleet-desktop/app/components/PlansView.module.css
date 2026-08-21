@@ -208,6 +208,13 @@
   color: var(--color-text-muted);
   font-size: 11px;
 }
+.marker {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+}
 .item_text {
   white-space: pre-wrap;
   word-break: break-word;
