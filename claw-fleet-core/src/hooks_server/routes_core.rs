@@ -649,6 +649,28 @@ pub(crate) fn route_task_plans(
                 );
             }
 
+/// `GET /plan_forest?path=<workspace>` — the workspace's plan forest with its
+/// handoff chains joined in. Chains are filtered to the requested workspace here
+/// (they are stored per-machine), matching what `LocalBackend` does, so both
+/// transports return the same shape.
+pub(crate) fn route_plan_forest(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+    let workspace_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+    let chains = crate::handoff::list_chains()
+        .into_iter()
+        .filter(|c| c.workspace_path == workspace_path)
+        .collect();
+    let forest = crate::plan_forest::build(std::path::Path::new(&workspace_path), chains);
+    let body = serde_json::to_string(&forest).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_search(
     ctx: &ServeCtx,
     request: tiny_http::Request,
