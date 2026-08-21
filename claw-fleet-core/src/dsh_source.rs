@@ -356,6 +356,11 @@ impl DshSource {
 
     /// Hand a prompt to a session. Returns once dsh has admitted the turn, not
     /// when it finishes — completion arrives on the mux as `turn/end`.
+    ///
+    /// The content is built by [`crate::dsh_attachments::prompt_content`], which
+    /// lifts any attached images out of the composer's `Context files:` block
+    /// into real image parts: a path alone never reaches dsh's model, since dsh
+    /// admits images only as content parts on this call.
     fn prompt(client: &DshClient, session_id: &str, prompt: &str) -> Result<(), String> {
         client
             .call(
@@ -366,7 +371,7 @@ impl DshSource {
                     // into a turn already running, which is not what either of
                     // Fleet's launch paths means.
                     "mode": "queue",
-                    "content": [{ "type": "text", "text": prompt }],
+                    "content": crate::dsh_attachments::prompt_content(prompt),
                 }),
             )
             .map(|_| ())
