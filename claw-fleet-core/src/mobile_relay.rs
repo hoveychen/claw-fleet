@@ -1119,6 +1119,35 @@ const TAIL_THUMB_MAX_PER_RESULT: usize = 3;
 /// blob shouldn't be re-decoded on every poll.
 fn tail_thumb_from_base64(media_type: &str, data: &str) -> Option<String> {
     use base64::Engine as _;
+    tail_thumb_cached(data, media_type, || {
+        base64::engine::general_purpose::STANDARD.decode(data).ok()
+    })
+}
+
+/// [`tail_thumb_from_base64`] for an image block whose bytes live in the
+/// user-attachment store instead of inline — the shape a dsh transcript carries
+/// (see `dsh_attachments::resolve_image_blocks`).
+///
+/// The path comes out of a transcript, so it is trusted no further than the
+/// store: [`crate::user_attachments::exists_in_store`] canonicalizes it and
+/// requires it to resolve inside the store root, so this can never become a read
+/// of an arbitrary file on the host. Keying the cache on the path is sound
+/// because the store is content-addressed — one path is always the same bytes.
+fn tail_thumb_from_store_path(media_type: &str, path: &str) -> Option<String> {
+    let file = std::path::Path::new(path);
+    if !crate::user_attachments::exists_in_store(file) {
+        return None;
+    }
+    tail_thumb_cached(path, media_type, || std::fs::read(file).ok())
+}
+
+/// The memoised re-encode behind both thumbnail entry points. `ident` keys the
+/// cache; `bytes` is only called on a miss.
+fn tail_thumb_cached<F>(ident: &str, media_type: &str, bytes: F) -> Option<String>
+where
+    F: FnOnce() -> Option<Vec<u8>>,
+{
+    use base64::Engine as _;
     use std::collections::HashMap;
     use std::hash::{Hash, Hasher};
     use std::sync::Mutex;
@@ -1127,7 +1156,7 @@ fn tail_thumb_from_base64(media_type: &str, data: &str) -> Option<String> {
     static CACHE: Mutex<Option<HashMap<u64, Option<String>>>> = Mutex::new(None);
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    data.hash(&mut hasher);
+    ident.hash(&mut hasher);
     let key = hasher.finish();
 
     if let Some(cached) = CACHE
@@ -1138,9 +1167,7 @@ fn tail_thumb_from_base64(media_type: &str, data: &str) -> Option<String> {
         return cached;
     }
 
-    let thumb = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .ok()
+    let thumb = bytes()
         .and_then(|bytes| {
             let (out, mime) = downscale_image(
                 bytes,
@@ -1163,6 +1190,23 @@ fn tail_thumb_from_base64(media_type: &str, data: &str) -> Option<String> {
         map.insert(key, thumb.clone());
     }
     thumb
+}
+
+/// Thumbnail one image block whichever way it carries its bytes: inline base64
+/// (Claude Code, codex) or a user-attachment store path (dsh).
+fn tail_thumb_of_image_block(block: &Value) -> Option<String> {
+    if let Some((media_type, data)) = base64_image_source(block) {
+        return tail_thumb_from_base64(media_type, data);
+    }
+    let source = block.get("source")?;
+    if source.get("type").and_then(Value::as_str) != Some("path") {
+        return None;
+    }
+    let media_type = source
+        .get("media_type")
+        .and_then(Value::as_str)
+        .unwrap_or("image/png");
+    tail_thumb_from_store_path(media_type, source.get("path")?.as_str()?)
 }
 
 /// Extract a base64 image `source` from a content block, if present.
@@ -1309,9 +1353,7 @@ fn slim_tail_block(block: &Value) -> Value {
     }
     match obj.get("type").and_then(Value::as_str) {
         Some("image") => {
-            if let Some(thumb) = base64_image_source(block)
-                .and_then(|(media_type, data)| tail_thumb_from_base64(media_type, data))
-            {
+            if let Some(thumb) = tail_thumb_of_image_block(block) {
                 out.insert(
                     "source".into(),
                     json!({ "type": "base64", "media_type": "image/jpeg", "data": thumb }),
@@ -1326,8 +1368,7 @@ fn slim_tail_block(block: &Value) -> Value {
                 .into_iter()
                 .flatten()
                 .filter(|b| b.get("type").and_then(Value::as_str) == Some("image"))
-                .filter_map(base64_image_source)
-                .filter_map(|(media_type, data)| tail_thumb_from_base64(media_type, data))
+                .filter_map(tail_thumb_of_image_block)
                 .take(TAIL_THUMB_MAX_PER_RESULT)
                 .map(Value::from)
                 .collect();
@@ -5876,6 +5917,62 @@ mod tests {
         assert!(block.get("content").is_none(), "result body stays stripped");
         let thumbs = block["_thumbs"].as_array().expect("thumbs present");
         assert_eq!(thumbs.len(), TAIL_THUMB_MAX_PER_RESULT, "thumb count capped");
+    }
+
+    /// dsh's transcripts carry an image as a store path, not inline base64
+    /// (`dsh_attachments::resolve_image_blocks`). The phone renders only what
+    /// the relay thumbnails, so that shape has to thumbnail too — and a path
+    /// outside the store must not be read at all.
+    #[test]
+    fn slim_tail_thumbnails_a_store_path_image() {
+        use base64::Engine as _;
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!("fleet-relay-path-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized via fleet_home_lock
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let mut buf = image::RgbImage::new(600, 400);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            *px = image::Rgb([(x / 4) as u8, (y / 2) as u8, ((x + y) / 8) as u8]);
+        }
+        let stored = crate::user_attachments::ingest_bytes(&png_of(buf), "shot.png").unwrap();
+
+        let path_block = |path: &str| {
+            json!({ "type": "user", "uuid": "p1", "message": { "role": "user", "content": [
+                { "type": "image",
+                  "source": { "type": "path", "media_type": "image/png", "path": path } }
+            ]}})
+        };
+
+        let slim = slim_tail_messages(vec![path_block(&stored.to_string_lossy())]);
+        let block = &slim[0]["message"]["content"][0];
+        assert_eq!(block["_thumb"], json!(true));
+        assert_eq!(block["source"]["media_type"], json!("image/jpeg"));
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(block["source"]["data"].as_str().expect("thumb data"))
+            .expect("thumb decodes");
+        assert!(bytes.len() <= TAIL_THUMB_HARD_CAP_BYTES);
+        image::load_from_memory(&bytes).expect("thumb is a valid image");
+
+        // A path outside the store is refused: a transcript must not be able to
+        // make the relay read arbitrary host files.
+        let outside = tmp.join("outside.png");
+        std::fs::write(&outside, std::fs::read(&stored).unwrap()).unwrap();
+        let slim = slim_tail_messages(vec![path_block(&outside.to_string_lossy())]);
+        let block = &slim[0]["message"]["content"][0];
+        assert!(block.get("source").is_none(), "path outside the store ships no source");
+        assert!(block.get("_thumb").is_none());
+
+        // SAFETY: serialized via fleet_home_lock
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     /// `tool_detail` is the tap-to-expand counterpart of the slim stream: full

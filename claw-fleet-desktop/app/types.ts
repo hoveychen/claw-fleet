@@ -239,7 +239,14 @@ export interface RedactedThinkingBlock {
 
 export interface ImageBlock {
   type: "image";
-  source: { type: string; media_type: string; data: string };
+  /**
+   * `type: "base64"` carries the bytes inline (Claude Code's shape, and a
+   * `Read` of an image file). `type: "path"` names a file in the
+   * user-attachment store instead and has no `data` — the shape
+   * `dsh_attachments::resolve_image_blocks` emits, since dsh's own log holds
+   * only a durable reference and inline base64 would be transport-trimmed.
+   */
+  source: { type: string; media_type: string; data?: string; path?: string };
 }
 
 export type ContentBlock =
