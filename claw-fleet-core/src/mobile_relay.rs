@@ -1905,6 +1905,34 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
 // `serve_request` above; the match is now just a method-literal → handler
 // table. Handlers that ignore the request body take `_params`.
 
+/// Who answered a request — stamped onto every `pending_snapshot` reply.
+///
+/// The relay hands each client frame to **every** agent in the channel
+/// (`Channel.agents` is a map, `Delivery::Delivered(n)`), and the phone keeps
+/// whichever reply arrives first. So a second agent process — a `fleet serve`
+/// started with a redirected `FLEET_HOME`, a stray build, a probe on another
+/// box — can win the race and answer out of a filesystem that holds none of
+/// this machine's pending cards. Observed 2026-08-21: six such joins inside
+/// half an hour, each ~20s, each able to blank the phone's card list because
+/// the snapshot is authoritative there.
+///
+/// `home` is the field that identifies the impostor: it is the `~/.fleet`
+/// parent this process actually reads, so a reply from a temp-home serve is
+/// self-evident. The client only ever compares the whole string for equality
+/// and shows it for diagnosis — nothing parses it.
+fn agent_fingerprint() -> Value {
+    let host = sysinfo::System::host_name().unwrap_or_else(|| "?".into());
+    let home = crate::session::real_home_dir()
+        .map(|h| h.display().to_string())
+        .unwrap_or_else(|| "?".into());
+    json!({
+        "host": host,
+        "pid": std::process::id(),
+        "home": home,
+        "ver": env!("CARGO_PKG_VERSION"),
+    })
+}
+
 // Same aggregation as `LocalBackend::list_pending_decisions`, minus
 // the session-cache display enrichment — the mobile client resolves
 // workspace/title labels from its own `sessions` snapshot.
@@ -1930,6 +1958,7 @@ fn serve_pending_snapshot(_params: &Value) -> Result<Value, String> {
         ids.iter().filter_map(|id| read(id)).collect()
     };
     Ok(json!({
+        "agent": agent_fingerprint(),
         "guard": read_live(crate::guard::list_pending_requests(), &|id| {
             crate::guard::read_request(id).and_then(|r| serde_json::to_value(r).ok())
         }),
@@ -3479,6 +3508,36 @@ mod tests {
             }
         }
         let _ = fs::remove_dir_all(&home);
+    }
+
+    /// Every snapshot must say who served it. The relay broadcasts each client
+    /// request to every agent in the channel and the phone keeps the first
+    /// reply, so without this stamp a stray agent's empty list is
+    /// indistinguishable from the desktop's — which is exactly how the phone's
+    /// cards got blanked (see `agent_fingerprint`). `home` is the field that
+    /// exposes the impostor, so assert it points at the home in force.
+    #[test]
+    fn the_phone_snapshot_says_which_agent_served_it() {
+        with_temp_home(|| {
+            let snap = serve_request("pending_snapshot", &serde_json::json!({})).unwrap();
+            let agent = &snap["agent"];
+            assert!(
+                agent.is_object(),
+                "the reply must carry an agent fingerprint: {snap}"
+            );
+            assert_eq!(agent["pid"], serde_json::json!(std::process::id()));
+            assert_eq!(agent["ver"], serde_json::json!(env!("CARGO_PKG_VERSION")));
+            assert!(
+                agent["host"].as_str().is_some_and(|h| !h.is_empty()),
+                "host must be populated: {agent}"
+            );
+            assert_eq!(
+                agent["home"],
+                serde_json::json!(crate::session::real_home_dir().unwrap().display().to_string()),
+                "home has to be the tree this process actually reads — that is what \
+                 identifies a serve running on a redirected FLEET_HOME"
+            );
+        });
     }
 
     #[test]

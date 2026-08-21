@@ -55,8 +55,21 @@ export interface PendingDecision {
   arrivedAt: number;
 }
 
+/** Who served a `pending_snapshot` (mobile_relay::agent_fingerprint).
+ *  The relay broadcasts every request to every agent in the channel and we keep
+ *  the first reply, so a stray agent can answer in the desktop's place. `home`
+ *  is what gives it away — it's the tree that process actually reads. */
+export interface AgentFingerprint {
+  host?: string;
+  pid?: number;
+  home?: string;
+  ver?: string;
+}
+
 /** `pending_snapshot` reply shape (see mobile_relay::serve_request). */
 export interface PendingSnapshot {
+  /** Absent when the desktop predates fingerprinting. */
+  agent?: AgentFingerprint;
   guard?: GuardRequest[];
   elicitation?: ElicitationRequest[];
   fleetAsk?: FleetAskRequest[];

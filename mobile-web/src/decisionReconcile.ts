@@ -1,4 +1,13 @@
-import type { PendingDecision } from "./types";
+import type { AgentFingerprint, PendingDecision } from "./types";
+
+/** Collapse a fingerprint into the string reconcile compares for equality.
+ *  `undefined` when the reply carried no `agent` at all — that's the
+ *  "unattributable" case the cooldown below covers. */
+export function agentKeyOf(agent: AgentFingerprint | undefined): string | undefined {
+  if (!agent) return undefined;
+  const { host = "?", pid = 0, home = "?", ver = "?" } = agent;
+  return `${host}/pid=${pid}/home=${home}/v${ver}`;
+}
 
 /** How long to keep suppressing a card the user answered on THIS device but
  *  whose answer hasn't been confirmed processed by the desktop yet. The happy
