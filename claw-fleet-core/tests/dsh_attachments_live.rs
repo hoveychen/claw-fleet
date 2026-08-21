@@ -144,3 +144,73 @@ fn live_an_attached_image_reaches_the_model_and_renders_from_the_store() {
         "dsh's digest and Fleet's store key agree, so no second copy was made"
     );
 }
+
+/// The same attachment against a **text-only** route. Measured: dsh refuses the
+/// whole call (`attachment-error` / `MODEL_DOES_NOT_SUPPORT_IMAGES`), prose
+/// included — so without the fallback the user's message would simply be lost.
+#[test]
+#[ignore = "runs a real turn (costs model credits); run manually with --ignored"]
+fn live_a_text_only_model_still_gets_the_prompt() {
+    let _guard = ServerGuard;
+
+    let stored = claw_fleet_core::user_attachments::ingest_bytes(&probe_png(), "probe.png")
+        .expect("ingest the probe image");
+
+    let source = DshSource::new();
+    let prompt = format!(
+        "只回答两个字：收到。不要用任何工具。\n\nContext files:\n- {}",
+        stored.display()
+    );
+    let spawned = source
+        .spawn(&SpawnSpec {
+            workspace_path: "/tmp".into(),
+            prompt: prompt.clone(),
+            model: Some("deepseek-official/deepseek-v4-flash".into()),
+            ..Default::default()
+        })
+        .expect("spawn must succeed despite the refused image");
+    let uri = format!(
+        "{DSH_URI_PREFIX}{}",
+        spawned.session_id.expect("spawn must report an id")
+    );
+
+    let answer = wait_for(Duration::from_secs(180), || {
+        let records = source.get_messages_tail(&uri, 50).ok()?;
+        records
+            .iter()
+            .rev()
+            .find_map(|r| {
+                (r.get("type").and_then(|t| t.as_str()) == Some("assistant")).then(|| {
+                    r["message"]["content"]
+                        .as_array()
+                        .map(|blocks| {
+                            blocks
+                                .iter()
+                                .filter(|b| {
+                                    b.get("type").and_then(|t| t.as_str()) == Some("text")
+                                })
+                                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                                .collect::<Vec<_>>()
+                                .join("")
+                        })
+                        .unwrap_or_default()
+                })
+            })
+            .filter(|s| !s.trim().is_empty())
+    })
+    .expect("the degraded turn must still produce an answer");
+    println!("text-only model answered: {answer:?}");
+
+    // The prose survived, and the attachment stayed a path in the text — which
+    // is exactly the pre-feature behaviour, not a lost message.
+    let records = source.get_messages(&uri).expect("read the history back");
+    let first_user_text = records
+        .iter()
+        .find(|r| r.get("type").and_then(|t| t.as_str()) == Some("user"))
+        .and_then(|r| r["message"]["content"][0]["text"].as_str())
+        .expect("the human prompt must be in the history");
+    assert!(
+        first_user_text.contains("Context files:") && first_user_text.contains("probe.png"),
+        "the degraded prompt keeps its block: {first_user_text:?}"
+    );
+}
