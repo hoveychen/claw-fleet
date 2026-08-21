@@ -8,6 +8,15 @@ import type { PendingDecision } from "./types";
  *  elapses the card is allowed back so Boss can re-answer. */
 export const ANSWER_GRACE_MS = 30_000;
 
+/** How long a just-arrived card is shielded from an *unattributable* empty
+ *  snapshot (one whose reply carries no `agent` fingerprint — an older desktop,
+ *  or a stray agent built before fingerprinting). The relay broadcasts every
+ *  request to every agent in the channel and the phone takes whichever reply
+ *  lands first, so an empty list can come from an agent that simply cannot see
+ *  this machine's `~/.fleet`. Past this window an empty snapshot is believed
+ *  again, so a genuinely resolved card can never be pinned on screen for long. */
+export const EMPTY_SNAPSHOT_COOLDOWN_MS = 20_000;
+
 /** Reconcile the authoritative `pending_snapshot` against the locally-held
  *  card list, honouring cards the user just answered on THIS device whose
  *  answer is still in flight. */
@@ -21,12 +30,23 @@ export interface ReconcileInput {
   answeredAt: Map<string, number>;
   /** Current wall clock (injected for testability). */
   now: number;
+  /** Fingerprint of the agent that served *this* snapshot (`agent` field of the
+   *  reply). `undefined` when the desktop predates fingerprinting. */
+  agentKey?: string;
+  /** Fingerprint of the agent the phone currently treats as its desktop — the
+   *  source of the last snapshot that actually carried cards. */
+  trustedAgentKey?: string;
 }
 
 export interface ReconcileResult {
   decisions: PendingDecision[];
   /** Pruned copy of `answeredAt` (confirmed-landed and grace-expired ids removed). */
   answeredAt: Map<string, number>;
+  /** Set when the whole snapshot was discarded as untrustworthy: the caller
+   *  keeps `prev` on screen and records the source for diagnosis. */
+  ignored?: { reason: "foreign-empty-snapshot" | "fresh-card-cooldown"; agentKey?: string };
+  /** Fingerprint to remember as the trusted agent after this reconcile. */
+  trustedAgentKey?: string;
 }
 
 export function reconcileDecisions({
