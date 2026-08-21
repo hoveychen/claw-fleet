@@ -130,7 +130,7 @@ fn fleet_session_sees_control_tools_and_plan_mutates_tasks_md() {
         &[
             json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}),
             json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
-                "name":"fleet__plan","arguments":{"action":"create","plan_id":"demo","title":"Demo work"}}}),
+                "name":"fleet__plan","arguments":{"action":"create","plan_id":"demo","title":"Demo work","root":true}}}),
             json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
                 "name":"fleet__plan","arguments":{"action":"add","plan_id":"demo","task":"P1","text":"first task"}}}),
             json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
