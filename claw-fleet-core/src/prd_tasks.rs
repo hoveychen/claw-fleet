@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 /// agent's findings in P3 silently redefine what P4 means. Separating them makes
 /// the handoff explicit — an `Explore` plan's deliverable is a set of `Exec`
 /// child plans, which the boss can read before any code is written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
 pub enum PlanKind {
     /// Implementation work: the P-tasks change code. The default, so every
     /// pre-existing plan keeps its meaning.
