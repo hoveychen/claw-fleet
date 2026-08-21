@@ -12,7 +12,8 @@ import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
 import { RelayClient, gzipSupported, binarySupported } from "./relay";
 import { computeCongestion, RECONNECT_WINDOW_MS, type Congestion } from "./connQuality";
-import { reconcileDecisions } from "./decisionReconcile";
+import { agentKeyOf, reconcileDecisions } from "./decisionReconcile";
+import { recordSnapshotSource, type SnapshotSource } from "./snapshotSources";
 import { reconcilePlan } from "./reconcilePlan";
 import { MockRelayClient, isMockMode } from "./mock/relay";
 import type {
@@ -210,6 +211,13 @@ export function App() {
   // Suppresses the just-answered card from flickering back when a fallback
   // `pending_snapshot` (which lags the send on a slow link) still lists it.
   const answeredRef = useRef<Map<string, number>>(new Map());
+  // Fingerprint of the agent whose snapshots actually carry this machine's
+  // cards. The relay fans every request out to all agents in the channel, so
+  // "which agent answered" is the only way to tell the desktop's authoritative
+  // empty list from a stray agent's (decisionReconcile.ts).
+  const trustedAgentRef = useRef<string | undefined>(undefined);
+  // Every agent that has answered a snapshot, for the More tab's diagnostics.
+  const snapshotSourcesRef = useRef<SnapshotSource[]>([]);
 
   // 栈底（主页 tab、无浮层）按返回：先拦一次给「再按一次退出」，再按才真走。
   // beforeunload 只覆盖刷新/关标签/地址栏跳走这些非返回路径——mock 模式不装，
@@ -279,15 +287,33 @@ export function App() {
       }
       // Snapshot is authoritative, but a card answered on this device whose
       // answer is still in flight must not pop back in (reconcileDecisions
-      // suppresses it until confirmed gone, or the grace window lapses).
+      // suppresses it until confirmed gone, or the grace window lapses) — and
+      // an "empty" from an agent other than our desktop is not authoritative at
+      // all (the relay fans requests out to every agent in the channel; see
+      // decisionReconcile.ts).
+      const agentKey = agentKeyOf(snap.agent);
       setDecisions((prev) => {
-        const { decisions, answeredAt } = reconcileDecisions({
+        const { decisions, answeredAt, ignored, trustedAgentKey } = reconcileDecisions({
           prev,
           fresh,
           answeredAt: answeredRef.current,
           now: Date.now(),
+          agentKey,
+          trustedAgentKey: trustedAgentRef.current,
         });
         answeredRef.current = answeredAt;
+        trustedAgentRef.current = trustedAgentKey;
+        // Diagnostics log, kept in a ref alongside the two above (a nested
+        // setState here would run inside an updater). The More tab renders it,
+        // so a second agent that blanked — or tried to blank — the card list
+        // leaves a trace Boss can read off the phone.
+        snapshotSourcesRef.current = recordSnapshotSource(snapshotSourcesRef.current, {
+          key: agentKey,
+          agent: snap.agent,
+          at: Date.now(),
+          trusted: !!agentKey && agentKey === trustedAgentKey,
+          ignored: !!ignored,
+        });
         return decisions;
       });
       // First authoritative snapshot is in — retire the loading skeleton.
@@ -727,6 +753,7 @@ export function App() {
             connected={connected}
             agentOnline={agentOnline}
             sessionsFrame={sessionsFrame}
+            snapshotSources={snapshotSourcesRef.current}
             push={push}
             pushOptedOut={pushOptedOut}
             onEnablePush={handleEnablePush}
