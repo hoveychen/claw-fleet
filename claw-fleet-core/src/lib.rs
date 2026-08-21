@@ -20,11 +20,13 @@ pub mod codex_source;
 pub mod codex_usage_history;
 pub mod console;
 pub mod consumer_heartbeat;
+pub mod context_files;
 pub mod daily_report;
 pub mod decision_history;
 pub mod decision_panel_config;
 #[cfg(windows)]
 pub mod dpapi;
+pub mod dsh_attachments;
 pub mod dsh_chat_preset;
 pub mod dsh_client;
 pub mod dsh_cost;
