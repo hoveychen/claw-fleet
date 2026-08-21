@@ -914,6 +914,167 @@ fn render_compact_block(b: &SourcedBlock, tag: Option<String>) -> String {
     }
 }
 
+// ── Cursor-neighborhood rendering (focused plan + its path to the root) ───────
+
+/// One rung on a focused plan's path to its tree root: enough to place the
+/// agent in the tree without pulling in the ancestor's whole checklist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AncestorLink {
+    pub plan_id: String,
+    pub title: Option<String>,
+    pub done: u32,
+    pub total: u32,
+}
+
+/// Walk `plan`'s `parent="..."` links upward, nearest ancestor first, over a
+/// pre-built id → block map. Unlike [`resolve_backtrack_in`] this does not stop
+/// at the first ancestor with pending work — the whole chain is the agent's
+/// position in the tree. A parent that is missing from the map ends the walk; a
+/// parent pointing back into the chain is a cycle and also ends it (the partial
+/// chain up to that point is still returned, so a corrupt link degrades the
+/// display instead of hiding the path entirely).
+fn ancestor_chain(by_id: &HashMap<&str, &SourcedBlock>, plan: &str) -> Vec<AncestorLink> {
+    let mut out: Vec<AncestorLink> = Vec::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    visited.insert(plan.to_string());
+    let Some(start) = by_id.get(plan) else {
+        return out;
+    };
+    let mut cursor = start.parent.clone();
+    while let Some(pid) = cursor {
+        if !visited.insert(pid.clone()) {
+            break; // cycle
+        }
+        let Some(block) = by_id.get(pid.as_str()) else {
+            break; // dangling parent
+        };
+        let (done, total) = count_tasks(&block.body);
+        out.push(AncestorLink {
+            plan_id: pid,
+            title: extract_plan_name(&block.body),
+            done,
+            total,
+        });
+        cursor = block.parent.clone();
+    }
+    out
+}
+
+/// The focused plan rendered **whole** (every checkbox plus its indented
+/// progress notes, verbatim from TASKS.md), preceded by its path to the tree
+/// root and followed by a one-line tally of the plans deliberately left out.
+///
+/// This is the cursor-neighborhood shape: exactly one plan is expanded, so
+/// there is no menu of competing "next tasks" to drift toward, and the notes
+/// the boss wrote are actually in context instead of being a pointer the agent
+/// has to choose to follow. The flat all-plans listing
+/// ([`render_with_sources`]) remains the fallback for a session with no focus
+/// record — a fresh session still needs the panorama to pick up work.
+fn render_cursor_neighborhood(
+    focused: &SourcedBlock,
+    ancestors: &[AncestorLink],
+    other_active: &[&SourcedBlock],
+    tag: Option<String>,
+) -> String {
+    let mut out = String::new();
+
+    if !ancestors.is_empty() {
+        out.push_str("**你在计划树里的位置**(由近到远,根在最后):\n");
+        for (i, a) in ancestors.iter().enumerate() {
+            let title = a.title.as_deref().unwrap_or("(无标题)");
+            let indent = "  ".repeat(i);
+            out.push_str(&format!(
+                "{indent}↳ 父 `{}` — {title} ({}/{})\n",
+                a.plan_id, a.done, a.total
+            ));
+        }
+        out.push('\n');
+    }
+
+    let label = focused.id.as_deref().unwrap_or("(anonymous)");
+    let (done, total) = count_tasks(&focused.body);
+    let mut head = format!("## 你当前归属的 plan: {label}");
+    if let Some(title) = extract_plan_name(&focused.body) {
+        head.push_str(&format!(" — {title}"));
+    }
+    head.push_str(&format!(" ({done}/{total})"));
+    if let Some(s) = tag {
+        head.push_str(&format!(" — source: {s}"));
+    }
+    out.push_str(&head);
+    out.push_str("\n\n");
+    out.push_str(focused.body.trim());
+
+    if !other_active.is_empty() {
+        let ids = other_active
+            .iter()
+            .filter_map(|b| b.id.as_deref())
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "\n\n---\n\n本 workspace 另有 {} 个 active plan **未展开**(它们不是你当前的工作,\
+             除非老板明确改派,不要挑其中的任务做):{}。需要全景时跑 `fleet plan list`。",
+            other_active.len(),
+            if ids.is_empty() { "(无 id)".to_string() } else { ids }
+        ));
+    }
+
+    out
+}
+
+/// Pure core of the hook body: pick the cursor-neighborhood shape when
+/// `focused_id` names an *active* plan in `all_blocks`, else the flat listing.
+/// Returns `(rendered, cursor_focus, active_blocks)` — the caller needs the
+/// active set to decide whether there is anything to inject at all.
+///
+/// Split out of [`render_active_plans_reminder`] so tests can drive the focus
+/// directly instead of writing a record into the process-global `~/.fleet`
+/// (same rationale as [`resolve_backtrack_in`]).
+///
+/// A focus record naming a plan that is missing here (another workspace's plan,
+/// a deleted block) or already complete falls through to the flat listing: a
+/// stale cursor must not blank out the panorama. When the focused plan is done
+/// but has pending ancestors, `backtrack_backstop` supplies the directive.
+fn render_plans_body(
+    all_blocks: &[SourcedBlock],
+    focused_id: Option<&str>,
+    main_root: Option<&Path>,
+) -> (String, bool, Vec<SourcedBlock>) {
+    let active: Vec<SourcedBlock> = all_blocks
+        .iter()
+        .filter(|b| b.body.lines().any(is_pending_task_line))
+        .cloned()
+        .collect();
+
+    let focused = focused_id.filter(|id| {
+        active
+            .iter()
+            .any(|b| b.id.as_deref() == Some(*id))
+    });
+
+    let Some(id) = focused else {
+        return (render_with_sources(&active, main_root), false, active);
+    };
+
+    let by_id: HashMap<&str, &SourcedBlock> = all_blocks
+        .iter()
+        .filter_map(|b| b.id.as_deref().map(|i| (i, b)))
+        .collect();
+    let primary: Option<PathBuf> = main_root.map(|r| r.join("TASKS.md"));
+    let block = active
+        .iter()
+        .find(|b| b.id.as_deref() == Some(id))
+        .expect("focused was filtered to the active set");
+    let others: Vec<&SourcedBlock> = active
+        .iter()
+        .filter(|b| b.id.as_deref() != Some(id))
+        .collect();
+    let tag = display_source(&block.source, main_root, primary.as_deref());
+    let ancestors = ancestor_chain(&by_id, id);
+    let out = render_cursor_neighborhood(block, &ancestors, &others, tag);
+    (out, true, active)
+}
+
 /// `None` when `source` is the main TASKS.md (the implicit norm — no
 /// annotation needed). Otherwise a relative path under `main_root` when
 /// possible, else the absolute path as a fallback.
@@ -1190,11 +1351,25 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
         return None;
     }
 
-    let (raw, problems) = collect_from_sources(&sources, true);
+    // Collect *every* block (completed included) in one pass: the active set is
+    // a filter over it, and the focused plan's ancestor chain needs the
+    // completed ones too — a finished parent is still a rung on the path to the
+    // root. Reading each source once keeps this cheaper than the previous
+    // active-only pass plus the backstop's separate re-read.
+    let (all_raw, problems) = collect_from_sources(&sources, false);
     let warning = render_problem_warning(&problems);
-    let deduped = dedup_blocks_keep_latest_mtime(raw);
-    let rendered = render_with_sources(&deduped, main_root.as_deref());
+    let all_blocks = dedup_blocks_keep_latest_mtime(all_raw);
     let backtrack_note = backtrack_backstop(cwd, session_id);
+
+    // Cursor mode: this session is attributed to one of the active plans, so
+    // expand only that plan (whole, notes included) plus its path to the root.
+    // Anything else would hand the agent a menu of competing next-tasks.
+    let focused_id: Option<String> = session_id
+        .and_then(crate::task_progress::read)
+        .map(|r| r.plan_id);
+
+    let (rendered, cursor_focus, deduped) =
+        render_plans_body(&all_blocks, focused_id.as_deref(), main_root.as_deref());
 
     if deduped.is_empty() && warning.is_none() {
         return None;
@@ -1223,19 +1398,41 @@ pub fn render_active_plans_reminder(cwd: &Path, session_id: Option<&str>) -> Opt
         Some(b) => format!("\n\n{b}"),
         None => String::new(),
     };
+    let header = if cursor_focus {
+        format!(
+            "Fleet PRD Discipline mode re-injects this on every prompt. This \
+workspace has {n} active {plan_word}, but only **the one you are attributed \
+to** is expanded below — whole, including every per-task progress note. That \
+is deliberate: your job this turn is the next unchecked P-task of *that* plan, \
+not whichever of the {n} looks quickest. Work it to completion following the \
+Rule 4 cadence, and tick boxes with `fleet plan check` (a hand-edited checkbox \
+records no attribution, so your card goes blank and the cursor is lost). If \
+the work genuinely belongs to a different plan, say so and re-point the focus \
+explicitly with `fleet plan resume <id>` — do not silently start executing \
+another plan's tasks. TASKS.md is the durable macro plan: defer to it over \
+your in-context memory of what is done. Only modify the block whose `id` \
+matches your plan. When the same `id` appears in multiple TASKS.md files, the \
+most recently modified file wins — keep a given `id` in exactly one file."
+        )
+    } else {
+        format!(
+            "The workspace `TASKS.md` (re-injected on every prompt by Fleet PRD \
+Discipline mode) holds {n} active {plan_word} below — merged across the main \
+checkout and any sibling worktrees. This file is the durable macro plan — \
+defer to it over your in-context memory of which P-tasks are done. This \
+session is not attributed to any of them, so each is compacted to its title, \
+progress, and next pending task; read the source file shown for the full \
+checklist and per-task notes. Once you start one, claim it with `fleet plan \
+resume <id>` (or `fleet plan create`) — the injection then narrows to just \
+that plan and its ancestors. After each P-task, update the checkbox in the \
+source file shown for that plan. Only modify the block whose `id` matches the \
+plan you are working on; treat every other block as another agent's in-flight \
+work. When the same `id` appears in multiple TASKS.md files, the most recently \
+modified file wins — keep a given `id` in exactly one file."
+        )
+    };
     Some(format!(
-        "<system-reminder>\n\
-The workspace `TASKS.md` (re-injected on every prompt by Fleet PRD \
-Discipline mode) holds {n} active {plan_word} below — merged across the \
-main checkout and any sibling worktrees. This file is the durable macro \
-plan — defer to it over your in-context memory of which P-tasks are done. \
-Only each plan's title, progress, and next pending task appear below — read \
-the source file shown for the full checklist and per-task progress notes. \
-After each P-task, update the checkbox in the source file shown for that \
-plan. Only modify the block whose `id` matches the plan you are working \
-on; treat every other block as another agent's in-flight work. When the \
-same `id` appears in multiple TASKS.md files, the most recently modified \
-file wins — keep a given `id` in exactly one file.\n\
+        "<system-reminder>\n{header}\n\
 \n\
 Sources scanned:\n{sources_list}\n\
 \n\
@@ -1855,6 +2052,121 @@ trailing notes outside\n";
             .iter()
             .filter_map(|b| b.id.as_deref().map(|id| (id, b)))
             .collect()
+    }
+
+    // ── Cursor-neighborhood rendering (P1) ────────────────────────────────────
+
+    /// Two plans with per-task notes; focus on one. Only the focused plan is
+    /// expanded — whole, notes included — while the other collapses to a single
+    /// tally line. This is the anti-drift property: the injection offers exactly
+    /// one next task, so there is no cheaper-looking alternative to pick.
+    #[test]
+    fn cursor_mode_expands_only_focused_plan_including_notes() {
+        let blocks = [
+            sbp(
+                "mine",
+                "**Plan:** My work\n\n- [x] **P1** — done bit\n- [ ] **P2** — the real task\n  - 备注:这条 note 必须进上下文\n",
+                None,
+            ),
+            sbp(
+                "theirs",
+                "**Plan:** Other work\n\n- [ ] **P1** — tempting short task\n",
+                None,
+            ),
+        ];
+        let (out, cursor, active) = render_plans_body(&blocks, Some("mine"), None);
+        assert!(cursor, "focus on an active plan ⇒ cursor mode");
+        assert_eq!(active.len(), 2, "both plans are still active");
+
+        assert!(out.contains("你当前归属的 plan: mine"), "focused plan headed: {out}");
+        assert!(out.contains("**P2** — the real task"));
+        assert!(
+            out.contains("备注:这条 note 必须进上下文"),
+            "per-task notes must survive into the injection: {out}"
+        );
+        // The competing plan's task text must NOT be in context — only its id,
+        // in the collapsed tally.
+        assert!(
+            !out.contains("tempting short task"),
+            "unfocused plan's task text must not appear: {out}"
+        );
+        assert!(out.contains("另有 1 个 active plan"));
+        assert!(out.contains("theirs"), "collapsed line still names the id: {out}");
+    }
+
+    /// A focused child renders its path to the root, including an ancestor that
+    /// is already complete (the rung still places the agent in the tree). The
+    /// ancestor contributes one line, not its checklist.
+    #[test]
+    fn cursor_mode_renders_ancestor_path_including_completed_rungs() {
+        let blocks = [
+            sbp("root", "**Plan:** Root goal\n\n- [ ] **P9** — root tail\n", None),
+            sbp("mid", "**Plan:** Middle\n\n- [x] **P1** — mid done\n", Some("root")),
+            sbp(
+                "leaf",
+                "**Plan:** Leaf\n\n- [ ] **P1** — leaf task\n",
+                Some("mid"),
+            ),
+        ];
+        let (out, cursor, _) = render_plans_body(&blocks, Some("leaf"), None);
+        assert!(cursor);
+        assert!(out.contains("你在计划树里的位置"), "path header: {out}");
+        assert!(out.contains("父 `mid` — Middle (1/1)"), "completed rung shown: {out}");
+        assert!(out.contains("父 `root` — Root goal (0/1)"), "root rung shown: {out}");
+        assert!(out.contains("**P1** — leaf task"), "focused body expanded");
+        assert!(
+            !out.contains("root tail"),
+            "ancestor's checklist must stay collapsed to one line: {out}"
+        );
+    }
+
+    /// No focus record ⇒ the flat panorama, unchanged. A fresh session must
+    /// still be able to see every plan to pick work up.
+    #[test]
+    fn no_focus_falls_back_to_flat_listing() {
+        let blocks = [
+            sbp("a", "**Plan:** A\n\n- [ ] **P1** — a1\n", None),
+            sbp("b", "**Plan:** B\n\n- [ ] **P1** — b1\n", None),
+        ];
+        let (out, cursor, _) = render_plans_body(&blocks, None, None);
+        assert!(!cursor, "no focus ⇒ flat mode");
+        assert!(out.contains("## Plan: a"));
+        assert!(out.contains("## Plan: b"));
+        assert!(!out.contains("你当前归属的 plan"));
+    }
+
+    /// A stale cursor — pointing at another workspace's plan, or at one that is
+    /// already complete — must not blank the panorama out; it falls back to the
+    /// flat listing. (For the completed-plan case `backtrack_backstop` supplies
+    /// the "climb to the parent" directive separately.)
+    #[test]
+    fn stale_or_completed_focus_falls_back_to_flat_listing() {
+        let blocks = [
+            sbp("a", "**Plan:** A\n\n- [ ] **P1** — a1\n", None),
+            sbp("done", "**Plan:** Done\n\n- [x] **P1** — d\n", None),
+        ];
+        // Focus naming a plan that isn't here at all.
+        let (out, cursor, active) = render_plans_body(&blocks, Some("elsewhere"), None);
+        assert!(!cursor, "unknown plan id ⇒ flat mode");
+        assert!(out.contains("## Plan: a"));
+        assert_eq!(active.len(), 1, "completed plan is not active");
+        // Focus naming a plan that exists but is fully checked.
+        let (out2, cursor2, _) = render_plans_body(&blocks, Some("done"), None);
+        assert!(!cursor2, "completed focus ⇒ flat mode");
+        assert!(out2.contains("## Plan: a"));
+    }
+
+    /// A parent cycle must not hang the walk, and the partial path is still
+    /// rendered rather than swallowed.
+    #[test]
+    fn ancestor_chain_survives_a_parent_cycle() {
+        let blocks = [
+            sbp("x", "- [ ] **P1** — x\n", Some("y")),
+            sbp("y", "- [ ] **P1** — y\n", Some("x")),
+        ];
+        let chain = ancestor_chain(&by_id_map(&blocks), "x");
+        assert_eq!(chain.len(), 1, "walk stops at the cycle: {chain:?}");
+        assert_eq!(chain[0].plan_id, "y");
     }
 
     #[test]
