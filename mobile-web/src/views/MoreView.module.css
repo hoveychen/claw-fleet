@@ -185,3 +185,44 @@
   flex-shrink: 0;
   color: var(--color-text-dim);
 }
+
+/* 决策卡来源诊断：频道里出现第二个 agent 时把它的 host/pid/目录摊开，
+   好让老板直接照着排查（正常情况这块不渲染）。 */
+.sourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+.sourceItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 2px solid var(--color-warning);
+  padding-left: 8px;
+}
+
+.sourceHead {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.sourceHome {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.sourceStat {
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+.sourceNote {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  line-height: 1.55;
+}
