@@ -67,7 +67,7 @@ fn create_claims_focus() {
     let home = tempfile::tempdir().unwrap();
     let ws = tempfile::tempdir().unwrap();
 
-    plan(home.path(), ws.path(), &["create", "alpha", "--title", "Alpha"]);
+    plan(home.path(), ws.path(), &["create", "alpha", "--title", "Alpha", "--root"]);
 
     let rec = focus(home.path()).expect("create must claim focus");
     assert_eq!(rec["planId"], "alpha");
@@ -84,8 +84,8 @@ fn add_does_not_claim_focus() {
     let ws = tempfile::tempdir().unwrap();
 
     // `create` claims focus on alpha; clear it so `add`'s effect is isolated.
-    plan(home.path(), ws.path(), &["create", "alpha", "--title", "Alpha"]);
-    plan(home.path(), ws.path(), &["create", "beta", "--title", "Beta"]);
+    plan(home.path(), ws.path(), &["create", "alpha", "--title", "Alpha", "--root"]);
+    plan(home.path(), ws.path(), &["create", "beta", "--title", "Beta", "--root"]);
     let rec = focus(home.path()).expect("create claimed focus");
     assert_eq!(rec["planId"], "beta", "second create re-points focus");
 
@@ -101,7 +101,7 @@ fn check_claims_focus_and_advances_current_task() {
     let home = tempfile::tempdir().unwrap();
     let ws = tempfile::tempdir().unwrap();
 
-    plan(home.path(), ws.path(), &["create", "alpha", "--title", "Alpha"]);
+    plan(home.path(), ws.path(), &["create", "alpha", "--title", "Alpha", "--root"]);
     plan(home.path(), ws.path(), &["add", "alpha", "P1", "--text", "first"]);
     plan(home.path(), ws.path(), &["add", "alpha", "P2", "--text", "second"]);
     plan(home.path(), ws.path(), &["check", "alpha", "P1"]);
