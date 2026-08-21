@@ -137,6 +137,11 @@ pub struct StopPayload {
     pub background_tasks: Vec<BackgroundTask>,
     #[serde(default)]
     pub session_crons: Vec<SessionCron>,
+    /// Session cwd as Claude Code reports it for this firing — authoritative
+    /// over the hook process's own cwd. Consumed by [`crate::plan_gate`] to
+    /// locate the workspace's TASKS.md. Empty when absent from the payload.
+    #[serde(default)]
+    pub cwd: String,
 }
 
 /// Parse the JSON the Stop hook receives on stdin. Returns `None` for anything
