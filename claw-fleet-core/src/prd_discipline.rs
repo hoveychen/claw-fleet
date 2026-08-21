@@ -192,10 +192,13 @@ executor 而失败（exit 127），而 MCP 工具是 JSON-RPC 打到本地常驻
 server、总能触达本地 Fleet 状态。仅当这些工具不在列表里（用户手起、非 Fleet \
 的会话）时，才退回 `fleet …` CLI。**\n\
 \n\
-- `fleet plan create <id> --title \"...\" [--parent <parent-id>]` —— 新增一个\
-  v2 计划块**并**把本会话记录为它的执行者。创建计划就是开始它，故无需另行声明。\
+- `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root) \
+  [--kind explore|exec]` —— 新增一个 v2 计划块**并**把本会话记录为它的执行者。\
+  创建计划就是开始它，故无需另行声明。**`--parent` 与 `--root` 必须二选一**：\
   当新计划是**你在父计划中途分出的旁支工作**（一个你必须返回的岔路）时传\
-  `--parent`——见下方「子计划与回溯」。\n\
+  `--parent`（见下方「子计划与回溯」），新开一棵顶层树时传 `--root`。\
+  故意不设默认值——计划在树里的位置永远是你的显式选择：当 `--parent` 只是\
+  「可选」时，某个仓库前 355 个计划里有 350 个是平的，回溯根本没有树可走。\n\
 - `fleet plan check <id> <P>` —— 勾选一个任务为完成（`[ ]`→`[x]`）并把本会话的\
   焦点刷新到 `<id>`。如 `fleet plan check auth-refactor P2`。\n\
 - `fleet plan uncheck <id> <P>` —— 取消勾选。\n\
@@ -209,6 +212,28 @@ server、总能触达本地 Fleet 状态。仅当这些工具不在列表里（�
 \n\
 手改 TASKS.md 仍有效——文件是勾选框的唯一真相来源——但它不记录归属，所以桌面端\
 无法判断你的会话在哪个计划上，你的卡片上什么都不显示。\n\
+\n\
+### explore 计划与 exec 计划\n\
+\n\
+计划的 `--kind` 说明它的 P-task 是**干什么用的**。`exec`（缺省）意味着 P-task \
+会改代码。`explore` 意味着 P-task 产出的是理解，而这个计划的交付物是\
+**它派生出的 exec 子计划**——不是它自己的代码改动。\n\
+\n\
+凡是以「先搞清楚……」开头、你还叫不出具体改动名字的工作，都用 `--kind explore`。\
+调研完成后，把结论变成 `fleet plan create <id> --parent <explore-id>` 的一批\
+子计划——每块自洽的实现各一个——让{title}在动手之前就能逐条读到要做什么。\
+explore 计划里不要改生产代码（一次性的探针脚本可以）。\n\
+\n\
+**为什么这条要用机制拆开而不是口头提醒：**把调研和实现塞进同一个计划，正是\
+长程工作走歪的方式。「P3 —— 调研 X」挨着「P4 —— 实现 X」，P3 的发现悄悄重新\
+定义了 P4 的含义，等有人察觉时，实现已经和没人拍板过的需求耦合在一起了。\
+拆成两个计划会强迫这次交接显形：调研的产出是一份待建 exec 计划清单，而这份\
+清单恰恰是值得在投入前被审阅的东西。这就是 Rule 6 背后的机制——explore 计划\
+是**允许你还不知道**的地方，而子计划是每条需求被追溯回{title}真正要求过的\
+东西的地方。\n\
+\n\
+注入的上下文会给 explore 计划打上 `[explore]` 标记，并在它成为你的焦点时\
+重述这条契约，这样一次上下文压缩没法把一次调研悄悄变成一场自由实现。\n\
 \n\
 ### 子计划与回溯\n\
 \n\
@@ -364,6 +389,21 @@ worktree 的借口——重点就是哪怕一次 50 行的机械编辑也享受�
 进去）会自动归属你；`fleet plan check` 随你推进而刷新。唯一需要显式认领的情形是\
 **接起一个你没创建、也没被交接的计划**：在你第一个 P-task 之前跑\
 `fleet plan resume <plan-id> [P]`。\n\
+\n\
+**现在有两道机制在强制这个节奏，而不只是请求它。**\n\
+\n\
+*聚焦注入。*你一旦被归属到某个计划，每轮的注入就不再罗列全部 active 计划，\
+而是**只展开你这一个**——完整的，连 per-task 备注一起——外加一行到树根的路径。\
+其余计划折叠成一行计数。所以摆在你面前的下一个任务，在构造上就只有一个。\
+如果工作真的属于另一个计划，说出来并用 `fleet plan resume <id>` 显式改指，\
+不要因为另一个计划的下一个 P 看起来更短就悄悄去做它。\n\
+\n\
+*计划门。*当你试图在自己焦点计划（或它的某个祖先）仍有未完成 P-task 时结束\
+回合，`Stop` 钩子会拒绝，并把一条点名下一个 P 的指令交回给你。它只在你**本回合\
+确实推进过计划**时才介入，并且对每一个正当出口让路：已登记的 `fleet handoff`、\
+一个 `fleet watch`、一张等{title}回答的决策卡，以及它已经说过一次之后的第二次\
+尝试。所以它困不住你——但也别把它当成需要绕过去的东西。它触发而你手上没有正当\
+出口时，诚实的反应是继续干活。\n\
 \n\
 ### 节奏何时确实要停\n\
 \n\
@@ -686,11 +726,16 @@ has no `fleet` and fails (exit 127); the MCP tools are JSON-RPC to the local \
 `fleet …` CLI only when those tools are absent (a user's hand-launched, \
 non-Fleet session).**\n\
 \n\
-- `fleet plan create <id> --title \"...\" [--parent <parent-id>]` — add a new \
-  v2 plan block **and** record this session as its executor. Creating a plan is \
-  starting it, so no separate declaration is needed. Pass `--parent` when the \
-  new plan is **side work you spun off mid-parent** (a detour you must return \
-  from) — see \"Child plans & backtracking\" below.\n\
+- `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root) \
+  [--kind explore|exec]` — add a new v2 plan block **and** record this session \
+  as its executor. Creating a plan is starting it, so no separate declaration \
+  is needed. **Exactly one of `--parent` / `--root` is required**: pass \
+  `--parent` when the new plan is **side work you spun off mid-parent** (a \
+  detour you must return from — see \"Child plans & backtracking\" below), or \
+  `--root` when it starts a new top-level tree. There is deliberately no \
+  default — a plan's position in the tree is always your explicit choice, \
+  because when `--parent` was merely optional 350 of the first 355 plans in a \
+  repo came out flat and the backtrack had no tree to walk.\n\
 - `fleet plan check <id> <P>` — tick a task done (`[ ]`→`[x]`) and refresh this \
   session's focus onto `<id>`. e.g. `fleet plan check auth-refactor P2`.\n\
 - `fleet plan uncheck <id> <P>` — untick.\n\
@@ -706,6 +751,34 @@ non-Fleet session).**\n\
 Hand-editing TASKS.md still works — the file is the source of truth for \
 checkboxes — but it records no attribution, so the desktop app cannot tell \
 which plan your session is on and shows nothing on your card.\n\
+\n\
+### Explore plans vs exec plans\n\
+\n\
+A plan's `--kind` says what its P-tasks are **for**. `exec` (the default) means \
+the P-tasks change code. `explore` means they produce understanding, and the \
+plan's deliverable is **the exec child plans it spawns** — not edits of its own.\n\
+\n\
+Use `--kind explore` whenever the work starts with \"figure out …\" and you \
+cannot yet name the concrete changes. Then, when the investigation is done, \
+turn the findings into `fleet plan create <id> --parent <explore-id>` children \
+— one per coherent chunk of implementation — and let the boss read that list \
+before any code is written. Do not change production code inside an explore \
+plan (throwaway probe scripts are fine).\n\
+\n\
+**Why the split is enforced rather than suggested:** bundling an exploration \
+and an implementation into one plan is how long-range work goes wrong. \"P3 — \
+调研 X\" sits next to \"P4 — 实现 X\", P3's findings silently redefine what P4 \
+means, and by the time anyone notices, the implementation is coupled to \
+requirements nobody agreed to. Separate plans force the handoff to be visible: \
+the exploration's output is a list of proposed exec plans, which is exactly the \
+artifact worth reviewing before committing to it. This is the mechanism behind \
+Rule 6 — an explore plan is where you're *allowed* to not know yet, and the \
+child plans are where each requirement gets traced back to something the boss \
+actually asked for.\n\
+\n\
+The injected context marks explore plans `[explore]` and restates this contract \
+when one is your focus, so a compaction can't quietly turn an exploration into \
+a free-form implementation session.\n\
 \n\
 ### Child plans & backtracking\n\
 \n\
@@ -906,6 +979,25 @@ authored the plan) and a Fleet handoff (Fleet spawned you into it) attribute \
 you automatically; `fleet plan check` refreshes it as you go. The one case \
 needing an explicit claim is **picking up a plan you did not create and were \
 not handed**: run `fleet plan resume <plan-id> [P]` before your first P-task.\n\
+\n\
+**Two mechanisms now enforce this rhythm rather than just asking for it.**\n\
+\n\
+*Focused injection.* Once you are attributed to a plan, the per-prompt \
+injection stops listing every active plan and expands **only yours** — whole, \
+including its per-task notes — plus a one-line path to its tree root. The other \
+plans collapse to a tally line. So there is exactly one next task in front of \
+you, by construction. If work genuinely belongs to a different plan, say so and \
+re-point with `fleet plan resume <id>`; do not quietly start executing another \
+plan's tasks because its next P looked shorter.\n\
+\n\
+*The plan gate.* If you try to end a turn while your focused plan (or an \
+ancestor of it) still has a pending P-task, the `Stop` hook refuses and hands \
+you back a directive naming the next P. It only engages when you actually \
+advanced a plan during the current turn, and it stands down for every \
+legitimate exit: a registered `fleet handoff`, a `fleet watch`, a decision card \
+awaiting {title}, or a second attempt after it has already spoken once. So it \
+cannot trap you — but do not treat it as something to get around. If it fires \
+and you have no legitimate exit, the honest response is to keep working.\n\
 \n\
 ### When the rhythm DOES pause\n\
 \n\
@@ -1520,6 +1612,44 @@ mod tests {
         assert!(
             g.contains("## Rule 4") && g.contains("rhythm"),
             "guidance must include Rule 4 — Plan execution rhythm"
+        );
+    }
+
+    /// The three P-tree mechanisms must be documented **in both locales**, or an
+    /// agent meets them only as unexplained friction: a refused `create`, a
+    /// narrowed injection, and a `Stop` that won't take.
+    ///
+    /// Checking both is the point: `render_guidance` early-returns an entirely
+    /// separate Chinese body for `locale == "zh"`, so editing the English half
+    /// alone leaves a zh session — the common case here — with none of it.
+    #[test]
+    fn render_documents_the_plan_tree_mechanisms_in_both_locales() {
+        let en = render_guidance("Boss", "en");
+        assert!(
+            en.contains("--root") && en.contains("Exactly one of `--parent` / `--root`"),
+            "[en] create must document the required tree-position declaration"
+        );
+        assert!(
+            en.contains("Explore plans vs exec plans") && en.contains("--kind explore"),
+            "[en] the explore→exec contract must be documented"
+        );
+        assert!(
+            en.contains("The plan gate") && en.contains("Focused injection"),
+            "[en] the gate and the narrowed injection must be documented"
+        );
+
+        let zh = render_guidance("老板", "zh");
+        assert!(
+            zh.contains("--root") && zh.contains("必须二选一"),
+            "[zh] create must document the required tree-position declaration"
+        );
+        assert!(
+            zh.contains("explore 计划与 exec 计划") && zh.contains("--kind explore"),
+            "[zh] the explore→exec contract must be documented"
+        );
+        assert!(
+            zh.contains("计划门") && zh.contains("聚焦注入"),
+            "[zh] the gate and the narrowed injection must be documented"
         );
     }
 

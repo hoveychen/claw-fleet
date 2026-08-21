@@ -65,6 +65,32 @@ pub(crate) fn cmd_session_idle() {
             eprintln!("{reason}");
             std::process::exit(2);
         }
+
+        // Plan gate: same exit-2 channel, but for plan work rather than
+        // background work. Must stay ahead of `mark_idle` (it compares against
+        // the *previous* yield's timestamp) and ahead of the handoff relay (a
+        // registered relay is one of its escape hatches). Unlike bg_guard this
+        // is not headless-only: an interactive session drifting off a
+        // half-finished plan tree is exactly the case it exists for.
+        let cwd = if payload.cwd.is_empty() {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        } else {
+            std::path::PathBuf::from(&payload.cwd)
+        };
+        if let Some(reason) =
+            claw_fleet_core::plan_gate::gate_reason(&cwd, &sid, payload.stop_hook_active)
+        {
+            timing.end(
+                2,
+                serde_json::json!({
+                    "blocked": true,
+                    "blocked_by": "plan_gate",
+                    "is_headless": headless,
+                }),
+            );
+            eprintln!("{reason}");
+            std::process::exit(2);
+        }
     }
 
     if let Err(e) = claw_fleet_core::idle::mark_idle(&sid) {
@@ -147,6 +173,12 @@ pub(crate) fn cmd_session_resume() {
         return;
     };
     claw_fleet_core::idle::clear_idle(&sid);
+    // Stamp when this turn began, so the plan gate can tell "the agent advanced
+    // a plan during this turn" from "an old focus record is lying around" —
+    // notably when the boss interrupts mid-plan to redirect.
+    if let Err(e) = claw_fleet_core::idle::mark_turn_start(&sid) {
+        eprintln!("fleet session resume: {e}");
+    }
     // A fresh user prompt means the user took the session back over — a still
     // pending (i.e. never-consumed) handoff is stale intent; drop it so it
     // can't fire surprisingly on a later Stop.

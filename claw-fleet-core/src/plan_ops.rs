@@ -157,29 +157,86 @@ pub fn resume(
 
 /// Create a new plan block in the workspace's primary TASKS.md and claim focus
 /// (authoring a plan is starting it). `parent` records a sub-plan relationship.
+///
+/// Exactly one of `parent` / `root` must be given. Making the tree position an
+/// explicit choice is the point: with `--parent` merely *available*, 350 of the
+/// first 355 plans authored in this repo were created flat, so the parent-link
+/// backtrack had no tree to walk and a decomposed task never ran to completion
+/// as a unit. Declaring `--root` is cheap; forgetting to declare anything is
+/// what used to happen silently.
 pub fn create(
     cwd: &Path,
     plan_id: &str,
     title: &str,
     parent: Option<&str>,
+    root: bool,
+    kind: pt::PlanKind,
     session_id: Option<&str>,
 ) -> Result<PlanOutcome, String> {
+    let parent = parent.filter(|p| !p.trim().is_empty());
+    match (parent, root) {
+        (Some(_), true) => {
+            return Err(
+                "--parent and --root are mutually exclusive: a plan is either a child of \
+                 another plan or a new tree root, not both."
+                    .to_string(),
+            )
+        }
+        (None, false) => {
+            let candidates = pending_plan_ids(cwd);
+            let hint = if candidates.is_empty() {
+                "no plan here has pending work, so --root is probably right.".to_string()
+            } else {
+                format!(
+                    "plans with pending work you could be branching off: {}.",
+                    candidates.join(", ")
+                )
+            };
+            return Err(format!(
+                "declare this plan's position in the tree: pass --parent <id> if it is side \
+                 work spawned mid-plan (Fleet will point you back at the parent when it \
+                 completes), or --root if it starts a new top-level tree. {hint}"
+            ))
+        }
+        _ => {}
+    }
     let path = workspace_tasks_path(cwd);
     let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let updated = pt::create_plan(&content, plan_id, title, parent)?;
+    let updated = pt::create_plan(&content, plan_id, title, parent, kind)?;
     std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
     // Writing a plan is starting it: the agent authoring the block is the agent
     // about to execute it. Claiming focus here spares it a separate `resume`.
     let warnings = record_focus(cwd, plan_id, &updated, session_id);
+    let kindness = match kind {
+        pt::PlanKind::Explore => " [explore — 交付物是 exec 子 plan,不是代码改动]",
+        pt::PlanKind::Exec => "",
+    };
     let message = match parent {
         Some(p) if !p.trim().is_empty() => format!(
-            "created child plan '{plan_id}' (parent '{}') in {}",
+            "created child plan '{plan_id}'{kindness} (parent '{}') in {}",
             p.trim(),
             path.display()
         ),
-        _ => format!("created plan '{plan_id}' in {}", path.display()),
+        _ => format!("created plan '{plan_id}'{kindness} in {}", path.display()),
     };
     Ok(PlanOutcome { message, warnings })
+}
+
+/// Ids of plans in this workspace that still have a pending P-task — the
+/// plausible `--parent` candidates offered when a `create` declares neither
+/// position. Best-effort: an unreadable TASKS.md yields an empty list rather
+/// than failing the create's error message.
+fn pending_plan_ids(cwd: &Path) -> Vec<String> {
+    let main_root = pt::discover_main_checkout_root(cwd);
+    let sources = pt::collect_task_sources(cwd, main_root.as_deref());
+    let (raw, _) = pt::collect_from_sources(&sources, true);
+    let mut ids: Vec<String> = pt::dedup_blocks_keep_latest_mtime(raw)
+        .into_iter()
+        .filter_map(|b| b.id)
+        .collect();
+    ids.sort();
+    ids.truncate(12); // an error message, not a listing — `fleet plan list` has the rest
+    ids
 }
 
 /// Append a pending task. Deliberately does NOT claim focus: `add` edits a
@@ -233,7 +290,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path();
 
-        let created = create(cwd, "demo", "Demo work", None, None).unwrap();
+        let created = create(cwd, "demo", "Demo work", None, true, pt::PlanKind::Exec, None).unwrap();
         assert!(created.message.contains("created plan 'demo'"));
         // No session id ⇒ attribution is a warning, but the edit still lands.
         assert_eq!(created.warnings.len(), 1);
@@ -257,12 +314,64 @@ mod tests {
         assert!(err.contains("not found"));
     }
 
+    /// A `create` that declares neither position is refused, and the error names
+    /// the plans it could plausibly branch off. This is the whole point of P3:
+    /// with `--parent` merely optional, plans were authored flat by default and
+    /// the tree never came into existence.
+    #[test]
+    fn create_without_parent_or_root_is_refused_and_suggests_candidates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        // An existing plan with pending work becomes a suggested parent.
+        create(cwd, "host", "Host plan", None, true, pt::PlanKind::Exec, None).unwrap();
+        add(cwd, "host", "P1", "open task").unwrap();
+
+        let err = create(cwd, "orphan", "Orphan", None, false, pt::PlanKind::Exec, None).unwrap_err();
+        assert!(err.contains("--parent"), "names the flag: {err}");
+        assert!(err.contains("--root"), "names the alternative: {err}");
+        assert!(err.contains("host"), "suggests the pending plan as a parent: {err}");
+        // Nothing was written.
+        assert!(!read_tasks(cwd).contains("orphan"), "refused create must not write");
+    }
+
+    /// Declaring both positions is contradictory, not a silent precedence rule.
+    #[test]
+    fn create_with_both_parent_and_root_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        create(tmp.path(), "par", "Parent", None, true, pt::PlanKind::Exec, None).unwrap();
+        let err = create(tmp.path(), "kid", "Kid", Some("par"), true, pt::PlanKind::Exec, None).unwrap_err();
+        assert!(err.contains("mutually exclusive"), "{err}");
+    }
+
+    /// An empty/whitespace `--parent` is not a declaration — it must be treated
+    /// as absent (matching `create_plan`'s own empty-slot handling) and so still
+    /// require `--root`.
+    #[test]
+    fn create_with_blank_parent_still_requires_a_declaration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = create(tmp.path(), "x", "X", Some("   "), false, pt::PlanKind::Exec, None).unwrap_err();
+        assert!(err.contains("--root"), "blank parent ⇒ still undeclared: {err}");
+    }
+
+    /// The two valid shapes both write, and a child records its parent link.
+    #[test]
+    fn create_accepts_root_and_parent_shapes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        create(cwd, "top", "Top", None, true, pt::PlanKind::Exec, None).unwrap();
+        assert!(read_tasks(cwd).contains("<!-- fleet:prd:begin id=\"top\" v=\"2\" -->"));
+
+        let child = create(cwd, "side", "Side", Some("top"), false, pt::PlanKind::Exec, None).unwrap();
+        assert!(child.message.contains("parent 'top'"), "{}", child.message);
+        assert!(read_tasks(cwd).contains("id=\"side\" v=\"2\" parent=\"top\""));
+    }
+
     /// `resume` refuses without a session id (its whole job is claiming focus),
     /// whereas `create`/`check` merely warn — locking that asymmetry.
     #[test]
     fn resume_without_session_id_errors() {
         let tmp = tempfile::tempdir().unwrap();
-        create(tmp.path(), "demo", "Demo", None, None).unwrap();
+        create(tmp.path(), "demo", "Demo", None, true, pt::PlanKind::Exec, None).unwrap();
         add(tmp.path(), "demo", "P1", "task").unwrap();
         let err = resume(tmp.path(), "demo", None, None).unwrap_err();
         assert!(err.contains("no session id"));

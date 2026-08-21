@@ -71,7 +71,9 @@ fn plan_tool_def() -> Value {
                 "plan_id": {"type": "string", "description": "Plan sentinel id (kebab-case). Required for check/uncheck/create/add/resume/get."},
                 "task": {"type": "string", "description": "P-task id like \"P2\". Required for check/uncheck/add; optional for resume."},
                 "title": {"type": "string", "description": "Plan title. Required for create."},
-                "parent": {"type": "string", "description": "Parent plan id for a sub-plan (create only)."},
+                "parent": {"type": "string", "description": "Parent plan id, when this plan is side work spawned mid-parent (create only). Fleet points you back at the parent once this plan completes. Exactly one of parent/root is required for create."},
+                "root": {"type": "boolean", "description": "Declare this plan a new top-level tree (create only). Required when parent is absent, so a plan's position in the tree is always an explicit choice."},
+                "kind": {"type": "string", "enum": ["exec", "explore"], "description": "What the P-tasks are for (create only, default exec). `exec` changes code; `explore` investigates and its deliverable is the exec child plans it spawns, not edits of its own — use it so an exploration's findings can't silently redefine the implementation."},
                 "text": {"type": "string", "description": "Task text. Required for add."}
             },
             "required": ["action"],
@@ -265,6 +267,8 @@ fn handle_plan(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, St
             &req(args, "plan_id")?,
             &req(args, "title")?,
             arg(args, "parent").as_deref(),
+            args.get("root").and_then(|v| v.as_bool()).unwrap_or(false),
+            crate::prd_tasks::PlanKind::from_attr(arg(args, "kind").as_deref()),
             sid,
         )
         .map(render_plan_outcome),
@@ -769,6 +773,28 @@ mod tests {
         assert!(!is_control_tool("fleet__set_session_title"));
     }
 
+    /// The MCP surface enforces the same tree-position declaration the CLI does
+    /// — the whole reason plan mutations were lifted into `plan_ops`. Without
+    /// this, an agent on a remote-workspace session (which can only reach the
+    /// MCP tool) would keep authoring flat plans.
+    #[test]
+    fn plan_create_via_mcp_requires_parent_or_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = handle(
+            "fleet__plan",
+            &json!({"action": "create", "plan_id": "demo", "title": "Demo"}),
+            None,
+            tmp.path(),
+        )
+        .unwrap_err();
+        assert!(err.contains("--parent"), "{err}");
+        assert!(err.contains("--root"), "{err}");
+        assert!(
+            !tmp.path().join("TASKS.md").exists(),
+            "a refused create must not create the file"
+        );
+    }
+
     #[test]
     fn plan_check_maps_args_and_mutates_the_file() {
         let tmp = tempfile::tempdir().unwrap();
@@ -776,7 +802,7 @@ mod tests {
         // create → add → check, all via the MCP arg surface.
         handle(
             "fleet__plan",
-            &json!({"action": "create", "plan_id": "demo", "title": "Demo"}),
+            &json!({"action": "create", "plan_id": "demo", "title": "Demo", "root": true}),
             None,
             cwd,
         )
