@@ -192,6 +192,7 @@
   "view_audit": "Audit",
   "view_memory": "Memory",
   "view_schedule": "Schedule",
+  "view_plans": "Plan tree",
   "view_wiki": "Wiki",
   "view_skills": "Skills",
   "view_plugins": "Plugins",
@@ -550,6 +551,19 @@
     "saving": "Saving",
     "open_session": "Open session",
     "open_session_tip": "Open the session this schedule produced"
+  },
+  "plans": {
+    "title": "Plan tree",
+    "refresh": "Refresh",
+    "workspaces": "Repos",
+    "empty_title": "No plans in this repo yet",
+    "empty_sub": "Start a tree with `fleet plan create <id> --root --title \"…\"`",
+    "completed_fold": "{{count}} completed",
+    "done_items": "{{count}} done",
+    "relay": "{{count}}-leg relay",
+    "unattached": "Unattached relay chains",
+    "anonymous": "Plus {{count}} legacy anonymous plan block(s) — no id, cannot join the tree",
+    "orphan_tip": "Parent plan {{parent}} does not exist; promoted to a root"
   },
   "memory": {
     "panel_title": "Memory",

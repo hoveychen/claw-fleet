@@ -192,6 +192,7 @@
   "view_audit": "审计",
   "view_memory": "记忆",
   "view_schedule": "计划",
+  "view_plans": "计划树",
   "view_wiki": "知识库",
   "view_skills": "技能",
   "view_plugins": "插件",
@@ -547,6 +548,19 @@
     "saving": "保存中",
     "open_session": "查看会话",
     "open_session_tip": "查看触发出的会话"
+  },
+  "plans": {
+    "title": "计划树",
+    "refresh": "刷新",
+    "workspaces": "仓库",
+    "empty_title": "这个仓库还没有计划",
+    "empty_sub": "用 `fleet plan create <id> --root --title \"…\"` 开一棵计划树",
+    "completed_fold": "已完成 {{count}} 个",
+    "done_items": "已完成 {{count}} 条",
+    "relay": "接力 {{count}} 棒",
+    "unattached": "未挂靠的接力链",
+    "anonymous": "另有 {{count}} 个旧版匿名计划块（无 id，无法入树）",
+    "orphan_tip": "父计划 {{parent}} 不存在,已提升为根"
   },
   "memory": {
     "panel_title": "Memory",
