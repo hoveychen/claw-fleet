@@ -159,6 +159,79 @@ pub fn image_block_key(block: &Value) -> Option<(String, String)> {
 /// Length of [`crate::user_attachments`]'s content key in hex characters.
 const KEY_HEX_LEN: usize = 16;
 
+/// Rewrite every dsh image block in `records` into the store-path form the
+/// transcript renderer knows how to display, filling the store first for any
+/// image it does not already hold.
+///
+/// `fetch` reads one attachment's bytes by id — `session.attachment` in
+/// production, which proves the session's log references that id before
+/// answering. It is a parameter so this orchestration is testable without a live
+/// server, the way `dsh_source::history_with` takes its own fetch.
+///
+/// A fetch that fails leaves the block rewritten anyway: the renderer's
+/// broken-image affordance is retryable and says so, whereas an unrewritten
+/// block renders as an anonymous unknown-block card that no user can act on.
+pub fn resolve_image_blocks<F>(records: &mut [Value], fetch: F)
+where
+    F: Fn(&str) -> Option<Vec<u8>>,
+{
+    for record in records {
+        let Some(content) = record
+            .get_mut("message")
+            .and_then(|m| m.get_mut("content"))
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        for block in content {
+            if block.get("type").and_then(Value::as_str) != Some("image") {
+                continue;
+            }
+            let Some((key, name)) = image_block_key(block) else {
+                continue;
+            };
+            let Some(path) = crate::user_attachments::stored_path(&key, &name) else {
+                continue;
+            };
+            if !crate::user_attachments::exists_in_store(&path) {
+                // Only reachable for an image this Fleet never uploaded — one
+                // sent from dsh's own web UI, or a session resumed on another
+                // machine. Fleet's own sends already put the bytes in the store
+                // under this very key, since both sides key on the same digest.
+                if let Some(id) = block
+                    .get("attachment")
+                    .and_then(|a| a.get("attachmentId"))
+                    .and_then(Value::as_str)
+                {
+                    if let Some(bytes) = fetch(id) {
+                        let _ = crate::user_attachments::ingest_bytes(&bytes, &name);
+                    }
+                }
+            }
+            let media_type = block
+                .get("attachment")
+                .and_then(|a| a.get("mediaType"))
+                .and_then(Value::as_str)
+                .unwrap_or("image/png")
+                .to_string();
+            *block = json!({
+                "type": "image",
+                // `path` rather than `base64`: the transport trims every string
+                // leaf over 4 KiB (`message_trim`), which would corrupt an
+                // inline payload into something no `<img>` can decode. A store
+                // path is also what the composer's own attachments leave in a
+                // transcript, so both ends of a dsh conversation render through
+                // one path.
+                "source": {
+                    "type": "path",
+                    "media_type": media_type,
+                    "path": path.to_string_lossy(),
+                },
+            });
+        }
+    }
+}
+
 /// Keep a stored name to a bare filename, the only form the store serves.
 fn sanitize_name(name: &str) -> String {
     Path::new(name)
@@ -184,6 +257,7 @@ fn default_name(attachment: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::Digest as _;
 
     /// Minimal byte strings that sniff as each accepted type.
     fn png() -> Vec<u8> {
@@ -381,6 +455,168 @@ mod tests {
         });
         let (_, name) = image_block_key(&block).unwrap();
         assert_eq!(name, "passwd");
+    }
+
+    /// The digest dsh reports is the digest of the bytes Fleet uploaded, so an
+    /// image Fleet sent is already in the store under the key derived from that
+    /// digest — the resolver rewrites it without a single fetch.
+    #[test]
+    fn resolve_rewrites_a_stored_image_without_fetching() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!("fleet-dsh-res-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized via fleet_home_lock
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let bytes = png();
+        let stored = crate::user_attachments::ingest_bytes(&bytes, "shot.png").unwrap();
+        let digest: String = sha2::Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+
+        let mut records = vec![json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "按这个改" },
+                    { "type": "image", "attachment": {
+                        "attachmentId": format!("sha256:{digest}"),
+                        "mediaType": "image/png",
+                        "name": "shot.png",
+                    }},
+                ],
+            },
+        })];
+
+        let fetched = std::cell::Cell::new(0);
+        resolve_image_blocks(&mut records, |_| {
+            fetched.set(fetched.get() + 1);
+            None
+        });
+        assert_eq!(fetched.get(), 0, "the store already had it");
+
+        let block = &records[0]["message"]["content"][1];
+        assert_eq!(block["type"], "image");
+        assert_eq!(block["source"]["type"], "path");
+        assert_eq!(block["source"]["media_type"], "image/png");
+        assert_eq!(block["source"]["path"], stored.to_string_lossy().as_ref());
+        assert_eq!(
+            records[0]["message"]["content"][0]["text"], "按这个改",
+            "the text block must be left alone"
+        );
+
+        // SAFETY: serialized via fleet_home_lock
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// An image Fleet never uploaded — sent from dsh's own web UI — is fetched
+    /// once, committed to the store, and then rendered from there.
+    #[test]
+    fn resolve_fetches_an_image_the_store_is_missing() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!("fleet-dsh-miss-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized via fleet_home_lock
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let bytes = png();
+        let digest: String = sha2::Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let mut records = vec![json!({
+            "message": { "content": [{ "type": "image", "attachment": {
+                "attachmentId": format!("sha256:{digest}"),
+                "mediaType": "image/png",
+            }}]},
+        })];
+
+        let asked = std::cell::RefCell::new(Vec::new());
+        resolve_image_blocks(&mut records, |id| {
+            asked.borrow_mut().push(id.to_string());
+            Some(bytes.clone())
+        });
+        assert_eq!(asked.borrow().len(), 1, "one fetch for the missing image");
+        assert_eq!(asked.borrow()[0], format!("sha256:{digest}"));
+
+        let path = records[0]["message"]["content"][0]["source"]["path"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bytes,
+            "the fetched bytes must be readable at the rendered path"
+        );
+
+        // SAFETY: serialized via fleet_home_lock
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// A fetch that cannot answer still yields a renderable block: the frontend
+    /// shows a retryable broken-image affordance rather than an unknown card.
+    #[test]
+    fn resolve_rewrites_even_when_the_fetch_fails() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!("fleet-dsh-fail-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized via fleet_home_lock
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let mut records = vec![json!({
+            "message": { "content": [{ "type": "image", "attachment": {
+                "attachmentId": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "mediaType": "image/webp",
+            }}]},
+        })];
+        resolve_image_blocks(&mut records, |_| None);
+        let source = &records[0]["message"]["content"][0]["source"];
+        assert_eq!(source["type"], "path");
+        assert_eq!(source["media_type"], "image/webp");
+        assert!(source["path"].as_str().unwrap().ends_with("image.webp"));
+
+        // SAFETY: serialized via fleet_home_lock
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Records with no image content must come back byte-identical: this pass
+    /// runs over every history read, so it has to be a no-op for the 99% case.
+    #[test]
+    fn resolve_leaves_non_image_records_untouched() {
+        let before = vec![
+            json!({ "type": "user", "message": { "content": [{ "type": "text", "text": "hi" }] } }),
+            json!({ "type": "assistant", "message": { "content": [
+                { "type": "thinking", "thinking": "…" },
+                { "type": "tool_use", "name": "Bash", "input": {} },
+            ]}}),
+            json!({ "type": "system", "subtype": "init" }),
+        ];
+        let mut after = before.clone();
+        resolve_image_blocks(&mut after, |_| None);
+        assert_eq!(after, before);
     }
 
     #[test]
