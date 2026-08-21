@@ -47,7 +47,7 @@ export async function openSettingsWindow(): Promise<void> {
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-export type ViewMode = "list" | "gallery" | "history" | "audit" | "report" | "memory" | "wiki" | "skills" | "plugins" | "files" | "mobile" | "schedule";
+export type ViewMode = "list" | "gallery" | "history" | "audit" | "report" | "memory" | "wiki" | "skills" | "plugins" | "files" | "mobile" | "schedule" | "plans";
 export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
 /** 启动台's segmented mark filter. "all" shows every bucket. */
 export type MarkFilter = "all" | "pending" | "done";
@@ -108,6 +108,21 @@ export interface MainViewState {
     tab: "files" | "procs";
     activeFilePath: string | null;
   };
+  plans: {
+    /** Repo whose plan forest is on screen. `null` = nothing picked yet. */
+    selectedWorkspace: string | null;
+    /** Per-plan expand override. Absent = the default rule decides (a plan with
+     *  pending P-tasks anywhere in its subtree opens; a finished one stays
+     *  shut), so the map only ever holds the nodes the user disagreed with. */
+    expandOverrides: Record<string, boolean>;
+    /** Show the fully-finished root trees, which are otherwise folded behind a
+     *  single 「已完成 N 个」 row — this workspace has ~350 finished plans and
+     *  listing them all is the first thing you'd see otherwise. */
+    showCompletedRoots: boolean;
+    /** Plan ids whose completed P-tasks are unfolded. An expanded node lists
+     *  only its pending P-tasks in full; the done ones collapse to a count. */
+    doneItemsShown: string[];
+  };
   mobile: { urlDraft: string; editingUrl: boolean };
 }
 
@@ -161,6 +176,12 @@ const DEFAULT_MAIN_VIEW_STATE: MainViewState = {
     showIgnored: false,
     tab: "files",
     activeFilePath: null,
+  },
+  plans: {
+    selectedWorkspace: null,
+    expandOverrides: {},
+    showCompletedRoots: false,
+    doneItemsShown: [],
   },
   mobile: { urlDraft: "", editingUrl: false },
 };

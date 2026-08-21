@@ -47,6 +47,7 @@ const ALL_KEYS = [
   "plugins-rail-width",
   "audit-rail-width",
   "report-rail-width",
+  "plans-rail-width",
   // File-tree columns inside a detail pane (SkillsView / FilesView / ScratchpadView).
   "skills-tree-width",
   "files-tree-width",
