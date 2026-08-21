@@ -16,6 +16,53 @@ use serde::{Deserialize, Serialize};
 
 // ── Block types ───────────────────────────────────────────────────────────────
 
+/// What a plan's P-tasks are *for* — the distinction between figuring out what
+/// to build and building it.
+///
+/// The failure this exists to prevent: an exploration and an implementation
+/// bundled into one plan, where "P3 — 调研 X" sits next to "P4 — 实现 X" and the
+/// agent's findings in P3 silently redefine what P4 means. Separating them makes
+/// the handoff explicit — an `Explore` plan's deliverable is a set of `Exec`
+/// child plans, which the boss can read before any code is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlanKind {
+    /// Implementation work: the P-tasks change code. The default, so every
+    /// pre-existing plan keeps its meaning.
+    #[default]
+    Exec,
+    /// Investigation work: the P-tasks produce understanding, and the plan's
+    /// deliverable is the `Exec` child plans it spawns — not edits of its own.
+    Explore,
+}
+
+impl PlanKind {
+    /// Sentinel attribute value. `Exec` is the implied default and is therefore
+    /// never written out, keeping existing TASKS.md files byte-identical.
+    pub fn as_attr(self) -> Option<&'static str> {
+        match self {
+            PlanKind::Exec => None,
+            PlanKind::Explore => Some("explore"),
+        }
+    }
+
+    /// Parse a `kind="..."` slot. Anything unrecognized (including absent) is
+    /// `Exec` — an unknown future value must not silently turn a plan into an
+    /// exploration.
+    pub fn from_attr(value: Option<&str>) -> Self {
+        match value.map(str::trim) {
+            Some("explore") => PlanKind::Explore,
+            _ => PlanKind::Exec,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PlanKind::Exec => "exec",
+            PlanKind::Explore => "explore",
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct PrdBlock {
     pub id: Option<String>,
@@ -28,6 +75,8 @@ pub struct PrdBlock {
     /// side work spawned mid-parent; when it completes, Fleet points the agent
     /// back at the nearest ancestor that still has pending P-tasks.
     pub parent: Option<String>,
+    /// `kind="..."` from the begin sentinel. See [`PlanKind`].
+    pub kind: PlanKind,
 }
 
 /// Attributes parsed off a sentinel comment (`<!-- fleet:prd:begin id="x" v="2" -->`).
@@ -38,6 +87,8 @@ pub struct SentinelAttrs {
     /// `parent="..."` slot — the id of this plan's parent, if any. Only
     /// meaningful on a `begin` sentinel; ignored (and typically absent) on `end`.
     pub parent: Option<String>,
+    /// `kind="..."` slot. See [`PlanKind`]; absent ⇒ [`PlanKind::Exec`].
+    pub kind: PlanKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +100,8 @@ pub struct SourcedBlock {
     /// `parent="..."` from the begin sentinel — carried so backtracking can walk
     /// the plan tree across sources. `None` for a top-level plan.
     pub parent: Option<String>,
+    /// `kind="..."` from the begin sentinel. See [`PlanKind`].
+    pub kind: PlanKind,
 }
 
 // ── Display / Backend types ───────────────────────────────────────────────────
@@ -241,30 +294,31 @@ pub fn extract_prd_blocks(content: &str) -> Vec<PrdBlock> {
 pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<SentinelProblem>) {
     let mut out = Vec::new();
     let mut problems = Vec::new();
-    // (id, version, parent, body)
-    let mut current: Option<(Option<String>, u8, Option<String>, String)> = None;
+    // (id, version, parent, kind, body)
+    let mut current: Option<(Option<String>, u8, Option<String>, PlanKind, String)> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(attrs) = parse_sentinel(trimmed, "begin") {
             // A second `begin` while one is already open means the previous
             // block was never closed — drop it and start fresh.
-            if let Some((open_id, _, _, _)) = current.take() {
+            if let Some((open_id, _, _, _, _)) = current.take() {
                 problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
             }
-            current = Some((attrs.id, attrs.version, attrs.parent, String::new()));
+            current = Some((attrs.id, attrs.version, attrs.parent, attrs.kind, String::new()));
             continue;
         }
         if let Some(attrs) = parse_sentinel(trimmed, "end") {
             let id = attrs.id;
             match current.take() {
-                Some((open_id, version, parent, body)) => {
+                Some((open_id, version, parent, kind, body)) => {
                     if open_id == id {
                         out.push(PrdBlock {
                             id: open_id,
                             body,
                             version,
                             parent,
+                            kind,
                         });
                     } else {
                         // id mismatch → discard the dangling block; do not start
@@ -288,12 +342,12 @@ pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<Se
                 line: trimmed.to_string(),
             });
         }
-        if let Some((_, _, _, body)) = current.as_mut() {
+        if let Some((_, _, _, _, body)) = current.as_mut() {
             body.push_str(line);
             body.push('\n');
         }
     }
-    if let Some((open_id, _, _, _)) = current.take() {
+    if let Some((open_id, _, _, _, _)) = current.take() {
         problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
     }
     (out, problems)
@@ -339,10 +393,17 @@ pub fn parse_sentinel(line: &str, kind: &str) -> Option<SentinelAttrs> {
         .find(|(k, _)| k == "parent")
         .map(|(_, v)| v.clone())
         .filter(|v| !v.is_empty());
+    let plan_kind = PlanKind::from_attr(
+        attrs
+            .iter()
+            .find(|(k, _)| k == "kind")
+            .map(|(_, v)| v.as_str()),
+    );
     Some(SentinelAttrs {
         id,
         version,
         parent,
+        kind: plan_kind,
     })
 }
 
@@ -419,7 +480,7 @@ fn join_preserving_eol(lines: Vec<String>, original: &str) -> String {
 
 #[cfg(test)]
 mod eol_tests {
-    use super::join_preserving_eol;
+    use super::{join_preserving_eol, PlanKind};
 
     #[test]
     fn crlf_is_preserved_not_flattened_to_lf() {
@@ -456,7 +517,7 @@ mod eol_tests {
         // (a mixed-ending file that the next mutation then flattens wholesale).
         let content = "# TASKS\r\n\r\n<!-- fleet:prd:begin id=\"a\" v=\"2\" -->\r\n\r\n\
                        **Plan:** A\r\n\r\n<!-- fleet:prd:end id=\"a\" -->\r\n";
-        let out = super::create_plan(content, "b", "B", None).expect("create_plan failed");
+        let out = super::create_plan(content, "b", "B", None, PlanKind::Exec).expect("create_plan failed");
         let lone_lf = out.matches('\n').count() - out.matches("\r\n").count();
         assert_eq!(lone_lf, 0, "every LF must be part of a CRLF pair, got: {out:?}");
     }
@@ -579,6 +640,7 @@ pub fn create_plan(
     plan_id: &str,
     title: &str,
     parent: Option<&str>,
+    kind: PlanKind,
 ) -> Result<String, String> {
     if extract_prd_blocks(content)
         .iter()
@@ -590,12 +652,18 @@ pub fn create_plan(
         Some(p) if !p.trim().is_empty() => format!(" parent=\"{}\"", p.trim()),
         _ => String::new(),
     };
+    // `Exec` writes no attribute, so existing files and the common case stay
+    // byte-identical to what earlier Fleet versions produced.
+    let kind_attr = match kind.as_attr() {
+        Some(k) => format!(" kind=\"{k}\""),
+        None => String::new(),
+    };
     // Match the existing file's line ending so appending a plan to a CRLF
     // TASKS.md doesn't leave lone LFs (a mixed-ending file the next mutation
     // then flattens wholesale).
     let eol = if content.contains("\r\n") { "\r\n" } else { "\n" };
     let block = format!(
-        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\"{parent_attr} -->{eol}{eol}**Plan:** {title}{eol}{eol}<!-- fleet:prd:end id=\"{plan_id}\" -->{eol}"
+        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\"{parent_attr}{kind_attr} -->{eol}{eol}**Plan:** {title}{eol}{eol}<!-- fleet:prd:end id=\"{plan_id}\" -->{eol}"
     );
     let mut out = content.to_string();
     if out.is_empty() {
@@ -760,6 +828,7 @@ pub fn collect_from_sources(
                 source: path.clone(),
                 mtime,
                 parent: b.parent,
+                kind: b.kind,
             });
         }
     }
@@ -901,6 +970,9 @@ fn render_compact_block(b: &SourcedBlock, tag: Option<String>) -> String {
     let label = b.id.as_deref().unwrap_or("(anonymous)");
     let (done, total) = count_tasks(&b.body);
     let mut head = format!("## Plan: {label}");
+    if b.kind == PlanKind::Explore {
+        head.push_str(" [explore]");
+    }
     if let Some(title) = extract_plan_name(&b.body) {
         head.push_str(&format!(" — {title}"));
     }
@@ -994,6 +1066,9 @@ fn render_cursor_neighborhood(
     let label = focused.id.as_deref().unwrap_or("(anonymous)");
     let (done, total) = count_tasks(&focused.body);
     let mut head = format!("## 你当前归属的 plan: {label}");
+    if focused.kind == PlanKind::Explore {
+        head.push_str(" [explore]");
+    }
     if let Some(title) = extract_plan_name(&focused.body) {
         head.push_str(&format!(" — {title}"));
     }
@@ -1003,6 +1078,17 @@ fn render_cursor_neighborhood(
     }
     out.push_str(&head);
     out.push_str("\n\n");
+    if focused.kind == PlanKind::Explore {
+        out.push_str(
+            "> **这是一个 explore plan。** 它的交付物是**若干个 exec 子 plan**,不是代码改动。\
+             做完调研后用 `fleet plan create <id> --parent ",
+        );
+        out.push_str(label);
+        out.push_str(
+            "` 把结论拆成可执行的子计划,让老板在动手前能逐条看到要做什么;\
+             除了调研必需的临时脚本,不要在这个 plan 里改生产代码。\n\n",
+        );
+    }
     out.push_str(focused.body.trim());
 
     if !other_active.is_empty() {
@@ -1614,6 +1700,7 @@ trailing notes outside\n";
             source: source.to_path_buf(),
             mtime,
             parent: None,
+            kind: PlanKind::Exec,
         }
     }
 
@@ -1989,19 +2076,19 @@ trailing notes outside\n";
 
     #[test]
     fn create_plan_appends_v2_block_and_rejects_dupes() {
-        let out = create_plan(TWO_PLAN, "c", "Gamma", None).unwrap();
+        let out = create_plan(TWO_PLAN, "c", "Gamma", None, PlanKind::Exec).unwrap();
         assert!(out.contains("<!-- fleet:prd:begin id=\"c\" v=\"2\" -->"));
         assert!(out.contains("**Plan:** Gamma"));
-        assert!(create_plan(&out, "c", "again", None).is_err());
+        assert!(create_plan(&out, "c", "again", None, PlanKind::Exec).is_err());
         // create into empty content seeds a header
-        let fresh = create_plan("", "x", "X", None).unwrap();
+        let fresh = create_plan("", "x", "X", None, PlanKind::Exec).unwrap();
         assert!(fresh.starts_with("# TASKS"));
         assert!(fresh.contains("id=\"x\" v=\"2\""));
     }
 
     #[test]
     fn create_plan_with_parent_writes_parent_attr_and_is_parseable() {
-        let out = create_plan("", "child", "Child", Some("root")).unwrap();
+        let out = create_plan("", "child", "Child", Some("root"), PlanKind::Exec).unwrap();
         assert!(
             out.contains("id=\"child\" v=\"2\" parent=\"root\" -->"),
             "parent attribute must land on the begin sentinel: {out}"
@@ -2009,7 +2096,7 @@ trailing notes outside\n";
         // round-trips back out through the parser
         assert_eq!(plan_parent(&out, "child").as_deref(), Some("root"));
         // blank parent degrades to a top-level plan (no attr written)
-        let blank = create_plan("", "x", "X", Some("   ")).unwrap();
+        let blank = create_plan("", "x", "X", Some("   "), PlanKind::Exec).unwrap();
         assert!(!blank.contains("parent="));
         assert_eq!(plan_parent(&blank, "x"), None);
     }
@@ -2044,6 +2131,7 @@ trailing notes outside\n";
             source: PathBuf::from("/r/TASKS.md"),
             mtime: UNIX_EPOCH,
             parent: parent.map(|s| s.to_string()),
+            kind: PlanKind::Exec,
         }
     }
 
@@ -2052,6 +2140,89 @@ trailing notes outside\n";
             .iter()
             .filter_map(|b| b.id.as_deref().map(|id| (id, b)))
             .collect()
+    }
+
+    // ── Plan kind: explore vs exec (P4) ───────────────────────────────────────
+
+    /// `kind="explore"` round-trips through the sentinel, and `exec` writes no
+    /// attribute at all so existing files stay byte-identical.
+    #[test]
+    fn plan_kind_round_trips_and_exec_writes_no_attribute() {
+        let explore = create_plan("", "look", "Look into it", None, PlanKind::Explore).unwrap();
+        assert!(
+            explore.contains("id=\"look\" v=\"2\" kind=\"explore\""),
+            "{explore}"
+        );
+        let blocks = extract_prd_blocks(&explore);
+        assert_eq!(blocks[0].kind, PlanKind::Explore);
+
+        let exec = create_plan("", "build", "Build it", None, PlanKind::Exec).unwrap();
+        assert!(exec.contains("id=\"build\" v=\"2\" -->"), "no kind attr: {exec}");
+        assert!(!exec.contains("kind="), "exec is the implied default: {exec}");
+        assert_eq!(extract_prd_blocks(&exec)[0].kind, PlanKind::Exec);
+    }
+
+    /// Both attributes coexist, in either order, and an unknown kind degrades to
+    /// `Exec` rather than silently turning a plan into an exploration.
+    #[test]
+    fn plan_kind_coexists_with_parent_and_unknown_values_are_exec() {
+        let out = create_plan("", "kid", "Kid", Some("par"), PlanKind::Explore).unwrap();
+        assert!(out.contains("parent=\"par\" kind=\"explore\""), "{out}");
+        let b = extract_prd_blocks(&out);
+        assert_eq!(b[0].parent.as_deref(), Some("par"));
+        assert_eq!(b[0].kind, PlanKind::Explore);
+
+        let reordered = parse_sentinel(
+            "<!-- fleet:prd:begin id=\"z\" kind=\"explore\" v=\"2\" parent=\"p\" -->",
+            "begin",
+        )
+        .unwrap();
+        assert_eq!(reordered.kind, PlanKind::Explore);
+
+        let weird =
+            parse_sentinel("<!-- fleet:prd:begin id=\"z\" kind=\"design\" -->", "begin").unwrap();
+        assert_eq!(weird.kind, PlanKind::Exec, "unknown kind ⇒ exec");
+        let absent = parse_sentinel("<!-- fleet:prd:begin id=\"z\" -->", "begin").unwrap();
+        assert_eq!(absent.kind, PlanKind::Exec);
+    }
+
+    /// A focused explore plan carries its contract into the injection: the
+    /// deliverable is exec child plans, not code edits. Without this the
+    /// distinction would be a sentinel attribute nothing ever acts on.
+    #[test]
+    fn explore_plan_injection_states_the_child_plan_contract() {
+        let blocks = [SourcedBlock {
+            id: Some("look".to_string()),
+            body: "**Plan:** Investigate\n\n- [ ] **P1** — 读源码\n".to_string(),
+            source: PathBuf::from("/r/TASKS.md"),
+            mtime: UNIX_EPOCH,
+            parent: None,
+            kind: PlanKind::Explore,
+        }];
+        let (out, cursor, _) = render_plans_body(&blocks, Some("look"), None);
+        assert!(cursor);
+        assert!(out.contains("[explore]"), "kind is visible: {out}");
+        assert!(
+            out.contains("交付物是**若干个 exec 子 plan**"),
+            "states the deliverable: {out}"
+        );
+        assert!(
+            out.contains("--parent look"),
+            "tells it how to spawn the children: {out}"
+        );
+    }
+
+    /// The flat listing also marks explore plans, so a session with no focus can
+    /// tell the two apart when picking work up.
+    #[test]
+    fn flat_listing_marks_explore_plans() {
+        let mut b = sbp("look", "**Plan:** L\n\n- [ ] **P1** — x\n", None);
+        b.kind = PlanKind::Explore;
+        let blocks = [b, sbp("build", "**Plan:** B\n\n- [ ] **P1** — y\n", None)];
+        let (out, _, _) = render_plans_body(&blocks, None, None);
+        assert!(out.contains("## Plan: look [explore] — L"), "{out}");
+        assert!(out.contains("## Plan: build — B"), "exec unmarked: {out}");
+        assert!(!out.contains("build [explore]"), "exec must not be marked: {out}");
     }
 
     // ── Cursor-neighborhood rendering (P1) ────────────────────────────────────

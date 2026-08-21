@@ -667,6 +667,12 @@ pub(crate) enum PlanCommands {
         /// explicit choice rather than a silent default.
         #[arg(long, conflicts_with = "parent")]
         root: bool,
+        /// What the P-tasks are for: `exec` (default) changes code; `explore`
+        /// investigates, and its deliverable is the exec child plans it spawns
+        /// rather than edits of its own. Keeping the two apart stops an
+        /// exploration's findings from silently redefining the implementation.
+        #[arg(long, value_parser = ["exec", "explore"], default_value = "exec")]
+        kind: String,
     },
     /// Append a pending task to a plan.
     Add {
