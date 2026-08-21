@@ -42,6 +42,16 @@ pub(crate) fn get_task_plans(
         .get_task_plans(&workspace_path, session_id.as_deref())
 }
 
+/// The workspace's whole execution chain — plan forest with handoff chains
+/// folded onto their plan nodes. Backs the top-level 计划树 view.
+#[tauri::command(async)]
+pub(crate) fn get_plan_forest(
+    workspace_path: String,
+    state: tauri::State<'_, AppState>,
+) -> claw_fleet_core::plan_forest::PlanForest {
+    state.backend.read().unwrap().get_plan_forest(&workspace_path)
+}
+
 #[tauri::command]
 pub(crate) fn get_claude_md_content(workspace_path: String) -> Result<String, String> {
     memory::read_claude_md(&workspace_path)
