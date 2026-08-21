@@ -103,6 +103,10 @@ export class MockRelayClient extends RelayClient {
     switch (method) {
       case "pending_snapshot":
         return {
+          // Mirrors mobile_relay::agent_fingerprint — the More page's
+          // 决策卡来源 row reads it to tell the desktop apart from a stray
+          // agent answering in its place.
+          agent: { host: "studio", pid: 4242, home: "/Users/boss", ver: "0.0.0" },
           guard: [MOCK_GUARD].filter((r) => !this.answered.has(r.id)),
           elicitation: [MOCK_ELICITATION].filter((r) => !this.answered.has(r.id)),
           fleetAsk: [MOCK_FLEET_ASK].filter((r) => !this.answered.has(r.id)),

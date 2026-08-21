@@ -753,6 +753,7 @@ export function App() {
             connected={connected}
             agentOnline={agentOnline}
             sessionsFrame={sessionsFrame}
+            snapshotSources={snapshotSourcesRef.current}
             push={push}
             pushOptedOut={pushOptedOut}
             onEnablePush={handleEnablePush}

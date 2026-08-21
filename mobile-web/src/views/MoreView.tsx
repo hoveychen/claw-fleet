@@ -3,7 +3,8 @@
 
 import { ChevronRight, FolderGit2, Gauge } from "lucide-react";
 import { useDraft } from "../draft";
-import { useI18n, type Lang } from "../i18n";
+import { dateLocale, useI18n, type Lang } from "../i18n";
+import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
 import { clearSecret } from "../secretStore";
 import { clearCachedSessions } from "../sessionCache";
@@ -22,6 +23,10 @@ interface Props {
   /** Most recent sessions frame kind + running counts, to show whether the
    *  desktop's delta path is actually engaged. */
   sessionsFrame: { last: "full" | "delta" | null; full: number; delta: number };
+  /** Every agent that has served a `pending_snapshot` this session. Normally
+   *  one (the desktop); a second entry is a stray agent answering in its place,
+   *  which is what blanks the card list — so it gets surfaced here by name. */
+  snapshotSources: SnapshotSource[];
   push: PushState;
   /** True when the user turned notifications off while permission stays granted. */
   pushOptedOut: boolean;
@@ -35,6 +40,7 @@ export function MoreView({
   connected,
   agentOnline,
   sessionsFrame,
+  snapshotSources,
   push,
   pushOptedOut,
   onEnablePush,
@@ -54,6 +60,16 @@ export function MoreView({
     ["light", t("亮色")],
     ["dark", t("暗色")],
   ];
+
+  // 决策卡来源诊断。正常只有一条（桌面端）；出现第二条、或有空快照被忽略过，
+  // 说明频道里有别的 agent 在替桌面端作答 —— 卡片自己消失就是它干的。
+  const trustedSource = snapshotSources.find((s) => s.trusted);
+  const foreignSources = snapshotSources.filter((s) => s !== trustedSource);
+  const ignoredTotal = snapshotSources.reduce((n, s) => n + s.ignored, 0);
+  const agentLabel = (s: SnapshotSource) =>
+    s.agent ? `${s.agent.host ?? "?"} · pid ${s.agent.pid ?? "?"}` : t("未署名");
+  const hhmm = (ts: number) =>
+    new Date(ts).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
   const connState = !connected ? "offline" : agentOnline ? "online" : "agent-offline";
   const connLabel = !connected
@@ -203,6 +219,52 @@ export function MoreView({
               )}
             </span>
           </div>
+          {snapshotSources.length > 0 && (
+            <>
+              <div className={styles.divider} />
+              <div className={styles.row}>
+                <span className={styles.rowLabel}>{t("决策卡来源")}</span>
+                <span className={styles.connWrap}>
+                  <span className={styles.connLabel}>
+                    {trustedSource ? agentLabel(trustedSource) : t("待确认")}
+                  </span>
+                  <span className={styles.frameCount}>
+                    {foreignSources.length > 0
+                      ? `${t("另有")} ${foreignSources.length} ${t("个 agent")}`
+                      : t("独占")}
+                  </span>
+                </span>
+              </div>
+              {foreignSources.length > 0 && (
+                <div className={styles.sourceList}>
+                  {foreignSources.map((s, i) => (
+                    <div className={styles.sourceItem} key={s.key ?? `anon-${i}`}>
+                      <span className={styles.sourceHead}>
+                        {agentLabel(s)} · {hhmm(s.firstAt)}–{hhmm(s.lastAt)}
+                      </span>
+                      <span className={styles.sourceHome}>{s.agent?.home ?? "—"}</span>
+                      <span className={styles.sourceStat}>
+                        {t("回了")} {s.snapshots} {t("份")}
+                        {s.ignored > 0 ? ` · ${t("空快照被拦")} ${s.ignored}` : ""}
+                      </span>
+                    </div>
+                  ))}
+                  <div className={styles.sourceNote}>
+                    {t(
+                      "同一频道里有别的 agent 在替桌面端作答（relay 会把请求广播给所有 agent）。把上面的 host / pid / 目录发给桌面端排查。",
+                    )}
+                  </div>
+                </div>
+              )}
+              {foreignSources.length === 0 && ignoredTotal > 0 && (
+                <div className={styles.sourceList}>
+                  <div className={styles.sourceNote}>
+                    {t("已拦下")} {ignoredTotal} {t("份可疑的空快照（卡片没被清掉）。")}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
           <div className={styles.divider} />
           <div className={styles.row}>
             <span className={styles.rowLabel}>{t("通知")}</span>
