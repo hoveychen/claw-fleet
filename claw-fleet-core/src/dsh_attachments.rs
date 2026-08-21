@@ -24,6 +24,26 @@
 //! 209-byte PNG uploaded through `session.prompt` came back as
 //! `attachmentId: "sha256:dae52f01…"`, byte-identical to `shasum -a 256` of the
 //! file on disk.
+//!
+//! # Both backends, without a new endpoint
+//!
+//! Fleet's rule is that a feature works under `RemoteBackend` too. This one does
+//! by construction, because every step already runs on whichever host the agent
+//! is on:
+//!
+//! * **Outbound.** The paths in the block were minted by
+//!   `Backend::upload_attachment`, which under `RemoteBackend` uploads the bytes
+//!   to the probe and returns a *probe* path. [`prompt_content`] then runs inside
+//!   that probe's `fleet serve`, next to the dsh it is talking to, so the file is
+//!   local to the reader.
+//! * **Inbound.** `get_messages` is a `fleet serve` route (`routes::MESSAGES`),
+//!   so [`resolve_image_blocks`] commits to the *probe's* store and emits probe
+//!   paths. The desktop renders them through the `fleet-attachment://` protocol,
+//!   whose handler goes through `Backend::get_user_attachment` — proxied to the
+//!   probe's `routes::USER_ATTACHMENT`. No local file access is assumed anywhere.
+//! * **Mobile.** The relay is started by `LocalBackend`, so in a remote
+//!   deployment it is the probe's own `fleet serve` that runs it — the store it
+//!   thumbnails from is the same one dsh committed into.
 
 use std::path::Path;
 
