@@ -11,6 +11,7 @@ import {
   wikiLinkComponent,
   type WikiLinkContext,
 } from "../../markdown/wikiLinks";
+import { useWikiLinks } from "../../markdown/wikiLinksContext";
 import { MermaidBlock } from "../../markdown/MermaidBlock";
 import { PathChip, type PathLinkContext } from "../../markdown/pathLinks";
 import { parsePathRef } from "../../markdown/pathRef";
@@ -56,7 +57,8 @@ interface Props {
   isPartial?: boolean;
   searchTerms?: string[] | null;
   /** When set, [[slug]] refs and bare slug hrefs resolve to other wiki docs
-   *  (in-app navigation, dead links grayed). Chat rendering leaves this unset. */
+   *  (in-app navigation, dead links grayed). Overrides the ambient
+   *  `WikiLinksProvider`; leaving both unset keeps refs inert (chat). */
   wiki?: WikiLinkContext;
   /** When set, inline-code spans that parse as filesystem paths become chips
    *  that open the file in the 文件 page. Needs a workspace root to resolve
@@ -68,9 +70,14 @@ export const TextBlock = memo(function TextBlock({
   text,
   isPartial,
   searchTerms,
-  wiki,
+  wiki: wikiProp,
   paths,
 }: Props) {
+  // A caller that knows its wiki context passes it; agent prose instead sits
+  // inside a provider (see wikiLinksContext for why threading a prop through
+  // every block renderer was the worse option). Outside both, refs stay prose.
+  const ambientWiki = useWikiLinks();
+  const wiki = wikiProp ?? ambientWiki ?? undefined;
   // When streaming, strip the last incomplete paragraph to avoid visual flicker.
   // normalizeSvgBlankLines keeps an inline <svg> from being truncated at a blank
   // line inside the drawing (see plugins.ts) — a no-op for prose without SVG.

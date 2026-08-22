@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
+import { useUIStore } from "../store";
 import type { WikiDoc } from "../components/WikiView";
 
 /**
@@ -54,4 +55,18 @@ export function useWikiDocs(): { docs: WikiDoc[]; loaded: boolean } {
     if (!loaded) void fetch();
   }, [loaded, fetch]);
   return { docs, loaded };
+}
+
+/**
+ * Hand a slug to the 知识库 page, selected. The fallback for prose rendered where
+ * no tab strip exists (the global drawer, Lite mode), and the escape hatch a
+ * wiki tab offers for the actions that need that page's dialogs.
+ *
+ * Reads the store imperatively because both callers are event handlers, not
+ * renders — subscribing would re-render them for a value they never display.
+ */
+export function revealSlugInWikiPage(slug: string): void {
+  const ui = useUIStore.getState();
+  ui.updateMainViewState("wiki", { selectedSlug: slug });
+  ui.setViewMode("wiki");
 }
