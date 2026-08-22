@@ -38,11 +38,14 @@ import {
   type TabState,
 } from "./sessionTabs";
 
-/** One group: its open tabs left→right plus the one it shows. */
+/** One group: its open tabs left→right, the one it shows, and its share of the
+ *  split axis. `weight` is relative — two groups at 1 each split the axis in
+ *  half; the number only means anything against its siblings' total. */
 export interface TabGroup {
   id: string;
   tabIds: string[];
   activeId: string | null;
+  weight: number;
 }
 
 /** Which way the groups are laid out. `row` = side by side (split right),
@@ -59,10 +62,83 @@ export interface GroupsState {
 /** The group a freshly-installed (or freshly-corrupted) layout starts with. */
 export const FIRST_GROUP_ID = "g1";
 
+/** Every group starts with an equal share of the axis. */
+export const DEFAULT_WEIGHT = 1;
+
+/** Coerce a persisted weight. A non-finite or non-positive value would make a
+ *  group zero-height (or poison the whole total via NaN), so anything odd falls
+ *  back to an equal share rather than being trusted. */
+function sanitizeWeight(raw: unknown): number {
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0
+    ? raw
+    : DEFAULT_WEIGHT;
+}
+
+/**
+ * Move the boundary between group `idx` and `idx + 1` by `deltaPx` along an axis
+ * `axisPx` long, keeping both sides at least `minPx`.
+ *
+ * Weights are relative, so this converts to pixels, clamps there, and converts
+ * back against the *unchanged* total — which is what keeps the groups either
+ * side of the dragged boundary still.
+ *
+ * Returns the input array unchanged (same reference) for a no-op, so callers can
+ * skip a re-render.
+ */
+export function resizeGroups(
+  weights: number[],
+  idx: number,
+  deltaPx: number,
+  axisPx: number,
+  minPx: number,
+): number[] {
+  if (idx < 0 || idx + 1 >= weights.length) return weights;
+  if (deltaPx === 0 || axisPx <= 0) return weights;
+  const total = weights.reduce((a, b) => a + b, 0);
+  if (total <= 0) return weights;
+  const pxPerWeight = axisPx / total;
+  const aPx = weights[idx] * pxPerWeight;
+  const bPx = weights[idx + 1] * pxPerWeight;
+  const pairPx = aPx + bPx;
+  // The pair can't satisfy both minimums no matter where the boundary goes —
+  // leave the layout alone instead of picking which side to violate.
+  if (pairPx < minPx * 2) return weights;
+  const nextAPx = Math.min(Math.max(aPx + deltaPx, minPx), pairPx - minPx);
+  if (nextAPx === aPx) return weights;
+  const out = [...weights];
+  out[idx] = nextAPx / pxPerWeight;
+  out[idx + 1] = (pairPx - nextAPx) / pxPerWeight;
+  return out;
+}
+
+/**
+ * Would one more group still leave every group at least `minPx`? Gates the split
+ * controls so a split can never produce a column too narrow to read.
+ *
+ * `axisPx === 0` means the axis hasn't been measured yet (first paint, before
+ * the ResizeObserver fires) and permits the split — refusing then would leave
+ * the buttons dead on load for no reason.
+ */
+export function canFitAnotherGroup(
+  axisPx: number,
+  groupCount: number,
+  minPx: number,
+): boolean {
+  if (axisPx <= 0) return true;
+  return axisPx / (groupCount + 1) >= minPx;
+}
+
 /** Wrap a flat single-strip state into the one-group layout. */
 export function singleGroup(tabs: TabState): GroupsState {
   return {
-    groups: [{ id: FIRST_GROUP_ID, tabIds: tabs.tabIds, activeId: tabs.activeId }],
+    groups: [
+      {
+        id: FIRST_GROUP_ID,
+        tabIds: tabs.tabIds,
+        activeId: tabs.activeId,
+        weight: DEFAULT_WEIGHT,
+      },
+    ],
     activeGroupId: FIRST_GROUP_ID,
     orientation: "row",
   };
@@ -139,7 +215,7 @@ export function inGroup(
   if (next.tabIds === grp.tabIds && next.activeId === grp.activeId) return state;
   if (next.tabIds.length === 0 && state.groups.length > 1) return reclaim(state, idx);
   const groups = [...state.groups];
-  groups[idx] = { id: groupId, tabIds: next.tabIds, activeId: next.activeId };
+  groups[idx] = { ...grp, tabIds: next.tabIds, activeId: next.activeId };
   return { ...state, groups };
 }
 
@@ -158,7 +234,8 @@ export function splitGroup(
   if (idx < 0) return state;
   const id = nextGroupId(state.groups);
   const groups = [...state.groups];
-  groups.splice(idx + 1, 0, { id, tabIds: [], activeId: null });
+  // Equal share: a split makes room, it doesn't take sides about how much.
+  groups.splice(idx + 1, 0, { id, tabIds: [], activeId: null, weight: DEFAULT_WEIGHT });
   return { groups, activeGroupId: id, orientation };
 }
 
@@ -256,7 +333,10 @@ export function closeGroup(state: GroupsState, groupId: string): GroupsState {
   if (idx < 0) return state;
   if (state.groups.length === 1) {
     if (state.groups[0].tabIds.length === 0) return state;
-    return { ...state, groups: [{ id: groupId, tabIds: [], activeId: null }] };
+    return {
+      ...state,
+      groups: [{ ...state.groups[0], tabIds: [], activeId: null }],
+    };
   }
   return reclaim(state, idx);
 }
@@ -358,7 +438,7 @@ export function parsePersistedGroups(raw: string | null): GroupsState {
       typeof gr.activeId === "string" && tabIds.includes(gr.activeId)
         ? gr.activeId
         : tabIds[0];
-    groups.push({ id: gr.id, tabIds, activeId });
+    groups.push({ id: gr.id, tabIds, activeId, weight: sanitizeWeight(gr.weight) });
   }
   if (groups.length === 0) return empty();
 

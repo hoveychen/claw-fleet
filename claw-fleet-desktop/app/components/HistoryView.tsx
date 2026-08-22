@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -44,6 +45,7 @@ import {
 import { useComposerDraftStore, type ComposerDraft } from "../composerDraft";
 import { SessionDetail } from "./SessionDetail";
 import { SessionTabs, type TabItem } from "./SessionTabs";
+import { GroupDivider } from "./GroupDivider";
 import {
   closeOtherTabs as closeOtherTabsState,
   closeTabsToRight as closeTabsToRightState,
@@ -53,6 +55,7 @@ import {
 } from "../sessionTabs";
 import {
   activeGroup,
+  canFitAnotherGroup,
   closeGroup,
   closeTabAnywhere,
   focusGroup,
@@ -63,6 +66,7 @@ import {
   parsePersistedGroups,
   pruneMissingGroupTabs,
   replaceTabAnywhere,
+  resizeGroups,
   serializeGroups,
   splitGroup,
   visibleTabIds,
@@ -99,6 +103,13 @@ const START_TIMEOUT_MS = 30_000;
  *  one pane unpaused, and past a handful the column is too narrow to read
  *  anyway. VS Code has no cap because its editors don't poll. */
 const MAX_GROUPS = 4;
+
+/** Narrowest a group may get. Below this the tab strip is all ellipsis and the
+ *  transcript wraps to unreadable ribbons, so it gates both the split controls
+ *  and the divider drag. Window resizes are NOT policed by it: shrinking the
+ *  window would then have to silently merge groups, and losing a layout you
+ *  arranged is worse than a cramped one you can widen back. */
+const MIN_GROUP_PX = 280;
 
 /**
  * Keep inactive session panes mounted *and laid out*. On macOS, WKWebView can
@@ -317,9 +328,31 @@ export function HistoryView() {
   // the split there was one unpaused pane; now there is one per group, which is
   // the entire CPU cost of the feature (see SessionDetail's three pollers).
   const visibleIds = useMemo(() => visibleTabIds(groupsState), [groupsState]);
-  // Room for another group? A hard cap on count only, for now — the width-aware
-  // gate that also collapses on a narrow window is a separate concern.
-  const canSplit = groupsState.groups.length < MAX_GROUPS;
+  // The split axis' length in px, measured (not guessed) so the width gate and
+  // the divider drag agree with what is on screen. Kept in a ref *as well* so
+  // the keyboard handler can read it without re-subscribing on every resize.
+  const detailRef = useRef<HTMLDivElement>(null);
+  const [axisPx, setAxisPx] = useState(0);
+  const axisRef = useRef(0);
+  axisRef.current = axisPx;
+  useEffect(() => {
+    const el = detailRef.current;
+    if (!el) return;
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      setAxisPx(groupsState.orientation === "row" ? r.width : r.height);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [groupsState.orientation]);
+
+  // Room for another group? Both a hard cap (each group keeps a pane unpaused)
+  // and a width gate (a split that produced unreadable slivers is not a split).
+  const canSplit =
+    groupsState.groups.length < MAX_GROUPS &&
+    canFitAnotherGroup(axisPx, groupsState.groups.length, MIN_GROUP_PX);
   // Per-tab search highlight (the FTS query that matched that session), keyed
   // by session id — each tab was opened by its own click and carries its own.
   const [queryById, setQueryById] = useState<Record<string, string | null>>({});
@@ -776,6 +809,20 @@ export function HistoryView() {
     [applyGroups],
   );
 
+  // Drag the boundary between group `idx` and its right/lower neighbour. The
+  // clamp lives in `resizeGroups`, against the measured axis, so a drag can
+  // neither collapse a group nor disturb the ones outside the pair.
+  const resizeBoundary = useCallback(
+    (idx: number, deltaPx: number) =>
+      applyGroups((s) => {
+        const weights = s.groups.map((g) => g.weight);
+        const next = resizeGroups(weights, idx, deltaPx, axisRef.current, MIN_GROUP_PX);
+        if (next === weights) return s;
+        return { ...s, groups: s.groups.map((g, i) => ({ ...g, weight: next[i] })) };
+      }),
+    [applyGroups],
+  );
+
   // The tab drag in flight. Held here rather than inside a strip because the
   // *destination* strip is a sibling component: it has to see which tab is
   // moving and where it came from to decide whether it is a drop target at all.
@@ -1169,14 +1216,28 @@ export function HistoryView() {
           above its own pane stack — and `data-orientation` decides whether they
           sit side by side (split right) or stack (split down). A single group
           fills it, so an un-split column looks exactly as it did. */}
-      <div className={styles.detail} data-orientation={groupsState.orientation}>
-        {groupsState.groups.map((grp) => {
+      <div
+        ref={detailRef}
+        className={styles.detail}
+        data-orientation={groupsState.orientation}
+      >
+        {groupsState.groups.map((grp, gi) => {
           const items = itemsByGroup.get(grp.id) ?? [];
           const isActiveGroup = grp.id === groupsState.activeGroupId;
           return (
+            <Fragment key={grp.id}>
+            {gi > 0 && (
+              <GroupDivider
+                orientation={groupsState.orientation}
+                onResize={(d) => resizeBoundary(gi - 1, d)}
+              />
+            )}
             <div
-              key={grp.id}
               className={styles.group}
+              // Weights are relative shares of the axis; `flexBasis: 0` makes
+              // grow the *only* thing that decides size, so a group holding a
+              // wide transcript can't claim more than its share.
+              style={{ flexGrow: grp.weight, flexBasis: 0 }}
               // Clicking anywhere in a group takes column focus, so typing in a
               // composer or hitting ⌘\ acts on the half you are looking at
               // rather than the half you last clicked a tab in.
@@ -1281,6 +1342,7 @@ export function HistoryView() {
                 )}
               </div>
             </div>
+            </Fragment>
           );
         })}
       </div>
