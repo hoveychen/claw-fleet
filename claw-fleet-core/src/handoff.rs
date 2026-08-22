@@ -133,6 +133,106 @@ impl HandoffChain {
     }
 }
 
+/// Clip `note` to `limit` chars on a char boundary, marking the elision.
+fn clip_note(note: &str, limit: usize) -> String {
+    let note = note.trim();
+    match note.char_indices().nth(limit) {
+        None => note.to_string(),
+        Some((byte, _)) => format!("{}…（已截断，全文见 show）", &note[..byte]),
+    }
+}
+
+/// Render a roster of chains: identity and hop order only, no notes.
+///
+/// Notes are the bulk of a chain — on this developer's machine the 97 recorded
+/// chains serialise to ~2.9 MB of JSON, which is not something an agent can
+/// read. The index tells you *which* chain to ask about; `render_chain` (via
+/// the `show` action) is where the notes live. Ordered most-recently-handed
+/// first, since the chains an agent asks about are almost always recent.
+pub fn render_chain_list(chains: &[HandoffChain]) -> String {
+    if chains.is_empty() {
+        return "no handoff chains recorded\n".to_string();
+    }
+    let last_handed = |c: &HandoffChain| c.links.iter().map(|l| l.handed_at).max().unwrap_or(0);
+    let mut ordered: Vec<&HandoffChain> = chains.iter().collect();
+    ordered.sort_by_key(|c| std::cmp::Reverse(last_handed(c)));
+    let mut out = format!(
+        "{} 条接力链（每一棒的 note 全文用 show 单独取）\n",
+        ordered.len()
+    );
+    for c in ordered {
+        let ids = c.session_ids();
+        out.push_str(&format!(
+            "\n{}  [{} 棒]  plan={}  ws={}\n",
+            c.chain_id,
+            ids.len(),
+            c.plan_id.as_deref().unwrap_or("-"),
+            c.workspace_path
+        ));
+        for (i, sid) in ids.iter().enumerate() {
+            out.push_str(&format!("  {}. {sid}\n", i + 1));
+        }
+    }
+    out
+}
+
+/// Render a chain as agent-readable text: one block per hop, each carrying the
+/// note that hop wrote when it handed the baton on.
+///
+/// This is the affordance a relayed session needs to answer "what did the boss
+/// originally ask?" — the chain's hop 1 is the origin of the work, which is not
+/// necessarily the plan the current hop happens to be executing. `note_limit`
+/// clips each note (for the successor's opening prompt, where the full chain
+/// would crowd out the briefing); `None` renders every note in full.
+pub fn render_chain(
+    chain: &HandoffChain,
+    viewer: Option<&str>,
+    note_limit: Option<usize>,
+) -> String {
+    let ids = chain.session_ids();
+    let mut out = format!(
+        "接力链 {}（{} 棒，plan={}，workspace={}）\n",
+        chain.chain_id,
+        ids.len(),
+        chain.plan_id.as_deref().unwrap_or("-"),
+        chain.workspace_path
+    );
+    for (i, sid) in ids.iter().enumerate() {
+        let mut marks = Vec::new();
+        if i == 0 {
+            marks.push("链的起点");
+        }
+        if viewer == Some(sid.as_str()) {
+            marks.push("你自己");
+        }
+        let mark = if marks.is_empty() {
+            String::new()
+        } else {
+            format!("  ← {}", marks.join("，"))
+        };
+        out.push_str(&format!("\n第 {} 棒  {sid}{mark}\n", i + 1));
+        // Link i is the baton hop i handed to hop i+1; the last hop has none.
+        if let Some(link) = chain.links.get(i) {
+            let plan = match (&link.plan_id, &link.next_task) {
+                (Some(p), Some(t)) => format!("（plan={p}, next={t}）"),
+                (Some(p), None) => format!("（plan={p}）"),
+                _ => String::new(),
+            };
+            let note = match note_limit {
+                Some(n) => clip_note(&link.note, n),
+                None => link.note.trim().to_string(),
+            };
+            out.push_str(&format!("  交给第 {} 棒时留下的 note{plan}：\n", i + 2));
+            for line in note.lines() {
+                out.push_str("  ");
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
 /// Lightweight per-session relay position, embedded into `SessionInfo` so the
 /// session card can render the "接力 n/N" chip without an extra round-trip.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -464,8 +564,15 @@ pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
 
 /// Opening prompt for the successor session. The prd-context hook re-injects
 /// the full TASKS.md plan on top of this, so the prompt only needs the relay
-/// note and the concrete "resume here" pointer.
-pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
+/// note, the chain it sits on, and the concrete "resume here" pointer.
+///
+/// `prior` is the chain the predecessor is on (`None` when it is starting one).
+/// From hop 3 onward the immediate note alone is a lossy view of the work: the
+/// plan being relayed is frequently a mid-chain spinoff, so a successor asked
+/// "what did the boss originally want" would otherwise answer from its own plan
+/// and silently narrow the scope. Handing it the hop roster up front costs a few
+/// hundred tokens and removes the need to know the affordance exists.
+pub fn compose_successor_prompt(p: &PendingHandoff, prior: Option<&HandoffChain>) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "你是一次接力开发的第 {} 棒，接替上一个 session（{}）继续未完成的工作。\n\n",
@@ -475,6 +582,29 @@ pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
     out.push_str("上一棒留下的交接信息：\n\n---\n");
     out.push_str(&p.note);
     out.push_str("\n---\n\n");
+    // Placed *after* the note delimiters so `codex_source::derive_codex_title`
+    // still finds the note between them.
+    if let Some(chain) = prior.filter(|c| !c.links.is_empty()) {
+        let ran = chain.session_ids().len();
+        out.push_str(&format!(
+            "在你之前这条链已经跑过 {ran} 棒（你是第 {}，尚未记入链；末棒即交接给你的那一棒）。\
+             老板若问「最开始的问题」「这个 chain 一开始要干什么」，指的是**第 1 棒的起点**，\
+             不是你手上的 plan——链中段常派生出新 plan，别拿它当原始诉求。\n\n",
+            ran + 1
+        ));
+        out.push_str(&render_chain(chain, None, Some(200)));
+        out.push_str(
+            "\n每一棒 note 的全文：调 `fleet__handoff` 传 action=\"show\"（CLI 等价 \
+             `fleet handoff show <session id>`）。",
+        );
+        if p.agent_source == "claude-code" {
+            out.push_str(
+                "要看某一棒当时真正发生了什么（含老板逐字的原始 prompt），读它的 transcript：\
+                 `find ~/.claude/projects -name \"<session id>.jsonl\"`。",
+            );
+        }
+        out.push_str("\n\n");
+    }
     if let Some(cwd) = &p.predecessor_cwd {
         out.push_str(&format!(
             "上一棒的代码工作在 `{cwd}`（多半是 Rule 3 的 worktree），而你被启动在会话原本的 workspace 里。\
@@ -618,8 +748,11 @@ where
     // build — or between a take and its link — must not spawn a second
     // successor for a session that already relayed. The record is already gone
     // (take removes first), so dropping it here retires it for good.
-    if let Some(chain) = chain_containing_in(chain_dir, session_id) {
-        if let Some(successor) = successor_of(&chain, session_id) {
+    // Doubles as the successor's chain view: the same lookup answers both "has
+    // this session already relayed?" and "what ran before it?".
+    let prior = chain_containing_in(chain_dir, session_id);
+    if let Some(chain) = &prior {
+        if let Some(successor) = successor_of(chain, session_id) {
             crate::log_debug(&format!(
                 "handoff: {session_id} already relayed to {successor} (chain {}); \
                  discarding a second pending record instead of forking the chain",
@@ -628,7 +761,7 @@ where
             return Ok(None);
         }
     }
-    let prompt = compose_successor_prompt(&pending);
+    let prompt = compose_successor_prompt(&pending, prior.as_ref());
     // The relay continues the predecessor's work, so it continues on the
     // predecessor's model and effort. Falling through to the CLI default here
     // would silently switch models mid-plan. `permission_mode` is deliberately
@@ -1227,7 +1360,7 @@ mod tests {
             created: 1,
             agent_source: "claude-code".into(),
         };
-        let prompt = compose_successor_prompt(&p);
+        let prompt = compose_successor_prompt(&p, None);
         assert!(prompt.contains("第 3 棒"));
         assert!(prompt.contains("src-sid"));
         assert!(prompt.contains("P1-P3 已完成；P4 卡在 X"));
@@ -1255,7 +1388,130 @@ mod tests {
             next_task: None,
             ..p
         };
-        let prompt = compose_successor_prompt(&free);
+        let prompt = compose_successor_prompt(&free, None);
         assert!(prompt.contains("按交接信息继续完成这项工作"));
+    }
+
+    /// The index must stay an index: notes are what makes a chain dump huge, so
+    /// listing must never carry them, and the freshest chain must come first.
+    #[test]
+    fn chain_list_is_an_index_without_notes_newest_first() {
+        let (root, pdir, cdir) = fresh_dirs("list");
+        register_simple(&pdir, &cdir, "old1", "秘密便条一", 1000).unwrap();
+        let taken = take_pending_in(&pdir, "old1", 1001).unwrap();
+        record_link_in(&cdir, &taken, "old2", 1002).unwrap();
+        register_simple(&pdir, &cdir, "new1", "秘密便条二", 5000).unwrap();
+        let taken = take_pending_in(&pdir, "new1", 5001).unwrap();
+        record_link_in(&cdir, &taken, "new2", 5002).unwrap();
+
+        let out = render_chain_list(&list_chains_in(&cdir));
+        assert!(!out.contains("秘密便条"), "notes must not be listed:\n{out}");
+        assert!(out.contains("1. new1") && out.contains("2. new2"), "{out}");
+        assert!(out.contains("[2 棒]"), "{out}");
+        assert!(
+            out.find("new1").unwrap() < out.find("old1").unwrap(),
+            "newest chain must sort first:\n{out}"
+        );
+        assert_eq!(render_chain_list(&[]), "no handoff chains recorded\n");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A late hop must open its turn already knowing where the chain started.
+    /// Regression guard for the failure this exists to stop: hop 3 was asked
+    /// "回到这个 chain 最开始我的问题" and answered from the plan it was handed
+    /// (a mid-chain spinoff), because the opening prompt gave it only its
+    /// predecessor's note.
+    #[test]
+    fn successor_prompt_carries_the_chain_before_it() {
+        let (root, pdir, cdir) = fresh_dirs("prompt-chain");
+        register_in(
+            &pdir,
+            &cdir,
+            "s1",
+            "/ws",
+            None,
+            "老板原话：我要独立的文档库，能搜索，能支持 RAG",
+            Some("doc-lib"),
+            Some("P1"),
+            None,
+            None,
+            "claude-code",
+            1000,
+        )
+        .unwrap();
+        let taken = take_pending_in(&pdir, "s1", 1001).unwrap();
+        // Hop 1 starts the chain: nothing ran before it, so no roster is added.
+        // (Anchor on the roster's own header — the standing prompt text already
+        // contains the words "接力链" in an unrelated sentence.)
+        let first = compose_successor_prompt(&taken, chain_containing_in(&cdir, "s1").as_ref());
+        assert!(!first.contains("第 1 棒"), "{first}");
+        record_link_in(&cdir, &taken, "s2", 1002).unwrap();
+
+        register_simple(&pdir, &cdir, "s2", "维度改 1024", 2000).unwrap();
+        let taken = take_pending_in(&pdir, "s2", 2001).unwrap();
+        record_link_in(&cdir, &taken, "s3", 2002).unwrap();
+
+        register_simple(&pdir, &cdir, "s3", "收尾合并", 3000).unwrap();
+        let taken = take_pending_in(&pdir, "s3", 3001).unwrap();
+        let prompt = compose_successor_prompt(&taken, chain_containing_in(&cdir, "s3").as_ref());
+        assert!(prompt.contains("你是一次接力开发的第 4 棒"), "{prompt}");
+        assert!(prompt.contains("第 1 棒  s1"), "{prompt}");
+        assert!(prompt.contains("链的起点"), "{prompt}");
+        assert!(prompt.contains("老板原话：我要独立的文档库"), "{prompt}");
+        assert!(prompt.contains("action=\"show\""), "{prompt}");
+        assert!(prompt.contains("~/.claude/projects"), "{prompt}");
+        // The immediate briefing must still be the note, ahead of the roster.
+        assert!(
+            prompt.find("收尾合并").unwrap() < prompt.find("第 1 棒  s1").unwrap(),
+            "{prompt}"
+        );
+        // Codex relays get no ~/.claude transcript hint — wrong store for them.
+        let codex = PendingHandoff { agent_source: "codex".into(), ..taken };
+        let cprompt = compose_successor_prompt(&codex, chain_containing_in(&cdir, "s3").as_ref());
+        assert!(cprompt.contains("第 1 棒  s1"), "{cprompt}");
+        assert!(!cprompt.contains("~/.claude/projects"), "{cprompt}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The rendered chain must let a late hop find where the work *started* —
+    /// hop 1's session id and the note it wrote — because the plan a relayed
+    /// session executes is often a mid-chain spinoff, not the original ask.
+    #[test]
+    fn render_chain_shows_origin_and_attributes_notes_to_the_hop_that_wrote_them() {
+        let (root, pdir, cdir) = fresh_dirs("render");
+        register_in(
+            &pdir, &cdir, "s1", "/ws", None, "老板原话：我要独立的文档库", Some("doc-lib"),
+            Some("P1"), None, None, "claude-code", 1000,
+        )
+        .unwrap();
+        let taken = take_pending_in(&pdir, "s1", 1001).unwrap();
+        record_link_in(&cdir, &taken, "s2", 1002).unwrap();
+        register_simple(&pdir, &cdir, "s2", "接着做 embedding 维度", 2000).unwrap();
+        let taken = take_pending_in(&pdir, "s2", 2001).unwrap();
+        record_link_in(&cdir, &taken, "s3", 2002).unwrap();
+
+        let chain = chain_containing_in(&cdir, "s3").unwrap();
+        let full = render_chain(&chain, Some("s3"), None);
+        assert!(full.contains("第 1 棒  s1"), "{full}");
+        assert!(full.contains("链的起点"), "{full}");
+        assert!(full.contains("你自己"), "{full}");
+        assert!(full.contains("老板原话：我要独立的文档库"), "{full}");
+        assert!(full.contains("doc-lib"), "{full}");
+        // s2's note belongs to hop 2, not hop 1.
+        // Anchor on the hop *headers* (line-initial) — "第 2 棒" also occurs
+        // inside hop 1's "交给第 2 棒时留下的 note" lead-in.
+        let h1 = full.find("\n第 1 棒").unwrap();
+        let h2 = full.find("\n第 2 棒").unwrap();
+        let origin = full.find("老板原话").unwrap();
+        assert!(h1 < origin && origin < h2, "note attributed to wrong hop:\n{full}");
+        // The last hop wrote no note yet — nothing is invented for it.
+        assert!(!full.contains("交给第 4 棒"), "{full}");
+
+        // Clipping keeps the lead-in and marks the elision, on a char boundary
+        // (the notes are CJK — a byte slice would panic).
+        let clipped = render_chain(&chain, Some("s3"), Some(4));
+        assert!(clipped.contains("老板原话…"), "{clipped}");
+        assert!(!clipped.contains("独立的文档库"), "{clipped}");
+        let _ = fs::remove_dir_all(&root);
     }
 }

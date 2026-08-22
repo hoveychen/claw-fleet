@@ -433,8 +433,8 @@ Fleet 有一个一等的接力：\n\
 fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>] [--model <模型>] [--effort <档位>]\n\
 ```\n\
 \n\
-- **--note 是强制的**，是后继者在 TASKS.md 之外知道的一切：什么做完了、什么在\
-飞、关键文件、坑、下一个具体步骤。像换班简报那样写。\n\
+- **--note 是强制的**，是你这一棒交出去的全部账：什么做完了、什么在飞、关键\
+文件、坑、下一个具体步骤。像换班简报那样写。\n\
 - **当工作是一个 TASKS.md 计划时传 --plan/--next**，好让 Fleet 把后继者自动\
 归属到那个计划和 P；它会在那里恢复节奏，无需自己的任何 `fleet plan` 仪式。\n\
 - **--model / --effort 可选**：钉死后继者的模型（如 `claude-opus-5[1m]`，\
@@ -445,6 +445,13 @@ Fleet 的 Stop hook 就消费这个登记，并在同一 workspace spawn 一个�
 开场 prompt 就是你的便条；prd-context hook 会自动重新注入 TASKS.md 宏观计划。\n\
 - **接力被记录**为一条交接链，显示在会话卡片上（接力 n/N），好让{title}事后\
 追溯整个序列。\n\
+- **整条链你读得到，不止上一棒的便条**：调 `fleet__handoff` 传 \
+`action=\"show\"`（CLI 等价 `fleet handoff show <session id>`），会按棒列出链上\
+每一个 session id 和它交接时写的 note 全文；第 2 棒起的开场白里已附了这份名册\
+的摘要。**{title}若问「最开始的问题」「这个 chain 一开始要干什么」，指的是第 1 \
+棒的起点，不是你手上的 plan**——链中段常派生出新 plan，别拿它当原始诉求，先 \
+`show` 再答。要看某一棒当时逐字发生了什么，读它的 transcript：\
+`find ~/.claude/projects -name \"<session id>.jsonl\"`。\n\
 - 给你会话的一个新用户 prompt 会取消你待定的交接——{title}接管永远优先。链最多\
 100 跳；重新登记会覆盖你之前的便条。\n\
 \n\
