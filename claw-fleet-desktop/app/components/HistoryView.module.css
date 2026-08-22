@@ -244,13 +244,43 @@
 
 /* Fills PageShell's main container: the tab strip stacked over the detail body.
    Keep this level — see the comment at its call site in HistoryView.tsx. */
+/* The split axis. Children are editor groups; `data-orientation` decides whether
+ * a split lays them out side by side or stacked. With one group this is the same
+ * single-column box it always was. */
 .detail {
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   display: flex;
+}
+.detail[data-orientation="row"] {
+  flex-direction: row;
+}
+.detail[data-orientation="column"] {
   flex-direction: column;
+}
+
+/* One editor group: its tab strip above its pane stack. Groups share the axis
+ * equally. `min-*: 0` in *both* directions is load-bearing — a flex child
+ * defaults to min-content in the main axis, and a group holding a wide
+ * transcript would otherwise refuse to shrink and push its sibling off-screen
+ * instead of splitting the space. */
+.group {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* Separator between adjacent groups, drawn on the group rather than as its own
+ * element so there is nothing to keep in sync with the group list. */
+.detail[data-orientation="row"] > .group + .group {
+  border-left: 1px solid var(--color-border);
+}
+.detail[data-orientation="column"] > .group + .group {
+  border-top: 1px solid var(--color-border);
 }
 
 /* Holds the open tabs' panes plus the compose/pending/empty overlays — all of

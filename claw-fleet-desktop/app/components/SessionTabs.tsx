@@ -1,8 +1,10 @@
-// IDE-style tab strip above the 启动台 detail column.
+// IDE-style tab strip above one 启动台 editor *group*.
 //
 // Each open session is one tab. The strip owns no session state of its own —
-// HistoryView holds the tab list and hands it down, so the tabs and the
-// detail column can never disagree about what is open.
+// HistoryView holds the group list and hands each group its slice down, so the
+// tabs and the detail column can never disagree about what is open. One of
+// these renders per group; `groupId` is echoed back through every callback so
+// the reducers know which group the click belongs to.
 //
 // The status dot is deliberately resolved from `useSessionsStore` rather than
 // from the `SessionInfo` snapshot the tab was opened with: a tab that has been
@@ -25,7 +27,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { ChevronDown } from "lucide-react";
+import {
+  ChevronDown,
+  SquareSplitHorizontal,
+  SquareSplitVertical,
+} from "lucide-react";
 import { useSessionsStore } from "../store";
 import { isKeyboardActivationKey } from "../keyboard";
 import { preferredSessionTitle, rowBarColor, type SessionInfo } from "../types";
@@ -62,15 +68,25 @@ interface OverflowRow {
 export function SessionTabs({
   tabs,
   activeId,
+  isActiveGroup,
+  splittable,
   onActivate,
   onClose,
   onCloseOthers,
   onCloseRight,
   onCloseAll,
   onReorder,
+  onSplitRight,
+  onSplitDown,
 }: {
   tabs: TabItem[];
   activeId: string | null;
+  /** Does this group hold column focus? Drives the strip's active tint, so two
+   *  split halves don't both look like the one you're typing into. */
+  isActiveGroup: boolean;
+  /** False once the column is too narrow to take another group — the split
+   *  buttons stay visible but disabled, rather than silently doing nothing. */
+  splittable: boolean;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
   onCloseOthers: (id: string) => void;
@@ -78,6 +94,8 @@ export function SessionTabs({
   onCloseAll: () => void;
   /** Move `fromId` to `toId`'s slot. Called live during a drag, not on drop. */
   onReorder: (fromId: string, toId: string) => void;
+  onSplitRight: () => void;
+  onSplitDown: () => void;
 }) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
@@ -122,7 +140,9 @@ export function SessionTabs({
     if (!overflowing) setOverflowOpen(false);
   }, [overflowing]);
 
-  if (tabs.length === 0) return null;
+  // An *empty* strip still renders: a group the user just split open needs its
+  // split buttons and a drop target, or the half they made would be a dead box.
+  // Whether the single-group column shows a bar at all is HistoryView's call.
 
   const menuItems = (id: string): ContextMenuItem[] => {
     const idx = tabs.findIndex((s) => s.id === id);
@@ -166,7 +186,7 @@ export function SessionTabs({
   });
 
   return (
-    <div className={styles.bar}>
+    <div className={styles.bar} data-active-group={isActiveGroup ? "" : undefined}>
       <div className={styles.strip} role="tablist" ref={stripRef}>
         {tabs.map((tab) => {
           // The draft tab has no backing session — it wears its own label and no
@@ -281,6 +301,29 @@ export function SessionTabs({
           <ChevronDown size={15} />
         </button>
       )}
+
+      {/* Split controls, pinned right of the (scrolling) strip so they never
+          drift off-screen the way a trailing tab does. Disabled rather than
+          hidden when the column can't take another group — a control that
+          vanishes reads as a bug, one that greys out reads as a limit. */}
+      <button
+        className={styles.split_btn}
+        aria-label={t("tabs.split_right", "向右分屏")}
+        title={t("tabs.split_right", "向右分屏")}
+        disabled={!splittable}
+        onClick={onSplitRight}
+      >
+        <SquareSplitHorizontal size={14} />
+      </button>
+      <button
+        className={styles.split_btn}
+        aria-label={t("tabs.split_down", "向下分屏")}
+        title={t("tabs.split_down", "向下分屏")}
+        disabled={!splittable}
+        onClick={onSplitDown}
+      >
+        <SquareSplitVertical size={14} />
+      </button>
 
       {overflowOpen && overflowBtnRef.current && (
         <TabOverflowMenu

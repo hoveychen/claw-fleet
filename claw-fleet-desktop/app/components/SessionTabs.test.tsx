@@ -51,12 +51,16 @@ function renderTabs(onActivate: (id: string) => void) {
       <SessionTabs
         tabs={tabs}
         activeId="first"
+        isActiveGroup
+        splittable
         onActivate={onActivate}
         onClose={vi.fn()}
         onCloseOthers={vi.fn()}
         onCloseRight={vi.fn()}
         onCloseAll={vi.fn()}
         onReorder={vi.fn()}
+        onSplitRight={vi.fn()}
+        onSplitDown={vi.fn()}
       />,
     ),
   );
