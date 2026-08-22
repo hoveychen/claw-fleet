@@ -1,0 +1,61 @@
+/* Boundary between two editor groups.
+ *
+ * Two things had to be got right, both found by hit-testing the real thing:
+ *
+ *  1. The grab area is the ELEMENT, not a `::after` overlay. A 1px element with
+ *     a widened pseudo-element failed hit-testing outright —
+ *     `elementsFromPoint` returned the neighbouring pane everywhere except the
+ *     divider's exact left edge — so the handle was effectively unclickable.
+ *  2. It needs a `z-index` above SessionDetail's root, which is
+ *     `position: relative; z-index: 10` (see SessionDetail.module.css `.root`).
+ *     Anything lower loses the whole grab area to the pane on top of it — a 3
+ *     did not work, and the failure looks identical to "the handler is broken".
+ *
+ * So: a 7px transparent handle pulled back to 1px of layout with negative
+ * margins, painting its own hairline via `::before`.
+ */
+.divider {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 20;
+  background: transparent;
+  /* Keeps the pointer stream on this element for the whole drag even as the
+   * cursor passes over panes and iframes. */
+  touch-action: none;
+}
+
+.divider_v {
+  width: 7px;
+  margin: 0 -3px;
+  cursor: col-resize;
+}
+.divider_h {
+  height: 7px;
+  margin: -3px 0;
+  cursor: row-resize;
+}
+
+/* The visible hairline, centred inside the wider grab area. */
+.divider::before {
+  content: "";
+  position: absolute;
+  background: var(--color-border);
+  transition: background 0.12s;
+}
+.divider_v::before {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+}
+.divider_h::before {
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 1px;
+}
+
+.divider:hover::before,
+.divider:active::before {
+  background: var(--color-accent);
+}

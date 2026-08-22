@@ -274,14 +274,8 @@
   flex-direction: column;
   overflow: hidden;
 }
-/* Separator between adjacent groups, drawn on the group rather than as its own
- * element so there is nothing to keep in sync with the group list. */
-.detail[data-orientation="row"] > .group + .group {
-  border-left: 1px solid var(--color-border);
-}
-.detail[data-orientation="column"] > .group + .group {
-  border-top: 1px solid var(--color-border);
-}
+/* The line between groups is <GroupDivider>, a real element — it has to be
+ * draggable, and a border isn't. Nothing to draw here. */
 
 /* Holds the open tabs' panes plus the compose/pending/empty overlays — all of
  * which are siblings competing for the same space, so it stays a flex row and

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activeGroup,
+  canFitAnotherGroup,
   closeGroup,
   closeTabAnywhere,
   FIRST_GROUP_ID,
@@ -14,6 +15,7 @@ import {
   parsePersistedGroups,
   pruneMissingGroupTabs,
   replaceTabAnywhere,
+  resizeGroups,
   serializeGroups,
   singleGroup,
   splitGroup,
@@ -23,12 +25,15 @@ import {
 } from "./tabGroups";
 import { closeTab, DRAFT_TAB_ID } from "./sessionTabs";
 
-/** Terse group literal. */
-const g = (id: string, tabIds: string[], activeId: string | null): TabGroup => ({
-  id,
-  tabIds,
-  activeId,
-});
+/** Terse group literal. `weight` defaults to an equal share, which doubles as
+ *  regression cover: any reducer that rebuilds a group without carrying its
+ *  weight across fails the existing `toEqual` assertions. */
+const g = (
+  id: string,
+  tabIds: string[],
+  activeId: string | null,
+  weight = 1,
+): TabGroup => ({ id, tabIds, activeId, weight });
 
 /** Terse state literal, defaulting the axis to the side-by-side one. */
 const st = (
@@ -342,6 +347,73 @@ describe("parsePersistedGroups", () => {
     const next = parsePersistedGroups(raw);
     expect(next).toEqual(st([g("g2", ["a"], "a")], "g2"));
     expectInvariants(next);
+  });
+});
+
+describe("resizeGroups", () => {
+  // 1000px axis, two equal groups → 500px each. Weights are relative, so the
+  // helper converts to px, clamps, and converts back.
+  const two = [1, 1];
+
+  it("moves the boundary by the dragged distance", () => {
+    const next = resizeGroups(two, 0, 100, 1000, 200);
+    // 600 / 400 of a 1000px axis, expressed against the same weight total (2).
+    expect(next).toEqual([1.2, 0.8]);
+  });
+
+  it("keeps the total weight constant so untouched groups don't move", () => {
+    const next = resizeGroups([1, 1, 2], 0, 150, 1000, 200);
+    expect(next[2]).toBe(2);
+    expect(next.reduce((a, b) => a + b, 0)).toBeCloseTo(4);
+  });
+
+  it("clamps at the minimum instead of collapsing a group", () => {
+    // Dragging 400px left would leave the first group at 100px.
+    const next = resizeGroups(two, 0, -400, 1000, 200);
+    expect(next[0]).toBeCloseTo(0.4); // 200px of 1000, total weight 2
+    expect(next[1]).toBeCloseTo(1.6);
+  });
+
+  it("clamps the far side symmetrically", () => {
+    const next = resizeGroups(two, 0, 400, 1000, 200);
+    expect(next[1]).toBeCloseTo(0.4);
+  });
+
+  it("refuses when the axis cannot even hold two minimums", () => {
+    // No arrangement satisfies the constraint, so leave the layout alone rather
+    // than picking an arbitrary violation.
+    expect(resizeGroups(two, 0, 50, 300, 200)).toEqual(two);
+  });
+
+  it("is a no-op for a boundary that doesn't exist", () => {
+    expect(resizeGroups(two, 1, 50, 1000, 200)).toEqual(two);
+    expect(resizeGroups(two, -1, 50, 1000, 200)).toEqual(two);
+  });
+
+  it("is a no-op for a zero drag", () => {
+    expect(resizeGroups(two, 0, 0, 1000, 200)).toEqual(two);
+  });
+});
+
+describe("canFitAnotherGroup", () => {
+  it("allows a split while every resulting group clears the minimum", () => {
+    // 900px / 3 groups = 300 each ≥ 280.
+    expect(canFitAnotherGroup(900, 2, 280)).toBe(true);
+  });
+
+  it("refuses a split that would push groups under the minimum", () => {
+    // 800 / 3 = 266 < 280.
+    expect(canFitAnotherGroup(800, 2, 280)).toBe(false);
+  });
+
+  it("allows the first split of a wide column", () => {
+    expect(canFitAnotherGroup(1000, 1, 280)).toBe(true);
+  });
+
+  it("allows it while the axis is still unmeasured", () => {
+    // 0 means "ResizeObserver hasn't reported yet". Blocking then would make
+    // the split buttons dead on first paint.
+    expect(canFitAnotherGroup(0, 1, 280)).toBe(true);
   });
 });
 
