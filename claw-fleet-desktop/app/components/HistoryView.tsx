@@ -62,7 +62,7 @@ import {
   focusGroupAt,
   inGroup,
   moveTabToGroup,
-  openTabInActiveGroup,
+  openTabRouted,
   parsePersistedGroups,
   pruneMissingGroupTabs,
   replaceTabAnywhere,
@@ -365,6 +365,11 @@ export function HistoryView() {
   const canSplit =
     groupsState.groups.length < MAX_GROUPS &&
     canFitAnotherGroup(axisPx, groupsState.groups.length, MIN_GROUP_PX);
+  // Read inside callbacks (the keyboard handler, and every tab opener — the
+  // routing heuristic may only split when the same gate that greys out the split
+  // buttons says there is room), so they don't re-subscribe on every resize.
+  const canSplitRef = useRef(canSplit);
+  canSplitRef.current = canSplit;
   // Per-tab search highlight (the FTS query that matched that session), keyed
   // by session id — each tab was opened by its own click and carries its own.
   const [queryById, setQueryById] = useState<Record<string, string | null>>({});
@@ -664,12 +669,20 @@ export function HistoryView() {
     [applyGroups],
   );
 
+  // Every "open this" path goes through the routing heuristic, so conversations
+  // collect in one group and the material they cite in another (see
+  // `openTabRouted`) without the user arranging the column by hand each time.
+  const openRouted = useCallback(
+    (tabId: string) => applyGroups((st) => openTabRouted(st, tabId, canSplitRef.current)),
+    [applyGroups],
+  );
+
   const openTab = useCallback(
     (s: SessionInfo, highlight: string | null) => {
-      applyGroups((st) => openTabInActiveGroup(st, s.id));
+      openRouted(s.id);
       setQueryById((prev) => ({ ...prev, [s.id]: highlight }));
     },
-    [applyGroups],
+    [openRouted],
   );
 
   // Stable identity: SessionRow is memoised, and a fresh closure each render
@@ -882,8 +895,6 @@ export function HistoryView() {
   // pure waste, and nothing renders it.
   const chordRef = useRef<ChordState>(null);
   const chordTimer = useRef<number | null>(null);
-  const canSplitRef = useRef(canSplit);
-  canSplitRef.current = canSplit;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const r = resolveSplitKey(e, chordRef.current);
@@ -934,7 +945,7 @@ export function HistoryView() {
   // untouched; the draft is just another tab, so this is `openTab`, not an
   // overlay. Clicking it again while a draft is already open simply refocuses it.
   const handleNewSession = () => {
-    applyGroups((st) => openTabInActiveGroup(st, DRAFT_TAB_ID));
+    openRouted(DRAFT_TAB_ID);
   };
 
   // Schedule page "新建" shortcut: seed the new-session composer with a
@@ -960,9 +971,9 @@ export function HistoryView() {
     if (Object.keys(seed).length > 0) {
       useComposerDraftStore.getState().patchDraft("new", seed);
     }
-    applyGroups((st) => openTabInActiveGroup(st, DRAFT_TAB_ID));
+    openRouted(DRAFT_TAB_ID);
     clearNewSessionNav();
-  }, [newSessionNav, applyGroups, clearNewSessionNav]);
+  }, [newSessionNav, openRouted, clearNewSessionNav]);
 
   // A notification / tray click on a Fleet-spawned session routes here (the
   // store hop to "history" mounts this view); open the session in the inline
@@ -976,9 +987,9 @@ export function HistoryView() {
     if (!openTaskNav) return;
     if (handledOpenTaskNonce.current === openTaskNav.nonce) return;
     handledOpenTaskNonce.current = openTaskNav.nonce;
-    applyGroups((st) => openTabInActiveGroup(st, openTaskNav.sessionId));
+    openRouted(openTaskNav.sessionId);
     clearOpenTaskNav();
-  }, [openTaskNav, applyGroups, clearOpenTaskNav]);
+  }, [openTaskNav, openRouted, clearOpenTaskNav]);
 
   // Form spawned the process: flip the draft tab's pane to the "starting…"
   // spinner and start polling for the session. Snapshot the ad-hoc session ids
@@ -1072,17 +1083,17 @@ export function HistoryView() {
   // clicked in prose becomes a tab in the focused group — the same move as
   // clicking a session row — instead of navigating the window elsewhere.
   //
-  // `openTabInActiveGroup` already handles the case where the thing is open in
-  // another group: it moves focus there rather than opening a second copy.
+  // `openTabRouted` handles the case where the thing is already open in another
+  // group: it moves focus there rather than opening a second copy.
   // Memoised on `applyGroups` (itself stable), so the memoised link contexts
   // downstream don't churn on every scan.
   const detailTabs = useMemo<DetailTabOpener>(
     () => ({
-      openFile: (absPath) => applyGroups((st) => openTabInActiveGroup(st, fileTabId(absPath))),
-      openWiki: (slug) => applyGroups((st) => openTabInActiveGroup(st, wikiTabId(slug))),
-      openWeb: (url) => applyGroups((st) => openTabInActiveGroup(st, webTabId(url))),
+      openFile: (absPath) => openRouted(fileTabId(absPath)),
+      openWiki: (slug) => openRouted(wikiTabId(slug)),
+      openWeb: (url) => openRouted(webTabId(url)),
     }),
-    [applyGroups],
+    [openRouted],
   );
 
   /**
