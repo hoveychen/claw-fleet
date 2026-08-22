@@ -85,6 +85,25 @@ pub fn is_available() -> bool {
     discover().is_some()
 }
 
+/// The argv Fleet always launches the server with, after the binary itself.
+///
+/// One place, because two other things read it back: [`sweep_unregistered_orphans`]
+/// matches leaked servers by this exact command line, and the startup contract
+/// (`--port 0`, so the OS assigns the port) is what makes [`parse_port_line`]
+/// the only way to learn it.
+///
+/// `--no-open` last, so the sweep's `dsh web --port 0` signature still matches.
+/// Without it `dsh web` hands its URL to the default browser on startup — dsh's
+/// own default for a human running it in a terminal, but wrong here: Fleet
+/// drives this server over RPC and renders its sessions in its own UI, so every
+/// Fleet start (and every crash restart) popped a browser tab nobody asked for.
+/// The flag arrives in dsh-web-app 0.1.0-rc.8 (verified against the published
+/// tarballs); on 0.1.0-rc.7 and older it is an unknown option — those versions
+/// never opened a browser either, and Fleet no longer supports them.
+fn web_args() -> &'static [&'static str] {
+    &["web", "--port", "0", "--no-open"]
+}
+
 /// Extract the listening port from one launcher stdout line.
 ///
 /// `dsh web` prints exactly `dsh web: http://127.0.0.1:<port>` once the server
@@ -297,9 +316,7 @@ impl DshServer {
         }
 
         let mut cmd = crate::process_util::command(binary);
-        cmd.arg("web")
-            .arg("--port")
-            .arg("0")
+        cmd.args(web_args())
             .current_dir(workspace)
             // `dsh` is a `#!/usr/bin/env node` script, so starting it needs
             // `node` on PATH — not just the script itself, which `discover()`
@@ -542,6 +559,31 @@ mod tests {
         assert!(
             dead,
             "reap_orphans left the registry-invisible orphan (pid {pid}) alive"
+        );
+    }
+
+    /// `dsh web` hands the URL to the default browser unless told not to
+    /// ("dsh web: opening the default browser; pass --no-open to disable",
+    /// dsh-web-app 0.1.0-rc.8+). Fleet drives this server over RPC and renders
+    /// dsh sessions in its own UI, so every Fleet start — and every crash
+    /// restart — was popping a browser tab nobody asked for.
+    #[test]
+    fn launches_the_server_without_a_browser_handoff() {
+        assert!(
+            web_args().contains(&"--no-open"),
+            "dsh web would open a browser tab on every Fleet start: {:?}",
+            web_args()
+        );
+    }
+
+    /// The sweep matches leaked servers by command line, so the flag must not
+    /// break that signature by landing between `web` and `--port 0`.
+    #[test]
+    fn keeps_the_orphan_sweep_signature() {
+        assert!(
+            web_args().join(" ").starts_with("web --port 0"),
+            "sweep_unregistered_orphans matches `dsh web --port 0`: {:?}",
+            web_args()
         );
     }
 
