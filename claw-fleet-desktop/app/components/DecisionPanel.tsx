@@ -9,7 +9,7 @@ import {
   useUIStore,
 } from "../store";
 import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
-import { normalizeSvgBlankLines } from "../markdown/plugins";
+import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { usePrecedingAgentMessages } from "../hooks/usePrecedingAgentMessages";
 import type {
@@ -224,7 +224,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         <div className={`${styles.analysis} ${decision.analyzing ? styles.analysis_loading : ""}`}>
           {decision.analyzing
             ? t("guard.analyzing", "Analyzing command...")
-            : <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(decision.analysis ?? "")}</ReactMarkdown>}
+            : <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(decision.analysis ?? "")}</ReactMarkdown>}
         </div>
       )}
 
@@ -510,7 +510,7 @@ function PrecedingAgentMessagesRegion({
         <div className={styles.preceding_body}>
           {messages.map((m, i) => (
             <div key={m.uuid ?? i} className={styles.preceding_msg}>
-              <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
+              <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
                 {normalizeSvgBlankLines(m.text)}
               </ReactMarkdown>
             </div>
@@ -742,7 +742,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
+          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
       </div>
       </div>
@@ -1017,7 +1017,7 @@ function SharedOptionsBlock({
       {list}
       <div className={styles.elicitation_preview}>
         {focusedPreview ? (
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(focusedPreview)}</ReactMarkdown>
+          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(focusedPreview)}</ReactMarkdown>
         ) : null}
       </div>
     </div>
@@ -1090,7 +1090,7 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
         />
       ) : (
         <div className={styles.plan_content}>
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
+          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
             {normalizeSvgBlankLines(decision.editedPlan ?? req.planContent)}
           </ReactMarkdown>
         </div>
@@ -1595,7 +1595,7 @@ export function FleetAskCard({
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
+          <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{normalizeSvgBlankLines(q.question)}</ReactMarkdown>
         </div>
 
         {q.images && q.images.length > 0 ? (

@@ -4,7 +4,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { safeLinkComponent, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
-import { normalizeSvgBlankLines } from "../../markdown/plugins";
+import { normalizeSvgBlankLines, markdownUrlTransform } from "../../markdown/plugins";
 import { isFencedBlock } from "../../markdown/codeBlock";
 import {
   remarkWikiLinks,
@@ -92,6 +92,7 @@ export const TextBlock = memo(function TextBlock({
   return (
     <div className={styles.root}>
       <ReactMarkdown
+        urlTransform={markdownUrlTransform}
         remarkPlugins={wiki ? [...safeRemarkPlugins, remarkWikiLinks] : safeRemarkPlugins}
         rehypePlugins={safeRehypePlugins}
         components={{

@@ -89,16 +89,13 @@ describe("markdown 里的本地图片", () => {
     expect(imgSrc()).toBe("https://example.com/a.png");
   });
 
-  // Documented limitation, not a goal: react-markdown's own `urlTransform`
-  // allow-list (http/https/mailto/…) is applied per render site and drops a
-  // `data:` src before any component sees it. An agent that inlines base64 in
-  // markdown still shows nothing — tool-result images take a different path
-  // (ImageThumb) and are unaffected.
-  it("data: URL 被 react-markdown 的 urlTransform 提前剥掉（现状）", async () => {
+  // Admitted by markdownUrlTransform (see markdown/plugins): it goes straight to
+  // <img src>, so there is nothing to read off disk.
+  it("data:image URL 直接内联，不去读文件", async () => {
     await mount(<TextBlock text={`![inline](data:image/png;base64,${PNG_B64})`} />);
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(imgSrc()).toBeNull();
+    expect(imgSrc()).toBe(`data:image/png;base64,${PNG_B64}`);
   });
 
   it("file:// 也当本地路径读，而不是丢给 webview", async () => {
@@ -113,10 +110,19 @@ describe("markdown 里的本地图片", () => {
     });
   });
 
-  it("javascript: 之类的 src 仍被 sanitize 拦掉", async () => {
+  it("javascript: 之类的 src 仍被拦掉", async () => {
     await mount(<TextBlock text="![x](javascript:alert(1))" />);
 
     expect(invoke).not.toHaveBeenCalled();
+    expect(container!.querySelector("img")).toBeNull();
+  });
+
+  // The sanitize schema admits the whole `data:` scheme (it cannot express a
+  // mime restriction); markdownUrlTransform is the half that keeps it to images.
+  // Assert the composed pipeline, not just the transform in isolation.
+  it("非图片的 data: 文档不会渲染", async () => {
+    await mount(<TextBlock text="![x](data:text/html,<script>alert(1)</script>)" />);
+
     expect(container!.querySelector("img")).toBeNull();
   });
 
