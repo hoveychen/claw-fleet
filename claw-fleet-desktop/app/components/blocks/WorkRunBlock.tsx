@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
+import { markdownUrlTransform } from "../../markdown/plugins";
 import type { DecisionHistoryRecord, RawMessage, ToolResultBlock } from "../../types";
 import type { PathLinkContext } from "../../markdown/pathLinks";
 import {
@@ -99,6 +100,7 @@ export function WorkRunBlock({
         {title ? (
           <span className={`${styles.title}${shimmer}`}>
             <ReactMarkdown
+              urlTransform={markdownUrlTransform}
               remarkPlugins={safeRemarkPlugins}
               rehypePlugins={safeRehypePlugins}
               components={titleMarkdownComponents}

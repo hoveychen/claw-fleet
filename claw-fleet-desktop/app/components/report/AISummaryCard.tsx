@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
-import { normalizeSvgBlankLines } from "../../markdown/plugins";
+import { normalizeSvgBlankLines, markdownUrlTransform } from "../../markdown/plugins";
 import { useReportStore } from "../../store";
 import type { DailyMetrics } from "../../types";
 import styles from "./ReportView.module.css";
@@ -64,7 +64,7 @@ export function AISummaryCard({
           {/* Hero area */}
           <div className={styles.summary_hero}>
             <div className={styles.summary_hero_text}>
-              {heroLine && <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{normalizeSvgBlankLines(heroLine)}</ReactMarkdown>}
+              {heroLine && <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{normalizeSvgBlankLines(heroLine)}</ReactMarkdown>}
             </div>
             <div className={styles.summary_hero_stats}>
               <div className={styles.hero_stat}>
@@ -86,7 +86,7 @@ export function AISummaryCard({
           {/* Body */}
           {bodyMarkdown && (
             <div className={styles.summary_content}>
-              <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{normalizeSvgBlankLines(bodyMarkdown)}</ReactMarkdown>
+              <ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{normalizeSvgBlankLines(bodyMarkdown)}</ReactMarkdown>
             </div>
           )}
         </div>

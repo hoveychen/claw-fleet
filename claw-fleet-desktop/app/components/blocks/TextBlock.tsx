@@ -4,7 +4,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { safeLinkComponent, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
-import { normalizeSvgBlankLines } from "../../markdown/plugins";
+import { normalizeSvgBlankLines, markdownUrlTransform } from "../../markdown/plugins";
 import { isFencedBlock } from "../../markdown/codeBlock";
 import {
   remarkWikiLinks,
@@ -13,6 +13,7 @@ import {
 } from "../../markdown/wikiLinks";
 import { MermaidBlock } from "../../markdown/MermaidBlock";
 import { PathChip, type PathLinkContext } from "../../markdown/pathLinks";
+import { localImageComponent } from "../../markdown/localImages";
 import { parsePathRef } from "../../markdown/pathRef";
 import styles from "./TextBlock.module.css";
 
@@ -91,6 +92,7 @@ export const TextBlock = memo(function TextBlock({
   return (
     <div className={styles.root}>
       <ReactMarkdown
+        urlTransform={markdownUrlTransform}
         remarkPlugins={wiki ? [...safeRemarkPlugins, remarkWikiLinks] : safeRemarkPlugins}
         rehypePlugins={safeRehypePlugins}
         components={{
@@ -194,6 +196,10 @@ export const TextBlock = memo(function TextBlock({
           // so the Tauri webview never navigates (see markdown/safeLinks.ts).
           // Wiki docs upgrade slug refs to in-app navigation instead.
           a: wiki ? wikiLinkComponent(wiki) : safeLinkComponent(),
+          // Local image refs (`![](/Users/…/shot.png)`) are read through the
+          // Backend and inlined; a bare <img> would resolve the path against
+          // the webview origin and break. See markdown/localImages.
+          img: localImageComponent(paths),
         }}
       >
         {content}

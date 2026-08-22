@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import ReactMarkdown from "react-markdown";
 import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
-import { normalizeSvgBlankLines } from "../../markdown/plugins";
+import { normalizeSvgBlankLines, markdownUrlTransform } from "../../markdown/plugins";
 import { formatMsgTime } from "../../messageRows";
 import type { ToolResultBlock, ToolUseBlock as ToolUseBlockType } from "../../types";
 import {
@@ -331,6 +331,7 @@ function ResultBody({ result, tool }: { result: FleetResult; tool: FleetTool }) 
       return (
         <div className={styles.markdown}>
           <ReactMarkdown
+            urlTransform={markdownUrlTransform}
             remarkPlugins={safeRemarkPlugins}
             rehypePlugins={safeRehypePlugins}
             components={safeMarkdownComponents}
