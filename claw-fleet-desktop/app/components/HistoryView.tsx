@@ -62,7 +62,7 @@ import {
   focusGroupAt,
   inGroup,
   moveTabToGroup,
-  openTabInActiveGroup,
+  openTabRouted,
   parsePersistedGroups,
   pruneMissingGroupTabs,
   replaceTabAnywhere,
@@ -78,6 +78,18 @@ import {
   resolveSplitKey,
   type ChordState,
 } from "../splitShortcuts";
+import {
+  fileTabId,
+  parseTabKind,
+  tabKindLabel,
+  tabSurvivesScan,
+  webTabId,
+  wikiTabId,
+  type DetailTabOpener,
+} from "../tabKind";
+import { ExternalFilePreview } from "./FilesView";
+import { WikiTabPane } from "./WikiTabPane";
+import { WebTabPane } from "./WebTabPane";
 import { getItem, setItem } from "../storage";
 import { canControl, stopMode, performStop } from "./StopControl";
 import { SessionRail } from "./SessionRail";
@@ -353,6 +365,11 @@ export function HistoryView() {
   const canSplit =
     groupsState.groups.length < MAX_GROUPS &&
     canFitAnotherGroup(axisPx, groupsState.groups.length, MIN_GROUP_PX);
+  // Read inside callbacks (the keyboard handler, and every tab opener — the
+  // routing heuristic may only split when the same gate that greys out the split
+  // buttons says there is room), so they don't re-subscribe on every resize.
+  const canSplitRef = useRef(canSplit);
+  canSplitRef.current = canSplit;
   // Per-tab search highlight (the FTS query that matched that session), keyed
   // by session id — each tab was opened by its own click and carries its own.
   const [queryById, setQueryById] = useState<Record<string, string | null>>({});
@@ -555,10 +572,10 @@ export function HistoryView() {
     () => new Map(sessions.map((s) => [s.id, s])),
     [sessions],
   );
-  // Each group's strip entries, resolved against the live scan. The draft tab
-  // (DRAFT_TAB_ID) has no backing session and renders the compose form /
-  // starting spinner; every other id resolves to its live session, and an id
-  // that resolves to nothing (a vanished session) drops out just as before.
+  // Each group's strip entries. A session tab resolves against the live scan,
+  // and one that resolves to nothing (a vanished session) drops out as before.
+  // The other kinds carry their content *in the id* (a path, a slug, a url), so
+  // they need no lookup — and must not be dropped for lack of one.
   const itemsByGroup = useMemo(() => {
     const out = new Map<string, TabItem[]>();
     for (const grp of groupsState.groups) {
@@ -566,9 +583,26 @@ export function HistoryView() {
         grp.id,
         grp.tabIds
           .map((id): TabItem | null => {
-            if (id === DRAFT_TAB_ID)
+            const kind = parseTabKind(id);
+            if (kind.kind === "draft")
               return { id, session: null, label: t("new_session.button") };
-            const s = sessionById.get(id);
+            if (kind.kind !== "session") {
+              return {
+                id,
+                session: null,
+                // Basename / last slug segment / host — short enough for a
+                // strip. The full thing goes in the tooltip, where a session
+                // tab shows its workspace.
+                label: tabKindLabel(kind) ?? id,
+                tooltip:
+                  kind.kind === "file"
+                    ? kind.absPath
+                    : kind.kind === "wiki"
+                      ? kind.slug
+                      : kind.url,
+              };
+            }
+            const s = sessionById.get(kind.sessionId);
             return s ? { id, session: s } : null;
           })
           .filter((x): x is TabItem => x != null),
@@ -604,10 +638,11 @@ export function HistoryView() {
   useEffect(() => {
     if (!scanReady || prunedRef.current) return;
     prunedRef.current = true;
-    // The draft tab never resolves against the scan — exempt it from pruning, or
-    // the first scan would close a new-session form the user is typing into.
+    // Only session tabs are prunable: the draft tab would otherwise lose a form
+    // the user is typing into, and a file / wiki / web tab isn't a session at
+    // all, so the scan has no opinion about it (see `tabSurvivesScan`).
     setGroupsState((prev) =>
-      pruneMissingGroupTabs(prev, (id) => id === DRAFT_TAB_ID || sessionById.has(id)),
+      pruneMissingGroupTabs(prev, (id) => tabSurvivesScan(id, (sid) => sessionById.has(sid))),
     );
   }, [scanReady, sessionById]);
 
@@ -634,12 +669,20 @@ export function HistoryView() {
     [applyGroups],
   );
 
+  // Every "open this" path goes through the routing heuristic, so conversations
+  // collect in one group and the material they cite in another (see
+  // `openTabRouted`) without the user arranging the column by hand each time.
+  const openRouted = useCallback(
+    (tabId: string) => applyGroups((st) => openTabRouted(st, tabId, canSplitRef.current)),
+    [applyGroups],
+  );
+
   const openTab = useCallback(
     (s: SessionInfo, highlight: string | null) => {
-      applyGroups((st) => openTabInActiveGroup(st, s.id));
+      openRouted(s.id);
       setQueryById((prev) => ({ ...prev, [s.id]: highlight }));
     },
-    [applyGroups],
+    [openRouted],
   );
 
   // Stable identity: SessionRow is memoised, and a fresh closure each render
@@ -852,8 +895,6 @@ export function HistoryView() {
   // pure waste, and nothing renders it.
   const chordRef = useRef<ChordState>(null);
   const chordTimer = useRef<number | null>(null);
-  const canSplitRef = useRef(canSplit);
-  canSplitRef.current = canSplit;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const r = resolveSplitKey(e, chordRef.current);
@@ -904,7 +945,7 @@ export function HistoryView() {
   // untouched; the draft is just another tab, so this is `openTab`, not an
   // overlay. Clicking it again while a draft is already open simply refocuses it.
   const handleNewSession = () => {
-    applyGroups((st) => openTabInActiveGroup(st, DRAFT_TAB_ID));
+    openRouted(DRAFT_TAB_ID);
   };
 
   // Schedule page "新建" shortcut: seed the new-session composer with a
@@ -930,9 +971,9 @@ export function HistoryView() {
     if (Object.keys(seed).length > 0) {
       useComposerDraftStore.getState().patchDraft("new", seed);
     }
-    applyGroups((st) => openTabInActiveGroup(st, DRAFT_TAB_ID));
+    openRouted(DRAFT_TAB_ID);
     clearNewSessionNav();
-  }, [newSessionNav, applyGroups, clearNewSessionNav]);
+  }, [newSessionNav, openRouted, clearNewSessionNav]);
 
   // A notification / tray click on a Fleet-spawned session routes here (the
   // store hop to "history" mounts this view); open the session in the inline
@@ -946,9 +987,9 @@ export function HistoryView() {
     if (!openTaskNav) return;
     if (handledOpenTaskNonce.current === openTaskNav.nonce) return;
     handledOpenTaskNonce.current = openTaskNav.nonce;
-    applyGroups((st) => openTabInActiveGroup(st, openTaskNav.sessionId));
+    openRouted(openTaskNav.sessionId);
     clearOpenTaskNav();
-  }, [openTaskNav, applyGroups, clearOpenTaskNav]);
+  }, [openTaskNav, openRouted, clearOpenTaskNav]);
 
   // Form spawned the process: flip the draft tab's pane to the "starting…"
   // spinner and start polling for the session. Snapshot the ad-hoc session ids
@@ -1015,8 +1056,9 @@ export function HistoryView() {
   const groupHeaderChainsRef = useRef(groupHeaderChains);
   groupHeaderChainsRef.current = groupHeaderChains;
   useEffect(() => {
-    // The draft tab has no session to mark read; only real session tabs dwell.
-    if (!activeId || activeId === DRAFT_TAB_ID) return;
+    // Only session tabs dwell — the draft, a file, a wiki doc and a web page
+    // have no session whose unread dot could be cleared.
+    if (!activeId || parseTabKind(activeId).kind !== "session") return;
     const id = setTimeout(() => {
       const target = activeSessionRef.current;
       // A group header aggregates unread over the whole chain, so dwelling on it
@@ -1035,6 +1077,105 @@ export function HistoryView() {
     query.trim().length >= 2 ? snippetByPath.get(jsonlPath) : undefined;
   const railIsUnread = (s: SessionInfo) => sessionUnread(s, readOverrides[s.id]);
   const openTabIds = useMemo(() => new Set(allTabIds), [allTabIds]);
+
+  // The column's "open this beside what I'm reading" capability, handed to
+  // every pane that renders links: a path, a `[[slug]]` or an external url
+  // clicked in prose becomes a tab in the focused group — the same move as
+  // clicking a session row — instead of navigating the window elsewhere.
+  //
+  // `openTabRouted` handles the case where the thing is already open in another
+  // group: it moves focus there rather than opening a second copy.
+  // Memoised on `applyGroups` (itself stable), so the memoised link contexts
+  // downstream don't churn on every scan.
+  const detailTabs = useMemo<DetailTabOpener>(
+    () => ({
+      openFile: (absPath) => openRouted(fileTabId(absPath)),
+      openWiki: (slug) => openRouted(wikiTabId(slug)),
+      openWeb: (url) => openRouted(webTabId(url)),
+    }),
+    [openRouted],
+  );
+
+  /**
+   * What one tab's pane holds, by kind. Sessions get the transcript view; the
+   * draft gets the compose form (or the spawn spinner once it has fired); a
+   * file, wiki doc or web page gets its own reader.
+   *
+   * The three readers are the *same components* the 仓库 and 知识库 pages use, so
+   * a file or doc looks identical whether it is open here or there.
+   */
+  const renderPane = (tab: TabItem, visible: boolean) => {
+    const kind = parseTabKind(tab.id);
+    switch (kind.kind) {
+      case "draft":
+        return pending ? (
+          <div className={styles.detail_starting}>
+            {startTimedOut ? (
+              <>
+                <span className={styles.starting_text}>
+                  {t(
+                    "new_session.start_timeout",
+                    "启动较慢，可再等等，或从左侧列表里查看",
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className={styles.starting_dismiss}
+                  onClick={cancelDraft}
+                >
+                  {t("cancel")}
+                </button>
+              </>
+            ) : (
+              <>
+                <span className={styles.starting_spinner} />
+                <span className={styles.starting_text}>
+                  {t("new_session.starting", "正在启动会话…")}
+                </span>
+              </>
+            )}
+          </div>
+        ) : (
+          <NewSessionForm onCreated={handleCreated} onCancel={cancelDraft} />
+        );
+      case "file":
+        return (
+          <div className={styles.other_pane}>
+            <ExternalFilePreview
+              path={kind.absPath}
+              // Read-only, and — unlike the 仓库 page's use of this component —
+              // usually a file that IS inside a workspace.
+              label={t("tabs.file_readonly", "只读预览")}
+              onClose={() => closeTab(tab.id)}
+            />
+          </div>
+        );
+      case "wiki":
+        return (
+          <div className={styles.other_pane}>
+            <WikiTabPane slug={kind.slug} onOpenSlug={detailTabs.openWiki} />
+          </div>
+        );
+      case "web":
+        return (
+          <div className={styles.other_pane}>
+            <WebTabPane url={kind.url} />
+          </div>
+        );
+      default:
+        return (
+          <SessionDetail
+            inline
+            sessionInfo={tab.session!}
+            searchQuery={queryById[tab.id] ?? null}
+            tabOpener={detailTabs}
+            // `visible` here is per group, which is precisely "is in
+            // `visibleIds`" — one unpaused pane per group.
+            paused={!visible}
+          />
+        );
+    }
+  };
 
   return (
     <PageShell
@@ -1277,9 +1418,8 @@ export function HistoryView() {
                     visible. Unmounting the others would throw away the messages,
                     scroll position and view-tab that make a tab worth keeping
                     open. The hidden ones are `paused`, so they cost no polling —
-                    with N groups there are N unpaused panes, one per group. The
-                    draft tab renders the compose form, or the spawn spinner once
-                    it has fired. */}
+                    with N groups there are N unpaused panes, one per group.
+                    What each pane *holds* is `renderPane`'s call. */}
                 {items.map((tab) => {
                   // Equivalent to `tab.id === grp.activeId` (a tab belongs to
                   // one group), but phrased against the same set that defines
@@ -1292,44 +1432,7 @@ export function HistoryView() {
                       style={sessionPaneStyle(visible)}
                       aria-hidden={!visible}
                     >
-                      {tab.id === DRAFT_TAB_ID ? (
-                        pending ? (
-                          <div className={styles.detail_starting}>
-                            {startTimedOut ? (
-                              <>
-                                <span className={styles.starting_text}>
-                                  {t("new_session.start_timeout", "启动较慢，可再等等，或从左侧列表里查看")}
-                                </span>
-                                <button
-                                  type="button"
-                                  className={styles.starting_dismiss}
-                                  onClick={cancelDraft}
-                                >
-                                  {t("cancel")}
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <span className={styles.starting_spinner} />
-                                <span className={styles.starting_text}>
-                                  {t("new_session.starting", "正在启动会话…")}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        ) : (
-                          <NewSessionForm onCreated={handleCreated} onCancel={cancelDraft} />
-                        )
-                      ) : (
-                        <SessionDetail
-                          inline
-                          sessionInfo={tab.session!}
-                          searchQuery={queryById[tab.id] ?? null}
-                          // `visible` here is per group, which is precisely
-                          // "is in `visibleIds`" — one unpaused pane per group.
-                          paused={!visible}
-                        />
-                      )}
+                      {renderPane(tab, visible)}
                     </div>
                   );
                 })}

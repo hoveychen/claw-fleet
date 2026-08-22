@@ -1,5 +1,6 @@
 import type { Components } from "react-markdown";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useWebLinkTarget, wantsSystemBrowser } from "./webLinks";
 import { MermaidBlock } from "./MermaidBlock";
 import { isMermaidPre } from "./mermaidPre";
 import { PathChip, type PathLinkContext } from "./pathLinks";
@@ -14,24 +15,53 @@ export { safeRemarkPlugins, safeRehypePlugins } from "./plugins";
 export function safeLinkComponent(): Components["a"] {
   return function SafeLink({ href, children }) {
     const isExternal = !!href && /^https?:\/\//i.test(href);
+    const openInTab = useWebLinkTarget();
     return (
       <a
         href={href}
+        title={isExternal && openInTab ? OPEN_IN_TAB_HINT : undefined}
         onClick={(e) => {
           e.preventDefault();
-          if (isExternal && href) {
-            // Surfaced rather than swallowed: when a window's capability is
-            // missing `opener:default`, the ACL rejects this and the link
-            // silently does nothing — which is exactly how that bug hid in
-            // the decision-float window.
-            openUrl(href).catch((err) => console.error("openUrl failed:", href, err));
-          }
+          if (isExternal && href) openExternal(href, e, openInTab);
+        }}
+        // ⌘/Ctrl-click reaches onClick, but a middle click does not.
+        onAuxClick={(e) => {
+          if (e.button !== 1 || !isExternal || !href) return;
+          e.preventDefault();
+          openExternal(href, e, openInTab);
         }}
       >
         {children}
       </a>
     );
   };
+}
+
+/** Hint on links that no longer leave the app on a plain click, so the escape
+ *  hatch is discoverable rather than folklore. Deliberately not i18n'd through
+ *  `t()`: these renderers are plain functions outside any component that could
+ *  hold the hook. */
+export const OPEN_IN_TAB_HINT = "Opens in a tab · ⌘/Ctrl-click or middle-click for the browser";
+
+/**
+ * Open an external link the way this click asked for: a tab beside the prose
+ * where the surface offers one, the system browser otherwise (and always, for
+ * ⌘/Ctrl/middle click).
+ *
+ * The browser call is surfaced rather than swallowed: when a window's capability
+ * is missing `opener:default`, the ACL rejects it and the link silently does
+ * nothing — which is exactly how that bug hid in the decision-float window.
+ */
+export function openExternal(
+  href: string,
+  e: { button: number; metaKey: boolean; ctrlKey: boolean },
+  openInTab: ((url: string) => void) | null,
+): void {
+  if (openInTab && !wantsSystemBrowser(e)) {
+    openInTab(href);
+    return;
+  }
+  openUrl(href).catch((err) => console.error("openUrl failed:", href, err));
 }
 
 /**
