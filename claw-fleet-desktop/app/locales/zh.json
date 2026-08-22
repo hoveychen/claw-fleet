@@ -1525,7 +1525,16 @@
     "close_all": "全部关闭",
     "overflow": "所有标签",
     "search": "搜索标签…",
-    "no_match": "无匹配标签"
+    "no_match": "无匹配标签",
+    "file_readonly": "只读预览",
+    "wiki_missing": "该文档未发布，或已被删除",
+    "wiki_open_page": "在知识库中打开",
+    "wiki_open_page_short": "知识库",
+    "web_probing": "正在检查该站是否允许嵌入…",
+    "web_blocked": "该站禁止被嵌入",
+    "web_reload": "重新加载",
+    "web_open_browser": "在浏览器中打开",
+    "web_open_browser_short": "浏览器"
   },
   "detail": {
     "triggered_by_schedule": "由计划 {{id}} 触发",

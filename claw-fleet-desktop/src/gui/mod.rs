@@ -48,6 +48,7 @@ mod alerts;
 mod mascot;
 mod llm;
 mod schedule;
+mod url_embed;
 
 use self::tts::*;
 use self::decision::*;
@@ -77,6 +78,7 @@ use self::locale::*;
 use self::alerts::*;
 use self::mascot::*;
 use self::llm::*;
+use self::url_embed::*;
 
 pub(crate) use self::tts::play_tts_for_notification;
 
@@ -1989,6 +1991,7 @@ pub fn run() {
             get_platform,
             log_frontend_debug,
             reveal_path,
+            probe_url_embeddable,
             check_app_version,
             get_app_version,
             desktop_build_commit,

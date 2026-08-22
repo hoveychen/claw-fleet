@@ -46,12 +46,16 @@ function tabLabel(s: SessionInfo): string {
 }
 
 /** One entry in the strip. `session` is the live session behind the tab, or
- *  `null` for the synthetic new-session draft tab, which shows `label` instead
- *  of a title + status dot. */
+ *  `null` for a tab holding something else — the synthetic new-session draft, a
+ *  file, a wiki doc, a web page — which shows `label` instead of a title +
+ *  status dot. */
 export interface TabItem {
   id: string;
   session: SessionInfo | null;
   label?: string;
+  /** Hover text. A session tab shows its workspace; a file/wiki/web tab shows
+   *  the full path / slug / url its short label was cut from. */
+  tooltip?: string;
 }
 
 /** A resolved row for the overflow dropdown — title + live dot, decoupled from
@@ -259,7 +263,13 @@ export function SessionTabs({
               className={`${styles.tab} ${isActive ? styles.tab_active : ""} ${
                 drag?.tabId === tab.id ? styles.tab_dragging : ""
               }`}
-              title={live ? `${label}\n${live.workspaceName}` : label}
+              title={
+                live
+                  ? `${label}\n${live.workspaceName}`
+                  : tab.tooltip
+                    ? `${label}\n${tab.tooltip}`
+                    : label
+              }
               draggable
               onDragStart={(e) => {
                 onDragStart(tab.id);

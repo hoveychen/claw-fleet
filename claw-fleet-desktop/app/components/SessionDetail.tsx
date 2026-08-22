@@ -30,6 +30,11 @@ import { HandoffChainRow } from "./HandoffChainRow";
 import { WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
 import type { PathLinkContext } from "../markdown/pathLinks";
+import type { WikiLinkContext } from "../markdown/wikiLinks";
+import type { DetailTabOpener } from "../tabKind";
+import { WikiLinksProvider } from "../markdown/wikiLinksContext";
+import { WebLinkProvider } from "../markdown/webLinks";
+import { revealSlugInWikiPage, useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
 import { ScratchpadView } from "./ScratchpadView";
 import type { ExplorerEntry } from "./ExplorerPane";
@@ -138,6 +143,7 @@ export function SessionDetail({
   sessionInfo = null,
   searchQuery: standaloneSearchQuery = null,
   paused = false,
+  tabOpener,
 }: {
   lite?: boolean;
   inline?: boolean;
@@ -159,6 +165,12 @@ export function SessionDetail({
    *  every 700ms and `get_messages_tail` every 1.5s in the background. Coming
    *  back to the foreground refetches the tail once, immediately. */
   paused?: boolean;
+  /** Present when this instance lives in a tab strip (the 任务 page's detail
+   *  column): a path the agent named then opens as a tab *beside* the
+   *  conversation instead of switching the whole window to the 仓库 page. Absent
+   *  in the global drawer and Lite mode, which have nowhere to put a tab and so
+   *  keep the page-switching behaviour. */
+  tabOpener?: DetailTabOpener;
 } = {}) {
   const { t } = useTranslation();
   const isStandalone = sessionInfo != null;
@@ -585,9 +597,35 @@ export function SessionDetail({
     return {
       workspaceRoot: workspacePath,
       isLocal: connection?.type !== "remote",
-      openInFiles: (absPath, line) => requestFileNav({ workspacePath, absPath, line }),
+      // In a tab strip the file opens beside the prose that named it — the
+      // whole point of an IDE's split. Elsewhere (drawer, Lite) there is no
+      // strip, so it still goes to the 仓库 page.
+      openInFiles: (absPath, line) =>
+        tabOpener
+          ? tabOpener.openFile(absPath, line)
+          : requestFileNav({ workspacePath, absPath, line }),
     };
-  }, [workspacePath, connection?.type, requestFileNav]);
+  }, [workspacePath, connection?.type, requestFileNav, tabOpener]);
+
+  // `[[slug]]` refs the agent wrote become links. Agents are told to publish
+  // findings to the wiki and to cross-reference them that way, so the refs were
+  // already all over the transcripts — as plain text, because nothing here had
+  // ever handed the renderer a wiki context. Provided (not threaded) for the
+  // reason spelled out in wikiLinksContext.
+  //
+  // Unknown slugs render grayed out rather than clickable, which is exactly the
+  // signal worth having: it marks a doc the agent said it would write and
+  // didn't.
+  const { docs: wikiDocs } = useWikiDocs();
+  const wikiLinks = useMemo<WikiLinkContext>(() => {
+    const slugs = new Set(wikiDocs.map((d) => d.slug));
+    return {
+      hasSlug: (slug) => slugs.has(slug),
+      // A tab beside the prose where there is a strip; the 知识库 page otherwise
+      // — the same split as a clicked path.
+      openSlug: tabOpener ? tabOpener.openWiki : revealSlugInWikiPage,
+    };
+  }, [wikiDocs, tabOpener]);
 
   useEffect(() => {
     if (!workspacePath || !sessionId) {
@@ -883,6 +921,11 @@ export function SessionDetail({
   }, [liveSession, sessions]);
 
   return (
+    // Both link capabilities cover the whole component, so the reader modal and
+    // every tool-block renderer inherit them too. `openWeb` is null outside a
+    // tab strip, which is precisely "send it to the browser".
+    <WikiLinksProvider value={wikiLinks}>
+      <WebLinkProvider value={tabOpener?.openWeb ?? null}>
       <div className={`${styles.root} ${liveSession ? styles.open : ""} ${lite ? styles.lite : ""} ${inline ? styles.inline : ""}`}>
         {liveSession && (
           <>
@@ -1313,6 +1356,8 @@ export function SessionDetail({
           )}
         </>
       )}
-    </div>
+      </div>
+      </WebLinkProvider>
+    </WikiLinksProvider>
   );
 }

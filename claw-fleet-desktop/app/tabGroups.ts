@@ -37,6 +37,7 @@ import {
   replaceTab,
   type TabState,
 } from "./sessionTabs";
+import { parseTabKind } from "./tabKind";
 
 /** One group: its open tabs left→right, the one it shows, and its share of the
  *  split axis. `weight` is relative — two groups at 1 each split the axis in
@@ -316,6 +317,91 @@ export function openTabInActiveGroup(state: GroupsState, tabId: string): GroupsS
     return focusGroup(revealed, holder.id);
   }
   return inGroup(state, state.activeGroupId, (t) => openTab(t, tabId));
+}
+
+/**
+ * What a tab is *for*. Two kinds of thing end up in this column: the
+ * conversation you are working through, and the material it cites.
+ */
+export type TabAffinity = "primary" | "side";
+
+/** A session (or the draft that becomes one) is the work; a file, a wiki doc and
+ *  a web page are what you read beside it. */
+export function tabAffinity(id: string): TabAffinity {
+  const kind = parseTabKind(id).kind;
+  return kind === "session" || kind === "draft" ? "primary" : "side";
+}
+
+/** Does this group already hold tabs of that affinity — i.e. is it a home for
+ *  them? A group the user mixed by hand is a home for both, deliberately: the
+ *  heuristic exists to save arranging, not to overrule an arrangement. */
+function isHomeFor(grp: TabGroup, want: TabAffinity): boolean {
+  return grp.tabIds.some((id) => tabAffinity(id) === want);
+}
+
+/**
+ * Open `tabId` in the group where it belongs, splitting one open if that kind of
+ * thing has no home yet.
+ *
+ * This is the layout doing the arranging: a doc or page cited by a conversation
+ * lands *beside* it rather than on top of it, which is the whole reason to have
+ * the two on screen at once. The rules, in order:
+ *
+ *  1. already open somewhere → revealed there (invariant 3), as before;
+ *  2. the focused group is empty → it gets the tab, whatever the kind. The user
+ *     split it open on purpose; routing past it would leave a blank half;
+ *  3. the focused group already holds this kind → it gets the tab, so reading a
+ *     second doc while parked among docs doesn't hop the column around;
+ *  4. another group holds this kind → that one gets it (nearest to the focus,
+ *     the right-hand side winning ties), and takes focus;
+ *  5. nothing holds this kind and there is room → a new group, right after the
+ *     focused one, along the column's current axis;
+ *  6. no room (`canSplit` false — the column is too narrow, or already at the
+ *     group cap) → the focused group, exactly as before this heuristic existed.
+ *
+ * `canSplit` is passed in rather than computed here because the width gate needs
+ * the *measured* axis, which only the component knows.
+ */
+export function openTabRouted(
+  state: GroupsState,
+  tabId: string,
+  canSplit: boolean,
+): GroupsState {
+  const holder = findGroupOf(state, tabId);
+  if (holder) {
+    const revealed = inGroup(state, holder.id, (t) => ({ ...t, activeId: tabId }));
+    return focusGroup(revealed, holder.id);
+  }
+
+  const active = activeGroup(state);
+  const want = tabAffinity(tabId);
+  if (active.tabIds.length === 0 || isHomeFor(active, want)) {
+    return inGroup(state, active.id, (t) => openTab(t, tabId));
+  }
+
+  const activeIdx = state.groups.findIndex((g) => g.id === active.id);
+  let best: { id: string; dist: number } | null = null;
+  state.groups.forEach((grp, i) => {
+    if (grp.id === active.id || !isHomeFor(grp, want)) return;
+    const dist = Math.abs(i - activeIdx);
+    // `<` keeps the first of equal distances, and the forEach reaches the
+    // right-hand candidate first only when it is strictly nearer — so a tie
+    // between i-1 and i+1 has to be broken explicitly.
+    if (!best || dist < best.dist || (dist === best.dist && i > activeIdx)) {
+      best = { id: grp.id, dist };
+    }
+  });
+  if (best) {
+    const target = (best as { id: string }).id;
+    return focusGroup(
+      inGroup(state, target, (t) => openTab(t, tabId)),
+      target,
+    );
+  }
+
+  if (!canSplit) return inGroup(state, active.id, (t) => openTab(t, tabId));
+  const split = splitGroup(state, active.id, state.orientation);
+  return inGroup(split, split.activeGroupId, (t) => openTab(t, tabId));
 }
 
 /** Close a tab whichever group holds it — the strip's ✕ and middle-click, plus
