@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
-import { normalizeSvgBlankLines } from "../../markdown/plugins";
+import { normalizeSvgBlankLines, markdownUrlTransform } from "../../markdown/plugins";
 import { useReportStore } from "../../store";
 import type { Lesson } from "../../types";
 import styles from "./ReportView.module.css";
@@ -58,8 +58,8 @@ export function LessonsCard({
             return (
             <div key={idx} className={styles.lesson_card}>
               <div className={styles.lesson_content}>
-                <div className={styles.lesson_text}><ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{normalizeSvgBlankLines(lesson.content)}</ReactMarkdown></div>
-                <div className={styles.lesson_reason}><ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{normalizeSvgBlankLines(lesson.reason)}</ReactMarkdown></div>
+                <div className={styles.lesson_text}><ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{normalizeSvgBlankLines(lesson.content)}</ReactMarkdown></div>
+                <div className={styles.lesson_reason}><ReactMarkdown urlTransform={markdownUrlTransform} remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{normalizeSvgBlankLines(lesson.reason)}</ReactMarkdown></div>
                 <div className={styles.lesson_meta}>
                   {lesson.workspaceName} · {lesson.sessionId}
                 </div>

@@ -143,6 +143,16 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { path: q(a.workspacePath) },
   }),
 
+  // Bytes of one host file named in agent prose — how a markdown image ref
+  // (`![](/Users/…/shot.png)`) gets rendered (markdown/localImages). Live-routed
+  // so the harness sees the real screenshots rather than the mock's placeholder
+  // text, which would classify as "not an image" and show the failure chip.
+  read_external_file: (a) => ({
+    method: "GET",
+    path: "/explorer_external_file",
+    query: { path: q(a.path) },
+  }),
+
   today_usage: () => ({ method: "GET", path: "/today_usage" }),
 
   // The launcher builds its tool picker from the real source registry — with

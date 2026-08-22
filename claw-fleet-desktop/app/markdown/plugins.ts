@@ -1,7 +1,10 @@
 // The one markdown plugin chain every surface renders through — chat messages,
 // decision cards, wiki docs, report cards. Kept free of Tauri APIs and CSS
 // modules so plugins.test.ts can drive it directly.
-import type { PluggableList } from "unified";
+import type { Plugin, PluggableList } from "unified";
+import type { Root, Element } from "hast";
+import { visit } from "unist-util-visit";
+import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkCjkFriendly from "remark-cjk-friendly";
@@ -77,6 +80,64 @@ const schema = {
     // vector — a stray `fill` on a `<div>` does nothing.
     "*": [...(defaultSchema.attributes?.["*"] ?? []), ...SVG_ATTRS],
   },
+  protocols: {
+    ...defaultSchema.protocols,
+    // GitHub's schema allows only http(s) here, so a `file://` or `data:` image
+    // src was stripped before anything could act on it.
+    //
+    // `file:` — `rehypeFileUrlImages` below rewrites it to a bare path in this
+    // same chain, so no `file://` URL ever reaches the DOM; it becomes a Backend
+    // read (markdown/localImages).
+    //
+    // `data:` — narrowed to `data:image/*` immediately after, by
+    // `markdownUrlTransform`, which runs on the way out of the tree. Sanitize
+    // cannot express "image mime only", so the two filters compose: this admits
+    // the scheme, that one admits only image payloads.
+    src: [...(defaultSchema.protocols?.src ?? []), "file", "data"],
+  },
+};
+
+/**
+ * The `urlTransform` every render site must pass to `<ReactMarkdown>`.
+ *
+ * react-markdown's own default drops any URL whose protocol isn't in a
+ * hard-coded list (http/https/mailto/xmpp/irc), which silently blanks an
+ * `![](data:image/png;base64,…)` — an agent inlining a small chart or a diff
+ * thumbnail sees nothing rendered, with no failure state to explain it.
+ *
+ * Only `data:image/*` is added back. It goes to an `<img src>` (SVG payloads
+ * loaded that way cannot execute script), which is the same thing tool-result
+ * images already do through ImageThumb. `data:text/html`, `javascript:` and
+ * everything else still take the default path and are dropped.
+ *
+ * `markdownUrlTransform.test.ts` asserts every `<ReactMarkdown>` in the app
+ * passes this — the prop is per-site, so the only defence against a new render
+ * site quietly reverting to the default is a coverage check.
+ */
+export function markdownUrlTransform(url: string): string {
+  return /^data:image\//i.test(url) ? url : defaultUrlTransform(url);
+}
+
+/**
+ * `<img src="file:///Users/me/shot.png">` → `<img src="/Users/me/shot.png">`.
+ *
+ * An agent that writes its screenshot as a `file://` URL is naming a host path,
+ * and a bare host path is what `markdown/localImages` knows how to fetch.
+ * Rewriting it here — rather than admitting `file:` in `markdownUrlTransform`
+ * above — keeps the scheme out of the DOM entirely: what reaches the `img`
+ * component is a path, so there is no URL for the webview to try to fetch.
+ *
+ * Must run after `rehype-sanitize`: before it, the attribute is still subject to
+ * the protocol list above and the rewrite would be undone.
+ */
+export const rehypeFileUrlImages: Plugin<[], Root> = () => (tree) => {
+  visit(tree, "element", (node: Element) => {
+    if (node.tagName !== "img") return;
+    const src = node.properties?.src;
+    if (typeof src !== "string") return;
+    const m = /^file:\/\/(?:localhost)?(\/.*)$/i.exec(src);
+    if (m) node.properties!.src = m[1];
+  });
 };
 
 /**
@@ -175,6 +236,9 @@ export const safeRehypePlugins: PluggableList = [
   rehypeRaw,
   [rehypeSanitize, schema],
   rehypeKatex,
+  // After sanitize, so the rewritten bare path isn't re-checked against the
+  // protocol list (see rehypeFileUrlImages).
+  rehypeFileUrlImages,
   // Runs last so the `cjk-indent` class it adds to CJK-leading <p> survives the
   // sanitize pass above (className is globally allow-listed by `schema`).
   rehypeCjkIndent,

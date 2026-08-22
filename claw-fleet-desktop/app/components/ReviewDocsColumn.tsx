@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
 import type { ReviewDoc, ReviewDocContent } from "../types";
 import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
-import { normalizeSvgBlankLines } from "../markdown/plugins";
+import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { AutoHeightFrame } from "./AutoHeightFrame";
 import styles from "./ReviewDocsColumn.module.css";
@@ -122,6 +122,7 @@ export function ReviewDocsColumn({
         ) : (
           <div className={styles.markdown}>
             <ReactMarkdown
+              urlTransform={markdownUrlTransform}
               remarkPlugins={safeRemarkPlugins}
               rehypePlugins={safeRehypePlugins}
               components={mdComponents}

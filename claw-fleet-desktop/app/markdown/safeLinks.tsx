@@ -4,6 +4,7 @@ import { MermaidBlock } from "./MermaidBlock";
 import { isMermaidPre } from "./mermaidPre";
 import { PathChip, type PathLinkContext } from "./pathLinks";
 import { parsePathRef } from "./pathRef";
+import { localImageComponent } from "./localImages";
 import styles from "./markdown.module.css";
 
 // The plugin chain lives in ./plugins (Tauri-free, so tests can drive it) and is
@@ -45,6 +46,9 @@ export function safeLinkComponent(): Components["a"] {
 export function pathAwareMarkdownComponents(paths: PathLinkContext): Components {
   return {
     ...safeMarkdownComponents,
+    // Knowing the workspace root additionally lets a *relative* image ref
+    // resolve — `![](shots/01.png)` from an agent working in that checkout.
+    img: localImageComponent(paths),
     code: ({ className, children, ...props }) => {
       if (isMermaid(className)) return <MermaidBlock code={codeText(children)} />;
       const raw = typeof children === "string" ? children : null;
@@ -76,6 +80,10 @@ function codeText(children: React.ReactNode): string {
 
 export const safeMarkdownComponents: Components = {
   a: safeLinkComponent(),
+  // A host path in an image ref has to be fetched through the Backend; a bare
+  // <img src="/Users/…"> resolves against the webview origin and 404s. See
+  // ./localImages.
+  img: localImageComponent(),
   // The `code` branch below swaps a ```mermaid fence for <MermaidBlock>, but
   // react-markdown's outer <pre> would still wrap it — a monospace, boxed
   // container the diagram then inherits from. Unwrap it for mermaid only;

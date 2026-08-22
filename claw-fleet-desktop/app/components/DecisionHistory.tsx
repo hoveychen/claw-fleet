@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
-import { normalizeSvgBlankLines } from "../markdown/plugins";
+import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { normalizeAnswer, summarizeQuestion } from "../decisionText";
 import type {
@@ -92,6 +92,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
           <div key={qi} className={styles.question_block}>
             <div className={styles.question_text}>
               <ReactMarkdown
+                urlTransform={markdownUrlTransform}
                 remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                 components={md.block}
               >
@@ -111,6 +112,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                   <span className={styles.option_label}>
                     <span className={styles.option_marker}>{isSelected ? "✓" : "○"}</span>
                     <ReactMarkdown
+                      urlTransform={markdownUrlTransform}
                       remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                       components={md.inline}
                     >
@@ -120,6 +122,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                   {opt.description && (
                     <span className={styles.option_desc}>
                       <ReactMarkdown
+                        urlTransform={markdownUrlTransform}
                         remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                         components={md.inline}
                       >
@@ -167,6 +170,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
     <div className={styles.body}>
       <div className={styles.plan_content}>
         <ReactMarkdown
+          urlTransform={markdownUrlTransform}
           remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
           components={md.block}
         >
@@ -180,6 +184,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
           </div>
           <div className={styles.plan_content}>
             <ReactMarkdown
+              urlTransform={markdownUrlTransform}
               remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
               components={md.block}
             >
@@ -227,6 +232,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
           <div key={qi} className={styles.question_block}>
             <div className={styles.question_text}>
               <ReactMarkdown
+                urlTransform={markdownUrlTransform}
                 remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                 components={md.block}
               >
@@ -267,6 +273,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                   <span className={styles.option_label}>
                     <span className={styles.option_marker}>{isSelected ? "✓" : "○"}</span>
                     <ReactMarkdown
+                      urlTransform={markdownUrlTransform}
                       remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                       components={md.inline}
                     >
@@ -276,6 +283,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                   {opt.description && (
                     <span className={styles.option_desc}>
                       <ReactMarkdown
+                        urlTransform={markdownUrlTransform}
                         remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                         components={md.inline}
                       >
