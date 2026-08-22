@@ -15,6 +15,13 @@
   border-bottom: 1px solid var(--color-border);
 }
 
+/* Split layout only: the group that holds column focus wears a tinted bar, so
+ * two halves on screen don't both look like the one being typed into. A single
+ * group never gets the attribute, so the un-split column is unchanged. */
+.bar[data-active-group] {
+  background: var(--color-bg-secondary);
+}
+
 .strip {
   display: flex;
   align-items: stretch;
@@ -51,6 +58,30 @@
 .overflow_btn_active {
   background: var(--color-bg-secondary);
   color: var(--color-text);
+}
+
+/* Split right / split down, pinned right of the scrolling strip. Same shape as
+ * .overflow_btn so the bar's right end reads as one control cluster. */
+.split_btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  border: none;
+  border-left: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.split_btn:hover:not(:disabled) {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+.split_btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 /* Portalled dropdown — mirrors ContextMenu's surface (modal bg, border, shadow)
