@@ -77,6 +77,25 @@ export function parseTabKind(id: string): TabKind {
 }
 
 /**
+ * The detail column's "open this beside what I'm reading" capability, handed
+ * down to the surfaces that render agent prose.
+ *
+ * It is a prop rather than a store hop because it is only meaningful where a tab
+ * strip exists: the same `SessionDetail` also renders in the global drawer and
+ * in Lite mode, and there a clicked path still belongs in the 仓库 page. A
+ * surface holding one of these knows it has somewhere to put a tab; a surface
+ * without it keeps the page-switching behaviour.
+ */
+export interface DetailTabOpener {
+  /** `line` is accepted (and currently unused) because the caller has it: no
+   *  renderer in the app anchors to a line yet — the 仓库 page has carried the
+   *  same field, equally unread, since paths became clickable. */
+  openFile: (absPath: string, line: number | null) => void;
+  openWiki: (slug: string) => void;
+  openWeb: (url: string) => void;
+}
+
+/**
  * Should a restored tab id survive the first-scan prune?
  *
  * Only session tabs are prunable, and only because a persisted id can name a

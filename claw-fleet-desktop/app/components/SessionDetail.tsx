@@ -30,6 +30,7 @@ import { HandoffChainRow } from "./HandoffChainRow";
 import { WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
 import type { PathLinkContext } from "../markdown/pathLinks";
+import type { DetailTabOpener } from "../tabKind";
 import { ResumeComposer } from "./ResumeComposer";
 import { ScratchpadView } from "./ScratchpadView";
 import type { ExplorerEntry } from "./ExplorerPane";
@@ -138,6 +139,7 @@ export function SessionDetail({
   sessionInfo = null,
   searchQuery: standaloneSearchQuery = null,
   paused = false,
+  tabOpener,
 }: {
   lite?: boolean;
   inline?: boolean;
@@ -159,6 +161,12 @@ export function SessionDetail({
    *  every 700ms and `get_messages_tail` every 1.5s in the background. Coming
    *  back to the foreground refetches the tail once, immediately. */
   paused?: boolean;
+  /** Present when this instance lives in a tab strip (the 任务 page's detail
+   *  column): a path the agent named then opens as a tab *beside* the
+   *  conversation instead of switching the whole window to the 仓库 page. Absent
+   *  in the global drawer and Lite mode, which have nowhere to put a tab and so
+   *  keep the page-switching behaviour. */
+  tabOpener?: DetailTabOpener;
 } = {}) {
   const { t } = useTranslation();
   const isStandalone = sessionInfo != null;
@@ -585,9 +593,15 @@ export function SessionDetail({
     return {
       workspaceRoot: workspacePath,
       isLocal: connection?.type !== "remote",
-      openInFiles: (absPath, line) => requestFileNav({ workspacePath, absPath, line }),
+      // In a tab strip the file opens beside the prose that named it — the
+      // whole point of an IDE's split. Elsewhere (drawer, Lite) there is no
+      // strip, so it still goes to the 仓库 page.
+      openInFiles: (absPath, line) =>
+        tabOpener
+          ? tabOpener.openFile(absPath, line)
+          : requestFileNav({ workspacePath, absPath, line }),
     };
-  }, [workspacePath, connection?.type, requestFileNav]);
+  }, [workspacePath, connection?.type, requestFileNav, tabOpener]);
 
   useEffect(() => {
     if (!workspacePath || !sessionId) {
