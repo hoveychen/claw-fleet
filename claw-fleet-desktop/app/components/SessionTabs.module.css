@@ -39,6 +39,14 @@
 }
 .strip::-webkit-scrollbar { display: none; }
 
+/* A tab from another group is hovering: say so, because a cross-group drop only
+ * commits on release and there is otherwise no feedback that the release will
+ * land here rather than snap back. */
+.strip[data-drop-target] {
+  background: rgba(var(--color-accent-rgb), 0.12);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
 /* Appears at the strip's right end only while tabs are hidden. Opens the
  * searchable dropdown of every open tab (VS Code "show opened editors"). */
 .overflow_btn {

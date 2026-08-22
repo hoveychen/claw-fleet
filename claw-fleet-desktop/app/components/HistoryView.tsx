@@ -58,6 +58,7 @@ import {
   focusGroup,
   focusGroupAt,
   inGroup,
+  moveTabToGroup,
   openTabInActiveGroup,
   parsePersistedGroups,
   pruneMissingGroupTabs,
@@ -775,6 +776,28 @@ export function HistoryView() {
     [applyGroups],
   );
 
+  // The tab drag in flight. Held here rather than inside a strip because the
+  // *destination* strip is a sibling component: it has to see which tab is
+  // moving and where it came from to decide whether it is a drop target at all.
+  const [drag, setDrag] = useState<{ tabId: string; fromGroup: string } | null>(null);
+  const startTabDrag = useCallback(
+    (fromGroup: string, tabId: string) => setDrag({ tabId, fromGroup }),
+    [],
+  );
+  const endTabDrag = useCallback(() => setDrag(null), []);
+  // A cross-group drop. Commits the move (which re-parents the pane, so the
+  // SessionDetail remounts once — the price of the move, paid on release rather
+  // than on every pointer step) and hands focus to the destination.
+  const dropTab = useCallback(
+    (toGroupId: string, beforeTabId: string | null) => {
+      const moving = drag?.tabId;
+      setDrag(null);
+      if (!moving) return;
+      applyGroups((s) => moveTabToGroup(s, moving, toGroupId, beforeTabId ?? undefined));
+    },
+    [drag, applyGroups],
+  );
+
   // ⌘\ / ⌘K ⌘\ / ⌘1..⌘9. Bound on `window` in the capture phase, the same way
   // the find bar takes ⌘F — component-level handlers (a composer's textarea)
   // would otherwise see the stroke first. The chord state lives in a ref, not
@@ -1166,6 +1189,7 @@ export function HistoryView() {
                   keeps its strip so the empty half is still operable. */}
               {(items.length > 0 || groupsState.groups.length > 1) && (
                 <SessionTabs
+                  groupId={grp.id}
                   tabs={items}
                   activeId={grp.activeId}
                   // Meaningless with one group, so the tint stays off until the
@@ -1178,6 +1202,10 @@ export function HistoryView() {
                   onCloseRight={(id) => closeTabsToRight(grp.id, id)}
                   onCloseAll={() => closeAllTabs(grp.id)}
                   onReorder={(fromId, toId) => reorderTabs(grp.id, fromId, toId)}
+                  drag={drag}
+                  onDragStart={(tabId) => startTabDrag(grp.id, tabId)}
+                  onDragEnd={endTabDrag}
+                  onDropTab={dropTab}
                   onSplitRight={() => splitAt(grp.id, "row")}
                   onSplitDown={() => splitAt(grp.id, "column")}
                 />
