@@ -397,13 +397,9 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
             handoff::cancel_pending(sid);
             Ok("ok: pending handoff cancelled (if any)".to_string())
         }
-        "list" => {
-            let chains = handoff::list_chains();
-            if chains.is_empty() {
-                return Ok("no handoff chains recorded".to_string());
-            }
-            serde_json::to_string_pretty(&chains).map_err(|e| e.to_string())
-        }
+        // Index only. Dumping every chain's notes here used to serialise to
+        // megabytes; `show` is the way to read one chain in full.
+        "list" => Ok(handoff::render_chain_list(&handoff::list_chains())),
         other => Err(format!("unknown handoff action: {other}")),
     }
 }

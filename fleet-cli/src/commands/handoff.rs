@@ -26,23 +26,13 @@ pub(crate) fn cmd_handoff(
             return;
         }
         Some(HandoffCommands::List) => {
-            let chains = claw_fleet_core::handoff::list_chains();
-            if chains.is_empty() {
-                println!("no handoff chains recorded");
-                return;
-            }
-            for c in chains {
-                println!(
-                    "{}  [{} hops]  plan={}  ws={}",
-                    c.chain_id,
-                    c.links.len(),
-                    c.plan_id.as_deref().unwrap_or("-"),
-                    c.workspace_path
-                );
-                for id in c.session_ids() {
-                    println!("  -> {id}");
-                }
-            }
+            // Shared with the `fleet__handoff` MCP `list` action.
+            print!(
+                "{}",
+                claw_fleet_core::handoff::render_chain_list(
+                    &claw_fleet_core::handoff::list_chains()
+                )
+            );
             return;
         }
         Some(HandoffCommands::Show { session_id }) => {
