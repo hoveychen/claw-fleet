@@ -47,12 +47,19 @@ use crate::session::{
 /// `mcp__fleet__*` rules pre-authorise Fleet's own MCP tools so Claude Code
 /// stops prompting on every invocation now that the desktop already renders +
 /// audits them via the Decision Panel. Two families: the UI tools (`fleet__ask`
-/// / `fleet__render_a2ui`) and the six control tools (`fleet__plan` / `handoff`
-/// / `watch` / `loop` / `schedule` / `wiki`) registered for Fleet-owned
+/// / `fleet__render_a2ui`) and the control tools registered for Fleet-owned
 /// sessions — without the latter, an rca remote session would trade a Bash
 /// `fleet` 127 for a per-call permission prompt. The control-tool rules are kept
 /// in sync with [`crate::mcp_control::CONTROL_TOOL_NAMES`] by
 /// `inject_rules_preauthorise_every_control_tool`.
+///
+/// `fleet__control` is pre-authorised alongside the rest even though it is
+/// destructive (it stops/interrupts other agents). The alternative is worse
+/// rather than safer: a headless detached session has no prompt UI, so an
+/// un-authorised call there stalls the session instead of refusing. The guard
+/// against misuse lives in the tool itself — it refuses subagents, ambiguous
+/// prefixes, and non-Fleet sessions for `interrupt` — not in a prompt nothing
+/// can answer.
 pub const INJECT_RULES: &[&str] = &[
     "Bash(*)",
     "PowerShell(*)",
@@ -72,6 +79,8 @@ pub const INJECT_RULES: &[&str] = &[
     "mcp__fleet__fleet__loop",
     "mcp__fleet__fleet__schedule",
     "mcp__fleet__fleet__wiki",
+    "mcp__fleet__fleet__inspect",
+    "mcp__fleet__fleet__control",
 ];
 
 const LOCK_FILE_NAME: &str = "permissions-lock.json";

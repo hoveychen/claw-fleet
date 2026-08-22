@@ -30,14 +30,16 @@ use serde_json::{json, Value};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Names of the six control tools, in `tools/list` order.
-pub const CONTROL_TOOL_NAMES: [&str; 6] = [
+/// Names of the control tools, in `tools/list` order.
+pub const CONTROL_TOOL_NAMES: [&str; 8] = [
     "fleet__plan",
     "fleet__handoff",
     "fleet__watch",
     "fleet__loop",
     "fleet__schedule",
     "fleet__wiki",
+    "fleet__inspect",
+    "fleet__control",
 ];
 
 /// True when `name` is one of the control tools this module owns.
@@ -45,7 +47,7 @@ pub fn is_control_tool(name: &str) -> bool {
     CONTROL_TOOL_NAMES.contains(&name)
 }
 
-/// The six control-tool definitions, appended to `tools/list` for Fleet-owned
+/// The control-tool definitions, appended to `tools/list` for Fleet-owned
 /// sessions only.
 pub fn control_tool_defs() -> Vec<Value> {
     vec![
@@ -55,6 +57,8 @@ pub fn control_tool_defs() -> Vec<Value> {
         loop_tool_def(),
         schedule_tool_def(),
         wiki_tool_def(),
+        crate::mcp_inspect::inspect_tool_def(),
+        crate::mcp_inspect::control_tool_def(),
     ]
 }
 
@@ -211,6 +215,8 @@ pub fn handle(
         "fleet__loop" => handle_loop(args, session_id),
         "fleet__schedule" => handle_schedule(args, session_id),
         "fleet__wiki" => handle_wiki(args, cwd),
+        "fleet__inspect" => crate::mcp_inspect::handle_inspect(args, &action_of(args)?),
+        "fleet__control" => crate::mcp_inspect::handle_control(args, &action_of(args)?),
         other => Err(format!("unknown control tool: {other}")),
     }
 }
@@ -219,7 +225,7 @@ pub fn handle(
 
 /// A non-empty string arg, coercing a JSON number to its decimal string so
 /// `interval: 300` and `interval: "300"` both work.
-fn arg(args: &Value, key: &str) -> Option<String> {
+pub(crate) fn arg(args: &Value, key: &str) -> Option<String> {
     match args.get(key) {
         Some(Value::String(v)) if !v.trim().is_empty() => Some(v.trim().to_string()),
         Some(Value::Number(n)) => Some(n.to_string()),
@@ -227,7 +233,7 @@ fn arg(args: &Value, key: &str) -> Option<String> {
     }
 }
 
-fn req(args: &Value, key: &str) -> Result<String, String> {
+pub(crate) fn req(args: &Value, key: &str) -> Result<String, String> {
     arg(args, key).ok_or_else(|| format!("`{key}` is required for this action"))
 }
 
@@ -236,7 +242,7 @@ fn action_of(args: &Value) -> Result<String, String> {
 }
 
 /// A `bool`-ish flag arg: JSON `true` or the string "true"/"1"/"yes".
-fn flag(args: &Value, key: &str) -> bool {
+pub(crate) fn flag(args: &Value, key: &str) -> bool {
     match args.get(key) {
         Some(Value::Bool(b)) => *b,
         Some(Value::String(s)) => matches!(s.trim(), "true" | "1" | "yes"),
