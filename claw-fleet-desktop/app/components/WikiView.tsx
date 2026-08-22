@@ -1003,10 +1003,6 @@ function WikiDetail({
     updateMainViewState("wiki", {
       versionBySlug: { ...versionBySlug, [doc.slug]: nextVersion },
     });
-  const [markdown, setMarkdown] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const effectiveVersion = doc.versions.some((v) => v.id === version)
     ? version
     : doc.currentVersion;
@@ -1032,23 +1028,6 @@ function WikiDetail({
       setExporting(false);
     }
   };
-
-  useEffect(() => {
-    if (doc.kind !== "markdown") {
-      setMarkdown(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    invoke<string>("get_wiki_file_text", {
-      slug: doc.slug,
-      version: effectiveVersion,
-      relpath: doc.entry,
-    })
-      .then(setMarkdown)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, [doc.slug, doc.kind, doc.entry, effectiveVersion]);
 
   return (
     <>
@@ -1127,28 +1106,85 @@ function WikiDetail({
       </div>
 
       <div className={styles.detail_body_wrap}>
-        {doc.kind === "markdown" ? (
-          <div className={styles.markdown_body}>
-            {loading && <p className={styles.loading}>{t("wiki.loading", "Loading…")}</p>}
-            {error && <p className={styles.error}>{error}</p>}
-            {markdown !== null && (
-              <div className={styles.content_markdown}>
-                <TextBlock text={markdown} wiki={wikiLinks} />
-              </div>
-            )}
-          </div>
-        ) : (
-          // allow-scripts but NOT allow-same-origin: demos can run JS while
-          // staying a cross-origin document with no reach into Tauri IPC.
-          <iframe
-            key={`${doc.slug}/${effectiveVersion}`}
-            className={styles.html_frame}
-            sandbox="allow-scripts"
-            src={wikiFileUrl(doc.slug, effectiveVersion, doc.entry)}
-            title={doc.title}
-          />
-        )}
+        <WikiDocBody doc={doc} version={effectiveVersion} wikiLinks={wikiLinks} />
       </div>
     </>
+  );
+}
+
+/**
+ * One wiki doc's content — markdown fetched and rendered, or the bundled HTML
+ * in its own frame. Everything the reader looks at, none of the chrome.
+ *
+ * Split out of `WikiDetail` (which keeps the header full of doc actions) so a
+ * detail-column wiki tab renders the identical body: same fetch, same link
+ * context, same sandbox policy. `version` is already resolved by the caller,
+ * which is what lets the tab share the wiki page's per-slug version choice.
+ */
+export function WikiDocBody({
+  doc,
+  version,
+  wikiLinks,
+}: {
+  doc: WikiDoc;
+  version: string;
+  wikiLinks: WikiLinkContext;
+}) {
+  const { t } = useTranslation();
+  const [markdown, setMarkdown] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (doc.kind !== "markdown") {
+      setMarkdown(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    let stale = false;
+    invoke<string>("get_wiki_file_text", {
+      slug: doc.slug,
+      version,
+      relpath: doc.entry,
+    })
+      .then((text) => {
+        if (!stale) setMarkdown(text);
+      })
+      .catch((e) => {
+        if (!stale) setError(String(e));
+      })
+      .finally(() => {
+        if (!stale) setLoading(false);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [doc.slug, doc.kind, doc.entry, version]);
+
+  if (doc.kind !== "markdown") {
+    // allow-scripts but NOT allow-same-origin: demos can run JS while staying a
+    // cross-origin document with no reach into Tauri IPC.
+    return (
+      <iframe
+        key={`${doc.slug}/${version}`}
+        className={styles.html_frame}
+        sandbox="allow-scripts"
+        src={wikiFileUrl(doc.slug, version, doc.entry)}
+        title={doc.title}
+      />
+    );
+  }
+
+  return (
+    <div className={styles.markdown_body}>
+      {loading && <p className={styles.loading}>{t("wiki.loading", "Loading…")}</p>}
+      {error && <p className={styles.error}>{error}</p>}
+      {markdown !== null && (
+        <div className={styles.content_markdown}>
+          <TextBlock text={markdown} wiki={wikiLinks} />
+        </div>
+      )}
+    </div>
   );
 }

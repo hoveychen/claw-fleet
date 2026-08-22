@@ -311,6 +311,18 @@ function handleIPC(
     case "git_status":
       return MOCK_GIT_STATUS;
 
+    // A web tab asks the host whether the site allows framing. Answered from a
+    // hardcoded list rather than the network, but kept true to it: github really
+    // does send `X-Frame-Options: deny`, so a tab pointed at it shows the
+    // refusal card here exactly as it would in the app.
+    case "probe_url_embeddable": {
+      const url = (args.url as string) ?? "";
+      const blocked = ["github.com", "google.com", "x.com"].some((h) => url.includes(h));
+      return blocked
+        ? { embeddable: false, reason: "X-Frame-Options: deny", status: 200 }
+        : { embeddable: true, reason: null, status: 200 };
+    }
+
     // Wiki / Plugins. These MUST return a list rather than falling through to
     // `default: return null` — both views do `setState(await invoke(...))` and
     // then filter the result, so a null blanks the whole app.

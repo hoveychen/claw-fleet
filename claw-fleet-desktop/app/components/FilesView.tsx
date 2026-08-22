@@ -703,8 +703,22 @@ function WorkspaceExplorer({
  * in a sibling repo. The tree can't hold them (they have no root), so this
  * stands in for the whole tree+preview pair: a banner saying where the file
  * lives, plus the ordinary `FilePreview` fed by the ungated backend read.
+ *
+ * Exported because a detail-column file tab is the same thing minus the tree:
+ * one absolute path, read-only. It passes its own `label`, since a file opened
+ * from a session's prose is usually *inside* a workspace — the tab is just a
+ * viewer, not the out-of-tree escape hatch this banner names by default.
  */
-function ExternalFilePreview({ path, onClose }: { path: string; onClose: () => void }) {
+export function ExternalFilePreview({
+  path,
+  onClose,
+  label,
+}: {
+  path: string;
+  onClose: () => void;
+  /** Banner text. Defaults to the out-of-workspace notice. */
+  label?: string;
+}) {
   const { t } = useTranslation();
   const { connection } = useConnectionStore();
   const isRemote = connection?.type === "remote";
@@ -738,7 +752,9 @@ function ExternalFilePreview({ path, onClose }: { path: string; onClose: () => v
     <div className={fileStyles.external_wrap}>
       <div className={fileStyles.external_bar}>
         <div className={fileStyles.external_text}>
-          <span className={fileStyles.external_title}>{t("files.external_title")}</span>
+          <span className={fileStyles.external_title}>
+            {label ?? t("files.external_title")}
+          </span>
           <span className={fileStyles.external_path}>{path}</span>
         </div>
         <div className={fileStyles.external_actions}>
