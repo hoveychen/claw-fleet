@@ -3,6 +3,7 @@ import {
   fileTabId,
   parseTabKind,
   tabKindLabel,
+  tabSurvivesScan,
   webTabId,
   wikiTabId,
 } from "./tabKind";
@@ -92,5 +93,31 @@ describe("tabKindLabel", () => {
     // neither is derivable from the id.
     expect(tabKindLabel({ kind: "session", sessionId: "x" })).toBe(null);
     expect(tabKindLabel({ kind: "draft" })).toBe(null);
+  });
+});
+
+describe("tabSurvivesScan", () => {
+  const known = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+  const hasSession = (id: string) => id === known;
+
+  it("keeps a session tab whose session the scan knows", () => {
+    expect(tabSurvivesScan(known, hasSession)).toBe(true);
+  });
+
+  it("drops a session tab whose session is gone", () => {
+    expect(tabSurvivesScan("deleted-session-id", hasSession)).toBe(false);
+  });
+
+  it("keeps the draft tab, which never resolves against the scan", () => {
+    expect(tabSurvivesScan(DRAFT_TAB_ID, hasSession)).toBe(true);
+  });
+
+  it("keeps file / wiki / web tabs — the session scan says nothing about them", () => {
+    // The regression this guards: the prune predicate used to be "draft, or a
+    // known session", so the first scan after a restart would silently close
+    // every restored file/wiki/web tab.
+    expect(tabSurvivesScan(fileTabId("/repo/src/main.rs"), hasSession)).toBe(true);
+    expect(tabSurvivesScan(wikiTabId("arch/overview"), hasSession)).toBe(true);
+    expect(tabSurvivesScan(webTabId("https://example.com"), hasSession)).toBe(true);
   });
 });

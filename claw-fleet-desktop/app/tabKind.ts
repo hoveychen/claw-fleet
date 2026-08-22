@@ -76,6 +76,23 @@ export function parseTabKind(id: string): TabKind {
   return { kind: "session", sessionId: id };
 }
 
+/**
+ * Should a restored tab id survive the first-scan prune?
+ *
+ * Only session tabs are prunable, and only because a persisted id can name a
+ * session whose transcript has since been deleted — left in the list it would
+ * grow forever. Every other kind is invisible to the session scan (a file, a
+ * wiki doc and a web page are not sessions), so asking the scan about them
+ * would silently close every restored one on the first scan after a restart.
+ */
+export function tabSurvivesScan(
+  id: string,
+  hasSession: (sessionId: string) => boolean,
+): boolean {
+  const k = parseTabKind(id);
+  return k.kind === "session" ? hasSession(k.sessionId) : true;
+}
+
 /** Last path segment, tolerating either separator so a Windows path reads the
  *  same as a POSIX one. */
 function basename(p: string): string {

@@ -299,6 +299,19 @@
   display: flex;
 }
 
+/* A pane holding something other than a session — a repo file, a wiki doc, a web
+ * page. SessionDetail brings its own frame and padding; these three are bare
+ * content, so the gutter lives here rather than being repeated in each. */
+.other_pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px 10px 10px;
+}
+
 .detail_empty {
   flex: 1;
   display: flex;

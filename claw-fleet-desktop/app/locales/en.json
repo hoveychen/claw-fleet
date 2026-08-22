@@ -1528,7 +1528,16 @@
     "close_all": "Close All",
     "overflow": "All Tabs",
     "search": "Search tabs…",
-    "no_match": "No matching tabs"
+    "no_match": "No matching tabs",
+    "file_readonly": "Read-only preview",
+    "wiki_missing": "This doc isn't published, or was deleted",
+    "wiki_open_page": "Open in the wiki page",
+    "wiki_open_page_short": "Wiki",
+    "web_probing": "Checking whether this site allows embedding…",
+    "web_blocked": "This site refuses to be embedded",
+    "web_reload": "Reload",
+    "web_open_browser": "Open in browser",
+    "web_open_browser_short": "Browser"
   },
   "detail": {
     "triggered_by_schedule": "Triggered by schedule {{id}}",
