@@ -142,6 +142,40 @@ fn clip_note(note: &str, limit: usize) -> String {
     }
 }
 
+/// Render a roster of chains: identity and hop order only, no notes.
+///
+/// Notes are the bulk of a chain — on this developer's machine the 97 recorded
+/// chains serialise to ~2.9 MB of JSON, which is not something an agent can
+/// read. The index tells you *which* chain to ask about; `render_chain` (via
+/// the `show` action) is where the notes live. Ordered most-recently-handed
+/// first, since the chains an agent asks about are almost always recent.
+pub fn render_chain_list(chains: &[HandoffChain]) -> String {
+    if chains.is_empty() {
+        return "no handoff chains recorded\n".to_string();
+    }
+    let last_handed = |c: &HandoffChain| c.links.iter().map(|l| l.handed_at).max().unwrap_or(0);
+    let mut ordered: Vec<&HandoffChain> = chains.iter().collect();
+    ordered.sort_by_key(|c| std::cmp::Reverse(last_handed(c)));
+    let mut out = format!(
+        "{} 条接力链（每一棒的 note 全文用 show 单独取）\n",
+        ordered.len()
+    );
+    for c in ordered {
+        let ids = c.session_ids();
+        out.push_str(&format!(
+            "\n{}  [{} 棒]  plan={}  ws={}\n",
+            c.chain_id,
+            ids.len(),
+            c.plan_id.as_deref().unwrap_or("-"),
+            c.workspace_path
+        ));
+        for (i, sid) in ids.iter().enumerate() {
+            out.push_str(&format!("  {}. {sid}\n", i + 1));
+        }
+    }
+    out
+}
+
 /// Render a chain as agent-readable text: one block per hop, each carrying the
 /// note that hop wrote when it handed the baton on.
 ///
@@ -1356,6 +1390,30 @@ mod tests {
         };
         let prompt = compose_successor_prompt(&free, None);
         assert!(prompt.contains("按交接信息继续完成这项工作"));
+    }
+
+    /// The index must stay an index: notes are what makes a chain dump huge, so
+    /// listing must never carry them, and the freshest chain must come first.
+    #[test]
+    fn chain_list_is_an_index_without_notes_newest_first() {
+        let (root, pdir, cdir) = fresh_dirs("list");
+        register_simple(&pdir, &cdir, "old1", "秘密便条一", 1000).unwrap();
+        let taken = take_pending_in(&pdir, "old1", 1001).unwrap();
+        record_link_in(&cdir, &taken, "old2", 1002).unwrap();
+        register_simple(&pdir, &cdir, "new1", "秘密便条二", 5000).unwrap();
+        let taken = take_pending_in(&pdir, "new1", 5001).unwrap();
+        record_link_in(&cdir, &taken, "new2", 5002).unwrap();
+
+        let out = render_chain_list(&list_chains_in(&cdir));
+        assert!(!out.contains("秘密便条"), "notes must not be listed:\n{out}");
+        assert!(out.contains("1. new1") && out.contains("2. new2"), "{out}");
+        assert!(out.contains("[2 棒]"), "{out}");
+        assert!(
+            out.find("new1").unwrap() < out.find("old1").unwrap(),
+            "newest chain must sort first:\n{out}"
+        );
+        assert_eq!(render_chain_list(&[]), "no handoff chains recorded\n");
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// A late hop must open its turn already knowing where the chain started.
