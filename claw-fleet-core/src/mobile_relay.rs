@@ -2907,9 +2907,43 @@ async fn connect_ws(url: &str, connect_timeout: Duration) -> Result<RelayWs, Str
     }
 }
 
+/// Why this process must not join the pairing channel as an agent, or `None`
+/// when it may. Pure so both answers are testable; the caller supplies
+/// `cfg!(test)` and the live `FLEET_HOME`.
+///
+/// The relay hands every client frame to **all** agents in the channel and the
+/// phone keeps whichever reply lands first, so any extra agent holding the real
+/// pairing secret can answer in the desktop's place — out of a filesystem that
+/// may hold none of its pending cards. Caught in the wild 2026-08-21: a
+/// `cargo test --workspace` in a sibling worktree put two of them on the
+/// channel, ~20s each, and blanked the phone's card list.
+fn join_block_reason(
+    is_test_build: bool,
+    fleet_home: Option<&std::ffi::OsStr>,
+) -> Option<&'static str> {
+    if is_test_build {
+        return Some("test build");
+    }
+    // `FLEET_HOME` exists purely to isolate tests (every setter in the tree is
+    // inside a `#[cfg(test)]` mod), so a process running under one is a test
+    // fixture no matter how it was built — including the `fleet serve` children
+    // integration tests spawn. Empty means "unset" here exactly as it does in
+    // `real_home_dir`, which falls through to the passwd entry.
+    if fleet_home.is_some_and(|h| !h.is_empty()) {
+        return Some("FLEET_HOME is set (test isolation)");
+    }
+    None
+}
+
 /// Ensure the outbound relay WebSocket is running. Idempotent; no-op when
 /// the feature is disabled or no secret is set.
 pub fn ensure_ws_client() {
+    if let Some(reason) = join_block_reason(cfg!(test), std::env::var_os("FLEET_HOME").as_deref()) {
+        // Logged rather than silent: if this ever fires for a real desktop the
+        // line is the only thing that would explain a phone that never pairs.
+        crate::log_debug(&format!("[mobile-relay] not joining channel: {reason}"));
+        return;
+    }
     let cfg = load_config();
     if !cfg.enabled || cfg.secret.is_empty() {
         return;
@@ -3538,6 +3572,50 @@ mod tests {
                  identifies a serve running on a redirected FLEET_HOME"
             );
         });
+    }
+
+    /// A test process must never present the user's real pairing secret to the
+    /// relay. Two shapes did exactly that on 2026-08-21, both out of one
+    /// `cargo test --workspace`:
+    ///
+    /// * the lib test binary itself — `config_roundtrip_and_default` saves an
+    ///   enabled config under a temp `FLEET_HOME`, `save_config` spawns the ws
+    ///   thread, and that thread outlives the temp home. `ws_run_loop` reloads
+    ///   the config each pass, so its next pass read the *real*
+    ///   `~/.fleet/mobile-relay.json` and joined the production channel for the
+    ///   rest of the binary's life (~20s, matching the relay's join/left log).
+    /// * `fleet serve` started as an integration-test child — `hooks_server`
+    ///   calls `ensure_ws_client` unconditionally.
+    ///
+    /// Hence two conditions, not one: `cfg!(test)` catches the first shape, and
+    /// `FLEET_HOME` (set only ever by test isolation — verified across the repo)
+    /// catches the second, which is a plain non-test build.
+    #[test]
+    fn a_test_process_must_never_join_the_pairing_channel() {
+        use std::ffi::OsStr;
+        assert!(
+            join_block_reason(true, None).is_some(),
+            "a lib test binary must be refused even with no FLEET_HOME — that is \
+             the shape whose ws thread outlived its temp home and reconnected \
+             with the user's real secret"
+        );
+        assert!(
+            join_block_reason(false, Some(OsStr::new("/tmp/fleet-home-xyz"))).is_some(),
+            "a non-test build running under a redirected FLEET_HOME is test \
+             isolation (integration tests spawn `fleet serve` that way), so it \
+             must not present itself as the desktop"
+        );
+        assert_eq!(
+            join_block_reason(false, None),
+            None,
+            "the real desktop / a real `fleet serve` must still join"
+        );
+        assert_eq!(
+            join_block_reason(false, Some(OsStr::new(""))),
+            None,
+            "an empty FLEET_HOME means 'unset' everywhere else (real_home_dir \
+             falls through to the passwd entry), so it must not block here either"
+        );
     }
 
     #[test]
