@@ -56,6 +56,7 @@ import {
   closeGroup,
   closeTabAnywhere,
   focusGroup,
+  focusGroupAt,
   inGroup,
   openTabInActiveGroup,
   parsePersistedGroups,
@@ -67,6 +68,11 @@ import {
   type GroupsState,
   type SplitOrientation,
 } from "../tabGroups";
+import {
+  CHORD_TIMEOUT_MS,
+  resolveSplitKey,
+  type ChordState,
+} from "../splitShortcuts";
 import { getItem, setItem } from "../storage";
 import { canControl, stopMode, performStop } from "./StopControl";
 import { SessionRail } from "./SessionRail";
@@ -768,6 +774,53 @@ export function HistoryView() {
       applyGroups((s) => splitGroup(s, groupId, orientation)),
     [applyGroups],
   );
+
+  // ⌘\ / ⌘K ⌘\ / ⌘1..⌘9. Bound on `window` in the capture phase, the same way
+  // the find bar takes ⌘F — component-level handlers (a composer's textarea)
+  // would otherwise see the stroke first. The chord state lives in a ref, not
+  // state: re-rendering the whole page between the two halves of ⌘K ⌘\ would be
+  // pure waste, and nothing renders it.
+  const chordRef = useRef<ChordState>(null);
+  const chordTimer = useRef<number | null>(null);
+  const canSplitRef = useRef(canSplit);
+  canSplitRef.current = canSplit;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const r = resolveSplitKey(e, chordRef.current);
+      if (!r.handled) {
+        chordRef.current = r.chord;
+        return;
+      }
+      e.preventDefault();
+      chordRef.current = r.chord;
+      // Re-arm (or clear) the chord's expiry alongside its state.
+      if (chordTimer.current != null) window.clearTimeout(chordTimer.current);
+      chordTimer.current =
+        r.chord === null
+          ? null
+          : window.setTimeout(() => {
+              chordRef.current = null;
+              chordTimer.current = null;
+            }, CHORD_TIMEOUT_MS);
+      const action = r.action;
+      if (!action) return;
+      if (action.kind === "focusGroup") {
+        applyGroups((s) => focusGroupAt(s, action.pos));
+        return;
+      }
+      // Split acts on the focused group, and honours the same cap the buttons do
+      // — otherwise the keyboard would be a way around the group ceiling.
+      if (!canSplitRef.current) return;
+      applyGroups((s) =>
+        splitGroup(s, s.activeGroupId, action.kind === "splitRight" ? "row" : "column"),
+      );
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      if (chordTimer.current != null) window.clearTimeout(chordTimer.current);
+    };
+  }, [applyGroups]);
 
   // Back out of the draft tab: close it and abandon any in-flight spawn
   // correlation so a late scan match doesn't pop the tab back open.
