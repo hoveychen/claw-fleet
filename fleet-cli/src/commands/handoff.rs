@@ -46,8 +46,14 @@ pub(crate) fn cmd_handoff(
             return;
         }
         Some(HandoffCommands::Show { session_id }) => {
+            // Same rendering as the `fleet__handoff` MCP `show` action, so the
+            // CLI and the tool agents are told to prefer agree byte for byte.
+            // Nothing consumes the old pretty-JSON form.
             match claw_fleet_core::handoff::chain_containing(&session_id) {
-                Some(c) => println!("{}", serde_json::to_string_pretty(&c).unwrap_or_default()),
+                Some(c) => print!(
+                    "{}",
+                    claw_fleet_core::handoff::render_chain(&c, Some(&session_id), None)
+                ),
                 None => {
                     eprintln!("no chain contains session {session_id}");
                     std::process::exit(1);
