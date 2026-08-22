@@ -896,10 +896,14 @@ mod tests {
     #[test]
     fn fleet_owned_session_also_sees_the_control_tools() {
         // Conditional registration: a Fleet-owned session gets the four UI tools
-        // PLUS the six control tools; a non-Fleet session (tested above) does not.
+        // PLUS every control tool; a non-Fleet session (tested above) does not.
         let result = tools_list_result(true);
         let tools = result["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 10, "Fleet-owned session sees UI + control tools");
+        assert_eq!(
+            tools.len(),
+            4 + crate::mcp_control::CONTROL_TOOL_NAMES.len(),
+            "Fleet-owned session sees UI + control tools"
+        );
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         for control in crate::mcp_control::CONTROL_TOOL_NAMES {
             assert!(names.contains(&control), "{control} must be advertised to Fleet sessions");
