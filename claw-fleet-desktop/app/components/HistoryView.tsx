@@ -78,7 +78,15 @@ import {
   resolveSplitKey,
   type ChordState,
 } from "../splitShortcuts";
-import { parseTabKind, tabKindLabel, tabSurvivesScan, wikiTabId } from "../tabKind";
+import {
+  fileTabId,
+  parseTabKind,
+  tabKindLabel,
+  tabSurvivesScan,
+  webTabId,
+  wikiTabId,
+  type DetailTabOpener,
+} from "../tabKind";
 import { ExternalFilePreview } from "./FilesView";
 import { WikiTabPane } from "./WikiTabPane";
 import { WebTabPane } from "./WebTabPane";
@@ -1059,12 +1067,21 @@ export function HistoryView() {
   const railIsUnread = (s: SessionInfo) => sessionUnread(s, readOverrides[s.id]);
   const openTabIds = useMemo(() => new Set(allTabIds), [allTabIds]);
 
-  // A `[[slug]]` clicked inside a wiki tab opens the target as its own tab in
-  // the focused group — the same move as clicking a session row, so a chain of
-  // cross-referenced docs reads as a chain of tabs. Stable: WikiTabPane memoises
-  // its link context on it.
-  const openWikiTab = useCallback(
-    (slug: string) => applyGroups((st) => openTabInActiveGroup(st, wikiTabId(slug))),
+  // The column's "open this beside what I'm reading" capability, handed to
+  // every pane that renders links: a path, a `[[slug]]` or an external url
+  // clicked in prose becomes a tab in the focused group — the same move as
+  // clicking a session row — instead of navigating the window elsewhere.
+  //
+  // `openTabInActiveGroup` already handles the case where the thing is open in
+  // another group: it moves focus there rather than opening a second copy.
+  // Memoised on `applyGroups` (itself stable), so the memoised link contexts
+  // downstream don't churn on every scan.
+  const detailTabs = useMemo<DetailTabOpener>(
+    () => ({
+      openFile: (absPath) => applyGroups((st) => openTabInActiveGroup(st, fileTabId(absPath))),
+      openWiki: (slug) => applyGroups((st) => openTabInActiveGroup(st, wikiTabId(slug))),
+      openWeb: (url) => applyGroups((st) => openTabInActiveGroup(st, webTabId(url))),
+    }),
     [applyGroups],
   );
 
@@ -1125,7 +1142,7 @@ export function HistoryView() {
       case "wiki":
         return (
           <div className={styles.other_pane}>
-            <WikiTabPane slug={kind.slug} onOpenSlug={openWikiTab} />
+            <WikiTabPane slug={kind.slug} onOpenSlug={detailTabs.openWiki} />
           </div>
         );
       case "web":
@@ -1140,6 +1157,7 @@ export function HistoryView() {
             inline
             sessionInfo={tab.session!}
             searchQuery={queryById[tab.id] ?? null}
+            tabOpener={detailTabs}
             // `visible` here is per group, which is precisely "is in
             // `visibleIds`" — one unpaused pane per group.
             paused={!visible}
