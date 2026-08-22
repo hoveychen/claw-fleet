@@ -82,14 +82,11 @@ fn tool_names(resp: &Value) -> Vec<String> {
         .collect()
 }
 
-const CONTROL_TOOLS: [&str; 6] = [
-    "fleet__plan",
-    "fleet__handoff",
-    "fleet__watch",
-    "fleet__loop",
-    "fleet__schedule",
-    "fleet__wiki",
-];
+/// Driven off core's own registry so a newly registered control tool can't
+/// drift out of this end-to-end check (it did once: `fleet__inspect` /
+/// `fleet__control` shipped and only the hardcoded copy here still said six).
+const CONTROL_TOOLS: [&str; claw_fleet_core::mcp_control::CONTROL_TOOL_NAMES.len()] =
+    claw_fleet_core::mcp_control::CONTROL_TOOL_NAMES;
 
 #[test]
 fn non_fleet_session_sees_only_ui_tools_and_control_call_is_refused() {
@@ -140,7 +137,11 @@ fn fleet_session_sees_control_tools_and_plan_mutates_tasks_md() {
 
     // 1. All six control tools are advertised alongside the four UI tools.
     let names = tool_names(&resps[0]);
-    assert_eq!(names.len(), 10, "Fleet session must see UI + control tools: {names:?}");
+    assert_eq!(
+        names.len(),
+        4 + CONTROL_TOOLS.len(),
+        "Fleet session must see UI + control tools: {names:?}"
+    );
     for c in CONTROL_TOOLS {
         assert!(names.contains(&c.to_string()), "{c} must be advertised to Fleet sessions");
     }
