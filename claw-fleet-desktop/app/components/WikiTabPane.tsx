@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { BookOpen, ExternalLink } from "lucide-react";
 import { useUIStore } from "../store";
-import { useWikiDocs } from "../hooks/useWikiDocs";
+import { revealSlugInWikiPage, useWikiDocs } from "../hooks/useWikiDocs";
 import { WikiDocBody } from "./WikiView";
 import styles from "./TabPanes.module.css";
 
@@ -28,7 +28,6 @@ export function WikiTabPane({
 }) {
   const { t } = useTranslation();
   const { docs, loaded } = useWikiDocs();
-  const setViewMode = useUIStore((s) => s.setViewMode);
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const versionBySlug = useUIStore((s) => s.mainViewState.wiki.versionBySlug);
 
@@ -42,10 +41,7 @@ export function WikiTabPane({
   }, [docs, onOpenSlug]);
 
   // Hand the doc to the full page, which owns the destructive actions.
-  const openInWikiPage = () => {
-    updateMainViewState("wiki", { selectedSlug: slug });
-    setViewMode("wiki");
-  };
+  const openInWikiPage = () => revealSlugInWikiPage(slug);
 
   if (!doc) {
     return (
