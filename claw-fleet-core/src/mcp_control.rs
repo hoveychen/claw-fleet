@@ -171,11 +171,13 @@ fn schedule_tool_def() -> Value {
 fn wiki_tool_def() -> Value {
     json!({
         "name": "fleet__wiki",
-        "description": "Publish and browse docs in the Fleet wiki knowledge base. Use this instead of the `fleet wiki` CLI. Actions: publish (--path required; --slug/--title optional), cat (--slug required; --version/--file optional), list, search (--query required). Note: `publish` reads a LOCAL file path; in a remote workspace the file the agent wrote may live on the remote fs.",
+        "description": "Publish and browse docs in the Fleet wiki knowledge base. Use this instead of the `fleet wiki` CLI. Actions: publish (--path required; --slug/--title optional), cat (--slug required; --version/--file optional), show (--slug required — version history + entry filename), mv (--slug and --to required — rename a slug, e.g. into a virtual directory; versions move with it), list, search (--query required). `list`/`search` are scoped to the current workspace; pass `all: true` to reach every workspace — do that before writing a `[[slug]]` cross-reference, since an unpublished target renders as a dead link. Note: `publish` reads a LOCAL file path; in a remote workspace the file the agent wrote may live on the remote fs.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["publish", "cat", "list", "search"]},
+                "action": {"type": "string", "enum": ["publish", "cat", "show", "mv", "list", "search"]},
+                "to": {"type": "string", "description": "New slug (mv only)."},
+                "all": {"type": "boolean", "description": "Reach every workspace instead of just this one (list/search only)."},
                 "path": {"type": "string", "description": "File or dir to publish. Required for publish."},
                 "slug": {"type": "string", "description": "Doc slug (virtual path with /). Required for cat; optional for publish."},
                 "title": {"type": "string", "description": "Doc title (publish only)."},
@@ -231,6 +233,26 @@ fn req(args: &Value, key: &str) -> Result<String, String> {
 
 fn action_of(args: &Value) -> Result<String, String> {
     arg(args, "action").ok_or_else(|| "`action` is required".to_string())
+}
+
+/// A `bool`-ish flag arg: JSON `true` or the string "true"/"1"/"yes".
+fn flag(args: &Value, key: &str) -> bool {
+    match args.get(key) {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => matches!(s.trim(), "true" | "1" | "yes"),
+        _ => false,
+    }
+}
+
+/// Epoch ms as local wall-clock, for the timestamps agents read in tool output.
+fn fmt_ms(ms: u64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms as i64)
+        .map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn now_ms() -> u64 {
@@ -713,6 +735,31 @@ fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
                 doc.title
             ))
         }
+        "show" => {
+            let slug = req(args, "slug")?;
+            let doc = wiki::get_doc(&slug)?;
+            let mut out = format!(
+                "{}  —  {}\n  kind: {}   entry: {}\n  workspace: {}\n  created: {}   updated: {}\n  versions:\n",
+                doc.slug,
+                doc.title,
+                doc.kind,
+                doc.entry,
+                doc.workspace_path,
+                fmt_ms(doc.created_ms),
+                fmt_ms(doc.updated_ms),
+            );
+            for v in &doc.versions {
+                let marker = if v.id == doc.current_version { "*" } else { " " };
+                out.push_str(&format!(
+                    "   {marker} {}  {} file(s)  {} bytes  {}\n",
+                    v.id,
+                    v.file_count,
+                    v.size_bytes,
+                    fmt_ms(v.published_ms)
+                ));
+            }
+            Ok(out)
+        }
         "cat" => {
             let slug = req(args, "slug")?;
             let doc = wiki::get_doc(&slug)?;
@@ -721,16 +768,31 @@ fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
             let f = wiki::get_file(&slug, &version, &relpath)?;
             Ok(String::from_utf8_lossy(&f.bytes).into_owned())
         }
+        "mv" => {
+            let from = req(args, "slug")?;
+            let to = req(args, "to")?;
+            let doc = wiki::move_doc(&from, &to)?;
+            Ok(format!(
+                "Moved {from} → {} ({} version(s) moved with it)",
+                doc.slug,
+                doc.versions.len()
+            ))
+        }
         "list" => {
+            let all = flag(args, "all");
             let scope = wiki::resolve_workspace_path(cwd);
             let docs: Vec<_> = wiki::list_docs()
                 .into_iter()
-                .filter(|d| wiki::workspace_contains(&d.workspace_path, &scope))
+                .filter(|d| all || wiki::workspace_contains(&d.workspace_path, &scope))
                 .collect();
             if docs.is_empty() {
-                return Ok(format!(
-                    "No wiki docs published from {scope}. (search/cat can still reach other workspaces.)"
-                ));
+                return Ok(if all {
+                    "No wiki docs published yet.".to_string()
+                } else {
+                    format!(
+                        "No wiki docs published from {scope}. Pass all:true to list every workspace."
+                    )
+                });
             }
             let mut out = String::new();
             for d in &docs {
@@ -746,14 +808,26 @@ fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
         }
         "search" => {
             let query = req(args, "query")?;
-            let by_slug: std::collections::HashMap<String, wiki::WikiDoc> =
-                wiki::list_docs().into_iter().map(|d| (d.slug.clone(), d)).collect();
+            // Was unscoped — every workspace, always — while the guidance
+            // documents search as workspace-local with `--all` to widen. Scope
+            // it here so the tool matches the contract agents are handed.
+            let all = flag(args, "all");
+            let scope = wiki::resolve_workspace_path(cwd);
+            let by_slug: std::collections::HashMap<String, wiki::WikiDoc> = wiki::list_docs()
+                .into_iter()
+                .filter(|d| all || wiki::workspace_contains(&d.workspace_path, &scope))
+                .map(|d| (d.slug.clone(), d))
+                .collect();
             let hits: Vec<_> = wiki::search_docs(&query)
                 .into_iter()
                 .filter(|h| by_slug.contains_key(&h.slug))
                 .collect();
             if hits.is_empty() {
-                return Ok(format!("No doc matches '{query}'."));
+                return Ok(if all {
+                    format!("No doc matches '{query}'.")
+                } else {
+                    format!("No doc in this workspace matches '{query}'. Pass all:true to search every workspace.")
+                });
             }
             let mut out = String::new();
             for h in &hits {
@@ -898,6 +972,72 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("not on any relay chain"), "{err}");
+    }
+
+    /// MCP clients send booleans as either JSON `true` or the string "true";
+    /// reading only one form would silently ignore `all` from half of them.
+    #[test]
+    fn flag_accepts_json_bool_and_string_forms() {
+        assert!(flag(&json!({"all": true}), "all"));
+        assert!(flag(&json!({"all": "true"}), "all"));
+        assert!(flag(&json!({"all": "yes"}), "all"));
+        assert!(!flag(&json!({"all": false}), "all"));
+        assert!(!flag(&json!({"all": "no"}), "all"));
+        assert!(!flag(&json!({}), "all"));
+    }
+
+    #[test]
+    fn wiki_show_requires_slug_and_reports_a_miss() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = handle("fleet__wiki", &json!({"action": "show"}), None, tmp.path()).unwrap_err();
+        assert!(err.contains("slug"), "{err}");
+        let err = handle(
+            "fleet__wiki",
+            &json!({"action": "show", "slug": "no-such-doc-9d1c"}),
+            None,
+            tmp.path(),
+        )
+        .unwrap_err();
+        assert!(!err.is_empty(), "a missing slug must report an error");
+    }
+
+    /// `mv` takes two slugs; omitting the destination must say which one.
+    #[test]
+    fn wiki_mv_requires_both_slugs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = handle(
+            "fleet__wiki",
+            &json!({"action": "mv", "slug": "a"}),
+            None,
+            tmp.path(),
+        )
+        .unwrap_err();
+        assert!(err.contains("`to`"), "{err}");
+        let err = handle(
+            "fleet__wiki",
+            &json!({"action": "mv", "to": "b"}),
+            None,
+            tmp.path(),
+        )
+        .unwrap_err();
+        assert!(err.contains("`slug`"), "{err}");
+    }
+
+    /// An empty workspace-scoped result must point at the `all` escape hatch —
+    /// otherwise an agent reads "nothing published" and stops looking.
+    #[test]
+    fn wiki_scoped_empty_results_mention_the_all_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = handle("fleet__wiki", &json!({"action": "list"}), None, tmp.path()).unwrap();
+        assert!(out.contains("all:true"), "{out}");
+        let out = handle(
+            "fleet__wiki",
+            &json!({"action": "search", "query": "zzz-no-such-term-9d1c"}),
+            None,
+            tmp.path(),
+        )
+        .unwrap();
+        assert!(out.contains("all:true"), "{out}");
     }
 
     #[test]
