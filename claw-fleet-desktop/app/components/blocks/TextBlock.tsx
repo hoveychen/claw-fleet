@@ -13,6 +13,7 @@ import {
 } from "../../markdown/wikiLinks";
 import { MermaidBlock } from "../../markdown/MermaidBlock";
 import { PathChip, type PathLinkContext } from "../../markdown/pathLinks";
+import { localImageComponent } from "../../markdown/localImages";
 import { parsePathRef } from "../../markdown/pathRef";
 import styles from "./TextBlock.module.css";
 
@@ -194,6 +195,10 @@ export const TextBlock = memo(function TextBlock({
           // so the Tauri webview never navigates (see markdown/safeLinks.ts).
           // Wiki docs upgrade slug refs to in-app navigation instead.
           a: wiki ? wikiLinkComponent(wiki) : safeLinkComponent(),
+          // Local image refs (`![](/Users/…/shot.png)`) are read through the
+          // Backend and inlined; a bare <img> would resolve the path against
+          // the webview origin and break. See markdown/localImages.
+          img: localImageComponent(paths),
         }}
       >
         {content}

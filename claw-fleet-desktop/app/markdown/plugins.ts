@@ -1,7 +1,9 @@
 // The one markdown plugin chain every surface renders through — chat messages,
 // decision cards, wiki docs, report cards. Kept free of Tauri APIs and CSS
 // modules so plugins.test.ts can drive it directly.
-import type { PluggableList } from "unified";
+import type { Plugin, PluggableList } from "unified";
+import type { Root, Element } from "hast";
+import { visit } from "unist-util-visit";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkCjkFriendly from "remark-cjk-friendly";
@@ -77,6 +79,37 @@ const schema = {
     // vector — a stray `fill` on a `<div>` does nothing.
     "*": [...(defaultSchema.attributes?.["*"] ?? []), ...SVG_ATTRS],
   },
+  protocols: {
+    ...defaultSchema.protocols,
+    // GitHub's schema allows only http(s) here, which strips a `file://` image
+    // src before anything can act on it. Admitted because `rehypeFileUrlImages`
+    // below rewrites it to a bare path in the same chain, so no `file://` URL
+    // ever reaches the DOM — it becomes a Backend read (markdown/localImages).
+    src: [...(defaultSchema.protocols?.src ?? []), "file"],
+  },
+};
+
+/**
+ * `<img src="file:///Users/me/shot.png">` → `<img src="/Users/me/shot.png">`.
+ *
+ * An agent that writes its screenshot as a `file://` URL is naming a host path,
+ * and a bare host path is what `markdown/localImages` knows how to fetch. The
+ * rewrite has to happen here, in the shared chain, because the *other* layer
+ * that erases the URL is react-markdown's `urlTransform` — whose allow-list
+ * (http/https/mailto/…) is not configurable through the plugin chain and would
+ * otherwise have to be overridden at every single render site.
+ *
+ * Must run after `rehype-sanitize`: before it, the attribute is still subject to
+ * the protocol list above and the rewrite would be undone.
+ */
+export const rehypeFileUrlImages: Plugin<[], Root> = () => (tree) => {
+  visit(tree, "element", (node: Element) => {
+    if (node.tagName !== "img") return;
+    const src = node.properties?.src;
+    if (typeof src !== "string") return;
+    const m = /^file:\/\/(?:localhost)?(\/.*)$/i.exec(src);
+    if (m) node.properties!.src = m[1];
+  });
 };
 
 /**
@@ -175,6 +208,9 @@ export const safeRehypePlugins: PluggableList = [
   rehypeRaw,
   [rehypeSanitize, schema],
   rehypeKatex,
+  // After sanitize, so the rewritten bare path isn't re-checked against the
+  // protocol list (see rehypeFileUrlImages).
+  rehypeFileUrlImages,
   // Runs last so the `cjk-indent` class it adds to CJK-leading <p> survives the
   // sanitize pass above (className is globally allow-listed by `schema`).
   rehypeCjkIndent,
