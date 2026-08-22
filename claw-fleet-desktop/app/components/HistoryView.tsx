@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -44,19 +45,39 @@ import {
 import { useComposerDraftStore, type ComposerDraft } from "../composerDraft";
 import { SessionDetail } from "./SessionDetail";
 import { SessionTabs, type TabItem } from "./SessionTabs";
+import { GroupDivider } from "./GroupDivider";
 import {
   closeOtherTabs as closeOtherTabsState,
-  closeTab as closeTabState,
   closeTabsToRight as closeTabsToRightState,
   DRAFT_TAB_ID,
-  openTab as openTabState,
-  parsePersistedTabs,
-  pruneMissingTabs,
-  replaceTab as replaceTabState,
   reorderTabs as reorderTabIds,
   TABS_STORAGE_KEY,
-  type TabState,
 } from "../sessionTabs";
+import {
+  activeGroup,
+  canFitAnotherGroup,
+  closeGroup,
+  closeTabAnywhere,
+  focusGroup,
+  focusGroupAt,
+  inGroup,
+  moveTabToGroup,
+  openTabInActiveGroup,
+  parsePersistedGroups,
+  pruneMissingGroupTabs,
+  replaceTabAnywhere,
+  resizeGroups,
+  serializeGroups,
+  splitGroup,
+  visibleTabIds,
+  type GroupsState,
+  type SplitOrientation,
+} from "../tabGroups";
+import {
+  CHORD_TIMEOUT_MS,
+  resolveSplitKey,
+  type ChordState,
+} from "../splitShortcuts";
 import { getItem, setItem } from "../storage";
 import { canControl, stopMode, performStop } from "./StopControl";
 import { SessionRail } from "./SessionRail";
@@ -77,6 +98,18 @@ export interface PendingSpawn extends NewSessionCreated {
 /** Give up on the in-place spinner after this long and offer an escape hatch;
  *  the scanner polls every ~5s so a healthy spawn resolves well within this. */
 const START_TIMEOUT_MS = 30_000;
+
+/** Ceiling on split groups. Not a layout limit — a *cost* one: each group keeps
+ *  one pane unpaused, and past a handful the column is too narrow to read
+ *  anyway. VS Code has no cap because its editors don't poll. */
+const MAX_GROUPS = 4;
+
+/** Narrowest a group may get. Below this the tab strip is all ellipsis and the
+ *  transcript wraps to unreadable ribbons, so it gates both the split controls
+ *  and the divider drag. Window resizes are NOT policed by it: shrinking the
+ *  window would then have to silently merge groups, and losing a layout you
+ *  arranged is worse than a cramped one you can widen back. */
+const MIN_GROUP_PX = 280;
 
 /**
  * Keep inactive session panes mounted *and laid out*. On macOS, WKWebView can
@@ -266,20 +299,60 @@ export function HistoryView() {
   // Inline detail column selection — local to the page, deliberately NOT the
   // global useDetailStore (that one drives the drawer overlaying every view).
   //
-  // The column is an IDE-style tab strip: `tabIds` is the open tabs left→right
-  // and `activeId` is the one on screen. We keep *ids*, not SessionInfo
-  // snapshots, and resolve them against the live scan on every render — a tab
-  // that has been open for ten minutes must show the session's current title
-  // and status, not the ones it wore when it was opened.
+  // The column is an IDE-style split of editor *groups*: `groupsState.groups` is
+  // the groups along one axis, each with its own tabs left→right and its own
+  // focused tab, and `activeGroupId` says which group the keyboard is in. We
+  // keep *ids*, not SessionInfo snapshots, and resolve them against the live
+  // scan on every render — a tab that has been open for ten minutes must show
+  // the session's current title and status, not the ones it wore when it was
+  // opened. The reducers all live in `tabGroups.ts`, which enforces the layout's
+  // four invariants (see its header) so this component never has to.
   //
   // Restored from the previous run. The lazy initialiser matters: `initStorage`
   // is awaited before React renders, so reading at first render sees a warm
   // cache, while a module-level read would run at import time and see nothing.
-  const [restored] = useState(() =>
-    parsePersistedTabs(getItem(TABS_STORAGE_KEY)),
+  const [groupsState, setGroupsState] = useState<GroupsState>(() =>
+    parsePersistedGroups(getItem(TABS_STORAGE_KEY)),
   );
-  const [tabIds, setTabIds] = useState<string[]>(restored.tabIds);
-  const [activeId, setActiveId] = useState<string | null>(restored.activeId);
+  // Every open tab across every group — the flat view the pruning, persistence
+  // and spawn-correlation paths care about (none of them are per-group).
+  const allTabIds = useMemo(
+    () => groupsState.groups.flatMap((g) => g.tabIds),
+    [groupsState],
+  );
+  // The focused group's focused tab. Everything that used to mean "the tab on
+  // screen" (dwell-to-read, the list's active highlight) means *this* now: the
+  // one tab the user is actually looking at, not merely one of the visible ones.
+  const activeId = activeGroup(groupsState).activeId;
+  // One visible tab per group — exactly the set that stays *unpaused*. Before
+  // the split there was one unpaused pane; now there is one per group, which is
+  // the entire CPU cost of the feature (see SessionDetail's three pollers).
+  const visibleIds = useMemo(() => visibleTabIds(groupsState), [groupsState]);
+  // The split axis' length in px, measured (not guessed) so the width gate and
+  // the divider drag agree with what is on screen. Kept in a ref *as well* so
+  // the keyboard handler can read it without re-subscribing on every resize.
+  const detailRef = useRef<HTMLDivElement>(null);
+  const [axisPx, setAxisPx] = useState(0);
+  const axisRef = useRef(0);
+  axisRef.current = axisPx;
+  useEffect(() => {
+    const el = detailRef.current;
+    if (!el) return;
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      setAxisPx(groupsState.orientation === "row" ? r.width : r.height);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [groupsState.orientation]);
+
+  // Room for another group? Both a hard cap (each group keeps a pane unpaused)
+  // and a width gate (a split that produced unreadable slivers is not a split).
+  const canSplit =
+    groupsState.groups.length < MAX_GROUPS &&
+    canFitAnotherGroup(axisPx, groupsState.groups.length, MIN_GROUP_PX);
   // Per-tab search highlight (the FTS query that matched that session), keyed
   // by session id — each tab was opened by its own click and carries its own.
   const [queryById, setQueryById] = useState<Record<string, string | null>>({});
@@ -482,29 +555,45 @@ export function HistoryView() {
     () => new Map(sessions.map((s) => [s.id, s])),
     [sessions],
   );
-  // The strip's entries. The draft tab (DRAFT_TAB_ID) has no backing session and
-  // renders the compose form / starting spinner; every other id resolves to its
-  // live session, and an id that resolves to nothing (a vanished session) drops
-  // out just as before.
-  const tabItems = useMemo<TabItem[]>(
-    () =>
-      tabIds
-        .map((id): TabItem | null => {
-          if (id === DRAFT_TAB_ID)
-            return { id, session: null, label: t("new_session.button") };
-          const s = sessionById.get(id);
-          return s ? { id, session: s } : null;
-        })
-        .filter((x): x is TabItem => x != null),
-    [tabIds, sessionById, t],
-  );
+  // Each group's strip entries, resolved against the live scan. The draft tab
+  // (DRAFT_TAB_ID) has no backing session and renders the compose form /
+  // starting spinner; every other id resolves to its live session, and an id
+  // that resolves to nothing (a vanished session) drops out just as before.
+  const itemsByGroup = useMemo(() => {
+    const out = new Map<string, TabItem[]>();
+    for (const grp of groupsState.groups) {
+      out.set(
+        grp.id,
+        grp.tabIds
+          .map((id): TabItem | null => {
+            if (id === DRAFT_TAB_ID)
+              return { id, session: null, label: t("new_session.button") };
+            const s = sessionById.get(id);
+            return s ? { id, session: s } : null;
+          })
+          .filter((x): x is TabItem => x != null),
+      );
+    }
+    return out;
+  }, [groupsState, sessionById, t]);
 
-  // Persist the strip so it comes back on the next launch. The per-tab search
+  // Persist the layout so it comes back on the next launch. The per-tab search
   // highlight is deliberately NOT persisted — a term you searched for last week
   // has no business highlighting a transcript on a cold start.
   useEffect(() => {
-    setItem(TABS_STORAGE_KEY, JSON.stringify({ tabIds, activeId }));
-  }, [tabIds, activeId]);
+    setItem(TABS_STORAGE_KEY, serializeGroups(groupsState));
+  }, [groupsState]);
+
+  // Drop search highlights for tabs no longer open anywhere. Keyed off the flat
+  // id list rather than done inside each reducer, so no close path can forget
+  // it. Returns `prev` unchanged when nothing was dropped, or this would loop.
+  useEffect(() => {
+    setQueryById((prev) => {
+      const open = new Set(allTabIds);
+      const kept = Object.entries(prev).filter(([id]) => open.has(id));
+      return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept);
+    });
+  }, [allTabIds]);
 
   // Restored ids can name sessions that have since been deleted. They already
   // render as nothing (they don't resolve against the scan), but left in the
@@ -517,43 +606,40 @@ export function HistoryView() {
     prunedRef.current = true;
     // The draft tab never resolves against the scan — exempt it from pruning, or
     // the first scan would close a new-session form the user is typing into.
-    const next = pruneMissingTabs(
-      { tabIds, activeId },
-      (id) => id === DRAFT_TAB_ID || sessionById.has(id),
+    setGroupsState((prev) =>
+      pruneMissingGroupTabs(prev, (id) => id === DRAFT_TAB_ID || sessionById.has(id)),
     );
-    if (next.tabIds.length === tabIds.length) return;
-    setTabIds(next.tabIds);
-    setActiveId(next.activeId);
-  }, [scanReady, sessionById, tabIds, activeId]);
+  }, [scanReady, sessionById]);
 
-  // Switching tabs just moves focus. A spawn in flight keeps correlating in the
-  // background (its draft tab morphs in place whether or not it's on screen), so
-  // activating another tab must NOT cancel `pending`.
-  const activateTab = useCallback((id: string) => setActiveId(id), []);
+  // Every mutation goes through here. The updater form (rather than reading
+  // `groupsState` from the closure) is what keeps this callback stable, so the
+  // memoised rows and strips don't churn on every tab change.
+  const applyGroups = useCallback(
+    (fn: (state: GroupsState) => GroupsState) => setGroupsState(fn),
+    [],
+  );
 
-  // The close/reorder rules (chiefly: where focus lands after a close) live in
-  // `sessionTabs.ts` as pure reducers so they can be unit-tested.
-  const applyTabs = useCallback(
-    (fn: (state: TabState) => TabState) => {
-      const next = fn({ tabIds, activeId });
-      setTabIds(next.tabIds);
-      setActiveId(next.activeId);
-      // Drop highlights for tabs that are no longer open.
-      setQueryById((prev) =>
-        Object.fromEntries(
-          Object.entries(prev).filter(([id]) => next.tabIds.includes(id)),
+  // Clicking a tab focuses it *and* moves column focus to its group — clicking
+  // into the other half is how you switch halves, as in any editor. A spawn in
+  // flight keeps correlating in the background (its draft tab morphs in place
+  // whether or not it's on screen), so this must NOT cancel `pending`.
+  const activateTab = useCallback(
+    (groupId: string, id: string) =>
+      applyGroups((s) =>
+        focusGroup(
+          inGroup(s, groupId, (t) => (t.activeId === id ? t : { ...t, activeId: id })),
+          groupId,
         ),
-      );
-    },
-    [tabIds, activeId],
+      ),
+    [applyGroups],
   );
 
   const openTab = useCallback(
     (s: SessionInfo, highlight: string | null) => {
-      applyTabs((st) => openTabState(st, s.id));
+      applyGroups((st) => openTabInActiveGroup(st, s.id));
       setQueryById((prev) => ({ ...prev, [s.id]: highlight }));
     },
-    [applyTabs],
+    [applyGroups],
   );
 
   // Stable identity: SessionRow is memoised, and a fresh closure each render
@@ -681,39 +767,144 @@ export function HistoryView() {
     [t, readOverrides, isLocal, handleRowClick, markRead, copyText],
   );
 
+  // Close paths. `closeTab` takes no group id on purpose — the ✕, middle-click
+  // and the list row's close all mean "close this session wherever it is", and
+  // `closeTabAnywhere` finds its group. The context-menu items scoped to one
+  // strip ("close others", "close to the right") do take one.
   const closeTab = useCallback(
-    (id: string) => applyTabs((s) => closeTabState(s, id)),
-    [applyTabs],
+    (id: string) => applyGroups((s) => closeTabAnywhere(s, id)),
+    [applyGroups],
   );
   const closeOtherTabs = useCallback(
-    (id: string) => applyTabs((s) => closeOtherTabsState(s, id)),
-    [applyTabs],
+    (groupId: string, id: string) =>
+      applyGroups((s) => inGroup(s, groupId, (t) => closeOtherTabsState(t, id))),
+    [applyGroups],
   );
   const closeTabsToRight = useCallback(
-    (id: string) => applyTabs((s) => closeTabsToRightState(s, id)),
-    [applyTabs],
+    (groupId: string, id: string) =>
+      applyGroups((s) => inGroup(s, groupId, (t) => closeTabsToRightState(t, id))),
+    [applyGroups],
   );
+  // "Close all" is per group, and empties the *whole group* — which in a split
+  // layout also removes it, collapsing the column back. That is the editor
+  // convention (`workbench.editor.closeEmptyGroups`), and the only way to undo a
+  // split without a separate "unsplit" control.
   const closeAllTabs = useCallback(
-    () => applyTabs(() => ({ tabIds: [], activeId: null })),
-    [applyTabs],
+    (groupId: string) => applyGroups((s) => closeGroup(s, groupId)),
+    [applyGroups],
   );
-  const reorderTabs = useCallback((fromId: string, toId: string) => {
-    setTabIds((prev) => reorderTabIds(prev, fromId, toId));
-  }, []);
+  const reorderTabs = useCallback(
+    (groupId: string, fromId: string, toId: string) =>
+      applyGroups((s) =>
+        inGroup(s, groupId, (t) => {
+          const tabIds = reorderTabIds(t.tabIds, fromId, toId);
+          return tabIds === t.tabIds ? t : { ...t, tabIds };
+        }),
+      ),
+    [applyGroups],
+  );
+  const splitAt = useCallback(
+    (groupId: string, orientation: SplitOrientation) =>
+      applyGroups((s) => splitGroup(s, groupId, orientation)),
+    [applyGroups],
+  );
+
+  // Drag the boundary between group `idx` and its right/lower neighbour. The
+  // clamp lives in `resizeGroups`, against the measured axis, so a drag can
+  // neither collapse a group nor disturb the ones outside the pair.
+  const resizeBoundary = useCallback(
+    (idx: number, deltaPx: number) =>
+      applyGroups((s) => {
+        const weights = s.groups.map((g) => g.weight);
+        const next = resizeGroups(weights, idx, deltaPx, axisRef.current, MIN_GROUP_PX);
+        if (next === weights) return s;
+        return { ...s, groups: s.groups.map((g, i) => ({ ...g, weight: next[i] })) };
+      }),
+    [applyGroups],
+  );
+
+  // The tab drag in flight. Held here rather than inside a strip because the
+  // *destination* strip is a sibling component: it has to see which tab is
+  // moving and where it came from to decide whether it is a drop target at all.
+  const [drag, setDrag] = useState<{ tabId: string; fromGroup: string } | null>(null);
+  const startTabDrag = useCallback(
+    (fromGroup: string, tabId: string) => setDrag({ tabId, fromGroup }),
+    [],
+  );
+  const endTabDrag = useCallback(() => setDrag(null), []);
+  // A cross-group drop. Commits the move (which re-parents the pane, so the
+  // SessionDetail remounts once — the price of the move, paid on release rather
+  // than on every pointer step) and hands focus to the destination.
+  const dropTab = useCallback(
+    (toGroupId: string, beforeTabId: string | null) => {
+      const moving = drag?.tabId;
+      setDrag(null);
+      if (!moving) return;
+      applyGroups((s) => moveTabToGroup(s, moving, toGroupId, beforeTabId ?? undefined));
+    },
+    [drag, applyGroups],
+  );
+
+  // ⌘\ / ⌘K ⌘\ / ⌘1..⌘9. Bound on `window` in the capture phase, the same way
+  // the find bar takes ⌘F — component-level handlers (a composer's textarea)
+  // would otherwise see the stroke first. The chord state lives in a ref, not
+  // state: re-rendering the whole page between the two halves of ⌘K ⌘\ would be
+  // pure waste, and nothing renders it.
+  const chordRef = useRef<ChordState>(null);
+  const chordTimer = useRef<number | null>(null);
+  const canSplitRef = useRef(canSplit);
+  canSplitRef.current = canSplit;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const r = resolveSplitKey(e, chordRef.current);
+      if (!r.handled) {
+        chordRef.current = r.chord;
+        return;
+      }
+      e.preventDefault();
+      chordRef.current = r.chord;
+      // Re-arm (or clear) the chord's expiry alongside its state.
+      if (chordTimer.current != null) window.clearTimeout(chordTimer.current);
+      chordTimer.current =
+        r.chord === null
+          ? null
+          : window.setTimeout(() => {
+              chordRef.current = null;
+              chordTimer.current = null;
+            }, CHORD_TIMEOUT_MS);
+      const action = r.action;
+      if (!action) return;
+      if (action.kind === "focusGroup") {
+        applyGroups((s) => focusGroupAt(s, action.pos));
+        return;
+      }
+      // Split acts on the focused group, and honours the same cap the buttons do
+      // — otherwise the keyboard would be a way around the group ceiling.
+      if (!canSplitRef.current) return;
+      applyGroups((s) =>
+        splitGroup(s, s.activeGroupId, action.kind === "splitRight" ? "row" : "column"),
+      );
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      if (chordTimer.current != null) window.clearTimeout(chordTimer.current);
+    };
+  }, [applyGroups]);
 
   // Back out of the draft tab: close it and abandon any in-flight spawn
   // correlation so a late scan match doesn't pop the tab back open.
   const cancelDraft = useCallback(() => {
     setPending(null);
     setStartTimedOut(false);
-    applyTabs((s) => closeTabState(s, DRAFT_TAB_ID));
-  }, [applyTabs]);
+    applyGroups((s) => closeTabAnywhere(s, DRAFT_TAB_ID));
+  }, [applyGroups]);
 
   // "+新会话" → open (or refocus) the single draft tab. Other tabs are left
   // untouched; the draft is just another tab, so this is `openTab`, not an
   // overlay. Clicking it again while a draft is already open simply refocuses it.
   const handleNewSession = () => {
-    applyTabs((st) => openTabState(st, DRAFT_TAB_ID));
+    applyGroups((st) => openTabInActiveGroup(st, DRAFT_TAB_ID));
   };
 
   // Schedule page "新建" shortcut: seed the new-session composer with a
@@ -739,9 +930,9 @@ export function HistoryView() {
     if (Object.keys(seed).length > 0) {
       useComposerDraftStore.getState().patchDraft("new", seed);
     }
-    applyTabs((st) => openTabState(st, DRAFT_TAB_ID));
+    applyGroups((st) => openTabInActiveGroup(st, DRAFT_TAB_ID));
     clearNewSessionNav();
-  }, [newSessionNav, applyTabs, clearNewSessionNav]);
+  }, [newSessionNav, applyGroups, clearNewSessionNav]);
 
   // A notification / tray click on a Fleet-spawned session routes here (the
   // store hop to "history" mounts this view); open the session in the inline
@@ -755,9 +946,9 @@ export function HistoryView() {
     if (!openTaskNav) return;
     if (handledOpenTaskNonce.current === openTaskNav.nonce) return;
     handledOpenTaskNonce.current = openTaskNav.nonce;
-    applyTabs((st) => openTabState(st, openTaskNav.sessionId));
+    applyGroups((st) => openTabInActiveGroup(st, openTaskNav.sessionId));
     clearOpenTaskNav();
-  }, [openTaskNav, applyTabs, clearOpenTaskNav]);
+  }, [openTaskNav, applyGroups, clearOpenTaskNav]);
 
   // Form spawned the process: flip the draft tab's pane to the "starting…"
   // spinner and start polling for the session. Snapshot the ad-hoc session ids
@@ -775,19 +966,19 @@ export function HistoryView() {
   // to launches.
   useEffect(() => {
     if (!pending) return;
-    if (!tabIds.includes(DRAFT_TAB_ID)) {
+    if (!allTabIds.includes(DRAFT_TAB_ID)) {
       setPending(null);
       setStartTimedOut(false);
       return;
     }
     const match = matchSpawnedSession(adhocSessions, pending);
     if (match) {
-      applyTabs((st) => replaceTabState(st, DRAFT_TAB_ID, match.id));
+      applyGroups((st) => replaceTabAnywhere(st, DRAFT_TAB_ID, match.id));
       setQueryById((prev) => ({ ...prev, [match.id]: null }));
       setPending(null);
       setStartTimedOut(false);
     }
-  }, [adhocSessions, pending, tabIds, applyTabs]);
+  }, [adhocSessions, pending, allTabIds, applyGroups]);
 
   // Surface an escape hatch if the spawn takes unusually long to show up.
   useEffect(() => {
@@ -809,8 +1000,11 @@ export function HistoryView() {
   // from marking themselves read: a session you have parked in a tab but are
   // not looking at is, correctly, still unread.
   const activeSession = useMemo(
-    () => tabItems.find((tab) => tab.id === activeId)?.session ?? null,
-    [tabItems, activeId],
+    () =>
+      itemsByGroup
+        .get(groupsState.activeGroupId)
+        ?.find((tab) => tab.id === activeId)?.session ?? null,
+    [itemsByGroup, groupsState.activeGroupId, activeId],
   );
   // Read at fire time so the timer isn't re-armed by every scan that refreshes
   // the session object, which would keep pushing the 2s dwell out. Same reason
@@ -840,7 +1034,7 @@ export function HistoryView() {
   const railSnippetFor = (jsonlPath: string) =>
     query.trim().length >= 2 ? snippetByPath.get(jsonlPath) : undefined;
   const railIsUnread = (s: SessionInfo) => sessionUnread(s, readOverrides[s.id]);
-  const openTabIds = useMemo(() => new Set(tabIds), [tabIds]);
+  const openTabIds = useMemo(() => new Set(allTabIds), [allTabIds]);
 
   return (
     <PageShell
@@ -1018,84 +1212,139 @@ export function HistoryView() {
         </>
       }
     >
-      {/* This column wrapper is load-bearing: `.detail_body` below is a flex ROW
-          whose children (the open tabs' panes) compete for the same space.
-          Dropping this level would put the tab strip side by side with them
-          instead of above them. */}
-      <div className={styles.detail}>
-        <SessionTabs
-          tabs={tabItems}
-          activeId={activeId}
-          onActivate={activateTab}
-          onClose={closeTab}
-          onCloseOthers={closeOtherTabs}
-          onCloseRight={closeTabsToRight}
-          onCloseAll={closeAllTabs}
-          onReorder={reorderTabs}
-        />
+      {/* The split axis. Each child is one editor group — its own tab strip
+          above its own pane stack — and `data-orientation` decides whether they
+          sit side by side (split right) or stack (split down). A single group
+          fills it, so an un-split column looks exactly as it did. */}
+      <div
+        ref={detailRef}
+        className={styles.detail}
+        data-orientation={groupsState.orientation}
+      >
+        {groupsState.groups.map((grp, gi) => {
+          const items = itemsByGroup.get(grp.id) ?? [];
+          const isActiveGroup = grp.id === groupsState.activeGroupId;
+          return (
+            <Fragment key={grp.id}>
+            {gi > 0 && (
+              <GroupDivider
+                orientation={groupsState.orientation}
+                onResize={(d) => resizeBoundary(gi - 1, d)}
+              />
+            )}
+            <div
+              className={styles.group}
+              // Weights are relative shares of the axis; `flexBasis: 0` makes
+              // grow the *only* thing that decides size, so a group holding a
+              // wide transcript can't claim more than its share.
+              style={{ flexGrow: grp.weight, flexBasis: 0 }}
+              // Clicking anywhere in a group takes column focus, so typing in a
+              // composer or hitting ⌘\ acts on the half you are looking at
+              // rather than the half you last clicked a tab in.
+              onMouseDownCapture={
+                isActiveGroup ? undefined : () => applyGroups((s) => focusGroup(s, grp.id))
+              }
+            >
+              {/* A lone group with nothing open shows no strip at all — the
+                  pre-split look. As soon as the column is split, every group
+                  keeps its strip so the empty half is still operable. */}
+              {(items.length > 0 || groupsState.groups.length > 1) && (
+                <SessionTabs
+                  groupId={grp.id}
+                  tabs={items}
+                  activeId={grp.activeId}
+                  // Meaningless with one group, so the tint stays off until the
+                  // column actually has halves to tell apart.
+                  isActiveGroup={groupsState.groups.length > 1 && isActiveGroup}
+                  splittable={canSplit}
+                  onActivate={(id) => activateTab(grp.id, id)}
+                  onClose={closeTab}
+                  onCloseOthers={(id) => closeOtherTabs(grp.id, id)}
+                  onCloseRight={(id) => closeTabsToRight(grp.id, id)}
+                  onCloseAll={() => closeAllTabs(grp.id)}
+                  onReorder={(fromId, toId) => reorderTabs(grp.id, fromId, toId)}
+                  drag={drag}
+                  onDragStart={(tabId) => startTabDrag(grp.id, tabId)}
+                  onDragEnd={endTabDrag}
+                  onDropTab={dropTab}
+                  onSplitRight={() => splitAt(grp.id, "row")}
+                  onSplitDown={() => splitAt(grp.id, "column")}
+                />
+              )}
 
-        <div className={styles.detail_body}>
-          {/* Every open tab stays mounted; only the active one is visible.
-              Unmounting the others would throw away the messages, scroll
-              position and view-tab that make a tab worth keeping open. The
-              hidden ones are `paused`, so they cost no polling. The draft tab
-              renders the compose form, or the spawn spinner once it has fired. */}
-          {tabItems.map((tab) => {
-            const visible = tab.id === activeId;
-            return (
-              <div
-                key={tab.id}
-                className={styles.pane}
-                style={sessionPaneStyle(visible)}
-                aria-hidden={!visible}
-              >
-                {tab.id === DRAFT_TAB_ID ? (
-                  pending ? (
-                    <div className={styles.detail_starting}>
-                      {startTimedOut ? (
-                        <>
-                          <span className={styles.starting_text}>
-                            {t("new_session.start_timeout", "启动较慢，可再等等，或从左侧列表里查看")}
-                          </span>
-                          <button
-                            type="button"
-                            className={styles.starting_dismiss}
-                            onClick={cancelDraft}
-                          >
-                            {t("cancel")}
-                          </button>
-                        </>
+              <div className={styles.detail_body}>
+                {/* Every open tab stays mounted; only its group's active one is
+                    visible. Unmounting the others would throw away the messages,
+                    scroll position and view-tab that make a tab worth keeping
+                    open. The hidden ones are `paused`, so they cost no polling —
+                    with N groups there are N unpaused panes, one per group. The
+                    draft tab renders the compose form, or the spawn spinner once
+                    it has fired. */}
+                {items.map((tab) => {
+                  // Equivalent to `tab.id === grp.activeId` (a tab belongs to
+                  // one group), but phrased against the same set that defines
+                  // "unpaused" so there is one source of truth for it.
+                  const visible = visibleIds.has(tab.id);
+                  return (
+                    <div
+                      key={tab.id}
+                      className={styles.pane}
+                      style={sessionPaneStyle(visible)}
+                      aria-hidden={!visible}
+                    >
+                      {tab.id === DRAFT_TAB_ID ? (
+                        pending ? (
+                          <div className={styles.detail_starting}>
+                            {startTimedOut ? (
+                              <>
+                                <span className={styles.starting_text}>
+                                  {t("new_session.start_timeout", "启动较慢，可再等等，或从左侧列表里查看")}
+                                </span>
+                                <button
+                                  type="button"
+                                  className={styles.starting_dismiss}
+                                  onClick={cancelDraft}
+                                >
+                                  {t("cancel")}
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <span className={styles.starting_spinner} />
+                                <span className={styles.starting_text}>
+                                  {t("new_session.starting", "正在启动会话…")}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <NewSessionForm onCreated={handleCreated} onCancel={cancelDraft} />
+                        )
                       ) : (
-                        <>
-                          <span className={styles.starting_spinner} />
-                          <span className={styles.starting_text}>
-                            {t("new_session.starting", "正在启动会话…")}
-                          </span>
-                        </>
+                        <SessionDetail
+                          inline
+                          sessionInfo={tab.session!}
+                          searchQuery={queryById[tab.id] ?? null}
+                          // `visible` here is per group, which is precisely
+                          // "is in `visibleIds`" — one unpaused pane per group.
+                          paused={!visible}
+                        />
                       )}
                     </div>
-                  ) : (
-                    <NewSessionForm onCreated={handleCreated} onCancel={cancelDraft} />
-                  )
-                ) : (
-                  <SessionDetail
-                    inline
-                    sessionInfo={tab.session!}
-                    searchQuery={queryById[tab.id] ?? null}
-                    paused={!visible}
-                  />
+                  );
+                })}
+
+                {items.length === 0 && (
+                  <div className={styles.detail_empty}>
+                    <History size={28} strokeWidth={1.2} />
+                    <span>{t("history.select_hint", "从左侧选择一个会话查看详情")}</span>
+                  </div>
                 )}
               </div>
-            );
-          })}
-
-          {tabItems.length === 0 && (
-            <div className={styles.detail_empty}>
-              <History size={28} strokeWidth={1.2} />
-              <span>{t("history.select_hint", "从左侧选择一个会话查看详情")}</span>
             </div>
-          )}
-        </div>
+            </Fragment>
+          );
+        })}
       </div>
     </PageShell>
   );
