@@ -133,6 +133,68 @@ impl HandoffChain {
     }
 }
 
+/// Clip `note` to `limit` chars on a char boundary, marking the elision.
+fn clip_note(note: &str, limit: usize) -> String {
+    let note = note.trim();
+    match note.char_indices().nth(limit) {
+        None => note.to_string(),
+        Some((byte, _)) => format!("{}…（已截断，全文见 show）", &note[..byte]),
+    }
+}
+
+/// Render a chain as agent-readable text: one block per hop, each carrying the
+/// note that hop wrote when it handed the baton on.
+///
+/// This is the affordance a relayed session needs to answer "what did the boss
+/// originally ask?" — the chain's hop 1 is the origin of the work, which is not
+/// necessarily the plan the current hop happens to be executing. `note_limit`
+/// clips each note (for the successor's opening prompt, where the full chain
+/// would crowd out the briefing); `None` renders every note in full.
+pub fn render_chain(chain: &HandoffChain, viewer: Option<&str>, note_limit: Option<usize>) -> String {
+    let ids = chain.session_ids();
+    let mut out = format!(
+        "接力链 {}（{} 棒，plan={}，workspace={}）\n",
+        chain.chain_id,
+        ids.len(),
+        chain.plan_id.as_deref().unwrap_or("-"),
+        chain.workspace_path
+    );
+    for (i, sid) in ids.iter().enumerate() {
+        let mut marks = Vec::new();
+        if i == 0 {
+            marks.push("链的起点");
+        }
+        if viewer == Some(sid.as_str()) {
+            marks.push("你自己");
+        }
+        let mark = if marks.is_empty() {
+            String::new()
+        } else {
+            format!("  ← {}", marks.join("，"))
+        };
+        out.push_str(&format!("\n第 {} 棒  {sid}{mark}\n", i + 1));
+        // Link i is the baton hop i handed to hop i+1; the last hop has none.
+        if let Some(link) = chain.links.get(i) {
+            let plan = match (&link.plan_id, &link.next_task) {
+                (Some(p), Some(t)) => format!("（plan={p}, next={t}）"),
+                (Some(p), None) => format!("（plan={p}）"),
+                _ => String::new(),
+            };
+            let note = match note_limit {
+                Some(n) => clip_note(&link.note, n),
+                None => link.note.trim().to_string(),
+            };
+            out.push_str(&format!("  交给第 {} 棒时留下的 note{plan}：\n", i + 2));
+            for line in note.lines() {
+                out.push_str("  ");
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
 /// Lightweight per-session relay position, embedded into `SessionInfo` so the
 /// session card can render the "接力 n/N" chip without an extra round-trip.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -1257,5 +1319,47 @@ mod tests {
         };
         let prompt = compose_successor_prompt(&free);
         assert!(prompt.contains("按交接信息继续完成这项工作"));
+    }
+
+    /// The rendered chain must let a late hop find where the work *started* —
+    /// hop 1's session id and the note it wrote — because the plan a relayed
+    /// session executes is often a mid-chain spinoff, not the original ask.
+    #[test]
+    fn render_chain_shows_origin_and_attributes_notes_to_the_hop_that_wrote_them() {
+        let (root, pdir, cdir) = fresh_dirs("render");
+        register_in(
+            &pdir, &cdir, "s1", "/ws", None, "老板原话：我要独立的文档库", Some("doc-lib"),
+            Some("P1"), None, None, "claude-code", 1000,
+        )
+        .unwrap();
+        let taken = take_pending_in(&pdir, "s1", 1001).unwrap();
+        record_link_in(&cdir, &taken, "s2", 1002).unwrap();
+        register_simple(&pdir, &cdir, "s2", "接着做 embedding 维度", 2000).unwrap();
+        let taken = take_pending_in(&pdir, "s2", 2001).unwrap();
+        record_link_in(&cdir, &taken, "s3", 2002).unwrap();
+
+        let chain = chain_containing_in(&cdir, "s3").unwrap();
+        let full = render_chain(&chain, Some("s3"), None);
+        assert!(full.contains("第 1 棒  s1"), "{full}");
+        assert!(full.contains("链的起点"), "{full}");
+        assert!(full.contains("你自己"), "{full}");
+        assert!(full.contains("老板原话：我要独立的文档库"), "{full}");
+        assert!(full.contains("doc-lib"), "{full}");
+        // s2's note belongs to hop 2, not hop 1.
+        // Anchor on the hop *headers* (line-initial) — "第 2 棒" also occurs
+        // inside hop 1's "交给第 2 棒时留下的 note" lead-in.
+        let h1 = full.find("\n第 1 棒").unwrap();
+        let h2 = full.find("\n第 2 棒").unwrap();
+        let origin = full.find("老板原话").unwrap();
+        assert!(h1 < origin && origin < h2, "note attributed to wrong hop:\n{full}");
+        // The last hop wrote no note yet — nothing is invented for it.
+        assert!(!full.contains("交给第 4 棒"), "{full}");
+
+        // Clipping keeps the lead-in and marks the elision, on a char boundary
+        // (the notes are CJK — a byte slice would panic).
+        let clipped = render_chain(&chain, Some("s3"), Some(4));
+        assert!(clipped.contains("老板原话…"), "{clipped}");
+        assert!(!clipped.contains("独立的文档库"), "{clipped}");
+        let _ = fs::remove_dir_all(&root);
     }
 }

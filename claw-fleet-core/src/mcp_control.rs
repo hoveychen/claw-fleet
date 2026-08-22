@@ -85,11 +85,12 @@ fn plan_tool_def() -> Value {
 fn handoff_tool_def() -> Value {
     json!({
         "name": "fleet__handoff",
-        "description": "Register a session relay (接力): the successor session is spawned by the Stop hook the moment this session yields its turn. Use this instead of the `fleet handoff` CLI. Actions: register (--note is required; --plan/--next/--model/--effort optional), cancel, list.",
+        "description": "Register a session relay (接力), or read the relay chain this session sits on. The successor is spawned by the Stop hook the moment this session yields its turn. Use this instead of the `fleet handoff` CLI. Actions: register (--note is required; --plan/--next/--model/--effort optional), show, cancel, list. Reach for `show` whenever the work predates your own session — a relayed session's plan is often NOT where the chain started, so \"what did the boss originally ask?\" is answered by hop 1 of `show`, not by the plan you happen to be executing.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["register", "cancel", "list"], "default": "register"},
+                "action": {"type": "string", "enum": ["register", "show", "cancel", "list"], "default": "register"},
+                "session": {"type": "string", "description": "Session whose chain to show (show only; defaults to this session)."},
                 "note": {"type": "string", "description": "Handoff briefing — what's done, what's next, key files, gotchas. Required for register."},
                 "plan": {"type": "string", "description": "Plan id to attribute the successor to."},
                 "next": {"type": "string", "description": "P-task the successor resumes at (requires plan)."},
@@ -367,6 +368,27 @@ fn handle_handoff(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String,
                 rec.model.as_deref().unwrap_or("<CLI 默认>"),
                 rec.effort.as_deref().unwrap_or("<CLI 默认>"),
             ))
+        }
+        "show" => {
+            // Defaults to the caller's own chain: the common need is "where did
+            // this work start", and a relayed session knows its own id but not
+            // its chain id.
+            let target = arg(args, "session")
+                .or_else(|| sid.map(str::to_string))
+                .ok_or(
+                    "no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set) — \
+                     pass `session` to show another session's chain",
+                )?;
+            match handoff::chain_containing(&target) {
+                // Notes in full: this action *is* the "read the whole chain"
+                // entry point, so clipping here would leave no way to reach the
+                // predecessors' briefings.
+                Some(c) => Ok(handoff::render_chain(&c, Some(&target), None)),
+                None => Err(format!(
+                    "session {target} is not on any relay chain (it was not handed off to, and \
+                     has not handed off yet)"
+                )),
+            }
         }
         "cancel" => {
             let sid = sid.ok_or(
@@ -857,6 +879,29 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("no session id"));
+    }
+
+    #[test]
+    fn handoff_show_without_session_id_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = handle("fleet__handoff", &json!({"action": "show"}), None, tmp.path())
+            .unwrap_err();
+        assert!(err.contains("no session id"), "{err}");
+    }
+
+    /// A session that was never relayed must be told so plainly, not handed an
+    /// empty render it could mistake for "the chain starts at me".
+    #[test]
+    fn handoff_show_off_chain_session_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = handle(
+            "fleet__handoff",
+            &json!({"action": "show", "session": "sess-never-relayed-9d1c"}),
+            None,
+            tmp.path(),
+        )
+        .unwrap_err();
+        assert!(err.contains("not on any relay chain"), "{err}");
     }
 
     #[test]
