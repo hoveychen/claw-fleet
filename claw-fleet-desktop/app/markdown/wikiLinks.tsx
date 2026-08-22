@@ -1,5 +1,6 @@
 import type { Components } from "react-markdown";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { OPEN_IN_TAB_HINT, openExternal } from "./safeLinks";
+import { useWebLinkTarget } from "./webLinks";
 import styles from "./markdown.module.css";
 
 /**
@@ -83,18 +84,32 @@ export function wikiLinkComponent(wiki: WikiLinkContext): Components["a"] {
     const slug = isExternal ? null : wikiSlugFromHref(href);
     const isLive = slug !== null && wiki.hasSlug(slug);
     const isDead = slug !== null && !isLive;
+    // External links obey the same "tab, or browser on ⌘/middle" rule as
+    // anywhere else — this renderer only differs in also knowing about slugs.
+    const openInTab = useWebLinkTarget();
     return (
       <a
         href={href}
         className={isLive ? styles.wiki_link : isDead ? styles.wiki_link_dead : undefined}
-        title={isDead ? `${slug}: not published` : undefined}
+        title={
+          isDead
+            ? `${slug}: not published`
+            : isExternal && openInTab
+              ? OPEN_IN_TAB_HINT
+              : undefined
+        }
         onClick={(e) => {
           e.preventDefault();
           if (isExternal && href) {
-            openUrl(href).catch((err) => console.error("openUrl failed:", href, err));
+            openExternal(href, e, openInTab);
           } else if (isLive && slug) {
             wiki.openSlug(slug);
           }
+        }}
+        onAuxClick={(e) => {
+          if (e.button !== 1 || !isExternal || !href) return;
+          e.preventDefault();
+          openExternal(href, e, openInTab);
         }}
       >
         {children}

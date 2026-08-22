@@ -14,7 +14,8 @@
 
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openExternal } from "../../markdown/safeLinks";
+import { useWebLinkTarget } from "../../markdown/webLinks";
 import { useAgentNav } from "../AgentNavContext";
 import {
   asAgentResult,
@@ -383,6 +384,7 @@ function Favicon({ url }: { url: string }) {
  *  card the rows scroll inside it and a bottom gradient fades the last row to
  *  hint there is more; the gradient clears once the reader scrolls to the end. */
 function SearchResultsCard({ links }: { links: Array<{ title: string; url: string }> }) {
+  const openInTab = useWebLinkTarget();
   const scrollRef = useRef<HTMLUListElement>(null);
   const [faded, setFaded] = useState(false);
   // Fade only while there is content below the fold (1px slack absorbs the
@@ -412,9 +414,14 @@ function SearchResultsCard({ links }: { links: Array<{ title: string; url: strin
                 href={l.url}
                 onClick={(e) => {
                   e.preventDefault();
-                  // Same surfaced-error pattern as SafeLink: a missing
-                  // opener capability must not fail silently.
-                  openUrl(l.url).catch((err) => console.error("openUrl failed:", l.url, err));
+                  // Same rule as a markdown link: a tab in the detail column,
+                  // the browser on ⌘/Ctrl-click or outside a tab strip.
+                  openExternal(l.url, e, openInTab);
+                }}
+                onAuxClick={(e) => {
+                  if (e.button !== 1) return;
+                  e.preventDefault();
+                  openExternal(l.url, e, openInTab);
                 }}
               >
                 <Favicon url={l.url} />
@@ -455,6 +462,7 @@ function WebSearchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: u
  *  claude.ai source-chip idiom the search rows use. Clickable, opening the URL
  *  through the same surfaced-error opener as the search results. */
 function FetchSource({ url }: { url: string }) {
+  const openInTab = useWebLinkTarget();
   let host = "";
   let rest = "";
   try {
@@ -471,7 +479,12 @@ function FetchSource({ url }: { url: string }) {
       href={url}
       onClick={(e) => {
         e.preventDefault();
-        openUrl(url).catch((err) => console.error("openUrl failed:", url, err));
+        openExternal(url, e, openInTab);
+      }}
+      onAuxClick={(e) => {
+        if (e.button !== 1) return;
+        e.preventDefault();
+        openExternal(url, e, openInTab);
       }}
     >
       <Favicon url={url} />

@@ -33,6 +33,7 @@ import type { PathLinkContext } from "../markdown/pathLinks";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
 import type { DetailTabOpener } from "../tabKind";
 import { WikiLinksProvider } from "../markdown/wikiLinksContext";
+import { WebLinkProvider } from "../markdown/webLinks";
 import { revealSlugInWikiPage, useWikiDocs } from "../hooks/useWikiDocs";
 import { ResumeComposer } from "./ResumeComposer";
 import { ScratchpadView } from "./ScratchpadView";
@@ -920,7 +921,11 @@ export function SessionDetail({
   }, [liveSession, sessions]);
 
   return (
+    // Both link capabilities cover the whole component, so the reader modal and
+    // every tool-block renderer inherit them too. `openWeb` is null outside a
+    // tab strip, which is precisely "send it to the browser".
     <WikiLinksProvider value={wikiLinks}>
+      <WebLinkProvider value={tabOpener?.openWeb ?? null}>
       <div className={`${styles.root} ${liveSession ? styles.open : ""} ${lite ? styles.lite : ""} ${inline ? styles.inline : ""}`}>
         {liveSession && (
           <>
@@ -1352,6 +1357,7 @@ export function SessionDetail({
         </>
       )}
       </div>
+      </WebLinkProvider>
     </WikiLinksProvider>
   );
 }

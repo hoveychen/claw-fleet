@@ -1030,7 +1030,7 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         content: [
           {
             type: "text",
-            text: "Mock data module created. Now creating the Tauri API mock layer that intercepts `invoke()` and `listen()` calls.\n\n```typescript\n// src/mock/tauri-mock.ts\nconst handlers: Record<string, Function> = {\n  list_sessions: () => MOCK_SESSIONS,\n  get_messages: ({ jsonlPath }) => MOCK_MESSAGES[id],\n  get_account_info: () => MOCK_ACCOUNT,\n  // ...\n};\n```\n\nThis will allow the app to run in any browser without the Tauri runtime.\n\nThe layout it stands in for is written up in [[arch/overview]]; the mock-only seams still need a page of their own ([[notes/mock-seams]] — not published yet).",
+            text: "Mock data module created. Now creating the Tauri API mock layer that intercepts `invoke()` and `listen()` calls.\n\n```typescript\n// src/mock/tauri-mock.ts\nconst handlers: Record<string, Function> = {\n  list_sessions: () => MOCK_SESSIONS,\n  get_messages: ({ jsonlPath }) => MOCK_MESSAGES[id],\n  get_account_info: () => MOCK_ACCOUNT,\n  // ...\n};\n```\n\nThis will allow the app to run in any browser without the Tauri runtime.\n\nThe layout it stands in for is written up in [[arch/overview]]; the mock-only seams still need a page of their own ([[notes/mock-seams]] — not published yet).\n\nThe headless capture recipe follows https://playwright.dev/docs/screenshots almost exactly.",
           },
         ],
         stop_reason: "end_turn",
