@@ -2921,15 +2921,29 @@ fn join_block_reason(
     is_test_build: bool,
     fleet_home: Option<&std::ffi::OsStr>,
 ) -> Option<&'static str> {
-    // Not a real guard yet — see the tests below. Current behaviour is
-    // "always join", which is exactly the hole.
-    let _ = (is_test_build, fleet_home);
+    if is_test_build {
+        return Some("test build");
+    }
+    // `FLEET_HOME` exists purely to isolate tests (every setter in the tree is
+    // inside a `#[cfg(test)]` mod), so a process running under one is a test
+    // fixture no matter how it was built — including the `fleet serve` children
+    // integration tests spawn. Empty means "unset" here exactly as it does in
+    // `real_home_dir`, which falls through to the passwd entry.
+    if fleet_home.is_some_and(|h| !h.is_empty()) {
+        return Some("FLEET_HOME is set (test isolation)");
+    }
     None
 }
 
 /// Ensure the outbound relay WebSocket is running. Idempotent; no-op when
 /// the feature is disabled or no secret is set.
 pub fn ensure_ws_client() {
+    if let Some(reason) = join_block_reason(cfg!(test), std::env::var_os("FLEET_HOME").as_deref()) {
+        // Logged rather than silent: if this ever fires for a real desktop the
+        // line is the only thing that would explain a phone that never pairs.
+        crate::log_debug(&format!("[mobile-relay] not joining channel: {reason}"));
+        return;
+    }
     let cfg = load_config();
     if !cfg.enabled || cfg.secret.is_empty() {
         return;
