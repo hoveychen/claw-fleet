@@ -5650,6 +5650,50 @@ mod tests {
         );
     }
 
+    /// End-to-end check that the capture actually produces a stack dump, rather
+    /// than only that the code compiles: a watchdog whose `sample` silently
+    /// fails is worth nothing, and that failure mode is invisible from a unit
+    /// test of the detection rule alone.
+    ///
+    /// `#[ignore]` + macOS-only on purpose — it shells out to `/usr/bin/sample`
+    /// for 3 real seconds, which is neither cheap nor available on a Linux CI
+    /// box. Run it by hand when touching the capture path:
+    ///   cargo test -p claw-fleet-core -- --ignored capture_stall_stacks
+    #[test]
+    #[ignore]
+    #[cfg(target_os = "macos")]
+    fn capture_stall_stacks_writes_a_real_dump() {
+        // Held for the whole test: repointing FLEET_HOME races every other test
+        // that reads a Fleet home (enforced by tests/home_env_lock_guard.rs).
+        let _lock = crate::session::fleet_home_lock();
+
+        let tmp = std::env::temp_dir().join(format!("fleet-stall-probe-{}", std::process::id()));
+        fs::create_dir_all(&tmp).unwrap();
+        // real_home_dir honours FLEET_HOME, so the dump lands in the fixture.
+        std::env::set_var("FLEET_HOME", &tmp);
+
+        capture_stall_stacks("probe", "method=probe stuck_ms=99999 other_stalled=0");
+
+        let dir = tmp.join(".fleet").join("diagnostics");
+        let dumps: Vec<_> = fs::read_dir(&dir)
+            .expect("diagnostics dir created")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("stall-"))
+            .collect();
+        assert_eq!(dumps.len(), 1, "exactly one dump for one capture");
+
+        let body = fs::read_to_string(dumps[0].path()).unwrap();
+        assert!(
+            body.contains("Analysis of sampling"),
+            "the dump must be a real sample report, got {} bytes",
+            body.len()
+        );
+        assert!(body.contains("Call graph"), "a sample report carries thread stacks");
+
+        std::env::remove_var("FLEET_HOME");
+        fs::remove_dir_all(&tmp).ok();
+    }
+
     /// Two holders of the same dedup key must never be inside the critical
     /// section at once, and different keys must not block each other. This is
     /// what replaces the "frames are serial" assumption that `spawn_session` and
