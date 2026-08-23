@@ -308,11 +308,22 @@ pub fn price_metered(
         let key = (!session_id.is_empty())
             .then(|| call.seq.map(|seq| metered_key(session_id, seq)))
             .flatten();
-        let Some(price) = rate_price(call) else {
-            tally.unknown += 1;
-            continue;
+        // The frozen price wins outright: it is what this call was charged, and
+        // no amount of movement in today's table changes that. Only when this
+        // call has never been priced does the table get consulted at all.
+        let price = match key.as_ref().and_then(|k| cached.get(k)) {
+            Some(frozen) => *frozen,
+            None => {
+                let Some(price) = rate_price(call) else {
+                    tally.unknown += 1;
+                    continue;
+                };
+                if let Some(key) = key {
+                    tally.fresh.insert(key, price);
+                }
+                price
+            }
         };
-        let _ = (&key, cached);
         tally.total += price.usd;
         if price.peak {
             tally.peak += 1;
