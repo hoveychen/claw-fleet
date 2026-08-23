@@ -3,10 +3,13 @@
    lives in planLayout.ts; this file only paints.
    Every colour comes from an App.css token (check-css-tokens gates this). */
 
+/* Sits inside PageShell's own `.main` (a flex column, overflow hidden), so the
+   height comes from `flex: 1` — `height: 100%` against an indefinite parent
+   would collapse the canvas. */
 .main {
   display: flex;
   align-items: stretch;
-  height: 100%;
+  flex: 1;
   min-height: 0;
 }
 
@@ -311,7 +314,7 @@
   flex-direction: column;
   flex-shrink: 0;
   width: 340px;
-  height: 100%;
+  min-height: 0;
   padding: 12px 14px 16px;
   border-left: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
