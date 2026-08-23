@@ -69,6 +69,7 @@ pub mod memory;
 pub mod message_trim;
 pub mod mobile_relay;
 pub mod relay_crypto;
+pub mod relay_region;
 pub mod model_cost;
 pub mod model_guidance;
 pub mod launch_spec;
