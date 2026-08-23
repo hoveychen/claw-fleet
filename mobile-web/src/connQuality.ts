@@ -39,3 +39,49 @@ export function computeCongestion(
 
 /** Window over which reconnects count toward congestion. */
 export const RECONNECT_WINDOW_MS = 60_000;
+
+/** One round trip attributed to the three places it can be spent. Each is null
+ *  when its input was missing — an unknown segment must stay unknown rather
+ *  than collapse to 0, or the UI would name the wrong culprit. */
+export interface RttSplit {
+  totalMs: number;
+  /** This phone ↔ relay (its own uplink/downlink). */
+  phoneMs: number | null;
+  /** Relay ↔ desktop, plus whatever the desktop spends before its handler
+   *  starts — decrypt, inflate, JSON parse, task scheduling. Those are not
+   *  measured separately today, so they land here rather than in `handleMs`. */
+  desktopLinkMs: number | null;
+  /** The desktop's handler body (its self-reported `handle_ms`). */
+  handleMs: number | null;
+}
+
+/** One-line breakdown for the header tooltip: `620ms · 手机 180 · 桌面链路 60 ·
+ *  处理 380`. Segments that weren't measured are omitted rather than shown as 0.
+ *
+ *  Takes the translate function instead of importing it: this module is unit
+ *  tested under node, and `i18n` touches `window`/`localStorage` at import. */
+export function formatRttSplit(split: RttSplit, t: (s: string) => string): string {
+  const parts = [`${split.totalMs}ms`];
+  if (split.phoneMs !== null) parts.push(`${t("手机")} ${split.phoneMs}`);
+  if (split.desktopLinkMs !== null) parts.push(`${t("桌面链路")} ${split.desktopLinkMs}`);
+  if (split.handleMs !== null) parts.push(`${t("处理")} ${split.handleMs}`);
+  return parts.join(" · ");
+}
+
+/** Attribute a round trip to phone link / desktop link / desktop handler.
+ *
+ *  The desktop-link leg is a residual: it is what the total has left after the
+ *  two directly measured segments, so it needs both of them. Clamped at 0 —
+ *  the phone's `Date.now()` can step (NTP, sleep/wake) and the two segments are
+ *  measured on different clocks, so a slightly negative residual is a
+ *  measurement artefact, not a link that took negative time. */
+export function splitRtt(sample: {
+  totalMs: number;
+  phoneRelayMs: number | null;
+  desktopHandleMs: number | null;
+}): RttSplit {
+  const { totalMs, phoneRelayMs: phoneMs, desktopHandleMs: handleMs } = sample;
+  const desktopLinkMs =
+    phoneMs !== null && handleMs !== null ? Math.max(0, totalMs - phoneMs - handleMs) : null;
+  return { totalMs, phoneMs, desktopLinkMs, handleMs };
+}
