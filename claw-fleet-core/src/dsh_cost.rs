@@ -190,16 +190,40 @@ const DEEPSEEK_PEAK_RATES: &[PeakRates] = &[
         cache_miss_input: 1.32,
         output: 3.96,
     },
+    // Published at flash's rates, as its own row on the pricing page.
+    PeakRates {
+        model: "deepseek-v4-flash-vision-exp",
+        cache_hit_input: 0.014,
+        cache_miss_input: 0.44,
+        output: 1.32,
+    },
 ];
 
 /// Is `at_ms` inside DeepSeek's peak window?
 ///
-/// Peak is 01:00–04:00 and 06:00–10:00 UTC — 7 hours a day; the other 17 are
-/// off-peak at half price. (The 16:30–00:30 window that discounted V3/R1 is
-/// retired and must not be used.)
+/// Peak is 01:00–04:00 and 06:00–10:00 UTC **Monday through Friday** — 7 hours a
+/// weekday, 35 a week; every other hour, the whole weekend included, is off-peak
+/// at half price. (The 16:30–00:30 window that discounted V3/R1 is retired and
+/// must not be used.)
+///
+/// The weekday is on DeepSeek's own clock, not UTC, so this shifts to UTC+8
+/// before splitting the day: the same two windows read 09:00–12:00 and
+/// 14:00–18:00 in Beijing time. Taking the weekday in UTC instead would agree at
+/// all 168 hours today — both windows end well before 16:00 UTC, which is where
+/// a UTC date and a Beijing date begin to disagree — so no test against the
+/// published windows could tell the two readings apart. Shifting first makes the
+/// right answer structural rather than a coincidence that would break silently
+/// if a window ever moved past 16:00 UTC.
 fn is_peak(at_ms: i64) -> bool {
-    let hour = at_ms.div_euclid(3_600_000).rem_euclid(24);
-    (1..4).contains(&hour) || (6..10).contains(&hour)
+    // DeepSeek bills on Beijing time (UTC+8, no DST).
+    let local_ms = at_ms + 8 * 3_600_000;
+    // 1970-01-01 was a Thursday, so day 0 maps to 4 with Mon = 1 … Sun = 7.
+    let weekday = (local_ms.div_euclid(86_400_000) + 3).rem_euclid(7) + 1;
+    if weekday > 5 {
+        return false;
+    }
+    let hour = local_ms.div_euclid(3_600_000).rem_euclid(24);
+    (9..12).contains(&hour) || (14..18).contains(&hour)
 }
 
 /// Sum what a fixed-price route charged, tier chosen per call.
@@ -852,9 +876,10 @@ mod tests {
         })
     }
 
-    /// 2026-08-18 19:47:32 UTC — the probe call's real timestamp. Off-peak.
+    /// 2026-08-18 19:47:32 UTC, a Tuesday — the probe call's real timestamp.
+    /// Off-peak.
     const OFF_PEAK_MS: i64 = 1_787_082_452_518;
-    /// Same day, 02:00 UTC. Inside the 01:00–04:00 peak window.
+    /// Same Tuesday, 03:00 UTC. Inside the 01:00–04:00 peak window.
     const PEAK_MS: i64 = 1_787_022_000_000;
 
     #[test]
@@ -943,6 +968,27 @@ mod tests {
         );
     }
 
+    /// The vision model is on the same published table at flash's rates. Leaving
+    /// it out is safe (it lands in `unknown` rather than being guessed at) but
+    /// under-reports every session that used it.
+    #[test]
+    fn the_vision_model_is_priced_at_flash_rates() {
+        let (total, peak_n, off_n, unknown) = price_metered(&[MeteredCall {
+            provider: "deepseek-official".into(),
+            model: "deepseek-v4-flash-vision-exp".into(),
+            at_ms: PEAK_MS,
+            input_tokens: 1_000_000,
+            cache_read_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+        }]);
+        // Peak flash: 0.44 miss + 0.014 hit + 1.32 out.
+        assert!(
+            (total - 1.774).abs() < 1e-9,
+            "expected 0.44 + 0.014 + 1.32 = $1.774, got {total}"
+        );
+        assert_eq!((peak_n, off_n, unknown), (1, 0, 0));
+    }
+
     /// The window boundaries themselves, since an off-by-one hour would misprice
     /// every call in a whole hour by 2×.
     #[test]
@@ -954,6 +1000,50 @@ mod tests {
         for h in [0, 4, 5, 10, 11, 16, 23] {
             assert!(!is_peak(at(h)), "{h:02}:00 UTC is off-peak");
         }
+    }
+
+    /// The published window is Monday–Friday, so the same clock hour on a
+    /// Saturday is off-peak. Reading the hour alone bills 14 hours a week at
+    /// 2× the real rate, and miscounts the same calls in the peak/off-peak
+    /// tally the panel prints.
+    #[test]
+    fn the_weekend_is_off_peak_at_every_hour() {
+        // Saturday 2026-08-22 02:00 UTC — inside the 01:00–04:00 hour band.
+        assert!(
+            !is_peak(1_787_364_000_000),
+            "Saturday 02:00 UTC is off-peak: the window is Mon–Fri"
+        );
+        // Saturday 2026-08-22 07:00 UTC — inside the 06:00–10:00 hour band.
+        assert!(
+            !is_peak(1_787_382_000_000),
+            "Saturday 07:00 UTC is off-peak"
+        );
+        // Sunday 2026-08-23 09:00 UTC.
+        assert!(!is_peak(1_787_475_600_000), "Sunday 09:00 UTC is off-peak");
+        // The bracketing weekdays must stay peak, or the fix has over-reached:
+        // Friday 2026-08-21 09:00 UTC and Monday 2026-08-24 01:00 UTC.
+        assert!(is_peak(1_787_302_800_000), "Friday 09:00 UTC is peak");
+        assert!(is_peak(1_787_533_200_000), "Monday 01:00 UTC is peak");
+    }
+
+    /// A weekend call must be charged the off-peak half, not just counted as
+    /// off-peak — the tally and the dollar figure come off the same flag.
+    #[test]
+    fn a_weekend_call_is_billed_at_the_off_peak_half() {
+        let (total, peak_n, off_n, _) = price_metered(&[MeteredCall {
+            provider: "deepseek-official".into(),
+            model: "deepseek-v4-flash".into(),
+            // Saturday 2026-08-22 02:00 UTC.
+            at_ms: 1_787_364_000_000,
+            input_tokens: 1_000_000,
+            cache_read_tokens: 0,
+            output_tokens: 1_000_000,
+        }]);
+        assert!(
+            (total - 0.88).abs() < 1e-9,
+            "weekend flash 1M in + 1M out is off-peak $0.88, got {total}"
+        );
+        assert_eq!((peak_n, off_n), (0, 1));
     }
 
     /// A session that used both routes must have its two totals added, each
