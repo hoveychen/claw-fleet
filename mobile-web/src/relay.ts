@@ -112,6 +112,22 @@ export function relayHttpBase(): string {
   return import.meta.env.VITE_RELAY_URL || window.location.origin;
 }
 
+/** Short, human-readable form of the relay this device talks to, for the More
+ *  tab. `https` is the norm so its scheme is dropped as noise; anything else
+ *  (a `http://127.0.0.1:…` dev relay) keeps the scheme, because that difference
+ *  is exactly what you're looking at the row to find out.
+ *
+ *  Takes the base as an argument so it stays pure/testable; callers in the UI
+ *  pass nothing and get the live one. */
+export function relayDisplayHost(base: string = relayHttpBase()): string {
+  try {
+    const u = new URL(base);
+    return u.protocol === "https:" ? u.host : `${u.protocol}//${u.host}`;
+  } catch {
+    return base;
+  }
+}
+
 function relayWsUrl(): string {
   const base = relayHttpBase().replace(/\/$/, "");
   return base.replace(/^http/, "ws") + "/ws";

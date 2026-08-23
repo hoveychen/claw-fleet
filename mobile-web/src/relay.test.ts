@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { RelayClient, RelayRequestError, isDesktopRejection } from "./relay";
+import { RelayClient, RelayRequestError, isDesktopRejection, relayDisplayHost } from "./relay";
 import { deriveKeys, isSealed, open, type RelayKeys, seal, sealBytes } from "./relayCrypto";
 
 // relay.ts 依赖浏览器全局（window.setTimeout/WebSocket/location），node 环境没有，
@@ -670,5 +670,20 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
     );
     await tick(5);
     expect(settled).toBe(false);
+  });
+});
+
+describe("relayDisplayHost", () => {
+  it("生产 relay 只显示主机名（https 是常态，scheme 是噪音）", () => {
+    expect(relayDisplayHost("https://fleet-relay.muveeai.com")).toBe("fleet-relay.muveeai.com");
+    expect(relayDisplayHost("https://fleet-relay.muveeai.com/")).toBe("fleet-relay.muveeai.com");
+  });
+
+  it("非 https（本地 dev relay）保留 scheme 和端口 —— 这正是要一眼看出的差别", () => {
+    expect(relayDisplayHost("http://127.0.0.1:18080")).toBe("http://127.0.0.1:18080");
+  });
+
+  it("解析不了就原样回显，不抛", () => {
+    expect(relayDisplayHost("not a url")).toBe("not a url");
   });
 });
