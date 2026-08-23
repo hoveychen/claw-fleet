@@ -89,17 +89,45 @@ export const LIVE_STATUSES = new Set([
   "waitingInput", "active", "delegating",
 ]);
 
-/** Run-status colour: green = agent still live, amber = waiting for input.
- *  Ended sessions get nothing (null) — this is a positive "this one's doing
- *  something" signal, not another mark on every row. Shared by the 启动台 list
- *  rows and its detail tab bar so a session wears the same dot in both.
+/** Faded green for the quiet-alive third state (see [`isQuietAlive`]). Built on
+ *  `--color-success-rgb` rather than a hex so it re-darkens with the light
+ *  theme like the solid green does. */
+export const QUIET_ALIVE_COLOR = "rgba(var(--color-success-rgb), 0.45)";
+
+/**
+ * Whether the process is still running while the scan-computed status has aged
+ * out to something that reads as "ended".
+ *
+ * `determine_status` (core `session/detect.rs`) derives status purely from the
+ * transcript's last records plus their age, and every live branch carries a
+ * hard window — `stop_reason=tool_use` holds Executing for 60s, a trailing user
+ * message holds Thinking for 120s, and the fallthrough is Idle past 30s. So a
+ * session parked on ONE long tool call (a build, a `until …; do :; done` wait
+ * for a background task) stops writing the transcript and its card decays to
+ * `idle` while the CLI process is very much alive — the same session whose
+ * composer says 会话运行中 because `canEnqueueSession` reads `procAlive`
+ * instead. This predicate names that gap so the row can show a third state
+ * rather than lying in one direction or the other.
+ */
+export function isQuietAlive(s: SessionInfo): boolean {
+  return s.procAlive && !LIVE_STATUSES.has(s.status);
+}
+
+/** Run-status colour: green = agent still live, amber = waiting for input,
+ *  faded green = process alive but the transcript has gone quiet (see
+ *  [`isQuietAlive`]). Genuinely ended sessions get nothing (null) — this is a
+ *  positive "this one's doing something" signal, not another mark on every row.
+ *  Shared by the 启动台 list rows and its detail tab bar so a session wears the
+ *  same dot in both.
  *
  *  Returns a CSS `var()` reference rather than a hex literal: the value lands in
  *  an inline `style`, and a hex pins whichever theme it was authored against —
  *  the amber and green here were dark-theme hues that never re-darkened under
  *  the light theme. */
 export function rowBarColor(s: SessionInfo): string | null {
-  if (!LIVE_STATUSES.has(s.status)) return null;
+  if (!LIVE_STATUSES.has(s.status)) {
+    return isQuietAlive(s) ? QUIET_ALIVE_COLOR : null;
+  }
   if (s.status === "waitingInput") return "var(--color-warning)";
   return "var(--color-success)";
 }

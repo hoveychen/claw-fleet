@@ -43,12 +43,20 @@ const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimite
 
 /** Dot tone for the row status accent — mirrors the desktop launchpad's
  *  `rowBarColor`: a colour only for live/waiting rows, `null` (no dot) for
- *  idle. The status is read off the dot, so there's no separate text pill. */
-function statusTone(status: SessionStatus): string | null {
-  if (WORKING.includes(status)) return "working";
-  if (status === "waitingInput") return "waiting";
-  if (status === "active") return "active";
-  if (status === "rateLimited" || status === "serverErrored") return "error";
+ *  idle. The status is read off the dot, so there's no separate text pill.
+ *
+ *  `"quiet"` is the third state (desktop `isQuietAlive`): the CLI process is
+ *  still running while the scan-computed status has aged out to idle, because
+ *  `determine_status` derives status from transcript age alone and a session
+ *  parked on one long tool call stops writing. Those rows must not read as
+ *  ended — the detail composer offers to *queue* a follow-up for exactly this
+ *  session, and the two surfaces must agree. */
+export function statusTone(s: SessionInfo): string | null {
+  if (WORKING.includes(s.status)) return "working";
+  if (s.status === "waitingInput") return "waiting";
+  if (s.status === "active") return "active";
+  if (s.status === "rateLimited" || s.status === "serverErrored") return "error";
+  if (s.procAlive) return "quiet";
   return null;
 }
 
@@ -57,12 +65,12 @@ function statusTone(status: SessionStatus): string | null {
  *  active member (which need not be the tip), so its dot must reflect the whole
  *  chain — a running hop outranks a waiting/active/errored one, mirroring the
  *  desktop launchpad's `chainBarColor`. */
-const TONE_PRIORITY = ["working", "waiting", "active", "error"];
+const TONE_PRIORITY = ["working", "waiting", "active", "error", "quiet"];
 function chainTone(members: SessionInfo[]): string | null {
   let best: string | null = null;
   let bestRank = TONE_PRIORITY.length;
   for (const m of members) {
-    const tn = statusTone(m.status);
+    const tn = statusTone(m);
     if (tn == null) continue;
     const r = TONE_PRIORITY.indexOf(tn);
     if (r >= 0 && r < bestRank) {
@@ -586,7 +594,7 @@ export function TasksView({
     // bold must reflect the whole chain (`group.markMembers` = full membership),
     // not just the tip — otherwise a chain floated to the top by a live mid-hop
     // shows no dot. Plain cards keep deriving from the session itself.
-    const tone = group ? chainTone(group.markMembers) : statusTone(s.status);
+    const tone = group ? chainTone(group.markMembers) : statusTone(s);
     const mode = stopMode(s);
     const unread = group ? group.markMembers.some(isSessionUnread) : isSessionUnread(s);
     const isDone = group
@@ -655,7 +663,7 @@ export function TasksView({
               {formatWatchElapsed(w.created)} · {t("轮询 {0} 次", w.pollCount)}
             </span>
           ))}
-          {live && (
+          {(live || tone === "quiet") && (
             <span className={styles.runtime} data-tone={tone ?? undefined}>
               <Clock size={11} />
               {formatRunning(s.createdAtMs)}

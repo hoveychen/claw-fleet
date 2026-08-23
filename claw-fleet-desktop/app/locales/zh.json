@@ -2164,6 +2164,7 @@
     "unread": "未读 — 有新消息",
     "running": "运行中",
     "waiting": "等待输入",
+    "quiet_alive": "运行中 · 已 {{mins}} 分钟没有新输出（多半卡在一条长工具调用上）",
     "running_subagents": "{{count}} 个子代运行中",
     "activity_via_subagent": "最近活跃来自子代（主会话本身已静默）",
     "resume_placeholder": "输入追问提示词后恢复会话…",
