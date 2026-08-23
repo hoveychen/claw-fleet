@@ -45,6 +45,16 @@ pub fn country_from_locale(raw: &str) -> Option<String> {
         .map(|c| c.to_ascii_uppercase())
 }
 
+/// Normalise a bare region code as returned by the Windows user geo API —
+/// already a region, not a locale. Alpha-2 codes pass through uppercased;
+/// numeric UN M.49 regions (Windows may return e.g. `001` for "World") have no
+/// alpha-2 form and yield `None`.
+pub fn country_from_geo_name(raw: &str) -> Option<String> {
+    let code = raw.trim();
+    (code.len() == 2 && code.bytes().all(|b| b.is_ascii_alphabetic()))
+        .then(|| code.to_ascii_uppercase())
+}
+
 /// The system's region code, cached for the process lifetime (a machine does
 /// not change country mid-run, and the macOS path shells out).
 pub fn detect_country() -> Option<String> {
@@ -78,11 +88,28 @@ fn detect_country_platform() -> Option<String> {
     country_from_locale(String::from_utf8_lossy(&out.stdout).trim())
 }
 
-// Windows/Linux GUI sessions with no LC_* env fall through to `None`, i.e. the
-// global host — the pre-region behaviour. Reading the Windows user geo
-// (`GetUserDefaultGeoName`) would need a Win32 binding this host cannot
-// compile-check, so it is deliberately left out rather than shipped untested.
-#[cfg(not(target_os = "macos"))]
+/// Windows: the user's "Region" setting (Settings → Time & language → Region →
+/// Country or region), which is what `LANG` would have carried on unix. A GUI
+/// session sets no `LC_*`, so this is the live path there.
+#[cfg(windows)]
+fn detect_country_platform() -> Option<String> {
+    use windows::Win32::Globalization::GetUserDefaultGeoName;
+    // An ISO-3166 alpha-2 code, or a UN M.49 decimal string when the location
+    // has no alpha-2 assignment. 16 UTF-16 units is far past either.
+    let mut buf = [0u16; 16];
+    // 0 means failure. Non-zero is "characters copied", which the docs leave
+    // ambiguous about the trailing NUL, so read up to the NUL rather than
+    // trusting the count.
+    if unsafe { GetUserDefaultGeoName(&mut buf) } == 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    country_from_geo_name(&String::from_utf16_lossy(&buf[..end]))
+}
+
+// Anything else (Linux, BSD) with no LC_* env falls through to `None`, i.e. the
+// global host — the pre-region behaviour.
+#[cfg(not(any(target_os = "macos", windows)))]
 fn detect_country_platform() -> Option<String> {
     None
 }
@@ -115,6 +142,19 @@ mod tests {
         assert_eq!(country_from_locale(""), None);
         // UN M.49 numeric regions have no alpha-2 form.
         assert_eq!(country_from_locale("es-419"), None);
+    }
+
+    #[test]
+    fn windows_geo_names_are_bare_region_codes() {
+        // GetUserDefaultGeoName hands back the region itself, not a locale, so
+        // it must not go through country_from_locale (which drops the first
+        // subtag and would read "CN" as a language).
+        assert_eq!(country_from_locale("CN"), None);
+        assert_eq!(country_from_geo_name("CN").as_deref(), Some("CN"));
+        assert_eq!(country_from_geo_name("us").as_deref(), Some("US"));
+        // M.49 numeric regions ("001" = World) have no alpha-2 form.
+        assert_eq!(country_from_geo_name("001"), None);
+        assert_eq!(country_from_geo_name(""), None);
     }
 
     #[test]
