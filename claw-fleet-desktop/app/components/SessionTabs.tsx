@@ -33,6 +33,7 @@ import {
   SquareSplitVertical,
 } from "lucide-react";
 import { useSessionsStore } from "../store";
+import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import { isKeyboardActivationKey } from "../keyboard";
 import { preferredSessionTitle, rowBarColor, type SessionInfo } from "../types";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -78,6 +79,7 @@ export function SessionTabs({
   drag,
   onDragStart,
   onDragEnd,
+  onDragHover,
   onDropTab,
   onActivate,
   onClose,
@@ -101,10 +103,14 @@ export function SessionTabs({
   splittable: boolean;
   /** The drag in flight, lifted to the host so a *different* group's strip can
    *  see it. A per-strip `useState` cannot: the destination strip is a sibling
-   *  component and would read `null` throughout the drag. */
-  drag: { tabId: string; fromGroup: string } | null;
+   *  component and would read `null` throughout the drag. `overGroup` is the
+   *  group the pointer is currently over — the strip it names paints itself as
+   *  the pending drop target. */
+  drag: { tabId: string; fromGroup: string; overGroup: string | null } | null;
   onDragStart: (tabId: string) => void;
   onDragEnd: () => void;
+  /** The pointer moved over `groupId` (or off every group, when null). */
+  onDragHover: (groupId: string | null) => void;
   /** Drop the in-flight tab into this group, before `beforeTabId` (or at the
    *  end when null). Only fired for *cross-group* drops — a same-group drag
    *  reorders live through `onReorder` instead. */
@@ -131,15 +137,51 @@ export function SessionTabs({
   const [overflowing, setOverflowing] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
 
-  // Is a tab from *another* group hovering us? Cross-group moves land on drop,
-  // never on dragover: moving a tab re-parents its pane, which remounts the
-  // SessionDetail, and doing that on every pointer move would thrash the
+  // Is a tab from *another* group being dragged over us? Cross-group moves land
+  // on release, never on hover: moving a tab re-parents its pane, which remounts
+  // the SessionDetail, and doing that on every pointer step would thrash the
   // transcript. So the strip only advertises itself as a target here.
-  const incoming = !!drag && drag.fromGroup !== groupId;
-  const [dropHover, setDropHover] = useState(false);
-  useEffect(() => {
-    if (!drag) setDropHover(false);
-  }, [drag]);
+  const incoming = !!drag && drag.fromGroup !== groupId && drag.overGroup === groupId;
+
+  // Which tab the current press started on. The drag hook can only be called
+  // once per component (rules of hooks), so the tab id travels in a ref that
+  // each tab's own pointerdown stamps before handing the event over.
+  const pressedTab = useRef<string | null>(null);
+  const tabDrag = usePointerDrag({
+    onStart: () => {
+      const id = pressedTab.current;
+      if (!id) return false;
+      onDragStart(id);
+    },
+    onMove: (p) => {
+      const id = pressedTab.current;
+      if (!id) return;
+      const overGroup = dropTargetAt(p.over, "data-group-id");
+      onDragHover(overGroup);
+      // Same group: reorder live under the cursor, so the strip shows the result
+      // as you go. The id guard stops it from thrashing once the swap lands and
+      // the tab under the pointer *is* the dragged one.
+      if (overGroup !== groupId) return;
+      const overTab = dropTargetAt(p.over, "data-tab-id");
+      if (overTab && overTab !== id) onReorder(id, overTab);
+    },
+    onDrop: (p) => {
+      const id = pressedTab.current;
+      pressedTab.current = null;
+      const overGroup = dropTargetAt(p.over, "data-group-id");
+      if (id && overGroup && overGroup !== groupId) {
+        // Land where the cursor showed it: before the tab under it.
+        const overTab = dropTargetAt(p.over, "data-tab-id");
+        onDropTab(overGroup, overTab && overTab !== id ? overTab : null);
+        return;
+      }
+      onDragEnd();
+    },
+    onCancel: () => {
+      pressedTab.current = null;
+      onDragEnd();
+    },
+  });
 
   const liveById = useMemo(
     () => new Map(sessions.map((s) => [s.id, s])),
@@ -217,34 +259,19 @@ export function SessionTabs({
   });
 
   return (
-    <div className={styles.bar} data-active-group={isActiveGroup ? "" : undefined}>
-      {/* The strip itself takes drops too, so a tab can be dropped onto empty
-          space (appending to the end) and — crucially — into a group with no
-          tabs at all, which has no tab element to aim at. */}
-      <div
-        className={styles.strip}
-        role="tablist"
-        ref={stripRef}
-        data-drop-target={incoming && dropHover ? "" : undefined}
-        onDragOver={(e) => {
-          if (!incoming) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          setDropHover(true);
-        }}
-        onDragLeave={(e) => {
-          // Fires for every child crossing too; only react when the pointer has
-          // actually left the strip's box.
-          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-          setDropHover(false);
-        }}
-        onDrop={(e) => {
-          if (!incoming) return;
-          e.preventDefault();
-          setDropHover(false);
-          onDropTab(groupId, null);
-        }}
-      >
+    // The whole bar is the group's drop zone, not just the scrolling strip: an
+    // empty group's strip collapses to a ~16px sliver, which is a miserable
+    // target to release a tab onto.
+    <div
+      className={styles.bar}
+      data-active-group={isActiveGroup ? "" : undefined}
+      data-group-id={groupId}
+      data-drop-target={incoming ? "" : undefined}
+    >
+      {/* A tab released over empty strip space appends to the end; over a group
+          with no tabs at all there is no tab element to aim at, which is why the
+          bar above carries the group marker. */}
+      <div className={styles.strip} role="tablist" ref={stripRef}>
         {tabs.map((tab) => {
           // The draft tab has no backing session — it wears its own label and no
           // status dot. Real tabs resolve their live session from the store so a
@@ -270,45 +297,18 @@ export function SessionTabs({
                     ? `${label}\n${tab.tooltip}`
                     : label
               }
-              draggable
-              onDragStart={(e) => {
-                onDragStart(tab.id);
-                e.dataTransfer.effectAllowed = "move";
-                // Some payload is required or Firefox/WebKit abort the drag; the
-                // real state travels through `drag`, since dataTransfer is
-                // unreadable during dragover (only on drop).
-                e.dataTransfer.setData("text/plain", tab.id);
+              data-tab-id={tab.id}
+              onPointerDown={(e) => {
+                pressedTab.current = tab.id;
+                tabDrag.onPointerDown(e);
               }}
-              // Same group: reorder live as the pointer crosses a neighbour, so
-              // the strip shows the result under the cursor. Once the swap
-              // lands, the tab under the pointer *is* the dragged one, so the id
-              // guard stops this from thrashing on repeat fires.
-              //
-              // Other group: only mark the target. Reordering live across groups
-              // would re-parent (and so remount) the pane on every pointer move.
-              onDragOver={(e) => {
-                if (!drag) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                if (incoming) {
-                  setDropHover(true);
-                  return;
-                }
-                if (drag.tabId === tab.id) return;
-                onReorder(drag.tabId, tab.id);
+              onClick={() => {
+                // The click the browser fires after a drag's release would
+                // re-activate whatever the press started on — including a tab
+                // that has just moved to the other group.
+                if (tabDrag.didDrag()) return;
+                onActivate(tab.id);
               }}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (incoming) {
-                  setDropHover(false);
-                  // Land where the cursor showed it: before the tab under it.
-                  onDropTab(groupId, tab.id);
-                  return;
-                }
-                onDragEnd();
-              }}
-              onDragEnd={onDragEnd}
-              onClick={() => onActivate(tab.id)}
               onKeyDown={(e) => {
                 // The nested close button owns its own keyboard events.
                 if (e.target !== e.currentTarget) return;
