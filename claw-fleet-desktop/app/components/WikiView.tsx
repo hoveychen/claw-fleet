@@ -3,8 +3,8 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
-  type DragEvent,
   type ReactNode,
   type SetStateAction,
 } from "react";
@@ -37,6 +37,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { PromptDialog } from "./PromptDialog";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { PageShell } from "./PageShell";
+import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import { useUIStore } from "../store";
 import styles from "./WikiView.module.css";
 
@@ -447,8 +448,35 @@ export function WikiView() {
     [load],
   );
 
+  // Which card the current press started on. The drag hook is called once for
+  // the whole view (rules of hooks), so the slug travels in a ref that each
+  // card's pointerdown stamps.
+  const pressedSlug = useRef<string | null>(null);
+  const cardDrag = usePointerDrag({
+    onStart: () => {
+      const slug = pressedSlug.current;
+      if (!slug) return false;
+      setDragSlug(slug);
+    },
+    onMove: (p) => setDropPath(dropTargetAt(p.over, "data-drop-folder")),
+    onDrop: (p) => {
+      const path = dropTargetAt(p.over, "data-drop-folder");
+      if (path === null) {
+        setDragSlug(null);
+        setDropPath(null);
+        return;
+      }
+      handleDrop(path);
+    },
+    onCancel: () => {
+      setDragSlug(null);
+      setDropPath(null);
+    },
+  });
+
   const handleDrop = async (folderPath: string) => {
-    const from = dragSlug;
+    const from = pressedSlug.current ?? dragSlug;
+    pressedSlug.current = null;
     setDragSlug(null);
     setDropPath(null);
     if (!from) return;
@@ -592,23 +620,12 @@ export function WikiView() {
   ];
 
   /**
-   * Accept a drop into folder `path` ("" is the root). Folder rows and the rail
-   * background both use this; the stopPropagation keeps a nested folder from
-   * bubbling its drop up to the root zone.
+   * Mark an element as folder `path`'s drop zone ("" is the root). The card drag
+   * resolves its landing spot by hit-testing this attribute (`dropTargetAt`), so
+   * a nested folder row naturally wins over the root zone it sits inside —
+   * `closest` stops at the first match, no stopPropagation needed.
    */
-  const dropProps = (path: string) => ({
-    onDragOver: (e: DragEvent) => {
-      if (!dragSlug) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setDropPath(path);
-    },
-    onDrop: (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      handleDrop(path);
-    },
-  });
+  const dropProps = (path: string) => ({ "data-drop-folder": path });
 
   /** Indent one tree level; depth 0 sits flush with the rail. */
   const indent = (depth: number) => ({ paddingLeft: `${8 + depth * 12}px` });
@@ -670,23 +687,22 @@ export function WikiView() {
       className={`${styles.grid_card} ${extraClass} ${
         selectedSlug === d.slug ? styles.grid_card_active : ""
       } ${dragSlug === d.slug ? styles.card_dragging : ""}`}
-      onClick={() => setSelectedSlug(d.slug)}
+      onClick={() => {
+        // The click a finished drag leaves behind must not also select the card.
+        if (cardDrag.didDrag()) return;
+        setSelectedSlug(d.slug);
+      }}
       onContextMenu={(e) => {
         // preventDefault also suppresses the app-wide Settings/About menu.
         e.preventDefault();
         e.stopPropagation();
         setCtxMenu({ doc: d, anchor: { x: e.clientX, y: e.clientY } });
       }}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = "move";
-        // Firefox refuses to start a drag with an empty payload.
-        e.dataTransfer.setData("text/plain", d.slug);
-        setDragSlug(d.slug);
-      }}
-      onDragEnd={() => {
-        setDragSlug(null);
-        setDropPath(null);
+      // Pointer drag, not HTML5 drag: the latter never delivers a drop inside
+      // this app's webview. See usePointerDrag.ts.
+      onPointerDown={(e) => {
+        pressedSlug.current = d.slug;
+        cardDrag.onPointerDown(e);
       }}
     >
       <span className={styles.grid_card_top}>
