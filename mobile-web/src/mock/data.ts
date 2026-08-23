@@ -189,6 +189,33 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     userMark: "done",
     lastReadMs: NOW - 3 * HOUR,
   },
+  // Quiet-alive: the process runs on while the transcript has gone silent.
+  // `determine_status` ages a session down to `idle` 60s after its last
+  // tool_use record, so one long tool call (a build, a background-task wait)
+  // makes a very much running session look ended. The row must keep a dot —
+  // faded, tone "quiet" — or the list contradicts the detail composer, which
+  // offers to *queue* a follow-up for this same session.
+  {
+    id: "sess-quiet-alive",
+    workspacePath: "/Users/demo/workspace/stealth",
+    workspaceName: "stealth",
+    aiTitle: "Implement ImageBitmap pixel snapshot and close",
+    slug: null,
+    status: "idle",
+    isSubagent: false,
+    lastMessagePreview:
+      "The build task is still running in the background, so I'll hold off here and wait for its completion notification.",
+    lastActivityMs: NOW - 7 * MIN,
+    createdAtMs: NOW - 95 * MIN,
+    jsonlPath: "/Users/demo/.claude/projects/stealth/sess-quiet-alive.jsonl",
+    model: "claude-opus-5",
+    entrypoint: "claw-fleet-newsession",
+    pid: 44821,
+    procAlive: true,
+    contextPercent: 0.21,
+    totalCostUsd: 14.11,
+    lastReadMs: NOW - 90 * MIN,
+  },
   // The pure-chat session — not a project. Its workspacePath must equal
   // MOCK_CHAT_WORKSPACE for the chat filter to recognise it.
   {
