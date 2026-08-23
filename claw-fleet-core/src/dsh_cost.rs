@@ -28,6 +28,33 @@
 //! which calls came from which, because "an invoice said so" and "we applied a
 //! published rate to counted tokens" are different kinds of number.
 //!
+//! # A price is recorded, not recomputed
+//!
+//! Both paths write what a call cost to `~/.fleet/dsh-generation-cost.json` and
+//! never revise it. For OpenRouter that is free: the receipt is immutable, so
+//! caching it is only an optimisation. For the table path it is the whole point.
+//!
+//! Nothing about a table price is inherently stable. DeepSeek's rates move, and
+//! so does the peak schedule — this module has already outlived one retired
+//! window (16:30–00:30) and one narrowing (peak became Monday–Friday, which cut
+//! every past weekend call in half). Because a session's cost was computed fresh
+//! from its stored events on every panel open, each such change silently rewrote
+//! the past: a session that cost what it cost in July would answer differently
+//! in August, with nothing to show for the difference.
+//!
+//! So a metered call is priced exactly once, keyed `<session id>:<seq>`, and
+//! keeps that figure. The tier is frozen alongside the dollars, since the panel
+//! prints both off the same decision.
+//!
+//! Two honest limits. First, this holds a price still from the moment it is
+//! first seen — it cannot recover what a call cost *before* Fleet ever priced
+//! it, and a session first opened today freezes at today's rules whatever those
+//! were when the call was actually made. Recovering the earlier figure would
+//! need dated rate tables, and DeepSeek publishes no effective dates to build
+//! one from. Second, an unknown model is not frozen: nothing was priced, so
+//! there is nothing to hold still, and a later build that learns the model is
+//! pricing it for the first time rather than repricing it.
+//!
 //! # How a session's calls are found (measured)
 //!
 //! Every successful model call leaves a durable `assistant/message` event whose
@@ -103,8 +130,9 @@ const GENERATION_ENDPOINT: &str = "https://openrouter.ai/api/v1/generation";
 /// one — dsh's own conventional choice, and the key `.credentials.yaml` uses.
 const DEFAULT_KEY_ENV: &str = "OPENROUTER_API_KEY";
 
-/// Cache file under `~/.fleet`. Generation records are immutable, so an entry
-/// never expires.
+/// Cache file under `~/.fleet`, holding both kinds of frozen price. No entry
+/// ever expires: a generation record is immutable, and a metered price is
+/// deliberately held still — see the module docs.
 const CACHE_FILE: &str = "dsh-generation-cost.json";
 
 /// A single billable model call found in a session's durable log.
@@ -241,7 +269,7 @@ fn is_peak(at_ms: i64) -> bool {
 /// come off the same decision: keeping the money but recomputing the tier would
 /// let the "N peak / M off-peak" line contradict the total beside it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-struct MeteredPrice {
+pub(crate) struct MeteredPrice {
     usd: f64,
     peak: bool,
 }
@@ -266,7 +294,7 @@ fn rate_price(call: &MeteredCall) -> Option<MeteredPrice> {
 /// The accounting a metered session produces: the panel's four numbers, plus
 /// whatever prices were computed for the first time and are owed to the cache.
 #[derive(Debug, Default, PartialEq)]
-pub struct MeteredTally {
+pub(crate) struct MeteredTally {
     pub total: f64,
     pub peak: u32,
     pub off_peak: u32,
@@ -295,7 +323,7 @@ fn metered_key(session_id: &str, seq: i64) -> String {
 /// Unknown models are deliberately *not* frozen. Nothing was priced, so there is
 /// nothing to hold still — when a later build learns the model, that is a first
 /// pricing, not a repricing.
-pub fn price_metered(
+pub(crate) fn price_metered(
     session_id: &str,
     calls: &[MeteredCall],
     cached: &BTreeMap<String, MeteredPrice>,
@@ -1142,6 +1170,38 @@ mod tests {
         // Friday 2026-08-21 09:00 UTC and Monday 2026-08-24 01:00 UTC.
         assert!(is_peak(1_787_302_800_000), "Friday 09:00 UTC is peak");
         assert!(is_peak(1_787_533_200_000), "Monday 01:00 UTC is peak");
+    }
+
+    /// A cache file written before the metered map existed must still load, or
+    /// the upgrade throws away every OpenRouter receipt the user had paid to
+    /// look up — and `load_cache` treats an unreadable file as empty, so the
+    /// loss would be silent.
+    #[test]
+    fn a_cache_file_predating_the_metered_map_still_loads() {
+        let cache: CostCache =
+            serde_json::from_str(r#"{"costs":{"gen-1":0.5}}"#).expect("old shape must parse");
+        assert_eq!(cache.costs.get("gen-1"), Some(&0.5));
+        assert!(cache.metered.is_empty(), "absent map reads as empty");
+    }
+
+    /// Both maps survive a write/read round trip under their own keys. They are
+    /// deliberately separate: Fleet's synthesised `session:seq` keys and the
+    /// provider's own `gen-…` ids must not be able to collide.
+    #[test]
+    fn both_cache_maps_round_trip_under_separate_keys() {
+        let mut cache = CostCache::default();
+        cache.costs.insert("gen-1".into(), 0.5);
+        cache.metered.insert(
+            metered_key(TEST_SESSION, 20),
+            MeteredPrice {
+                usd: 1.76,
+                peak: true,
+            },
+        );
+        let text = serde_json::to_string(&cache).expect("serialize");
+        let back: CostCache = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(back.costs, cache.costs);
+        assert_eq!(back.metered, cache.metered);
     }
 
     /// One flash call, 1M cache-miss input + 1M output, on Saturday
