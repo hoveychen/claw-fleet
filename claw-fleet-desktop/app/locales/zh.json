@@ -561,7 +561,13 @@
     "unattached": "未挂靠的接力链",
     "anonymous": "另有 {{count}} 个旧版匿名计划块（无 id，无法入树）",
     "orphan_tip": "父计划 {{parent}} 不存在,已提升为根",
-    "search_placeholder": "筛选仓库…"
+    "search_placeholder": "筛选仓库…",
+    "stat_pending": "个计划有待办",
+    "legend_live": "有待办",
+    "legend_done": "已完成",
+    "expand_subtree": "展开 {{count}} 个子计划",
+    "collapse_subtree": "折叠子树",
+    "close": "关闭"
   },
   "memory": {
     "panel_title": "Memory",
