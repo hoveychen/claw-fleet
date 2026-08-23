@@ -5,6 +5,7 @@ import {
   CHAT_ONLY,
   groupOpenReadTargets,
   matchesWorkspaceFilter,
+  statusTone,
 } from "./TasksView";
 import type { SessionInfo } from "../types";
 
@@ -142,5 +143,28 @@ describe("groupOpenReadTargets", () => {
   it("returns nothing when the whole chain is already read", () => {
     const tip = readState("tip", false);
     expect(groupOpenReadTargets(tip, [tip, readState("hop2", false)])).toEqual([]);
+  });
+});
+
+describe("statusTone quiet-alive", () => {
+  const row = (over: Partial<SessionInfo>) =>
+    ({ id: "s", workspacePath: "/w", workspaceName: "n", status: "idle", ...over }) as SessionInfo;
+
+  it("keeps a dot on a live process whose transcript aged out to idle", () => {
+    // The desktop's `isQuietAlive`, mirrored: status is derived from transcript
+    // age alone, so a session sitting on one long tool call reads `idle` while
+    // its process runs on. Dropping the dot would contradict the composer,
+    // which offers to queue a follow-up for that very session.
+    expect(statusTone(row({ status: "idle", procAlive: true }))).toBe("quiet");
+  });
+
+  it("still shows nothing once the process is gone", () => {
+    expect(statusTone(row({ status: "idle", procAlive: false }))).toBe(null);
+    expect(statusTone(row({ status: "idle" }))).toBe(null);
+  });
+
+  it("does not dim a genuinely working row down to quiet", () => {
+    expect(statusTone(row({ status: "executing", procAlive: true }))).toBe("working");
+    expect(statusTone(row({ status: "waitingInput", procAlive: true }))).toBe("waiting");
   });
 });
