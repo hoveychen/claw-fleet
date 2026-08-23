@@ -18,6 +18,8 @@ export const STEP_X = NODE_W + 52;
 /** Row pitch between siblings, and the wider gap between whole root trees. */
 export const GAP_Y = 12;
 export const ROOT_GAP = 28;
+/** Horizontal gap between two root trees packed onto the same band. */
+export const COL_GAP = 48;
 
 /** Same `source:id` identity the old tree used for its React keys: one plan id
  *  may legitimately appear in two TASKS.md files (main checkout + a worktree),
@@ -63,8 +65,19 @@ function descendantCount(node: PlanNode): number {
 /**
  * Lay the forest out. `collapsed` holds {@link nodeKey}s whose subtrees are
  * hidden; their descendants appear in neither `nodes` nor `edges`.
+ *
+ * Each root tree is laid out on its own, then the trees are packed left to
+ * right into bands no wider than `availableWidth`. Stacking them in one column
+ * instead (the obvious thing) is what a real repo punishes: most plans here are
+ * flat roots, so a 39-plan forest became a 39-row single column with two thirds
+ * of the canvas empty — a list again, which is the thing this view stopped
+ * being. Pass `Infinity` for one unbroken band.
  */
-export function layoutPlanForest(roots: PlanNode[], collapsed: Set<string>): ForestLayout {
+export function layoutPlanForest(
+  roots: PlanNode[],
+  collapsed: Set<string>,
+  availableWidth: number,
+): ForestLayout {
   const nodes: LayoutNode[] = [];
   const edges: LayoutEdge[] = [];
   let cursorY = 0;
@@ -114,11 +127,44 @@ export function layoutPlanForest(roots: PlanNode[], collapsed: Set<string>): For
     return laid;
   };
 
-  roots.forEach((root, i) => {
-    if (i > 0) cursorY += ROOT_GAP - GAP_Y;
-    walk(root, 0);
-  });
+  // Pack the trees into bands. Each root is laid out at the origin first, then
+  // the whole block (its nodes and the edges between them) is translated.
+  let bandX = 0;
+  let bandY = 0;
+  let bandH = 0;
+  let stageW = 0;
 
-  const height = nodes.reduce((h, n) => Math.max(h, n.y + NODE_H), 0);
-  return { nodes, edges, width: maxDepth * STEP_X + NODE_W, height };
+  for (const root of roots) {
+    const nodeStart = nodes.length;
+    const edgeStart = edges.length;
+    cursorY = 0;
+    maxDepth = 0;
+    walk(root, 0);
+
+    const block = nodes.slice(nodeStart);
+    const blockW = maxDepth * STEP_X + NODE_W;
+    const blockH = block.reduce((h, n) => Math.max(h, n.y + NODE_H), 0);
+
+    if (bandX > 0 && bandX + blockW > availableWidth) {
+      bandX = 0;
+      bandY += bandH + ROOT_GAP;
+      bandH = 0;
+    }
+    for (const n of block) {
+      n.x += bandX;
+      n.y += bandY;
+    }
+    for (const e of edges.slice(edgeStart)) {
+      e.x1 += bandX;
+      e.x2 += bandX;
+      e.y1 += bandY;
+      e.y2 += bandY;
+    }
+
+    stageW = Math.max(stageW, bandX + blockW);
+    bandH = Math.max(bandH, blockH);
+    bandX += blockW + COL_GAP;
+  }
+
+  return { nodes, edges, width: stageW, height: bandY + bandH };
 }
