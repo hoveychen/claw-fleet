@@ -667,6 +667,13 @@ pub(crate) enum PlanCommands {
         /// explicit choice rather than a silent default.
         #[arg(long, conflicts_with = "parent")]
         root: bool,
+        /// Why none of the workspace's in-flight plans is this plan's parent.
+        /// Required alongside --root whenever some other plan still has pending
+        /// work, so starting a parallel tree costs a moment's thought instead of
+        /// being the path of least resistance. Not needed for the first plan in a
+        /// workspace, and never valid with --parent.
+        #[arg(long, conflicts_with = "parent")]
+        root_reason: Option<String>,
         /// What the P-tasks are for: `exec` (default) changes code; `explore`
         /// investigates, and its deliverable is the exec child plans it spawns
         /// rather than edits of its own. Keeping the two apart stops an
