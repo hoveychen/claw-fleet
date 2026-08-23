@@ -346,7 +346,10 @@ impl DshSource {
     }
 
     /// Strip the `dsh://` scheme off a session URI.
-    fn session_id_of(path: &str) -> Option<&str> {
+    ///
+    /// `pub(crate)` for [`crate::dsh_cost`], which namespaces its frozen metered
+    /// prices by session id.
+    pub(crate) fn session_id_of(path: &str) -> Option<&str> {
         path.strip_prefix(DSH_URI_PREFIX).filter(|s| !s.is_empty())
     }
 
