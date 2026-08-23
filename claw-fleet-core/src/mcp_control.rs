@@ -75,8 +75,9 @@ fn plan_tool_def() -> Value {
                 "plan_id": {"type": "string", "description": "Plan sentinel id (kebab-case). Required for check/uncheck/create/add/resume/get."},
                 "task": {"type": "string", "description": "P-task id like \"P2\". Required for check/uncheck/add; optional for resume."},
                 "title": {"type": "string", "description": "Plan title. Required for create."},
-                "parent": {"type": "string", "description": "Parent plan id, when this plan is side work spawned mid-parent (create only). Fleet points you back at the parent once this plan completes. Exactly one of parent/root is required for create."},
-                "root": {"type": "boolean", "description": "Declare this plan a new top-level tree (create only). Required when parent is absent, so a plan's position in the tree is always an explicit choice."},
+                "parent": {"type": "string", "description": "Parent plan id (create only). Usually unnecessary: a plan authored while you are executing another plan already defaults to being that plan's child, and Fleet points you back at the parent once this plan completes. Pass this only to attach it somewhere other than the plan you are currently on."},
+                "root": {"type": "boolean", "description": "Start a new top-level tree instead of attaching to the plan you are currently executing (create only). Needs root_reason whenever you are on a plan; with no plan in flight it is the default anyway and this flag is a no-op."},
+                "root_reason": {"type": "string", "description": "Why this work does not belong under the plan you are currently executing (create only). Required alongside root while you are on a plan, so leaving its tree costs a moment's thought instead of being the path of least resistance. Never valid with parent."},
                 "kind": {"type": "string", "enum": ["exec", "explore"], "description": "What the P-tasks are for (create only, default exec). `exec` changes code; `explore` investigates and its deliverable is the exec child plans it spawns, not edits of its own — use it so an exploration's findings can't silently redefine the implementation."},
                 "text": {"type": "string", "description": "Task text. Required for add."}
             },
@@ -297,6 +298,7 @@ fn handle_plan(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, St
             &req(args, "title")?,
             arg(args, "parent").as_deref(),
             args.get("root").and_then(|v| v.as_bool()).unwrap_or(false),
+            arg(args, "root_reason").as_deref(),
             crate::prd_tasks::PlanKind::from_attr(arg(args, "kind").as_deref()),
             sid,
         )
@@ -871,25 +873,59 @@ mod tests {
         assert!(!is_control_tool("fleet__set_session_title"));
     }
 
-    /// The MCP surface enforces the same tree-position declaration the CLI does
-    /// — the whole reason plan mutations were lifted into `plan_ops`. Without
-    /// this, an agent on a remote-workspace session (which can only reach the
-    /// MCP tool) would keep authoring flat plans.
+    /// `root_reason` must survive the MCP arg mapping and be declared in the
+    /// schema. A remote-workspace session can reach *only* this path, so either
+    /// gap means the tree-position rules are unusable there — and because the
+    /// schema sets `additionalProperties: false`, an undeclared property is
+    /// rejected before the handler ever runs.
+    ///
+    /// The probe is the `--parent` + `root_reason` contradiction: it is the one
+    /// branch whose outcome depends on `root_reason` alone, with no dependence on
+    /// the session's focus record (which lives in the process-global `~/.fleet`
+    /// and would make this test non-hermetic). The focus-driven default itself is
+    /// covered by `plan_ops`'s `create_in` tests.
     #[test]
-    fn plan_create_via_mcp_requires_parent_or_root() {
+    fn plan_create_via_mcp_forwards_the_root_reason() {
         let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        handle(
+            "fleet__plan",
+            &json!({"action": "create", "plan_id": "host", "title": "Host", "root": true}),
+            None,
+            cwd,
+        )
+        .unwrap();
+
         let err = handle(
             "fleet__plan",
-            &json!({"action": "create", "plan_id": "demo", "title": "Demo"}),
+            &json!({
+                "action": "create",
+                "plan_id": "kid",
+                "title": "Kid",
+                "parent": "host",
+                "root_reason": "这条理由不该出现在子 plan 上"
+            }),
             None,
-            tmp.path(),
+            cwd,
         )
         .unwrap_err();
-        assert!(err.contains("--parent"), "{err}");
-        assert!(err.contains("--root"), "{err}");
         assert!(
-            !tmp.path().join("TASKS.md").exists(),
-            "a refused create must not create the file"
+            err.contains("--root-reason"),
+            "root_reason must reach plan_ops, not be dropped by the mapping: {err}"
+        );
+        assert!(
+            !std::fs::read_to_string(cwd.join("TASKS.md"))
+                .unwrap()
+                .contains("id=\"kid\""),
+            "a refused create must not write"
+        );
+
+        let schema = plan_tool_def();
+        assert!(
+            schema["inputSchema"]["properties"]
+                .get("root_reason")
+                .is_some(),
+            "root_reason must be a declared property (additionalProperties is false): {schema}"
         );
     }
 

@@ -26,6 +26,7 @@ pub(crate) fn cmd_plan(action: PlanCommands) {
             title,
             parent,
             root,
+            root_reason,
             kind,
         } => emit(plan_ops::create(
             &cwd,
@@ -33,6 +34,7 @@ pub(crate) fn cmd_plan(action: PlanCommands) {
             &title,
             parent.as_deref(),
             root,
+            root_reason.as_deref(),
             claw_fleet_core::prd_tasks::PlanKind::from_attr(Some(&kind)),
             sid.as_deref(),
         )),
