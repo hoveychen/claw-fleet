@@ -192,13 +192,22 @@ executor 而失败（exit 127），而 MCP 工具是 JSON-RPC 打到本地常驻
 server、总能触达本地 Fleet 状态。仅当这些工具不在列表里（用户手起、非 Fleet \
 的会话）时，才退回 `fleet …` CLI。**\n\
 \n\
-- `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root) \
-  [--kind explore|exec]` —— 新增一个 v2 计划块**并**把本会话记录为它的执行者。\
-  创建计划就是开始它，故无需另行声明。**`--parent` 与 `--root` 必须二选一**：\
-  当新计划是**你在父计划中途分出的旁支工作**（一个你必须返回的岔路）时传\
-  `--parent`（见下方「子计划与回溯」），新开一棵顶层树时传 `--root`。\
-  故意不设默认值——计划在树里的位置永远是你的显式选择：当 `--parent` 只是\
-  「可选」时，某个仓库前 355 个计划里有 350 个是平的，回溯根本没有树可走。\n\
+- `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root \
+  [--root-reason \"...\"]) [--kind explore|exec]` —— 新增一个 v2 计划块**并**把\
+  本会话记录为它的执行者。创建计划就是开始它，故无需另行声明。\
+  **`--parent` 与 `--root` 必须二选一**：当新计划是**你在父计划中途分出的旁支\
+  工作**（一个你必须返回的岔路）时传 `--parent`（见下方「子计划与回溯」），\
+  新开一棵顶层树时传 `--root`。故意不设默认值——计划在树里的位置永远是你的\
+  显式选择：当 `--parent` 只是「可选」时，某个仓库前 355 个计划里有 350 个是\
+  平的，回溯根本没有树可走。\n\
+  \n\
+  **而且本 workspace 还有别的计划没做完时，光传 `--root` 会被拒**，必须附上\
+  `--root-reason \"<为什么那些在飞的计划都不是它的父计划>\"`，一句话即可。\
+  只要求「显式二选一」是不够的：`--root` 依然是零成本的合法答案，你不必想清楚\
+  新计划跟手上的活是什么关系——那之后又有 109 个计划被平铺建出来。所以现在\
+  `--root` 只在**显然正确**时免费（本 workspace 没有任何计划还有待办，压根没有\
+  可挂的父计划）。这不是禁止顶层树——并行的树是合理的——只是不让「root」继续\
+  当那条阻力最小的路。若其中某个**就是**父计划，直接传 `--parent <id>`。\n\
 - `fleet plan check <id> <P>` —— 勾选一个任务为完成（`[ ]`→`[x]`）并把本会话的\
   焦点刷新到 `<id>`。如 `fleet plan check auth-refactor P2`。\n\
 - `fleet plan uncheck <id> <P>` —— 取消勾选。\n\
@@ -733,16 +742,27 @@ has no `fleet` and fails (exit 127); the MCP tools are JSON-RPC to the local \
 `fleet …` CLI only when those tools are absent (a user's hand-launched, \
 non-Fleet session).**\n\
 \n\
-- `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root) \
-  [--kind explore|exec]` — add a new v2 plan block **and** record this session \
-  as its executor. Creating a plan is starting it, so no separate declaration \
-  is needed. **Exactly one of `--parent` / `--root` is required**: pass \
-  `--parent` when the new plan is **side work you spun off mid-parent** (a \
-  detour you must return from — see \"Child plans & backtracking\" below), or \
-  `--root` when it starts a new top-level tree. There is deliberately no \
-  default — a plan's position in the tree is always your explicit choice, \
-  because when `--parent` was merely optional 350 of the first 355 plans in a \
-  repo came out flat and the backtrack had no tree to walk.\n\
+- `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root \
+  [--root-reason \"...\"]) [--kind explore|exec]` — add a new v2 plan block \
+  **and** record this session as its executor. Creating a plan is starting it, \
+  so no separate declaration is needed. **Exactly one of `--parent` / `--root` \
+  is required**: pass `--parent` when the new plan is **side work you spun off \
+  mid-parent** (a detour you must return from — see \"Child plans & \
+  backtracking\" below), or `--root` when it starts a new top-level tree. There \
+  is deliberately no default — a plan's position in the tree is always your \
+  explicit choice, because when `--parent` was merely optional 350 of the first \
+  355 plans in a repo came out flat and the backtrack had no tree to walk.\n\
+  \n\
+  **And when other plans in this workspace still have pending work, a bare \
+  `--root` is refused**: you must add `--root-reason \"<why none of those \
+  in-flight plans is the parent>\"`, one line is enough. Requiring an explicit \
+  choice was not enough on its own — `--root` still answered it at zero cost, \
+  without you ever working out how the new plan relates to what is already in \
+  flight, and 109 more plans came out flat. So `--root` is free only when it is \
+  *obviously* right: no plan here has pending work, so there is no candidate \
+  parent to have considered. This does not forbid top-level trees — parallel \
+  trees are legitimate — it just stops \"root\" from being the path of least \
+  resistance. If one of them IS the parent, pass `--parent <id>` instead.\n\
 - `fleet plan check <id> <P>` — tick a task done (`[ ]`→`[x]`) and refresh this \
   session's focus onto `<id>`. e.g. `fleet plan check auth-refactor P2`.\n\
 - `fleet plan uncheck <id> <P>` — untick.\n\
@@ -1657,6 +1677,25 @@ mod tests {
         assert!(
             zh.contains("计划门") && zh.contains("聚焦注入"),
             "[zh] the gate and the narrowed injection must be documented"
+        );
+    }
+
+    /// `--root-reason` must be documented in both locales, because the agent
+    /// otherwise meets the priced-up `--root` purely as a refused `create` and
+    /// has to reverse-engineer the flag out of an error message. Same
+    /// both-locales reasoning as the test above: the zh body is a separate
+    /// string, so documenting only the English half leaves zh sessions blind.
+    #[test]
+    fn render_documents_the_root_reason_gate_in_both_locales() {
+        let en = render_guidance("Boss", "en");
+        assert!(
+            en.contains("--root-reason") && en.contains("path of least resistance"),
+            "[en] the priced-up --root must be documented, not just its flag"
+        );
+        let zh = render_guidance("老板", "zh");
+        assert!(
+            zh.contains("--root-reason") && zh.contains("阻力最小的路"),
+            "[zh] the priced-up --root must be documented, not just its flag"
         );
     }
 

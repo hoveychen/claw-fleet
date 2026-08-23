@@ -175,8 +175,14 @@ date.\n\
 hand-editing markdown. **dsh has no Fleet MCP tools** — there is no \
 `fleet__plan` here, so the CLI is the only path (unlike Claude and Codex \
 sessions, whose guidance points at MCP first):\n\
-  - `fleet plan create <id> --title \"...\" [--parent <parent-id>]` — add a \
-new plan block. Pass `--parent` for side work spun off mid-plan.\n\
+  - `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root \
+[--root-reason \"...\"])` — add a new plan block. **One of `--parent` / \
+`--root` is required** — there is no default. Pass `--parent` for side work \
+spun off mid-plan (Fleet points you back at the parent when it completes); \
+`--root` starts a new top-level tree. When some other plan here still has \
+pending work, a bare `--root` is refused: add `--root-reason \"<why none of \
+those is the parent>\"`, so starting a parallel tree costs a moment's thought \
+instead of being the path of least resistance.\n\
   - `fleet plan check <id> <P>` / `uncheck <id> <P>` — tick / untick a task.\n\
   - `fleet plan resume <id> [P]` — take over an existing plan you did not \
 create and were not handed.\n\
@@ -963,6 +969,18 @@ mod tests {
         assert!(
             g.contains("fleet plan check") && g.contains("fleet plan create"),
             "must teach the fleet plan subcommands"
+        );
+        // `plan_ops` enforces the tree-position rules for every runtime, and dsh
+        // has no MCP fallback to discover them from — the CLI error is the only
+        // other teacher. This guidance drifted once already: it still documented
+        // --parent as optional after the declaration became mandatory.
+        assert!(
+            g.contains("--root") && g.contains("is required"),
+            "must teach that a tree position must be declared"
+        );
+        assert!(
+            g.contains("--root-reason"),
+            "must teach the justification a bare --root now needs"
         );
     }
 

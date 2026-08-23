@@ -162,18 +162,23 @@ pub fn resume(
 /// explicit choice is the point: with `--parent` merely *available*, 350 of the
 /// first 355 plans authored in this repo were created flat, so the parent-link
 /// backtrack had no tree to walk and a decomposed task never ran to completion
-/// as a unit. Declaring `--root` is cheap; forgetting to declare anything is
-/// what used to happen silently.
+/// as a unit.
+///
+/// That alone proved insufficient — see [`root_needs_justification`], which
+/// prices `--root` above `--parent` once this workspace has candidate parents,
+/// via the `root_reason` a bare `--root` must then carry.
 pub fn create(
     cwd: &Path,
     plan_id: &str,
     title: &str,
     parent: Option<&str>,
     root: bool,
+    root_reason: Option<&str>,
     kind: pt::PlanKind,
     session_id: Option<&str>,
 ) -> Result<PlanOutcome, String> {
     let parent = parent.filter(|p| !p.trim().is_empty());
+    let root_reason = root_reason.filter(|r| !r.trim().is_empty());
     match (parent, root) {
         (Some(_), true) => {
             return Err(
@@ -198,7 +203,20 @@ pub fn create(
                  completes), or --root if it starts a new top-level tree. {hint}"
             ))
         }
+        (Some(p), false) if root_reason.is_some() => {
+            return Err(format!(
+                "--root-reason justifies starting a NEW TREE, but this plan declares \
+                 --parent {p}, so it is a child and needs no such justification. Drop \
+                 --root-reason to create it as a child of '{p}', or drop --parent and \
+                 keep --root-reason to make it a root instead."
+            ))
+        }
         _ => {}
+    }
+    if root {
+        if let Some(err) = root_needs_justification(cwd, root_reason) {
+            return Err(err);
+        }
     }
     let path = workspace_tasks_path(cwd);
     let content = std::fs::read_to_string(&path).unwrap_or_default();
@@ -220,6 +238,46 @@ pub fn create(
         _ => format!("created plan '{plan_id}'{kindness} in {}", path.display()),
     };
     Ok(PlanOutcome { message, warnings })
+}
+
+/// Shortest `--root-reason` that counts as a justification, in characters. The
+/// gate exists to make declaring a root cost a moment's thought, so the cheap
+/// answers it must price out are exactly the short ones — `-`, `n/a`, `无`.
+/// Counted in `char`s, not bytes, so a four-character CJK reason is not held to
+/// a stricter bar than a four-letter English one.
+const MIN_ROOT_REASON_CHARS: usize = 4;
+
+/// `Some(error)` when this `--root` needs a justification it did not supply.
+///
+/// Requiring an explicit `--parent` / `--root` (2026-08-20) fixed the silent
+/// default but not the incentive: `--root` still answers the question at zero
+/// cost, without the agent ever working out how the new plan relates to what is
+/// already in flight. Measured on this repo afterwards — 366 plans, 3 with a
+/// `parent=`, and 109 authored flat since the last one that had it — so the
+/// backtrack had no edges to walk and each plan died alone.
+///
+/// So `--root` is free only when it is *obviously* right: no other plan here has
+/// pending work, hence no candidate parent to have considered. Once candidates
+/// exist, the agent must name why none of them is the parent. This deliberately
+/// does not forbid roots — parallel top-level trees are legitimate — it just
+/// stops "root" from being the path of least resistance.
+fn root_needs_justification(cwd: &Path, root_reason: Option<&str>) -> Option<String> {
+    let candidates = pending_plan_ids(cwd);
+    if candidates.is_empty() {
+        return None; // nothing to branch off — a new tree is the only option
+    }
+    let given = root_reason.map(|r| r.trim()).unwrap_or("");
+    if given.chars().count() >= MIN_ROOT_REASON_CHARS {
+        return None;
+    }
+    Some(format!(
+        "this workspace already has plans with pending work: {}. Declaring another \
+         top-level tree therefore needs `--root-reason \"<why none of those is the \
+         parent>\"` — one line is enough. If one of them IS the parent, pass \
+         `--parent <id>` instead, so Fleet can point you back at it when this plan \
+         completes.",
+        candidates.join(", ")
+    ))
 }
 
 /// Ids of plans in this workspace that still have a pending P-task — the
@@ -290,7 +348,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path();
 
-        let created = create(cwd, "demo", "Demo work", None, true, pt::PlanKind::Exec, None).unwrap();
+        let created = create(cwd, "demo", "Demo work", None, true, None, pt::PlanKind::Exec, None).unwrap();
         assert!(created.message.contains("created plan 'demo'"));
         // No session id ⇒ attribution is a warning, but the edit still lands.
         assert_eq!(created.warnings.len(), 1);
@@ -323,10 +381,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path();
         // An existing plan with pending work becomes a suggested parent.
-        create(cwd, "host", "Host plan", None, true, pt::PlanKind::Exec, None).unwrap();
+        create(cwd, "host", "Host plan", None, true, None, pt::PlanKind::Exec, None).unwrap();
         add(cwd, "host", "P1", "open task").unwrap();
 
-        let err = create(cwd, "orphan", "Orphan", None, false, pt::PlanKind::Exec, None).unwrap_err();
+        let err = create(cwd, "orphan", "Orphan", None, false, None, pt::PlanKind::Exec, None).unwrap_err();
         assert!(err.contains("--parent"), "names the flag: {err}");
         assert!(err.contains("--root"), "names the alternative: {err}");
         assert!(err.contains("host"), "suggests the pending plan as a parent: {err}");
@@ -338,8 +396,8 @@ mod tests {
     #[test]
     fn create_with_both_parent_and_root_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
-        create(tmp.path(), "par", "Parent", None, true, pt::PlanKind::Exec, None).unwrap();
-        let err = create(tmp.path(), "kid", "Kid", Some("par"), true, pt::PlanKind::Exec, None).unwrap_err();
+        create(tmp.path(), "par", "Parent", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        let err = create(tmp.path(), "kid", "Kid", Some("par"), true, None, pt::PlanKind::Exec, None).unwrap_err();
         assert!(err.contains("mutually exclusive"), "{err}");
     }
 
@@ -349,7 +407,7 @@ mod tests {
     #[test]
     fn create_with_blank_parent_still_requires_a_declaration() {
         let tmp = tempfile::tempdir().unwrap();
-        let err = create(tmp.path(), "x", "X", Some("   "), false, pt::PlanKind::Exec, None).unwrap_err();
+        let err = create(tmp.path(), "x", "X", Some("   "), false, None, pt::PlanKind::Exec, None).unwrap_err();
         assert!(err.contains("--root"), "blank parent ⇒ still undeclared: {err}");
     }
 
@@ -358,12 +416,121 @@ mod tests {
     fn create_accepts_root_and_parent_shapes() {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path();
-        create(cwd, "top", "Top", None, true, pt::PlanKind::Exec, None).unwrap();
+        create(cwd, "top", "Top", None, true, None, pt::PlanKind::Exec, None).unwrap();
         assert!(read_tasks(cwd).contains("<!-- fleet:prd:begin id=\"top\" v=\"2\" -->"));
 
-        let child = create(cwd, "side", "Side", Some("top"), false, pt::PlanKind::Exec, None).unwrap();
+        let child = create(cwd, "side", "Side", Some("top"), false, None, pt::PlanKind::Exec, None).unwrap();
         assert!(child.message.contains("parent 'top'"), "{}", child.message);
         assert!(read_tasks(cwd).contains("id=\"side\" v=\"2\" parent=\"top\""));
+    }
+
+    /// A workspace holding one plan with an open P-task — the state in which
+    /// `--root` stops being free.
+    fn ws_with_a_pending_plan() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        create(tmp.path(), "host", "Host plan", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        add(tmp.path(), "host", "P1", "open task").unwrap();
+        tmp
+    }
+
+    /// The core of "make --root expensive": requiring an explicit declaration was
+    /// not enough, because `--root` answers it at zero cost — the agent never has
+    /// to work out how the new plan relates to what is already in flight. So when
+    /// this workspace *has* candidate parents, a bare `--root` is refused and the
+    /// candidates are named: the agent must state why none of them is the parent.
+    #[test]
+    fn root_without_a_reason_is_refused_while_other_plans_are_pending() {
+        let tmp = ws_with_a_pending_plan();
+        let err = create(tmp.path(), "flat", "Flat", None, true, None, pt::PlanKind::Exec, None)
+            .unwrap_err();
+        assert!(err.contains("--root-reason"), "names the flag: {err}");
+        assert!(err.contains("host"), "names the candidate parent: {err}");
+        assert!(
+            !read_tasks(tmp.path()).contains("flat"),
+            "refused create must not write"
+        );
+    }
+
+    /// The escape hatch is real: a stated reason lets the new tree through.
+    #[test]
+    fn root_with_a_reason_is_accepted() {
+        let tmp = ws_with_a_pending_plan();
+        let out = create(
+            tmp.path(),
+            "flat",
+            "Flat",
+            None,
+            true,
+            Some("与 host 无关,是另一条产品线的独立需求"),
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap();
+        assert!(out.message.contains("created plan 'flat'"), "{}", out.message);
+        assert!(read_tasks(tmp.path()).contains("id=\"flat\""));
+    }
+
+    /// A token reason ("-", "n/a", "无") is the cheap answer the gate exists to
+    /// price out, so it must not pass as a justification.
+    #[test]
+    fn a_token_root_reason_is_refused() {
+        let tmp = ws_with_a_pending_plan();
+        for token in ["-", "n/a", "无", "   x  "] {
+            let err = create(
+                tmp.path(),
+                "flat",
+                "Flat",
+                None,
+                true,
+                Some(token),
+                pt::PlanKind::Exec,
+                None,
+            )
+            .unwrap_err();
+            assert!(
+                err.contains("--root-reason"),
+                "token {token:?} must not satisfy the gate: {err}"
+            );
+        }
+    }
+
+    /// The first plan in a fresh workspace has nothing to branch off, so demanding
+    /// a justification there would be pure ceremony. The gate must stay silent.
+    #[test]
+    fn root_needs_no_reason_when_nothing_is_pending() {
+        let tmp = tempfile::tempdir().unwrap();
+        create(tmp.path(), "first", "First", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        assert!(read_tasks(tmp.path()).contains("id=\"first\""));
+    }
+
+    /// A completed plan is not a candidate parent, so it must not re-arm the gate
+    /// for the next top-level tree.
+    #[test]
+    fn a_completed_plan_does_not_demand_a_root_reason() {
+        let tmp = ws_with_a_pending_plan();
+        mutate_checkbox(tmp.path(), "host", "P1", true, None).unwrap();
+        create(tmp.path(), "next", "Next", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        assert!(read_tasks(tmp.path()).contains("id=\"next\""));
+    }
+
+    /// `--root-reason` justifies *being a root*; pairing it with `--parent` means
+    /// the agent misread the flag. Refuse rather than silently ignore it, or it
+    /// reads as "I wrote a reason, so I'm covered" while the plan is a child.
+    #[test]
+    fn root_reason_with_parent_is_refused() {
+        let tmp = ws_with_a_pending_plan();
+        let err = create(
+            tmp.path(),
+            "kid",
+            "Kid",
+            Some("host"),
+            false,
+            Some("这条理由不该出现在子 plan 上"),
+            pt::PlanKind::Exec,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("--root-reason"), "{err}");
     }
 
     /// `resume` refuses without a session id (its whole job is claiming focus),
@@ -371,7 +538,7 @@ mod tests {
     #[test]
     fn resume_without_session_id_errors() {
         let tmp = tempfile::tempdir().unwrap();
-        create(tmp.path(), "demo", "Demo", None, true, pt::PlanKind::Exec, None).unwrap();
+        create(tmp.path(), "demo", "Demo", None, true, None, pt::PlanKind::Exec, None).unwrap();
         add(tmp.path(), "demo", "P1", "task").unwrap();
         let err = resume(tmp.path(), "demo", None, None).unwrap_err();
         assert!(err.contains("no session id"));

@@ -174,9 +174,14 @@ to the CLI only when those tools are absent.**\n\
 - Update plans with the **`fleet plan`** subcommands, not by hand-editing \
 markdown — they make the same file change AND attribute your session to the \
 plan (so Fleet's UI shows your current P):\n\
-  - `fleet plan create <id> --title \"...\" [--parent <parent-id>]` — add a \
-new plan block and record this session as its executor. Pass `--parent` for \
-side work spun off mid-plan.\n\
+  - `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root \
+[--root-reason \"...\"])` — add a new plan block and record this session as its \
+executor. **One of `--parent` / `--root` is required** — there is no default. \
+Pass `--parent` for side work spun off mid-plan (Fleet points you back at the \
+parent when it completes); `--root` starts a new top-level tree. When some \
+other plan here still has pending work, a bare `--root` is refused: add \
+`--root-reason \"<why none of those is the parent>\"`, so starting a parallel \
+tree costs a moment's thought instead of being the path of least resistance.\n\
   - `fleet plan check <id> <P>` / `uncheck <id> <P>` — tick / untick a task.\n\
   - `fleet plan resume <id> [P]` — take over an existing plan you did not \
 create and were not handed.\n\
@@ -943,6 +948,19 @@ mod tests {
         assert!(
             g.contains("fleet plan check") && g.contains("fleet plan create"),
             "must teach the fleet plan subcommands"
+        );
+        // The tree-position rules are enforced in `plan_ops` for every runtime,
+        // so a codex session that reads `[--parent]` as optional here just meets
+        // a refused `create` with no idea what to pass. This guidance drifted
+        // once already — it still documented --parent as optional after the
+        // declaration became mandatory.
+        assert!(
+            g.contains("--root") && g.contains("is required"),
+            "must teach that a tree position must be declared"
+        );
+        assert!(
+            g.contains("--root-reason"),
+            "must teach the justification a bare --root now needs"
         );
     }
 

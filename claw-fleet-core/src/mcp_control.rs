@@ -77,6 +77,7 @@ fn plan_tool_def() -> Value {
                 "title": {"type": "string", "description": "Plan title. Required for create."},
                 "parent": {"type": "string", "description": "Parent plan id, when this plan is side work spawned mid-parent (create only). Fleet points you back at the parent once this plan completes. Exactly one of parent/root is required for create."},
                 "root": {"type": "boolean", "description": "Declare this plan a new top-level tree (create only). Required when parent is absent, so a plan's position in the tree is always an explicit choice."},
+                "root_reason": {"type": "string", "description": "Why none of this workspace's in-flight plans is the parent (create only). Required alongside root whenever another plan still has pending work — starting a parallel tree should cost a moment's thought, not be the default. Omit for the first plan in a workspace; never valid with parent."},
                 "kind": {"type": "string", "enum": ["exec", "explore"], "description": "What the P-tasks are for (create only, default exec). `exec` changes code; `explore` investigates and its deliverable is the exec child plans it spawns, not edits of its own — use it so an exploration's findings can't silently redefine the implementation."},
                 "text": {"type": "string", "description": "Task text. Required for add."}
             },
@@ -297,6 +298,7 @@ fn handle_plan(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, St
             &req(args, "title")?,
             arg(args, "parent").as_deref(),
             args.get("root").and_then(|v| v.as_bool()).unwrap_or(false),
+            arg(args, "root_reason").as_deref(),
             crate::prd_tasks::PlanKind::from_attr(arg(args, "kind").as_deref()),
             sid,
         )
@@ -890,6 +892,73 @@ mod tests {
         assert!(
             !tmp.path().join("TASKS.md").exists(),
             "a refused create must not create the file"
+        );
+    }
+
+    /// Same reasoning one step further: the priced-up `--root` must hold on the
+    /// MCP surface too, and `root_reason` must actually reach `plan_ops` rather
+    /// than being dropped by the arg mapping. A remote-workspace session can
+    /// reach *only* this path, so a gap here means flat plans forever there.
+    ///
+    /// The schema declares `additionalProperties: false`, so this also pins
+    /// `root_reason` as a declared property — omitting it there would make every
+    /// justified root un-createable over MCP.
+    #[test]
+    fn plan_create_via_mcp_prices_up_root_and_forwards_the_reason() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        // First plan: nothing pending yet, so a bare root is legitimately free.
+        handle(
+            "fleet__plan",
+            &json!({"action": "create", "plan_id": "host", "title": "Host", "root": true}),
+            None,
+            cwd,
+        )
+        .unwrap();
+        handle(
+            "fleet__plan",
+            &json!({"action": "add", "plan_id": "host", "task": "P1", "text": "open"}),
+            None,
+            cwd,
+        )
+        .unwrap();
+
+        // Now a candidate parent exists ⇒ a bare root is refused.
+        let err = handle(
+            "fleet__plan",
+            &json!({"action": "create", "plan_id": "flat", "title": "Flat", "root": true}),
+            None,
+            cwd,
+        )
+        .unwrap_err();
+        assert!(err.contains("--root-reason"), "{err}");
+        assert!(err.contains("host"), "names the candidate parent: {err}");
+
+        // …and a stated reason gets through the arg mapping.
+        handle(
+            "fleet__plan",
+            &json!({
+                "action": "create",
+                "plan_id": "flat",
+                "title": "Flat",
+                "root": true,
+                "root_reason": "与 host 无关,是另一条产品线"
+            }),
+            None,
+            cwd,
+        )
+        .unwrap();
+        let body = std::fs::read_to_string(cwd.join("TASKS.md")).unwrap();
+        assert!(body.contains("id=\"flat\""), "justified root must be written");
+
+        // The declared property must be in the schema, or `additionalProperties:
+        // false` rejects the call before it ever reaches this code.
+        let schema = plan_tool_def();
+        assert!(
+            schema["inputSchema"]["properties"]
+                .get("root_reason")
+                .is_some(),
+            "root_reason must be a declared property: {schema}"
         );
     }
 
