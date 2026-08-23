@@ -659,14 +659,23 @@ pub(crate) enum PlanCommands {
         title: String,
         /// Parent plan id. Marks this as a child (side-branch) plan: when it
         /// completes, Fleet points you back at the parent to keep going.
-        /// Exactly one of --parent / --root is required.
+        /// Usually unnecessary — a plan authored while you are executing another
+        /// plan already defaults to being that plan's child. Pass this only to
+        /// attach it somewhere other than the plan you are currently on.
         #[arg(long)]
         parent: Option<String>,
-        /// Declare this plan a new top-level tree (no parent). Required when
-        /// --parent is absent, so a plan's position in the tree is always an
-        /// explicit choice rather than a silent default.
+        /// Start a new top-level tree instead of attaching to the plan you are
+        /// currently executing. Needs --root-reason whenever you are on a plan;
+        /// with no plan in flight it is the default anyway and this flag is a
+        /// no-op.
         #[arg(long, conflicts_with = "parent")]
         root: bool,
+        /// Why this work does not belong under the plan you are currently
+        /// executing. Required alongside --root while you are on a plan, so
+        /// leaving its tree costs a moment's thought instead of being the path of
+        /// least resistance. Never valid with --parent.
+        #[arg(long, conflicts_with = "parent")]
+        root_reason: Option<String>,
         /// What the P-tasks are for: `exec` (default) changes code; `explore`
         /// investigates, and its deliverable is the exec child plans it spawns
         /// rather than edits of its own. Keeping the two apart stops an

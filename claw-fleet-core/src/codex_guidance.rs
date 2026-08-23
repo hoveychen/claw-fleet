@@ -174,9 +174,15 @@ to the CLI only when those tools are absent.**\n\
 - Update plans with the **`fleet plan`** subcommands, not by hand-editing \
 markdown — they make the same file change AND attribute your session to the \
 plan (so Fleet's UI shows your current P):\n\
-  - `fleet plan create <id> --title \"...\" [--parent <parent-id>]` — add a \
-new plan block and record this session as its executor. Pass `--parent` for \
-side work spun off mid-plan.\n\
+  - `fleet plan create <id> --title \"...\" [--parent <id> | --root \
+--root-reason \"...\"]` — add a new plan block and record this session as its \
+executor. **A plan you author while executing another plan defaults to being \
+that plan's child** — no flag required, and Fleet walks you back to the parent \
+when the child completes. Both flags only override that default: `--parent \
+<id>` attaches it elsewhere; `--root` starts a separate top-level tree and, \
+while you are on a plan, **is refused without** `--root-reason \"<why this work \
+does not belong under the current plan>\"`. With no plan in flight, a root is \
+the default anyway and neither flag is needed.\n\
   - `fleet plan check <id> <P>` / `uncheck <id> <P>` — tick / untick a task.\n\
   - `fleet plan resume <id> [P]` — take over an existing plan you did not \
 create and were not handed.\n\
@@ -943,6 +949,19 @@ mod tests {
         assert!(
             g.contains("fleet plan check") && g.contains("fleet plan create"),
             "must teach the fleet plan subcommands"
+        );
+        // The tree-position rules live in `plan_ops` and apply to every runtime,
+        // so guidance that omits them leaves a codex session meeting the default
+        // as unexplained behaviour and the gate as an unexplained refusal. This
+        // text drifted once already — it still described `--parent` as optional
+        // long after the declaration had become mandatory.
+        assert!(
+            g.contains("defaults to being"),
+            "must teach the inherited-parent default"
+        );
+        assert!(
+            g.contains("--root-reason"),
+            "must teach the justification needed to leave the current plan's tree"
         );
     }
 

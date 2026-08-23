@@ -83,9 +83,12 @@ fn add_does_not_claim_focus() {
     let home = tempfile::tempdir().unwrap();
     let ws = tempfile::tempdir().unwrap();
 
-    // `create` claims focus on alpha; clear it so `add`'s effect is isolated.
+    // `create` claims focus on alpha; the second create re-points it to beta so
+    // `add`'s effect is isolated. Beta takes no `--root`: authored while alpha is
+    // in flight, it becomes alpha's child by default — which is irrelevant here,
+    // but passing `--root` would now require a justification.
     plan(home.path(), ws.path(), &["create", "alpha", "--title", "Alpha", "--root"]);
-    plan(home.path(), ws.path(), &["create", "beta", "--title", "Beta", "--root"]);
+    plan(home.path(), ws.path(), &["create", "beta", "--title", "Beta"]);
     let rec = focus(home.path()).expect("create claimed focus");
     assert_eq!(rec["planId"], "beta", "second create re-points focus");
 
@@ -93,6 +96,68 @@ fn add_does_not_claim_focus() {
     plan(home.path(), ws.path(), &["add", "alpha", "P1", "--text", "a1"]);
     let rec = focus(home.path()).expect("focus record still present");
     assert_eq!(rec["planId"], "beta", "add must not steal focus");
+}
+
+/// The tree-position default, end-to-end through the real binary: a plan
+/// authored while the session is executing another one becomes its child, with
+/// no flag passed. Leaving that tree still works but has to be justified.
+///
+/// This is the mechanism that keeps a decomposed goal running to completion — a
+/// relay chain in `agent-workspace` produced 8 sibling roots with 0 `parent=`
+/// from a single boss request, so every hop finished its own plan, found no
+/// ancestor to walk back to, and stopped with the goal unfinished. Only an
+/// end-to-end test catches a regression here: the default reads the focus record
+/// the *previous* invocation wrote, which a unit test stubs out.
+#[test]
+fn create_inherits_the_focused_plan_as_parent() {
+    let home = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let tasks = ws.path().join("TASKS.md");
+
+    // Nothing in flight ⇒ a fresh topic, no flag needed and no parent inherited.
+    plan(home.path(), ws.path(), &["create", "goal", "--title", "Goal"]);
+    let body = std::fs::read_to_string(&tasks).unwrap();
+    assert!(
+        body.contains(r#"id="goal" v="2" -->"#),
+        "first plan must be a root: {body}"
+    );
+
+    // Authored while 'goal' is in flight ⇒ child of goal, no flag passed.
+    plan(home.path(), ws.path(), &["create", "item1", "--title", "Item 1"]);
+    let body = std::fs::read_to_string(&tasks).unwrap();
+    assert!(
+        body.contains(r#"id="item1" v="2" parent="goal""#),
+        "spawned plan must inherit the focused plan as parent: {body}"
+    );
+
+    // Opting out is refused without a reason…
+    let out = Command::new(bin_path("fleet-cli"))
+        .args(["plan", "create", "escape", "--title", "Escape", "--root"])
+        .current_dir(ws.path())
+        .env("FLEET_HOME", home.path())
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env("FLEET_SESSION_ID", SID)
+        .output()
+        .expect("run fleet plan");
+    assert!(!out.status.success(), "a bare --root mid-plan must be refused");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--root-reason"), "{err}");
+    assert!(
+        !std::fs::read_to_string(&tasks).unwrap().contains("escape"),
+        "a refused create must not write"
+    );
+
+    // …and allowed with one.
+    plan(
+        home.path(),
+        ws.path(),
+        &["create", "escape", "--title", "Escape", "--root", "--root-reason", "另一条产品线,与 goal 无关"],
+    );
+    let body = std::fs::read_to_string(&tasks).unwrap();
+    assert!(
+        body.contains(r#"id="escape" v="2" -->"#),
+        "a justified root must be written without a parent: {body}"
+    );
 }
 
 /// `check` both ticks the box and refreshes focus onto that plan.
