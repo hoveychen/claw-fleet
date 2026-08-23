@@ -3175,6 +3175,21 @@ fn start_stall_watchdog() {
     });
 }
 
+/// Stamp how long this desktop spent handling a request onto its reply, so the
+/// phone can split the round trip it measures into "the link was slow" vs "the
+/// desktop was slow" — the total alone can't tell those apart.
+///
+/// A duration, not a timestamp: the two clocks are never synchronised, and a
+/// timestamp would need them to be. Only correlated replies (`req_id` present)
+/// are stamped; unsolicited pushes carry no request to attribute the time to.
+fn stamp_handle_ms(reply: &mut Value, handle_ms: u128) {
+    let Some(obj) = reply.as_object_mut() else { return };
+    if !obj.contains_key("req_id") {
+        return;
+    }
+    obj.insert("handle_ms".to_string(), json!(handle_ms as u64));
+}
+
 async fn dispatch_inbound<F>(payload: Value, handler: F)
 where
     F: FnOnce(&Value) -> Option<Value> + Send + 'static,
@@ -3224,7 +3239,12 @@ where
         // task spent waiting to be polled again.
         let wake_ms = handle_ms.saturating_sub(queue_ms.saturating_add(exec_ms));
         let phases = format!("queue_ms={queue_ms} exec_ms={exec_ms} wake_ms={wake_ms}");
-        if let Some(reply) = reply {
+        if let Some(mut reply) = reply {
+            // Ride the B segment out with the reply. Stamped after the phases are
+            // computed so it covers everything this side spent, and before
+            // `encode_payload` so it travels inside the sealed envelope — the
+            // relay must not learn how busy this desktop is.
+            stamp_handle_ms(&mut reply, handle_ms);
             let out = encode_payload(&reply);
             let Outbound::Text(ref wire) = out;
             crate::log_debug(&format!(
@@ -5605,6 +5625,31 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(ran.load(Ordering::SeqCst), "the handler must still run, just off the loop");
+    }
+
+    // ── reply timing stamp ───────────────────────────────────────────────────
+
+    /// The phone splits its measured round trip by subtracting what this desktop
+    /// reports spending, so the stamp has to land on the reply it belongs to —
+    /// and nowhere else. An unstamped reply degrades the phone to "total only".
+    #[test]
+    fn stamp_handle_ms_marks_only_correlated_replies() {
+        let mut reply = json!({ "event": "reply", "req_id": "r1", "ok": true, "data": 42 });
+        stamp_handle_ms(&mut reply, 380);
+        assert_eq!(reply["handle_ms"], 380, "a reply carries the desktop's own cost");
+        assert_eq!(reply["data"], 42, "stamping must not disturb the payload");
+
+        // An unsolicited push (sessions snapshot, decision_created) has no request
+        // to attribute time to; stamping it would invite the phone to subtract a
+        // duration from a round trip that was never measured.
+        let mut push = json!({ "event": "sessions", "sessions": [] });
+        stamp_handle_ms(&mut push, 380);
+        assert!(push.get("handle_ms").is_none(), "pushes stay untouched");
+
+        // Handlers are free to return any JSON; a non-object must not panic.
+        let mut scalar = json!("ok");
+        stamp_handle_ms(&mut scalar, 380);
+        assert_eq!(scalar, json!("ok"));
     }
 
     // ── stall watchdog ───────────────────────────────────────────────────────
