@@ -869,12 +869,24 @@ export function HistoryView() {
   // The tab drag in flight. Held here rather than inside a strip because the
   // *destination* strip is a sibling component: it has to see which tab is
   // moving and where it came from to decide whether it is a drop target at all.
-  const [drag, setDrag] = useState<{ tabId: string; fromGroup: string } | null>(null);
+  const [drag, setDrag] = useState<{
+    tabId: string;
+    fromGroup: string;
+    /** Which group the pointer is over right now, so the destination strip can
+     *  light up. Only the *source* strip tracks the pointer (it owns the drag),
+     *  so the hover has to travel through here to reach its sibling. */
+    overGroup: string | null;
+  } | null>(null);
   const startTabDrag = useCallback(
-    (fromGroup: string, tabId: string) => setDrag({ tabId, fromGroup }),
+    (fromGroup: string, tabId: string) => setDrag({ tabId, fromGroup, overGroup: fromGroup }),
     [],
   );
   const endTabDrag = useCallback(() => setDrag(null), []);
+  const hoverTabDrag = useCallback(
+    (overGroup: string | null) =>
+      setDrag((d) => (!d || d.overGroup === overGroup ? d : { ...d, overGroup })),
+    [],
+  );
   // A cross-group drop. Commits the move (which re-parents the pane, so the
   // SessionDetail remounts once — the price of the move, paid on release rather
   // than on every pointer step) and hands focus to the destination.
@@ -1407,6 +1419,7 @@ export function HistoryView() {
                   drag={drag}
                   onDragStart={(tabId) => startTabDrag(grp.id, tabId)}
                   onDragEnd={endTabDrag}
+                  onDragHover={hoverTabDrag}
                   onDropTab={dropTab}
                   onSplitRight={() => splitAt(grp.id, "row")}
                   onSplitDown={() => splitAt(grp.id, "column")}
