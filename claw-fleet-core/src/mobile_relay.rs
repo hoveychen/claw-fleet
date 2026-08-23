@@ -3020,19 +3020,39 @@ where
         let started = std::time::Instant::now();
         // Blocking file IO (write_response / pending scans) must not run on the ws
         // runtime thread.
-        let reply = tokio::task::spawn_blocking(move || handler(&payload)).await.ok().flatten();
+        //
+        // `handle_ms` alone can't explain a slow reply, which is why it is split
+        // three ways here. A `tail` that replays in 1.7s on the same machine has
+        // been logged at 379s, so the wall clock is spent somewhere outside the
+        // handler body — and each of the three has a different fix:
+        //   queue_ms — submitted, waiting for a blocking worker (pool starved by
+        //              long-running handlers, e.g. `guard_analyze`)
+        //   exec_ms  — the handler body itself (real work, or a lock/IO stall)
+        //   wake_ms  — handler done, waiting for the single-threaded ws runtime to
+        //              poll the continuation (the `select!` loop is blocked)
+        let blocking = tokio::task::spawn_blocking(move || {
+            let queue_ms = started.elapsed().as_millis();
+            let t = std::time::Instant::now();
+            let reply = handler(&payload);
+            (reply, queue_ms, t.elapsed().as_millis())
+        });
+        let (reply, queue_ms, exec_ms) = blocking.await.unwrap_or((None, 0, 0));
         let handle_ms = started.elapsed().as_millis();
+        // Whatever the two measured phases don't account for is time the finished
+        // task spent waiting to be polled again.
+        let wake_ms = handle_ms.saturating_sub(queue_ms.saturating_add(exec_ms));
+        let phases = format!("queue_ms={queue_ms} exec_ms={exec_ms} wake_ms={wake_ms}");
         if let Some(reply) = reply {
             let out = encode_payload(&reply);
             let Outbound::Text(ref wire) = out;
             crate::log_debug(&format!(
-                "[relay-timing] method={method} handle_ms={handle_ms} wire_bytes={}",
+                "[relay-timing] method={method} handle_ms={handle_ms} {phases} wire_bytes={}",
                 wire.len()
             ));
             send_out(out);
         } else if handle_ms >= 50 {
             crate::log_debug(&format!(
-                "[relay-timing] method={method} handle_ms={handle_ms} no-reply"
+                "[relay-timing] method={method} handle_ms={handle_ms} {phases} no-reply"
             ));
         }
     });
