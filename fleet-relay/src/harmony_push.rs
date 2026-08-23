@@ -54,6 +54,14 @@ const SUCCESS_CODE: &str = "80000000";
 ///   * `82500006` — invalid OpenID (from this module's original comment).
 ///   * `80300007` — `atomicUnableSendUnsubscribedMsg`, i.e. the user revoked
 ///     the service-notification subscription (from the setup wiki).
+///   * `82500005` — the recipient's one-off subscription quota is spent. Pruning
+///     rather than retrying, because a spent quota only comes back when the user
+///     re-authorises — and re-authorising re-subscribes, which writes a *new*
+///     record. So the old one can never deliver again, and keeping it means
+///     re-sending to it on every single notify. Observed live: one channel
+///     carried a leftover 元服务 OpenID subscription alongside the device token
+///     that replaced it, and logged this code on every notify for a day while
+///     the token leg delivered fine.
 ///
 /// CAVEAT: neither code has been confirmed on a real device to be *permanent*
 /// (the success path `80000000` and the OAuth-param errors were verified, these
@@ -65,7 +73,7 @@ const SUCCESS_CODE: &str = "80000000";
 /// this list. Under-pruning here is harmless (a stale entry that keeps getting
 /// skipped); over-pruning silently drops a working subscriber, so we err toward
 /// keeping.
-const DEAD_OPENID_CODES: &[&str] = &["82500006", "80300007"];
+const DEAD_OPENID_CODES: &[&str] = &["82500006", "80300007", "82500005"];
 
 fn is_dead_openid_code(code: &str) -> bool {
     DEAD_OPENID_CODES.contains(&code)
@@ -603,5 +611,18 @@ cHMuOFehtqcSyMaY3z552xNj
         assert!(!is_dead_openid_code("80300010"));
         assert!(!is_dead_openid_code("1101"));
         assert!(!is_dead_openid_code(""));
+    }
+
+    /// A one-off subscription whose quota is spent can never deliver again until
+    /// the user re-authorises — and re-authorising re-subscribes, which writes a
+    /// fresh record. Retrying the spent one just fails forever: one live channel
+    /// logged this same code on every single notify for a day, because the
+    /// subscription it belongs to is never pruned.
+    #[test]
+    fn exhausted_one_off_quota_prunes() {
+        assert!(
+            is_dead_openid_code("82500005"),
+            "a spent one-off subscription must be pruned, not retried on every notify"
+        );
     }
 }
