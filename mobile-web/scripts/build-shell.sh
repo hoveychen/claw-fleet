@@ -14,7 +14,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Keep in sync with claw-fleet-core/src/mobile_relay.rs DEFAULT_RELAY_URL.
+# Matches claw-fleet-core/src/mobile_relay.rs DEFAULT_RELAY_URL, i.e. the
+# non-mainland host. A build can't know where the phone will be, so mainland
+# builds pass RELAY_URL=https://fleet-relay.eternizedlab.com explicitly
+# (both hosts front the same relay — see claw-fleet-core/src/relay_region.rs).
 RELAY_URL="${RELAY_URL:-https://fleet-relay.muveeai.com}"
 
 echo "==> building shell bundle against relay: $RELAY_URL"
