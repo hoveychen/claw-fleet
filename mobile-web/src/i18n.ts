@@ -113,6 +113,12 @@ const DICT: Record<string, string> = {
   桌面端离线: "Desktop offline",
   "在线 · 网络一般": "Online · slow",
   "在线 · 网络拥挤": "Online · congested",
+  链路耗时: "Link timing",
+  "等待样本…": "Awaiting sample…",
+  分段不可用: "Breakdown unavailable",
+  手机: "Phone",
+  桌面链路: "Desktop link",
+  处理: "Handling",
   "用 Safari 分享菜单「添加到主屏幕」后从主屏幕打开——否则 7 天不访问，iOS 会清掉本机配对，需重新扫码。":
     "Use Safari's share menu \"Add to Home Screen\" and open from there — otherwise iOS wipes the local pairing after 7 days of inactivity and you'll need to re-scan.",
   知道了: "Got it",

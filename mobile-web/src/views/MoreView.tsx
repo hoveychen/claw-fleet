@@ -4,6 +4,7 @@
 import { ChevronRight, FolderGit2, Gauge } from "lucide-react";
 import { useDraft } from "../draft";
 import { dateLocale, useI18n, type Lang } from "../i18n";
+import type { RttSplit } from "../connQuality";
 import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
 import { relayDisplayHost } from "../relay";
@@ -24,6 +25,9 @@ interface Props {
   /** Most recent sessions frame kind + running counts, to show whether the
    *  desktop's delta path is actually engaged. */
   sessionsFrame: { last: "full" | "delta" | null; full: number; delta: number };
+  /** Latest round trip split three ways, so a laggy phone can be told apart
+   *  from a laggy desktop link and from a slow desktop handler. */
+  rttSplit: RttSplit | null;
   /** Every agent that has served a `pending_snapshot` this session. Normally
    *  one (the desktop); a second entry is a stray agent answering in its place,
    *  which is what blanks the card list — so it gets surfaced here by name. */
@@ -41,6 +45,7 @@ export function MoreView({
   connected,
   agentOnline,
   sessionsFrame,
+  rttSplit,
   snapshotSources,
   push,
   pushOptedOut,
@@ -206,6 +211,30 @@ export function MoreView({
             <span className={styles.connWrap}>
               <span className={styles.connDot} data-state={connState} />
               <span className={styles.connLabel}>{connLabel}</span>
+            </span>
+          </div>
+          {/* 一个请求的往返被拆成三段。哪一段大，要修的东西完全不同：手机段大
+              是这台手机的网络，桌面链路段大是桌面到 relay（或 relay 排队），处理段
+              大是桌面 handler 自己慢。未测到的段不显示，不拿 0 冒充。 */}
+          <div className={styles.divider} />
+          <div className={styles.row}>
+            <span className={styles.rowLabel}>{t("链路耗时")}</span>
+            <span className={styles.connWrap}>
+              <span className={styles.connLabel}>
+                {rttSplit ? `${rttSplit.totalMs}ms` : t("等待样本…")}
+              </span>
+              {rttSplit && (
+                <span className={styles.frameCount}>
+                  {[
+                    rttSplit.phoneMs !== null && `${t("手机")} ${rttSplit.phoneMs}`,
+                    rttSplit.desktopLinkMs !== null &&
+                      `${t("桌面链路")} ${rttSplit.desktopLinkMs}`,
+                    rttSplit.handleMs !== null && `${t("处理")} ${rttSplit.handleMs}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || t("分段不可用")}
+                </span>
+              )}
             </span>
           </div>
           <div className={styles.divider} />
