@@ -473,6 +473,47 @@ const MOCK_SESSIONS_SEED: Array<
     agentSource: "claude-code",
     lastOutcome: [],
   },
+
+  // ── 10. Quiet-alive: the process is running, the transcript is not ─────────
+  // Parked on one long tool call (a build, a background-task wait), so
+  // `determine_status` aged it past the 60s tool_use window down to `idle`
+  // while the CLI process keeps running. The row must wear the faded-green dot
+  // (`isQuietAlive`), NOT read as ended — the detail composer says 会话运行中
+  // for this exact session, and the two must not contradict each other.
+  {
+    id: "sess-quiet-alive",
+    workspacePath: "/Users/demo/workspace/stealth",
+    workspaceName: "stealth",
+    ideName: null,
+    entrypoint: "claw-fleet-newsession",
+    isSubagent: false,
+    parentSessionId: null,
+    agentType: null,
+    agentDescription: null,
+    slug: null,
+    aiTitle: "Implement ImageBitmap pixel snapshot and close",
+    status: "idle",
+    tokenSpeed: 0,
+    agentTokenSpeed: 0,
+    totalOutputTokens: 59_793,
+    totalCostUsd: 14.11,
+    agentTotalCostUsd: 14.11,
+    costSpeedUsdPerMin: 0,
+    lastMessagePreview:
+      "The build task is still running in the background, so I'll hold off here and wait for its completion notification.",
+    lastActivityMs: NOW - 7 * MIN,
+    createdAtMs: NOW - 95 * MIN,
+    jsonlPath: "/Users/demo/.claude/projects/stealth/sess-quiet-alive.jsonl",
+    model: "claude-opus-5",
+    thinkingLevel: null,
+    pid: 44821,
+    pidPrecise: true,
+    procAlive: true,
+    lastSkill: null,
+    contextPercent: 0.21,
+    agentSource: "claude-code",
+    lastOutcome: [],
+  },
 ];
 
 // These fields are always serialized by the backend (plain Rust fields), so the

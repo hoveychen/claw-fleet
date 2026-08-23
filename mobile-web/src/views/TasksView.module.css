@@ -328,6 +328,14 @@
   background: var(--color-success);
 }
 
+/* Quiet-alive: the process runs on while the transcript has gone quiet (one
+   long tool call). Same green as a live row but faded, so it reads as "still
+   going, just silent" rather than as another working session. */
+.statusDot[data-tone="quiet"] {
+  background: var(--color-success);
+  opacity: 0.45;
+}
+
 .statusDot[data-tone="idle"] {
   background: var(--color-text-dim);
 }
@@ -384,6 +392,11 @@
 
 .runtime[data-tone="waiting"] {
   color: var(--color-warning);
+}
+
+.runtime[data-tone="quiet"] {
+  color: var(--color-success);
+  opacity: 0.6;
 }
 
 .snippet {
