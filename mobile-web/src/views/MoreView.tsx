@@ -6,6 +6,7 @@ import { useDraft } from "../draft";
 import { dateLocale, useI18n, type Lang } from "../i18n";
 import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
+import { relayDisplayHost } from "../relay";
 import { clearSecret } from "../secretStore";
 import { clearCachedSessions } from "../sessionCache";
 import { useTheme, type ThemeSetting } from "../theme";
@@ -194,6 +195,12 @@ export function MoreView({
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("连接与通知")}</div>
         <div className={styles.card}>
+          <div className={styles.row}>
+            {/* 与「关于」里的 Fleet Mobile 同理，Relay 是专名，中英一致，不进字典。 */}
+            <span className={styles.rowLabel}>Relay</span>
+            <span className={styles.relayValue}>{relayDisplayHost()}</span>
+          </div>
+          <div className={styles.divider} />
           <div className={styles.row}>
             <span className={styles.rowLabel}>{t("桌面端")}</span>
             <span className={styles.connWrap}>
