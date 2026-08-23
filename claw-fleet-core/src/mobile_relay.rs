@@ -2978,6 +2978,10 @@ pub fn ensure_ws_client() {
     if WS_STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
+    // Started alongside the socket, not at module init: it only has anything to
+    // watch once handlers can arrive, and this path already excludes test
+    // fixtures (see the gate above).
+    start_stall_watchdog();
     let spawned = std::thread::Builder::new()
         .name("mobile-relay-ws".into())
         .spawn(|| {
@@ -3025,6 +3029,152 @@ async fn ws_run_loop() {
 /// the relay dropped the socket, and every answer frame buffered behind it was
 /// lost unread — while decision cards, which only need one momentary push, kept
 /// arriving. Hence the handler must not be awaited inline.
+// ── Stall capture: what a stuck handler is actually waiting on ───────────────
+//
+// The three-way split in `dispatch_inbound` says *which phase* ate the wall
+// clock; when that phase is `exec_ms` it still can't say what the handler was
+// blocked on, because by the time the line is logged the stack is gone. So
+// handlers register while they run and a watchdog snapshots the process stacks
+// while one is still stuck — the only artifact that names the lock / syscall.
+
+/// Handlers currently running: `id → (method, started)`.
+static INFLIGHT: Mutex<Option<HashMap<u64, (String, std::time::Instant)>>> = Mutex::new(None);
+static INFLIGHT_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// A handler still running this long past its start is stalled: replaying every
+/// session on one machine kept the slowest handler under 2s, so 10s is already
+/// far outside anything the work itself explains.
+const STALL_AFTER: Duration = Duration::from_secs(10);
+/// Minimum gap between two captures. Sampling is not free (it walks every
+/// thread), and a stall that lasts minutes would otherwise be re-captured on
+/// every sweep.
+const STALL_CAPTURE_COOLDOWN: Duration = Duration::from_secs(120);
+/// Lifetime cap on captures per process, so a permanently wedged handler can't
+/// fill the disk with near-identical dumps.
+const STALL_CAPTURE_MAX: usize = 20;
+/// How often the watchdog looks for a stalled handler.
+const STALL_SWEEP_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Register a running handler; the returned id must be handed to
+/// [`inflight_exit`] when it finishes.
+fn inflight_enter(method: &str) -> u64 {
+    let id = INFLIGHT_SEQ.fetch_add(1, Ordering::Relaxed);
+    if let Ok(mut guard) = INFLIGHT.lock() {
+        guard
+            .get_or_insert_with(HashMap::new)
+            .insert(id, (method.to_string(), std::time::Instant::now()));
+    }
+    id
+}
+
+fn inflight_exit(id: u64) {
+    if let Ok(mut guard) = INFLIGHT.lock() {
+        if let Some(map) = guard.as_mut() {
+            map.remove(&id);
+        }
+    }
+}
+
+/// Handlers in `table` that have been running longer than `after`, as
+/// `(method, elapsed_ms)` — split out from the sweep so the "is anything
+/// stuck?" rule is testable without a live socket or a real clock.
+fn stalled_entries(
+    table: &HashMap<u64, (String, std::time::Instant)>,
+    now: std::time::Instant,
+    after: Duration,
+) -> Vec<(String, u128)> {
+    let mut out: Vec<(String, u128)> = table
+        .values()
+        .filter(|(_, started)| now.saturating_duration_since(*started) >= after)
+        .map(|(method, started)| {
+            (method.clone(), now.saturating_duration_since(*started).as_millis())
+        })
+        .collect();
+    // Longest-stuck first: that is the one whose stack is worth reading.
+    out.sort_by(|a, b| b.1.cmp(&a.1));
+    out
+}
+
+/// Write a stack snapshot of *this* process next to the other Fleet
+/// diagnostics. macOS-only: `sample` ships with the OS and needs no
+/// entitlement to inspect its own process. Elsewhere the stall is still logged,
+/// just without the stacks.
+fn capture_stall_stacks(label: &str, detail: &str) {
+    let Some(home) = crate::session::real_home_dir() else { return };
+    let dir = home.join(".fleet").join("diagnostics");
+    if fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let out = dir.join(format!("stall-{}-{}.txt", now_ms(), label));
+    crate::log_debug(&format!("[stall] {detail} → sampling into {}", out.display()));
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("/usr/bin/sample")
+            .arg(std::process::id().to_string())
+            .arg("3") // seconds of sampling
+            .arg("-file")
+            .arg(&out)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        match status {
+            Ok(s) if s.success() => crate::log_debug("[stall] sample written"),
+            Ok(s) => crate::log_debug(&format!("[stall] sample exited {s}")),
+            Err(e) => crate::log_debug(&format!("[stall] sample failed: {e}")),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = &out;
+        crate::log_debug("[stall] stack capture unavailable on this platform");
+    }
+}
+
+/// Start the single sweeper thread that watches [`INFLIGHT`]. Idempotent.
+fn start_stall_watchdog() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let spawned = std::thread::Builder::new()
+            .name("relay-stall-watchdog".into())
+            .spawn(|| {
+                let mut captures = 0usize;
+                let mut last_capture: Option<std::time::Instant> = None;
+                loop {
+                    std::thread::sleep(STALL_SWEEP_INTERVAL);
+                    if captures >= STALL_CAPTURE_MAX {
+                        continue; // keep draining, stop dumping
+                    }
+                    let now = std::time::Instant::now();
+                    let stalled = match INFLIGHT.lock() {
+                        Ok(guard) => guard
+                            .as_ref()
+                            .map(|t| stalled_entries(t, now, STALL_AFTER))
+                            .unwrap_or_default(),
+                        Err(_) => continue,
+                    };
+                    let Some((method, elapsed_ms)) = stalled.first().cloned() else { continue };
+                    if last_capture.is_some_and(|t| now.duration_since(t) < STALL_CAPTURE_COOLDOWN)
+                    {
+                        continue;
+                    }
+                    last_capture = Some(now);
+                    captures += 1;
+                    let others = stalled.len().saturating_sub(1);
+                    capture_stall_stacks(
+                        &method,
+                        &format!(
+                            "method={method} stuck_ms={elapsed_ms} other_stalled={others}"
+                        ),
+                    );
+                }
+            });
+        if let Err(e) = spawned {
+            crate::log_debug(&format!("[stall] watchdog spawn failed: {e}"));
+        }
+    });
+}
+
 async fn dispatch_inbound<F>(payload: Value, handler: F)
 where
     F: FnOnce(&Value) -> Option<Value> + Send + 'static,
@@ -3057,10 +3207,15 @@ where
         //   exec_ms  — the handler body itself (real work, or a lock/IO stall)
         //   wake_ms  — handler done, waiting for the single-threaded ws runtime to
         //              poll the continuation (the `select!` loop is blocked)
+        let watched = method.clone();
         let blocking = tokio::task::spawn_blocking(move || {
             let queue_ms = started.elapsed().as_millis();
             let t = std::time::Instant::now();
+            // Registered for the handler's whole body so the watchdog can catch
+            // it mid-stall — after it returns, the stack that mattered is gone.
+            let inflight = inflight_enter(&watched);
             let reply = handler(&payload);
+            inflight_exit(inflight);
             (reply, queue_ms, t.elapsed().as_millis())
         });
         let (reply, queue_ms, exec_ms) = blocking.await.unwrap_or((None, 0, 0));
@@ -5450,6 +5605,49 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(ran.load(Ordering::SeqCst), "the handler must still run, just off the loop");
+    }
+
+    // ── stall watchdog ───────────────────────────────────────────────────────
+
+    /// Only handlers past the threshold count as stalled, and the longest-stuck
+    /// one must come first — the watchdog captures for `first()`, so an ordering
+    /// slip would dump the stack of a handler that had barely started.
+    #[test]
+    fn stalled_entries_reports_only_the_overdue_longest_first() {
+        let now = std::time::Instant::now();
+        let ago = |s: u64| now.checked_sub(Duration::from_secs(s)).expect("clock has headroom");
+
+        let mut table = HashMap::new();
+        table.insert(1u64, ("pending_snapshot".to_string(), ago(0)));
+        table.insert(2u64, ("tail".to_string(), ago(30)));
+        table.insert(3u64, ("today_usage".to_string(), ago(12)));
+
+        let stalled = stalled_entries(&table, now, Duration::from_secs(10));
+        let methods: Vec<&str> = stalled.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(
+            methods,
+            vec!["tail", "today_usage"],
+            "the fresh handler is not stalled; the 30s one outranks the 12s one"
+        );
+        assert!(stalled[0].1 >= 30_000, "elapsed is reported in ms");
+    }
+
+    /// A handler that finished must leave no trace, or the watchdog would keep
+    /// sampling stacks for work that already replied.
+    #[test]
+    fn inflight_exit_clears_the_entry() {
+        let id = inflight_enter("probe-method");
+        {
+            let guard = INFLIGHT.lock().unwrap();
+            let table = guard.as_ref().expect("registry initialised on first enter");
+            assert!(table.contains_key(&id), "a running handler is registered");
+        }
+        inflight_exit(id);
+        let guard = INFLIGHT.lock().unwrap();
+        assert!(
+            !guard.as_ref().unwrap().contains_key(&id),
+            "a finished handler must be deregistered"
+        );
     }
 
     /// Two holders of the same dedup key must never be inside the critical
