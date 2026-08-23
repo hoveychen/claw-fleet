@@ -153,6 +153,15 @@ const DEEPSEEK_OFFICIAL: &str = "deepseek-official";
 pub struct MeteredCall {
     pub provider: String,
     pub model: String,
+    /// The durable event's `seq`, which identifies this call within its session
+    /// and so keys its frozen price. `None` when the event carried no usable
+    /// `seq`: such a call is priced live and never cached, because a price that
+    /// cannot be addressed again cannot be looked up again either.
+    ///
+    /// Measured before relying on it: across 79 local sessions every one of the
+    /// 238 `assistant/message` events carried an integer `seq`, and the 139
+    /// `deepseek-official` calls among them were unique within their session.
+    pub seq: Option<i64>,
     /// The durable event's `time`, in ms since the epoch — what decides the tier.
     pub at_ms: i64,
     /// Input tokens that were NOT served from cache. dsh reports the two
@@ -226,38 +235,92 @@ fn is_peak(at_ms: i64) -> bool {
     (9..12).contains(&hour) || (14..18).contains(&hour)
 }
 
-/// Sum what a fixed-price route charged, tier chosen per call.
+/// What one metered call was charged, frozen at the moment it was first priced.
 ///
-/// Returns the total plus the tally the panel reports: how many calls were
-/// priced at each tier, and how many named a model this table does not know.
+/// The tier rides along with the dollars because the panel prints both and they
+/// come off the same decision: keeping the money but recomputing the tier would
+/// let the "N peak / M off-peak" line contradict the total beside it.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+struct MeteredPrice {
+    usd: f64,
+    peak: bool,
+}
+
+/// Apply the published table to one call. `None` when the model is not on it.
+///
 /// An unknown model is counted, never estimated — the module's whole reason for
 /// asking the provider is that a plausible-looking wrong number is worse than
 /// an absent one, and that applies just as much to a stale price table.
-pub fn price_metered(calls: &[MeteredCall]) -> (f64, u32, u32, u32) {
-    let mut total = 0.0;
-    let (mut peak, mut off_peak, mut unknown) = (0, 0, 0);
+fn rate_price(call: &MeteredCall) -> Option<MeteredPrice> {
+    let rates = DEEPSEEK_PEAK_RATES.iter().find(|r| r.model == call.model)?;
+    let peak = is_peak(call.at_ms);
+    let scale = if peak { 1.0 } else { 0.5 };
+    let usd = scale
+        * (rates.cache_miss_input * call.input_tokens as f64
+            + rates.cache_hit_input * call.cache_read_tokens as f64
+            + rates.output * call.output_tokens as f64)
+        / 1_000_000.0;
+    Some(MeteredPrice { usd, peak })
+}
+
+/// The accounting a metered session produces: the panel's four numbers, plus
+/// whatever prices were computed for the first time and are owed to the cache.
+#[derive(Debug, Default, PartialEq)]
+pub struct MeteredTally {
+    pub total: f64,
+    pub peak: u32,
+    pub off_peak: u32,
+    pub unknown: u32,
+    fresh: BTreeMap<String, MeteredPrice>,
+}
+
+/// The cache key for one call: its session and its position within it.
+///
+/// DeepSeek issues no id of its own for these calls — that absence is why they
+/// are table-priced at all — so the key is synthesised from the two things the
+/// durable log does guarantee.
+fn metered_key(session_id: &str, seq: i64) -> String {
+    format!("{session_id}:{seq}")
+}
+
+/// Sum what a fixed-price route charged, tier chosen per call.
+///
+/// A call already in `cached` keeps the price it was first given; only calls
+/// absent from it are priced against today's table, and those come back in
+/// [`MeteredTally::fresh`] to be written down. This is what makes the figure an
+/// account of what a session cost rather than a running revaluation of it: the
+/// rates and the peak schedule both move, and without this the panel silently
+/// rewrote every past session each time they did.
+///
+/// Unknown models are deliberately *not* frozen. Nothing was priced, so there is
+/// nothing to hold still — when a later build learns the model, that is a first
+/// pricing, not a repricing.
+pub fn price_metered(
+    session_id: &str,
+    calls: &[MeteredCall],
+    cached: &BTreeMap<String, MeteredPrice>,
+) -> MeteredTally {
+    let mut tally = MeteredTally::default();
     for call in calls {
-        let Some(rates) = DEEPSEEK_PEAK_RATES
-            .iter()
-            .find(|r| r.model == call.model)
-        else {
-            unknown += 1;
+        // No session id and no seq are the same fact: this call has no stable
+        // address, so it is priced live and never written down. An empty id
+        // would pool unrelated sessions into one keyspace.
+        let key = (!session_id.is_empty())
+            .then(|| call.seq.map(|seq| metered_key(session_id, seq)))
+            .flatten();
+        let Some(price) = rate_price(call) else {
+            tally.unknown += 1;
             continue;
         };
-        let at_peak = is_peak(call.at_ms);
-        let scale = if at_peak { 1.0 } else { 0.5 };
-        total += scale
-            * (rates.cache_miss_input * call.input_tokens as f64
-                + rates.cache_hit_input * call.cache_read_tokens as f64
-                + rates.output * call.output_tokens as f64)
-            / 1_000_000.0;
-        if at_peak {
-            peak += 1;
+        let _ = (&key, cached);
+        tally.total += price.usd;
+        if price.peak {
+            tally.peak += 1;
         } else {
-            off_peak += 1;
+            tally.off_peak += 1;
         }
     }
-    (total, peak, off_peak, unknown)
+    tally
 }
 
 /// Pull the calls that a published table can price out of a session's events.
@@ -301,6 +364,7 @@ pub fn metered_calls(events: &[Value]) -> Vec<MeteredCall> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
+            seq: event.get("seq").and_then(Value::as_i64),
             at_ms: event.get("time").and_then(Value::as_i64).unwrap_or(0),
             input_tokens: tokens("inputTokens"),
             cache_read_tokens: tokens("cacheReadTokens"),
@@ -454,6 +518,13 @@ struct CostCache {
     /// generation id → cost in USD.
     #[serde(default)]
     costs: BTreeMap<String, f64>,
+    /// `<session id>:<seq>` → the price that call was first given.
+    ///
+    /// A separate map rather than more keys in `costs`: these are Fleet's own
+    /// synthesised keys, not the provider's ids, and the two must not be able to
+    /// collide. `serde(default)` so a cache written before this existed loads.
+    #[serde(default)]
+    metered: BTreeMap<String, MeteredPrice>,
 }
 
 fn load_cache() -> CostCache {
@@ -466,10 +537,15 @@ fn load_cache() -> CostCache {
     }
 }
 
-/// Merge `fresh` into the on-disk cache under the cross-process file lock, so a
-/// second Fleet process pricing another session cannot drop these entries.
-fn store_cache(fresh: &BTreeMap<String, f64>) {
-    if fresh.is_empty() {
+/// Merge both kinds of fresh entry into the on-disk cache under the
+/// cross-process file lock, so a second Fleet process pricing another session
+/// cannot drop these entries.
+///
+/// Receipts and metered prices are written together under one lock: a session
+/// that mixes routes produces both, and two separate locked writes would leave
+/// a window where only half of it had been recorded.
+fn store_cache(fresh: &BTreeMap<String, f64>, fresh_metered: &BTreeMap<String, MeteredPrice>) {
+    if fresh.is_empty() && fresh_metered.is_empty() {
         return;
     }
     let Some(path) = cache_path() else { return };
@@ -480,6 +556,9 @@ fn store_cache(fresh: &BTreeMap<String, f64>) {
             _ => CostCache::default(),
         };
         cache.costs.extend(fresh.iter().map(|(k, v)| (k.clone(), *v)));
+        cache
+            .metered
+            .extend(fresh_metered.iter().map(|(k, v)| (k.clone(), *v)));
         if let Ok(bytes) = serde_json::to_vec_pretty(&cache) {
             if let Err(e) = crate::atomic_json::write_atomic(&path, &bytes) {
                 crate::log_debug(&format!("dsh cost cache: write: {e}"));
@@ -614,7 +693,20 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
         });
     }
 
-    let (table_total, peak_n, off_peak_n, unknown_model_n) = price_metered(&metered);
+    // The session's own id namespaces the metered keys, so two sessions cannot
+    // collide on a `seq` they both happen to use. Absent (a URI shape this
+    // module does not recognise) means nothing is cacheable — an empty id would
+    // pool every such session into one keyspace.
+    let session_id = crate::dsh_source::DshSource::session_id_of(uri).unwrap_or_default();
+    let cache = load_cache();
+    let table = price_metered(session_id, &metered, &cache.metered);
+    // Freeze before either branch below can return. The no-OpenRouter-key path
+    // exits early, and a user with no key is exactly the DeepSeek-only case this
+    // cache exists for — writing only on the way past it would leave the most
+    // common metered session revaluing itself forever.
+    store_cache(&BTreeMap::new(), &table.fresh);
+    let (table_total, peak_n, off_peak_n, unknown_model_n) =
+        (table.total, table.peak, table.off_peak, table.unknown);
 
     let needs_openrouter = refs.iter().any(|r| r.provider == OPENROUTER);
     let key = openrouter_api_key();
@@ -638,12 +730,11 @@ pub fn dsh_session_cost(uri: &str) -> Result<DshSessionCost, String> {
         });
     }
 
-    let cached = load_cache().costs;
-    let (cost, fresh) = tally(&refs, &cached, |id| match key.as_deref() {
+    let (cost, fresh) = tally(&refs, &cache.costs, |id| match key.as_deref() {
         Some(key) => fetch_generation_cost(key, id),
         None => Err("no OpenRouter API key configured".to_string()),
     });
-    store_cache(&fresh);
+    store_cache(&fresh, &BTreeMap::new());
     Ok(merge_metered(cost, table_total, peak_n, off_peak_n, unknown_model_n))
 }
 
@@ -876,6 +967,17 @@ mod tests {
         })
     }
 
+    /// The session id the metered tests price against, so their frozen keys are
+    /// namespaced the same way the real entry point namespaces them.
+    const TEST_SESSION: &str = "session-test";
+
+    /// Price with a cold cache — what most of these tests want, since they are
+    /// checking the published-rate arithmetic rather than the freeze.
+    fn priced(calls: &[MeteredCall]) -> (f64, u32, u32, u32) {
+        let t = price_metered(TEST_SESSION, calls, &BTreeMap::new());
+        (t.total, t.peak, t.off_peak, t.unknown)
+    }
+
     /// 2026-08-18 19:47:32 UTC, a Tuesday — the probe call's real timestamp.
     /// Off-peak.
     const OFF_PEAK_MS: i64 = 1_787_082_452_518;
@@ -895,6 +997,7 @@ mod tests {
             vec![MeteredCall {
                 provider: "deepseek-official".into(),
                 model: "deepseek-v4-flash".into(),
+                seq: Some(20),
                 at_ms: OFF_PEAK_MS,
                 input_tokens: 12938,
                 cache_read_tokens: 0,
@@ -911,19 +1014,20 @@ mod tests {
         let call = |at_ms| MeteredCall {
             provider: "deepseek-official".into(),
             model: "deepseek-v4-flash".into(),
+            seq: Some(20),
             at_ms,
             input_tokens: 1_000_000,
             cache_read_tokens: 0,
             output_tokens: 1_000_000,
         };
-        let (peak_total, peak_n, off_n, unknown) = price_metered(&[call(PEAK_MS)]);
+        let (peak_total, peak_n, off_n, unknown) = priced(&[call(PEAK_MS)]);
         assert!(
             (peak_total - 1.76).abs() < 1e-9,
             "peak flash 1M in + 1M out must be $1.76, got {peak_total}"
         );
         assert_eq!((peak_n, off_n, unknown), (1, 0, 0));
 
-        let (off_total, peak_n, off_n, _) = price_metered(&[call(OFF_PEAK_MS)]);
+        let (off_total, peak_n, off_n, _) = priced(&[call(OFF_PEAK_MS)]);
         assert!(
             (off_total - 0.88).abs() < 1e-9,
             "off-peak is exactly half — $0.88 expected, got {off_total}"
@@ -935,9 +1039,10 @@ mod tests {
     fn prices_the_three_token_classes_separately() {
         // Cache hits are an order of magnitude cheaper than misses, so folding
         // them together would overstate a cache-heavy session by ~30×.
-        let (total, _, off_n, _) = price_metered(&[MeteredCall {
+        let (total, _, off_n, _) = priced(&[MeteredCall {
             provider: "deepseek-official".into(),
             model: "deepseek-v4-pro".into(),
+            seq: Some(20),
             at_ms: OFF_PEAK_MS,
             input_tokens: 1_000_000,
             cache_read_tokens: 1_000_000,
@@ -953,9 +1058,10 @@ mod tests {
 
     #[test]
     fn an_unknown_model_is_counted_not_estimated() {
-        let (total, peak_n, off_n, unknown) = price_metered(&[MeteredCall {
+        let (total, peak_n, off_n, unknown) = priced(&[MeteredCall {
             provider: "deepseek-official".into(),
             model: "deepseek-v5-unreleased".into(),
+            seq: Some(20),
             at_ms: OFF_PEAK_MS,
             input_tokens: 1_000_000,
             cache_read_tokens: 0,
@@ -973,9 +1079,10 @@ mod tests {
     /// under-reports every session that used it.
     #[test]
     fn the_vision_model_is_priced_at_flash_rates() {
-        let (total, peak_n, off_n, unknown) = price_metered(&[MeteredCall {
+        let (total, peak_n, off_n, unknown) = priced(&[MeteredCall {
             provider: "deepseek-official".into(),
             model: "deepseek-v4-flash-vision-exp".into(),
+            seq: Some(20),
             at_ms: PEAK_MS,
             input_tokens: 1_000_000,
             cache_read_tokens: 1_000_000,
@@ -1026,13 +1133,101 @@ mod tests {
         assert!(is_peak(1_787_533_200_000), "Monday 01:00 UTC is peak");
     }
 
+    /// One flash call, 1M cache-miss input + 1M output, on Saturday
+    /// 2026-08-22 02:00 UTC. Today's table prices it off-peak at $0.88; the
+    /// same call was priced at peak, $1.76, before the Mon–Fri rule landed.
+    fn weekend_call(seq: Option<i64>) -> MeteredCall {
+        MeteredCall {
+            provider: "deepseek-official".into(),
+            model: "deepseek-v4-flash".into(),
+            seq,
+            at_ms: 1_787_364_000_000,
+            input_tokens: 1_000_000,
+            cache_read_tokens: 0,
+            output_tokens: 1_000_000,
+        }
+    }
+
+    /// The freeze contract. A call priced once keeps that price when the rates
+    /// or the peak schedule move under it.
+    ///
+    /// Without this the panel is not reporting what a session cost — it is
+    /// revaluing it at today's prices every time it is opened, which is exactly
+    /// what the Mon–Fri weekend fix silently did to every past weekend session
+    /// the moment it landed. The receipt half of this module has always behaved
+    /// this way (an invoice does not change); this is the table half catching up.
+    #[test]
+    fn a_priced_call_keeps_the_price_it_was_first_given() {
+        let cached = BTreeMap::from([(
+            metered_key(TEST_SESSION, 20),
+            MeteredPrice {
+                usd: 1.76,
+                peak: true,
+            },
+        )]);
+        let t = price_metered(TEST_SESSION, &[weekend_call(Some(20))], &cached);
+        assert!(
+            (t.total - 1.76).abs() < 1e-9,
+            "the frozen price must survive a rule change: expected $1.76, got \
+             {} (today's table would say $0.88)",
+            t.total
+        );
+        assert_eq!(
+            (t.peak, t.off_peak),
+            (1, 0),
+            "the tier freezes with the money — recomputing it would let the \
+             panel's peak/off-peak line contradict the total beside it"
+        );
+        assert!(
+            t.fresh.is_empty(),
+            "nothing was priced anew, so nothing is owed to the cache"
+        );
+    }
+
+    /// A first pricing must come back out to be written down, or the freeze
+    /// never takes hold and every visit re-prices from scratch.
+    #[test]
+    fn a_first_pricing_is_handed_back_to_be_written_down() {
+        let t = price_metered(TEST_SESSION, &[weekend_call(Some(20))], &BTreeMap::new());
+        assert!((t.total - 0.88).abs() < 1e-9, "priced at today's table");
+        assert_eq!(
+            t.fresh.get(&metered_key(TEST_SESSION, 20)),
+            Some(&MeteredPrice {
+                usd: 0.88,
+                peak: false
+            }),
+            "the computed price is owed to the cache under its session:seq key"
+        );
+    }
+
+    /// A call with no `seq` has no stable address, so it is priced live and
+    /// never written down — a cache entry nothing could ever look up again is
+    /// worse than none, since the next session's `seq` would collide with it.
+    #[test]
+    fn a_call_with_no_seq_is_priced_but_not_cached() {
+        let t = price_metered(TEST_SESSION, &[weekend_call(None)], &BTreeMap::new());
+        assert!((t.total - 0.88).abs() < 1e-9);
+        assert_eq!(t.off_peak, 1);
+        assert!(t.fresh.is_empty(), "unaddressable, so uncacheable");
+    }
+
+    /// The same guard for the other half of the key: an unrecognised URI yields
+    /// no session id, and an empty one would pool unrelated sessions together.
+    #[test]
+    fn an_empty_session_id_caches_nothing() {
+        let t = price_metered("", &[weekend_call(Some(20))], &BTreeMap::new());
+        assert!((t.total - 0.88).abs() < 1e-9);
+        assert!(t.fresh.is_empty(), "no session id, no keyspace");
+    }
+
     /// A weekend call must be charged the off-peak half, not just counted as
     /// off-peak — the tally and the dollar figure come off the same flag.
     #[test]
     fn a_weekend_call_is_billed_at_the_off_peak_half() {
-        let (total, peak_n, off_n, _) = price_metered(&[MeteredCall {
+        let (total, peak_n, off_n, _) = priced(&[MeteredCall {
             provider: "deepseek-official".into(),
             model: "deepseek-v4-flash".into(),
+            seq: Some(20),
             // Saturday 2026-08-22 02:00 UTC.
             at_ms: 1_787_364_000_000,
             input_tokens: 1_000_000,
