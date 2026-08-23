@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { RelayClient, RelayRequestError, isDesktopRejection, relayDisplayHost } from "./relay";
+import { RelayClient, RelayRequestError, isDesktopRejection, relayDisplayHost, resolveRelayBase } from "./relay";
 import { deriveKeys, isSealed, open, type RelayKeys, seal, sealBytes } from "./relayCrypto";
 
 // relay.ts 依赖浏览器全局（window.setTimeout/WebSocket/location），node 环境没有，
@@ -685,5 +685,32 @@ describe("relayDisplayHost", () => {
 
   it("解析不了就原样回显，不抛", () => {
     expect(relayDisplayHost("not a url")).toBe("not a url");
+  });
+});
+
+describe("resolveRelayBase", () => {
+  const BAKED = "https://fleet-relay.muveeai.com";
+  const SHELL_ORIGIN = "https://fleet.local";
+
+  it("配对二维码带来的 relay 胜过打包时烧进去的那个", () => {
+    // 鸿蒙壳扫到的二维码指向自建 relay。以前 WebShell 只把 secret 传给页面，
+    // relay 永远是编译期烧死的那个 —— 自建 relay 在鸿蒙端根本连不上。
+    const hash = "#k=deadbeefdeadbeef&relay=" + encodeURIComponent("https://relay.corp.example.com");
+    expect(resolveRelayBase(hash, BAKED, SHELL_ORIGIN)).toBe("https://relay.corp.example.com");
+  });
+
+  it("没带 relay 时仍用打包值，PWA 则回落同源", () => {
+    expect(resolveRelayBase("#k=abc", BAKED, SHELL_ORIGIN)).toBe(BAKED);
+    expect(resolveRelayBase("#k=abc", undefined, "https://fleet-relay.muveeai.com")).toBe(
+      "https://fleet-relay.muveeai.com",
+    );
+  });
+
+  it("非 http(s) 的 relay 一律忽略，回落到打包值", () => {
+    for (const bad of ["javascript:alert(1)", "fleet-relay.muveeai.com", "ftp://x/y", ""]) {
+      expect(resolveRelayBase("#k=abc&relay=" + encodeURIComponent(bad), BAKED, SHELL_ORIGIN)).toBe(
+        BAKED,
+      );
+    }
   });
 });
