@@ -120,7 +120,15 @@ struct WebShell {
       // 非空、配对页永远进不去，页面就停在 mobile-web 那张为 PWA 写的引导页
       // 上（它假设用户是扫码打开带密钥的网址，因此没有扫码按钮）——等于没有
       // 任何配对入口。
-      this.src = p === null ? '' : ORIGIN + 'index.html#k=' + p.secret;
+      //
+      // relayUrl 也一起交给页面。以前这里只取 secret，relay 永远是打包时
+      // sync-web.sh 烧进 VITE_RELAY_URL 的那个——扫了指向自建 relay 的二维码，
+      // app 照样去连官方 relay，配对必然失败且现象只是「一直连不上」。
+      // mobile-web 的 resolveRelayBase 认 fragment 里的 &relay=，优先级高于
+      // 打包值，所以这里给了它就生效，web 侧不需要鸿蒙分支。
+      this.src = p === null
+        ? ''
+        : ORIGIN + 'index.html#k=' + p.secret + '&relay=' + encodeURIComponent(p.relayUrl);
     }).catch(() => { this.pairChecked = true; this.src = ''; });
   }
 
