@@ -11,7 +11,14 @@ import {
 import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
 import { RelayClient, type RttSample, gzipSupported, binarySupported } from "./relay";
-import { computeCongestion, RECONNECT_WINDOW_MS, type Congestion } from "./connQuality";
+import {
+  computeCongestion,
+  formatRttSplit,
+  splitRtt,
+  RECONNECT_WINDOW_MS,
+  type Congestion,
+  type RttSplit,
+} from "./connQuality";
 import { agentKeyOf, reconcileDecisions } from "./decisionReconcile";
 import { recordSnapshotSource, type SnapshotSource } from "./snapshotSources";
 import { reconcilePlan } from "./reconcilePlan";
@@ -157,6 +164,10 @@ export function App() {
   // timestamps of recent reconnects) so they don't each force a re-render; the
   // level is recomputed and set explicitly when a sample or reconnect lands.
   const [congestion, setCongestion] = useState<Congestion>("good");
+  // The latest round trip attributed to phone link / desktop link / desktop
+  // handler. State (not a ref) because the More page renders it: the total says
+  // "it's slow", only the split says which of the three to go fix.
+  const [rttSplit, setRttSplit] = useState<RttSplit | null>(null);
   const rttRef = useRef<number | null>(null);
   const reconnectsRef = useRef<number[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -366,6 +377,7 @@ export function App() {
         // feels is the total, whichever segment ate it. The segments are for
         // telling them *which* one did, on the More page.
         rttRef.current = sample.totalMs;
+        setRttSplit(splitRtt(sample));
         recomputeCongestion();
       },
       onReconnect: () => {
@@ -677,7 +689,10 @@ export function App() {
           data-state={!connected ? "offline" : agentOnline ? "online" : "agent-offline"}
           data-congestion={congestion}
         />
-        <span className={styles.connLabel}>
+        <span
+          className={styles.connLabel}
+          title={rttSplit ? formatRttSplit(rttSplit, t) : undefined}
+        >
           {!connected
             ? t("连接中…")
             : !agentOnline
@@ -756,6 +771,7 @@ export function App() {
             connected={connected}
             agentOnline={agentOnline}
             sessionsFrame={sessionsFrame}
+            rttSplit={rttSplit}
             snapshotSources={snapshotSourcesRef.current}
             push={push}
             pushOptedOut={pushOptedOut}
