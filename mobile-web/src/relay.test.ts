@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { RelayClient, RelayRequestError, isDesktopRejection, relayDisplayHost, resolveRelayBase } from "./relay";
+import { RelayClient, RelayRequestError, type RttSample, isDesktopRejection, relayDisplayHost, resolveRelayBase } from "./relay";
 import { deriveKeys, isSealed, open, type RelayKeys, seal, sealBytes } from "./relayCrypto";
 
 // relay.ts 依赖浏览器全局（window.setTimeout/WebSocket/location），node 环境没有，
@@ -216,6 +216,96 @@ describe("RelayClient 早 ack(方案 A)", () => {
     ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
     await tick();
     expect(count).toBe(1);
+  });
+});
+
+// 整条往返（手机→relay→桌面→relay→手机）是五段之和，只报总数时"卡"没法归因。
+// 两个已有的观测点各切一刀：relay 收到上行帧就立刻回的 msg_ack 圈出手机↔relay 那
+// 一段（不含桌面），桌面盖印在 reply 里的 handle_ms 圈出它自己 handler 的耗时。
+// 剩下的残差才是 relay↔桌面。任一刀缺席时必须报 null 而不是 0——0 会谎称"那段是
+// 零耗时"，把别人的时间算到残差头上。
+describe("RelayClient RTT 分段", () => {
+  const clients: RelayClient[] = [];
+
+  beforeEach(() => {
+    FakeWs.instances = [];
+    (globalThis as unknown as { window: unknown }).window = windowShim();
+    (globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWs;
+  });
+
+  afterEach(() => {
+    for (const c of clients.splice(0)) c.close();
+  });
+
+  /** 发一个请求并返回它的 req_id 与收到的样本槽。 */
+  async function requestWithSamples(): Promise<{
+    ws: FakeWs;
+    reqId: string;
+    samples: RttSample[];
+  }> {
+    const base = FakeWs.instances.length;
+    const samples: RttSample[] = [];
+    const client = new RelayClient(SECRET, { onRttSample: (s) => samples.push(s) });
+    clients.push(client);
+    client.connect();
+    const ws = await nextWs(base);
+    ws.onopen?.();
+    ws.deliver({ type: "authed", agent_online: true, clients: 1 });
+    const p = client.request("today_usage");
+    p.catch(() => {});
+    await tick();
+    return { ws, reqId: await sentReqId(ws), samples };
+  }
+
+  it("ack 与 handle_ms 都在时，三段可分辨", async () => {
+    const { ws, reqId, samples } = await requestWithSamples();
+    // relay 先回 msg_ack（此时桌面还没参与），隔一会儿桌面的 reply 才到。
+    ws.deliver({ type: "msg_ack", ack_id: reqId, status: "delivered" });
+    await tick(40);
+    ws.deliver(
+      await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: {}, handle_ms: 380 }),
+    );
+    await tick();
+
+    expect(samples).toHaveLength(1);
+    const s = samples[0];
+    expect(s.desktopHandleMs).toBe(380);
+    expect(s.phoneRelayMs).not.toBeNull();
+    // ack 在 reply 之前到，所以手机段必然短于总数——若把两者搞反，残差会变负。
+    expect(s.phoneRelayMs!).toBeLessThan(s.totalMs);
+    expect(s.totalMs).toBeGreaterThanOrEqual(40);
+  });
+
+  it("msg_ack 没赶上时手机段报 null，不冒充 0", async () => {
+    const { ws, reqId, samples } = await requestWithSamples();
+    ws.deliver(
+      await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: {}, handle_ms: 12 }),
+    );
+    await tick();
+    expect(samples[0].phoneRelayMs).toBeNull();
+    expect(samples[0].desktopHandleMs).toBe(12);
+  });
+
+  it("旧桌面不带 handle_ms 时桌面段报 null，不冒充 0", async () => {
+    const { ws, reqId, samples } = await requestWithSamples();
+    ws.deliver({ type: "msg_ack", ack_id: reqId, status: "delivered" });
+    await tick();
+    ws.deliver(await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: {} }));
+    await tick();
+    expect(samples[0].desktopHandleMs).toBeNull();
+    expect(samples[0].phoneRelayMs).not.toBeNull();
+  });
+
+  it("桌面拒绝（ok:false）也照样出样本——慢和失败是两回事", async () => {
+    const { ws, reqId, samples } = await requestWithSamples();
+    ws.deliver({ type: "msg_ack", ack_id: reqId, status: "delivered" });
+    await tick();
+    ws.deliver(
+      await sealedMsg({ event: "reply", req_id: reqId, ok: false, error: "nope", handle_ms: 7 }),
+    );
+    await tick();
+    expect(samples).toHaveLength(1);
+    expect(samples[0].desktopHandleMs).toBe(7);
   });
 });
 

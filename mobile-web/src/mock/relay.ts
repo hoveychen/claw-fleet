@@ -62,8 +62,9 @@ export class MockRelayClient extends RelayClient {
       this.mockHandlers.onStatus?.(true);
       this.mockHandlers.onSessions?.(MOCK_SESSIONS);
       this.mockHandlers.onSessionsKind?.("full");
-      // A healthy round-trip so the header light comes up green in screenshots.
-      this.mockHandlers.onRttSample?.(80);
+      // A healthy round-trip so the header light comes up green in screenshots,
+      // segmented so the More page's link-timing row has something to render.
+      this.mockHandlers.onRttSample?.({ totalMs: 80, phoneRelayMs: 34, desktopHandleMs: 21 });
       // Last: its handler fetches `pending_snapshot`, which needs the ref set.
       this.mockHandlers.onAgentOnline?.(true);
     }, 0);

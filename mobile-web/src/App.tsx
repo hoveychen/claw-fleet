@@ -10,7 +10,7 @@ import {
 } from "./push";
 import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
-import { RelayClient, gzipSupported, binarySupported } from "./relay";
+import { RelayClient, type RttSample, gzipSupported, binarySupported } from "./relay";
 import { computeCongestion, RECONNECT_WINDOW_MS, type Congestion } from "./connQuality";
 import { agentKeyOf, reconcileDecisions } from "./decisionReconcile";
 import { recordSnapshotSource, type SnapshotSource } from "./snapshotSources";
@@ -361,8 +361,11 @@ export function App() {
           full: s.full + (kind === "full" ? 1 : 0),
           delta: s.delta + (kind === "delta" ? 1 : 0),
         })),
-      onRttSample: (rttMs: number) => {
-        rttRef.current = rttMs;
+      onRttSample: (sample: RttSample) => {
+        // The congestion light still judges the whole round trip — what the user
+        // feels is the total, whichever segment ate it. The segments are for
+        // telling them *which* one did, on the More page.
+        rttRef.current = sample.totalMs;
         recomputeCongestion();
       },
       onReconnect: () => {
