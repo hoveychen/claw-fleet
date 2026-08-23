@@ -107,9 +107,59 @@ export interface RelayHandlers {
   onAuthError?: (message: string) => void;
 }
 
-/** Base URL for HTTP endpoints (/vapid): dev override or same-origin. */
+/** Decide which relay this device talks to, from the three sources that can
+ *  name one. Pure so it can be tested without a `window`.
+ *
+ *  `baked` is `VITE_RELAY_URL`, compiled in at build time (the harmony shell
+ *  bakes it via `mobile-harmony/scripts/sync-web.sh`, because its page origin
+ *  is the fake `https://fleet.local` and falling back to it would make the app
+ *  dial itself). `origin` is `window.location.origin` — correct for the PWA,
+ *  which the relay itself serves.
+ *
+ *  `hash` may carry `&relay=<encoded origin>` alongside the `#k=` secret. Only
+ *  the harmony shell writes it, from the relay origin the pairing QR actually
+ *  named (`WebShell.ets` → `RelayStore`): without it the shell dialed the baked
+ *  relay forever and a self-hosted relay could never be paired to from harmony.
+ *  It outranks `baked` because it describes *this* pairing, while the baked
+ *  value is only the default the bundle happened to ship with.
+ *
+ *  Only absolute http/https URLs are honoured — a QR is untrusted input, and
+ *  this value becomes the base of every URL the client builds. The origin is
+ *  taken (path dropped, trailing slash normalised): a relay behind a path
+ *  prefix isn't supported anywhere in this client anyway — the PWA derives its
+ *  base from `window.location.origin`, which loses the prefix just the same. */
+export function resolveRelayBase(
+  hash: string,
+  baked: string | undefined,
+  origin: string,
+): string {
+  const fallback = baked || origin;
+  const match = hash.match(/[#&]relay=([^&]+)/);
+  if (!match) return fallback;
+  let candidate: URL;
+  try {
+    candidate = new URL(decodeURIComponent(match[1]));
+  } catch {
+    return fallback;
+  }
+  if (candidate.protocol !== "https:" && candidate.protocol !== "http:") return fallback;
+  return candidate.origin;
+}
+
+/** Base URL for HTTP endpoints (/vapid) and the WebSocket.
+ *
+ *  Resolved once at module load: `loadSecretSync()` scrubs the fragment off the
+ *  URL right after boot (so the secret doesn't linger in the address bar), and
+ *  every later caller — the first connect included — would then see a hash with
+ *  no `relay=` in it. */
+const RELAY_BASE = resolveRelayBase(
+  window.location.hash,
+  import.meta.env.VITE_RELAY_URL,
+  window.location.origin,
+);
+
 export function relayHttpBase(): string {
-  return import.meta.env.VITE_RELAY_URL || window.location.origin;
+  return RELAY_BASE;
 }
 
 /** Short, human-readable form of the relay this device talks to, for the More
