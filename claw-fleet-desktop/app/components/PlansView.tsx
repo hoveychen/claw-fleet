@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, GitBranch, Link2, ListTree, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
@@ -63,6 +63,9 @@ function flatten(roots: PlanNode[], out: PlanNode[] = []): PlanNode[] {
   }
   return out;
 }
+
+/** Left + right margin on `.stage`; the packer gets the width that is left. */
+const STAGE_MARGIN_X = 40;
 
 /** The connector between two boxes: a horizontal-tangent cubic, so the curve
  *  leaves the parent and meets the child flat rather than at an angle. */
@@ -201,7 +204,24 @@ export function PlansView() {
     return out;
   }, [shownRoots, expandOverrides]);
 
-  const layout = useMemo(() => layoutPlanForest(shownRoots, collapsed), [shownRoots, collapsed]);
+  // The packer needs the canvas width to know how many root trees fit on a
+  // band; re-measure on every resize (opening the drawer counts).
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [canvasW, setCanvasW] = useState(0);
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const measure = () => setCanvasW(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [forest]);
+
+  const layout = useMemo(
+    () => layoutPlanForest(shownRoots, collapsed, Math.max(NODE_W, canvasW - STAGE_MARGIN_X)),
+    [shownRoots, collapsed, canvasW],
+  );
 
   const selected = useMemo(() => {
     if (!selectedKey) return null;
@@ -283,7 +303,7 @@ export function PlansView() {
                 </span>
               </div>
 
-              <div className={styles.canvas}>
+              <div className={styles.canvas} ref={canvasRef}>
                 <div
                   className={styles.stage}
                   style={{ width: layout.width, height: layout.height }}
@@ -445,11 +465,20 @@ function PlanDrawer({ node, doneShown, onToggleDone, onOpenChain, onClose }: Dra
   const { t } = useTranslation();
   const pendingItems = node.items.filter((i) => !i.done);
   const doneItems = node.items.filter((i) => i.done);
+  // Plan titles are supposed to be one line, but plenty in the wild are a whole
+  // paragraph — clamp like the items do rather than let one push the tasks off.
+  const [titleOpen, setTitleOpen] = useState(false);
 
   return (
     <aside className={styles.drawer}>
       <div className={styles.drawer_head}>
-        <div className={styles.drawer_title}>{node.title || node.id}</div>
+        <div
+          className={titleOpen ? styles.drawer_title_open : styles.drawer_title}
+          onClick={() => setTitleOpen((v) => !v)}
+          title={node.title ?? undefined}
+        >
+          {node.title || node.id}
+        </div>
         <button className={styles.close} onClick={onClose} title={t("plans.close", "关闭")}>
           <X size={14} strokeWidth={2} />
         </button>

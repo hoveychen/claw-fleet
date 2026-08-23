@@ -325,12 +325,21 @@
   align-items: flex-start;
   gap: 8px;
 }
-.drawer_title {
+.drawer_title,
+.drawer_title_open {
   flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   line-height: 1.4;
+  cursor: pointer;
+}
+.drawer_title {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .close {
   flex-shrink: 0;
