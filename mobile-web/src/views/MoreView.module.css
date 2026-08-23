@@ -52,6 +52,15 @@
   color: var(--color-text-secondary);
 }
 
+/* Relay 地址：主机名没有空格，默认换行规则断不开，自建 relay 的长域名会把
+   卡片撑破。允许任意位置折行，并右对齐跟其他数值列对齐。 */
+.relayValue {
+  composes: rowValue;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .rowNote {
   font-size: 12px;
   color: var(--color-text-secondary);
