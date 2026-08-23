@@ -2043,15 +2043,42 @@ fn serve_decision_asset(params: &Value) -> Result<Value, String> {
 
 // Last `n` transcript messages — the mobile SessionDetail polls this
 // (same model as the desktop HistoryView tab; no watcher push).
+/// Log a `tail` this slow with its per-stage breakdown. Replaying every session
+/// on one machine put the whole handler under 1.7s, so anything above this is
+/// already unexplained by the work itself and worth a line; below it the method
+/// fires often enough (thousands a day) that logging every call is just noise.
+const TAIL_DETAIL_LOG_MS: u128 = 1_000;
+
 fn serve_tail(params: &Value) -> Result<Value, String> {
     let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
     let n = params.get("n").and_then(Value::as_u64).unwrap_or(200) as usize;
+
+    // Staged so a slow reply names its own culprit. `[relay-timing]` says the
+    // handler took N seconds; without this it can't say whether that was source
+    // discovery, the disk/RPC read, or the slim+thumbnail pass — and `path`/`n`
+    // are what make the case reproducible offline afterwards.
+    let t0 = std::time::Instant::now();
     let sources = crate::agent_source::build_sources();
     let source = crate::agent_source::find_source_for_path(&sources, path)
         .ok_or_else(|| format!("no agent source for path: {path}"))?;
-    source
-        .get_messages_tail(path, n)
-        .map(|msgs| Value::Array(slim_tail_messages(msgs)))
+    let find_ms = t0.elapsed().as_millis();
+
+    let t1 = std::time::Instant::now();
+    let msgs = source.get_messages_tail(path, n)?;
+    let read_ms = t1.elapsed().as_millis();
+    let rows = msgs.len();
+
+    let t2 = std::time::Instant::now();
+    let slim = slim_tail_messages(msgs);
+    let slim_ms = t2.elapsed().as_millis();
+
+    if t0.elapsed().as_millis() >= TAIL_DETAIL_LOG_MS {
+        crate::log_debug(&format!(
+            "[tail-detail] find_ms={find_ms} read_ms={read_ms} slim_ms={slim_ms} \
+             rows={rows} n={n} path={path}"
+        ));
+    }
+    Ok(Value::Array(slim))
 }
 
 // Byte-offset incremental tail (mirrors the `/tail` endpoint): the
