@@ -2,7 +2,7 @@ import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, ChevronRight, Clock, FolderGit2, Radar, Waypoints } from "lucide-react";
 import type { SessionInfo } from "../types";
-import { LIVE_STATUSES, rowBarColor } from "../types";
+import { LIVE_STATUSES, isQuietAlive, rowBarColor } from "../types";
 import { MarkControl } from "./MarkControl";
 import { AgentSourceIcon } from "./SessionCard";
 import styles from "./SessionRow.module.css";
@@ -133,6 +133,14 @@ export const SessionRow = memo(function SessionRow({
 }: SessionRowProps) {
   const { t } = useTranslation();
   const runColor = runColorOverride !== undefined ? runColorOverride : rowBarColor(s);
+  // Process alive, transcript quiet (see `isQuietAlive`): the row keeps its dot
+  // — faded, so it reads apart from a truly working session — and the runtime
+  // chip stays up, since "how long has this been going" is exactly the question
+  // a session stuck on one long tool call raises.
+  const quiet = isQuietAlive(s);
+  const quietMins = quiet
+    ? Math.max(0, Math.round((Date.now() - s.lastActivityMs) / 60000))
+    : 0;
   return (
     <div
       className={styles.row_wrap}
@@ -150,9 +158,13 @@ export const SessionRow = memo(function SessionRow({
             className={styles.row_status_dot}
             style={{ background: runColor }}
             title={
-              s.status === "waitingInput"
-                ? t("history.waiting", "等待输入")
-                : t("history.running", "运行中")
+              quiet
+                ? t("history.quiet_alive", "运行中 · 已 {{mins}} 分钟没有新输出（多半卡在一条长工具调用上）", {
+                    mins: quietMins,
+                  })
+                : s.status === "waitingInput"
+                  ? t("history.waiting", "等待输入")
+                  : t("history.running", "运行中")
             }
           />
         )}
@@ -201,7 +213,7 @@ export const SessionRow = memo(function SessionRow({
                 {compactElapsed(w.created)}·{w.pollCount}
               </span>
             ))}
-            {LIVE_STATUSES.has(s.status) && (
+            {(LIVE_STATUSES.has(s.status) || quiet) && (
               <span
                 className={styles.row_runtime}
                 style={{ color: runColor ?? undefined }}

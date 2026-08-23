@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   canResumeSession,
+  isQuietAlive,
+  rowBarColor,
   shouldFollowSession,
   HANDOFF_ENTRYPOINT,
   NEW_SESSION_ENTRYPOINT,
@@ -100,6 +102,36 @@ describe("canResumeSession", () => {
     expect(
       canResumeSession(session({ agentSource: "codex", entrypoint: "codex_exec" })),
     ).toBe(false);
+  });
+});
+
+describe("isQuietAlive / rowBarColor third state", () => {
+  it("marks a live process whose transcript went quiet as quiet-alive", () => {
+    // The scan-computed status ages out on a hard clock (`determine_status`:
+    // tool_use → Executing for 60s, then Idle), so a session sitting on one
+    // long Bash — a build, a background-task wait — reads `idle` while its
+    // process is very much alive. That is the case the row dot must not paint
+    // as "ended".
+    expect(isQuietAlive(session({ status: "idle", procAlive: true }))).toBe(true);
+  });
+
+  it("is not quiet-alive when the status still says something is going on", () => {
+    expect(isQuietAlive(session({ status: "executing", procAlive: true }))).toBe(false);
+    expect(isQuietAlive(session({ status: "waitingInput", procAlive: true }))).toBe(false);
+  });
+
+  it("is not quiet-alive once the process is gone", () => {
+    expect(isQuietAlive(session({ status: "idle", procAlive: false }))).toBe(false);
+  });
+
+  it("paints quiet-alive rows a faded green, distinct from both live and ended", () => {
+    expect(rowBarColor(session({ status: "idle", procAlive: true }))).toBe(
+      "rgba(var(--color-success-rgb), 0.45)",
+    );
+    expect(rowBarColor(session({ status: "executing", procAlive: true }))).toBe(
+      "var(--color-success)",
+    );
+    expect(rowBarColor(session({ status: "idle", procAlive: false }))).toBe(null);
   });
 });
 
