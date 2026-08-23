@@ -156,17 +156,12 @@ pub fn resume(
 }
 
 /// Create a new plan block in the workspace's primary TASKS.md and claim focus
-/// (authoring a plan is starting it). `parent` records a sub-plan relationship.
+/// (authoring a plan is starting it).
 ///
-/// Exactly one of `parent` / `root` must be given. Making the tree position an
-/// explicit choice is the point: with `--parent` merely *available*, 350 of the
-/// first 355 plans authored in this repo were created flat, so the parent-link
-/// backtrack had no tree to walk and a decomposed task never ran to completion
-/// as a unit.
-///
-/// That alone proved insufficient — see [`root_needs_justification`], which
-/// prices `--root` above `--parent` once this workspace has candidate parents,
-/// via the `root_reason` a bare `--root` must then carry.
+/// **A plan spawned while you are executing another plan defaults to being its
+/// child.** That default is the whole mechanism — see [`resolve_tree_position`]
+/// for why the two previous designs (silent flat default, then a mandatory
+/// explicit choice) both failed to build a tree.
 pub fn create(
     cwd: &Path,
     plan_id: &str,
@@ -177,47 +172,43 @@ pub fn create(
     kind: pt::PlanKind,
     session_id: Option<&str>,
 ) -> Result<PlanOutcome, String> {
+    let focus = session_id
+        .and_then(crate::task_progress::read)
+        .map(|r| r.plan_id)
+        // Another workspace's plan is not a parent candidate here.
+        .filter(|id| pt::find_plan_source(cwd, id).is_some());
+    create_in(
+        cwd,
+        plan_id,
+        title,
+        parent,
+        root,
+        root_reason,
+        kind,
+        session_id,
+        focus.as_deref(),
+    )
+}
+
+/// [`create`] with the session's focused plan injected, so tests can drive the
+/// tree-position rules without writing into the process-global `~/.fleet`
+/// (same rationale as [`crate::plan_gate::gate_reason_in`]).
+#[allow(clippy::too_many_arguments)]
+fn create_in(
+    cwd: &Path,
+    plan_id: &str,
+    title: &str,
+    parent: Option<&str>,
+    root: bool,
+    root_reason: Option<&str>,
+    kind: pt::PlanKind,
+    session_id: Option<&str>,
+    focus: Option<&str>,
+) -> Result<PlanOutcome, String> {
     let parent = parent.filter(|p| !p.trim().is_empty());
     let root_reason = root_reason.filter(|r| !r.trim().is_empty());
-    match (parent, root) {
-        (Some(_), true) => {
-            return Err(
-                "--parent and --root are mutually exclusive: a plan is either a child of \
-                 another plan or a new tree root, not both."
-                    .to_string(),
-            )
-        }
-        (None, false) => {
-            let candidates = pending_plan_ids(cwd);
-            let hint = if candidates.is_empty() {
-                "no plan here has pending work, so --root is probably right.".to_string()
-            } else {
-                format!(
-                    "plans with pending work you could be branching off: {}.",
-                    candidates.join(", ")
-                )
-            };
-            return Err(format!(
-                "declare this plan's position in the tree: pass --parent <id> if it is side \
-                 work spawned mid-plan (Fleet will point you back at the parent when it \
-                 completes), or --root if it starts a new top-level tree. {hint}"
-            ))
-        }
-        (Some(p), false) if root_reason.is_some() => {
-            return Err(format!(
-                "--root-reason justifies starting a NEW TREE, but this plan declares \
-                 --parent {p}, so it is a child and needs no such justification. Drop \
-                 --root-reason to create it as a child of '{p}', or drop --parent and \
-                 keep --root-reason to make it a root instead."
-            ))
-        }
-        _ => {}
-    }
-    if root {
-        if let Some(err) = root_needs_justification(cwd, root_reason) {
-            return Err(err);
-        }
-    }
+    let parent = resolve_tree_position(parent, root, root_reason, focus)?;
+
     let path = workspace_tasks_path(cwd);
     let content = std::fs::read_to_string(&path).unwrap_or_default();
     let updated = pt::create_plan(&content, plan_id, title, parent, kind)?;
@@ -230,71 +221,100 @@ pub fn create(
         pt::PlanKind::Exec => "",
     };
     let message = match parent {
-        Some(p) if !p.trim().is_empty() => format!(
-            "created child plan '{plan_id}'{kindness} (parent '{}') in {}",
-            p.trim(),
-            path.display()
-        ),
-        _ => format!("created plan '{plan_id}'{kindness} in {}", path.display()),
+        Some(p) => {
+            let inherited = if Some(p) == focus && !p.is_empty() {
+                " — 默认挂在你当前执行的 plan 下;要另起一棵树用 --root --root-reason"
+            } else {
+                ""
+            };
+            format!(
+                "created child plan '{plan_id}'{kindness} (parent '{p}') in {}{inherited}",
+                path.display()
+            )
+        }
+        None => format!("created plan '{plan_id}'{kindness} in {}", path.display()),
     };
     Ok(PlanOutcome { message, warnings })
 }
 
 /// Shortest `--root-reason` that counts as a justification, in characters. The
-/// gate exists to make declaring a root cost a moment's thought, so the cheap
-/// answers it must price out are exactly the short ones — `-`, `n/a`, `无`.
-/// Counted in `char`s, not bytes, so a four-character CJK reason is not held to
-/// a stricter bar than a four-letter English one.
+/// gate exists to make leaving your current plan's tree cost a moment's thought,
+/// so the cheap answers it must price out are exactly the short ones — `-`,
+/// `n/a`, `无`. Counted in `char`s, not bytes, so a four-character CJK reason is
+/// not held to a stricter bar than a four-letter English one.
 const MIN_ROOT_REASON_CHARS: usize = 4;
 
-/// `Some(error)` when this `--root` needs a justification it did not supply.
+/// Resolve the new plan's parent from the explicit flags plus the session's
+/// focused plan. `Ok(None)` means a root.
 ///
-/// Requiring an explicit `--parent` / `--root` (2026-08-20) fixed the silent
-/// default but not the incentive: `--root` still answers the question at zero
-/// cost, without the agent ever working out how the new plan relates to what is
-/// already in flight. Measured on this repo afterwards — 366 plans, 3 with a
-/// `parent=`, and 109 authored flat since the last one that had it — so the
-/// backtrack had no edges to walk and each plan died alone.
+/// **Why the default is the focused plan.** Two earlier designs both failed to
+/// produce a tree:
 ///
-/// So `--root` is free only when it is *obviously* right: no other plan here has
-/// pending work, hence no candidate parent to have considered. Once candidates
-/// exist, the agent must name why none of them is the parent. This deliberately
-/// does not forbid roots — parallel top-level trees are legitimate — it just
-/// stops "root" from being the path of least resistance.
-fn root_needs_justification(cwd: &Path, root_reason: Option<&str>) -> Option<String> {
-    let candidates = pending_plan_ids(cwd);
-    if candidates.is_empty() {
-        return None; // nothing to branch off — a new tree is the only option
+/// 1. `--parent` merely *available* → 350 of the first 355 plans in this repo
+///    came out flat.
+/// 2. An explicit `--parent` / `--root` choice made *mandatory* (2026-08-20) →
+///    109 more came out flat, because `--root` answers the question at zero
+///    cost without the agent working out how the new plan relates to what it is
+///    already doing.
+///
+/// Both left the backtrack with no edges. The observed damage is a relay chain
+/// in `agent-workspace`: one boss request ("audit the research flow for gaps")
+/// produced a six-item list, each item became its own root plan (8 plans, 0
+/// `parent=`), and so every hop finished its one plan, found no ancestor, and
+/// ended the turn with the list unfinished. The boss had to keep asking whether
+/// his original question was done — the macro goal existed only in a wiki doc
+/// and in prose the agents hand-copied between handoff notes.
+///
+/// So the choice is not made mandatory, it is made *correct by default*: a plan
+/// authored while you are executing another plan is that plan's child. Chaining
+/// siblings into a line is fine — [`pt::resolve_backtrack_target`] skips
+/// completed ancestors, so the walk always lands on the nearest unfinished work.
+/// Leaving the tree stays possible, it just has to be said out loud.
+fn resolve_tree_position<'a>(
+    parent: Option<&'a str>,
+    root: bool,
+    root_reason: Option<&str>,
+    focus: Option<&'a str>,
+) -> Result<Option<&'a str>, String> {
+    if parent.is_some() && root {
+        return Err(
+            "--parent and --root are mutually exclusive: a plan is either a child of \
+             another plan or a new tree root, not both."
+                .to_string(),
+        );
     }
-    let given = root_reason.map(|r| r.trim()).unwrap_or("");
-    if given.chars().count() >= MIN_ROOT_REASON_CHARS {
-        return None;
+    if let Some(p) = parent {
+        if root_reason.is_some() {
+            return Err(format!(
+                "--root-reason justifies starting a NEW TREE, but this plan declares \
+                 --parent {p}, so it is a child and needs no such justification. Drop \
+                 --root-reason to create it as a child of '{p}', or drop --parent and \
+                 keep --root-reason to make it a root instead."
+            ));
+        }
+        return Ok(Some(p));
     }
-    Some(format!(
-        "this workspace already has plans with pending work: {}. Declaring another \
-         top-level tree therefore needs `--root-reason \"<why none of those is the \
-         parent>\"` — one line is enough. If one of them IS the parent, pass \
-         `--parent <id>` instead, so Fleet can point you back at it when this plan \
-         completes.",
-        candidates.join(", ")
-    ))
-}
 
-/// Ids of plans in this workspace that still have a pending P-task — the
-/// plausible `--parent` candidates offered when a `create` declares neither
-/// position. Best-effort: an unreadable TASKS.md yields an empty list rather
-/// than failing the create's error message.
-fn pending_plan_ids(cwd: &Path) -> Vec<String> {
-    let main_root = pt::discover_main_checkout_root(cwd);
-    let sources = pt::collect_task_sources(cwd, main_root.as_deref());
-    let (raw, _) = pt::collect_from_sources(&sources, true);
-    let mut ids: Vec<String> = pt::dedup_blocks_keep_latest_mtime(raw)
-        .into_iter()
-        .filter_map(|b| b.id)
-        .collect();
-    ids.sort();
-    ids.truncate(12); // an error message, not a listing — `fleet plan list` has the rest
-    ids
+    let Some(focused) = focus else {
+        // No plan in flight: this is a fresh topic, so a root is the only option
+        // and demanding either a declaration or a justification is pure ceremony.
+        return Ok(None);
+    };
+
+    if !root {
+        return Ok(Some(focused)); // the default that builds the tree
+    }
+    let given = root_reason.map(str::trim).unwrap_or("");
+    if given.chars().count() >= MIN_ROOT_REASON_CHARS {
+        return Ok(None);
+    }
+    Err(format!(
+        "you are currently executing plan '{focused}', so by default this new plan \
+         becomes its child and Fleet walks you back to '{focused}' when it completes. \
+         Starting a separate top-level tree instead needs `--root-reason \"<why this \
+         work does not belong under {focused}>\"` — one line is enough. Drop --root \
+         to accept the default, or pass `--parent <id>` to attach it elsewhere."
+    ))
 }
 
 /// Append a pending task. Deliberately does NOT claim focus: `add` edits a
@@ -372,26 +392,6 @@ mod tests {
         assert!(err.contains("not found"));
     }
 
-    /// A `create` that declares neither position is refused, and the error names
-    /// the plans it could plausibly branch off. This is the whole point of P3:
-    /// with `--parent` merely optional, plans were authored flat by default and
-    /// the tree never came into existence.
-    #[test]
-    fn create_without_parent_or_root_is_refused_and_suggests_candidates() {
-        let tmp = tempfile::tempdir().unwrap();
-        let cwd = tmp.path();
-        // An existing plan with pending work becomes a suggested parent.
-        create(cwd, "host", "Host plan", None, true, None, pt::PlanKind::Exec, None).unwrap();
-        add(cwd, "host", "P1", "open task").unwrap();
-
-        let err = create(cwd, "orphan", "Orphan", None, false, None, pt::PlanKind::Exec, None).unwrap_err();
-        assert!(err.contains("--parent"), "names the flag: {err}");
-        assert!(err.contains("--root"), "names the alternative: {err}");
-        assert!(err.contains("host"), "suggests the pending plan as a parent: {err}");
-        // Nothing was written.
-        assert!(!read_tasks(cwd).contains("orphan"), "refused create must not write");
-    }
-
     /// Declaring both positions is contradictory, not a silent precedence rule.
     #[test]
     fn create_with_both_parent_and_root_is_refused() {
@@ -401,17 +401,7 @@ mod tests {
         assert!(err.contains("mutually exclusive"), "{err}");
     }
 
-    /// An empty/whitespace `--parent` is not a declaration — it must be treated
-    /// as absent (matching `create_plan`'s own empty-slot handling) and so still
-    /// require `--root`.
-    #[test]
-    fn create_with_blank_parent_still_requires_a_declaration() {
-        let tmp = tempfile::tempdir().unwrap();
-        let err = create(tmp.path(), "x", "X", Some("   "), false, None, pt::PlanKind::Exec, None).unwrap_err();
-        assert!(err.contains("--root"), "blank parent ⇒ still undeclared: {err}");
-    }
-
-    /// The two valid shapes both write, and a child records its parent link.
+    /// The two explicit shapes both write, and a child records its parent link.
     #[test]
     fn create_accepts_root_and_parent_shapes() {
         let tmp = tempfile::tempdir().unwrap();
@@ -424,27 +414,86 @@ mod tests {
         assert!(read_tasks(cwd).contains("id=\"side\" v=\"2\" parent=\"top\""));
     }
 
-    /// A workspace holding one plan with an open P-task — the state in which
-    /// `--root` stops being free.
-    fn ws_with_a_pending_plan() -> tempfile::TempDir {
+    /// A workspace already holding a plan, plus the session focused on it —
+    /// i.e. an agent that is mid-plan and now authors another one.
+    fn ws_focused_on_host() -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
         create(tmp.path(), "host", "Host plan", None, true, None, pt::PlanKind::Exec, None).unwrap();
         add(tmp.path(), "host", "P1", "open task").unwrap();
         tmp
     }
 
-    /// The core of "make --root expensive": requiring an explicit declaration was
-    /// not enough, because `--root` answers it at zero cost — the agent never has
-    /// to work out how the new plan relates to what is already in flight. So when
-    /// this workspace *has* candidate parents, a bare `--root` is refused and the
-    /// candidates are named: the agent must state why none of them is the parent.
+    /// **The mechanism.** A plan authored while the session is executing another
+    /// plan defaults to being its child — no flag needed. Two earlier designs
+    /// (optional `--parent`, then a mandatory explicit choice) both produced flat
+    /// forests; this is the one that actually builds an edge.
     #[test]
-    fn root_without_a_reason_is_refused_while_other_plans_are_pending() {
-        let tmp = ws_with_a_pending_plan();
-        let err = create(tmp.path(), "flat", "Flat", None, true, None, pt::PlanKind::Exec, None)
-            .unwrap_err();
+    fn a_plan_spawned_while_executing_another_defaults_to_its_child() {
+        let tmp = ws_focused_on_host();
+        let out = create_in(
+            tmp.path(),
+            "spawned",
+            "Spawned mid-plan",
+            None,
+            false,
+            None,
+            pt::PlanKind::Exec,
+            None,
+            Some("host"),
+        )
+        .unwrap();
+        assert!(
+            read_tasks(tmp.path()).contains("id=\"spawned\" v=\"2\" parent=\"host\""),
+            "the edge must be written: {}",
+            read_tasks(tmp.path())
+        );
+        assert!(
+            out.message.contains("parent 'host'") && out.message.contains("--root"),
+            "the message must say the parent was inherited and how to opt out: {}",
+            out.message
+        );
+    }
+
+    /// The default must never override an explicit `--parent`.
+    #[test]
+    fn an_explicit_parent_wins_over_the_focused_plan() {
+        let tmp = ws_focused_on_host();
+        create(tmp.path(), "other", "Other", None, true, None, pt::PlanKind::Exec, None).unwrap();
+        create_in(
+            tmp.path(),
+            "kid",
+            "Kid",
+            Some("other"),
+            false,
+            None,
+            pt::PlanKind::Exec,
+            None,
+            Some("host"),
+        )
+        .unwrap();
+        assert!(read_tasks(tmp.path()).contains("id=\"kid\" v=\"2\" parent=\"other\""));
+    }
+
+    /// Leaving your current plan's tree stays possible, but must be said out loud
+    /// — this is the case the boss kept hitting: hop N finishes its plan, authors
+    /// the next item as a fresh root, and the macro goal loses its last edge.
+    #[test]
+    fn leaving_the_focused_tree_requires_a_reason() {
+        let tmp = ws_focused_on_host();
+        let err = create_in(
+            tmp.path(),
+            "flat",
+            "Flat",
+            None,
+            true,
+            None,
+            pt::PlanKind::Exec,
+            None,
+            Some("host"),
+        )
+        .unwrap_err();
         assert!(err.contains("--root-reason"), "names the flag: {err}");
-        assert!(err.contains("host"), "names the candidate parent: {err}");
+        assert!(err.contains("host"), "names the plan being left: {err}");
         assert!(
             !read_tasks(tmp.path()).contains("flat"),
             "refused create must not write"
@@ -453,9 +502,9 @@ mod tests {
 
     /// The escape hatch is real: a stated reason lets the new tree through.
     #[test]
-    fn root_with_a_reason_is_accepted() {
-        let tmp = ws_with_a_pending_plan();
-        let out = create(
+    fn a_stated_reason_lets_a_new_tree_through() {
+        let tmp = ws_focused_on_host();
+        let out = create_in(
             tmp.path(),
             "flat",
             "Flat",
@@ -464,19 +513,24 @@ mod tests {
             Some("与 host 无关,是另一条产品线的独立需求"),
             pt::PlanKind::Exec,
             None,
+            Some("host"),
         )
         .unwrap();
         assert!(out.message.contains("created plan 'flat'"), "{}", out.message);
         assert!(read_tasks(tmp.path()).contains("id=\"flat\""));
+        assert!(
+            !read_tasks(tmp.path()).contains("id=\"flat\" v=\"2\" parent="),
+            "a justified root must not be given a parent anyway"
+        );
     }
 
     /// A token reason ("-", "n/a", "无") is the cheap answer the gate exists to
     /// price out, so it must not pass as a justification.
     #[test]
-    fn a_token_root_reason_is_refused() {
-        let tmp = ws_with_a_pending_plan();
+    fn a_token_reason_does_not_buy_a_new_tree() {
+        let tmp = ws_focused_on_host();
         for token in ["-", "n/a", "无", "   x  "] {
-            let err = create(
+            let err = create_in(
                 tmp.path(),
                 "flat",
                 "Flat",
@@ -485,6 +539,7 @@ mod tests {
                 Some(token),
                 pt::PlanKind::Exec,
                 None,
+                Some("host"),
             )
             .unwrap_err();
             assert!(
@@ -494,23 +549,74 @@ mod tests {
         }
     }
 
-    /// The first plan in a fresh workspace has nothing to branch off, so demanding
-    /// a justification there would be pure ceremony. The gate must stay silent.
+    /// No plan in flight ⇒ this is a fresh topic from the boss. A root is the
+    /// only sensible outcome, so neither a declaration nor a justification is
+    /// demanded. This is the case that made the previous mandatory-choice design
+    /// pure ceremony: a workspace's stale active plans are not *your* context.
     #[test]
-    fn root_needs_no_reason_when_nothing_is_pending() {
-        let tmp = tempfile::tempdir().unwrap();
-        create(tmp.path(), "first", "First", None, true, None, pt::PlanKind::Exec, None).unwrap();
-        assert!(read_tasks(tmp.path()).contains("id=\"first\""));
+    fn without_a_focused_plan_a_bare_create_is_a_root() {
+        let tmp = ws_focused_on_host(); // 'host' exists and is pending…
+        let out = create_in(
+            tmp.path(),
+            "fresh",
+            "Fresh topic",
+            None,
+            false,
+            None,
+            pt::PlanKind::Exec,
+            None,
+            None, // …but this session is executing nothing
+        )
+        .unwrap();
+        assert!(out.message.contains("created plan 'fresh'"), "{}", out.message);
+        assert!(
+            !read_tasks(tmp.path()).contains("id=\"fresh\" v=\"2\" parent="),
+            "no focus ⇒ no inherited parent"
+        );
     }
 
-    /// A completed plan is not a candidate parent, so it must not re-arm the gate
-    /// for the next top-level tree.
+    /// A focused plan that is already complete still parents the next one. The
+    /// walk skips finished ancestors ([`pt::resolve_backtrack_target`]), so
+    /// chaining is harmless — whereas requiring the focus to be *pending* would
+    /// re-open the exact hole this fixes: hop N ticks its last box, authors the
+    /// next item, and the chain breaks right at the handoff boundary.
     #[test]
-    fn a_completed_plan_does_not_demand_a_root_reason() {
-        let tmp = ws_with_a_pending_plan();
+    fn a_completed_focus_still_parents_the_next_plan() {
+        let tmp = ws_focused_on_host();
         mutate_checkbox(tmp.path(), "host", "P1", true, None).unwrap();
-        create(tmp.path(), "next", "Next", None, true, None, pt::PlanKind::Exec, None).unwrap();
-        assert!(read_tasks(tmp.path()).contains("id=\"next\""));
+        create_in(
+            tmp.path(),
+            "next",
+            "Next",
+            None,
+            false,
+            None,
+            pt::PlanKind::Exec,
+            None,
+            Some("host"),
+        )
+        .unwrap();
+        assert!(read_tasks(tmp.path()).contains("id=\"next\" v=\"2\" parent=\"host\""));
+    }
+
+    /// A blank `--parent` is not a declaration — it falls through to the default
+    /// rather than being written as an empty parent attribute.
+    #[test]
+    fn a_blank_parent_falls_through_to_the_default() {
+        let tmp = ws_focused_on_host();
+        create_in(
+            tmp.path(),
+            "x",
+            "X",
+            Some("   "),
+            false,
+            None,
+            pt::PlanKind::Exec,
+            None,
+            Some("host"),
+        )
+        .unwrap();
+        assert!(read_tasks(tmp.path()).contains("id=\"x\" v=\"2\" parent=\"host\""));
     }
 
     /// `--root-reason` justifies *being a root*; pairing it with `--parent` means
@@ -518,7 +624,7 @@ mod tests {
     /// reads as "I wrote a reason, so I'm covered" while the plan is a child.
     #[test]
     fn root_reason_with_parent_is_refused() {
-        let tmp = ws_with_a_pending_plan();
+        let tmp = ws_focused_on_host();
         let err = create(
             tmp.path(),
             "kid",

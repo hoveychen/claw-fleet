@@ -75,9 +75,9 @@ fn plan_tool_def() -> Value {
                 "plan_id": {"type": "string", "description": "Plan sentinel id (kebab-case). Required for check/uncheck/create/add/resume/get."},
                 "task": {"type": "string", "description": "P-task id like \"P2\". Required for check/uncheck/add; optional for resume."},
                 "title": {"type": "string", "description": "Plan title. Required for create."},
-                "parent": {"type": "string", "description": "Parent plan id, when this plan is side work spawned mid-parent (create only). Fleet points you back at the parent once this plan completes. Exactly one of parent/root is required for create."},
-                "root": {"type": "boolean", "description": "Declare this plan a new top-level tree (create only). Required when parent is absent, so a plan's position in the tree is always an explicit choice."},
-                "root_reason": {"type": "string", "description": "Why none of this workspace's in-flight plans is the parent (create only). Required alongside root whenever another plan still has pending work — starting a parallel tree should cost a moment's thought, not be the default. Omit for the first plan in a workspace; never valid with parent."},
+                "parent": {"type": "string", "description": "Parent plan id (create only). Usually unnecessary: a plan authored while you are executing another plan already defaults to being that plan's child, and Fleet points you back at the parent once this plan completes. Pass this only to attach it somewhere other than the plan you are currently on."},
+                "root": {"type": "boolean", "description": "Start a new top-level tree instead of attaching to the plan you are currently executing (create only). Needs root_reason whenever you are on a plan; with no plan in flight it is the default anyway and this flag is a no-op."},
+                "root_reason": {"type": "string", "description": "Why this work does not belong under the plan you are currently executing (create only). Required alongside root while you are on a plan, so leaving its tree costs a moment's thought instead of being the path of least resistance. Never valid with parent."},
                 "kind": {"type": "string", "enum": ["exec", "explore"], "description": "What the P-tasks are for (create only, default exec). `exec` changes code; `explore` investigates and its deliverable is the exec child plans it spawns, not edits of its own — use it so an exploration's findings can't silently redefine the implementation."},
                 "text": {"type": "string", "description": "Task text. Required for add."}
             },
@@ -873,41 +873,21 @@ mod tests {
         assert!(!is_control_tool("fleet__set_session_title"));
     }
 
-    /// The MCP surface enforces the same tree-position declaration the CLI does
-    /// — the whole reason plan mutations were lifted into `plan_ops`. Without
-    /// this, an agent on a remote-workspace session (which can only reach the
-    /// MCP tool) would keep authoring flat plans.
-    #[test]
-    fn plan_create_via_mcp_requires_parent_or_root() {
-        let tmp = tempfile::tempdir().unwrap();
-        let err = handle(
-            "fleet__plan",
-            &json!({"action": "create", "plan_id": "demo", "title": "Demo"}),
-            None,
-            tmp.path(),
-        )
-        .unwrap_err();
-        assert!(err.contains("--parent"), "{err}");
-        assert!(err.contains("--root"), "{err}");
-        assert!(
-            !tmp.path().join("TASKS.md").exists(),
-            "a refused create must not create the file"
-        );
-    }
-
-    /// Same reasoning one step further: the priced-up `--root` must hold on the
-    /// MCP surface too, and `root_reason` must actually reach `plan_ops` rather
-    /// than being dropped by the arg mapping. A remote-workspace session can
-    /// reach *only* this path, so a gap here means flat plans forever there.
+    /// `root_reason` must survive the MCP arg mapping and be declared in the
+    /// schema. A remote-workspace session can reach *only* this path, so either
+    /// gap means the tree-position rules are unusable there — and because the
+    /// schema sets `additionalProperties: false`, an undeclared property is
+    /// rejected before the handler ever runs.
     ///
-    /// The schema declares `additionalProperties: false`, so this also pins
-    /// `root_reason` as a declared property — omitting it there would make every
-    /// justified root un-createable over MCP.
+    /// The probe is the `--parent` + `root_reason` contradiction: it is the one
+    /// branch whose outcome depends on `root_reason` alone, with no dependence on
+    /// the session's focus record (which lives in the process-global `~/.fleet`
+    /// and would make this test non-hermetic). The focus-driven default itself is
+    /// covered by `plan_ops`'s `create_in` tests.
     #[test]
-    fn plan_create_via_mcp_prices_up_root_and_forwards_the_reason() {
+    fn plan_create_via_mcp_forwards_the_root_reason() {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path();
-        // First plan: nothing pending yet, so a bare root is legitimately free.
         handle(
             "fleet__plan",
             &json!({"action": "create", "plan_id": "host", "title": "Host", "root": true}),
@@ -915,50 +895,37 @@ mod tests {
             cwd,
         )
         .unwrap();
-        handle(
-            "fleet__plan",
-            &json!({"action": "add", "plan_id": "host", "task": "P1", "text": "open"}),
-            None,
-            cwd,
-        )
-        .unwrap();
 
-        // Now a candidate parent exists ⇒ a bare root is refused.
         let err = handle(
-            "fleet__plan",
-            &json!({"action": "create", "plan_id": "flat", "title": "Flat", "root": true}),
-            None,
-            cwd,
-        )
-        .unwrap_err();
-        assert!(err.contains("--root-reason"), "{err}");
-        assert!(err.contains("host"), "names the candidate parent: {err}");
-
-        // …and a stated reason gets through the arg mapping.
-        handle(
             "fleet__plan",
             &json!({
                 "action": "create",
-                "plan_id": "flat",
-                "title": "Flat",
-                "root": true,
-                "root_reason": "与 host 无关,是另一条产品线"
+                "plan_id": "kid",
+                "title": "Kid",
+                "parent": "host",
+                "root_reason": "这条理由不该出现在子 plan 上"
             }),
             None,
             cwd,
         )
-        .unwrap();
-        let body = std::fs::read_to_string(cwd.join("TASKS.md")).unwrap();
-        assert!(body.contains("id=\"flat\""), "justified root must be written");
+        .unwrap_err();
+        assert!(
+            err.contains("--root-reason"),
+            "root_reason must reach plan_ops, not be dropped by the mapping: {err}"
+        );
+        assert!(
+            !std::fs::read_to_string(cwd.join("TASKS.md"))
+                .unwrap()
+                .contains("id=\"kid\""),
+            "a refused create must not write"
+        );
 
-        // The declared property must be in the schema, or `additionalProperties:
-        // false` rejects the call before it ever reaches this code.
         let schema = plan_tool_def();
         assert!(
             schema["inputSchema"]["properties"]
                 .get("root_reason")
                 .is_some(),
-            "root_reason must be a declared property: {schema}"
+            "root_reason must be a declared property (additionalProperties is false): {schema}"
         );
     }
 

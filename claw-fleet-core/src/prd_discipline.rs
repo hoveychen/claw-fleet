@@ -192,22 +192,31 @@ executor 而失败（exit 127），而 MCP 工具是 JSON-RPC 打到本地常驻
 server、总能触达本地 Fleet 状态。仅当这些工具不在列表里（用户手起、非 Fleet \
 的会话）时，才退回 `fleet …` CLI。**\n\
 \n\
-- `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root \
-  [--root-reason \"...\"]) [--kind explore|exec]` —— 新增一个 v2 计划块**并**把\
-  本会话记录为它的执行者。创建计划就是开始它，故无需另行声明。\
-  **`--parent` 与 `--root` 必须二选一**：当新计划是**你在父计划中途分出的旁支\
-  工作**（一个你必须返回的岔路）时传 `--parent`（见下方「子计划与回溯」），\
-  新开一棵顶层树时传 `--root`。故意不设默认值——计划在树里的位置永远是你的\
-  显式选择：当 `--parent` 只是「可选」时，某个仓库前 355 个计划里有 350 个是\
-  平的，回溯根本没有树可走。\n\
+- `fleet plan create <id> --title \"...\" [--parent <id> | --root --root-reason \
+  \"...\"] [--kind explore|exec]` —— 新增一个 v2 计划块**并**把本会话记录为它的\
+  执行者。创建计划就是开始它，故无需另行声明。\n\
   \n\
-  **而且本 workspace 还有别的计划没做完时，光传 `--root` 会被拒**，必须附上\
-  `--root-reason \"<为什么那些在飞的计划都不是它的父计划>\"`，一句话即可。\
-  只要求「显式二选一」是不够的：`--root` 依然是零成本的合法答案，你不必想清楚\
-  新计划跟手上的活是什么关系——那之后又有 109 个计划被平铺建出来。所以现在\
-  `--root` 只在**显然正确**时免费（本 workspace 没有任何计划还有待办，压根没有\
-  可挂的父计划）。这不是禁止顶层树——并行的树是合理的——只是不让「root」继续\
-  当那条阻力最小的路。若其中某个**就是**父计划，直接传 `--parent <id>`。\n\
+  **默认行为：你在执行某个计划时新建的计划，自动成为它的子计划。**一个 flag \
+  都不用传。这条默认值就是整个机制——**从一个计划里派生出来的计划，默认就是\
+  它的儿子**。\n\
+  \n\
+  两条相关的 flag 都只是**覆盖**这个默认值：\n\
+  - `--parent <id>`：挂到别处（不是你当前执行的那个计划）。通常用不上。\n\
+  - `--root --root-reason \"<为什么这活不属于当前计划>\"`：另起一棵顶层树。\
+    **你手上有计划时，光传 `--root` 会被拒**，必须给出理由，一句话即可。\n\
+  - 手上**没有**计划时（老板刚开的新话题），root 本来就是默认，什么都不用传。\n\
+  \n\
+  为什么默认值要这么设：前两版设计都没能长出树。①`--parent` 只是「可选」时，\
+  某个仓库前 355 个计划里 350 个是平的；②改成「必须显式二选一」之后，又有 \
+  109 个是平的——因为 `--root` 依然是零成本的合法答案，你不必想清楚新计划跟\
+  手上的活是什么关系。真实代价是一条接力链：老板一句「审一下研究流程的缺陷」\
+  拆出六条清单，每条各自建成顶层计划（8 个计划，0 条 parent），于是每一棒做完\
+  自己那一个、找不到祖先、就结束了回合，而清单还剩两条没做——宏观目标只活在\
+  一份 wiki 和各棒手抄的交接便条里。所以现在不是把选择变成**强制**，而是把它\
+  变成**默认就对**。\n\
+  \n\
+  把兄弟串成一条链也没关系：回溯会跳过已完成的祖先，总是落在最近的未完成\
+  工作上。离开这棵树依然可以，只是要说出口。\n\
 - `fleet plan check <id> <P>` —— 勾选一个任务为完成（`[ ]`→`[x]`）并把本会话的\
   焦点刷新到 `<id>`。如 `fleet plan check auth-refactor P2`。\n\
 - `fleet plan uncheck <id> <P>` —— 取消勾选。\n\
@@ -742,27 +751,39 @@ has no `fleet` and fails (exit 127); the MCP tools are JSON-RPC to the local \
 `fleet …` CLI only when those tools are absent (a user's hand-launched, \
 non-Fleet session).**\n\
 \n\
-- `fleet plan create <id> --title \"...\" (--parent <parent-id> | --root \
-  [--root-reason \"...\"]) [--kind explore|exec]` — add a new v2 plan block \
-  **and** record this session as its executor. Creating a plan is starting it, \
-  so no separate declaration is needed. **Exactly one of `--parent` / `--root` \
-  is required**: pass `--parent` when the new plan is **side work you spun off \
-  mid-parent** (a detour you must return from — see \"Child plans & \
-  backtracking\" below), or `--root` when it starts a new top-level tree. There \
-  is deliberately no default — a plan's position in the tree is always your \
-  explicit choice, because when `--parent` was merely optional 350 of the first \
-  355 plans in a repo came out flat and the backtrack had no tree to walk.\n\
+- `fleet plan create <id> --title \"...\" [--parent <id> | --root --root-reason \
+  \"...\"] [--kind explore|exec]` — add a new v2 plan block **and** record this \
+  session as its executor. Creating a plan is starting it, so no separate \
+  declaration is needed.\n\
   \n\
-  **And when other plans in this workspace still have pending work, a bare \
-  `--root` is refused**: you must add `--root-reason \"<why none of those \
-  in-flight plans is the parent>\"`, one line is enough. Requiring an explicit \
-  choice was not enough on its own — `--root` still answered it at zero cost, \
-  without you ever working out how the new plan relates to what is already in \
-  flight, and 109 more plans came out flat. So `--root` is free only when it is \
-  *obviously* right: no plan here has pending work, so there is no candidate \
-  parent to have considered. This does not forbid top-level trees — parallel \
-  trees are legitimate — it just stops \"root\" from being the path of least \
-  resistance. If one of them IS the parent, pass `--parent <id>` instead.\n\
+  **The default: a plan you author while executing another plan becomes that \
+  plan's child, automatically.** No flag required. That default *is* the \
+  mechanism — **a plan spawned out of a plan is by default its son**.\n\
+  \n\
+  Both flags merely *override* that default:\n\
+  - `--parent <id>` — attach it somewhere other than the plan you are on. \
+    Rarely needed.\n\
+  - `--root --root-reason \"<why this work does not belong under the current \
+    plan>\"` — start a separate top-level tree. **While you are on a plan, a \
+    bare `--root` is refused**; one line of justification is enough.\n\
+  - With **no** plan in flight (a fresh topic from the boss), a root is already \
+    the default and you need neither flag.\n\
+  \n\
+  Why the default is set this way: two earlier designs failed to grow a tree. \
+  (1) With `--parent` merely optional, 350 of the first 355 plans in a repo came \
+  out flat. (2) After the choice was made *mandatory*, 109 more came out flat — \
+  `--root` still answered it at zero cost, without you working out how the new \
+  plan relates to what you are already doing. The real cost was a relay chain: \
+  one boss request (\"audit the research flow for gaps\") produced a six-item \
+  list, each item became its own top-level plan (8 plans, 0 `parent=`), and so \
+  every hop finished its one plan, found no ancestor, and ended the turn with \
+  the list unfinished — the macro goal lived only in a wiki doc and in prose the \
+  agents hand-copied between handoff notes. So the choice is not made \
+  *mandatory*, it is made *correct by default*.\n\
+  \n\
+  Chaining siblings into a line is fine: the backtrack skips completed ancestors \
+  and always lands on the nearest unfinished work. Leaving the tree stays \
+  possible, it just has to be said out loud.\n\
 - `fleet plan check <id> <P>` — tick a task done (`[ ]`→`[x]`) and refresh this \
   session's focus onto `<id>`. e.g. `fleet plan check auth-refactor P2`.\n\
 - `fleet plan uncheck <id> <P>` — untick.\n\
@@ -1653,8 +1674,8 @@ mod tests {
     fn render_documents_the_plan_tree_mechanisms_in_both_locales() {
         let en = render_guidance("Boss", "en");
         assert!(
-            en.contains("--root") && en.contains("Exactly one of `--parent` / `--root`"),
-            "[en] create must document the required tree-position declaration"
+            en.contains("--root") && en.contains("becomes that plan's child"),
+            "[en] create must document the inherited-parent default"
         );
         assert!(
             en.contains("Explore plans vs exec plans") && en.contains("--kind explore"),
@@ -1667,8 +1688,8 @@ mod tests {
 
         let zh = render_guidance("老板", "zh");
         assert!(
-            zh.contains("--root") && zh.contains("必须二选一"),
-            "[zh] create must document the required tree-position declaration"
+            zh.contains("--root") && zh.contains("自动成为它的子计划"),
+            "[zh] create must document the inherited-parent default"
         );
         assert!(
             zh.contains("explore 计划与 exec 计划") && zh.contains("--kind explore"),
@@ -1680,22 +1701,32 @@ mod tests {
         );
     }
 
-    /// `--root-reason` must be documented in both locales, because the agent
-    /// otherwise meets the priced-up `--root` purely as a refused `create` and
-    /// has to reverse-engineer the flag out of an error message. Same
-    /// both-locales reasoning as the test above: the zh body is a separate
-    /// string, so documenting only the English half leaves zh sessions blind.
+    /// Both halves of the tree-position rule must be documented in both locales:
+    /// the inherited-parent default, and the `--root-reason` needed to opt out.
+    /// Documenting only the flag would leave the agent meeting the default as
+    /// unexplained behaviour ("why did my plan get a parent I never asked for?")
+    /// and the gate as an unexplained refusal. Same both-locales reasoning as the
+    /// test above: the zh body is a separate string, so editing only the English
+    /// half leaves zh sessions blind.
     #[test]
-    fn render_documents_the_root_reason_gate_in_both_locales() {
+    fn render_documents_the_inherited_parent_default_in_both_locales() {
         let en = render_guidance("Boss", "en");
         assert!(
-            en.contains("--root-reason") && en.contains("path of least resistance"),
-            "[en] the priced-up --root must be documented, not just its flag"
+            en.contains("--root-reason") && en.contains("is by default its son"),
+            "[en] the default must be stated as the mechanism, not just the flag"
+        );
+        assert!(
+            en.contains("plan in flight"),
+            "[en] the no-focus case must be documented or the default reads as always-on"
         );
         let zh = render_guidance("老板", "zh");
         assert!(
-            zh.contains("--root-reason") && zh.contains("阻力最小的路"),
-            "[zh] the priced-up --root must be documented, not just its flag"
+            zh.contains("--root-reason") && zh.contains("默认就是"),
+            "[zh] the default must be stated as the mechanism, not just the flag"
+        );
+        assert!(
+            zh.contains("root 本来就是默认"),
+            "[zh] the no-focus case must be documented or the default reads as always-on"
         );
     }
 
