@@ -86,6 +86,28 @@ async function inflateGzipBytes(buf: ArrayBuffer): Promise<string> {
   return new Response(stream).text();
 }
 
+/** One round trip, broken into the pieces that have different causes.
+ *
+ *  `totalMs` alone can't say whether a laggy UI is this phone's network, the
+ *  desktop's network, or the desktop's own handler — the three fixes are
+ *  unrelated, so the split is the whole point of measuring at all.
+ *
+ *  Both segments are optional because either source can be absent: the relay's
+ *  `msg_ack` may lose the race with the reply on a fast link, and a desktop that
+ *  predates the `handle_ms` stamp reports nothing. A missing segment degrades the
+ *  UI to a coarser answer; it never invents one. */
+export interface RttSample {
+  /** Request → reply, measured entirely on this phone's clock. */
+  totalMs: number;
+  /** Phone ↔ relay round trip, from the relay's own `msg_ack` for the outbound
+   *  frame. The relay acks as soon as it has handed the frame on, so this leg
+   *  excludes the desktop entirely. */
+  phoneRelayMs: number | null;
+  /** What the desktop reported spending inside its handler (`handle_ms`). A
+   *  duration it measured on its own clock, so no clock sync is involved. */
+  desktopHandleMs: number | null;
+}
+
 export interface RelayHandlers {
   /** WS-level connectivity (this phone ↔ relay). */
   onStatus?: (connected: boolean) => void;
@@ -98,9 +120,10 @@ export interface RelayHandlers {
    *  `delta` (incremental upsert/remove). Lets the UI surface whether the
    *  desktop's delta path is actually engaged. Fired on every sessions update. */
   onSessionsKind?: (kind: "full" | "delta") => void;
-  /** One request→reply round-trip time sample (ms), reported when a reply lands
-   *  for a still-pending request. A weak-link congestion signal. */
-  onRttSample?: (rttMs: number) => void;
+  /** One request→reply round-trip sample, reported when a reply lands for a
+   *  still-pending request. A weak-link congestion signal, and — via its
+   *  segments — the only way to tell a slow link from a slow desktop. */
+  onRttSample?: (sample: RttSample) => void;
   /** Fired each time the socket drops and a reconnect is scheduled — a second
    *  weak-link signal (frequent reconnects ⇒ congested). */
   onReconnect?: () => void;
@@ -229,6 +252,9 @@ export class RelayClient {
       timer: number;
       /** Epoch ms when request() sent this — used to compute RTT on reply. */
       sentAt: number;
+      /** Epoch ms the relay's `msg_ack` for this frame landed. Set once (the
+       *  first ack wins) and read on reply to split off the phone↔relay leg. */
+      ackAt?: number;
       // 方案 A: fired once when the desktop's early `ack{req_id}` lands, before
       // the final reply — lets a caller confirm the submit reached the desktop
       // without waiting out the timeout. `acked` guards against a double fire.
@@ -407,6 +433,11 @@ export class RelayClient {
   private handleMsgAck(ackId: string, status: string) {
     const entry = this.pending.get(ackId);
     if (!entry) return;
+    // Timing first, whatever the custody verdict: this ack came straight back
+    // from the relay without involving the desktop, so its arrival is the one
+    // observation that isolates this phone's own leg of the round trip. Recorded
+    // before the early returns below, which resolve/reject and drop the entry.
+    entry.ackAt ??= Date.now();
     if (status === "queued" && entry.ackIsDelivery) {
       this.pending.delete(ackId);
       window.clearTimeout(entry.timer);
@@ -513,7 +544,15 @@ export class RelayClient {
         if (!entry) return;
         this.pending.delete(reqId);
         window.clearTimeout(entry.timer);
-        this.handlers.onRttSample?.(Date.now() - entry.sentAt);
+        // `handle_ms` rides inside the sealed reply (see mobile_relay.rs
+        // stamp_handle_ms). An older desktop omits it — hence null, not 0, which
+        // would claim the desktop was instant and blame the link for its time.
+        const handleMs = payload.handle_ms;
+        this.handlers.onRttSample?.({
+          totalMs: Date.now() - entry.sentAt,
+          phoneRelayMs: entry.ackAt !== undefined ? entry.ackAt - entry.sentAt : null,
+          desktopHandleMs: typeof handleMs === "number" ? handleMs : null,
+        });
         if (payload.ok) {
           entry.resolve(payload.data);
         } else {
