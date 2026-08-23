@@ -29,7 +29,9 @@ use flate2::{write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-pub const DEFAULT_RELAY_URL: &str = "https://fleet-relay.muveeai.com";
+/// Fallback relay host — also the value every non-mainland region resolves to.
+/// The *effective* default is region-derived, see [`default_relay_url`].
+pub const DEFAULT_RELAY_URL: &str = crate::relay_region::RELAY_URL_GLOBAL;
 const CONFIG_FILE_NAME: &str = "mobile-relay.json";
 /// Minimum seconds between two `sessions` snapshots pushed to clients.
 const SESSIONS_THROTTLE: Duration = Duration::from_secs(2);
@@ -53,8 +55,12 @@ pub struct MobileRelayConfig {
     pub secret: String,
 }
 
+/// The relay host a config with no stored value gets: the mainland host in
+/// China, [`DEFAULT_RELAY_URL`] everywhere else (and whenever the region can't
+/// be told). Only the *default* is region-derived — an already-stored
+/// `relayUrl` is the user's own value and is never rewritten.
 fn default_relay_url() -> String {
-    DEFAULT_RELAY_URL.to_string()
+    crate::relay_region::region_default_relay_url().to_string()
 }
 
 impl Default for MobileRelayConfig {
@@ -3623,7 +3629,8 @@ mod tests {
         with_temp_home(|| {
             let cfg = load_config();
             assert!(!cfg.enabled);
-            assert_eq!(cfg.relay_url, DEFAULT_RELAY_URL);
+            // Region-derived: the mainland host in CN, DEFAULT_RELAY_URL elsewhere.
+            assert_eq!(cfg.relay_url, crate::relay_region::region_default_relay_url());
             assert!(cfg.secret.is_empty());
 
             let cfg = MobileRelayConfig {
@@ -3641,6 +3648,29 @@ mod tests {
                 let mode = fs::metadata(config_path().unwrap()).unwrap().permissions().mode();
                 assert_eq!(mode & 0o777, 0o600, "secret file must be 0600");
             }
+        });
+    }
+
+    #[test]
+    fn stored_relay_url_survives_the_region_default() {
+        with_temp_home(|| {
+            // A user-set host must never be rewritten by region detection — the
+            // region only decides what an *absent* value defaults to.
+            let cfg = MobileRelayConfig {
+                enabled: true,
+                relay_url: crate::relay_region::RELAY_URL_CN.into(),
+                secret: generate_secret(),
+            };
+            save_config(&cfg).unwrap();
+            assert_eq!(load_config().relay_url, crate::relay_region::RELAY_URL_CN);
+
+            // A config file predating the field falls back to the region default.
+            let p = config_path().unwrap();
+            fs::write(&p, r#"{"enabled":true,"secret":"s"}"#).unwrap();
+            assert_eq!(
+                load_config().relay_url,
+                crate::relay_region::region_default_relay_url()
+            );
         });
     }
 
