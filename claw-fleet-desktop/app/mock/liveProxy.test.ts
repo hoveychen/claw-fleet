@@ -161,6 +161,36 @@ describe("live proxy route table", () => {
     }
   });
 
+  /**
+   * Body casing is per-struct, not per-surface. The one-off `struct Req` inside
+   * a single `remote.rs` fn declares no `rename_all`, so its fields go out
+   * snake_case — while the shared request types in `claw-fleet-core` are
+   * camelCase. Sending the wrong one is a 400 with a body nobody reads
+   * (`missing field user_title`), which is how the first four of these shipped.
+   */
+  it("keeps snake_case bodies snake_case", () => {
+    expect(LIVE_ROUTES.apply_interaction_mode({}).body).toHaveProperty("user_title");
+    expect(LIVE_ROUTES.apply_prd_mode({}).body).toHaveProperty("user_title");
+    expect(LIVE_ROUTES.reconcile_codex_guidance({}).body).toHaveProperty("user_title");
+    expect(LIVE_ROUTES.install_plugin({ pluginId: "p" }).body).toEqual({ plugin_id: "p" });
+    expect(LIVE_ROUTES.uninstall_plugin({ pluginId: "p" }).body).toEqual({ plugin_id: "p" });
+    expect(LIVE_ROUTES.set_plugin_enabled({ pluginId: "p", enabled: true }).body).toEqual({
+      plugin_id: "p",
+      enabled: true,
+    });
+    expect(LIVE_ROUTES.delete_skill({ skillPath: "/s" }).body).toEqual({ skill_path: "/s" });
+  });
+
+  it("keeps camelCase bodies camelCase", () => {
+    // `SpawnSessionRequest` / `SetSessionMarkRequest` are `rename_all = "camelCase"`.
+    expect(LIVE_ROUTES.spawn_new_claude_session({ workspacePath: "/w" }).body).toMatchObject({
+      workspacePath: "/w",
+    });
+    expect(
+      LIVE_ROUTES.set_session_mark({ sessionId: "s", workspacePath: "/w", mark: "star" }).body,
+    ).toMatchObject({ sessionId: "s", workspacePath: "/w" });
+  });
+
   it("builds the tail request the store issues", () => {
     expect(LIVE_ROUTES.get_messages_tail({ jsonlPath: "dsh://s-1", tail: 150 })).toEqual({
       method: "GET",

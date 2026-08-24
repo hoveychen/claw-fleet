@@ -158,6 +158,34 @@ describe("list-shaped commands never answer null", () => {
 });
 
 /**
+ * `getCurrentWindow()` is called on the boot path (theme sync) and by the
+ * custom titlebar. Every query in the family has to come back with the type
+ * its caller destructures — an unhandled one is a rejected promise inside the
+ * titlebar's effect, and a null where a size is expected throws on `.width`.
+ */
+describe("plugin:window family", () => {
+  it("answers the boolean queries as booleans", () => {
+    for (const op of ["is_visible", "is_focused", "is_maximized", "is_minimized"]) {
+      const { handled, value } = localCommand(`plugin:window|${op}`, {});
+      expect(handled).toBe(true);
+      expect(typeof value).toBe("boolean");
+    }
+  });
+
+  it("answers a size as a {width,height} pair", () => {
+    const { value } = localCommand("plugin:window|inner_size", {});
+    expect(value).toHaveProperty("width");
+    expect(value).toHaveProperty("height");
+  });
+
+  it("answers every other window op rather than reporting a gap", () => {
+    for (const op of ["set_theme", "minimize", "toggle_maximize", "start_dragging", "close"]) {
+      expect(localCommand(`plugin:window|${op}`, {}).handled).toBe(true);
+    }
+  });
+});
+
+/**
  * The completeness guard: every command the frontend can invoke has to be
  * *classified* — routed to the probe, composed from other routes, answered
  * locally, or listed below as a known gap. Without this, adding a command to
