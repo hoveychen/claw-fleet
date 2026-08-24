@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 import { localCommand } from "./webTransport";
+import { LIVE_COMPOSITES, LIVE_ROUTES } from "./mock/liveProxy";
 
 /**
  * `@tauri-apps/plugin-store`'s JS half expects specific shapes back from its
@@ -91,7 +94,33 @@ describe("host facts", () => {
   });
 
   it("leaves unknown commands unhandled so the caller can record the gap", () => {
-    expect(localCommand("open_settings_window", {}).handled).toBe(false);
+    expect(localCommand("no_such_command", {}).handled).toBe(false);
+  });
+
+  /**
+   * The three host-settings pairs have no endpoint on `fleet serve`. Handing
+   * back a plausible default would render a toggle that looks like the host's
+   * state and saves nowhere, so they stay unhandled (and therefore rejected and
+   * logged) until the routes exist.
+   */
+  it.each([
+    "get_permissions_config",
+    "set_permissions_config",
+    "get_decision_panel_config",
+    "set_decision_panel_config",
+    "get_auto_resume_config",
+    "set_auto_resume_config",
+  ])("%s is rejected rather than answered with a fabricated default", (cmd) => {
+    expect(localCommand(cmd, {}).handled).toBe(false);
+  });
+
+  it("reports no pending app update instead of rejecting the boot check", () => {
+    // `App.tsx` reads `has_update` — snake_case, unlike most of the surface.
+    expect(localCommand("check_app_version", {}).value).toEqual({
+      has_update: false,
+      latest_version: "",
+      release_url: "",
+    });
   });
 });
 
@@ -106,9 +135,118 @@ describe("host facts", () => {
  * `list_saved_connections`, so these two are load-bearing.
  */
 describe("list-shaped commands never answer null", () => {
-  it.each(["list_saved_connections", "list_ssh_profiles"])("%s returns an array", (cmd) => {
+  it.each([
+    "list_saved_connections",
+    "list_ssh_profiles",
+    // `store.ts` assigns this straight into the `alerts` array slot.
+    "get_waiting_alerts",
+    // `audio.ts` maps over the voices; `AccountInfo` over the tools.
+    "get_tts_voices",
+    "detect_ai_tools",
+  ])("%s returns an array", (cmd) => {
     const { handled, value } = localCommand(cmd, {});
     expect(handled).toBe(true);
     expect(Array.isArray(value)).toBe(true);
+  });
+
+  it("generate_mascot_quips keeps both quip lists", () => {
+    expect(localCommand("generate_mascot_quips", {}).value).toEqual({
+      busy: [],
+      idle: [],
+    });
+  });
+});
+
+/**
+ * The completeness guard: every command the frontend can invoke has to be
+ * *classified* — routed to the probe, composed from other routes, answered
+ * locally, or listed below as a known gap. Without this, adding a command to
+ * the frontend silently adds a browser-build gap that only a manual click-
+ * through of every view would find.
+ */
+const KNOWN_WEB_GAPS = [
+  // Host settings under `~/.fleet` with no endpoint on `fleet serve`. Wiring
+  // them needs three new routes; a fabricated default would lie. See the
+  // comment on `localCommand`'s default arm.
+  "get_permissions_config",
+  "set_permissions_config",
+  "get_decision_panel_config",
+  "set_decision_panel_config",
+  "get_auto_resume_config",
+  "set_auto_resume_config",
+  // Reach a workspace file through `memory::` instead of the Backend trait, so
+  // there is no HTTP shape to mirror.
+  "get_claude_md_content",
+  "promote_memory",
+  // Write to the caller's own machine.
+  "install_fleet_cli",
+  "install_fleet_skill",
+  "apply_mcp_injector",
+  // Move bytes through a caller-side filesystem path.
+  "stage_pasted_attachment",
+  "upload_elicitation_attachment",
+  "export_wiki_doc",
+  // Emit onto the desktop's app-event bus, or have no RemoteBackend override.
+  "test_decision_frontend_only",
+  "test_fleet_ask_end_to_end",
+  "test_fleet_ask_via_claude_cli",
+  // SSH connection management — a tab only ever talks to the server that
+  // served it, so there is nothing to connect, disconnect or install.
+  "connect_remote",
+  "disconnect_remote",
+  "delete_connection",
+  "install_rca_remote",
+  "update_rca_remote",
+];
+
+/**
+ * Handled, but their whole body *is* a side effect on the real window
+ * (`location.reload()` / `print()`), so the coverage sweep below asserts them
+ * from this list instead of calling them and making jsdom log a
+ * "Not implemented" for each run.
+ */
+const SIDE_EFFECT_ONLY = ["restart_app", "print_webview"];
+
+/** Same scan as `liveProxy.test.ts`, over the whole app. */
+function invokedCommands(dir: string, out = new Set<string>()): Set<string> {
+  for (const entry of readdirSync(dir)) {
+    if (entry === "node_modules" || entry === "generated") continue;
+    const p = join(dir, entry);
+    if (statSync(p).isDirectory()) {
+      invokedCommands(p, out);
+    } else if (/\.tsx?$/.test(entry)) {
+      for (const m of readFileSync(p, "utf8").matchAll(/invoke(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g)) {
+        out.add(m[1]);
+      }
+    }
+  }
+  return out;
+}
+
+describe("browser-build command coverage", () => {
+  it("classifies every command the frontend invokes", () => {
+    const invoked = [...invokedCommands(join(__dirname))];
+    expect(invoked.length).toBeGreaterThan(150);
+
+    const unclassified = invoked.filter(
+      (cmd) =>
+        !(cmd in LIVE_ROUTES) &&
+        !(cmd in LIVE_COMPOSITES) &&
+        // `start/stop_watching_session` are intercepted inside `liveInvoke`
+        // (they become pollers), ahead of the route table.
+        cmd !== "start_watching_session" &&
+        cmd !== "stop_watching_session" &&
+        !SIDE_EFFECT_ONLY.includes(cmd) &&
+        !localCommand(cmd, {}).handled &&
+        !KNOWN_WEB_GAPS.includes(cmd),
+    );
+    expect(unclassified).toEqual([]);
+  });
+
+  it("keeps the gap list free of entries that are now covered", () => {
+    const covered = KNOWN_WEB_GAPS.filter(
+      (cmd) => cmd in LIVE_ROUTES || cmd in LIVE_COMPOSITES || localCommand(cmd, {}).handled,
+    );
+    expect(covered).toEqual([]);
   });
 });

@@ -17,7 +17,13 @@
  * runtime by whether `__TAURI_INTERNALS__` is present.
  */
 
-import { liveInvoke, installLiveProxy, setProbeBase, liveProxyReport } from "./mock/liveProxy";
+import {
+  liveInvoke,
+  installLiveProxy,
+  setProbeBase,
+  setHostPrefsSource,
+  liveProxyReport,
+} from "./mock/liveProxy";
 
 /**
  * True when running inside the desktop webview.
@@ -85,6 +91,110 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     case "get_app_version":
     case "desktop_build_commit":
       return { handled: true, value: "web" };
+    // Snake_case on purpose — `App.tsx` reads `has_update` off this shape.
+    case "check_app_version":
+      return {
+        handled: true,
+        value: { has_update: false, latest_version: "", release_url: "" },
+      };
+    // The desktop log lives on the host; a tab has no path to show.
+    case "get_log_path":
+      return { handled: true, value: "" };
+
+    // ── Native window / tray / dock ──────────────────────────────────────
+    // There is one window here and the browser owns its chrome, so these are
+    // no-ops rather than gaps: the callers fire and forget, and reporting a
+    // gap for each would bury the ones that matter.
+    case "show_main_window":
+    case "open_settings_window":
+    case "open_preview_window":
+    case "close_preview_window":
+    case "show_decision_float":
+    case "hide_decision_float":
+    case "resize_decision_float":
+    case "toggle_tray_panel":
+    case "set_lite_mode":
+    case "quit_app":
+    case "nudge_traffic_lights":
+      return { handled: true, value: null };
+    case "is_main_window_minimized":
+      return { handled: true, value: false };
+    // The float window does not exist here, so it holds no snapshot. Typed
+    // `PendingDecision[] | null` by its caller, so null is in-contract.
+    case "get_decision_float_snapshot":
+      return { handled: true, value: null };
+    // `app.restart()`'s honest browser equivalent.
+    case "restart_app":
+      window.location.reload();
+      return { handled: true, value: null };
+    // …and the print sheet really is the same feature.
+    case "print_webview":
+      window.print();
+      return { handled: true, value: null };
+    // Opening a file manager / the OS notification pane needs the host shell.
+    case "reveal_path":
+    case "open_notification_settings":
+      return { handled: true, value: null };
+
+    // ── Host-side prefs the frontend itself owns ─────────────────────────
+    // Both are pushed *from* the frontend (which persists them in this same
+    // store), so recording them is the whole job on this side. The desktop
+    // additionally re-applies every installed guidance carrier on each call;
+    // that side effect is not reproduced here — the Settings panel's explicit
+    // apply buttons cover it, and they now carry these two values (see
+    // `setHostPrefsSource`).
+    case "set_locale":
+    case "set_user_title":
+    case "set_notification_mode":
+      return { handled: true, value: null };
+
+    // ── Native dialogs ──────────────────────────────────────────────────
+    // `null` is this pair's "user cancelled", which is the truthful answer
+    // when there is no dialog to open.
+    case "pick_file":
+    case "save_skill_file":
+      return { handled: true, value: null };
+
+    // ── Host audio / OS TTS ─────────────────────────────────────────────
+    // The desktop synthesises through edge-tts on the host. Answer with an
+    // empty voice list (list-shaped — `audio.ts` maps over it) and swallow the
+    // speak call rather than substituting a different engine's voices.
+    case "get_tts_voices":
+      return { handled: true, value: [] };
+    case "speak_text":
+      return { handled: true, value: null };
+
+    // Local-CLI detection and the mascot's LLM quips both run on the host with
+    // no route to reach them. Both are read as collections, so they answer as
+    // empty collections instead of null.
+    case "detect_ai_tools":
+      return { handled: true, value: [] };
+    case "generate_mascot_quips":
+      return { handled: true, value: { busy: [], idle: [] } };
+
+    // Keep-awake holds a power assertion on the host; a tab cannot.
+    case "keep_awake_supported":
+    case "get_keep_awake":
+    case "set_keep_awake":
+      return { handled: true, value: false };
+
+    // In-memory on the desktop, fed by its own session watcher. Nothing here
+    // populates it — and `store.ts` assigns the result straight into an array
+    // slot, so this must be a list, never null.
+    case "get_waiting_alerts":
+      return { handled: true, value: [] };
+
+    // The desktop pre-flights `X-Frame-Options` so it can explain a blank
+    // iframe before showing one. A page cannot read another origin's headers,
+    // and `WebTabPane` already treats `null` as "this host doesn't know the
+    // command" and fails open — so answer null and let the iframe speak.
+    case "probe_url_embeddable":
+      return { handled: true, value: null };
+
+    // Console instead of the host log file.
+    case "log_frontend_debug":
+      console.debug("[frontend]", args.msg);
+      return { handled: true, value: null };
 
     // SSH connection management. The front door only ever talks to the backend
     // inside the app that served this page, so there is nothing to list — but
@@ -97,6 +207,29 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
       return { handled: true, value: [] };
 
     // Everything else is left unhandled and rejected by the caller below.
+    //
+    // Deliberately *not* given a stand-in value, because any value would be a
+    // lie the UI would present as fact:
+    //   - get/set_permissions_config, get/set_decision_panel_config,
+    //     get/set_auto_resume_config — host settings under `~/.fleet` with no
+    //     endpoint on `fleet serve` (see `hooks_server`: `/auto_resume_config`
+    //     was retired in Phase 4 P3 and the other two never had one). A
+    //     fabricated "current value" would show a toggle that reads as the
+    //     host's state and saves nowhere. Each caller already has a `.catch`
+    //     and a typed initial value, so rejecting degrades cleanly. Wiring
+    //     these needs three new routes, not a frontend change.
+    //   - get_claude_md_content, promote_memory — read/write a workspace file
+    //     through `memory::` directly instead of the Backend trait, so they
+    //     have no HTTP shape to mirror.
+    //   - install_fleet_cli, install_fleet_skill, apply_mcp_injector — write to
+    //     the *caller's* machine.
+    //   - stage_pasted_attachment, upload_elicitation_attachment,
+    //     export_wiki_doc — move bytes through a caller-side filesystem path.
+    //   - test_decision_frontend_only, test_fleet_ask_* — emit onto the
+    //     desktop's own app-event bus / have no RemoteBackend override.
+    //   - connect_remote, disconnect_remote, delete_connection,
+    //     install_rca_remote, update_rca_remote — SSH connection management.
+    //     The tab only ever talks to the server that served it.
     default:
       return { handled: false };
   }
@@ -120,6 +253,16 @@ export async function installWebTransport(): Promise<void> {
   // Same origin: this page was served by the very process that answers the
   // data routes, so no proxy prefix.
   setProbeBase("");
+
+  // The guidance routes (`/apply_interaction_mode`, `/apply_prd_mode`, …) need
+  // the user's title and locale in their body. On the desktop those live in
+  // AppState; here they live in this store, under the same keys `storage.ts`
+  // registers ("user-title", "lang"). Read on each call rather than cached, so
+  // an apply right after a language switch carries the new value.
+  setHostPrefsSource(() => ({
+    userTitle: window.localStorage.getItem(`${STORE_PREFIX}user-title`) ?? "",
+    locale: window.localStorage.getItem(`${STORE_PREFIX}lang`) ?? "en",
+  }));
 
   // `shouldMockEvents` routes `emit`/`listen` through the same handler, which
   // is what lets liveProxy's pollers stand in for the desktop's push channels
