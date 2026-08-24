@@ -1,13 +1,24 @@
-/* 计划树 — the workspace's plan forest as an indented, self-drawn tree.
+/* 计划树 — the workspace's plans as a progress matrix (one row per plan, one
+   cell per P-task) plus a detail drawer for the one plan you clicked. Row
+   ordering and cell states live in planMatrix.ts; this file only paints.
    Every colour comes from an App.css token (check-css-tokens gates this). */
 
+/* Sits inside PageShell's own `.main` (a flex column, overflow hidden), so the
+   height comes from `flex: 1` — `height: 100%` against an indefinite parent
+   would collapse the board. */
 .main {
   display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+.board {
+  display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 10px 16px 24px;
-  overflow-y: auto;
-  height: 100%;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0 0;
 }
 
 /* ── Banner ─────────────────────────────────────────────────────────────── */
@@ -79,34 +90,131 @@
   font-weight: 600;
 }
 
-/* ── Tree row ───────────────────────────────────────────────────────────── */
+/* ── Toolbar ────────────────────────────────────────────────────────────── */
 
-.node {
+.toolbar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 0 16px 10px;
+}
+.stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.stat b {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-accent);
+}
+.stat_dim {
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.chip {
+  padding: 3px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.chip:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-dim);
+}
+.chip_on {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+}
+.spacer {
+  flex: 1;
+}
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.legend i:not(:first-child) {
+  margin-left: 8px;
+}
+.dot_done {
+  background: var(--color-success);
+  opacity: 0.65;
+}
+.dot_next {
+  background: var(--color-accent);
+}
+.dot_todo {
+  background: var(--color-border-strong);
+}
+
+/* ── Matrix ─────────────────────────────────────────────────────────────── */
+
+.matrix {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 20px;
 }
 
 .row {
   display: flex;
   align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 5px 10px 5px 8px;
-  border: none;
+  gap: 6px;
+  min-height: 24px;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text);
-  font-size: 12.5px;
-  text-align: left;
-  cursor: pointer;
 }
 .row:hover {
   background: var(--color-bg-hover);
 }
-.row_done {
-  color: var(--color-text-dim);
+.row_selected {
+  background: var(--color-bg-card-selected);
 }
 
+/* Fixed-width head + count keep every row's cell strip on the same x, which is
+   the whole point of the matrix — you read progress down a column. */
+.row_head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  width: 420px;
+  padding: 3px 4px 3px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.caret_hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.caret_hit:hover {
+  background: var(--color-bg-card-hover);
+}
 .caret {
   flex-shrink: 0;
   color: var(--color-text-muted);
@@ -118,22 +226,149 @@
   transform: rotate(90deg);
   transition: transform 0.12s ease;
 }
-
-.title {
-  font-weight: 600;
+.title,
+.title_done {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 46%;
+}
+.title_done {
+  color: var(--color-text-dim);
+}
+.kind_dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-teal);
+}
+.orphan {
+  flex-shrink: 0;
+  color: var(--color-warning);
+}
+
+.chain_slot {
+  flex-shrink: 0;
+  width: 26px;
+}
+.chain_count {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10.5px;
+  color: var(--color-accent);
+}
+.count,
+.count_live {
+  flex-shrink: 0;
+  width: 44px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-align: right;
+  color: var(--color-text-muted);
+}
+.count_live {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.cells {
+  display: flex;
+  gap: 3px;
+  margin-left: 10px;
+}
+.cell {
+  width: 11px;
+  height: 12px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.cell:hover {
+  outline: 1px solid var(--color-text-dim);
+  outline-offset: 1px;
+}
+.cell_done {
+  background: var(--color-success);
+  opacity: 0.65;
+}
+.cell_next {
+  background: var(--color-accent);
+}
+.cell_todo {
+  background: var(--color-border-strong);
+}
+
+/* ── Detail drawer ──────────────────────────────────────────────────────── */
+
+.drawer {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 340px;
+  min-height: 0;
+  padding: 12px 14px 16px;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  overflow-y: auto;
+}
+.drawer_head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.drawer_title,
+.drawer_title_open {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.drawer_title {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.drawer_meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+.drawer_meta .count,
+.drawer_meta .count_live {
+  width: auto;
+  text-align: left;
 }
 .id {
-  flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--color-text-muted);
 }
 .kind {
-  flex-shrink: 0;
   padding: 1px 6px;
   border-radius: var(--radius-pill);
   font-size: 10.5px;
@@ -141,69 +376,56 @@
   color: var(--color-teal);
   background: color-mix(in srgb, var(--color-teal) 15%, transparent);
 }
-.orphan {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  font-size: 10.5px;
-  color: var(--color-warning);
-  background: var(--color-warning-bg);
-}
 .source {
-  flex-shrink: 0;
+  margin-top: 4px;
   font-size: 10.5px;
   color: var(--color-text-muted);
+  word-break: break-all;
 }
-.spacer {
-  flex: 1;
-}
-.chain_count {
-  display: inline-flex;
+.orphan_note {
+  display: flex;
   align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
   font-size: 11px;
-  color: var(--color-accent);
-}
-.progress {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-.progress_live {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-accent);
 }
 
-/* ── Expanded body ──────────────────────────────────────────────────────── */
-
-.body {
+.drawer_body {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 2px;
-  padding-bottom: 4px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--color-border-soft);
 }
 
 .item {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  padding: 2px 0;
+  width: 100%;
+  padding: 3px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.item:hover {
+  background: var(--color-bg-hover);
 }
 .item_done {
   color: var(--color-text-muted);
 }
-.box {
+.box_glyph {
   flex-shrink: 0;
   color: var(--color-text-muted);
   font-size: 11px;
@@ -215,17 +437,25 @@
   font-weight: 600;
   color: var(--color-text-dim);
 }
+/* Clamped by default; clicking the row swaps in the wrapping variant. */
 .item_text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item_text_open {
+  min-width: 0;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.done_fold,
-.fold_row {
+.done_fold {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   align-self: flex-start;
+  margin-top: 4px;
   padding: 3px 8px 3px 4px;
   border: none;
   border-radius: var(--radius-sm);
@@ -234,13 +464,9 @@
   font-size: 11.5px;
   cursor: pointer;
 }
-.done_fold:hover,
-.fold_row:hover {
+.done_fold:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-dim);
-}
-.fold_row {
-  margin-top: 8px;
 }
 
 .chain {
@@ -248,7 +474,7 @@
   align-items: center;
   gap: 5px;
   align-self: flex-start;
-  margin: 3px 0;
+  margin: 5px 0 0;
   padding: 3px 9px;
   border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
   border-radius: var(--radius-pill);
@@ -272,8 +498,9 @@
 .section {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-top: 16px;
+  gap: 6px;
+  flex-shrink: 0;
+  margin: 0 16px;
   padding-top: 10px;
   border-top: 1px solid var(--color-border-soft);
 }
@@ -283,15 +510,22 @@
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
 }
+.chain_row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 4px;
+}
 
 .footnote {
-  margin-top: 14px;
+  flex-shrink: 0;
+  margin: 10px 16px 12px;
   font-size: 11px;
   color: var(--color-text-muted);
 }
 
 .error {
-  margin: 8px 0;
+  margin: 8px 16px;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   background: var(--color-error-bg);
