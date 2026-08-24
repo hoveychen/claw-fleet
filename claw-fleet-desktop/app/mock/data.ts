@@ -879,8 +879,11 @@ export const MOCK_HANDOFF_CHAINS: Record<string, HandoffChain> = {
 };
 
 // ── Plan forest (计划树 view) ────────────────────────────────────────────────
-// One live root with a child plan and a relay folded onto it, plus a finished
-// root — enough to exercise every fold the view draws.
+// One live root three levels deep with a relay folded onto it, plus a finished
+// root — enough to exercise every fold the view draws. One item deliberately
+// carries a multi-paragraph implementation note: real P-tasks routinely run
+// that long (it is why the view draws a graph and clamps prose in the drawer),
+// and a mock made only of one-liners would hide the clamp entirely.
 
 export const MOCK_PLAN_FOREST: PlanForest = {
   roots: [
@@ -893,7 +896,19 @@ export const MOCK_PLAN_FOREST: PlanForest = {
         { text: "**P1** — Audit the current schema", done: true },
         { text: "**P2** — Backfill into the shadow table", done: true },
         { text: "**P3** — Validate drift on staging", done: true },
-        { text: "**P4** — Flip the read path behind usage_billing_v2", done: false },
+        {
+          text:
+            "**P4** — Flip the read path behind usage_billing_v2. Dual-read for one " +
+            "bake window: `LedgerReader::get` queries v2 first and falls back to the " +
+            "legacy view on a miss, counting `ledger_v2_miss_total` by tenant so the " +
+            "backfill's tail is visible instead of silently papered over. The flag is " +
+            "per-tenant (not global) because three enterprise tenants have custom " +
+            "proration that P2's shadow table does not reproduce yet; they stay on the " +
+            "legacy path until their own migration lands. Rollback is the flag alone — " +
+            "no schema change ships in this P — and the acceptance gate is 24h at " +
+            "zero misses across the top 50 tenants by volume.",
+          done: false,
+        },
         { text: "**P5** — Drop the legacy tables after a 48h dual-write bake", done: false },
       ],
       done: 3,
@@ -909,7 +924,23 @@ export const MOCK_PLAN_FOREST: PlanForest = {
           done: 0,
           total: 1,
           chains: [],
-          children: [],
+          children: [
+            {
+              id: "index-build-probe",
+              title: "Probe CONCURRENTLY build time on a 400M-row clone",
+              source: ".worktrees/index-probe/TASKS.md",
+              kind: "exec",
+              items: [
+                { text: "**P1** — Restore the clone and time the build", done: true },
+                { text: "**P2** — Report lock windows back to the parent plan", done: false },
+              ],
+              done: 1,
+              total: 2,
+              chains: [],
+              children: [],
+              orphanedParent: null,
+            },
+          ],
           orphanedParent: null,
         },
       ],
