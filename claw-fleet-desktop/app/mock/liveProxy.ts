@@ -339,6 +339,47 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/audit/rules",
   }),
 
+  // ── Host settings (three GET/POST pairs) ───────────────────────────────
+  // `RemoteBackend` answers these from the desktop's own files, on purpose —
+  // over SSH they govern the desktop machine, not the probe host. A browser
+  // tab has no machine of its own, so it asks the host that served it. The
+  // POST bodies are the config object verbatim under the IPC arg name the
+  // frontend uses (`cfg` for two of them, `config` for auto-resume), and each
+  // route answers with the value as stored, which is not always what went in:
+  // the decision-panel config is clamped on its way to disk.
+  get_auto_resume_config: () => ({
+    method: "GET",
+    path: "/auto_resume_config",
+  }),
+
+  set_auto_resume_config: (a) => ({
+    method: "POST",
+    path: "/auto_resume_config",
+    body: a.config,
+  }),
+
+  get_permissions_config: () => ({
+    method: "GET",
+    path: "/permissions_config",
+  }),
+
+  set_permissions_config: (a) => ({
+    method: "POST",
+    path: "/permissions_config",
+    body: a.cfg,
+  }),
+
+  get_decision_panel_config: () => ({
+    method: "GET",
+    path: "/decision_panel_config",
+  }),
+
+  set_decision_panel_config: (a) => ({
+    method: "POST",
+    path: "/decision_panel_config",
+    body: a.cfg,
+  }),
+
   get_claude_binary_override: () => ({
     method: "GET",
     path: "/claude_binary_override",

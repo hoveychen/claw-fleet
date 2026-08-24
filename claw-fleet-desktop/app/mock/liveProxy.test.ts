@@ -181,6 +181,25 @@ describe("live proxy route table", () => {
     expect(LIVE_ROUTES.delete_skill({ skillPath: "/s" }).body).toEqual({ skill_path: "/s" });
   });
 
+  /**
+   * The three host-settings POSTs pass the config object straight through, so
+   * the only thing that can be wrong is which IPC arg it comes from — and the
+   * frontend is not consistent: `set_auto_resume_config` sends `{ config }`
+   * while the other two send `{ cfg }`. Reading the wrong one posts `undefined`,
+   * which serializes to no body at all and 400s on the server.
+   */
+  it("takes each host-settings body from the arg name the caller uses", () => {
+    expect(LIVE_ROUTES.set_auto_resume_config({ config: { enabled: false } }).body).toEqual({
+      enabled: false,
+    });
+    expect(LIVE_ROUTES.set_permissions_config({ cfg: { enabled: true } }).body).toEqual({
+      enabled: true,
+    });
+    expect(
+      LIVE_ROUTES.set_decision_panel_config({ cfg: { wait_seconds: 600 } }).body,
+    ).toEqual({ wait_seconds: 600 });
+  });
+
   it("keeps camelCase bodies camelCase", () => {
     // `SpawnSessionRequest` / `SetSessionMarkRequest` are `rename_all = "camelCase"`.
     expect(LIVE_ROUTES.spawn_new_claude_session({ workspacePath: "/w" }).body).toMatchObject({
