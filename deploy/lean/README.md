@@ -113,7 +113,23 @@ redeploys.
 
 muvee auto-mounts exactly **one** persistent volume per project, at
 `/workspace`. So `~/.fleet` (Fleet state) rides in that same volume via
-`FLEET_STATE_DIR`, and `/workspace` doubles as the default agent workspace:
+`FLEET_STATE_DIR` — but **the agent workspace must be a subdirectory of the
+volume, not the volume root**:
+
+```
+/workspace/               ← the persistent volume (not exposed)
+├── repo/                 ← FLEET_PUBLIC_WORKSPACE: what /v1 serves
+├── .fleet-state/         ← FLEET_STATE_DIR (Fleet's token lives here)
+└── .foxy-switcher/       ← FOXY_DATA_DIR (the vault device token lives here)
+```
+
+Why it matters: `/v1/responses/{id}/files` walks the **public workspace root**
+and mints a downloadable id per file. Point that root at the volume itself and a
+caller holding only the scoped token can list and fetch `.fleet-state/token`
+(Fleet's admin token) and `.foxy-switcher/agent-config.json` (the vault device
+token) — verified against a live container, which is why `is_internal_dir` in
+`responses.rs` now refuses those paths on both list and read. Keep the layout
+above anyway: the guard is the second line, not the first.
 
 ```sh
 muveectl projects create --name fleet-cloud \
@@ -125,7 +141,7 @@ muveectl projects create --name fleet-cloud \
 for pair in \
   "fleet-cloud-admin-token:FLEET_ADMIN_TOKEN:$(openssl rand -hex 32)" \
   "fleet-cloud-public-token:FLEET_PUBLIC_TOKEN:$(openssl rand -hex 32)" \
-  "fleet-cloud-workspace:FLEET_PUBLIC_WORKSPACE:/workspace" \
+  "fleet-cloud-workspace:FLEET_PUBLIC_WORKSPACE:/workspace/repo" \
   "fleet-cloud-state-dir:FLEET_STATE_DIR:/workspace/.fleet-state" \
   "fleet-cloud-foxy-dir:FOXY_DATA_DIR:/workspace/.foxy-switcher" \
   "fleet-cloud-foxy-vault:FOXY_VAULT_URL:https://<vault-host>" ; do

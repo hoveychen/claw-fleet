@@ -912,6 +912,43 @@ fn is_ignored_dir(name: &str) -> bool {
     )
 }
 
+/// Directories that must never be exposed through `/v1`, even when a deployment
+/// places them inside the workspace root.
+///
+/// This is not hygiene, it is the confinement boundary. A host that hands out a
+/// single persistent volume (muvee mounts exactly one, at `/workspace`) pushes
+/// an operator to park Fleet's state and the cred store's data inside the very
+/// tree `/v1` serves — and then `.fleet-state/token` is Fleet's admin token and
+/// `.foxy-switcher/agent-config.json` is the vault device token. Both were
+/// listed *and* downloadable with nothing but the scoped public token on the
+/// first cloud deployment. Choosing a workspace subdirectory avoids the overlap;
+/// this list means getting that choice wrong is not catastrophic.
+///
+/// `.claude` / `.codex` / `.ssh` / `.aws` / `.gnupg` are here for the same
+/// reason — they are credential stores by convention, so a workspace copy of one
+/// is never something a scoped caller should fetch.
+fn is_internal_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".fleet"
+            | ".fleet-state"
+            | ".foxy-switcher"
+            | ".claude"
+            | ".codex"
+            | ".ssh"
+            | ".aws"
+            | ".gnupg"
+    )
+}
+
+/// True when a workspace-relative path traverses an [`is_internal_dir`]
+/// component. Checked on read as well as on list: a file id is
+/// `base64url(rel_path)`, so it is guessable — skipping these on the walk alone
+/// would hide them from the listing while still serving them by id. Pure.
+fn is_internal_rel(rel: &str) -> bool {
+    rel.replace('\\', "/").split('/').any(is_internal_dir)
+}
+
 /// Cap the walk so an enormous tree can't blow up memory / the response.
 const MAX_LISTED_FILES: usize = 2000;
 
@@ -942,7 +979,7 @@ fn list_workspace_files() -> Vec<FileObject> {
             }
             let name = entry.file_name().to_string_lossy().to_string();
             if md.is_dir() {
-                if !is_ignored_dir(&name) {
+                if !is_ignored_dir(&name) && !is_internal_dir(&name) {
                     stack.push(path);
                 }
                 continue;
@@ -983,6 +1020,12 @@ fn list_workspace_files() -> Vec<FileObject> {
 /// `(bytes, mime)`. Errors carry an HTTP status so the handler can map them.
 fn read_workspace_file(file_id: &str) -> Result<(Vec<u8>, String), (u16, String)> {
     let rel = decode_file_id(file_id).ok_or((404, "malformed file id".to_string()))?;
+    // Confinement, part one: never serve Fleet-internal or credential dirs, even
+    // when they sit inside the workspace root. Checked before touching the disk
+    // so the answer can't depend on whether the file happens to exist.
+    if is_internal_rel(&rel) {
+        return Err((403, "path is not exposed".to_string()));
+    }
     let root = std::path::PathBuf::from(public_workspace());
     let canon_root = root
         .canonicalize()
@@ -1560,6 +1603,57 @@ mod tests {
         assert_eq!(public_workspace(), "/workspace");
         if let Some(v) = prev {
             std::env::set_var("FLEET_PUBLIC_WORKSPACE", v);
+        }
+    }
+
+    /// A scoped `/v1` caller must never be able to list or download Fleet's own
+    /// state or the cred store's data, even when a deployment puts those
+    /// directories inside the workspace root — which the single-persistent-volume
+    /// layout (muvee mounts exactly one volume, at /workspace) invites.
+    ///
+    /// Regression: on the first cloud deployment, `FLEET_STATE_DIR` and
+    /// `FOXY_DATA_DIR` both lived under `/workspace`, so the artifact walk listed
+    /// `.fleet-state/token` (Fleet's admin token) and
+    /// `.foxy-switcher/agent-config.json` (the vault device token), and
+    /// `/v1/files/{id}/content` served both to a caller holding only the scoped
+    /// token. Verified against the live container before this guard existed.
+    #[test]
+    fn internal_dirs_are_not_listed_or_readable() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("FLEET_PUBLIC_WORKSPACE").ok();
+        let root = std::env::temp_dir().join(format!("fleet-conf-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (dir, name) in [
+            (".fleet-state", "token"),
+            (".foxy-switcher", "agent-config.json"),
+            ("src", "main.rs"),
+        ] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join(name), b"secret-or-not").unwrap();
+        }
+        std::env::set_var("FLEET_PUBLIC_WORKSPACE", root.to_string_lossy().to_string());
+
+        let listed: Vec<String> = list_workspace_files().into_iter().map(|f| f.filename).collect();
+        assert!(
+            listed.iter().any(|f| f.ends_with("main.rs")),
+            "real workspace files must still be listed, got {listed:?}"
+        );
+        for leaked in [".fleet-state/token", ".foxy-switcher/agent-config.json"] {
+            assert!(
+                !listed.iter().any(|f| f.replace('\\', "/") == leaked),
+                "{leaked} must not be listed, got {listed:?}"
+            );
+            let id = encode_file_id(leaked);
+            assert!(
+                read_workspace_file(&id).is_err(),
+                "{leaked} must not be readable by id"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+        match prev {
+            Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
+            None => std::env::remove_var("FLEET_PUBLIC_WORKSPACE"),
         }
     }
 
