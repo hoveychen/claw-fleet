@@ -201,9 +201,9 @@ const KNOWN_WEB_GAPS = [
   "install_fleet_cli",
   "install_fleet_skill",
   "apply_mcp_injector",
-  // Move bytes through a caller-side filesystem path.
-  "stage_pasted_attachment",
-  "upload_elicitation_attachment",
+  // Moves bytes through a caller-side filesystem path — here, a path the user
+  // gets to *choose*, which a tab cannot offer. (Its browser equivalent is a
+  // download, and that is not what this command does.)
   "export_wiki_doc",
   // Emit onto the desktop's app-event bus, or have no RemoteBackend override.
   "test_decision_frontend_only",
@@ -241,6 +241,52 @@ function invokedCommands(dir: string, out = new Set<string>()): Set<string> {
   }
   return out;
 }
+
+/**
+ * The two halves of the attachment handshake. On the desktop they are a pair:
+ * `stage_pasted_attachment` writes bytes to the host's temp dir and
+ * `upload_elicitation_attachment` decides where they finally live (the store
+ * for a paste, the picked path left alone for a file).
+ *
+ * The browser build collapses that: there is no host temp dir a tab can write
+ * to, so the staging POST already lands in the store (see the
+ * `stage_pasted_attachment` route), and everything reaching the second command
+ * is *already* a path on the host that serves this page. Which makes it the
+ * same situation `LocalBackend` is in — its `upload_attachment` returns a
+ * picked path untouched because the agent runs on that very machine.
+ */
+describe("attachment resolve is a pass-through in the browser build", () => {
+  it("hands back the path it was given", () => {
+    const p = "/home/u/.fleet/user-attachments/ab12/shot.png";
+    const { handled, value } = localCommand("upload_elicitation_attachment", {
+      sourcePath: p,
+      fromClipboard: true,
+    });
+    expect(handled).toBe(true);
+    expect(value).toBe(p);
+  });
+
+  it("is a path for a picked file too, not only a paste", () => {
+    expect(
+      localCommand("upload_elicitation_attachment", {
+        sourcePath: "/srv/repo/notes.md",
+        fromClipboard: false,
+      }).value,
+    ).toBe("/srv/repo/notes.md");
+  });
+
+  /**
+   * A rejection would land in the composer's catch and show the red banner; an
+   * empty string would silently splice `- ` into the prompt's `Context files:`
+   * block. Neither is right, so an argument-less call must still be *handled* —
+   * this only guards the completeness sweep below from a lucky pass.
+   */
+  it("stays handled with no source path rather than inventing one", () => {
+    const { handled, value } = localCommand("upload_elicitation_attachment", {});
+    expect(handled).toBe(true);
+    expect(value).toBe("");
+  });
+});
 
 describe("browser-build command coverage", () => {
   it("classifies every command the frontend invokes", () => {

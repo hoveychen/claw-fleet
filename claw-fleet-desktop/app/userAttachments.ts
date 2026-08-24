@@ -11,6 +11,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { isWebBuild } from "./hostEnv";
 import type { ChatComposerAttachment, ChatComposerStagedAttachment } from "./components/ChatComposer";
 
 /**
@@ -76,6 +77,15 @@ export function isStoredAttachment(path: string): boolean {
  * Built by hand rather than with `convertFileSrc` for the same reason as
  * `decisionAssetUrl`: the desktop may be pointed at a remote backend, where the
  * file is on the probe host and no local file:// URL could reach it.
+ *
+ * In the browser build there is no custom protocol to reach at all — the scheme
+ * is registered on the Tauri webview, and an `<img src="fleet-attachment://…">`
+ * in a tab just fails to load, with a bare net error and no clue why. The same
+ * bytes are already served over HTTP by the process that served this page, so
+ * the same two segments become that route's query. Absolute rather than
+ * root-relative on purpose: `markdown/localImages` only leaves a src alone when
+ * it matches `^(?:https?|data|blob|fleet-[a-z-]+):`, and would otherwise take
+ * `/user_attachment?…` for a host path to go and read.
  */
 export function userAttachmentUrl(path: string): string | null {
   const stored = path.match(STORE_RE);
@@ -86,6 +96,15 @@ export function userAttachmentUrl(path: string): string | null {
         return legacy ? [LEGACY_PASTED_KEY, legacy[1]] : null;
       })();
   if (!seg) return null;
+  if (isWebBuild()) {
+    // `encodeURIComponent`, not `URLSearchParams`: the latter form-encodes a
+    // space as `+`, and the route decodes with `percent_decode_str`, which
+    // leaves `+` alone — so `my shot.png` would be looked up as `my+shot.png`
+    // and 404. Every attachment whose name has a space, silently blank.
+    const key = encodeURIComponent(seg[0]);
+    const name = encodeURIComponent(seg[1]);
+    return `${window.location.origin}/user_attachment?key=${key}&name=${name}`;
+  }
   const joined = seg.map(encodeURIComponent).join("/");
   return navigator.userAgent.includes("Windows")
     ? `http://fleet-attachment.localhost/${joined}`
