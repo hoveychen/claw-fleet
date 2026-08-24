@@ -1381,14 +1381,31 @@ let eventStreamFailures = 0;
  * How many failures before giving up.
  *
  * `EventSource` retries forever by design, which is right for a stream that
- * merely dropped — and wrong for one the deployment cannot serve at all.
- * Measured against `fleet-cloud.muveeai.com`: `GET /events` answers 404 there
- * (a direct `fleet webui` upgrades it fine, so it is the reverse proxy in
- * front, not the server), and an unbounded retry turns that into a 404 every
- * few seconds per open tab, forever. Three strikes is enough to tell "proxy
- * won't pass this" from "server restarted".
+ * merely dropped — and wrong for one the deployment cannot serve at all. Three
+ * strikes tells "the proxy won't pass this" from "the server restarted".
  */
 const EVENT_STREAM_MAX_FAILURES = 3;
+
+/**
+ * How long to wait for `onopen` before treating the attempt as failed.
+ *
+ * Needed because "cannot serve this" does not always surface as an error.
+ * Measured, direct vs. through the deployment's reverse proxy:
+ *
+ *   `fleet webui` on localhost → `200`, `Connection: upgrade`, `Upgrade: sse`,
+ *     `Content-Type: text/event-stream`, and the 13-byte `: connected` preamble
+ *     arrives immediately.
+ *   the same server behind `fleet-cloud.muveeai.com` → no response headers at
+ *     all; the request just hangs until the client times out.
+ *
+ * A hung request fires neither `onopen` nor `onerror`, so a failure counter
+ * alone never trips: the page would sit there holding a connection, no cards,
+ * no heartbeat, and nothing in the log to say why. `tiny_http`'s upgrade names
+ * a non-WebSocket protocol (`Upgrade: sse`), which is the likely thing the
+ * proxy declines to forward. Locally the stream opens in single-digit ms, so
+ * this budget is generous by orders of magnitude.
+ */
+const EVENT_STREAM_OPEN_TIMEOUT_MS = 8000;
 
 /**
  * Attach to `GET /events` so decision cards reach this page.
@@ -1420,28 +1437,48 @@ function startEventStream() {
     logLine(`SSE unavailable: ${String(e).slice(0, 120)}`);
     return;
   }
-  eventStream.onopen = () => {
-    // A stream that opened is healthy; let EventSource own any later retry.
-    eventStreamFailures = 0;
-    logLine("SSE open → /events (consumer heartbeat now live)");
-  };
-  eventStream.onerror = () => {
+  // Fires whether the attempt errored or simply hung; `giveUp` decides.
+  const attemptFailed = (why: string) => {
     eventStreamFailures += 1;
     if (eventStreamFailures >= EVENT_STREAM_MAX_FAILURES) {
-      // Give up rather than 404 forever. The consequences are worth stating in
-      // the log, because they are silent in the UI: decision cards raised while
-      // this tab is open will not appear (only the mount catch-up runs), and
-      // without an SSE client the server stops writing the consumer heartbeat,
-      // so the agent's questions fall through to its own terminal prompt.
+      // Stop rather than hold a dead connection for the life of the tab. The
+      // consequences are worth spelling out in the log, because they are
+      // invisible in the UI: decision cards raised while this tab is open will
+      // not appear (only the mount catch-up runs), and with no SSE client the
+      // server stops writing the consumer heartbeat, so the agent's questions
+      // fall through to its own terminal prompt.
       eventStream?.close();
       eventStream = null;
       logLine(
-        `SSE gave up after ${EVENT_STREAM_MAX_FAILURES} failed attempts — ` +
+        `SSE gave up after ${EVENT_STREAM_MAX_FAILURES} attempts (${why}) — ` +
           "no live decision cards, and no consumer heartbeat for this page",
       );
       return;
     }
-    logLine(`SSE error ${eventStreamFailures}/${EVENT_STREAM_MAX_FAILURES} (EventSource will retry)`);
+    logLine(`SSE ${why} ${eventStreamFailures}/${EVENT_STREAM_MAX_FAILURES} — retrying`);
+    if (why === "timeout") {
+      // A hung attempt is not retried by EventSource (it never failed, from its
+      // point of view), so tear it down and start a fresh one ourselves.
+      eventStream?.close();
+      eventStream = null;
+      window.setTimeout(startEventStream, 1000);
+    }
+  };
+
+  const openDeadline = window.setTimeout(
+    () => attemptFailed("timeout"),
+    EVENT_STREAM_OPEN_TIMEOUT_MS,
+  );
+
+  eventStream.onopen = () => {
+    // A stream that opened is healthy; let EventSource own any later retry.
+    window.clearTimeout(openDeadline);
+    eventStreamFailures = 0;
+    logLine("SSE open → /events (consumer heartbeat now live)");
+  };
+  eventStream.onerror = () => {
+    window.clearTimeout(openDeadline);
+    attemptFailed("error");
   };
   for (const name of FORWARDED_SSE_EVENTS) {
     eventStream.addEventListener(name, (ev) => {
