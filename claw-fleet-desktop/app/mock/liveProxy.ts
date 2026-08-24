@@ -1187,7 +1187,24 @@ async function callProbe(req: LiveReq): Promise<unknown> {
   try {
     value = JSON.parse(text);
   } catch {
-    return text;
+    // Every route in the table answers JSON (even the ones returning a plain
+    // string do it as a JSON string literal), and the one that answers bytes
+    // sets `raw`. So a 200 that will not parse means something *between* this
+    // page and `fleet serve` answered instead — which now has a concrete
+    // cause: `fleet-cloud.muveeai.com` sits behind an OAuth gateway, and an
+    // expired session turns every data call into a login page served as 200.
+    //
+    // Handing that HTML back as a string would put it where the caller expects
+    // an array or an object, i.e. the same crash-on-render family as the
+    // missing `pick`. Fail loudly instead, and say what to do about it.
+    const looksLikeHtml = /^\s*<(?:!doctype|html|head|body|a\b)/i.test(text);
+    logLine(`ERR ${req.method} ${req.path} → 200 but not JSON (${text.length}B)`);
+    throw new Error(
+      looksLikeHtml
+        ? `${req.path} answered HTML, not JSON — an auth gateway or proxy ` +
+          "intercepted the call (sign in again and reload)"
+        : `${req.path} answered a body that is not JSON: ${text.slice(0, 120)}`,
+    );
   }
   if (req.pick) {
     return (value as Record<string, unknown> | null)?.[req.pick] ?? null;
