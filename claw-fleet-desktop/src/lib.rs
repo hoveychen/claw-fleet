@@ -14,7 +14,6 @@ pub mod local_backend;
 pub mod remote;
 pub mod traffic_lights;
 pub mod version_check;
-pub mod web_serve;
 
 pub use gui::*;
 

@@ -33,6 +33,11 @@ fn main() -> anyhow::Result<()> {
     claw_fleet_core::console::init_utf8();
     let cli = Cli::parse();
     let token = cli.token.unwrap_or_default();
-    claw_fleet_core::hooks_server::serve(cli.port, token, cli.port_file);
+    claw_fleet_core::hooks_server::serve(claw_fleet_core::hooks_server::ServeOptions {
+        port: cli.port,
+        token,
+        port_file: cli.port_file,
+        ..Default::default()
+    });
     Ok(())
 }
