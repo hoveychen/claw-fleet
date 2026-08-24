@@ -12,6 +12,11 @@
 //!   surfaces …) is denied so provider credentials and host internals stay
 //!   invisible to the customer.
 //!
+//! A deployment that fronts this server with its own auth gateway can switch
+//! the whole tiering off (`FLEET_SERVE_NO_AUTH`): every request is then treated
+//! as admin, because the gateway has already decided who may reach the port.
+//! That is opt-in and off by default — nothing changes for existing callers.
+//!
 //! Keeping the decision in one pure function makes the security boundary unit
 //! testable — see the tests below.
 
@@ -44,7 +49,14 @@ pub fn authorize(
     presented: Option<&str>,
     admin_token: &str,
     public_token: Option<&str>,
+    auth_disabled: bool,
 ) -> AuthOutcome {
+    // An external gateway owns authentication for this deployment; re-checking
+    // a token here would just be a second scheme to keep in sync. Full access,
+    // since the gateway has already vetted whoever got this far.
+    if auth_disabled {
+        return AuthOutcome::Admin;
+    }
     let presented = match presented {
         Some(t) => t,
         None => return AuthOutcome::Denied,
@@ -79,15 +91,15 @@ mod tests {
     fn admin_token_reaches_any_path_including_internal() {
         // A public path and a dangerous internal one both succeed for admin.
         assert_eq!(
-            authorize(routes::SPAWN_SESSION, Some(ADMIN), ADMIN, Some(PUBLIC)),
+            authorize(routes::SPAWN_SESSION, Some(ADMIN), ADMIN, Some(PUBLIC), false),
             AuthOutcome::Admin
         );
         assert_eq!(
-            authorize(routes::PROC_RUN, Some(ADMIN), ADMIN, Some(PUBLIC)),
+            authorize(routes::PROC_RUN, Some(ADMIN), ADMIN, Some(PUBLIC), false),
             AuthOutcome::Admin
         );
         assert_eq!(
-            authorize(routes::APPLY_GUARD_HOOK, Some(ADMIN), ADMIN, Some(PUBLIC)),
+            authorize(routes::APPLY_GUARD_HOOK, Some(ADMIN), ADMIN, Some(PUBLIC), false),
             AuthOutcome::Admin
         );
     }
@@ -104,7 +116,7 @@ mod tests {
             "/v1/files/file_xyz/content",
         ] {
             assert_eq!(
-                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC)),
+                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC), false),
                 AuthOutcome::Scoped,
                 "expected scoped access to public path {p}"
             );
@@ -134,7 +146,7 @@ mod tests {
             routes::REMOTE_WORKSPACES,
         ] {
             assert_eq!(
-                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC)),
+                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC), false),
                 AuthOutcome::Denied,
                 "scoped token must be denied on internal path {p}"
             );
@@ -169,7 +181,7 @@ mod tests {
                 "v1 raw route {p} must be off the v2 scoped whitelist"
             );
             assert_eq!(
-                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC)),
+                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC), false),
                 AuthOutcome::Denied,
                 "scoped token must be denied on v1-replaced raw route {p}"
             );
@@ -199,17 +211,52 @@ mod tests {
                 "credential-adjacent route {p} must not be on the public whitelist"
             );
             assert_eq!(
-                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC)),
+                authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC), false),
                 AuthOutcome::Denied,
                 "scoped token must be denied on credential-adjacent route {p}"
             );
         }
     }
 
+    /// The gateway-fronted deployment: no token presented at all, yet every
+    /// route answers. This is what lets the browser UI talk to `fleet serve`
+    /// without a credential in the page.
+    #[test]
+    fn disabling_auth_admits_everything_without_a_token() {
+        for p in [
+            routes::HEALTH,
+            routes::SESSIONS,
+            routes::SPAWN_SESSION,
+            routes::PROC_RUN,
+            "/v1/responses",
+            "/index.html",
+        ] {
+            assert_eq!(
+                authorize(p, None, ADMIN, Some(PUBLIC), true),
+                AuthOutcome::Admin,
+                "with auth disabled every path must be reachable: {p}"
+            );
+        }
+    }
+
+    /// It must be opt-in only — an unrelated config change must never widen the
+    /// surface by accident.
+    #[test]
+    fn the_tiering_still_applies_when_auth_is_not_disabled() {
+        assert_eq!(
+            authorize(routes::PROC_RUN, None, ADMIN, Some(PUBLIC), false),
+            AuthOutcome::Denied
+        );
+        assert_eq!(
+            authorize(routes::PROC_RUN, Some(PUBLIC), ADMIN, Some(PUBLIC), false),
+            AuthOutcome::Denied
+        );
+    }
+
     #[test]
     fn no_token_is_denied() {
         assert_eq!(
-            authorize(routes::SPAWN_SESSION, None, ADMIN, Some(PUBLIC)),
+            authorize(routes::SPAWN_SESSION, None, ADMIN, Some(PUBLIC), false),
             AuthOutcome::Denied
         );
     }
@@ -217,7 +264,7 @@ mod tests {
     #[test]
     fn wrong_token_is_denied() {
         assert_eq!(
-            authorize(routes::SPAWN_SESSION, Some("nope"), ADMIN, Some(PUBLIC)),
+            authorize(routes::SPAWN_SESSION, Some("nope"), ADMIN, Some(PUBLIC), false),
             AuthOutcome::Denied
         );
     }
@@ -227,11 +274,11 @@ mod tests {
         // Without a configured public token, only the admin token works —
         // the scoped secret string is meaningless.
         assert_eq!(
-            authorize(routes::SPAWN_SESSION, Some(PUBLIC), ADMIN, None),
+            authorize(routes::SPAWN_SESSION, Some(PUBLIC), ADMIN, None, false),
             AuthOutcome::Denied
         );
         assert_eq!(
-            authorize(routes::SPAWN_SESSION, Some(ADMIN), ADMIN, None),
+            authorize(routes::SPAWN_SESSION, Some(ADMIN), ADMIN, None, false),
             AuthOutcome::Admin
         );
     }
@@ -240,7 +287,7 @@ mod tests {
     fn empty_public_token_does_not_enable_scoped_tier() {
         // An empty presented token must not match an empty configured one.
         assert_eq!(
-            authorize(routes::SPAWN_SESSION, Some(""), ADMIN, Some("")),
+            authorize(routes::SPAWN_SESSION, Some(""), ADMIN, Some(""), false),
             AuthOutcome::Denied
         );
     }
@@ -248,7 +295,7 @@ mod tests {
     #[test]
     fn empty_admin_token_never_matches() {
         assert_eq!(
-            authorize(routes::SPAWN_SESSION, Some(""), "", Some(PUBLIC)),
+            authorize(routes::SPAWN_SESSION, Some(""), "", Some(PUBLIC), false),
             AuthOutcome::Denied
         );
     }

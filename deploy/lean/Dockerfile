@@ -8,9 +8,15 @@
 # workspace are bind-mounted from the host at /workspace; credentials are NOT
 # baked into the image and NOT placed under /workspace.
 #
-# The container exposes only `fleet serve`'s scoped-token API (see
-# docs/fleet-cloud-lean-public-api.md). One-customer-per-container: isolation,
-# credential and data boundaries are the container boundary.
+# The container serves two things off one port: `fleet serve`'s scoped-token
+# API (see docs/fleet-cloud-lean-public-api.md) and — for paths that match no
+# data route — the web UI bundle from FLEET_WEB_ROOT.
+# One-customer-per-container: isolation, credential and data boundaries are the
+# container boundary.
+#
+# The UI needs routes outside the `/v1/*` scoped whitelist, so a deployment that
+# exposes it sets FLEET_SERVE_NO_AUTH=1 and puts its own auth gateway in front.
+# Without that env the token tiering is unchanged and the UI's data calls 401.
 
 # ── The cred store's own binary ─────────────────────────────────────────────
 # foxy-switcher ships as a CGO_ENABLED=0 static binary on distroless, so the
@@ -19,6 +25,19 @@
 # (`--mode=agent`) this container needs to lease + inject credentials.
 ARG FOXY_IMAGE=ghcr.io/hoveychen/foxy-switcher:latest
 FROM ${FOXY_IMAGE} AS foxy
+
+# ── Build the web UI ────────────────────────────────────────────────────────
+# The desktop frontend is a plain web app; the same `vite build` output the
+# Tauri app bundles is what the browser loads here. `fleet serve` serves it out
+# of FLEET_WEB_ROOT, so the container answers both the API and the UI.
+# Same shape as fleet-relay's web stage.
+FROM node:22-bookworm-slim AS webui
+RUN corepack enable
+WORKDIR /src/claw-fleet-desktop
+COPY claw-fleet-desktop/package.json claw-fleet-desktop/pnpm-lock.yaml claw-fleet-desktop/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY claw-fleet-desktop/ ./
+RUN pnpm run build
 
 # ── Build the fleet CLI ─────────────────────────────────────────────────────
 FROM rust:1.90-slim-bookworm AS build
@@ -48,6 +67,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chown -R fleet:fleet /workspace /home/fleet
 
 COPY --from=build /src/target/release/fleet-cli /usr/local/bin/fleet
+COPY --from=webui /src/claw-fleet-desktop/dist /usr/share/fleet-web
 COPY --from=foxy /usr/local/bin/foxy-switcher /usr/local/bin/foxy-switcher
 COPY deploy/lean/entrypoint.sh /usr/local/bin/fleet-entrypoint
 RUN chmod +x /usr/local/bin/fleet-entrypoint
@@ -80,10 +100,16 @@ ENV HOME=/home/fleet
 ENV CODEX_HOME=/home/fleet/.codex \
     FLEET_SERVE_HOST=0.0.0.0 \
     FLEET_SERVE_PORT=8080 \
+    FLEET_WEB_ROOT=/usr/share/fleet-web \
     FOXY_DATA_DIR=/home/fleet/.foxy-switcher \
     FOXY_AGENT_PORT=8765
 # FLEET_ADMIN_TOKEN  — first-party full-access token (required)
 # FLEET_PUBLIC_TOKEN — per-customer scoped token for external integrators
+# FLEET_SERVE_NO_AUTH — 1/true: skip the token tiering entirely (the web UI
+#                      needs routes outside /v1/*). ONLY with an auth gateway
+#                      in front — the port can start agent sessions.
+# FLEET_WEB_ROOT     — web UI bundle dir; unset/empty disables the UI and the
+#                      container is API-only again.
 # FLEET_STATE_DIR    — persist ~/.fleet by symlink instead of a mount (optional)
 # FOXY_VAULT_URL     — cred-store vault the pairing hint points at (optional)
 # FOXY_DATA_DIR      — foxy's data dir (agent-config.json + the `port` file
