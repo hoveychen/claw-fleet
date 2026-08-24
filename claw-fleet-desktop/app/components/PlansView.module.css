@@ -175,6 +175,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  /* Rows size to their content so a too-wide strip scrolls the container
+     rather than compressing every row differently. */
+  width: max-content;
+  min-width: 100%;
   min-height: 24px;
   border-radius: var(--radius-sm);
 }
@@ -192,7 +196,7 @@
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
-  width: 420px;
+  /* Width is set inline from matrixMetrics — it shrinks before the cells do. */
   padding: 3px 4px 3px 6px;
   border: none;
   border-radius: var(--radius-sm);
@@ -275,11 +279,11 @@
 
 .cells {
   display: flex;
-  gap: 3px;
   margin-left: 10px;
 }
+/* Cell width and the strip's gap come from matrixMetrics (inline). */
 .cell {
-  width: 11px;
+  flex-shrink: 0;
   height: 12px;
   padding: 0;
   border: none;
