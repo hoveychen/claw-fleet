@@ -873,7 +873,49 @@ struct FileObject {
     bytes: u64,
     created_at: i64,
     filename: String,
-    purpose: &'static str, // "output"
+    /// `"output"` for artifacts the run produced; for uploads, whatever the
+    /// caller declared (OpenAI's own default for non-fine-tuning use is
+    /// `user_data`).
+    purpose: String,
+}
+
+/// Where `POST /v1/files` puts uploads, relative to the workspace root.
+///
+/// Inside the workspace on purpose: the agent reads an attachment by path, so
+/// the bytes have to be somewhere it can reach. Each upload gets its own
+/// subdirectory, so the caller's filename survives verbatim (it shows up in the
+/// prompt, and `photo.png` reads better than a hash) without one upload ever
+/// overwriting another.
+const UPLOADS_DIR: &str = ".fleet-uploads";
+
+/// Cap for a single upload. Same ceiling as a desktop attachment — one number
+/// for "how big a blob may a caller hand the agent".
+const MAX_UPLOAD_BYTES: u64 = crate::backend::MAX_ATTACHMENT_BYTES;
+
+/// Reduce a caller-supplied filename to a bare, safe basename. Traversal
+/// (`../`, absolute paths) and empty/`.`/`..` names collapse to a default, so
+/// the join below can only land inside the upload's own directory. Pure.
+fn sanitize_upload_filename(raw: &str) -> String {
+    let base = std::path::Path::new(raw)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let cleaned: String = base
+        .chars()
+        .map(|c| if c == '/' || c == '\\' || c == '\0' { '_' } else { c })
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        return "upload.bin".to_string();
+    }
+    cleaned.to_string()
+}
+
+/// True when a workspace-relative path lives under the uploads directory —
+/// the only region `DELETE /v1/files/{id}` is allowed to touch. Pure.
+fn is_upload_rel(rel: &str) -> bool {
+    let norm = rel.replace('\\', "/");
+    norm.starts_with(&format!("{UPLOADS_DIR}/"))
 }
 
 /// `file_<base64url(rel)>`. Pure.
@@ -966,7 +1008,7 @@ fn list_workspace_files() -> Vec<FileObject> {
                     bytes: md.len(),
                     created_at,
                     filename: rel_str,
-                    purpose: "output",
+                    purpose: "output".to_string(),
                 },
                 mtime,
             ));
