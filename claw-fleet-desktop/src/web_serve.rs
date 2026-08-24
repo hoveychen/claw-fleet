@@ -72,7 +72,12 @@ const CONFIG_FILE_NAME: &str = "web-access.json";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebAccessConfig {
-    /// Whether the front door accepts logins at all.
+    /// Whether the front door opens at all.
+    ///
+    /// Off by default. The port can start agent sessions, so switching it on is
+    /// the user's decision rather than something an app update does for them.
+    /// The config file (with a generated password) is still written on first
+    /// run, so turning it on is a one-word edit.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     /// Password the browser must present once per session. Generated on first
@@ -87,13 +92,13 @@ pub struct WebAccessConfig {
 }
 
 fn default_enabled() -> bool {
-    true
+    false
 }
 
 impl Default for WebAccessConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             password: String::new(),
             bind_lan: false,
         }
@@ -194,7 +199,7 @@ pub fn start_with_config(
 ) -> std::io::Result<u16> {
     if !config.enabled {
         return Err(std::io::Error::other(
-            "web front door disabled in web-access.json",
+            "disabled — set \"enabled\": true in ~/.fleet/web-access.json to open it",
         ));
     }
     let host = if config.bind_lan { "0.0.0.0" } else { "127.0.0.1" };
@@ -988,6 +993,28 @@ mod tests {
             401,
             "the cookie must stop working after logout"
         );
+    }
+
+    /// Opening a port that can start agent sessions must never be something an
+    /// app update does on the user's behalf — it stays off until they say so,
+    /// whether the field is absent or the struct is defaulted.
+    #[test]
+    fn the_front_door_is_off_until_switched_on() {
+        assert!(!WebAccessConfig::default().enabled);
+
+        let from_empty: WebAccessConfig = serde_json::from_str("{}").unwrap();
+        assert!(!from_empty.enabled, "a config with no `enabled` key must stay shut");
+
+        let explicit: WebAccessConfig = serde_json::from_str(r#"{"enabled": true}"#).unwrap();
+        assert!(explicit.enabled, "an explicit opt-in must still be honoured");
+    }
+
+    /// LAN exposure is a second, separate opt-in: switching the door on must
+    /// not also publish it beyond loopback.
+    #[test]
+    fn enabling_does_not_imply_lan_exposure() {
+        let opted_in: WebAccessConfig = serde_json::from_str(r#"{"enabled": true}"#).unwrap();
+        assert!(!opted_in.bind_lan);
     }
 
     #[test]
