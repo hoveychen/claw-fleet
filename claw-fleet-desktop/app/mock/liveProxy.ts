@@ -25,7 +25,21 @@
 
 import { emit } from "@tauri-apps/api/event";
 
-const LIVE_BASE = "/__live";
+/**
+ * Path prefix every probe call is made under.
+ *
+ * `/__live` is the vite dev-server proxy (dev only — `vite build` drops
+ * `server.proxy`). The shipped browser build calls `setProbeBase("")` instead:
+ * there the app's own front door serves both this page and the data routes, so
+ * they are same-origin already and need no prefix. Same route table, same
+ * fetch, different prefix — the alternative was a second mapping table that
+ * would drift from this one.
+ */
+let LIVE_BASE = "/__live";
+
+export function setProbeBase(base: string) {
+  LIVE_BASE = base;
+}
 
 /** True when the page was opened with `?live` (implies `?mock`). */
 export const LIVE_MODE =
