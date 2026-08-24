@@ -344,7 +344,10 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
         {/* Step 2: Install skill */}
         <div className={styles.modal_step}>
           <div className={styles.step_label}>
-            <span className={styles.step_num}>2</span>
+            {/* No number in the browser build: step 1 is hidden there, and a
+                lone step labelled "2" reads as a missing first step rather than
+                as the only one there is. */}
+            {!isWebBuild() && <span className={styles.step_num}>2</span>}
             <span className={styles.step_title}>{t("account.ai_step2_title")}</span>
           </div>
           <p className={styles.step_desc}>{t("account.ai_step2_desc")}</p>
