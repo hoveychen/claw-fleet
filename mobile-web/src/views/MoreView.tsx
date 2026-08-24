@@ -1,7 +1,7 @@
 // 「更多」tab：把原来散在 header 齿轮 / 顶部横幅里的设置项收纳到一处——
 // 语言 / 主题、桌面端连接状态、通知开关、重新配对、关于/版本。
 
-import { ChevronRight, FolderGit2, Gauge } from "lucide-react";
+import { ChevronRight, FolderGit2, Gauge, ListTree } from "lucide-react";
 import { useDraft } from "../draft";
 import { dateLocale, useI18n, type Lang } from "../i18n";
 import type { RttSplit } from "../connQuality";
@@ -38,6 +38,7 @@ interface Props {
   onEnablePush: () => void;
   onDisablePush: () => void;
   onOpenRepo: () => void;
+  onOpenPlans: () => void;
   onOpenUsage: () => void;
 }
 
@@ -52,6 +53,7 @@ export function MoreView({
   onEnablePush,
   onDisablePush,
   onOpenRepo,
+  onOpenPlans,
   onOpenUsage,
 }: Props) {
   const { lang, setLang, t } = useI18n();
@@ -97,6 +99,17 @@ export function MoreView({
             <span className={styles.navText}>
               <span className={styles.navLabel}>{t("仓库")}</span>
               <span className={styles.navSub}>{t("查看未合并 worktree 与未推提交")}</span>
+            </span>
+            <ChevronRight size={18} className={styles.navChevron} />
+          </button>
+          <div className={styles.divider} />
+          <button className={styles.navRow} onClick={onOpenPlans}>
+            <span className={styles.navIcon}>
+              <ListTree size={18} />
+            </span>
+            <span className={styles.navText}>
+              <span className={styles.navLabel}>{t("计划")}</span>
+              <span className={styles.navSub}>{t("整仓 TASKS.md 计划的进度矩阵")}</span>
             </span>
             <ChevronRight size={18} className={styles.navChevron} />
           </button>

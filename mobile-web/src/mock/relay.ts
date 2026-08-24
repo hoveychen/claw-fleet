@@ -28,6 +28,7 @@ import {
   MOCK_REPO_DETAIL,
   MOCK_REPOS,
   MOCK_SESSIONS,
+  MOCK_PLAN_FOREST,
   MOCK_TODAY_USAGE,
   MOCK_TOOL_DETAILS,
   MOCK_WIKI_DOCS,
@@ -121,6 +122,17 @@ export class MockRelayClient extends RelayClient {
         );
       case "chat_workspace":
         return { path: MOCK_CHAT_WORKSPACE };
+      case "plan_forest":
+        return MOCK_PLAN_FOREST;
+      // The session-detail 任务计划 tab reads the flat per-session shape; derive
+      // it from the same fixture so the two never drift apart.
+      case "task_plans":
+        return MOCK_PLAN_FOREST.roots.map((r) => ({
+          id: r.id,
+          title: r.title,
+          source: r.source,
+          items: r.items,
+        }));
       case "session_decisions":
         return MOCK_DECISION_HISTORY;
       case "today_usage":
