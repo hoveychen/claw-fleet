@@ -14,6 +14,9 @@ import { toolForAgentSource } from "../modelChoices";
 import { StopControl, canControl } from "./StopControl";
 import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
+import { isWebBuild } from "../hostEnv";
+import { DirPickerDialog } from "./DirPickerDialog";
+import { useConnectionStore } from "../store";
 import type { SessionInfo } from "../types";
 import styles from "./ResumeComposer.module.css";
 
@@ -75,6 +78,13 @@ export function ResumeComposer({
   const [error, setError] = useState<string | null>(null);
   const [cancellingIndex, setCancellingIndex] = useState<number | null>(null);
   const composerRef = useRef<ChatComposerHandle | null>(null);
+  // The native directory dialog browses the machine the *desktop* runs on: the
+  // wrong one under a remote connection, and absent entirely in the browser
+  // build. `DirPickerDialog` browses whichever host the backend is bound to,
+  // which is the host that will read the attachment (mirrors NewSessionForm).
+  const isRemote = useConnectionStore((c) => c.connection?.type === "remote");
+  const needsBackendDirPicker = isRemote || isWebBuild();
+  const [pickingDir, setPickingDir] = useState(false);
 
   // Drop one queued follow-up by its chip position. The backend re-emits the
   // sessions snapshot on success, so the chip disappears without local state.
@@ -125,13 +135,25 @@ export function ResumeComposer({
     }
   };
 
+  // Reported, not swallowed: opening the picker can fail (and in the browser
+  // build it also *uploads*, which can be refused for size), and this menu item
+  // has no other way to say so — an unhandled rejection here just leaves the
+  // user staring at a composer that ignored their file.
   const pickFiles = async () => {
-    const picked = await openDialog({ multiple: true, directory: false });
-    if (picked == null) return;
-    addPaths(Array.isArray(picked) ? picked : [picked]);
+    try {
+      const picked = await openDialog({ multiple: true, directory: false });
+      if (picked == null) return;
+      addPaths(Array.isArray(picked) ? picked : [picked]);
+    } catch (e) {
+      setError(`${t("composer.attach_failed", "Attachment upload failed")}: ${String(e)}`);
+    }
   };
 
   const pickDirectory = async () => {
+    if (needsBackendDirPicker) {
+      setPickingDir(true);
+      return;
+    }
     const picked = await openDialog({ multiple: false, directory: true });
     if (typeof picked !== "string") return;
     addAttachmentEntry({ path: picked, name: basename(picked) });
@@ -254,6 +276,16 @@ export function ResumeComposer({
         ]}
       />
       {error && <div className={styles.error}>{error}</div>}
+      {pickingDir && (
+        <DirPickerDialog
+          initialPath=""
+          onPick={(path) => {
+            addAttachmentEntry({ path, name: basename(path) });
+            setPickingDir(false);
+          }}
+          onCancel={() => setPickingDir(false)}
+        />
+      )}
     </div>
   );
 }
