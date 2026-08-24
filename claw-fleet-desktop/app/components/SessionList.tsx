@@ -6,6 +6,7 @@ import { Menu, Shield, ListChecks, Coffee, ListTree } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
+import { isWebBuild } from "../hostEnv";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
 import { isFleetOwnedEntrypoint, sessionUnread } from "../types";
@@ -357,13 +358,19 @@ export function SessionList() {
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_skills")}</span>
           </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "mobile" ? styles.nav_active : ""}`}
-            onClick={() => navTo("mobile")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="1.5" width="8" height="13" rx="1.6"/><line x1="7" y1="12.5" x2="9" y2="12.5"/></svg></span>
-            <span className={styles.nav_label}>{t("view_mobile", "移动端")}</span>
-          </button>
+          {/* Mobile pairing is a desktop-host feature: the relay channel is
+              opened by *this* machine's Fleet process and the QR code pairs a
+              phone to it. In the browser build you are already the remote
+              client, so the panel has nothing to offer. */}
+          {!isWebBuild() && (
+            <button
+              className={`${styles.nav_item} ${viewMode === "mobile" ? styles.nav_active : ""}`}
+              onClick={() => navTo("mobile")}
+            >
+              <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="1.5" width="8" height="13" rx="1.6"/><line x1="7" y1="12.5" x2="9" y2="12.5"/></svg></span>
+              <span className={styles.nav_label}>{t("view_mobile", "移动端")}</span>
+            </button>
+          )}
         </nav>
 
         <div className={styles.separator} />
@@ -409,19 +416,26 @@ export function SessionList() {
                   <Coffee size={14} strokeWidth={1.5} />
                 </button>
               )}
-              <button
-                type="button"
-                className={styles.footer_toolbar_btn}
-                onClick={() => setLiteMode(true)}
-                title={t("lite.enter")}
-                aria-label={t("lite.enter")}
-              >
-                {/* Picture-in-picture / mini-window glyph for Lite mode */}
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
-                  <rect x="8.5" y="7.5" width="5" height="4.5" rx="0.8" fill="currentColor" fillOpacity="0.4" />
-                </svg>
-              </button>
+              {/* Lite mode is a *window* mode: entering it undecorates the
+                  desktop window and resizes it to a portrait strip via
+                  `set_lite_mode`. A browser tab has no window of its own to
+                  reshape, so the button would only shrink the layout inside
+                  whatever viewport the tab already has. */}
+              {!isWebBuild() && (
+                <button
+                  type="button"
+                  className={styles.footer_toolbar_btn}
+                  onClick={() => setLiteMode(true)}
+                  title={t("lite.enter")}
+                  aria-label={t("lite.enter")}
+                >
+                  {/* Picture-in-picture / mini-window glyph for Lite mode */}
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
+                    <rect x="8.5" y="7.5" width="5" height="4.5" rx="0.8" fill="currentColor" fillOpacity="0.4" />
+                  </svg>
+                </button>
+              )}
               <button
                 type="button"
                 className={`${styles.footer_toolbar_btn} ${styles.footer_theme_btn}`}

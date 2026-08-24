@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { stampHostClasses } from "./hostClass";
+import { markWebBuild } from "./hostEnv";
 import { primePromoStorage, promoSceneFromSearch } from "./mock/promo-scene";
 
 const params = new URLSearchParams(window.location.search);
@@ -44,6 +45,9 @@ async function boot() {
     const { isTauriHost, installWebTransport } = await import("./webTransport");
     isTauriBuild = isTauriHost();
     if (!isTauriBuild) {
+      // Before the transport, which installs `__TAURI_INTERNALS__` itself and
+      // so destroys the evidence `isTauriHost()` just read.
+      markWebBuild();
       await installWebTransport();
     }
   }
