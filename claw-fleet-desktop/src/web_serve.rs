@@ -20,9 +20,9 @@
 //! identical is what lets the frontend's mapping table stay a single table
 //! instead of one per transport.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Cursor;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 use claw_fleet_core::backend::Backend;
 use serde::Deserialize;
@@ -59,16 +59,14 @@ const WORKERS: usize = 4;
 /// memorable and survives restarts.
 pub const DEFAULT_PORT: u16 = 4571;
 
-/// Cookie carrying a logged-in browser's session token.
-const COOKIE_NAME: &str = "fleet_web";
 const CONFIG_FILE_NAME: &str = "web-access.json";
 
 /// Persisted settings for the browser front door.
 ///
-/// There is deliberately no token/secret for an upstream service here: this
-/// module talks to the app's own in-process backend, so — unlike the
-/// `fleet serve` path — there is no admin token that could leak into the page.
-/// The password guards *this* port and nothing else.
+/// No credential of any kind lives here. The door does not authenticate: the
+/// boss runs an auth gateway in front of anything exposed, so a second scheme
+/// inside would only be a thing to keep in sync. What this file still decides
+/// is *whether* and *where* the port opens.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebAccessConfig {
@@ -76,17 +74,17 @@ pub struct WebAccessConfig {
     ///
     /// Off by default. The port can start agent sessions, so switching it on is
     /// the user's decision rather than something an app update does for them.
-    /// The config file (with a generated password) is still written on first
-    /// run, so turning it on is a one-word edit.
+    /// The config file is still written on first run, so turning it on is a
+    /// one-word edit rather than something to be told about.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Password the browser must present once per session. Generated on first
-    /// load; an empty value denies every login rather than allowing any.
-    #[serde(default)]
-    pub password: String,
-    /// Bind `0.0.0.0` instead of loopback, so a phone or another machine on the
-    /// LAN can reach it. Off by default — opening a port that can start agent
-    /// sessions is the user's call, not a default.
+    /// Bind `0.0.0.0` instead of loopback, so a phone or another machine can
+    /// reach it.
+    ///
+    /// Off by default, and a *separate* opt-in from `enabled` precisely because
+    /// nothing here authenticates: switching this on publishes routes that can
+    /// start agent sessions to everything that can route to this host. Only
+    /// turn it on behind the auth gateway.
     #[serde(default)]
     pub bind_lan: bool,
 }
@@ -99,7 +97,6 @@ impl Default for WebAccessConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            password: String::new(),
             bind_lan: false,
         }
     }
@@ -109,32 +106,30 @@ fn config_path() -> Option<std::path::PathBuf> {
     claw_fleet_core::session::get_fleet_dir().map(|d| d.join(CONFIG_FILE_NAME))
 }
 
-/// Read the config, minting a password on first use.
+/// Read the config, writing a default one out on first use so the switch is
+/// discoverable as a file rather than something to be told about.
 ///
 /// `load_preserving` distinguishes "no file yet" from "file is there but
-/// unreadable this instant". Only the former may be replaced with a freshly
-/// generated password — overwriting on a transient read error would rotate the
-/// password out from under a browser that is already logged in.
+/// unreadable this instant"; only the former is worth materialising, since
+/// overwriting on a transient read error would discard real settings.
 pub fn load_config() -> WebAccessConfig {
     use claw_fleet_core::atomic_json::JsonLoad;
     let Some(path) = config_path() else {
         return WebAccessConfig::default();
     };
-    let (mut cfg, may_persist) = match claw_fleet_core::atomic_json::load_preserving(&path) {
-        JsonLoad::Loaded(cfg) => (cfg, true),
-        JsonLoad::Missing | JsonLoad::Corrupt => (WebAccessConfig::default(), true),
-        JsonLoad::Unreadable => (WebAccessConfig::default(), false),
-    };
-    if cfg.password.is_empty() && may_persist {
-        // 64 hex chars is what the relay pairing secret uses; reused here
-        // rather than inventing a second entropy helper.
-        cfg.password = claw_fleet_core::mobile_relay::generate_secret();
-        let _ = save_config(&cfg);
+    match claw_fleet_core::atomic_json::load_preserving(&path) {
+        JsonLoad::Loaded(cfg) => cfg,
+        JsonLoad::Missing | JsonLoad::Corrupt => {
+            let cfg = WebAccessConfig::default();
+            let _ = save_config(&cfg);
+            cfg
+        }
+        JsonLoad::Unreadable => WebAccessConfig::default(),
     }
-    cfg
 }
 
-/// Persist at 0600 — the password grants the right to start agent sessions.
+/// Persist at 0600 — it decides whether a port that can start agent sessions
+/// opens at all.
 pub fn save_config(cfg: &WebAccessConfig) -> std::io::Result<()> {
     let path = config_path()
         .ok_or_else(|| std::io::Error::other("no fleet dir"))?;
@@ -157,25 +152,9 @@ struct Ctx {
     /// (`account_info` / `source_usage`). Built once — `Runtime::new()` spins
     /// up worker threads, so per-request construction would be wasteful.
     rt: tokio::runtime::Runtime,
-    /// The password a browser must present to `/web/login`.
-    password: String,
-    /// Session tokens handed out to logged-in browsers. In memory only, so an
-    /// app restart forces a re-login — acceptable, and it means a leaked cookie
-    /// cannot outlive the process.
-    sessions: Mutex<HashSet<String>>,
     /// Frontend bundle, when one is available. `None` leaves the port as a
     /// pure data API (what the tests drive).
     assets: Option<AssetSource>,
-}
-
-impl Ctx {
-    /// A request is authorized when its cookie names a live session token.
-    fn authorized(&self, request: &Request) -> bool {
-        match session_cookie(request) {
-            Some(token) => self.sessions.lock().unwrap().contains(&token),
-            None => false,
-        }
-    }
 }
 
 /// Bind the front door and serve it from background threads.
@@ -190,7 +169,7 @@ pub fn start(
 }
 
 /// `start` with the config supplied rather than read from disk — the seam the
-/// tests drive, so they neither read nor mint the real `~/.fleet` password.
+/// tests drive, so they never touch the real `~/.fleet/web-access.json`.
 pub fn start_with_config(
     backend: SharedBackend,
     port: u16,
@@ -215,8 +194,6 @@ pub fn start_with_config(
     let ctx = Arc::new(Ctx {
         backend,
         rt,
-        password: config.password,
-        sessions: Mutex::new(HashSet::new()),
         assets,
     });
     let server = Arc::new(server);
@@ -293,29 +270,6 @@ fn decode(raw: &str) -> String {
         .to_string()
 }
 
-/// Value of the session cookie, if the request carries one.
-///
-/// Browsers send every cookie for the origin in one header, so the app's own
-/// cookies ride along; pick out ours by name rather than assuming position.
-fn session_cookie(request: &Request) -> Option<String> {
-    let header = request
-        .headers()
-        .iter()
-        .find(|h| h.field.equiv("cookie"))?
-        .value
-        .as_str()
-        .to_string();
-    for pair in header.split(';') {
-        // A valueless segment must not abort the scan — ours may follow it.
-        if let Some((name, value)) = pair.trim().split_once('=') {
-            if name == COOKIE_NAME {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
-}
-
 fn read_body(request: &mut Request) -> Result<String, String> {
     let mut body = String::new();
     request
@@ -378,136 +332,6 @@ fn default_source() -> String {
     "claude".to_string()
 }
 
-#[derive(Deserialize)]
-struct LoginBody {
-    password: String,
-}
-
-// ── Auth ────────────────────────────────────────────────────────────────────
-
-/// Routes reachable without a session cookie. Everything else is gated.
-///
-/// `/health` stays open so "is the front door up" is answerable without
-/// credentials; it reveals nothing but liveness.
-fn is_public(method: &str, path: &str) -> bool {
-    matches!((method, path), ("GET", "/health") | ("POST", LOGIN_PATH))
-}
-
-const LOGIN_PATH: &str = "/web/login";
-const LOGOUT_PATH: &str = "/web/logout";
-
-fn login(ctx: &Ctx, request: &mut Request) -> Resp {
-    let body: LoginBody = match parse_body(request) {
-        Ok(b) => b,
-        Err(e) => return error(400, &e),
-    };
-    // An empty configured password denies every attempt rather than accepting
-    // any — the same invariant `hooks_server::auth` holds for an empty token.
-    if ctx.password.is_empty() || body.password != ctx.password {
-        return error(401, "wrong password");
-    }
-    let token = claw_fleet_core::mobile_relay::generate_secret();
-    ctx.sessions.lock().unwrap().insert(token.clone());
-    // No `Secure`: this is served over plain HTTP on loopback/LAN, and a
-    // Secure cookie would simply never be sent back.
-    let cookie: Header = format!("Set-Cookie: {COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/")
-        .parse()
-        .expect("cookie header is well-formed");
-    Response::from_data(b"{\"ok\":true}".to_vec())
-        .with_header(json_header())
-        .with_header(cookie)
-}
-
-/// Whether an unauthorized GET should be answered with the login page rather
-/// than a bare 401. A navigating browser sends `Accept: text/html`; the app's
-/// own `fetch` calls do not, so they still get the 401 their caller expects.
-fn wants_html(request: &Request) -> bool {
-    request
-        .headers()
-        .iter()
-        .find(|h| h.field.equiv("accept"))
-        .map(|h| h.value.as_str().contains("text/html"))
-        .unwrap_or(false)
-}
-
-/// Served to a browser that hasn't logged in yet.
-///
-/// Self-contained on purpose: it must render before any of the app bundle is
-/// authorized, so it cannot reference `/assets/*`.
-fn login_page() -> Resp {
-    let html = r#"<!doctype html>
-<html lang="zh">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Fleet</title>
-<style>
-  :root { color-scheme: light dark; }
-  body {
-    margin: 0; min-height: 100vh; display: grid; place-items: center;
-    background: #f4f1ea; color: #2b2b2b;
-    font: 15px/1.5 -apple-system, system-ui, "Helvetica Neue", sans-serif;
-  }
-  form {
-    background: #fffdf8; border: 1px solid #ddd6c9; border-radius: 10px;
-    padding: 28px 30px; width: 288px;
-    box-shadow: 0 1px 2px rgba(0,0,0,.04);
-  }
-  h1 { margin: 0 0 4px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
-  p { margin: 0 0 18px; font-size: 13px; color: #6b6459; }
-  input, button { width: 100%; box-sizing: border-box; font: inherit; }
-  input {
-    padding: 9px 11px; border: 1px solid #d3ccbe; border-radius: 6px;
-    background: #fff; margin-bottom: 12px;
-  }
-  input:focus { outline: 2px solid #b9a06b; outline-offset: -1px; border-color: #b9a06b; }
-  button {
-    padding: 9px 11px; border: 0; border-radius: 6px; cursor: pointer;
-    background: #2b2b2b; color: #f8f6f1; font-weight: 500;
-  }
-  button:active { transform: translateY(.5px); }
-  .err { margin: 12px 0 0; font-size: 13px; color: #b03030; min-height: 1.5em; }
-  @media (prefers-color-scheme: dark) {
-    body { background: #1c1b19; color: #e8e4dc; }
-    form { background: #242220; border-color: #3a3733; }
-    p { color: #9a938a; }
-    input { background: #1c1b19; border-color: #45413b; color: inherit; }
-    button { background: #e8e4dc; color: #1c1b19; }
-  }
-</style>
-</head>
-<body>
-<form id="f">
-  <h1>Fleet</h1>
-  <p>输入访问密码</p>
-  <input id="p" type="password" autocomplete="current-password" autofocus>
-  <button type="submit">进入</button>
-  <p class="err" id="e"></p>
-</form>
-<script>
-document.getElementById('f').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const err = document.getElementById('e');
-  err.textContent = '';
-  try {
-    const resp = await fetch('/web/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: document.getElementById('p').value }),
-    });
-    if (resp.ok) { location.reload(); return; }
-    err.textContent = resp.status === 401 ? '密码不对' : '登录失败：' + resp.status;
-  } catch (e) {
-    err.textContent = '连接失败';
-  }
-});
-</script>
-</body>
-</html>"#;
-    let header: Header = "Content-Type: text/html; charset=utf-8".parse().unwrap();
-    Response::from_data(html.as_bytes().to_vec()).with_header(header)
-}
-
 /// Serve a file out of the frontend bundle.
 ///
 /// `/` maps to `/index.html`; anything the bundle doesn't have 404s rather than
@@ -529,18 +353,6 @@ fn serve_static(ctx: &Ctx, path: &str) -> Resp {
     }
 }
 
-fn logout(ctx: &Ctx, request: &Request) -> Resp {
-    if let Some(token) = session_cookie(request) {
-        ctx.sessions.lock().unwrap().remove(&token);
-    }
-    let cookie: Header = format!("Set-Cookie: {COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
-        .parse()
-        .expect("cookie header is well-formed");
-    Response::from_data(b"{\"ok\":true}".to_vec())
-        .with_header(json_header())
-        .with_header(cookie)
-}
-
 // ── Dispatch ────────────────────────────────────────────────────────────────
 
 fn handle(ctx: &Ctx, mut request: Request) {
@@ -554,25 +366,11 @@ fn handle(ctx: &Ctx, mut request: Request) {
 
     let method = request.method().as_str().to_string();
 
-    // Gate first: no route below should have to think about auth.
-    if !is_public(&method, path) && !ctx.authorized(&request) {
-        // A browser navigating here gets the password prompt; a data fetch gets
-        // the 401 its caller is written to handle.
-        let denied = if method == "GET" && wants_html(&request) {
-            login_page()
-        } else {
-            error(401, "login required")
-        };
-        let _ = request.respond(denied);
-        return;
-    }
-
+    // No auth gate. Deliberate: the door binds loopback unless explicitly told
+    // otherwise, and anything exposed sits behind the boss's auth gateway. See
+    // `WebAccessConfig`.
     let response = match (method.as_str(), path) {
         ("GET", "/health") => json_body(&serde_json::json!({ "ok": true })),
-
-        ("POST", LOGIN_PATH) => login(ctx, &mut request),
-
-        ("POST", LOGOUT_PATH) => logout(ctx, &request),
 
         ("GET", claw_fleet_core::routes::SESSIONS) => {
             json_body(&ctx.backend.read().unwrap().list_sessions())
@@ -791,24 +589,18 @@ mod tests {
         ));
     }
 
-    const TEST_PASSWORD: &str = "correct-horse";
-
-    /// Boot a front door on an OS-assigned port with the config supplied, so no
-    /// test reads or mints the real `~/.fleet/web-access.json` password.
-    fn serve(password: &str) -> String {
-        serve_with_assets(password, None)
+    /// Boot a front door on an OS-assigned port, never touching the real
+    /// `~/.fleet/web-access.json`.
+    fn serve() -> String {
+        serve_with_assets(None)
     }
 
-    fn serve_with_assets(password: &str, assets: Option<AssetSource>) -> String {
+    fn serve_with_assets(assets: Option<AssetSource>) -> String {
         let backend: SharedBackend = Arc::new(RwLock::new(Box::new(crate::NullBackend)));
         let port = start_with_config(
             backend,
             0,
-            WebAccessConfig {
-                enabled: true,
-                password: password.to_string(),
-                bind_lan: false,
-            },
+            WebAccessConfig { enabled: true, bind_lan: false },
             assets,
         )
         .expect("front door must bind");
@@ -830,30 +622,6 @@ mod tests {
         }))
     }
 
-    /// Log in and return the session cookie value. reqwest is built here
-    /// without the `cookies` feature, so the cookie is carried by hand.
-    fn login_cookie(base: &str, password: &str) -> String {
-        let resp = reqwest::blocking::Client::new()
-            .post(format!("{base}{LOGIN_PATH}"))
-            .json(&serde_json::json!({ "password": password }))
-            .send()
-            .unwrap();
-        assert_eq!(resp.status(), 200, "login should succeed");
-        let set = resp
-            .headers()
-            .get("set-cookie")
-            .expect("login must set a cookie")
-            .to_str()
-            .unwrap();
-        assert!(set.contains("HttpOnly"), "cookie must be HttpOnly: {set}");
-        set.split(';')
-            .next()
-            .unwrap()
-            .trim()
-            .strip_prefix(&format!("{COOKIE_NAME}="))
-            .expect("cookie is named fleet_web")
-            .to_string()
-    }
 
     /// End-to-end over a real socket: the point of this module is that an HTTP
     /// request reaches a `Backend` method and its return value comes back as
@@ -862,16 +630,9 @@ mod tests {
     /// response shapes the dispatcher produces.
     #[test]
     fn http_requests_reach_the_backend() {
-        let base = serve(TEST_PASSWORD);
-        let cookie = login_cookie(&base, TEST_PASSWORD);
+        let base = serve();
         let client = reqwest::blocking::Client::new();
-        let get = |path: String| {
-            client
-                .get(path)
-                .header("Cookie", format!("{COOKIE_NAME}={cookie}"))
-                .send()
-                .unwrap()
-        };
+        let get = |path: String| client.get(path).send().unwrap();
 
         // Ok(Vec) → 200 + serialized JSON.
         let sessions = get(format!("{base}/sessions"));
@@ -903,97 +664,9 @@ mod tests {
         assert_eq!(get(format!("{base}/sources/a/b/usage")).status(), 404);
     }
 
-    #[test]
-    fn data_routes_require_a_session() {
-        let base = serve(TEST_PASSWORD);
-        let client = reqwest::blocking::Client::new();
 
-        // No cookie at all.
-        assert_eq!(
-            client.get(format!("{base}/sessions")).send().unwrap().status(),
-            401
-        );
 
-        // A cookie that was never issued.
-        assert_eq!(
-            client
-                .get(format!("{base}/sessions"))
-                .header("Cookie", format!("{COOKIE_NAME}=made-up"))
-                .send()
-                .unwrap()
-                .status(),
-            401
-        );
 
-        // Liveness stays open — it discloses nothing but "the door is up".
-        assert_eq!(
-            client.get(format!("{base}/health")).send().unwrap().status(),
-            200
-        );
-    }
-
-    #[test]
-    fn wrong_password_is_rejected() {
-        let base = serve(TEST_PASSWORD);
-        let resp = reqwest::blocking::Client::new()
-            .post(format!("{base}{LOGIN_PATH}"))
-            .json(&serde_json::json!({ "password": "guess" }))
-            .send()
-            .unwrap();
-        assert_eq!(resp.status(), 401);
-        assert!(resp.headers().get("set-cookie").is_none());
-    }
-
-    /// A blank password must deny everything rather than admit anything — the
-    /// invariant that makes a truncated/corrupt config fail closed.
-    #[test]
-    fn empty_password_admits_nobody() {
-        let base = serve("");
-        let client = reqwest::blocking::Client::new();
-        for attempt in ["", "anything"] {
-            let resp = client
-                .post(format!("{base}{LOGIN_PATH}"))
-                .json(&serde_json::json!({ "password": attempt }))
-                .send()
-                .unwrap();
-            assert_eq!(resp.status(), 401, "empty config must reject {attempt:?}");
-        }
-    }
-
-    #[test]
-    fn logout_invalidates_the_session() {
-        let base = serve(TEST_PASSWORD);
-        let cookie = login_cookie(&base, TEST_PASSWORD);
-        let client = reqwest::blocking::Client::new();
-        let header = format!("{COOKIE_NAME}={cookie}");
-
-        assert_eq!(
-            client
-                .get(format!("{base}/sessions"))
-                .header("Cookie", &header)
-                .send()
-                .unwrap()
-                .status(),
-            200
-        );
-
-        client
-            .post(format!("{base}{LOGOUT_PATH}"))
-            .header("Cookie", &header)
-            .send()
-            .unwrap();
-
-        assert_eq!(
-            client
-                .get(format!("{base}/sessions"))
-                .header("Cookie", &header)
-                .send()
-                .unwrap()
-                .status(),
-            401,
-            "the cookie must stop working after logout"
-        );
-    }
 
     /// Opening a port that can start agent sessions must never be something an
     /// app update does on the user's behalf — it stays off until they say so,
@@ -1023,61 +696,20 @@ mod tests {
         let result = start_with_config(
             backend,
             0,
-            WebAccessConfig {
-                enabled: false,
-                password: TEST_PASSWORD.to_string(),
-                bind_lan: false,
-            },
+            WebAccessConfig { enabled: false, bind_lan: false },
             None,
         );
         assert!(result.is_err(), "disabled must not open a port");
     }
 
-    /// A navigating browser must get the password form, not a bare 401 — that
-    /// is the whole login UX, and it has to render before any bundle file is
-    /// authorized.
-    #[test]
-    fn unauthorized_navigation_gets_the_login_page() {
-        let base = serve_with_assets(TEST_PASSWORD, fake_bundle());
-        let resp = reqwest::blocking::Client::new()
-            .get(&base)
-            .header("Accept", "text/html")
-            .send()
-            .unwrap();
-        assert_eq!(resp.status(), 200);
-        let body = resp.text().unwrap();
-        assert!(body.contains("/web/login"), "login form must post to /web/login");
-        assert!(
-            !body.contains("board"),
-            "the app bundle must not be served before login"
-        );
-    }
 
-    /// The same unauthorized path via `fetch` (no `Accept: text/html`) must stay
-    /// a 401, or the frontend would parse a login page as data.
-    #[test]
-    fn unauthorized_fetch_stays_a_401() {
-        let base = serve_with_assets(TEST_PASSWORD, fake_bundle());
-        let resp = reqwest::blocking::Client::new()
-            .get(format!("{base}/sessions"))
-            .header("Accept", "application/json")
-            .send()
-            .unwrap();
-        assert_eq!(resp.status(), 401);
-    }
 
     #[test]
-    fn logged_in_browser_gets_the_bundle() {
-        let base = serve_with_assets(TEST_PASSWORD, fake_bundle());
-        let cookie = login_cookie(&base, TEST_PASSWORD);
+    fn browser_gets_the_bundle() {
+        let base = serve_with_assets(fake_bundle());
         let client = reqwest::blocking::Client::new();
         let get = |path: String| {
-            client
-                .get(path)
-                .header("Cookie", format!("{COOKIE_NAME}={cookie}"))
-                .header("Accept", "text/html")
-                .send()
-                .unwrap()
+            client.get(path).header("Accept", "text/html").send().unwrap()
         };
 
         // `/` resolves to index.html.
@@ -1095,15 +727,27 @@ mod tests {
         assert_eq!(get(format!("{base}/assets/nope.js")).status(), 404);
     }
 
+    /// The door authenticates nothing, on purpose — auth lives in the gateway
+    /// in front of it. Pinned as a test so it reads as a decision rather than
+    /// an oversight: if someone later adds a gate here, this fails and they
+    /// have to confirm the deployment story changed.
+    #[test]
+    fn no_credential_is_required() {
+        let base = serve();
+        let client = reqwest::blocking::Client::new();
+        // Bare request, no cookie and no Authorization header.
+        let resp = client.get(format!("{base}/sessions")).send().unwrap();
+        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.text().unwrap(), "[]");
+    }
+
     /// Data routes must win over the bundle: were the static arm to shadow one,
     /// the page would receive HTML where it expects JSON.
     #[test]
     fn data_routes_are_not_shadowed_by_static() {
-        let base = serve_with_assets(TEST_PASSWORD, fake_bundle());
-        let cookie = login_cookie(&base, TEST_PASSWORD);
+        let base = serve_with_assets(fake_bundle());
         let resp = reqwest::blocking::Client::new()
             .get(format!("{base}/sessions"))
-            .header("Cookie", format!("{COOKIE_NAME}={cookie}"))
             .header("Accept", "text/html")
             .send()
             .unwrap();
@@ -1111,21 +755,4 @@ mod tests {
         assert_eq!(resp.text().unwrap(), "[]");
     }
 
-    /// Browsers send every cookie for the origin in one header, and a segment
-    /// with no `=` (a bare flag cookie) must not abort the scan before ours is
-    /// reached. Driven over HTTP so it exercises the real `session_cookie`.
-    #[test]
-    fn session_is_found_among_other_cookies() {
-        let base = serve(TEST_PASSWORD);
-        let cookie = login_cookie(&base, TEST_PASSWORD);
-        let resp = reqwest::blocking::Client::new()
-            .get(format!("{base}/sessions"))
-            .header(
-                "Cookie",
-                format!("theme=dark; flagged; {COOKIE_NAME}={cookie}; other=x"),
-            )
-            .send()
-            .unwrap();
-        assert_eq!(resp.status(), 200);
-    }
 }
