@@ -1,13 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, GitBranch, Link2, ListTree, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { HandoffChainModal } from "./HandoffChainModal";
 import { distinctWorkspaces } from "./NewSessionForm";
-import { cellStates, matrixRows, nodeKey, pendingOf, subtreeHasPending } from "./planMatrix";
-import type { MatrixRow } from "./planMatrix";
+import {
+  cellStates,
+  matrixMetrics,
+  matrixRows,
+  nodeKey,
+  pendingOf,
+  subtreeHasPending,
+} from "./planMatrix";
+import type { MatrixMetrics, MatrixRow } from "./planMatrix";
 import { useDetailStore, useSessionsStore, useUIStore } from "../store";
 import type { HandoffChain, PlanForest, PlanNode } from "../types";
 import styles from "./PlansView.module.css";
@@ -199,6 +206,25 @@ export function PlansView() {
 
   const rows = useMemo(() => matrixRows(shownRoots, collapsed), [shownRoots, collapsed]);
 
+  // Narrow windows: the title column and then the cells give ground so the
+  // widest row still fits. Re-measure on every resize — opening the drawer
+  // takes 340px off the board and counts as one.
+  const matrixRef = useRef<HTMLDivElement | null>(null);
+  const [boardW, setBoardW] = useState(0);
+  useEffect(() => {
+    const el = matrixRef.current;
+    if (!el) return;
+    const measure = () => setBoardW(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [forest]);
+  const metrics = useMemo(
+    () => matrixMetrics(boardW, rows.reduce((n, r) => Math.max(n, r.node.total), 0)),
+    [boardW, rows],
+  );
+
   const selected = useMemo(() => {
     if (!selectedKey) return null;
     return flatten(forest?.roots ?? []).find((n) => nodeKey(n) === selectedKey) ?? null;
@@ -292,11 +318,12 @@ export function PlansView() {
                 </span>
               </div>
 
-              <div className={styles.matrix}>
+              <div className={styles.matrix} ref={matrixRef}>
                 {rows.map((row) => (
                   <PlanMatrixRow
                     key={row.key}
                     row={row}
+                    metrics={metrics}
                     selected={row.key === selectedKey}
                     onSelect={select}
                     onToggleSubtree={toggleSubtree}
@@ -358,12 +385,13 @@ export function PlansView() {
 
 interface RowProps {
   row: MatrixRow;
+  metrics: MatrixMetrics;
   selected: boolean;
   onSelect: (key: string, item: number | null) => void;
   onToggleSubtree: (key: string, open: boolean) => void;
 }
 
-function PlanMatrixRow({ row, selected, onSelect, onToggleSubtree }: RowProps) {
+function PlanMatrixRow({ row, metrics, selected, onSelect, onToggleSubtree }: RowProps) {
   const { t } = useTranslation();
   const { node } = row;
   const pending = pendingOf(node);
@@ -373,7 +401,7 @@ function PlanMatrixRow({ row, selected, onSelect, onToggleSubtree }: RowProps) {
     <div className={`${styles.row} ${selected ? styles.row_selected : ""}`}>
       <button
         className={styles.row_head}
-        style={{ paddingLeft: 6 + row.depth * 16 }}
+        style={{ width: metrics.titleW, paddingLeft: 6 + row.depth * 16 }}
         title={`${node.title || node.id}\n${node.id}${node.source ? `\n${node.source}` : ""}`}
         onClick={() => onSelect(row.key, null)}
       >
@@ -426,11 +454,12 @@ function PlanMatrixRow({ row, selected, onSelect, onToggleSubtree }: RowProps) {
         {node.done}/{node.total}
       </span>
 
-      <span className={styles.cells}>
+      <span className={styles.cells} style={{ gap: metrics.gap }}>
         {cells.map((state, i) => (
           <button
             key={i}
             className={`${styles.cell} ${styles[`cell_${state}`]}`}
+            style={{ width: metrics.cellW }}
             title={node.items[i] ? cellTip(node.items[i].text) : `P${i + 1}`}
             onClick={() => onSelect(row.key, i)}
           />
