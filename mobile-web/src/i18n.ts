@@ -212,6 +212,8 @@ const DICT: Record<string, string> = {
   独占: "Sole agent",
   另有: "Plus",
   "个 agent": "other agent(s)",
+  重启过: "restarted",
+  次: "time(s)",
   回了: "served",
   份: "snapshot(s)",
   空快照被拦: "empty snapshots blocked",
