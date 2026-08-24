@@ -60,13 +60,13 @@ a 400 that points at the upload route — see
 | `FLEET_PUBLIC_TOKEN` | no | Per-customer scoped token; unset disables external access. |
 | `FLEET_SERVE_HOST` | no | Bind host, default `0.0.0.0` in-container. |
 | `FLEET_SERVE_PORT` | no | Listen port, default `8080`. |
-| `FLEET_HOME` | no | Override for Fleet's home root. **Leave unset in the container** so it resolves to `$HOME=/home/fleet` — the same home the agents read, with `~/.fleet` on the named state volume and `~/.claude` ephemeral. |
+| `FLEET_HOME` | no | Override for Fleet's home root. **Leave unset in the container** so it resolves to `$HOME=/home/fleet` — the same home the agents read, with `~/.fleet` and the transcript dirs on the named state volume, and the rest of `~/.claude` ephemeral. |
 | `FLEET_PUBLIC_WORKSPACE` | no | Workspace bound to every `/v1` response, default `/workspace`. Requests carry no path — this is the confinement root. |
-| `CODEX_HOME` | no | Codex cred/config dir, default `/home/fleet/.codex` (ephemeral). |
+| `CODEX_HOME` | no | Codex cred/config dir, default `/home/fleet/.codex` (ephemeral, except `sessions/` — see `FLEET_STATE_DIR`). |
 | `FLEET_WAIT_FOR_CREDS` | no | Wait for the claude credential before serving. `1` (default) / `0`. |
 | `FLEET_CREDS_TIMEOUT` | no | Seconds to wait for the credential, default `60`. |
 | `FLEET_CRED_STORE_URL` | no | Cred-store endpoint the operator's injector uses (informational). |
-| `FLEET_STATE_DIR` | no | Persist `~/.fleet` by symlinking it here instead of mounting a volume at it — for hosts that hand out exactly one volume (muvee). Unset = leave `~/.fleet` where it is. |
+| `FLEET_STATE_DIR` | no | Persist `~/.fleet`, `~/.claude/projects` and `~/.codex/sessions` by symlinking them here instead of mounting volumes at each — for hosts that hand out exactly one volume (muvee). Credentials stay ephemeral (foxy re-injects them at boot); transcripts must not, because nothing re-creates them. Unset = leave all three where they are. |
 | `FOXY_DATA_DIR` | no | foxy's data dir, default `/home/fleet/.foxy-switcher`. Holds `agent-config.json` (the device token pairing produces) and the daemon's `port` file. Same env var `claw_fleet_core::foxy` reads to source usage from the local daemon. |
 | `FOXY_VAULT_URL` | no | Vault URL printed in the pairing hint when the container is unpaired. Informational only — `pair` takes it as a flag. |
 | `FOXY_AGENT` | no | `0` disables starting the cred-store agent even when paired. |
