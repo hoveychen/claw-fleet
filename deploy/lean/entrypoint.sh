@@ -98,10 +98,26 @@ fi
 # Anthropic itself. Keep the two pointing at one directory.
 : "${FOXY_DATA_DIR:=${HOME}/.foxy-switcher}"
 : "${FOXY_AGENT_PORT:=8765}"
+: "${CODEX_HOME:=${HOME}/.codex}"
+claude_cred="${HOME}/.claude/.credentials.json"
 foxy_bin="$(command -v foxy-switcher || true)"
 foxy_paired=0
 if [[ -n "${foxy_bin}" && "${FOXY_AGENT:-1}" != "0" ]]; then
     mkdir -p "${FOXY_DATA_DIR}"
+
+    # Injection state must not outlive the credential it describes. When the
+    # data dir is on a persistent volume (so pairing survives a redeploy) but
+    # the credential lives on the ephemeral layer, a container recreate leaves
+    # `injected.json` naming an account whose token file is gone. credinject's
+    # reconcile compares the vault's token hash against that persisted hash,
+    # concludes "already injected" and returns — silently, no log line — so the
+    # container serves forever without a credential. Reap the pair of state
+    # files that describe the write; pairing and the native backup stay.
+    if [[ ! -s "${claude_cred}" && -e "${FOXY_DATA_DIR}/injected.json" ]]; then
+        echo "fleet-entrypoint: credential gone but injection state present — reaping stale foxy state" >&2
+        rm -f "${FOXY_DATA_DIR}/injected.json" "${FOXY_DATA_DIR}/marker-last-write.json"
+    fi
+
     if [[ -s "${FOXY_DATA_DIR}/agent-config.json" ]]; then
         foxy_paired=1
         echo "fleet-entrypoint: starting cred-store agent (foxy --mode=agent, data-dir ${FOXY_DATA_DIR}) ..." >&2
@@ -129,8 +145,8 @@ fi
 # before serving, so early API calls don't race an un-leased container. The
 # vault lease/inject itself is wired by the operator (foxy). Disable the wait
 # with FLEET_WAIT_FOR_CREDS=0 (e.g. API-key deployments that need no lease).
-: "${CODEX_HOME:=${HOME}/.codex}"
-claude_cred="${HOME}/.claude/.credentials.json"
+# ${claude_cred} and ${CODEX_HOME} are set above, before the cred-store block —
+# the stale-state reap needs the credential path too.
 if [[ -n "${foxy_bin}" && "${foxy_paired}" -eq 0 && "${FOXY_AGENT:-1}" != "0" ]]; then
     # Nothing is going to inject — waiting would just burn the timeout before
     # serving an agent-less API. Serve now; the operator pairs, then restarts.
