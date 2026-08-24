@@ -328,6 +328,7 @@ pub fn maybe_drain(session: &crate::session::SessionInfo) {
                 model: model.map(str::to_string),
                 effort: effort.map(str::to_string),
                 permission_mode: perm.map(str::to_string),
+            images: Vec::new(),
             },
             Box::new(|_| {}),
         )

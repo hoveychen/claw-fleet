@@ -33,6 +33,12 @@ pub struct SpawnSpec {
     pub session_id: Option<String>,
     /// `CLAUDE_CODE_ENTRYPOINT` value (Claude only); empty → the source's default.
     pub entrypoint: String,
+    /// Absolute paths of images to attach to this turn's prompt.
+    ///
+    /// Codex takes them as `codex exec -i <FILE>`, which is the only way it
+    /// sees an image. Claude ignores this field — it reads images off disk with
+    /// its own file tools, so the caller lists the paths in the prompt instead.
+    pub images: Vec<String>,
 }
 
 /// Parameters for resuming an existing session, source-agnostic.
@@ -51,6 +57,9 @@ pub struct ResumeSpec {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub permission_mode: Option<String>,
+    /// Images for the resumed turn — same contract as [`SpawnSpec::images`]
+    /// (`codex exec resume -i <FILE>`; ignored by Claude).
+    pub images: Vec<String>,
 }
 
 /// How a source should be monitored for changes.

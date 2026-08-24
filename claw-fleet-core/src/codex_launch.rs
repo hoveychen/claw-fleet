@@ -772,6 +772,24 @@ pub fn fleet_decision_card_args(session_env: &[(String, String)]) -> Vec<String>
 /// `cmd_codex_notify`) — the user's own notify still runs. Returns empty when no
 /// `fleet` binary resolves (the session still runs, just without the turn-end
 /// relay).
+/// `-i <FILE>` pairs for the images attached to this turn.
+///
+/// `codex exec -i` (and `codex exec resume -i`) is the only channel through
+/// which Codex sees an image: unlike Claude, it will not open an image path
+/// mentioned in the prompt. Verified against `codex-cli 0.148.0`:
+/// `-i, --image <FILE>...` on `exec`, `-i, --image <FILE>` on `exec resume`.
+///
+/// Blank entries are dropped; the flags go in `pre_prompt_args`, i.e. before the
+/// `--` separator, so they are parsed as flags and never as prompt text.
+pub fn codex_image_args(images: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for path in images.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        out.push("-i".to_string());
+        out.push(path.to_string());
+    }
+    out
+}
+
 pub fn fleet_notify_args() -> Vec<String> {
     let Some(fleet) = crate::fleet_cli::resolve_fleet_binary() else {
         crate::log_debug("fleet_notify_args: no fleet binary resolved; skipping codex notify relay");
@@ -1043,6 +1061,7 @@ pub fn spawn_new_codex_session(
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    images: &[String],
 ) -> Result<SpawnSessionResponse, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
@@ -1092,6 +1111,7 @@ pub fn spawn_new_codex_session(
     // Channel B: prepend the workspace's active TASKS.md plans (new session has
     // no thread id yet, so no backtrack backstop — pass None).
     let prompt = maybe_prepend_active_plans(&workspace_path, None, prompt);
+    pre_prompt.extend(codex_image_args(images));
     let args = build_codex_exec_args(&workspace_path, &prompt, model, effort, &pre_prompt);
 
     crate::log_debug(&format!(
@@ -1317,6 +1337,7 @@ pub fn resume_codex_session(
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    images: &[String],
     on_exit: Box<dyn FnOnce(bool) + Send>,
 ) -> Result<(), String> {
     let session_id = session_id.trim();
@@ -1360,6 +1381,7 @@ pub fn resume_codex_session(
     // Channel B: prepend the workspace's active TASKS.md plans; this resume knows
     // its thread id, so the backtrack backstop can fire for a completed child.
     let prompt = maybe_prepend_active_plans(&workspace_path, Some(session_id), prompt);
+    pre_prompt.extend(codex_image_args(images));
     let args = build_codex_resume_args(session_id, &prompt, model, effort, &pre_prompt);
 
     // A resume may carry its own `--model` / `--effort`; record them so the
@@ -1968,6 +1990,7 @@ mod tests {
             "reply with exactly: OK",
             None,
             None,
+            &[],
         )
         .expect("spawn should succeed");
         assert!(resp.pid > 0, "got a pid");
@@ -1992,7 +2015,7 @@ mod tests {
     fn live_fleet_session_id_resolves_from_launch_token() {
         let ws = std::env::temp_dir().join(format!("fleet-codex-tok-live-{}", std::process::id()));
         std::fs::create_dir_all(&ws).unwrap();
-        let resp = spawn_new_codex_session(ws.to_str().unwrap(), "reply with exactly: OK", None, None)
+        let resp = spawn_new_codex_session(ws.to_str().unwrap(), "reply with exactly: OK", None, None, &[])
             .expect("spawn should succeed");
         let sid = resp.session_id.expect("thread id captured");
 
@@ -2032,7 +2055,7 @@ mod tests {
     fn live_kill_tears_down_codex_process() {
         let ws = std::env::temp_dir().join(format!("fleet-codex-kill-{}", std::process::id()));
         std::fs::create_dir_all(&ws).unwrap();
-        let resp = spawn_new_codex_session(ws.to_str().unwrap(), "wait quietly", None, None)
+        let resp = spawn_new_codex_session(ws.to_str().unwrap(), "wait quietly", None, None, &[])
             .expect("spawn should succeed");
         let pid = resp.pid;
         crate::session::kill_pid_impl(pid).expect("kill should not error");
@@ -2165,6 +2188,7 @@ mod tests {
             "reply with exactly: FIRST",
             None,
             None,
+            &[],
         )
         .expect("initial spawn should succeed");
         let tid = resp.session_id.expect("thread id captured");
@@ -2179,6 +2203,7 @@ mod tests {
             "reply with exactly: SECOND",
             None,
             None,
+            &[],
             Box::new(move |success| {
                 ok_cb.store(success, std::sync::atomic::Ordering::SeqCst);
                 done_cb.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -2353,6 +2378,26 @@ mod tests {
     /// fleet consumes the handoff → codex successor — is a shell test run against
     /// the freshly-built fleet binary; a cargo #[ignore] test can't guarantee
     /// `resolve_fleet_binary` returns THIS build.)
+    #[test]
+    fn image_args_are_flag_pairs_before_the_prompt_separator() {
+        assert!(codex_image_args(&[]).is_empty());
+        assert!(codex_image_args(&["".to_string(), "   ".to_string()]).is_empty());
+        let imgs = vec!["/ws/a.png".to_string(), "/ws/b with space.jpg".to_string()];
+        assert_eq!(
+            codex_image_args(&imgs),
+            vec!["-i", "/ws/a.png", "-i", "/ws/b with space.jpg"]
+        );
+
+        // In a real argv they must sit before `--`, or codex would read them as
+        // prompt text instead of flags.
+        let args = build_codex_exec_args("/ws", "-look at these", None, None, &codex_image_args(&imgs));
+        let dashdash = args.iter().position(|a| a == "--").expect("has --");
+        let first_i = args.iter().position(|a| a == "-i").expect("has -i");
+        assert!(first_i < dashdash, "images must precede --: {args:?}");
+        assert_eq!(args.last().unwrap(), "-look at these");
+        assert_eq!(args.iter().filter(|a| *a == "-i").count(), 2);
+    }
+
     #[test]
     fn fleet_notify_args_inject_codex_notify_override() {
         let args = fleet_notify_args();

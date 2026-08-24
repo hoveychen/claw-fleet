@@ -618,6 +618,7 @@ fn spawn_resume(rec: &WatchRecord, prompt: &str) -> Result<(), String> {
             model: rec.model.clone(),
             effort: rec.effort.clone(),
             permission_mode: None,
+        images: Vec::new(),
         },
         Box::new(|_| {}),
     )

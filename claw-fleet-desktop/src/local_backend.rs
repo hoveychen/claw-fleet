@@ -1715,6 +1715,7 @@ pub fn resume_session_impl(
             model: model.map(str::to_string),
             effort: effort.map(str::to_string),
             permission_mode: permission_mode.map(str::to_string),
+        images: Vec::new(),
         },
         Box::new(|_| {}),
     )
@@ -1942,6 +1943,7 @@ impl Backend for LocalBackend {
             permission_mode,
             session_id: None,
             entrypoint: String::new(),
+        images: Vec::new(),
         };
         let resp = claw_fleet_core::agent_source::spawn_session(&tool, &spec)?;
         // Trigger a rescan after a delay so the freshly created JSONL shows up
