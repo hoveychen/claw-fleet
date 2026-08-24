@@ -20,9 +20,9 @@
 //! identical is what lets the frontend's mapping table stay a single table
 //! instead of one per transport.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use claw_fleet_core::backend::Backend;
 use serde::Deserialize;
@@ -44,21 +44,138 @@ const WORKERS: usize = 4;
 /// memorable and survives restarts.
 pub const DEFAULT_PORT: u16 = 4571;
 
+/// Cookie carrying a logged-in browser's session token.
+const COOKIE_NAME: &str = "fleet_web";
+const CONFIG_FILE_NAME: &str = "web-access.json";
+
+/// Persisted settings for the browser front door.
+///
+/// There is deliberately no token/secret for an upstream service here: this
+/// module talks to the app's own in-process backend, so — unlike the
+/// `fleet serve` path — there is no admin token that could leak into the page.
+/// The password guards *this* port and nothing else.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WebAccessConfig {
+    /// Whether the front door accepts logins at all.
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    /// Password the browser must present once per session. Generated on first
+    /// load; an empty value denies every login rather than allowing any.
+    #[serde(default)]
+    pub password: String,
+    /// Bind `0.0.0.0` instead of loopback, so a phone or another machine on the
+    /// LAN can reach it. Off by default — opening a port that can start agent
+    /// sessions is the user's call, not a default.
+    #[serde(default)]
+    pub bind_lan: bool,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+impl Default for WebAccessConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            password: String::new(),
+            bind_lan: false,
+        }
+    }
+}
+
+fn config_path() -> Option<std::path::PathBuf> {
+    claw_fleet_core::session::get_fleet_dir().map(|d| d.join(CONFIG_FILE_NAME))
+}
+
+/// Read the config, minting a password on first use.
+///
+/// `load_preserving` distinguishes "no file yet" from "file is there but
+/// unreadable this instant". Only the former may be replaced with a freshly
+/// generated password — overwriting on a transient read error would rotate the
+/// password out from under a browser that is already logged in.
+pub fn load_config() -> WebAccessConfig {
+    use claw_fleet_core::atomic_json::JsonLoad;
+    let Some(path) = config_path() else {
+        return WebAccessConfig::default();
+    };
+    let (mut cfg, may_persist) = match claw_fleet_core::atomic_json::load_preserving(&path) {
+        JsonLoad::Loaded(cfg) => (cfg, true),
+        JsonLoad::Missing | JsonLoad::Corrupt => (WebAccessConfig::default(), true),
+        JsonLoad::Unreadable => (WebAccessConfig::default(), false),
+    };
+    if cfg.password.is_empty() && may_persist {
+        // 64 hex chars is what the relay pairing secret uses; reused here
+        // rather than inventing a second entropy helper.
+        cfg.password = claw_fleet_core::mobile_relay::generate_secret();
+        let _ = save_config(&cfg);
+    }
+    cfg
+}
+
+/// Persist at 0600 — the password grants the right to start agent sessions.
+pub fn save_config(cfg: &WebAccessConfig) -> std::io::Result<()> {
+    let path = config_path()
+        .ok_or_else(|| std::io::Error::other("no fleet dir"))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_vec_pretty(cfg).map_err(std::io::Error::other)?;
+    claw_fleet_core::atomic_json::write_atomic(&path, &json)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 struct Ctx {
     backend: SharedBackend,
     /// Runtime for the two `Backend` methods that return futures
     /// (`account_info` / `source_usage`). Built once — `Runtime::new()` spins
     /// up worker threads, so per-request construction would be wasteful.
     rt: tokio::runtime::Runtime,
+    /// The password a browser must present to `/web/login`.
+    password: String,
+    /// Session tokens handed out to logged-in browsers. In memory only, so an
+    /// app restart forces a re-login — acceptable, and it means a leaked cookie
+    /// cannot outlive the process.
+    sessions: Mutex<HashSet<String>>,
+}
+
+impl Ctx {
+    /// A request is authorized when its cookie names a live session token.
+    fn authorized(&self, request: &Request) -> bool {
+        match session_cookie(request) {
+            Some(token) => self.sessions.lock().unwrap().contains(&token),
+            None => false,
+        }
+    }
 }
 
 /// Bind the front door and serve it from background threads.
 ///
-/// Binds loopback only: this port answers every request without auth for now,
-/// so it must not be reachable from the LAN. The password gate (P2) is what
-/// unlocks a wider bind.
+/// Binds loopback unless `bindLan` is set in `~/.fleet/web-access.json`.
 pub fn start(backend: SharedBackend, port: u16) -> std::io::Result<u16> {
-    let server = Server::http(("127.0.0.1", port))
+    start_with_config(backend, port, load_config())
+}
+
+/// `start` with the config supplied rather than read from disk — the seam the
+/// tests drive, so they neither read nor mint the real `~/.fleet` password.
+pub fn start_with_config(
+    backend: SharedBackend,
+    port: u16,
+    config: WebAccessConfig,
+) -> std::io::Result<u16> {
+    if !config.enabled {
+        return Err(std::io::Error::other(
+            "web front door disabled in web-access.json",
+        ));
+    }
+    let host = if config.bind_lan { "0.0.0.0" } else { "127.0.0.1" };
+    let server = Server::http((host, port))
         .map_err(|e| std::io::Error::other(format!("web front door bind failed: {e}")))?;
     let bound = server
         .server_addr()
@@ -67,7 +184,12 @@ pub fn start(backend: SharedBackend, port: u16) -> std::io::Result<u16> {
         .unwrap_or(port);
 
     let rt = tokio::runtime::Runtime::new()?;
-    let ctx = Arc::new(Ctx { backend, rt });
+    let ctx = Arc::new(Ctx {
+        backend,
+        rt,
+        password: config.password,
+        sessions: Mutex::new(HashSet::new()),
+    });
     let server = Arc::new(server);
 
     for _ in 0..WORKERS {
@@ -142,6 +264,29 @@ fn decode(raw: &str) -> String {
         .to_string()
 }
 
+/// Value of the session cookie, if the request carries one.
+///
+/// Browsers send every cookie for the origin in one header, so the app's own
+/// cookies ride along; pick out ours by name rather than assuming position.
+fn session_cookie(request: &Request) -> Option<String> {
+    let header = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("cookie"))?
+        .value
+        .as_str()
+        .to_string();
+    for pair in header.split(';') {
+        // A valueless segment must not abort the scan — ours may follow it.
+        if let Some((name, value)) = pair.trim().split_once('=') {
+            if name == COOKIE_NAME {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn read_body(request: &mut Request) -> Result<String, String> {
     let mut body = String::new();
     request
@@ -204,6 +349,58 @@ fn default_source() -> String {
     "claude".to_string()
 }
 
+#[derive(Deserialize)]
+struct LoginBody {
+    password: String,
+}
+
+// ── Auth ────────────────────────────────────────────────────────────────────
+
+/// Routes reachable without a session cookie. Everything else is gated.
+///
+/// `/health` stays open so "is the front door up" is answerable without
+/// credentials; it reveals nothing but liveness.
+fn is_public(method: &str, path: &str) -> bool {
+    matches!((method, path), ("GET", "/health") | ("POST", LOGIN_PATH))
+}
+
+const LOGIN_PATH: &str = "/web/login";
+const LOGOUT_PATH: &str = "/web/logout";
+
+fn login(ctx: &Ctx, request: &mut Request) -> Resp {
+    let body: LoginBody = match parse_body(request) {
+        Ok(b) => b,
+        Err(e) => return error(400, &e),
+    };
+    // An empty configured password denies every attempt rather than accepting
+    // any — the same invariant `hooks_server::auth` holds for an empty token.
+    if ctx.password.is_empty() || body.password != ctx.password {
+        return error(401, "wrong password");
+    }
+    let token = claw_fleet_core::mobile_relay::generate_secret();
+    ctx.sessions.lock().unwrap().insert(token.clone());
+    // No `Secure`: this is served over plain HTTP on loopback/LAN, and a
+    // Secure cookie would simply never be sent back.
+    let cookie: Header = format!("Set-Cookie: {COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/")
+        .parse()
+        .expect("cookie header is well-formed");
+    Response::from_data(b"{\"ok\":true}".to_vec())
+        .with_header(json_header())
+        .with_header(cookie)
+}
+
+fn logout(ctx: &Ctx, request: &Request) -> Resp {
+    if let Some(token) = session_cookie(request) {
+        ctx.sessions.lock().unwrap().remove(&token);
+    }
+    let cookie: Header = format!("Set-Cookie: {COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+        .parse()
+        .expect("cookie header is well-formed");
+    Response::from_data(b"{\"ok\":true}".to_vec())
+        .with_header(json_header())
+        .with_header(cookie)
+}
+
 // ── Dispatch ────────────────────────────────────────────────────────────────
 
 fn handle(ctx: &Ctx, mut request: Request) {
@@ -215,8 +412,20 @@ fn handle(ctx: &Ctx, mut request: Request) {
     // frontend's `q()` drops nulls, and `URLSearchParams` skips empty values.
     let opt = |key: &str| query.get(key).filter(|v| !v.is_empty()).cloned();
 
-    let response = match (request.method().as_str(), path) {
+    let method = request.method().as_str().to_string();
+
+    // Gate first: no route below should have to think about auth.
+    if !is_public(&method, path) && !ctx.authorized(&request) {
+        let _ = request.respond(error(401, "login required"));
+        return;
+    }
+
+    let response = match (method.as_str(), path) {
         ("GET", "/health") => json_body(&serde_json::json!({ "ok": true })),
+
+        ("POST", LOGIN_PATH) => login(ctx, &mut request),
+
+        ("POST", LOGOUT_PATH) => logout(ctx, &request),
 
         ("GET", claw_fleet_core::routes::SESSIONS) => {
             json_body(&ctx.backend.read().unwrap().list_sessions())
@@ -432,6 +641,50 @@ mod tests {
         ));
     }
 
+    const TEST_PASSWORD: &str = "correct-horse";
+
+    /// Boot a front door on an OS-assigned port with the config supplied, so no
+    /// test reads or mints the real `~/.fleet/web-access.json` password.
+    fn serve(password: &str) -> String {
+        let backend: SharedBackend = Arc::new(RwLock::new(Box::new(crate::NullBackend)));
+        let port = start_with_config(
+            backend,
+            0,
+            WebAccessConfig {
+                enabled: true,
+                password: password.to_string(),
+                bind_lan: false,
+            },
+        )
+        .expect("front door must bind");
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// Log in and return the session cookie value. reqwest is built here
+    /// without the `cookies` feature, so the cookie is carried by hand.
+    fn login_cookie(base: &str, password: &str) -> String {
+        let resp = reqwest::blocking::Client::new()
+            .post(format!("{base}{LOGIN_PATH}"))
+            .json(&serde_json::json!({ "password": password }))
+            .send()
+            .unwrap();
+        assert_eq!(resp.status(), 200, "login should succeed");
+        let set = resp
+            .headers()
+            .get("set-cookie")
+            .expect("login must set a cookie")
+            .to_str()
+            .unwrap();
+        assert!(set.contains("HttpOnly"), "cookie must be HttpOnly: {set}");
+        set.split(';')
+            .next()
+            .unwrap()
+            .trim()
+            .strip_prefix(&format!("{COOKIE_NAME}="))
+            .expect("cookie is named fleet_web")
+            .to_string()
+    }
+
     /// End-to-end over a real socket: the point of this module is that an HTTP
     /// request reaches a `Backend` method and its return value comes back as
     /// JSON. The route table alone can't show that, so this drives the server
@@ -439,59 +692,169 @@ mod tests {
     /// response shapes the dispatcher produces.
     #[test]
     fn http_requests_reach_the_backend() {
-        let backend: SharedBackend = Arc::new(RwLock::new(Box::new(crate::NullBackend)));
-        // Port 0: the OS picks a free one, so the test never collides with a
-        // running app on DEFAULT_PORT.
-        let port = start(backend, 0).expect("front door must bind");
-        let base = format!("http://127.0.0.1:{port}");
+        let base = serve(TEST_PASSWORD);
+        let cookie = login_cookie(&base, TEST_PASSWORD);
         let client = reqwest::blocking::Client::new();
+        let get = |path: String| {
+            client
+                .get(path)
+                .header("Cookie", format!("{COOKIE_NAME}={cookie}"))
+                .send()
+                .unwrap()
+        };
 
         // Ok(Vec) → 200 + serialized JSON.
-        let sessions = client.get(format!("{base}/sessions")).send().unwrap();
+        let sessions = get(format!("{base}/sessions"));
         assert_eq!(sessions.status(), 200);
         assert_eq!(sessions.text().unwrap(), "[]");
 
         // Err(String) → 500 carrying the backend's own message, which is what
         // liveProxy's callProbe re-throws to the UI.
-        let messages = client
-            .get(format!("{base}/messages?path=/x.jsonl"))
-            .send()
-            .unwrap();
+        let messages = get(format!("{base}/messages?path=/x.jsonl"));
         assert_eq!(messages.status(), 500);
         assert_eq!(messages.text().unwrap(), "backend not ready");
 
         // Option::None → 200 + `null` (not 404): the frontend distinguishes
         // "no live thinking" from a failed request.
-        let thinking = client
-            .get(format!("{base}/live_thinking?session_id=abc"))
-            .send()
-            .unwrap();
+        let thinking = get(format!("{base}/live_thinking?session_id=abc"));
         assert_eq!(thinking.status(), 200);
         assert_eq!(thinking.text().unwrap(), "null");
 
         // Result<(), _> route: body is discarded, status carries the outcome.
-        let interrupt = client
-            .get(format!("{base}/interrupt?pid=123"))
-            .send()
-            .unwrap();
-        assert_eq!(interrupt.status(), 500);
+        assert_eq!(get(format!("{base}/interrupt?pid=123")).status(), 500);
 
         // Query parsing is enforced before the backend is touched.
-        let bad_pid = client
-            .get(format!("{base}/interrupt?pid=notanumber"))
-            .send()
-            .unwrap();
-        assert_eq!(bad_pid.status(), 400);
+        assert_eq!(get(format!("{base}/interrupt?pid=notanumber")).status(), 400);
 
         // Unmapped paths must not fall through to anything.
-        let missing = client.get(format!("{base}/settings")).send().unwrap();
-        assert_eq!(missing.status(), 404);
+        assert_eq!(get(format!("{base}/settings")).status(), 404);
 
         // A nested source name is rejected at the router, not passed along.
-        let nested = client
-            .get(format!("{base}/sources/a/b/usage"))
+        assert_eq!(get(format!("{base}/sources/a/b/usage")).status(), 404);
+    }
+
+    #[test]
+    fn data_routes_require_a_session() {
+        let base = serve(TEST_PASSWORD);
+        let client = reqwest::blocking::Client::new();
+
+        // No cookie at all.
+        assert_eq!(
+            client.get(format!("{base}/sessions")).send().unwrap().status(),
+            401
+        );
+
+        // A cookie that was never issued.
+        assert_eq!(
+            client
+                .get(format!("{base}/sessions"))
+                .header("Cookie", format!("{COOKIE_NAME}=made-up"))
+                .send()
+                .unwrap()
+                .status(),
+            401
+        );
+
+        // Liveness stays open — it discloses nothing but "the door is up".
+        assert_eq!(
+            client.get(format!("{base}/health")).send().unwrap().status(),
+            200
+        );
+    }
+
+    #[test]
+    fn wrong_password_is_rejected() {
+        let base = serve(TEST_PASSWORD);
+        let resp = reqwest::blocking::Client::new()
+            .post(format!("{base}{LOGIN_PATH}"))
+            .json(&serde_json::json!({ "password": "guess" }))
             .send()
             .unwrap();
-        assert_eq!(nested.status(), 404);
+        assert_eq!(resp.status(), 401);
+        assert!(resp.headers().get("set-cookie").is_none());
+    }
+
+    /// A blank password must deny everything rather than admit anything — the
+    /// invariant that makes a truncated/corrupt config fail closed.
+    #[test]
+    fn empty_password_admits_nobody() {
+        let base = serve("");
+        let client = reqwest::blocking::Client::new();
+        for attempt in ["", "anything"] {
+            let resp = client
+                .post(format!("{base}{LOGIN_PATH}"))
+                .json(&serde_json::json!({ "password": attempt }))
+                .send()
+                .unwrap();
+            assert_eq!(resp.status(), 401, "empty config must reject {attempt:?}");
+        }
+    }
+
+    #[test]
+    fn logout_invalidates_the_session() {
+        let base = serve(TEST_PASSWORD);
+        let cookie = login_cookie(&base, TEST_PASSWORD);
+        let client = reqwest::blocking::Client::new();
+        let header = format!("{COOKIE_NAME}={cookie}");
+
+        assert_eq!(
+            client
+                .get(format!("{base}/sessions"))
+                .header("Cookie", &header)
+                .send()
+                .unwrap()
+                .status(),
+            200
+        );
+
+        client
+            .post(format!("{base}{LOGOUT_PATH}"))
+            .header("Cookie", &header)
+            .send()
+            .unwrap();
+
+        assert_eq!(
+            client
+                .get(format!("{base}/sessions"))
+                .header("Cookie", &header)
+                .send()
+                .unwrap()
+                .status(),
+            401,
+            "the cookie must stop working after logout"
+        );
+    }
+
+    #[test]
+    fn disabled_config_refuses_to_bind() {
+        let backend: SharedBackend = Arc::new(RwLock::new(Box::new(crate::NullBackend)));
+        let result = start_with_config(
+            backend,
+            0,
+            WebAccessConfig {
+                enabled: false,
+                password: TEST_PASSWORD.to_string(),
+                bind_lan: false,
+            },
+        );
+        assert!(result.is_err(), "disabled must not open a port");
+    }
+
+    /// Browsers send every cookie for the origin in one header, and a segment
+    /// with no `=` (a bare flag cookie) must not abort the scan before ours is
+    /// reached. Driven over HTTP so it exercises the real `session_cookie`.
+    #[test]
+    fn session_is_found_among_other_cookies() {
+        let base = serve(TEST_PASSWORD);
+        let cookie = login_cookie(&base, TEST_PASSWORD);
+        let resp = reqwest::blocking::Client::new()
+            .get(format!("{base}/sessions"))
+            .header(
+                "Cookie",
+                format!("theme=dark; flagged; {COOKIE_NAME}={cookie}; other=x"),
+            )
+            .send()
+            .unwrap();
+        assert_eq!(resp.status(), 200);
     }
 }
