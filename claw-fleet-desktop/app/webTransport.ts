@@ -57,7 +57,73 @@ const STORE_PREFIX = "fleet-web:";
  */
 export function localCommand(cmd: string, args: Record<string, unknown>): { handled: boolean; value?: unknown } {
   const key = () => `${STORE_PREFIX}${String(args.key ?? "")}`;
+
+  // ── plugin:window ────────────────────────────────────────────────────────
+  // The custom titlebar and the theme sync drive `getCurrentWindow()`. A tab
+  // has no window of its own to move, size or decorate, and nothing here is
+  // meaningful enough to be worth a lie — so the whole family answers, with
+  // the shape each caller expects, rather than being reported as gaps. (Its
+  // buttons stay inert; the browser's own chrome is the real one.)
+  if (cmd.startsWith("plugin:window|")) {
+    const op = cmd.slice("plugin:window|".length);
+    switch (op) {
+      case "is_visible":
+      case "is_focused":
+      case "is_resizable":
+        return { handled: true, value: true };
+      case "is_maximized":
+      case "is_minimized":
+      case "is_fullscreen":
+      case "is_decorated":
+        return { handled: true, value: false };
+      case "scale_factor":
+        return { handled: true, value: window.devicePixelRatio };
+      case "theme":
+        return {
+          handled: true,
+          value: window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light",
+        };
+      case "inner_size":
+      case "outer_size": {
+        const dpr = window.devicePixelRatio || 1;
+        return {
+          handled: true,
+          value: {
+            width: Math.round(window.innerWidth * dpr),
+            height: Math.round(window.innerHeight * dpr),
+          },
+        };
+      }
+      default:
+        return { handled: true, value: null };
+    }
+  }
+
   switch (cmd) {
+    // ── Plugins with a real browser equivalent ───────────────────────────
+    // Not awaited: `localCommand` is synchronous by contract. The write can
+    // still fail in an insecure context, and the UI will have said "copied"
+    // — the same optimism the desktop path has when the permission is absent.
+    case "plugin:clipboard-manager|write_text":
+      void navigator.clipboard?.writeText(String(args.text ?? ""));
+      return { handled: true, value: null };
+    case "plugin:opener|open_url":
+      window.open(String(args.url ?? ""), "_blank", "noopener");
+      return { handled: true, value: null };
+    // `ask()` is a yes/no prompt, which is exactly `confirm()`.
+    case "plugin:dialog|ask":
+      return { handled: true, value: window.confirm(String(args.message ?? "")) };
+    // File pickers need the host filesystem; `null` is their "cancelled".
+    case "plugin:dialog|open":
+    case "plugin:dialog|save":
+      return { handled: true, value: null };
+    // Report notifications as not-granted so the frontend keeps them in-app
+    // rather than handing them to an OS channel that isn't wired here.
+    case "plugin:notification|is_permission_granted":
+      return { handled: true, value: false };
+    case "plugin:notification|request_permission":
+      return { handled: true, value: "denied" };
+
     // Resource id — a number is expected, and `null` wedges the boot.
     case "plugin:store|load":
       return { handled: true, value: 1 };

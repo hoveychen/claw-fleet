@@ -125,8 +125,14 @@ const hostPrefs = () => hostPrefsSource();
  * Two consequences of "mirrors remote.rs" that are easy to get wrong:
  *   - the *query* names come from remote.rs's `format!` templates, not from the
  *     IPC argument names, and they routinely differ (`jsonlPath` → `?path=`);
- *   - POST bodies are `#[serde(rename_all = "camelCase")]` structs, so they
- *     take the frontend's own casing verbatim — snake_case keys 400.
+ *   - a POST body's key casing is whatever *that* request struct declares, and
+ *     it is not uniform. The shared request types in `claw-fleet-core`
+ *     (`SpawnSessionRequest`, `SetSessionMarkRequest`, …) are
+ *     `rename_all = "camelCase"` and take the frontend's own casing verbatim.
+ *     The one-off `struct Req` / `struct Body` declared inside a single
+ *     `remote.rs` fn usually declares nothing, so those go out snake_case —
+ *     `/apply_interaction_mode` wants `user_title`, `/plugins/*` want
+ *     `plugin_id`. Guessing either way 400s; read the struct.
  *
  * `liveProxy.test.ts` pins every key to a command the frontend really invokes
  * and every `path` to a route `hooks_server::serve` really serves, which is how
@@ -181,7 +187,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "POST",
     path: "/apply_interaction_mode",
     empty: true,
-    body: { userTitle: hostPrefs().userTitle, locale: hostPrefs().locale },
+    body: { user_title: hostPrefs().userTitle, locale: hostPrefs().locale },
   }),
 
   apply_model_guidance: () => ({
@@ -201,7 +207,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "POST",
     path: "/apply_prd_mode",
     empty: true,
-    body: { userTitle: hostPrefs().userTitle, locale: hostPrefs().locale },
+    body: { user_title: hostPrefs().userTitle, locale: hostPrefs().locale },
   }),
 
   apply_wiki_guidance: () => ({
@@ -265,7 +271,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "POST",
     path: "/skill_delete",
     empty: true,
-    body: { skillPath: a.skillPath },
+    body: { skill_path: a.skillPath },
   }),
 
   delete_wiki_doc: (a) => ({
@@ -507,7 +513,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "POST",
     path: "/plugins/install",
     empty: true,
-    body: { pluginId: a.pluginId },
+    body: { plugin_id: a.pluginId },
   }),
 
   interrupt_agent_session: (a) => ({
@@ -743,7 +749,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "POST",
     path: "/reconcile_codex_guidance",
     empty: true,
-    body: { userTitle: hostPrefs().userTitle, locale: hostPrefs().locale },
+    body: { user_title: hostPrefs().userTitle, locale: hostPrefs().locale },
   }),
 
   remove_browse_path: (a) => ({
@@ -944,7 +950,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "POST",
     path: "/plugins/set_enabled",
     empty: true,
-    body: { pluginId: a.pluginId, enabled: a.enabled },
+    body: { plugin_id: a.pluginId, enabled: a.enabled },
   }),
 
   set_session_mark: (a) => ({
@@ -1048,7 +1054,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "POST",
     path: "/plugins/uninstall",
     empty: true,
-    body: { pluginId: a.pluginId },
+    body: { plugin_id: a.pluginId },
   }),
 
   update_schedule: (a) => ({
