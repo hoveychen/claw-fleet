@@ -1655,6 +1655,24 @@ pub fn run() {
                 );
                 *state.backend.write().unwrap() = Box::new(local);
 
+                // HTTP front door for the browser build. Started here, after
+                // the real backend has replaced NullBackend, and handed the
+                // *shared* lock rather than a clone of the backend — so a later
+                // `connect_remote` swap is visible to the page too.
+                // Non-fatal: a bind failure (port taken by a second instance)
+                // just means the browser build is unavailable this run.
+                {
+                    let shared = state.backend.clone();
+                    match crate::web_serve::start(shared, crate::web_serve::DEFAULT_PORT) {
+                        Ok(port) => claw_fleet_core::log_debug(&format!(
+                            "web front door listening on http://127.0.0.1:{port}"
+                        )),
+                        Err(e) => claw_fleet_core::log_debug(&format!(
+                            "web front door not started: {e}"
+                        )),
+                    }
+                }
+
                 // Pre-fetch LLM provider info in background so Settings opens instantly.
                 let cached = state.cached_llm_providers.clone();
                 std::thread::spawn(move || {
