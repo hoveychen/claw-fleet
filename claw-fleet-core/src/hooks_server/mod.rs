@@ -27,6 +27,7 @@ mod routes_plan_approval;
 mod routes_proc;
 mod routes_schedule;
 mod routes_session_state;
+mod routes_settings;
 mod routes_skills;
 mod routes_spawn;
 mod routes_wiki;
@@ -46,6 +47,7 @@ use routes_plan_approval::*;
 use routes_proc::*;
 use routes_schedule::*;
 use routes_session_state::*;
+use routes_settings::*;
 use routes_skills::*;
 use routes_spawn::*;
 use routes_wiki::*;
@@ -922,10 +924,21 @@ fn handle_request(
             // still-live client. `?path=` is percent-encoded (slashes as %2F).
             crate::routes::STOP_WORKSPACE => route_stop_workspace(ctx, request, &query, json_header, path),
 
-            // Phase 4 P3: `/auto_resume_config` removed. Remote callers hitting
-            // that path receive the catch-all 404 below. `/resume_session` was
-            // re-added later (POST, with follow-up prompt) for the history
-            // panel — see the handler further down.
+            // ── Host settings the Settings panel reads and writes ────────────
+            // GET returns the current config, POST saves it (side effects
+            // included) and answers with the stored value. Phase 4 P3 retired
+            // `/auto_resume_config` because RemoteBackend stopped calling it —
+            // over SSH these three govern the *desktop* machine, so it reads
+            // the local files instead. They are back for the browser build,
+            // which has no host of its own: without them `fleet webui` would
+            // paint a toggle that reads as the host's state and saves nowhere.
+            // `/resume_session` was re-added separately (POST, with follow-up
+            // prompt) for the history panel — see the handler further down.
+            crate::routes::AUTO_RESUME_CONFIG => route_auto_resume_config(ctx, request, &query, json_header, path),
+
+            crate::routes::PERMISSIONS_CONFIG => route_permissions_config(ctx, request, &query, json_header, path),
+
+            crate::routes::DECISION_PANEL_CONFIG => route_decision_panel_config(ctx, request, &query, json_header, path),
 
             // ── OpenAI Responses-compatible public API (Fleet Cloud v2) ──
             // The external customer surface. Internally calls spawn/tail/
