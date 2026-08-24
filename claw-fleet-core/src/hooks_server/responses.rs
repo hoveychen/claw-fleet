@@ -1343,6 +1343,50 @@ const STREAM_POLL_MS: u64 = 500;
 /// (~20 min at 500ms). On timeout we emit `response.incomplete`.
 const STREAM_MAX_TICKS: u32 = 2_400;
 
+/// The transcript a stream is tailing.
+///
+/// A stream tick needs two things about its session, and they have nothing in
+/// common but where they used to be read from. The transcript **path** never
+/// changes once the session exists; the **status** changes constantly. Reading
+/// both off one `scan_all_sources` per tick meant paying a full walk of every
+/// agent source every [`STREAM_POLL_MS`] for the life of the stream — measured
+/// at ~400ms per walk on a host with ~400 recent transcripts, against a 500ms
+/// tick, per concurrent stream. So they are split: the path resolves here, at
+/// most once, and the status comes from the shared snapshot.
+///
+/// Resolution still scans, because it is the one part that must not go stale —
+/// a stream opens on a session that may have been spawned milliseconds ago and
+/// may not be on disk for a tick or two yet, and the `/v1` surface's whole
+/// contract is that it sees such a session (see `session_snapshot`).
+struct TranscriptCursor {
+    path: Option<String>,
+}
+
+impl TranscriptCursor {
+    fn new() -> Self {
+        Self { path: None }
+    }
+
+    /// This session's transcript path, or `None` while it has yet to appear.
+    ///
+    /// Scans only while unresolved: a session that exists keeps the same path
+    /// for the life of the stream, so every later tick is a field read.
+    fn resolve(
+        &mut self,
+        sources: &[Box<dyn crate::agent_source::AgentSource>],
+        session_id: &str,
+    ) -> Option<&str> {
+        if self.path.is_none() {
+            let sessions = crate::session::scan_all_sources(sources);
+            self.path = sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .map(|s| s.jsonl_path.clone());
+        }
+        self.path.as_deref()
+    }
+}
+
 /// Detach a per-response SSE stream onto its own thread (like
 /// [`super::handle_sse_upgrade`], but scoped to one run). Polls the session's
 /// transcript incrementally, emitting `response.created` → repeated
@@ -1353,6 +1397,7 @@ fn run_stream(
     session_id: String,
     resp_id: String,
     model: Option<String>,
+    snapshot: std::sync::Arc<crate::session_snapshot::SessionSnapshot>,
 ) {
     std::thread::spawn(move || {
         let mut created = ResponseObject::new(resp_id.clone(), ResponseStatus::Queued);
@@ -1374,11 +1419,13 @@ fn run_stream(
         // Whether THIS turn has streamed any assistant text yet — the terminal
         // guard (mirrors the polling projection's `turn_has_output`).
         let mut emitted_text = false;
+        // Resolved once, then reused — see `TranscriptCursor` for why the path
+        // and the status are fetched by different means.
+        let mut cursor = TranscriptCursor::new();
         for _ in 0..STREAM_MAX_TICKS {
-            let sessions = crate::session::scan_all_sources(&sources);
-            if let Some(s) = sessions.iter().find(|s| s.id == session_id) {
-                if let Some(src) = crate::agent_source::find_source_for_path(&sources, &s.jsonl_path) {
-                    if let Ok((msgs, new_off)) = src.tail_incremental(&s.jsonl_path, offset) {
+            if let Some(path) = cursor.resolve(&sources, &session_id).map(str::to_string) {
+                if let Some(src) = crate::agent_source::find_source_for_path(&sources, &path) {
+                    if let Ok((msgs, new_off)) = src.tail_incremental(&path, offset) {
                         offset = new_off;
                         let delta = project_output_text(&msgs);
                         if !delta.is_empty() {
@@ -1414,8 +1461,17 @@ fn run_stream(
                 // nor the stale idle / bookkeeping-line window right after a
                 // resume completes the response prematurely.
                 if emitted_text {
-                    let status_str = serde_json::to_value(&s.status)
-                        .ok()
+                    // The one live field a tick needs, and the reason this loop
+                    // used to rescan. Read from the shared snapshot instead: it
+                    // refreshes on its own 2s ticker and every concurrent stream
+                    // reads the same copy, so the terminal event can land up to
+                    // one refresh late while the deltas above stay on the 500ms
+                    // tick. Late by a tick beats a full walk per tick.
+                    let status_str = snapshot
+                        .sessions()
+                        .iter()
+                        .find(|s| s.id == session_id)
+                        .and_then(|s| serde_json::to_value(&s.status).ok())
                         .and_then(|v| v.as_str().map(String::from))
                         .unwrap_or_default();
                     // No pending calls here (handled above); emitted_text is
@@ -1454,13 +1510,14 @@ fn start_stream(
     session_id: String,
     resp_id: String,
     model: Option<String>,
+    snapshot: std::sync::Arc<crate::session_snapshot::SessionSnapshot>,
 ) {
     let resp = tiny_http::Response::empty(200)
         .with_header("Content-Type: text/event-stream".parse::<tiny_http::Header>().unwrap())
         .with_header("Cache-Control: no-cache".parse::<tiny_http::Header>().unwrap())
         .with_header("Connection: keep-alive".parse::<tiny_http::Header>().unwrap());
     let stream = request.upgrade("sse", resp);
-    run_stream(stream, session_id, resp_id, model);
+    run_stream(stream, session_id, resp_id, model, snapshot);
 }
 
 fn respond_value(request: tiny_http::Request, status: u16, body: &serde_json::Value, json_header: tiny_http::Header) {
@@ -1564,7 +1621,13 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
             }
         }
         if stream {
-            return start_stream(request, sid.clone(), to_resp_id(&sid), model);
+            return start_stream(
+                request,
+                sid.clone(),
+                to_resp_id(&sid),
+                model,
+                ctx.snapshot.clone(),
+            );
         }
         let r = build_response(ctx.sources, &sid).unwrap_or_else(|| {
             let mut r = ResponseObject::new(to_resp_id(&sid), ResponseStatus::InProgress);
@@ -1653,7 +1716,7 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
         Err((status, code, msg)) => respond_error(request, status, code, msg, json_header),
         Ok((session_id, resp_id, init_status)) => {
             if stream {
-                start_stream(request, session_id, resp_id, model);
+                start_stream(request, session_id, resp_id, model, ctx.snapshot.clone());
             } else {
                 let mut r = ResponseObject::new(resp_id, init_status);
                 r.model = model;
@@ -2003,6 +2066,94 @@ mod tests {
     /// Serializes tests that mutate the `FLEET_PUBLIC_WORKSPACE` env var, since
     /// cargo runs the test fns concurrently in one process.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A source that counts its scans — the property `TranscriptCursor` is about.
+    struct CountingSource {
+        scans: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl crate::agent_source::AgentSource for CountingSource {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+        fn uri_prefix(&self) -> &'static str {
+            "counting://"
+        }
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn scan_sessions(&self) -> Vec<crate::session::SessionInfo> {
+            self.scans
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut s = crate::session::SessionInfo::default();
+            s.id = "wanted".to_string();
+            s.jsonl_path = "counting://wanted.jsonl".to_string();
+            vec![s]
+        }
+        fn get_messages(&self, _path: &str) -> Result<Vec<serde_json::Value>, String> {
+            Ok(Vec::new())
+        }
+        fn watch_strategy(&self) -> crate::agent_source::WatchStrategy {
+            crate::agent_source::WatchStrategy::Poll(std::time::Duration::from_secs(5))
+        }
+    }
+
+    /// A stream ticks every `STREAM_POLL_MS` for up to `STREAM_MAX_TICKS`. If it
+    /// re-walked every agent source each tick, a host with a few hundred
+    /// transcripts would spend most of that wall clock scanning — per concurrent
+    /// stream. The transcript path cannot change once resolved, so resolving it
+    /// twice is pure waste.
+    #[test]
+    fn the_stream_cursor_stops_scanning_once_the_transcript_resolves() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let scans = Arc::new(AtomicUsize::new(0));
+        let sources: Vec<Box<dyn crate::agent_source::AgentSource>> =
+            vec![Box::new(CountingSource {
+                scans: scans.clone(),
+            })];
+        let mut cursor = TranscriptCursor::new();
+
+        assert_eq!(
+            cursor.resolve(&sources, "wanted"),
+            Some("counting://wanted.jsonl"),
+            "the first resolve finds the session"
+        );
+        assert_eq!(scans.load(Ordering::SeqCst), 1, "and costs exactly one scan");
+
+        for _ in 0..10 {
+            assert_eq!(cursor.resolve(&sources, "wanted"), Some("counting://wanted.jsonl"));
+        }
+        assert_eq!(
+            scans.load(Ordering::SeqCst),
+            1,
+            "ten more ticks must not scan again — that is the per-tick full walk being removed"
+        );
+    }
+
+    /// The flip side: a session that isn't on disk yet must keep being looked
+    /// for, or a stream opened on a just-spawned run would never find it.
+    #[test]
+    fn the_stream_cursor_keeps_looking_until_the_session_appears() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let scans = Arc::new(AtomicUsize::new(0));
+        let sources: Vec<Box<dyn crate::agent_source::AgentSource>> =
+            vec![Box::new(CountingSource {
+                scans: scans.clone(),
+            })];
+        let mut cursor = TranscriptCursor::new();
+
+        assert_eq!(cursor.resolve(&sources, "not-yet-spawned"), None);
+        assert_eq!(cursor.resolve(&sources, "not-yet-spawned"), None);
+        assert_eq!(
+            scans.load(Ordering::SeqCst),
+            2,
+            "an unresolved cursor must retry — the session may still be spawning"
+        );
+    }
 
     #[test]
     fn resp_id_round_trips() {
