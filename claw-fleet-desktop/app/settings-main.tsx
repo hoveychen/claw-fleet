@@ -12,6 +12,20 @@ async function boot() {
   if (isMockMode) {
     const { installMocks } = await import("./mock/tauri-mock");
     installMocks();
+  } else {
+    // Same reason as `main.tsx`: opened in a plain browser, this page has no
+    // Tauri IPC, and `initStorage()` two lines down is already an `invoke`.
+    // Without a transport that call never settles, so `boot()` stops before
+    // `ReactDOM.render` and the page stays blank with an empty console.
+    //
+    // This page is reachable in the browser build because `open_settings_window`
+    // maps to `window.open("settings.html")` there — the whole Settings panel
+    // lives in this entry point, so skipping it would mean a web UI with no
+    // settings at all.
+    const { isTauriHost, installWebTransport } = await import("./webTransport");
+    if (!isTauriHost()) {
+      await installWebTransport();
+    }
   }
 
   const { initStorage } = await import("./storage");

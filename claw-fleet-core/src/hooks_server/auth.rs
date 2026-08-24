@@ -144,6 +144,13 @@ mod tests {
             routes::MEMORIES,
             routes::SKILL_CONTENT,
             routes::REMOTE_WORKSPACES,
+            // The three host-settings pairs. `PERMISSIONS_CONFIG` is the sharp
+            // one: a POST there flips the `settings.json` allow-rule injection
+            // for every session on the host, so a customer token reaching it
+            // could disarm the guard gate outright.
+            routes::AUTO_RESUME_CONFIG,
+            routes::PERMISSIONS_CONFIG,
+            routes::DECISION_PANEL_CONFIG,
         ] {
             assert_eq!(
                 authorize(p, Some(PUBLIC), ADMIN, Some(PUBLIC), false),
