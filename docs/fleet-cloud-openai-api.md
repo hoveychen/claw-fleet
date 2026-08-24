@@ -18,13 +18,44 @@
 | `GET /v1/responses/{id}` | 检索 response（投影 output + status + usage） |
 | `POST /v1/responses/{id}/cancel` | 取消（→ 内部 interrupt/stop） |
 | `GET /v1/responses/{id}/files` | 列出该 response 产出的文件（Fleet 扩展） |
-| `GET /v1/files/{id}/content` | 下载产物内容（Fleet 扩展，限 `/workspace` 内） |
+| `POST /v1/files` | 上传附件（`multipart/form-data`：`file` 必填，`purpose` 选填，默认 `user_data`），返回 file 对象 |
+| `GET /v1/files/{id}` | 取 file 对象（不含字节） |
+| `GET /v1/files/{id}/content` | 下载内容（限 workspace 内） |
+| `DELETE /v1/files/{id}` | 删除一个**上传**（产物不可删——同一 id 空间也命名 agent 的运行结果） |
 
 ## 请求 `input`
 
 - 字符串：`"input": "修复 issue #12"`。
 - 消息数组：`[{"type":"message","role":"user","content":[{"type":"input_text","text":"..."}]}]`。
 - 答决策卡：`[{"type":"function_call_output","call_id":"call_1","output":"allow"}]` 配 `previous_response_id`。
+- 附件：`{"type":"input_image","file_id":"file_…"}` / `{"type":"input_file","file_id":"file_…"}`，`file_id` 来自 `POST /v1/files`。
+
+### 附件（多模态输入）
+
+先上传再引用，两步：
+
+```sh
+fid=$(curl -s -X POST $HOST/v1/files -H "Authorization: Bearer $TOKEN" \
+        -F file=@shot.png -F purpose=user_data | jq -r .id)
+curl -s -X POST $HOST/v1/responses -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d "{\"input\":[{\"type\":\"message\",
+  \"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"图里是什么？\"},
+  {\"type\":\"input_image\",\"file_id\":\"$fid\"}]}]}"
+```
+
+机制：上传落到 workspace 下 `.fleet-uploads/<uuid>/<文件名>`，请求里的 `file_id`
+解析成绝对路径后追加成 prompt 末尾的附件清单，agent 用自己的文件工具从磁盘读。
+**传路径不传字节**，所以：
+
+- **内联数据不支持，且是显式 400**：`image_url`、`file_data`（含 data URL 与
+  http URL）都会被拒，错误信息指向 `POST /v1/files`。这里刻意不静默丢弃——早先
+  的实现能收下内联图片、返回 200，而 agent 根本没看到图。
+- 没有 `file_id` 的 `input_image`/`input_file` 同样是 400；不认识的**非附件**
+  part（如 `refusal`）继续容忍，保住对 OpenAI 客户端的前向兼容。
+- 坏 `file_id` 在**启动之前**就报错（404/403），不会先起一个找不到输入的运行。
+- 上限 50 MiB（`MAX_ATTACHMENT_BYTES`），超限 413 且不落盘。
+- 只接 **claude**。codex 只认 `session.prompt` 里的 image part、路径对它没用，
+  所以 `model` 指向 gpt/codex 时附件不会被看到——这一支还没做。
 
 ## `response` 对象
 
@@ -67,4 +98,6 @@ SSE 事件：`response.created`、`response.output_text.delta`、`response.compl
 
 ## 范围外（v2 不做）
 
-OpenAI tools 透传给 agent 当工具、image/file input、code interpreter；真按 token 出账/限额；`GET /v1/responses` 列表。
+OpenAI tools 透传给 agent 当工具、code interpreter；真按 token 出账/限额；`GET /v1/responses` 列表；`GET /v1/files` 列表（上传按 id 引用，没有列举需求）。
+
+附件已支持（见上），但只到 claude、且只认 `file_id`——内联字节与 codex 侧仍未做。

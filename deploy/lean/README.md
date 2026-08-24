@@ -37,7 +37,19 @@ The API is then on `http://<host>:8080`. External integrators use
 from openai import OpenAI
 client = OpenAI(base_url="http://<host>:8080/v1", api_key="$FLEET_PUBLIC_TOKEN")
 r = client.responses.create(model="claude-opus-5", input="fix issue #12")
+
+# attachments: upload, then reference by id
+f = client.files.create(file=open("shot.png", "rb"), purpose="user_data")
+r = client.responses.create(model="claude-opus-5", input=[{
+    "type": "message", "role": "user",
+    "content": [{"type": "input_text", "text": "what is in this?"},
+                {"type": "input_image", "file_id": f.id}]}])
 ```
+
+Uploads land under `<workspace>/.fleet-uploads/`, because the agent reads an
+attachment as a file. Inline bytes (`image_url` / `file_data`) are refused with
+a 400 that points at the upload route — see
+[`../../docs/fleet-cloud-openai-api.md`](../../docs/fleet-cloud-openai-api.md).
 
 ## Environment
 
