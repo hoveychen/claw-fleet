@@ -209,6 +209,17 @@ pub const WORKFLOW_TREES: &str = "/workflow_trees";
 /// server and built with `format!` on the client.
 pub const SOURCES_PREFIX: &str = "/sources/";
 
+/// Prefix arm: `/wiki_asset/<slug>/<version>/<relpath…>`, the browser build's
+/// stand-in for the desktop's `fleet-wiki://` custom protocol (unknown to a
+/// plain tab, where Chromium blocks the navigation and the iframe paints
+/// nothing). Deliberately a path and not [`WIKI_FILE`]'s query form: a
+/// published `index.html` reaches its bundle through relative refs, and the
+/// browser resolves those against the URL's directory — collapsing the doc
+/// into one query-bearing segment would send `assets/style.css` elsewhere.
+/// The slug's own `/` travels percent-encoded so the tail still splits into
+/// exactly slug / version / rel, matching the desktop protocol handler.
+pub const WIKI_ASSET_PREFIX: &str = "/wiki_asset/";
+
 /// Public API surface exposed to per-customer **scoped** tokens in the Fleet
 /// Cloud lean deployment (one-customer-per-container).
 ///
