@@ -47,7 +47,8 @@ r = client.responses.create(model="claude-opus-5", input=[{
 ```
 
 Uploads land under `<workspace>/.fleet-uploads/`, because the agent reads an
-attachment as a file. Inline bytes (`image_url` / `file_data`) are refused with
+attachment as a file — claude opens the path itself, codex gets images via
+`codex exec -i`. Inline bytes (`image_url` / `file_data`) are refused with
 a 400 that points at the upload route — see
 [`../../docs/fleet-cloud-openai-api.md`](../../docs/fleet-cloud-openai-api.md).
 
