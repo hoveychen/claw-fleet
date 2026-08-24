@@ -54,8 +54,11 @@ curl -s -X POST $HOST/v1/responses -H "Authorization: Bearer $TOKEN" \
   part（如 `refusal`）继续容忍，保住对 OpenAI 客户端的前向兼容。
 - 坏 `file_id` 在**启动之前**就报错（404/403），不会先起一个找不到输入的运行。
 - 上限 50 MiB（`MAX_ATTACHMENT_BYTES`），超限 413 且不落盘。
-- 只接 **claude**。codex 只认 `session.prompt` 里的 image part、路径对它没用，
-  所以 `model` 指向 gpt/codex 时附件不会被看到——这一支还没做。
+- **claude 与 codex 都支持，但通道不同**：claude 用自己的文件工具按清单里的路径
+  读；codex 不会去打开 prompt 里提到的图片路径，所以图片改走 `codex exec -i
+  <FILE>`（`codex exec resume -i` 同理），非图片仍走清单（那些它自己能读）。
+  是否图片按扩展名的 mime 判定。
+  （早期版本这里写过"路径对 codex 没用"——那是 dsh 的机制，codex 恰恰认路径。）
 
 ## `response` 对象
 
@@ -100,4 +103,4 @@ SSE 事件：`response.created`、`response.output_text.delta`、`response.compl
 
 OpenAI tools 透传给 agent 当工具、code interpreter；真按 token 出账/限额；`GET /v1/responses` 列表；`GET /v1/files` 列表（上传按 id 引用，没有列举需求）。
 
-附件已支持（见上），但只到 claude、且只认 `file_id`——内联字节与 codex 侧仍未做。
+附件已支持（见上），claude 与 codex 都通；仍未做的是内联字节（必须先上传拿 `file_id`）。
