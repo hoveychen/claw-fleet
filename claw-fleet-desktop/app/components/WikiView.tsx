@@ -10,6 +10,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
+import { isWebBuild } from "../hostEnv";
+import { downloadWikiExport } from "../mock/liveProxy";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   BookOpen,
@@ -171,8 +173,20 @@ async function exportDoc(doc: WikiDoc, version: string): Promise<void> {
   // Mirrors core's wiki::export_filename — kind decides the artifact shape,
   // and only the slug's last segment is a name (the rest are directories).
   const ext = doc.kind === "markdown" ? "md" : doc.kind === "html" ? "html" : "zip";
+  const filename = `${slugBasename(doc.slug)}.${ext}`;
+  // A tab has no destination to be given: `save()` answers null there, so this
+  // used to return one line later having done nothing at all. The artifact is
+  // already reachable — `/wiki_export` is the very route RemoteBackend reads it
+  // through, and it answers the finished bytes for every kind, zip bundle
+  // included — so hand them over as a download, the browser's version of the
+  // same intent. The name is derived here rather than taken from the response
+  // because that is where the desktop derives it too (`export_filename`).
+  if (isWebBuild()) {
+    await downloadWikiExport(doc.slug, version, filename);
+    return;
+  }
   const dest = await save({
-    defaultPath: `${slugBasename(doc.slug)}.${ext}`,
+    defaultPath: filename,
     filters: [{ name: doc.title, extensions: [ext] }],
   });
   if (!dest) return;
