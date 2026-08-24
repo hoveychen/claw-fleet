@@ -1360,6 +1360,18 @@ export async function downloadWikiExport(
   await downloadFromProbe("/wiki_export", { slug, version }, filename);
 }
 
+/**
+ * Download the bundled Fleet SKILL.md — the browser build's replacement for the
+ * desktop's `save_skill_file`.
+ *
+ * That command writes an `include_str!` constant the frontend never holds, to a
+ * path a tab cannot be given, so this is the one member of the export family
+ * that needed a route added rather than an existing one re-pointed.
+ */
+export async function downloadFleetSkill(): Promise<void> {
+  await downloadFromProbe("/fleet_skill", {}, "SKILL.md");
+}
+
 /** `callProbe` for a route that answers bytes rather than JSON. */
 async function callProbeBlob(req: LiveReq): Promise<Blob> {
   const url = probeUrl(req);

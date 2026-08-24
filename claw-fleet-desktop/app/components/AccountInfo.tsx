@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { isWebBuild } from "../hostEnv";
 import { ClaudeIcon, CodexIcon } from "./SessionCard";
 import styles from "./AccountInfo.module.css";
 
@@ -263,6 +264,16 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
   async function saveSkillFile() {
     setSaveMsg(null);
     try {
+      // A tab has no destination to save to, so "save" becomes "download" —
+      // still the same intent (hand me the file, I will put it where I want).
+      // There is no path to report back afterwards, so the confirmation is the
+      // download itself plus a generic ok.
+      if (isWebBuild()) {
+        const { downloadFleetSkill } = await import("../mock/liveProxy");
+        await downloadFleetSkill();
+        setSaveMsg("SKILL.md");
+        return;
+      }
       const path = await invoke<string>("save_skill_file");
       setSaveMsg(path);
     } catch (e) {
@@ -293,7 +304,12 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
         </div>
         <p className={styles.modal_desc}>{t("account.ai_modal_desc")}</p>
 
-        {/* Step 1: CLI in PATH */}
+        {/* Step 1: CLI in PATH.
+            Hidden in the browser build: `install_fleet_cli` symlinks the binary
+            into the *caller's* PATH, and the caller here is a tab. The machine
+            that would need it is the one serving this page, where the install
+            is a shell command on that host, not a button here. */}
+        {!isWebBuild() && (
         <div className={styles.modal_step}>
           <div className={styles.step_label}>
             <span className={styles.step_num}>1</span>
@@ -323,6 +339,7 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
             <p className={styles.step_hint}>{t("account.ai_step1_other")}</p>
           )}
         </div>
+        )}
 
         {/* Step 2: Install skill */}
         <div className={styles.modal_step}>
@@ -347,11 +364,19 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
             </div>
           )}
 
-          {!installResult && noToolsDetected && (
+          {!installResult && noToolsDetected && !isWebBuild() && (
             <p className={styles.step_hint}>{t("account.ai_no_tools")}</p>
           )}
 
           <div className={styles.step_action}>
+            {/* Same reason as step 1: this writes the skill into agent-tool
+                directories under the caller's home. `detect_ai_tools` answers
+                an empty list in a tab, so the button was permanently disabled
+                under a "no tools detected" notice that described the tab rather
+                than anything the user could act on. Downloading the file, which
+                is what the secondary button now does, is the part that still
+                means something here. */}
+            {!isWebBuild() && (
             <button
               className={styles.step_btn}
               onClick={installSkill}
@@ -363,6 +388,7 @@ function AiSetupModal({ onClose, isMacOS, cliInstallState, cliInstallMsg, onInst
                 ? "✓ " + t("account.ai_skill_installed_btn")
                 : t("account.ai_skill_install_btn")}
             </button>
+            )}
             <button className={styles.step_btn_secondary} onClick={saveSkillFile}>
               {t("account.ai_skill_save_btn")}
             </button>

@@ -344,6 +344,43 @@ describe("downloadWikiExport", () => {
   });
 });
 
+/**
+ * The bundled Fleet SKILL.md, downloadable in the browser build.
+ *
+ * On the desktop `save_skill_file` writes a compile-time `include_str!`
+ * constant to a path the user picks — the frontend never holds the text and a
+ * tab has no path to write to, so this is the one gap in the export family that
+ * needed a route rather than a re-routing. Pinned the same way as the wiki one:
+ * the whole pathname, against what `hooks_server` really serves.
+ */
+describe("downloadFleetSkill", () => {
+  it("calls a path hooks_server actually serves", async () => {
+    expect(servedRoutes().exact).toContain("/fleet_skill");
+
+    const seen: string[] = [];
+    const realFetch = globalThis.fetch;
+    const realCreate = URL.createObjectURL;
+    const realRevoke = URL.revokeObjectURL;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(new Blob(["# Fleet"]), { status: 200 });
+    }) as typeof fetch;
+    URL.createObjectURL = () => "blob:stub";
+    URL.revokeObjectURL = () => {};
+    try {
+      const { downloadFleetSkill } = await import("./liveProxy");
+      await downloadFleetSkill();
+    } finally {
+      globalThis.fetch = realFetch;
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    }
+
+    expect(seen).toHaveLength(1);
+    expect(new URL(seen[0]).pathname.replace(/^\/__live/, "")).toBe("/fleet_skill");
+  });
+});
+
 describe("query encoding matches RemoteBackend", () => {
   it("sends a space as %20, not as +", async () => {
     const seen: string[] = [];
