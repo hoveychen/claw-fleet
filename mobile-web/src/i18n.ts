@@ -503,6 +503,14 @@ const DICT: Record<string, string> = {
   "触发审计 · 已有规则": "triggers audit · rule exists",
   触发审计: "triggers audit",
 
+  // ── 计划页（整仓 TASKS.md 进度矩阵）──
+  "整仓 TASKS.md 计划的进度矩阵": "Progress matrix for the repo's TASKS.md plans",
+  "计划加载失败：{0}": "Failed to load plans: {0}",
+  "这个仓库还没有计划": "No plans in this repo yet",
+  "{0} 个计划有待办": "{0} plans with work left",
+  "已完成 {0} 个": "{0} completed",
+  "已完成 {0} 条": "{0} done",
+
   // ── 仓库 tab ──
   工具: "Tools",
   仓库: "Repositories",

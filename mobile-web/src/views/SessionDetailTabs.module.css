@@ -313,6 +313,55 @@
   overflow-wrap: anywhere;
 }
 
+.planStrip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 0 4px;
+}
+.planCell {
+  width: 10px;
+  height: 11px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.planCell[data-state="done"] {
+  background: var(--color-success, #4ade80);
+  opacity: 0.6;
+}
+.planCell[data-state="next"] {
+  background: var(--color-accent);
+}
+.planCell[data-state="todo"] {
+  background: var(--color-border);
+}
+.planCount {
+  margin-left: 6px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+
+.planMarker {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--color-text-dim);
+}
+
+/* 默认压成一行:P 任务正文常是几百字的实现笔记,点一下才展开。 */
+.planItemText {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.planItemText[data-open="true"] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .planItem {
   display: flex;
   align-items: flex-start;
