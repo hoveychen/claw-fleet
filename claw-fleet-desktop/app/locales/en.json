@@ -566,11 +566,13 @@
     "orphan_tip": "Parent plan {{parent}} does not exist; promoted to a root",
     "search_placeholder": "Filter repos…",
     "stat_pending": "plans with work left",
-    "legend_live": "Pending",
-    "legend_done": "Done",
     "expand_subtree": "Expand {{count}} sub-plan(s)",
     "collapse_subtree": "Collapse subtree",
-    "close": "Close"
+    "close": "Close",
+    "stat_tasks": "{{pending}} / {{total}} P-tasks left",
+    "legend_cell_done": "Done",
+    "legend_cell_next": "Next",
+    "legend_cell_todo": "To do"
   },
   "memory": {
     "panel_title": "Memory",

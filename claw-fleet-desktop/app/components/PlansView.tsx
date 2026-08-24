@@ -1,30 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, GitBranch, Link2, ListTree, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import { HandoffChainModal } from "./HandoffChainModal";
 import { distinctWorkspaces } from "./NewSessionForm";
-import { NODE_H, NODE_W, layoutPlanForest, nodeKey } from "./planLayout";
-import type { LayoutEdge, LayoutNode } from "./planLayout";
+import { cellStates, matrixRows, nodeKey, pendingOf, subtreeHasPending } from "./planMatrix";
+import type { MatrixRow } from "./planMatrix";
 import { useDetailStore, useSessionsStore, useUIStore } from "../store";
 import type { HandoffChain, PlanForest, PlanNode } from "../types";
 import styles from "./PlansView.module.css";
 
-// ── Tree helpers ─────────────────────────────────────────────────────────────
-
-/** Pending P-tasks in this plan alone. */
-function pendingOf(node: PlanNode): number {
-  return Math.max(0, node.total - node.done);
-}
-
-/** Does this plan — or anything below it — still have work left? Drives both
- *  the default expansion and the 「已完成」 fold: a root whose whole subtree is
- *  finished is history, and this workspace has hundreds of those. */
-function subtreeHasPending(node: PlanNode): boolean {
-  return pendingOf(node) > 0 || node.children.some(subtreeHasPending);
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Ordered session ids on a chain, derived from its links — mirrors the Rust
  *  `HandoffChain::session_ids`. Used for the 「接力 n 棒」 count. */
@@ -40,7 +28,7 @@ function chainLegCount(chain: HandoffChain): number {
 /** Split a TASKS.md item into its `P<n>` marker and the rest.
  *
  *  Items are written `**P3** — do the thing`, so the raw string renders as
- *  literal asterisks — the P-number, the one part you scan a tree by, is the
+ *  literal asterisks — the P-number, the one part you scan a plan by, is the
  *  part that looks like noise. Pull it out as a badge and drop the emphasis
  *  markers from the remainder. Anything that doesn't match keeps its text
  *  verbatim rather than being mangled by a half-baked markdown pass. */
@@ -55,7 +43,7 @@ function subtreeSize(node: PlanNode): number {
   return 1 + node.children.reduce((n, c) => n + subtreeSize(c), 0);
 }
 
-/** Every node in the forest, flat — used to resolve a selection back to its plan. */
+/** Every node in the forest, flat — resolves a selection back to its plan. */
 function flatten(roots: PlanNode[], out: PlanNode[] = []): PlanNode[] {
   for (const r of roots) {
     out.push(r);
@@ -64,35 +52,33 @@ function flatten(roots: PlanNode[], out: PlanNode[] = []): PlanNode[] {
   return out;
 }
 
-/** Left + right margin on `.stage`; the packer gets the width that is left. */
-const STAGE_MARGIN_X = 40;
-
-/** The connector between two boxes: a horizontal-tangent cubic, so the curve
- *  leaves the parent and meets the child flat rather than at an angle. */
-function edgePath(e: LayoutEdge): string {
-  const dx = Math.max(18, (e.x2 - e.x1) / 2);
-  return `M ${e.x1} ${e.y1} C ${e.x1 + dx} ${e.y1}, ${e.x2 - dx} ${e.y2}, ${e.x2} ${e.y2}`;
+/** Cell tooltip: the P-task's own text, trimmed to something a title attribute
+ *  can carry (items here run to several paragraphs). */
+function cellTip(text: string): string {
+  const { marker, rest } = splitMarker(text);
+  const body = rest.replace(/\s+/g, " ");
+  const head = marker ? `${marker} — ` : "";
+  return head + (body.length > 160 ? `${body.slice(0, 160)}…` : body);
 }
 
 // ── Root view ────────────────────────────────────────────────────────────────
 
 /**
- * 计划树 — a workspace's whole execution chain as a left-to-right node graph:
- * the `parent`-linked plan forest, one box per plan, with each plan's handoff
- * relays folded onto the node that spawned them. Server-side join lives in
- * `claw_fleet_core::plan_forest`; this view only lays it out and draws it.
+ * 计划树 — a workspace's plans as a progress matrix: one row per plan, one cell
+ * per P-task, columns aligned so you can read across rows. Server-side join
+ * lives in `claw_fleet_core::plan_forest`; this view only orders and paints it.
  *
- * The graph carries structure and progress only — title, done/total, a progress
- * bar, and badges. Not one line of P-task prose is on the canvas: a plan's items
- * are routinely multi-paragraph implementation notes, and rendering them inline
- * (what this view used to do) turned the whole page into a wall of text with the
- * shape of the forest lost inside it. Prose lives in the right-hand drawer,
- * behind a click, one plan at a time — and even there each item is clamped to a
- * line until you open it.
+ * Two things drive the shape:
  *
- * Two default folds survive from the old list, now applied to the *graph*:
- *   1. Roots whose whole subtree is finished are off-canvas behind one chip.
- *   2. A subtree with no pending work anywhere collapses into its parent node.
+ *   1. Not one line of P-task prose is on the board. Items are routinely
+ *      multi-paragraph implementation notes, and rendering them inline (what
+ *      this view used to do) turned the page into a wall of text. Prose lives
+ *      in the right-hand drawer, behind a click, one plan at a time — and even
+ *      there each item is clamped to a line until you open it.
+ *   2. A matrix, not a node graph, because the forest is mostly singletons:
+ *      agent-workspace carries 143 plans with 9 `parent=` links total. The
+ *      `parent` links that do exist show up as indentation, and a plan with
+ *      children can be collapsed.
  */
 export function PlansView() {
   const { t } = useTranslation();
@@ -105,9 +91,11 @@ export function PlansView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openChain, setOpenChain] = useState<HandoffChain | null>(null);
-  // Which plan the drawer is showing. Deliberately not persisted: a drawer
-  // restored on boot would reopen prose nobody asked to see.
+  // Which plan the drawer shows, and which of its items to open on arrival
+  // (set when the click landed on a specific cell). Deliberately not persisted:
+  // a drawer restored on boot would reopen prose nobody asked to see.
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [focusItem, setFocusItem] = useState<number | null>(null);
 
   // Repos to offer. Same derivation as the new-session launcher: worktree
   // checkouts fold onto their repo root (a plan lives in the root's TASKS.md,
@@ -161,8 +149,13 @@ export function PlansView() {
   }, [load]);
 
   // Dropping the selection on a repo switch keeps the drawer from showing a
-  // plan that is no longer on the canvas.
+  // plan that is no longer on the board.
   useEffect(() => setSelectedKey(null), [selectedWorkspace]);
+
+  const select = (key: string, item: number | null) => {
+    setSelectedKey(key);
+    setFocusItem(item);
+  };
 
   const toggleSubtree = (key: string, open: boolean) =>
     updatePlansView({ expandOverrides: { ...expandOverrides, [key]: open } });
@@ -190,7 +183,7 @@ export function PlansView() {
     [liveRoots, doneRoots, showCompletedRoots],
   );
 
-  // A subtree is drawn unless the user said otherwise; the default hides
+  // A subtree stays open unless the user said otherwise; the default folds away
   // branches with nothing left to do.
   const collapsed = useMemo(() => {
     const out = new Set<string>();
@@ -204,34 +197,21 @@ export function PlansView() {
     return out;
   }, [shownRoots, expandOverrides]);
 
-  // The packer needs the canvas width to know how many root trees fit on a
-  // band; re-measure on every resize (opening the drawer counts).
-  const canvasRef = useRef<HTMLDivElement | null>(null);
-  const [canvasW, setCanvasW] = useState(0);
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const measure = () => setCanvasW(el.clientWidth);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [forest]);
-
-  const layout = useMemo(
-    () => layoutPlanForest(shownRoots, collapsed, Math.max(NODE_W, canvasW - STAGE_MARGIN_X)),
-    [shownRoots, collapsed, canvasW],
-  );
+  const rows = useMemo(() => matrixRows(shownRoots, collapsed), [shownRoots, collapsed]);
 
   const selected = useMemo(() => {
     if (!selectedKey) return null;
     return flatten(forest?.roots ?? []).find((n) => nodeKey(n) === selectedKey) ?? null;
   }, [selectedKey, forest]);
 
-  const pendingPlans = useMemo(
-    () => flatten(shownRoots).filter((n) => pendingOf(n) > 0).length,
-    [shownRoots],
-  );
+  const { pendingPlans, pendingTasks, totalTasks } = useMemo(() => {
+    const all = flatten(shownRoots);
+    return {
+      pendingPlans: all.filter((n) => pendingOf(n) > 0).length,
+      pendingTasks: all.reduce((n, p) => n + pendingOf(p), 0),
+      totalTasks: all.reduce((n, p) => n + p.total, 0),
+    };
+  }, [shownRoots]);
 
   return (
     <PageShell
@@ -283,6 +263,13 @@ export function PlansView() {
                   <b>{pendingPlans}</b>
                   {t("plans.stat_pending", "个计划有待办")}
                 </span>
+                <span className={styles.stat_dim}>
+                  {t("plans.stat_tasks", {
+                    pending: pendingTasks,
+                    total: totalTasks,
+                    defaultValue: "{{pending}} / {{total}} 个 P 待办",
+                  })}
+                </span>
                 {doneRoots.length > 0 && (
                   <button
                     className={`${styles.chip} ${showCompletedRoots ? styles.chip_on : ""}`}
@@ -296,38 +283,25 @@ export function PlansView() {
                 )}
                 <span className={styles.spacer} />
                 <span className={styles.legend}>
-                  <i className={styles.dot_live} />
-                  {t("plans.legend_live", "有待办")}
                   <i className={styles.dot_done} />
-                  {t("plans.legend_done", "已完成")}
+                  {t("plans.legend_cell_done", "已完成")}
+                  <i className={styles.dot_next} />
+                  {t("plans.legend_cell_next", "下一个")}
+                  <i className={styles.dot_todo} />
+                  {t("plans.legend_cell_todo", "待办")}
                 </span>
               </div>
 
-              <div className={styles.canvas} ref={canvasRef}>
-                <div
-                  className={styles.stage}
-                  style={{ width: layout.width, height: layout.height }}
-                >
-                  <svg
-                    className={styles.edges}
-                    width={layout.width}
-                    height={layout.height}
-                    aria-hidden
-                  >
-                    {layout.edges.map((e) => (
-                      <path key={`${e.from}->${e.to}`} d={edgePath(e)} />
-                    ))}
-                  </svg>
-                  {layout.nodes.map((n) => (
-                    <PlanNodeBox
-                      key={n.key}
-                      laid={n}
-                      selected={n.key === selectedKey}
-                      onSelect={setSelectedKey}
-                      onToggleSubtree={toggleSubtree}
-                    />
-                  ))}
-                </div>
+              <div className={styles.matrix}>
+                {rows.map((row) => (
+                  <PlanMatrixRow
+                    key={row.key}
+                    row={row}
+                    selected={row.key === selectedKey}
+                    onSelect={select}
+                    onToggleSubtree={toggleSubtree}
+                  />
+                ))}
               </div>
             </>
           )}
@@ -356,6 +330,7 @@ export function PlansView() {
         {selected && (
           <PlanDrawer
             node={selected}
+            focusItem={focusItem}
             doneShown={doneItemsShown.includes(nodeKey(selected))}
             onToggleDone={() => toggleDoneItems(nodeKey(selected))}
             onOpenChain={setOpenChain}
@@ -379,73 +354,88 @@ export function PlansView() {
   );
 }
 
-// ── One node on the canvas ───────────────────────────────────────────────────
+// ── One row of the matrix ────────────────────────────────────────────────────
 
-interface NodeBoxProps {
-  laid: LayoutNode;
+interface RowProps {
+  row: MatrixRow;
   selected: boolean;
-  onSelect: (key: string) => void;
+  onSelect: (key: string, item: number | null) => void;
   onToggleSubtree: (key: string, open: boolean) => void;
 }
 
-function PlanNodeBox({ laid, selected, onSelect, onToggleSubtree }: NodeBoxProps) {
+function PlanMatrixRow({ row, selected, onSelect, onToggleSubtree }: RowProps) {
   const { t } = useTranslation();
-  const { node } = laid;
+  const { node } = row;
   const pending = pendingOf(node);
-  const pct = node.total > 0 ? Math.round((node.done / node.total) * 100) : 0;
+  const cells = cellStates(node);
 
   return (
-    <div
-      className={styles.box_wrap}
-      style={{ left: laid.x, top: laid.y, width: NODE_W, height: NODE_H }}
-    >
+    <div className={`${styles.row} ${selected ? styles.row_selected : ""}`}>
       <button
-        className={[
-          styles.box,
-          pending === 0 ? styles.box_done : styles.box_live,
-          selected ? styles.box_selected : "",
-        ].join(" ")}
+        className={styles.row_head}
+        style={{ paddingLeft: 6 + row.depth * 16 }}
         title={`${node.title || node.id}\n${node.id}${node.source ? `\n${node.source}` : ""}`}
-        onClick={() => onSelect(laid.key)}
+        onClick={() => onSelect(row.key, null)}
       >
-        <span className={styles.box_head}>
-          {node.orphanedParent ? (
-            <TriangleAlert size={11} strokeWidth={2} className={styles.orphan} />
-          ) : (
-            node.kind === "explore" && <i className={styles.kind_dot} />
-          )}
-          <span className={styles.box_title}>{node.title || node.id}</span>
-          {node.chains.length > 0 && (
-            <span className={styles.chain_count}>
-              <Link2 size={10} strokeWidth={2} />
-              {node.chains.length}
-            </span>
-          )}
-          <span className={pending > 0 ? styles.progress_live : styles.progress}>
-            {node.done}/{node.total}
+        {row.hasChildren ? (
+          <span
+            className={styles.caret_hit}
+            role="button"
+            tabIndex={-1}
+            title={
+              row.collapsed
+                ? t("plans.expand_subtree", {
+                    count: row.hiddenDescendants,
+                    defaultValue: "展开 {{count}} 个子计划",
+                  })
+                : t("plans.collapse_subtree", "折叠子树")
+            }
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSubtree(row.key, row.collapsed);
+            }}
+          >
+            <ChevronRight
+              size={12}
+              strokeWidth={2}
+              className={row.collapsed ? styles.caret : styles.caret_open}
+            />
           </span>
-        </span>
-        <span className={styles.bar} aria-hidden>
-          <i style={{ width: `${pct}%` }} />
+        ) : (
+          <span className={styles.caret_hit} aria-hidden />
+        )}
+        {node.orphanedParent ? (
+          <TriangleAlert size={11} strokeWidth={2} className={styles.orphan} />
+        ) : (
+          node.kind === "explore" && <i className={styles.kind_dot} />
+        )}
+        <span className={pending === 0 ? styles.title_done : styles.title}>
+          {node.title || node.id}
         </span>
       </button>
 
-      {laid.hasChildren && (
-        <button
-          className={styles.knob}
-          title={
-            laid.collapsed
-              ? t("plans.expand_subtree", { count: laid.hiddenDescendants, defaultValue: "展开 {{count}} 个子计划" })
-              : t("plans.collapse_subtree", "折叠子树")
-          }
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleSubtree(laid.key, laid.collapsed);
-          }}
-        >
-          {laid.collapsed ? laid.hiddenDescendants : "−"}
-        </button>
-      )}
+      <span className={styles.chain_slot}>
+        {node.chains.length > 0 && (
+          <span className={styles.chain_count}>
+            <Link2 size={10} strokeWidth={2} />
+            {node.chains.length}
+          </span>
+        )}
+      </span>
+      <span className={pending > 0 ? styles.count_live : styles.count}>
+        {node.done}/{node.total}
+      </span>
+
+      <span className={styles.cells}>
+        {cells.map((state, i) => (
+          <button
+            key={i}
+            className={`${styles.cell} ${styles[`cell_${state}`]}`}
+            title={node.items[i] ? cellTip(node.items[i].text) : `P${i + 1}`}
+            onClick={() => onSelect(row.key, i)}
+          />
+        ))}
+      </span>
     </div>
   );
 }
@@ -454,6 +444,8 @@ function PlanNodeBox({ laid, selected, onSelect, onToggleSubtree }: NodeBoxProps
 
 interface DrawerProps {
   node: PlanNode;
+  /** Item index to open on arrival — set when a cell, not the row, was clicked. */
+  focusItem: number | null;
   doneShown: boolean;
   onToggleDone: () => void;
   onOpenChain: (chain: HandoffChain) => void;
@@ -461,13 +453,22 @@ interface DrawerProps {
 }
 
 /** The only place P-task prose is rendered: one plan, on demand. */
-function PlanDrawer({ node, doneShown, onToggleDone, onOpenChain, onClose }: DrawerProps) {
+function PlanDrawer({
+  node,
+  focusItem,
+  doneShown,
+  onToggleDone,
+  onOpenChain,
+  onClose,
+}: DrawerProps) {
   const { t } = useTranslation();
-  const pendingItems = node.items.filter((i) => !i.done);
-  const doneItems = node.items.filter((i) => i.done);
   // Plan titles are supposed to be one line, but plenty in the wild are a whole
   // paragraph — clamp like the items do rather than let one push the tasks off.
   const [titleOpen, setTitleOpen] = useState(false);
+  const indexed = node.items.map((item, i) => ({ item, i }));
+  const pendingItems = indexed.filter((x) => !x.item.done);
+  const doneItems = indexed.filter((x) => x.item.done);
+  const focusIsDone = focusItem != null && node.items[focusItem]?.done === true;
 
   return (
     <aside className={styles.drawer}>
@@ -486,7 +487,7 @@ function PlanDrawer({ node, doneShown, onToggleDone, onOpenChain, onClose }: Dra
       <div className={styles.drawer_meta}>
         <span className={styles.id}>{node.id}</span>
         {node.kind === "explore" && <span className={styles.kind}>explore</span>}
-        <span className={pendingOf(node) > 0 ? styles.progress_live : styles.progress}>
+        <span className={pendingOf(node) > 0 ? styles.count_live : styles.count}>
           {node.done}/{node.total}
         </span>
       </div>
@@ -502,8 +503,8 @@ function PlanDrawer({ node, doneShown, onToggleDone, onOpenChain, onClose }: Dra
       )}
 
       <div className={styles.drawer_body}>
-        {pendingItems.map((item, i) => (
-          <TaskLine key={`p${i}`} text={item.text} />
+        {pendingItems.map(({ item, i }) => (
+          <TaskLine key={`p${i}`} text={item.text} startOpen={i === focusItem} />
         ))}
         {doneItems.length > 0 && (
           <button className={styles.done_fold} onClick={onToggleDone}>
@@ -515,7 +516,14 @@ function PlanDrawer({ node, doneShown, onToggleDone, onOpenChain, onClose }: Dra
             {t("plans.done_items", { count: doneItems.length, defaultValue: "已完成 {{count}} 条" })}
           </button>
         )}
-        {doneShown && doneItems.map((item, i) => <TaskLine key={`d${i}`} text={item.text} done />)}
+        {/* Clicking a finished cell has to reveal it even while the fold is shut,
+            otherwise the click looks broken. */}
+        {(doneShown || focusIsDone) &&
+          doneItems
+            .filter(({ i }) => doneShown || i === focusItem)
+            .map(({ item, i }) => (
+              <TaskLine key={`d${i}`} text={item.text} done startOpen={i === focusItem} />
+            ))}
         {node.chains.map((c) => (
           <ChainChip key={c.chainId} chain={c} onOpen={onOpenChain} />
         ))}
@@ -527,9 +535,9 @@ function PlanDrawer({ node, doneShown, onToggleDone, onOpenChain, onClose }: Dra
 /** One P-task line: `P3` as a badge, then its prose — clamped to a single line
  *  until clicked. Items here run to several paragraphs of implementation notes;
  *  showing them all in full is the thing this redesign exists to stop. */
-function TaskLine({ text, done }: { text: string; done?: boolean }) {
+function TaskLine({ text, done, startOpen }: { text: string; done?: boolean; startOpen?: boolean }) {
   const { marker, rest } = splitMarker(text);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!startOpen);
   return (
     <button
       className={`${styles.item} ${done ? styles.item_done : ""}`}
