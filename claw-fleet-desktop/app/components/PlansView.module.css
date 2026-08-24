@@ -1,11 +1,11 @@
-/* 计划树 — the workspace's plan forest as a left-to-right node graph, with a
-   detail drawer for the one plan you clicked. Geometry (box size, column pitch)
-   lives in planLayout.ts; this file only paints.
+/* 计划树 — the workspace's plans as a progress matrix (one row per plan, one
+   cell per P-task) plus a detail drawer for the one plan you clicked. Row
+   ordering and cell states live in planMatrix.ts; this file only paints.
    Every colour comes from an App.css token (check-css-tokens gates this). */
 
 /* Sits inside PageShell's own `.main` (a flex column, overflow hidden), so the
    height comes from `flex: 1` — `height: 100%` against an indefinite parent
-   would collapse the canvas. */
+   would collapse the board. */
 .main {
   display: flex;
   align-items: stretch;
@@ -90,14 +90,14 @@
   font-weight: 600;
 }
 
-/* ── Toolbar above the canvas ───────────────────────────────────────────── */
+/* ── Toolbar ────────────────────────────────────────────────────────────── */
 
 .toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
-  padding: 0 16px 8px;
+  padding: 0 16px 10px;
 }
 .stat {
   display: inline-flex;
@@ -110,6 +110,10 @@
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--color-accent);
+}
+.stat_dim {
+  font-size: 11.5px;
+  color: var(--color-text-muted);
 }
 .chip {
   padding: 3px 9px;
@@ -140,93 +144,97 @@
   color: var(--color-text-muted);
 }
 .legend i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
 }
 .legend i:not(:first-child) {
   margin-left: 8px;
 }
-.dot_live {
-  background: var(--color-accent);
-}
 .dot_done {
   background: var(--color-success);
-  opacity: 0.55;
+  opacity: 0.65;
+}
+.dot_next {
+  background: var(--color-accent);
+}
+.dot_todo {
+  background: var(--color-border-strong);
 }
 
-/* ── Canvas ─────────────────────────────────────────────────────────────── */
+/* ── Matrix ─────────────────────────────────────────────────────────────── */
 
-.canvas {
+.matrix {
   flex: 1;
   min-height: 0;
   overflow: auto;
-}
-.stage {
-  position: relative;
-  margin: 6px 24px 28px 16px;
-}
-.edges {
-  position: absolute;
-  inset: 0;
-  overflow: visible;
-  pointer-events: none;
-}
-.edges path {
-  fill: none;
-  stroke: var(--color-border-strong);
-  stroke-width: 1.5;
+  padding: 0 16px 20px;
 }
 
-/* ── One plan box ───────────────────────────────────────────────────────── */
-
-.box_wrap {
-  position: absolute;
-}
-.box {
+.row {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 4px;
-  width: 100%;
-  height: 100%;
-  padding: 5px 8px 4px;
-  border: 1px solid var(--color-border);
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
   border-radius: var(--radius-sm);
-  background: var(--color-bg-card);
-  color: var(--color-text);
-  text-align: left;
-  cursor: pointer;
 }
-.box:hover {
-  background: var(--color-bg-card-hover);
+.row:hover {
+  background: var(--color-bg-hover);
 }
-.box_live {
-  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
-}
-.box_done {
-  color: var(--color-text-dim);
-  background: transparent;
-}
-.box_selected {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-soft);
+.row_selected {
+  background: var(--color-bg-card-selected);
 }
 
-.box_head {
+/* Fixed-width head + count keep every row's cell strip on the same x, which is
+   the whole point of the matrix — you read progress down a column. */
+.row_head {
   display: flex;
   align-items: center;
   gap: 5px;
-  min-width: 0;
-}
-.box_title {
-  flex: 1;
-  min-width: 0;
+  flex-shrink: 0;
+  width: 420px;
+  padding: 3px 4px 3px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
   font-size: 12px;
-  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.caret_hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.caret_hit:hover {
+  background: var(--color-bg-card-hover);
+}
+.caret {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform 0.12s ease;
+}
+.caret_open {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transform: rotate(90deg);
+  transition: transform 0.12s ease;
+}
+.title,
+.title_done {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.title_done {
+  color: var(--color-text-dim);
 }
 .kind_dot {
   flex-shrink: 0;
@@ -239,72 +247,58 @@
   flex-shrink: 0;
   color: var(--color-warning);
 }
+
+.chain_slot {
+  flex-shrink: 0;
+  width: 26px;
+}
 .chain_count {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  flex-shrink: 0;
   font-size: 10.5px;
   color: var(--color-accent);
 }
-.progress {
+.count,
+.count_live {
   flex-shrink: 0;
+  width: 44px;
   font-family: var(--font-mono);
   font-size: 10.5px;
+  text-align: right;
   color: var(--color-text-muted);
 }
-.progress_live {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+.count_live {
   font-weight: 600;
   color: var(--color-accent);
 }
 
-.bar {
-  display: block;
-  width: 100%;
-  height: 3px;
+.cells {
+  display: flex;
+  gap: 3px;
+  margin-left: 10px;
+}
+.cell {
+  width: 11px;
+  height: 12px;
+  padding: 0;
+  border: none;
   border-radius: 2px;
-  background: var(--color-bg-sunken);
-  overflow: hidden;
-}
-.bar i {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--color-accent);
-}
-.box_done .bar i {
-  background: var(--color-success);
-  opacity: 0.55;
-}
-
-/* Subtree fold handle, straddling the box's right edge where the connector
-   leaves it — collapsed it shows how many plans are hidden. */
-.knob {
-  position: absolute;
-  top: 50%;
-  right: -9px;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-field);
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1;
   cursor: pointer;
 }
-.knob:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+.cell:hover {
+  outline: 1px solid var(--color-text-dim);
+  outline-offset: 1px;
+}
+.cell_done {
+  background: var(--color-success);
+  opacity: 0.65;
+}
+.cell_next {
+  background: var(--color-accent);
+}
+.cell_todo {
+  background: var(--color-border-strong);
 }
 
 /* ── Detail drawer ──────────────────────────────────────────────────────── */
@@ -363,6 +357,11 @@
   align-items: center;
   gap: 8px;
   margin-top: 5px;
+}
+.drawer_meta .count,
+.drawer_meta .count_live {
+  width: auto;
+  text-align: left;
 }
 .id {
   font-family: var(--font-mono);
@@ -449,18 +448,6 @@
   min-width: 0;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.caret {
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-  transition: transform 0.12s ease;
-}
-.caret_open {
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-  transform: rotate(90deg);
-  transition: transform 0.12s ease;
 }
 
 .done_fold {
