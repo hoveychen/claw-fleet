@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { isWebBuild } from "../hostEnv";
+import { wikiFileUrl } from "../wikiAssets";
 import { downloadWikiExport } from "../mock/liveProxy";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
@@ -81,21 +82,6 @@ const KIND_CONFIG: Record<WikiDoc["kind"], { short: string; cssClass: string; Ic
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * URL of one wiki file through the fleet-wiki custom protocol. Built by hand:
- * convertFileSrc() percent-encodes the whole path (`/` → `%2F`), which
- * collapses the URL to a single segment and breaks relative-asset resolution
- * inside HTML docs.
- */
-function wikiFileUrl(slug: string, version: string, relpath: string): string {
-  const path = [slug, version, ...relpath.split("/")]
-    .map(encodeURIComponent)
-    .join("/");
-  return navigator.userAgent.includes("Windows")
-    ? `http://fleet-wiki.localhost/${path}`
-    : `fleet-wiki://localhost/${path}`;
-}
 
 function relativeTime(ms: number): string {
   if (!ms) return "";

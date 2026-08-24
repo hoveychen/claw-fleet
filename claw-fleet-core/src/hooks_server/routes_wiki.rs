@@ -74,6 +74,46 @@ pub(crate) fn route_wiki_file(
                 }
             }
 
+/// `/wiki_asset/<slug>/<version>/<relpath…>` — the same bytes
+/// [`route_wiki_file`] answers, addressed as a path so relative refs inside a
+/// published `index.html` resolve. The browser build's `<iframe src>` points
+/// here because `fleet-wiki://` only exists on the Tauri webview.
+///
+/// The split mirrors the desktop protocol handler (`gui/mod.rs`) exactly:
+/// `splitn(3, '/')` over the tail, decoding each part. Three parts, not more —
+/// `rel` keeps its own slashes, which is the whole point, and the slug's `/`
+/// arrives percent-encoded so it stays inside the first part.
+///
+/// No path-traversal check of its own: `wiki::get_file` already rejects `..`
+/// and absolute paths before touching the fs, then canonicalizes and requires
+/// the result to sit under the version dir. Re-normalizing the tail here would
+/// only add a second, divergent opinion about what is safe.
+pub(crate) fn route_wiki_asset_prefix(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let dec = |s: &str| percent_decode_str(s).decode_utf8_lossy().to_string();
+    let tail = &path[crate::routes::WIKI_ASSET_PREFIX.len()..];
+    let mut segs = tail.splitn(3, '/');
+    let slug = dec(segs.next().unwrap_or(""));
+    let version = dec(segs.next().unwrap_or(""));
+    let rel = dec(segs.next().unwrap_or(""));
+    match crate::wiki::get_file(&slug, &version, &rel) {
+        Ok(f) => {
+            let mime_header: tiny_http::Header =
+                format!("Content-Type: {}", f.mime).parse().unwrap();
+            let _ = request
+                .respond(tiny_http::Response::from_data(f.bytes).with_header(mime_header));
+        }
+        Err(_) => {
+            let _ = request.respond(tiny_http::Response::empty(404));
+        }
+    }
+}
+
 pub(crate) fn route_wiki_search(
     ctx: &ServeCtx,
     request: tiny_http::Request,
