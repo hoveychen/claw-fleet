@@ -727,6 +727,7 @@ pub fn fire_once(id: &str, generation: u64) -> Result<ScheduleRecord, ClaimError
                     permission_mode: perm.map(str::to_string),
                     session_id: None,
                     entrypoint: ep.to_string(),
+                images: Vec::new(),
                 },
             )
         },
@@ -788,6 +789,7 @@ pub fn run_now(id: &str) -> Result<Option<String>, String> {
                     permission_mode: perm.map(str::to_string),
                     session_id: None,
                     entrypoint: ep.to_string(),
+                images: Vec::new(),
                 },
             )
         },

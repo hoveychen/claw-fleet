@@ -69,6 +69,7 @@ impl FleetCore for RealFleetCore {
                 permission_mode: task.permission_policy.clone(),
                 session_id: (task.tool == "claude").then(|| task.attempt_id.to_string()),
                 entrypoint: CLOUD_TASK_ENTRYPOINT.into(),
+                images: Vec::new(),
             },
         )?;
         Ok(LaunchResult {
