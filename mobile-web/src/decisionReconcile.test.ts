@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   reconcileDecisions,
+  agentKeyOf,
   ANSWER_GRACE_MS,
   EMPTY_SNAPSHOT_COOLDOWN_MS,
 } from "./decisionReconcile";
@@ -133,6 +134,41 @@ describe("reconcileDecisions —— 陌生 agent 的空快照不得抹掉本地�
     });
     expect(r.decisions).toEqual([]);
     expect(r.ignored).toBeUndefined();
+  });
+
+  // 2026-08-24 实测：桌面 App 本地构建后重启（12:54，pid 43541 → 96862），手机
+  // 的「更多」页把活着的桌面端列成了「另有 1 个 agent」，而 trusted 钉在已死的
+  // 旧 pid 上 —— 因为身份键里带了 pid。lsof 证实同期本机只有一条 relay 连接，
+  // 所以这不是李鬼，是同一个桌面端的前世今生。守的应该是「读不到本机 ~/.fleet」
+  // 的进程，判据是 home，不是 pid。
+  it("桌面端重启（同 host/home/ver，只有 pid 变）：空快照照旧采信，不判成陌生 agent", () => {
+    const before = { host: "mbp", pid: 43541, home: "/Users/hoveychen", ver: "0.0.0" };
+    const after = { host: "mbp", pid: 96862, home: "/Users/hoveychen", ver: "0.0.0" };
+    const r = reconcileDecisions({
+      prev: [card("a", 49_000)],
+      fresh: [],
+      answeredAt: new Map(),
+      now: 50_000,
+      agentKey: agentKeyOf(after),
+      trustedAgentKey: agentKeyOf(before),
+    });
+    expect(r.ignored).toBeUndefined();
+    expect(r.decisions).toEqual([]);
+  });
+
+  it("换了 home（幽灵跑在被重定向的 FLEET_HOME 下）：仍然判成陌生 agent", () => {
+    const desk = { host: "mbp", pid: 43541, home: "/Users/hoveychen", ver: "0.0.0" };
+    const ghost = { host: "mbp", pid: 96862, home: "/tmp/fleet-home-xyz", ver: "0.0.0" };
+    const r = reconcileDecisions({
+      prev: [card("a", 49_000)],
+      fresh: [],
+      answeredAt: new Map(),
+      now: 900_000,
+      agentKey: agentKeyOf(ghost),
+      trustedAgentKey: agentKeyOf(desk),
+    });
+    expect(r.ignored?.reason).toBe("foreign-empty-snapshot");
+    expect(r.decisions.map((d) => d.id)).toEqual(["a"]);
   });
 
   it("非空快照：采信内容，并把来源记为主 agent", () => {

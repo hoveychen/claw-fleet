@@ -11,10 +11,16 @@ import type { AgentFingerprint } from "./types";
 /** 台账最多留几条来源。正常只有 1 条（桌面端），多出来的就是要查的。 */
 export const MAX_SNAPSHOT_SOURCES = 8;
 
+/** 一条来源最多记几个 pid。够看出「重启过」就行，不必留全部历史。 */
+export const MAX_SOURCE_PIDS = 8;
+
 export interface SnapshotSource {
   /** agentKeyOf() 的结果；`undefined` 表示对方没带指纹（老桌面端）。 */
   key?: string;
+  /** 最近一次回快照的那个进程的指纹（pid 跟到最新）。 */
   agent?: AgentFingerprint;
+  /** 这个来源用过的 pid，按首次出现排序。长度 > 1 就是它重启过。 */
+  pids: number[];
   firstAt: number;
   lastAt: number;
   /** 这个来源一共回了多少份快照。 */
@@ -33,6 +39,13 @@ export interface SnapshotSourceEvent {
   ignored: boolean;
 }
 
+/** 追加一个没见过的 pid，保持首次出现的顺序；满了就丢最早的那个。 */
+function withPid(pids: number[], pid: number | undefined): number[] {
+  if (pid === undefined || pids.includes(pid)) return pids;
+  const next = [...pids, pid];
+  return next.length > MAX_SOURCE_PIDS ? next.slice(next.length - MAX_SOURCE_PIDS) : next;
+}
+
 /** 纯函数：把一次快照到达并入台账，返回新数组（不改入参）。 */
 export function recordSnapshotSource(
   sources: SnapshotSource[],
@@ -43,6 +56,7 @@ export function recordSnapshotSource(
       ? {
           ...s,
           agent: ev.agent ?? s.agent,
+          pids: withPid(s.pids, ev.agent?.pid),
           lastAt: ev.at,
           snapshots: s.snapshots + 1,
           ignored: s.ignored + (ev.ignored ? 1 : 0),
@@ -54,6 +68,7 @@ export function recordSnapshotSource(
     next.push({
       key: ev.key,
       agent: ev.agent,
+      pids: withPid([], ev.agent?.pid),
       firstAt: ev.at,
       lastAt: ev.at,
       snapshots: 1,

@@ -74,8 +74,13 @@ export function MoreView({
   const trustedSource = snapshotSources.find((s) => s.trusted);
   const foreignSources = snapshotSources.filter((s) => s !== trustedSource);
   const ignoredTotal = snapshotSources.reduce((n, s) => n + s.ignored, 0);
-  const agentLabel = (s: SnapshotSource) =>
-    s.agent ? `${s.agent.host ?? "?"} · pid ${s.agent.pid ?? "?"}` : t("未署名");
+  // 同一个桌面端重启只是换了 pid（身份键不含 pid），台账把它并成一条 —— 这里把
+  // 换过几个进程原样说出来，免得「pid 和我 ps 到的不一样」再被当成李鬼。
+  const agentLabel = (s: SnapshotSource) => {
+    if (!s.agent) return t("未署名");
+    const base = `${s.agent.host ?? "?"} · pid ${s.agent.pid ?? "?"}`;
+    return s.pids.length > 1 ? `${base} · ${t("重启过")} ${s.pids.length - 1} ${t("次")}` : base;
+  };
   const hhmm = (ts: number) =>
     new Date(ts).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
