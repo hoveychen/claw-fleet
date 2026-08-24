@@ -57,6 +57,7 @@ import { onDecisionDeepLink } from "./decisionDeepLink";
 import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
+import { PlansView } from "./views/PlansView";
 import { RepoView } from "./views/RepoView";
 import { RepoDetailView } from "./views/RepoDetailView";
 import { SessionDetailView } from "./views/SessionDetailView";
@@ -212,6 +213,7 @@ export function App() {
   const [showRepo, setShowRepo] = useState(false);
   const [repoDetail, setRepoDetail] = useState<RepoSummary | null>(null);
   const [showUsage, setShowUsage] = useState(false);
+  const [showPlans, setShowPlans] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
   // Files handed over by another app's share, pending upload once the
   // new-session sheet mounts (that's where the attachment state lives).
@@ -627,6 +629,7 @@ export function App() {
     showRepo ||
     repoDetail !== null ||
     showUsage ||
+    showPlans ||
     showNewSession;
   // Float the decision drawer over whatever the boss is looking at — EXCEPT the
   // plain 决策 tab, which already renders the cards inline (no overlay covering
@@ -778,6 +781,7 @@ export function App() {
             onEnablePush={handleEnablePush}
             onDisablePush={handleDisablePush}
             onOpenRepo={() => setShowRepo(true)}
+            onOpenPlans={() => setShowPlans(true)}
             onOpenUsage={() => setShowUsage(true)}
           />
         )}
@@ -833,6 +837,17 @@ export function App() {
             repo={repoDetail}
             client={clientRef.current}
             onBack={() => setRepoDetail(null)}
+          />
+        </>
+      )}
+
+      {showPlans && (
+        <>
+          <HistoryLayer onBack={() => setShowPlans(false)} />
+          <PlansView
+            sessions={mergedSessions}
+            client={clientRef.current}
+            onBack={() => setShowPlans(false)}
           />
         </>
       )}
