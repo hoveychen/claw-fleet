@@ -89,6 +89,24 @@ pub struct InputPart {
     pub kind: String,
     #[serde(default)]
     pub text: Option<String>,
+    /// `input_image` / `input_file` referencing an upload from `POST /v1/files`.
+    #[serde(default)]
+    pub file_id: Option<String>,
+    /// Inline image data (`data:` URL or http URL). Captured only so the
+    /// request can be **rejected**: the agent reads attachments from disk, so
+    /// bytes have to be uploaded first. Silently dropping them — which is what
+    /// this surface did before — makes a caller think the image arrived.
+    #[serde(default)]
+    pub image_url: Option<serde_json::Value>,
+    /// Inline file data, rejected for the same reason as `image_url`.
+    #[serde(default)]
+    pub file_data: Option<serde_json::Value>,
+}
+
+/// What went wrong with an attachment part, as an HTTP-shaped error.
+#[derive(Debug)]
+pub struct AttachmentError {
+    pub message: String,
 }
 
 impl CreateResponseRequest {
@@ -117,6 +135,54 @@ impl CreateResponseRequest {
                 out.join("\n")
             }
         }
+    }
+
+    /// Every part of the input, flattened. Helper for the attachment passes.
+    fn parts(&self) -> Vec<&InputPart> {
+        let mut out = Vec::new();
+        if let ResponseInput::Items(items) = &self.input {
+            for it in items {
+                if let InputItem::Message { content: InputContent::Parts(parts), .. } = it {
+                    out.extend(parts.iter());
+                }
+            }
+        }
+        out
+    }
+
+    /// Attachment `file_id`s in request order, after rejecting the shapes this
+    /// surface cannot deliver.
+    ///
+    /// Inline bytes (`image_url`, `file_data`) are an explicit error rather than
+    /// a silent drop: the agent reads attachments as files, so there is nothing
+    /// to hand it, and a caller who gets a 200 back reasonably assumes the image
+    /// was seen. An attachment part with no `file_id` at all is the same class
+    /// of mistake and gets the same answer.
+    pub fn attachment_file_ids(&self) -> Result<Vec<String>, AttachmentError> {
+        let mut ids = Vec::new();
+        for p in self.parts() {
+            let is_attachment = p.kind == "input_image" || p.kind == "input_file";
+            if p.image_url.is_some() || p.file_data.is_some() {
+                return Err(AttachmentError {
+                    message: format!(
+                        "inline attachment data is not supported on {} — upload the bytes with POST /v1/files and reference the returned file_id",
+                        p.kind
+                    ),
+                });
+            }
+            if !is_attachment {
+                continue;
+            }
+            match p.file_id.as_deref().filter(|s| !s.is_empty()) {
+                Some(id) => ids.push(id.to_string()),
+                None => {
+                    return Err(AttachmentError {
+                        message: format!("{} part has no file_id", p.kind),
+                    })
+                }
+            }
+        }
+        Ok(ids)
     }
 
     /// `(call_id, output)` pairs the caller submitted as decision answers.
@@ -1508,6 +1574,21 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
         return respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header);
     }
 
+    // Attachments: resolve every referenced upload to a path inside the
+    // workspace and append them to the prompt, so the agent reads the bytes off
+    // disk. Resolved BEFORE launching — a bad file_id must be a 400, not a run
+    // that starts and then can't find its input.
+    let prompt = match req.attachment_file_ids() {
+        Err(e) => return respond_error(request, 400, "invalid_request", e.message, json_header),
+        Ok(ids) => match resolve_attachment_paths(&ids) {
+            Err((status, msg)) => {
+                let code = if status == 403 { "forbidden" } else { "invalid_request" };
+                return respond_error(request, status, code, msg, json_header);
+            }
+            Ok(paths) => prompt_with_attachments(&req.prompt_text(), &paths),
+        },
+    };
+
     // Launch: resume when previous_response_id is set, else spawn a new run.
     // Both yield the internal session id + wire resp_id + initial status.
     let launched: Result<(String, String, ResponseStatus), (u16, &'static str, String)> =
@@ -1521,7 +1602,7 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
                     let spec = crate::agent_source::ResumeSpec {
                         session_id: sid.clone(),
                         workspace_path: public_workspace(),
-                        prompt: req.prompt_text(),
+                        prompt: prompt.clone(),
                         model: model.clone(),
                         ..Default::default()
                     };
@@ -1538,7 +1619,7 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
             let (resp_id, uuid) = new_resp_id();
             let spec = crate::agent_source::SpawnSpec {
                 workspace_path: public_workspace(),
-                prompt: req.prompt_text(),
+                prompt: prompt.clone(),
                 model: model.clone(),
                 effort: None,
                 permission_mode: None,
@@ -1730,6 +1811,40 @@ fn upload_file(mut request: tiny_http::Request, json_header: tiny_http::Header) 
     respond_value(request, 200, &serde_json::to_value(&obj).unwrap_or_default(), json_header);
 }
 
+/// Resolve attachment file ids to absolute paths, applying the same confinement
+/// as every other file route. A missing id is a 404 and an out-of-bounds one a
+/// 403 — the caller's mistake either way, so it must not reach a spawn.
+fn resolve_attachment_paths(ids: &[String]) -> Result<Vec<std::path::PathBuf>, (u16, String)> {
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        let (_, path, _) = stat_workspace_file(id)
+            .map_err(|(status, msg)| (status, format!("attachment {id}: {msg}")))?;
+        out.push(path);
+    }
+    Ok(out)
+}
+
+/// Append an attachment manifest to the prompt.
+///
+/// Paths, not bytes: `claude` reads an image or a document off disk with its own
+/// file tools, so the delivery mechanism is telling it where to look. The
+/// instruction is explicit ("read each") because a bare path in a prompt is
+/// easy for a model to acknowledge without opening. Pure; unit-tested.
+fn prompt_with_attachments(prompt: &str, paths: &[std::path::PathBuf]) -> String {
+    if paths.is_empty() {
+        return prompt.to_string();
+    }
+    let mut out = prompt.trim_end().to_string();
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str("Attached files (read each one from disk before answering):\n");
+    for p in paths {
+        out.push_str(&format!("- {}\n", p.display()));
+    }
+    out
+}
+
 /// Seconds since the epoch, or 0 if the clock is before it.
 fn now_unix() -> i64 {
     std::time::SystemTime::now()
@@ -1904,6 +2019,134 @@ mod tests {
             Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
             None => std::env::remove_var("FLEET_PUBLIC_WORKSPACE"),
         }
+    }
+
+    /// A file id is `base64url(relative path)` and therefore forgeable, so the
+    /// read path — not the listing — is where escape attempts must die. Both
+    /// shapes an attacker actually has: a `../` id, and a symlink planted inside
+    /// the workspace that points out of it.
+    #[test]
+    fn crafted_ids_and_symlinks_cannot_escape_the_workspace() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("FLEET_PUBLIC_WORKSPACE").ok();
+        let base = std::env::temp_dir().join(format!("fleet-esc-{}", std::process::id()));
+        let root = base.join("ws");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(base.join("outside.txt"), b"not yours").unwrap();
+        std::fs::write(root.join("inside.txt"), b"fine").unwrap();
+        std::env::set_var("FLEET_PUBLIC_WORKSPACE", root.to_string_lossy().to_string());
+
+        // Sanity: an honest id still reads.
+        assert!(read_workspace_file(&encode_file_id("inside.txt")).is_ok());
+
+        // Traversal by crafted id.
+        assert!(read_workspace_file(&encode_file_id("../outside.txt")).is_err());
+        assert!(read_workspace_file(&encode_file_id("/etc/hosts")).is_err());
+        assert!(read_workspace_file("file_not-base64!!").is_err());
+
+        // Symlink planted inside the workspace, pointing out of it.
+        #[cfg(unix)]
+        {
+            let link = root.join("escape.txt");
+            std::os::unix::fs::symlink(base.join("outside.txt"), &link).unwrap();
+            let err = read_workspace_file(&encode_file_id("escape.txt"))
+                .err()
+                .expect("symlink out of the workspace must be refused");
+            assert_eq!(err.0, 403, "expected a confinement error, got {err:?}");
+            // …and it must not show up in the listing either.
+            let listed: Vec<String> =
+                list_workspace_files().into_iter().map(|f| f.filename).collect();
+            assert!(!listed.iter().any(|f| f == "escape.txt"), "got {listed:?}");
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+        match prev {
+            Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
+            None => std::env::remove_var("FLEET_PUBLIC_WORKSPACE"),
+        }
+    }
+
+    #[test]
+    fn attachment_file_ids_collected_in_order() {
+        let r: CreateResponseRequest = serde_json::from_str(
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_text","text":"what is in these?"},
+                {"type":"input_image","file_id":"file_AAA"},
+                {"type":"input_file","file_id":"file_BBB"}
+            ]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.prompt_text(), "what is in these?");
+        assert_eq!(r.attachment_file_ids().unwrap(), vec!["file_AAA", "file_BBB"]);
+    }
+
+    /// The regression this whole surface exists for: an inline image used to
+    /// deserialize fine, contribute nothing, and return 200 — so a caller
+    /// believed the agent had seen it. Now it is a stated error.
+    #[test]
+    fn inline_attachment_data_is_rejected_not_dropped() {
+        for body in [
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_text","text":"hi"},
+                {"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}
+            ]}]}"#,
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_file","filename":"a.pdf","file_data":"data:application/pdf;base64,JVBER"}
+            ]}]}"#,
+            // Chat-Completions object form of image_url.
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_image","image_url":{"url":"https://example.com/a.png"}}
+            ]}]}"#,
+        ] {
+            let r: CreateResponseRequest = serde_json::from_str(body).unwrap();
+            let err = r.attachment_file_ids().err().expect("must be rejected");
+            assert!(
+                err.message.contains("POST /v1/files"),
+                "the error should point at the upload route, got {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn attachment_part_without_file_id_is_rejected() {
+        let r: CreateResponseRequest = serde_json::from_str(
+            r#"{"input":[{"type":"message","role":"user","content":[{"type":"input_image"}]}]}"#,
+        )
+        .unwrap();
+        assert!(r.attachment_file_ids().is_err());
+    }
+
+    #[test]
+    fn unknown_non_attachment_parts_stay_tolerated() {
+        // Forward-compat: an OpenAI client may send part types we don't model.
+        // Those still must not fail the request — only attachments we cannot
+        // deliver do.
+        let r: CreateResponseRequest = serde_json::from_str(
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_text","text":"go"},
+                {"type":"refusal","refusal":"nope"}
+            ]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.attachment_file_ids().unwrap(), Vec::<String>::new());
+        assert_eq!(r.prompt_text(), "go");
+    }
+
+    #[test]
+    fn prompt_gains_an_attachment_manifest() {
+        let paths = vec![
+            std::path::PathBuf::from("/workspace/repo/.fleet-uploads/a/photo.png"),
+            std::path::PathBuf::from("/workspace/repo/.fleet-uploads/b/spec.pdf"),
+        ];
+        let out = prompt_with_attachments("describe it", &paths);
+        assert!(out.starts_with("describe it\n\n"));
+        assert!(out.contains("read each one from disk"));
+        assert!(out.contains("- /workspace/repo/.fleet-uploads/a/photo.png\n"));
+        assert!(out.contains("- /workspace/repo/.fleet-uploads/b/spec.pdf\n"));
+        // No attachments → the prompt is untouched, byte for byte.
+        assert_eq!(prompt_with_attachments("plain", &[]), "plain");
     }
 
     #[test]
