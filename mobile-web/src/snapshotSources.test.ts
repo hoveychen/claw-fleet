@@ -51,6 +51,49 @@ describe("recordSnapshotSource", () => {
     expect(log.find((s) => s.agent?.pid === 18953)!.trusted).toBe(true);
   });
 
+  // 桌面 App 重启只是换了个 pid，还是同一个桌面端。台账要把它并成一条，
+  // 否则「更多」页会把活着的桌面端报成「另有 1 个 agent」（2026-08-24 实测）。
+  it("桌面端重启（只有 pid 变）：并进同一条，记下换过几个进程并显示最新 pid", () => {
+    const restarted = { ...desk, pid: 96862 };
+    let log = recordSnapshotSource([], {
+      key: agentKeyOf(desk),
+      agent: desk,
+      at: 1_000,
+      trusted: true,
+      ignored: false,
+    });
+    log = recordSnapshotSource(log, {
+      key: agentKeyOf(restarted),
+      agent: restarted,
+      at: 5_000,
+      trusted: true,
+      ignored: false,
+    });
+    expect(log).toHaveLength(1);
+    expect(log[0].snapshots).toBe(2);
+    expect(log[0].pids).toEqual([18953, 96862]);
+    // 展示用的指纹跟到最新那个进程上。
+    expect(log[0].agent?.pid).toBe(96862);
+  });
+
+  it("同一个进程反复回快照：pid 台账不重复累加", () => {
+    let log = recordSnapshotSource([], {
+      key: agentKeyOf(desk),
+      agent: desk,
+      at: 1_000,
+      trusted: true,
+      ignored: false,
+    });
+    log = recordSnapshotSource(log, {
+      key: agentKeyOf(desk),
+      agent: desk,
+      at: 2_000,
+      trusted: true,
+      ignored: false,
+    });
+    expect(log[0].pids).toEqual([18953]);
+  });
+
   it("没有指纹的老桌面端：归到一条匿名来源，不和有指纹的混在一起", () => {
     let log = recordSnapshotSource([], {
       key: undefined,
