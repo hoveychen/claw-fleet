@@ -9,9 +9,14 @@
 #    plan-approval/idle/prd hooks + guidance) — makes this a *controlled* host,
 #    not a bare request/response API. Runs every start because ~/.claude is on
 #    the ephemeral layer; all apply_* steps are idempotent.
-# 3. Start `fleet serve` on the scoped-token API surface. serve() injects the
-#    permissions allowlist + fleet MCP (both default-on) and runs the headless
-#    control-plane ticker (auto-resume / drain / codex-stall).
+# 3. Start the HTTP server. Which one depends on FLEET_WEB_ROOT:
+#      set   → `fleet webui`: the browser UI plus the data routes it needs, no
+#              token. Put your own auth gateway in front of the published port.
+#      unset → `fleet serve`: the token-gated API surface only (scoped /v1/*).
+#    Either way it injects the permissions allowlist + fleet MCP (both
+#    default-on) and runs the headless control-plane ticker (auto-resume /
+#    drain / codex-stall). The image presets FLEET_WEB_ROOT, so the default is
+#    the UI; unset it for an API-only container.
 set -euo pipefail
 
 : "${FLEET_SERVE_HOST:=0.0.0.0}"
@@ -48,12 +53,16 @@ if [[ "$(id -u)" -eq 0 ]]; then
     exec gosu fleet "$0" "$@"
 fi
 
-if [[ -z "${FLEET_ADMIN_TOKEN:-}" ]]; then
-    echo "fleet-entrypoint: FLEET_ADMIN_TOKEN is required" >&2
+# The admin token is what `fleet serve` gates on. `fleet webui` has no token at
+# all, so it is only required in the API-only shape.
+if [[ -z "${FLEET_WEB_ROOT:-}" && -z "${FLEET_ADMIN_TOKEN:-}" ]]; then
+    echo "fleet-entrypoint: FLEET_ADMIN_TOKEN is required (API-only mode)" >&2
     exit 1
 fi
 
-if [[ -z "${FLEET_PUBLIC_TOKEN:-}" ]]; then
+if [[ -n "${FLEET_WEB_ROOT:-}" ]]; then
+    echo "fleet-entrypoint: web UI mode — this port has NO authentication; keep it behind your auth gateway" >&2
+elif [[ -z "${FLEET_PUBLIC_TOKEN:-}" ]]; then
     echo "fleet-entrypoint: FLEET_PUBLIC_TOKEN not set — scoped external access disabled (admin token only)" >&2
 fi
 
@@ -182,4 +191,12 @@ echo "fleet-entrypoint: installing control plane (fleet bootstrap) ..." >&2
 fleet bootstrap --locale "${FLEET_LOCALE:-en}"
 
 export FLEET_SERVE_HOST
+if [[ -n "${FLEET_WEB_ROOT:-}" ]]; then
+    # --host explicitly: `fleet webui` binds loopback by default, which inside a
+    # container means nothing outside it could ever connect.
+    exec fleet webui \
+        --port "${FLEET_SERVE_PORT}" \
+        --host "${FLEET_SERVE_HOST}" \
+        --web-root "${FLEET_WEB_ROOT}"
+fi
 exec fleet serve --port "${FLEET_SERVE_PORT}" --token "${FLEET_ADMIN_TOKEN}"

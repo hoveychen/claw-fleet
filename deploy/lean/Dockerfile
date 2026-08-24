@@ -14,9 +14,9 @@
 # One-customer-per-container: isolation, credential and data boundaries are the
 # container boundary.
 #
-# The UI needs routes outside the `/v1/*` scoped whitelist, so a deployment that
-# exposes it sets FLEET_SERVE_NO_AUTH=1 and puts its own auth gateway in front.
-# Without that env the token tiering is unchanged and the UI's data calls 401.
+# Which one runs is decided by FLEET_WEB_ROOT (preset below): set → `fleet
+# webui` (no authentication — keep it behind your auth gateway), unset →
+# `fleet serve` (token-gated API only).
 
 # ── The cred store's own binary ─────────────────────────────────────────────
 # foxy-switcher ships as a CGO_ENABLED=0 static binary on distroless, so the
@@ -103,13 +103,14 @@ ENV CODEX_HOME=/home/fleet/.codex \
     FLEET_WEB_ROOT=/usr/share/fleet-web \
     FOXY_DATA_DIR=/home/fleet/.foxy-switcher \
     FOXY_AGENT_PORT=8765
-# FLEET_ADMIN_TOKEN  — first-party full-access token (required)
+# FLEET_ADMIN_TOKEN  — first-party full-access token (required in API-only
+#                      mode, i.e. when FLEET_WEB_ROOT is unset)
 # FLEET_PUBLIC_TOKEN — per-customer scoped token for external integrators
-# FLEET_SERVE_NO_AUTH — 1/true: skip the token tiering entirely (the web UI
-#                      needs routes outside /v1/*). ONLY with an auth gateway
-#                      in front — the port can start agent sessions.
-# FLEET_WEB_ROOT     — web UI bundle dir; unset/empty disables the UI and the
-#                      container is API-only again.
+# FLEET_WEB_ROOT     — web UI bundle dir. Set (the image default) → the
+#                      entrypoint runs `fleet webui`, which has NO
+#                      authentication; only publish it behind your own auth
+#                      gateway. Unset it for an API-only container, which then
+#                      requires FLEET_ADMIN_TOKEN.
 # FLEET_STATE_DIR    — persist ~/.fleet by symlink instead of a mount (optional)
 # FOXY_VAULT_URL     — cred-store vault the pairing hint points at (optional)
 # FOXY_DATA_DIR      — foxy's data dir (agent-config.json + the `port` file
