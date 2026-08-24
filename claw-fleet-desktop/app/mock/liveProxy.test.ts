@@ -210,6 +210,34 @@ describe("live proxy route table", () => {
     ).toMatchObject({ sessionId: "s", workspacePath: "/w" });
   });
 
+  /**
+   * Routes that answer a JSON *envelope* while the command returns one field of
+   * it. `RemoteBackend` unwraps these in Rust — e.g. `/chat_workspace` answers
+   * `{"path": …}` and `fn chat_workspace` deserializes into a local `Resp` and
+   * returns `resp.path` — so a mapper without `pick` hands the caller an object
+   * where it declared a string.
+   *
+   * That is not a cosmetic mismatch. `useChatWorkspace` stores the value and
+   * `NewSessionForm` puts it in `setWorkspace`; picking the chat pill then made
+   * the whole page go blank, because something downstream does string work on
+   * an object and React unmounts the tree mid-render.
+   *
+   * To re-derive the list after a `remote.rs` change: find every method in
+   * `impl Backend for RemoteBackend` that declares a local `#[derive(Deserialize)]`
+   * struct and returns one of its fields. As of this test that is
+   * `analyze_guard_command`, `chat_workspace`, `get_claude_binary_override`,
+   * `get_skill_autosync`, `mobile_relay_qr_svg`, `upload_attachment` — the last
+   * two of those are the QR (already picked) and the attachment upload (not
+   * routed in the browser build at all), and `get_skill_autosync` has no
+   * frontend caller.
+   */
+  it("unwraps the envelope routes the same field RemoteBackend does", () => {
+    expect(LIVE_ROUTES.chat_workspace({}).pick).toBe("path");
+    expect(LIVE_ROUTES.get_claude_binary_override({}).pick).toBe("path");
+    expect(LIVE_ROUTES.analyze_guard_command({}).pick).toBe("analysis");
+    expect(LIVE_ROUTES.mobile_relay_qr_svg({}).pick).toBe("svg");
+  });
+
   it("builds the tail request the store issues", () => {
     expect(LIVE_ROUTES.get_messages_tail({ jsonlPath: "dsh://s-1", tail: 150 })).toEqual({
       method: "GET",
