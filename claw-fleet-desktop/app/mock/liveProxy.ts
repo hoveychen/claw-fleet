@@ -155,6 +155,8 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   analyze_guard_command: (a) => ({
     method: "POST",
     path: "/guard/analyze",
+    // `{ analysis }` on the wire, a bare string to the caller.
+    pick: "analysis",
     body: { command: a.command, context: a.context, lang: a.lang },
   }),
 
@@ -247,6 +249,9 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   chat_workspace: () => ({
     method: "GET",
     path: "/chat_workspace",
+    // `{ path }` on the wire, a bare path string to the caller. Without this
+    // the chat pill puts an object into `setWorkspace` and the page blanks.
+    pick: "path",
   }),
 
   // gui's own `check_setup_status` probes this machine (CLI on PATH, keychain);
@@ -383,6 +388,8 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   get_claude_binary_override: () => ({
     method: "GET",
     path: "/claude_binary_override",
+    // `{ path }` on the wire; `null` when no override is set.
+    pick: "path",
   }),
 
   get_codex_token_breakdown: (a) => ({
