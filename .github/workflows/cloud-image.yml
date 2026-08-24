@@ -25,6 +25,11 @@ on:
       - 'claw-fleet-core/**'
       - 'fleet-cli/**'
       - 'fleet-hooks-server/**'
+      # The image's webui stage builds this crate's frontend, which is what
+      # `fleet webui` serves. Without it here a pure-frontend change ships
+      # nothing: CI stays green, no image is built, and the deployed UI is
+      # silently the previous one.
+      - 'claw-fleet-desktop/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/cloud-image.yml'
