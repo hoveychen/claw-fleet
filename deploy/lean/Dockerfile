@@ -93,8 +93,13 @@ ENV HOME=/home/fleet
 #             Persist it by mounting a volume there (see fleet.compose.yaml),
 #             or — on a host that hands out exactly one volume, like muvee —
 #             set FLEET_STATE_DIR and the entrypoint symlinks ~/.fleet into it.
-#   ~/.claude, ~/.codex — the container's ephemeral writable layer. Leased
-#             credentials (claude → ~/.claude/.credentials.json, codex →
+#   ~/.claude/projects, ~/.codex/sessions — agent transcripts. Same deal: mount
+#             a volume, or set FLEET_STATE_DIR and the entrypoint symlinks them
+#             in too. Nothing re-creates a conversation, so leaving these on the
+#             writable layer means every container recreate destroys the whole
+#             history (it did, on fleet-cloud, 2026-08-24).
+#   ~/.claude, ~/.codex (the rest) — the container's ephemeral writable layer.
+#             Leased credentials (claude → ~/.claude/.credentials.json, codex →
 #             $CODEX_HOME/auth.json) live only for the container's lifetime and
 #             are NEVER on a named volume or the /workspace customer mount.
 ENV CODEX_HOME=/home/fleet/.codex \
@@ -111,7 +116,8 @@ ENV CODEX_HOME=/home/fleet/.codex \
 #                      authentication; only publish it behind your own auth
 #                      gateway. Unset it for an API-only container, which then
 #                      requires FLEET_ADMIN_TOKEN.
-# FLEET_STATE_DIR    — persist ~/.fleet by symlink instead of a mount (optional)
+# FLEET_STATE_DIR    — persist ~/.fleet + the transcript dirs by symlink
+#                      instead of mounts (optional)
 # FOXY_VAULT_URL     — cred-store vault the pairing hint points at (optional)
 # FOXY_DATA_DIR      — foxy's data dir (agent-config.json + the `port` file
 #                      claw_fleet_core::foxy reads to source usage from the

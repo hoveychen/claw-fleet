@@ -67,31 +67,60 @@ elif [[ -z "${FLEET_PUBLIC_TOKEN:-}" ]]; then
 fi
 
 # ── State persistence on a single-volume host ───────────────────────────────
-# Fleet state lives at ~/.fleet. Hosts that can mount a volume there should
-# (fleet.compose.yaml does). Hosts that hand out exactly ONE volume — muvee
-# auto-mounts /workspace and nothing else — set FLEET_STATE_DIR to a path
-# inside that volume and we make ~/.fleet a symlink into it. Credentials are
-# NOT covered by this: ~/.claude and ~/.codex stay on the ephemeral layer.
-if [[ -n "${FLEET_STATE_DIR:-}" ]]; then
-    mkdir -p "${FLEET_STATE_DIR}"
-    if [[ -L "${HOME}/.fleet" ]]; then
-        :  # already linked (container restart on a persisted volume)
-    elif mountpoint -q "${HOME}/.fleet" 2>/dev/null; then
-        echo "fleet-entrypoint: ${HOME}/.fleet is a mountpoint — ignoring FLEET_STATE_DIR" >&2
-    else
-        # Fresh ephemeral dir from the image; move anything already in it over
-        # so a mis-ordered start can't silently drop state, then link.
-        if [[ -d "${HOME}/.fleet" ]]; then
-            shopt -s dotglob nullglob
-            for entry in "${HOME}/.fleet"/*; do
-                mv -n "${entry}" "${FLEET_STATE_DIR}/" || true
-            done
-            shopt -u dotglob nullglob
-            rmdir "${HOME}/.fleet" 2>/dev/null || rm -rf "${HOME}/.fleet"
-        fi
-        ln -s "${FLEET_STATE_DIR}" "${HOME}/.fleet"
-        echo "fleet-entrypoint: ~/.fleet -> ${FLEET_STATE_DIR} (persistent)" >&2
+# Hosts that can mount a volume at each of these paths should (fleet.compose.yaml
+# does). Hosts that hand out exactly ONE volume — muvee auto-mounts /workspace
+# and nothing else — set FLEET_STATE_DIR to a path inside that volume, and we
+# symlink each path into it.
+
+# link_into_state <abs-target> <abs-link>
+#
+# Makes <abs-link> a symlink to <abs-target>, moving anything already sitting at
+# the link into the target first so a mis-ordered start cannot silently drop
+# state. Idempotent, and leaves a real mountpoint alone (a host that mounts a
+# volume there directly has already solved persistence its own way).
+link_into_state() {
+    local target="$1" link="$2"
+    mkdir -p "${target}"
+    if [[ -L "${link}" ]]; then
+        return 0  # already linked (container restart on a persisted volume)
     fi
+    if mountpoint -q "${link}" 2>/dev/null; then
+        echo "fleet-entrypoint: ${link} is a mountpoint — leaving it as-is" >&2
+        return 0
+    fi
+    if [[ -d "${link}" ]]; then
+        shopt -s dotglob nullglob
+        for entry in "${link}"/*; do
+            mv -n "${entry}" "${target}/" || true
+        done
+        shopt -u dotglob nullglob
+        rmdir "${link}" 2>/dev/null || rm -rf "${link}"
+    fi
+    mkdir -p "$(dirname "${link}")"
+    ln -s "${target}" "${link}"
+    echo "fleet-entrypoint: ${link} -> ${target} (persistent)" >&2
+}
+
+if [[ -n "${FLEET_STATE_DIR:-}" ]]; then
+    # Fleet's own state.
+    link_into_state "${FLEET_STATE_DIR}" "${HOME}/.fleet"
+
+    # Agent transcripts. These are NOT credentials and they have no other
+    # source: `~/.claude/.credentials.json` is re-injected from the foxy vault
+    # seconds after every container start (that vault lives on the volume
+    # because foxy takes FOXY_DATA_DIR from the env), so losing it costs
+    # nothing — but nothing re-creates a conversation. Leaving these on the
+    # ephemeral layer meant every redeploy silently destroyed the entire
+    # history: observed 2026-08-24 on fleet-cloud, where after a deploy the
+    # only surviving transcript was one written *after* the new container came
+    # up, and the old container (and its writable layer) was already gone.
+    #
+    # Only the transcript dirs move, so credentials stay ephemeral exactly as
+    # before. `session::scan` reads `get_claude_dir()/projects` and codex reads
+    # `get_codex_dir()/sessions` — one path each, so a symlink cannot make the
+    # same session show up twice.
+    link_into_state "${FLEET_STATE_DIR}/claude-projects" "${HOME}/.claude/projects"
+    link_into_state "${FLEET_STATE_DIR}/codex-sessions" "${HOME}/.codex/sessions"
 fi
 
 # ── Cred store agent (foxy-switcher) ────────────────────────────────────────
