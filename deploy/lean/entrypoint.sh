@@ -145,7 +145,12 @@ elif [[ "${FLEET_WAIT_FOR_CREDS:-1}" != "0" ]]; then
         fi
         [[ $waited -eq 0 ]] && echo "fleet-entrypoint: waiting for cred store to inject ${claude_cred} ..." >&2
         sleep 1
-        (( waited++ ))
+        # NOT `(( waited++ ))`: an arithmetic command whose expression evaluates
+        # to 0 exits 1, and post-increment evaluates to the OLD value — so the
+        # very first iteration returns 1 and `set -e` kills the entrypoint one
+        # second into the wait. (Verified in the image: bash 5.2 aborts on the
+        # old form; macOS bash 3.2 does not, which is why it survived review.)
+        waited=$(( waited + 1 ))
     done
     [[ -s "${claude_cred}" ]] && echo "fleet-entrypoint: claude credential present" >&2
 fi
