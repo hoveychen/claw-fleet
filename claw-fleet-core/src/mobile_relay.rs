@@ -1856,6 +1856,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         // ── Read methods ─────────────────────────────────────────────────
         "pending_snapshot" => serve_pending_snapshot(params),
         "task_plans" => serve_task_plans(params),
+        "plan_forest" => serve_plan_forest(params),
         "session_decisions" => serve_session_decisions(params),
         "decision_asset" => serve_decision_asset(params),
         "tail" => serve_tail(params),
@@ -2013,6 +2014,24 @@ fn serve_task_plans(params: &Value) -> Result<Value, String> {
     let plans =
         crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace), session_id);
     serde_json::to_value(plans).map_err(|e| e.to_string())
+}
+
+/// The whole repo's plan forest — the same join the desktop 计划树 renders,
+/// which `task_plans` cannot express: it returns a flat per-session list with
+/// no `parent` links, no relay chains and no done/total counters.
+fn serve_plan_forest(params: &Value) -> Result<Value, String> {
+    let workspace = params
+        .get("workspacePath")
+        .and_then(Value::as_str)
+        .ok_or("missing workspacePath")?;
+    // Same chain scoping the `/plan_forest` HTTP route uses: only this
+    // workspace's relays get folded onto its plans.
+    let chains = crate::handoff::list_chains()
+        .into_iter()
+        .filter(|c| c.workspace_path == workspace)
+        .collect();
+    let forest = crate::plan_forest::build(std::path::Path::new(workspace), chains);
+    serde_json::to_value(forest).map_err(|e| e.to_string())
 }
 
 fn serve_session_decisions(params: &Value) -> Result<Value, String> {
@@ -5542,6 +5561,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The phone's repo-level 计划 page needs the *forest*, not `task_plans`'s
+    /// flat per-session list: only the forest carries `parent` links, done/total
+    /// counters and the relay chains. Regression pin for the method table — it
+    /// shipped without this entry, so the mobile view had no way to ask.
+    #[test]
+    fn plan_forest_is_dispatched_and_returns_the_repo_tree() {
+        let _lock = fleet_home_lock();
+        let dir = std::env::temp_dir().join(format!("fleet-relay-forest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("TASKS.md"),
+            "# TASKS\n\n             <!-- fleet:prd:begin id=\"root-plan\" v=\"2\" -->\n\n             **Plan:** Root\n\n- [x] **P1** — done\n- [ ] **P2** — pending\n\n             <!-- fleet:prd:end id=\"root-plan\" -->\n\n             <!-- fleet:prd:begin id=\"kid-plan\" v=\"2\" parent=\"root-plan\" -->\n\n             **Plan:** Child\n\n- [ ] **P1** — side work\n\n             <!-- fleet:prd:end id=\"kid-plan\" -->\n",
+        )
+        .unwrap();
+
+        let v = serve_request(
+            "plan_forest",
+            &json!({ "workspacePath": dir.to_string_lossy() }),
+        )
+        .expect("plan_forest must be routed");
+        let roots = v["roots"].as_array().expect("roots array");
+        assert_eq!(roots.len(), 1, "the child must hang off the root, not sit beside it");
+        assert_eq!(roots[0]["id"], "root-plan");
+        assert_eq!(roots[0]["done"], 1);
+        assert_eq!(roots[0]["total"], 2);
+        assert_eq!(roots[0]["children"][0]["id"], "kid-plan");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The real `account_usage` path, driven the way the ws loop drives it:
