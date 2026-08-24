@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { Check, CheckCircle2, ChevronRight, ListTodo, Waypoints, Workflow } from "lucide-react";
 import { EmptyState } from "./EmptyState";
+import { splitMarker } from "./planMatrix";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
@@ -18,6 +19,7 @@ import type {
   TaskPlanDetail,
   TokenBreakdown,
   WorkflowTree,
+  TaskItem,
 } from "../types";
 import { useAgentNav } from "./AgentNavContext";
 import { AttachmentThumbs } from "./AttachmentThumb";
@@ -371,22 +373,79 @@ export function TaskPlansTab({
   const current = session.taskPlan?.currentTask;
   return (
     <div className={styles.stack}>
-      {data.map((p, i) => (
-        <div key={p.id ?? i} className={styles.planCard}>
-          {p.title && <div className={styles.planTitle}>{p.title}</div>}
-          {p.items.map((item, j) => {
-            const isCurrent = Boolean(
-              current && !item.done && item.text.includes(current),
-            );
-            return (
-              <div key={j} className={styles.planItem} data-done={item.done} data-current={isCurrent}>
-                <span className={styles.checkbox}>{item.done ? <Check size={11} /> : ""}</span>
-                <span>{item.text}</span>
-              </div>
-            );
-          })}
-        </div>
-      ))}
+      {data.map((p, i) => {
+        const done = p.items.filter((it) => it.done).length;
+        return (
+          <div key={p.id ?? i} className={styles.planCard}>
+            {p.title && <div className={styles.planTitle}>{p.title}</div>}
+            <PlanStrip items={p.items} done={done} />
+            {p.items.map((item, j) => {
+              const isCurrent = Boolean(
+                current && !item.done && item.text.includes(current),
+              );
+              return (
+                <PlanItemLine
+                  key={j}
+                  text={item.text}
+                  done={item.done}
+                  current={isCurrent}
+                />
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 一格一个 P 的进度条，和桌面计划树 / 手机计划页同一套语汇:绿=已完成、
+ *  橙=下一个、灰=待办。卡片折起时这一条就是全部信息量。 */
+function PlanStrip({ items, done }: { items: TaskItem[]; done: number }) {
+  let markedNext = false;
+  return (
+    <div className={styles.planStrip}>
+      {items.map((item, i) => {
+        let state: "done" | "next" | "todo" = "todo";
+        if (item.done) state = "done";
+        else if (!markedNext) {
+          state = "next";
+          markedNext = true;
+        }
+        return <span key={i} className={styles.planCell} data-state={state} />;
+      })}
+      <span className={styles.planCount}>
+        {done}/{items.length}
+      </span>
+    </div>
+  );
+}
+
+/** 单条 P:默认压成一行,点一下才展开全文。P-task 正文常常是几百字的实现
+ *  笔记,整段铺开会把这个页签变成一堵墙 —— 桌面端同样的毛病已经改掉了。 */
+function PlanItemLine({
+  text,
+  done,
+  current,
+}: {
+  text: string;
+  done: boolean;
+  current: boolean;
+}) {
+  const { marker, rest } = splitMarker(text);
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className={styles.planItem}
+      data-done={done}
+      data-current={current}
+      onClick={() => setOpen((v) => !v)}
+    >
+      <span className={styles.checkbox}>{done ? <Check size={11} /> : ""}</span>
+      {marker && <span className={styles.planMarker}>{marker}</span>}
+      <span className={styles.planItemText} data-open={open}>
+        {rest}
+      </span>
     </div>
   );
 }

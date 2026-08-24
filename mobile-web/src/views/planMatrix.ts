@@ -147,3 +147,14 @@ export function cellStates(node: PlanNode): CellState[] {
     return "next";
   });
 }
+
+/** Split a TASKS.md item into its `P<n>` marker and the rest. Items are written
+ *  `**P3** — do the thing`, so raw they render as literal asterisks — the
+ *  P-number, the one part you scan by, looks like noise. Anything that does not
+ *  match keeps its text verbatim rather than being mangled by a half-baked
+ *  markdown pass. */
+export function splitMarker(text: string): { marker: string | null; rest: string } {
+  const m = /^\*\*(P\d+[a-z]?)\*\*\s*(?:[—–-]\s*)?([\s\S]*)$/.exec(text.trim());
+  if (!m) return { marker: null, rest: text };
+  return { marker: m[1], rest: m[2].replace(/\*\*/g, "") };
+}

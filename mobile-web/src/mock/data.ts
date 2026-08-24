@@ -20,6 +20,7 @@ import type {
   SessionInfo,
   TodayUsage,
   WikiDoc,
+  PlanForest,
 } from "../types";
 
 const NOW = Date.now();
@@ -1291,4 +1292,69 @@ export const MOCK_HANDOFF_CHAIN: HandoffChain = {
         "P5(下线旧路径)要等 P4 放量稳定两周,别提前。",
     },
   ],
+};
+
+// ── Plan forest (计划页) ─────────────────────────────────────────────────────
+// One live root with a sub-plan and a finished root, plus one deliberately
+// long P-task: real plan items run to several paragraphs, and a fixture made of
+// one-liners would hide the sheet's clamp entirely.
+
+export const MOCK_PLAN_FOREST: PlanForest = {
+  roots: [
+    {
+      id: "billing-migration",
+      title: "把用量计费迁到 v2 ledger",
+      source: null,
+      kind: "exec",
+      items: [
+        { text: "**P1** — 盘清现有 schema", done: true },
+        { text: "**P2** — 回填影子表", done: true },
+        {
+          text:
+            "**P3** — 读路径切到 usage_billing_v2。先双读一个 bake 窗口:" +
+            "`LedgerReader::get` 先查 v2,miss 回落旧视图并按租户计 " +
+            "`ledger_v2_miss_total`,让回填的长尾看得见而不是被悄悄糊过去。" +
+            "开关按租户而不是全局,因为三个企业租户的分摊逻辑影子表还没复刻;" +
+            "回滚只靠开关,本 P 不带 schema 变更,验收是 top 50 租户 24h 零 miss。",
+          done: false,
+        },
+        { text: "**P4** — 双写 48h 后删旧表", done: false },
+      ],
+      done: 2,
+      total: 4,
+      chains: [],
+      children: [
+        {
+          id: "ledger-index-fix",
+          title: "先加 (ts, idempotency_key) 唯一索引",
+          source: ".worktrees/index/TASKS.md",
+          kind: "explore",
+          items: [
+            { text: "**P1** — 在 staging 克隆上量索引构建耗时", done: true },
+            { text: "**P2** — 把锁窗口报回父计划", done: false },
+          ],
+          done: 1,
+          total: 2,
+          chains: [],
+          children: [],
+          orphanedParent: null,
+        },
+      ],
+      orphanedParent: null,
+    },
+    {
+      id: "search-facets",
+      title: "重建搜索 facet 索引",
+      source: null,
+      kind: "exec",
+      items: [{ text: "**P1** — 重索引并核对 facet 计数", done: true }],
+      done: 1,
+      total: 1,
+      chains: [],
+      children: [],
+      orphanedParent: null,
+    },
+  ],
+  unattachedChains: [],
+  anonymous: 0,
 };
