@@ -646,39 +646,64 @@ enum Outbound {
 }
 static SESSIONS_LAST_SENT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 
-/// Host-supplied source for the *current* full sessions snapshot, used to push
-/// state to a phone the moment it connects instead of waiting for the next
-/// scan-driven change. The desktop `LocalBackend` registers this (see
-/// `local_backend.rs`); `fleet serve` leaves it unset because its broadcast
-/// loop already force-pushes on a new-client presence bump. When unset, the
-/// on-connect push is a no-op and the old "wait for the next scan tick"
-/// behaviour applies — which is exactly what the serve loop covers.
+/// Host-supplied source for the *current* session list, kept off the request
+/// path. Two consumers:
+///
+///   * the on-connect push, so a phone gets state the instant it connects
+///     instead of waiting for the next scan-driven change, and
+///   * read-only projections of the list (`today_usage`), which would otherwise
+///     rescan every agent source per poll.
+///
+/// The host already maintains this list — the desktop `LocalBackend` fills an
+/// `Arc<Mutex<Vec<SessionInfo>>>` from its watcher/poll threads, `fleet serve`
+/// has `SessionSnapshot` — so a handler costs a clone instead of a disk walk.
+/// Typed rather than `Value` so a projection needs no serde round trip; the
+/// on-connect push serialises it at the edge instead.
+///
+/// When unset, every consumer falls back to scanning: the on-connect push
+/// becomes a no-op (the `fleet serve` broadcast loop force-pushes on a
+/// new-client presence bump anyway) and projections call `scan_all_sources`.
 #[allow(clippy::type_complexity)]
-static SNAPSHOT_PROVIDER: Mutex<Option<Box<dyn Fn() -> Option<Value> + Send + Sync>>> =
-    Mutex::new(None);
+static SESSIONS_PROVIDER: Mutex<
+    Option<Box<dyn Fn() -> Option<Vec<crate::session::SessionInfo>> + Send + Sync>>,
+> = Mutex::new(None);
 
-/// Register the current-sessions provider (see [`SNAPSHOT_PROVIDER`]). Called
+/// Register the current-sessions provider (see [`SESSIONS_PROVIDER`]). Called
 /// once at backend startup; a later call replaces the previous provider.
-pub fn set_snapshot_provider<F>(f: F)
+pub fn set_sessions_provider<F>(f: F)
 where
-    F: Fn() -> Option<Value> + Send + Sync + 'static,
+    F: Fn() -> Option<Vec<crate::session::SessionInfo>> + Send + Sync + 'static,
 {
-    *SNAPSHOT_PROVIDER.lock().unwrap() = Some(Box::new(f));
+    *SESSIONS_PROVIDER.lock().unwrap() = Some(Box::new(f));
+}
+
+/// The host's current session list, or `None` when there is no authoritative one
+/// to hand out.
+///
+/// An empty list counts as "not scanned yet", not "no sessions" — every host
+/// registers its provider at startup, before its first scan has filled the list,
+/// so a caller that trusted the empty vec would report zero usage and push a
+/// blank roster for as long as the cold scan takes. A host that genuinely has no
+/// sessions falls back to a scan that also returns none, which costs nothing to
+/// walk. (Same reasoning as `session_snapshot`'s first-read contract.) Applied
+/// here rather than in each provider so neither host can forget it.
+fn provided_sessions() -> Option<Vec<crate::session::SessionInfo>> {
+    let guard = SESSIONS_PROVIDER.lock().unwrap();
+    guard
+        .as_ref()
+        .and_then(|provider| provider())
+        .filter(|sessions| !sessions.is_empty())
 }
 
 /// Push the current snapshot to clients right now, bypassing the change-dedup
 /// (the caller just reset [`SESSIONS_LAST_HASH`], so a phone that connected
 /// mid-idle still gets state even though nothing changed for existing clients).
-/// No-op when no provider is registered — see [`SNAPSHOT_PROVIDER`].
+/// No-op when no provider is registered — see [`SESSIONS_PROVIDER`].
 fn push_snapshot_on_connect() {
-    let snapshot = {
-        let guard = SNAPSHOT_PROVIDER.lock().unwrap();
-        match guard.as_ref() {
-            Some(provider) => provider(),
-            None => None,
-        }
-    };
-    if let Some(v) = snapshot {
+    let Some(sessions) = provided_sessions() else { return };
+    // Serialised here rather than by the provider: the wire wants JSON, the
+    // in-process projections want the structs.
+    if let Ok(v) = serde_json::to_value(&sessions) {
         publish_sessions(&v);
     }
 }
@@ -2266,19 +2291,35 @@ fn serve_today_usage(_params: &Value) -> Result<Value, String> {
     // expensive method by total time; the phone and the desktop both poll it, so
     // collapse overlapping calls onto one scan.
     cached_by_key("today_usage", TODAY_USAGE_CACHE_TTL, || {
-        let sources = crate::agent_source::build_sources();
-        let sessions = crate::session::scan_all_sources(&sources);
-        let usage = crate::today_usage::today_usage(&sessions);
+        let usage = crate::today_usage::today_usage(&current_sessions());
         serde_json::to_value(usage).map_err(|e| e.to_string())
     })
+}
+
+/// The session list a read-only projection should work from: the host's warm
+/// copy when it has one, otherwise a scan.
+///
+/// The scan is the fallback, not the norm. It walks every transcript of every
+/// agent source, which measured 319–615ms per `today_usage` call on a host with
+/// ~400 recent transcripts — while `pending_snapshot` on the same connection
+/// answered in 0–1ms. The phone polls `today_usage` every 20s and
+/// [`TODAY_USAGE_CACHE_TTL`] is 5s, so every poll used to pay that in full, and
+/// the desktop's own badge poll paid it again. Both hosts already keep the list
+/// warm (see [`SESSIONS_PROVIDER`]) — this makes the handler read it.
+fn current_sessions() -> Vec<crate::session::SessionInfo> {
+    if let Some(sessions) = provided_sessions() {
+        return sessions;
+    }
+    let sources = crate::agent_source::build_sources();
+    crate::session::scan_all_sources(&sources)
 }
 
 // Per-model receipt breakdown behind the header counter (mirrors
 // `LocalBackend::today_usage_breakdown` / `/today_usage_breakdown`).
 fn serve_today_usage_breakdown(_params: &Value) -> Result<Value, String> {
-    let sources = crate::agent_source::build_sources();
-    let sessions = crate::session::scan_all_sources(&sources);
-    let breakdown = crate::today_usage::today_usage_breakdown(&sessions);
+    // Same projection, same list — see `current_sessions`. Uncached (unlike
+    // `today_usage`) because this one is opened by hand, not polled.
+    let breakdown = crate::today_usage::today_usage_breakdown(&current_sessions());
     serde_json::to_value(breakdown).map_err(|e| e.to_string())
 }
 
@@ -6049,6 +6090,56 @@ mod tests {
         assert_eq!(gunzip_bytes(&gz).expect("gunzip"), raw.as_bytes());
     }
 
+    /// `today_usage` is a projection of the session list, not a reason to walk
+    /// the disk again. It is the phone's most expensive method by far — measured
+    /// at 319–615ms per call on a host with ~400 recent transcripts, against
+    /// 0–1ms for every other polled method — and the phone polls it every 20s
+    /// while the 5s result cache is always stale by then. So when the host has
+    /// already got the list, the handler must read *that* and never scan.
+    #[test]
+    fn today_usage_projects_the_provided_session_list_without_scanning() {
+        let _guard = fleet_home_lock();
+        // A cost/token figure no real scan of this machine could produce, and a
+        // creation stamp inside today's window so it counts at all.
+        let sentinel = crate::session::SessionInfo {
+            id: "warm-sentinel".to_string(),
+            created_at_ms: chrono::Local::now().timestamp_millis().max(0) as u64,
+            total_input_tokens: 4_242,
+            total_output_tokens: 777,
+            total_cost_usd: 12.5,
+            ..Default::default()
+        };
+        set_sessions_provider(move || Some(vec![sentinel.clone()]));
+        // The handler memoises per key; a sibling test's value would mask this one.
+        *RESULT_CACHE.lock().unwrap() = None;
+
+        let usage = serve_today_usage(&json!({})).expect("today_usage answers");
+
+        assert_eq!(
+            usage["outputTokens"], 777,
+            "the provided list is the input — a rescan would report this host's real sessions"
+        );
+        assert_eq!(usage["inputTokens"], 4_242);
+        assert_eq!(usage["sessionCount"], 1);
+
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
+        *RESULT_CACHE.lock().unwrap() = None;
+    }
+
+    /// Every host registers its provider before its first scan has filled the
+    /// list, so an empty vec means "not scanned yet" and must not be served as
+    /// an answer — see `provided_sessions`.
+    #[test]
+    fn an_empty_provided_list_is_not_an_authoritative_answer() {
+        let _guard = fleet_home_lock();
+        set_sessions_provider(|| Some(Vec::new()));
+        assert!(
+            provided_sessions().is_none(),
+            "an unscanned host must fall back, not report zero"
+        );
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
+    }
+
     #[test]
     fn on_connect_push_emits_current_snapshot_via_provider() {
         use crate::session_launch::NEW_SESSION_ENTRYPOINT;
@@ -6068,17 +6159,20 @@ mod tests {
         // No provider (the `fleet serve` fallback, and the pre-fix desktop
         // behaviour): a connect pushes nothing — the phone would sit blank until
         // the next scan-driven change. This is exactly the bug being fixed.
-        *SNAPSHOT_PROVIDER.lock().unwrap() = None;
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
         push_snapshot_on_connect();
         assert!(rx.try_recv().is_err(), "no provider → no on-connect push (pre-fix state)");
 
         // With a provider registered (the desktop LocalBackend path), connecting
         // emits the current snapshot immediately, no scan tick required.
-        set_snapshot_provider(|| {
-            Some(json!([{
-                "id": "s1", "isSubagent": false, "lastActivityMs": 1,
-                "workspaceName": "w", "entrypoint": NEW_SESSION_ENTRYPOINT
-            }]))
+        set_sessions_provider(|| {
+            Some(vec![crate::session::SessionInfo {
+                id: "s1".to_string(),
+                workspace_name: "w".to_string(),
+                last_activity_ms: 1,
+                entrypoint: Some(NEW_SESSION_ENTRYPOINT.to_string()),
+                ..Default::default()
+            }])
         });
         push_snapshot_on_connect();
         let out = rx.try_recv().expect("on-connect push emitted a frame");
@@ -6087,7 +6181,7 @@ mod tests {
         assert_eq!(decode_out(&text)["event"], "sessions");
 
         // Reset shared globals so sibling tests start from a known state.
-        *SNAPSHOT_PROVIDER.lock().unwrap() = None;
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
         *OUT_TX.lock().unwrap() = None;
         *ENC_KEY.lock().unwrap() = None;
         CONNECTED.store(false, Ordering::SeqCst);

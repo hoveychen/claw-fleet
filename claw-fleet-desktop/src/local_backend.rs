@@ -185,9 +185,9 @@ impl LocalBackend {
         // is the equivalent hook for the desktop LocalBackend path.
         {
             let sess_for_relay = sessions.clone();
-            claw_fleet_core::mobile_relay::set_snapshot_provider(move || {
+            claw_fleet_core::mobile_relay::set_sessions_provider(move || {
                 let list = sess_for_relay.lock().ok()?;
-                serde_json::to_value(&*list).ok()
+                Some(list.clone())
             });
         }
 
