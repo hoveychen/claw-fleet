@@ -1208,14 +1208,19 @@ export function liveProxyReport() {
 
 // ── Fetch ───────────────────────────────────────────────────────────────────
 
-async function callProbe(req: LiveReq): Promise<unknown> {
+/**
+ * Absolute URL for one request, under the current probe base.
+ *
+ * The query is built by hand rather than through `searchParams.set`, which
+ * serializes a space as `+` (it is the *form* encoder). `hooks_server::
+ * parse_query` splits on `&`/`=` and percent-decodes each value, and
+ * percent-decoding leaves `+` alone — so `/Users/x/My Project` would be looked
+ * up as `/Users/x/My+Project` and answer 404 or empty, which the UI shows as
+ * "no data". `RemoteBackend`, the surface this table mirrors, percent-encodes
+ * (`NON_ALPHANUMERIC`).
+ */
+function probeUrl(req: LiveReq): string {
   const url = new URL(LIVE_BASE + req.path, window.location.origin);
-  // Built by hand rather than through `searchParams.set`, which serializes a
-  // space as `+` (it is the *form* encoder). `hooks_server::parse_query` splits
-  // on `&`/`=` and percent-decodes each value, and percent-decoding leaves `+`
-  // alone — so `/Users/x/My Project` would be looked up as `/Users/x/My+Project`
-  // and answer 404 or empty, which the UI shows as "no data". `RemoteBackend`,
-  // the surface this table mirrors, percent-encodes (`NON_ALPHANUMERIC`).
   const pairs: string[] = [];
   for (const [k, v] of Object.entries(req.query ?? {})) {
     if (v != null && v !== "") {
@@ -1223,8 +1228,13 @@ async function callProbe(req: LiveReq): Promise<unknown> {
     }
   }
   if (pairs.length > 0) url.search = pairs.join("&");
+  return url.toString();
+}
+
+async function callProbe(req: LiveReq): Promise<unknown> {
+  const url = probeUrl(req);
   const started = performance.now();
-  const resp = await fetch(url.toString(), {
+  const resp = await fetch(url, {
     method: req.method,
     headers:
       req.rawBody != null
@@ -1300,6 +1310,82 @@ export async function uploadAttachmentBytes(
     throw new Error(`/elicitation/upload accepted "${name}" but returned no path`);
   }
   return path;
+}
+
+/**
+ * Fetch a route's raw bytes and hand them to the user as a file download.
+ *
+ * The browser build's stand-in for the desktop's "pick a destination, then
+ * write there" pair. A tab cannot be given a host path to write to — but the
+ * artifact itself is already reachable over HTTP, and a download is the
+ * browser's own version of the same intent.
+ *
+ * Goes through `callProbe`'s base and query encoding rather than fetching by
+ * hand, so a slug with a space is percent-encoded the way the route expects.
+ */
+async function downloadFromProbe(
+  path: string,
+  query: Record<string, string | number | undefined | null>,
+  filename: string,
+): Promise<void> {
+  const bytes = await callProbeBlob({ method: "GET", path, query });
+  const url = URL.createObjectURL(bytes);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Not immediate: revoking before the browser has started reading the blob
+  // cancels the download in Safari. One turn of the event loop is enough.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/**
+ * Download one wiki doc's export artifact — the browser build's replacement for
+ * the desktop's `save()` + `export_wiki_doc` pair.
+ *
+ * The path literal lives here, beside the route table, rather than in
+ * `WikiView`: `/wiki_export` is the same route `RemoteBackend::export_wiki_doc`
+ * reads through, and it answers the finished bytes for every doc kind — a zip
+ * for a bundle included — so nothing about the artifact has to be rebuilt on
+ * this side.
+ */
+export async function downloadWikiExport(
+  slug: string,
+  version: string,
+  filename: string,
+): Promise<void> {
+  await downloadFromProbe("/wiki_export", { slug, version }, filename);
+}
+
+/**
+ * Download the bundled Fleet SKILL.md — the browser build's replacement for the
+ * desktop's `save_skill_file`.
+ *
+ * That command writes an `include_str!` constant the frontend never holds, to a
+ * path a tab cannot be given, so this is the one member of the export family
+ * that needed a route added rather than an existing one re-pointed.
+ */
+export async function downloadFleetSkill(): Promise<void> {
+  await downloadFromProbe("/fleet_skill", {}, "SKILL.md");
+}
+
+/** `callProbe` for a route that answers bytes rather than JSON. */
+async function callProbeBlob(req: LiveReq): Promise<Blob> {
+  const url = probeUrl(req);
+  const started = performance.now();
+  const resp = await fetch(url, { method: req.method });
+  const ms = Math.round(performance.now() - started);
+  if (!resp.ok) {
+    const text = await resp.text();
+    logLine(`ERR ${req.method} ${req.path} \u2192 ${resp.status} (${ms}ms) ${text.slice(0, 200)}`);
+    throw new Error(`HTTP ${resp.status}: ${text.slice(0, 300)}`);
+  }
+  const blob = await resp.blob();
+  logLine(`OK  ${req.method} ${req.path} \u2192 200 (${ms}ms, ${blob.size}B)`);
+  return blob;
 }
 
 /**

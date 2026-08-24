@@ -918,6 +918,8 @@ fn handle_request(
         match path {
             crate::routes::HEALTH => route_health(ctx, request, &query, json_header, path),
 
+            crate::routes::FLEET_SKILL => route_fleet_skill(request),
+
             crate::routes::SESSIONS => route_sessions(ctx, request, &query, json_header, path),
 
             crate::routes::INTERRUPT => route_interrupt(ctx, request, &query, json_header, path),

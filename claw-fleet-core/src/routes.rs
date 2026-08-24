@@ -76,6 +76,13 @@ pub const EXPLORER_FILE: &str = "/explorer_file";
 pub const EXPLORER_EXTERNAL_FILE: &str = "/explorer_external_file";
 pub const EXPLORER_ROOTS: &str = "/explorer_roots";
 pub const FILE_SIZE: &str = "/file_size";
+/// The bundled Fleet SKILL.md, verbatim.
+///
+/// A static asset rather than a Backend capability: the desktop compiles the
+/// same text in via `include_str!` and has never needed to ask anyone for it.
+/// It exists so the *browser* build can hand the file to the user — a tab holds
+/// neither the constant nor a path to save it to.
+pub const FLEET_SKILL: &str = "/fleet_skill";
 pub const FLEET_ASK_PENDING: &str = "/fleet-ask/pending";
 pub const FLEET_ASK_RESPOND: &str = "/fleet-ask/respond";
 pub const FLEET_LLM_USAGE_DAILY: &str = "/fleet_llm_usage/daily";

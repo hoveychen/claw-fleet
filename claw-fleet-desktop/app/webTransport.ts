@@ -259,6 +259,12 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     // ── Native dialogs ──────────────────────────────────────────────────
     // `null` is this pair's "user cancelled", which is the truthful answer
     // when there is no dialog to open.
+    //
+    // `save_skill_file` is no longer reached from the browser build — the
+    // AccountInfo panel downloads the bundled SKILL.md instead of asking the
+    // host to write it somewhere. Kept anyway: this stub is what makes the
+    // command *classified* rather than a gap, and a "cancelled" is still the
+    // right answer if some future caller does reach it.
     case "pick_file":
     case "save_skill_file":
       return { handled: true, value: null };

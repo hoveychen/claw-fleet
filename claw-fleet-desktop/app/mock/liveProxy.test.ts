@@ -299,6 +299,88 @@ describe("live proxy route table", () => {
  * path that does not exist and answers 404 or empty, and the UI shows it as
  * "no data".
  */
+/**
+ * The browser build's replacement for the desktop's "pick a destination, then
+ * write there" export. `save()` answers null in a tab, so the old path returned
+ * one line later having silently done nothing.
+ *
+ * Pinned here rather than in `WikiView` because the failure mode is the *path*:
+ * a route nobody serves 404s, `exportDoc`'s caller shows that as a failed
+ * export, and no test would have caught the typo — the same class the
+ * `LIVE_ROUTES` path sweep above exists for, which does not see this literal
+ * because it is not a mapped command.
+ */
+describe("downloadWikiExport", () => {
+  it("calls a path hooks_server serves, with the slug percent-encoded", async () => {
+    expect(servedRoutes().exact).toContain("/wiki_export");
+
+    const seen: string[] = [];
+    const realFetch = globalThis.fetch;
+    const realCreate = URL.createObjectURL;
+    const realRevoke = URL.revokeObjectURL;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(new Blob(["# doc"]), { status: 200 });
+    }) as typeof fetch;
+    URL.createObjectURL = () => "blob:stub";
+    URL.revokeObjectURL = () => {};
+    try {
+      const { downloadWikiExport } = await import("./liveProxy");
+      await downloadWikiExport("arch/my notes", "v2", "notes.md");
+    } finally {
+      globalThis.fetch = realFetch;
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    }
+
+    expect(seen).toHaveLength(1);
+    // The whole pathname, not a substring: `toContain("/wiki_export")` is also
+    // satisfied by a typo'd `/wiki_exportt`, which is exactly the mistake this
+    // is here to catch (verified by mutating the literal).
+    const url = new URL(seen[0]);
+    expect(url.pathname.replace(/^\/__live/, "")).toBe("/wiki_export");
+    expect(url.search).toContain("my%20notes");
+    expect(url.search).toContain("version=v2");
+  });
+});
+
+/**
+ * The bundled Fleet SKILL.md, downloadable in the browser build.
+ *
+ * On the desktop `save_skill_file` writes a compile-time `include_str!`
+ * constant to a path the user picks — the frontend never holds the text and a
+ * tab has no path to write to, so this is the one gap in the export family that
+ * needed a route rather than a re-routing. Pinned the same way as the wiki one:
+ * the whole pathname, against what `hooks_server` really serves.
+ */
+describe("downloadFleetSkill", () => {
+  it("calls a path hooks_server actually serves", async () => {
+    expect(servedRoutes().exact).toContain("/fleet_skill");
+
+    const seen: string[] = [];
+    const realFetch = globalThis.fetch;
+    const realCreate = URL.createObjectURL;
+    const realRevoke = URL.revokeObjectURL;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(new Blob(["# Fleet"]), { status: 200 });
+    }) as typeof fetch;
+    URL.createObjectURL = () => "blob:stub";
+    URL.revokeObjectURL = () => {};
+    try {
+      const { downloadFleetSkill } = await import("./liveProxy");
+      await downloadFleetSkill();
+    } finally {
+      globalThis.fetch = realFetch;
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    }
+
+    expect(seen).toHaveLength(1);
+    expect(new URL(seen[0]).pathname.replace(/^\/__live/, "")).toBe("/fleet_skill");
+  });
+});
+
 describe("query encoding matches RemoteBackend", () => {
   it("sends a space as %20, not as +", async () => {
     const seen: string[] = [];
