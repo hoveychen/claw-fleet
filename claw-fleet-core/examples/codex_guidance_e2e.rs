@@ -59,6 +59,7 @@ fn main() {
                 prompt,
                 model.as_deref(),
                 effort.as_deref(),
+                &[],
             )
             .expect("spawn_new_codex_session");
             println!(
@@ -86,6 +87,7 @@ fn main() {
                 prompt,
                 model.as_deref(),
                 effort.as_deref(),
+                &[],
                 Box::new(move |ok| {
                     let _ = tx.send(ok);
                 }),

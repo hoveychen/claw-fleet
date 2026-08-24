@@ -713,6 +713,7 @@ fn spawn_successor_by_source(
             permission_mode: permission_mode.map(str::to_string),
             session_id: None,
             entrypoint: entrypoint.to_string(),
+        images: Vec::new(),
         },
     )
 }

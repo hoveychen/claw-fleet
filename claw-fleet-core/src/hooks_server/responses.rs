@@ -1578,16 +1578,17 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
     // workspace and append them to the prompt, so the agent reads the bytes off
     // disk. Resolved BEFORE launching — a bad file_id must be a 400, not a run
     // that starts and then can't find its input.
-    let prompt = match req.attachment_file_ids() {
+    let (prompt, images) = match req.attachment_file_ids() {
         Err(e) => return respond_error(request, 400, "invalid_request", e.message, json_header),
         Ok(ids) => match resolve_attachment_paths(&ids) {
             Err((status, msg)) => {
                 let code = if status == 403 { "forbidden" } else { "invalid_request" };
                 return respond_error(request, status, code, msg, json_header);
             }
-            Ok(paths) => prompt_with_attachments(&req.prompt_text(), &paths),
+            Ok(paths) => split_attachments_for_tool(tool, &paths),
         },
     };
+    let prompt = prompt_with_attachments(&req.prompt_text(), &prompt);
 
     // Launch: resume when previous_response_id is set, else spawn a new run.
     // Both yield the internal session id + wire resp_id + initial status.
@@ -1604,6 +1605,7 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
                         workspace_path: public_workspace(),
                         prompt: prompt.clone(),
                         model: model.clone(),
+                        images: images.clone(),
                         ..Default::default()
                     };
                     match crate::agent_source::resume_session(tool, &spec, Box::new(|_| {})) {
@@ -1625,14 +1627,23 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
                 permission_mode: None,
                 session_id: Some(uuid.clone()),
                 entrypoint: String::new(),
+                images: images.clone(),
             };
             match crate::agent_source::spawn_session(tool, &spec) {
-                Ok(_) => {
+                Ok(resp) => {
+                    // Key the response on the id the source actually used.
+                    // Claude accepts the one we pre-mint (`--session-id`), but
+                    // Codex mints its own thread id and reports it back — keying
+                    // on our uuid there left `GET /v1/responses/{id}` polling an
+                    // id no transcript would ever carry, so a codex run
+                    // completed while the API said "queued" forever.
+                    let sid = effective_session_id(&uuid, resp.session_id.as_deref());
+                    let resp_id = to_resp_id(&sid);
                     // Fresh session starts at turn offset 0 (whole transcript is
                     // this turn); write it explicitly so any stale marker can't
                     // hide the output.
-                    write_turn_offset(&uuid, 0);
-                    Ok((uuid, resp_id, ResponseStatus::Queued))
+                    write_turn_offset(&sid, 0);
+                    Ok((sid, resp_id, ResponseStatus::Queued))
                 }
                 Err(e) => Err((500, "spawn_failed", e)),
             }
@@ -1822,6 +1833,50 @@ fn resolve_attachment_paths(ids: &[String]) -> Result<Vec<std::path::PathBuf>, (
         out.push(path);
     }
     Ok(out)
+}
+
+/// The session id a spawned run is actually keyed by.
+///
+/// Sources differ on who mints it: Claude takes the caller's `--session-id`,
+/// Codex mints its own thread id and returns it. Prefer what the source
+/// reported; fall back to the pre-minted id when it reported nothing (the
+/// degraded Codex case where `thread.started` never arrived). Pure.
+fn effective_session_id(pre_minted: &str, returned: Option<&str>) -> String {
+    returned
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(pre_minted)
+        .to_string()
+}
+
+/// Split resolved attachments into (paths listed in the prompt, paths passed as
+/// image flags), according to how the target agent actually ingests an image.
+///
+/// - **claude** reads any attachment off disk with its own file tools, images
+///   included, so everything goes in the prompt manifest and nothing is flagged.
+/// - **codex** will not open an image path mentioned in the prompt; `codex exec
+///   -i <FILE>` is its only image channel. Non-images still go in the manifest —
+///   codex reads those with its own tools like claude does.
+///
+/// Image-ness comes from the extension via the shared mime table, so it matches
+/// what `GET /v1/files/{id}/content` reports for the same file. Pure.
+fn split_attachments_for_tool(
+    tool: &str,
+    paths: &[std::path::PathBuf],
+) -> (Vec<std::path::PathBuf>, Vec<String>) {
+    if tool != "codex" {
+        return (paths.to_vec(), Vec::new());
+    }
+    let mut in_prompt = Vec::new();
+    let mut images = Vec::new();
+    for p in paths {
+        if crate::wiki::mime_for_path(p).starts_with("image/") {
+            images.push(p.to_string_lossy().into_owned());
+        } else {
+            in_prompt.push(p.clone());
+        }
+    }
+    (in_prompt, images)
 }
 
 /// Append an attachment manifest to the prompt.
@@ -2132,6 +2187,54 @@ mod tests {
         .unwrap();
         assert_eq!(r.attachment_file_ids().unwrap(), Vec::<String>::new());
         assert_eq!(r.prompt_text(), "go");
+    }
+
+    /// Regression: keying a spawned response on our pre-minted uuid works for
+    /// Claude (it accepts `--session-id`) but silently breaks Codex, which mints
+    /// its own thread id — the run completes while `GET /v1/responses/{id}`
+    /// reports `queued` forever. Observed live: a codex rollout answered "Red"
+    /// while the API never left `queued`.
+    #[test]
+    fn spawned_response_uses_the_id_the_source_minted() {
+        // Codex reports a thread id → that wins.
+        assert_eq!(
+            effective_session_id("pre-uuid", Some("01a031e5-b6d5-7e80-a4d7-e52e7b556146")),
+            "01a031e5-b6d5-7e80-a4d7-e52e7b556146"
+        );
+        // Claude echoes the id we handed it.
+        assert_eq!(effective_session_id("pre-uuid", Some("pre-uuid")), "pre-uuid");
+        // Degraded codex spawn (no `thread.started`) → keep the pre-minted id
+        // rather than producing an empty one.
+        assert_eq!(effective_session_id("pre-uuid", None), "pre-uuid");
+        assert_eq!(effective_session_id("pre-uuid", Some("   ")), "pre-uuid");
+        // And the wire id round-trips either way.
+        let sid = effective_session_id("pre-uuid", Some("thread-9"));
+        assert_eq!(session_id_from_resp(&to_resp_id(&sid)), Some("thread-9"));
+    }
+
+    #[test]
+    fn attachments_split_per_agent_ingestion() {
+        let paths = vec![
+            std::path::PathBuf::from("/ws/.fleet-uploads/a/shot.png"),
+            std::path::PathBuf::from("/ws/.fleet-uploads/b/spec.pdf"),
+            std::path::PathBuf::from("/ws/.fleet-uploads/c/photo.JPEG"),
+        ];
+
+        // claude reads everything off disk itself — nothing gets flagged.
+        let (in_prompt, images) = split_attachments_for_tool("claude", &paths);
+        assert_eq!(in_prompt.len(), 3);
+        assert!(images.is_empty());
+
+        // codex only sees an image through `-i`; the pdf still rides the manifest.
+        let (in_prompt, images) = split_attachments_for_tool("codex", &paths);
+        assert_eq!(in_prompt, vec![std::path::PathBuf::from("/ws/.fleet-uploads/b/spec.pdf")]);
+        assert_eq!(
+            images,
+            vec![
+                "/ws/.fleet-uploads/a/shot.png".to_string(),
+                "/ws/.fleet-uploads/c/photo.JPEG".to_string()
+            ]
+        );
     }
 
     #[test]

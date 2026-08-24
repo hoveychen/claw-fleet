@@ -36,6 +36,7 @@ pub(crate) fn route_resume_session(
                                 model: req.model.clone(),
                                 effort: req.effort.clone(),
                                 permission_mode: req.permission_mode.clone(),
+                            images: Vec::new(),
                             },
                             Box::new(|_| {}),
                         ) {
@@ -231,6 +232,7 @@ pub(crate) fn route_spawn_session(
                             permission_mode: req.permission_mode.clone(),
                             session_id: req.session_id.clone(),
                             entrypoint: String::new(),
+                        images: Vec::new(),
                         };
                         match crate::agent_source::spawn_session(
                             req.tool.as_deref().unwrap_or("claude"),

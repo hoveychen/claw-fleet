@@ -205,6 +205,7 @@ pub fn maybe_fire_auto_resume(
                 model: None,
                 effort: None,
                 permission_mode: None,
+            images: Vec::new(),
             },
             Box::new(move |success| {
                 in_flight_done.fetch_sub(1, Ordering::SeqCst);
@@ -298,6 +299,7 @@ pub fn maybe_fire_auto_resume(
                 model: None,
                 effort: None,
                 permission_mode: None,
+            images: Vec::new(),
             },
             // The per-episode se_map cap (not the failures backoff) bounds these,
             // so the reaper only needs to release the concurrency slot.
