@@ -10,6 +10,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { isWebBuild } from "../hostEnv";
 import { ImageLightbox } from "./ImageLightbox";
 import { useAutoFlip } from "./useAutoFlip";
 import { useWikiMentions } from "./useWikiMentions";
@@ -295,6 +296,67 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     [onAttachmentError],
   );
 
+  // ── HTML5 drag-and-drop, browser build only ─────────────────────────────
+  //
+  // The desktop never sees a DOM drop: Tauri intercepts the webview's native
+  // one and delivers *paths* over the app event the effect above listens to. In
+  // a tab nothing intercepts anything and that effect's `invoke` has no
+  // transport, so these handlers are the only drop path there is — and without
+  // them a dropped file was swallowed with no chip and no error.
+  //
+  // `preventDefault` is not optional and is not about us: an unclaimed dragover
+  // means the browser handles the drop itself by *navigating to the file*,
+  // which replaces the running app. So the composer claims both events
+  // whenever it is the drop target, and only then decides whether to act.
+  const webDrop = isWebBuild();
+  const acceptsDrop = Boolean(onDropFiles) && !disabled;
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (!webDrop) return;
+      e.preventDefault();
+      if (acceptsDrop) setDragActive(true);
+    },
+    [webDrop, acceptsDrop],
+  );
+
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent) => {
+      if (!webDrop) return;
+      // Moving between the composer's own children fires leave/enter pairs;
+      // only an exit from the root box should clear the hint.
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+      setDragActive(false);
+    },
+    [webDrop],
+  );
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      if (!webDrop) return;
+      e.preventDefault();
+      setDragActive(false);
+      if (!acceptsDrop) return;
+      // Read before the first await: the files are the event's, and the host
+      // callback is what the paths are for.
+      const files = [...(e.dataTransfer?.files ?? [])];
+      if (files.length === 0) return;
+      try {
+        // Lazily, unlike `webTransport`'s static import of the same module:
+        // there is no user-activation window to protect here (the drop already
+        // handed over the bytes), so the desktop bundle need not carry the
+        // browser-build upload path or the route table behind it.
+        const { uploadPickedFiles } = await import("../webAttachments");
+        const paths = await uploadPickedFiles(files);
+        if (paths.length > 0) onDropFilesRef.current?.(paths);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        reportError(`${t("composer.attach_failed", "Attachment upload failed")}: ${detail}`);
+      }
+    },
+    [webDrop, acceptsDrop, reportError, t],
+  );
+
   const handlePickFiles = useCallback(async () => {
     try {
       const result = await openDialog({
@@ -518,6 +580,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     <div
       ref={composerRootRef}
       className={`${styles.composer} ${bare ? styles.bare : ""} ${dragActive ? styles.drag_active : ""} ${className ?? ""}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       {dragActive && (
         <div className={styles.drop_overlay}>
