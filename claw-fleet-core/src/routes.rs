@@ -220,6 +220,15 @@ pub const SOURCES_PREFIX: &str = "/sources/";
 /// exactly slug / version / rel, matching the desktop protocol handler.
 pub const WIKI_ASSET_PREFIX: &str = "/wiki_asset/";
 
+/// Prefix arm: `/decision_asset/<id>/<qidx>/<relpath…>`, the browser build's
+/// stand-in for `fleet-decision://`. Same reasoning as [`WIKI_ASSET_PREFIX`] —
+/// the served `index.html` reaches the question's images through relative refs
+/// (`<img src="chart.png">`, the documented `fleet__ask` `images` contract),
+/// which [`DECISION_ASSET`]'s query form cannot support. Neither the card id
+/// nor `q<idx>` may hold a separator, so unlike a wiki slug nothing here needs
+/// percent-encoding to stay in one segment.
+pub const DECISION_ASSET_PREFIX: &str = "/decision_asset/";
+
 /// Public API surface exposed to per-customer **scoped** tokens in the Fleet
 /// Cloud lean deployment (one-customer-per-container).
 ///
