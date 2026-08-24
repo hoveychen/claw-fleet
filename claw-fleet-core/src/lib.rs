@@ -132,6 +132,7 @@ pub mod token_analysis;
 pub mod user_attachments;
 pub mod wakeup_guard;
 pub mod watch;
+pub mod web_assets;
 pub mod wiki;
 pub mod wiki_guidance;
 pub mod workflow;

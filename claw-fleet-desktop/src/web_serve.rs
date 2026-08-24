@@ -32,20 +32,14 @@ use tiny_http::{Header, Request, Response, Server};
 /// Shared handle on the app's live backend — the same `Arc` `AppState` holds.
 pub type SharedBackend = Arc<RwLock<Box<dyn Backend>>>;
 
-/// One frontend file, resolved by whoever owns the bundle.
-pub struct StaticAsset {
-    pub bytes: Vec<u8>,
-    pub mime: String,
-}
-
-/// Resolves a request path to a frontend file.
+/// Frontend bundle plumbing, shared with `fleet serve` so both servers agree
+/// on how `/` maps to `index.html` and what a miss looks like.
 ///
-/// Behind this is Tauri's own `AssetResolver`, which serves the very bundle the
-/// desktop webview loads — so the browser gets the same `vite build` output
-/// with nothing embedded twice and no second build step. Kept as a closure
-/// rather than an `AppHandle` so this module stays free of Tauri types and the
-/// tests can inject a fake bundle.
-pub type AssetSource = Arc<dyn Fn(&str) -> Option<StaticAsset> + Send + Sync>;
+/// Here the source closure wraps Tauri's own `AssetResolver` — the very bundle
+/// the desktop webview loads, so nothing is embedded twice and there is no
+/// second build step. Keeping it a closure (rather than an `AppHandle`) is also
+/// what lets the tests inject a fake bundle.
+pub use claw_fleet_core::web_assets::{AssetSource, StaticAsset};
 
 type Resp = Response<Cursor<Vec<u8>>>;
 
@@ -332,24 +326,12 @@ fn default_source() -> String {
     "claude".to_string()
 }
 
-/// Serve a file out of the frontend bundle.
-///
-/// `/` maps to `/index.html`; anything the bundle doesn't have 404s rather than
-/// falling back to index, so a mistyped asset path stays visible as a missing
-/// file instead of silently returning HTML.
+/// Serve a file out of the frontend bundle, or 404 when this port was started
+/// as a pure data API (no bundle supplied).
 fn serve_static(ctx: &Ctx, path: &str) -> Resp {
-    let Some(assets) = ctx.assets.as_ref() else {
-        return error(404, "no such route");
-    };
-    let wanted = if path == "/" { "/index.html" } else { path };
-    match assets(wanted) {
-        Some(asset) => {
-            let header: Header = format!("Content-Type: {}", asset.mime)
-                .parse()
-                .unwrap_or_else(|_| json_header());
-            Response::from_data(asset.bytes).with_header(header)
-        }
-        None => error(404, "no such file"),
+    match ctx.assets.as_ref() {
+        Some(assets) => claw_fleet_core::web_assets::respond(assets, path),
+        None => error(404, "no such route"),
     }
 }
 
