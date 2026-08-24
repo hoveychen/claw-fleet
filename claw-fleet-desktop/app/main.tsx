@@ -34,6 +34,14 @@ async function boot() {
     installMocks({ qaMode: mockQaMode });
     triggerPromoScene = mocks.triggerPromoScene;
     triggerMockQaScenario = mocks.triggerMockQaScenario;
+  } else {
+    // Same bundle, opened in a plain browser rather than the desktop webview:
+    // stand an HTTP transport in for Tauri's IPC. Must also precede everything
+    // else — `initStorage()` below is already an `invoke` call.
+    const { isTauriHost, installWebTransport } = await import("./webTransport");
+    if (!isTauriHost()) {
+      await installWebTransport();
+    }
   }
 
   const { initStorage, setItem, migrateSessionViewDefault, migrateFeatureTristate } =

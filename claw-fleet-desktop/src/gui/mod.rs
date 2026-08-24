@@ -1663,7 +1663,25 @@ pub fn run() {
                 // just means the browser build is unavailable this run.
                 {
                     let shared = state.backend.clone();
-                    match crate::web_serve::start(shared, crate::web_serve::DEFAULT_PORT) {
+                    // Serve the frontend straight out of Tauri's own asset
+                    // bundle — the same files the desktop webview loads, so the
+                    // browser build needs no second copy and no extra build
+                    // step. In dev this falls back to reading frontendDist.
+                    let handle = app.handle().clone();
+                    let assets: crate::web_serve::AssetSource =
+                        Arc::new(move |path: &str| {
+                            handle.asset_resolver().get(path.to_string()).map(|a| {
+                                crate::web_serve::StaticAsset {
+                                    bytes: a.bytes,
+                                    mime: a.mime_type,
+                                }
+                            })
+                        });
+                    match crate::web_serve::start(
+                        shared,
+                        crate::web_serve::DEFAULT_PORT,
+                        Some(assets),
+                    ) {
                         Ok(port) => claw_fleet_core::log_debug(&format!(
                             "web front door listening on http://127.0.0.1:{port}"
                         )),
