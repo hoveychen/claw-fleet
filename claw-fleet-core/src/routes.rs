@@ -22,6 +22,19 @@ pub const APPLY_PLAN_APPROVAL_HOOK: &str = "/apply_plan_approval_hook";
 pub const APPLY_PRD_MODE: &str = "/apply_prd_mode";
 pub const APPLY_WIKI_GUIDANCE: &str = "/apply_wiki_guidance";
 pub const AUDIT: &str = "/audit";
+/// The three host-settings pairs the Settings panel reads and writes: GET
+/// returns the current config, POST saves it and answers with the stored value.
+///
+/// They exist for the **browser build**, which has no host of its own — a tab
+/// served by `fleet webui` has to reach these settings over HTTP or show a
+/// toggle that saves nowhere. `RemoteBackend` deliberately does NOT call them:
+/// over SSH these three govern the *desktop* machine (its injector lock, its
+/// decision-panel hooks, its resume scheduler), so it keeps reading the local
+/// files. `/auto_resume_config` is the same path Phase 4 P3 retired for exactly
+/// that reason; it is back for the web transport, not for the SSH client.
+pub const AUTO_RESUME_CONFIG: &str = "/auto_resume_config";
+pub const PERMISSIONS_CONFIG: &str = "/permissions_config";
+pub const DECISION_PANEL_CONFIG: &str = "/decision_panel_config";
 pub const AUDIT_CHECK_UPDATE: &str = "/audit/check-update";
 pub const AUDIT_PATTERN_INFO: &str = "/audit/pattern-info";
 pub const AUDIT_RULES: &str = "/audit/rules";
