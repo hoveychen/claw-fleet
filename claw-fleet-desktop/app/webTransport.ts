@@ -5,8 +5,12 @@
  * The frontend was always a plain web app; `invoke()` was the only thing tying
  * it to Tauri. `mock/liveProxy.ts` already proved the board renders from HTTP
  * alone and already owns the command → route table, so this module does not
- * introduce a second one: it points that table at the app's own front door
- * (`web_serve.rs`, same origin, no prefix) and installs it as the IPC handler.
+ * introduce a second one: it points that table at whatever server delivered
+ * this page (same origin, no prefix) and installs it as the IPC handler.
+ *
+ * That server is `fleet webui`, which serves this bundle and the data routes
+ * it calls off one port. (`fleet serve` is the other subcommand — token-gated
+ * API only, no bundle — and is not what this talks to.)
  *
  * Deliberately *not* a separate entry point or build: the shipped `dist/` is
  * the same one Tauri bundles, and which transport gets installed is decided at
