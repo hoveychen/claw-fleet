@@ -961,6 +961,10 @@ fn handle_request(
             // ── Unified /sources/{name}/account and /sources/{name}/usage ──
             _ if path.starts_with(crate::routes::SOURCES_PREFIX) => route_sources_prefix(ctx, request, &query, json_header, path),
 
+            // ── /wiki_asset/<slug>/<version>/<rel…> — path form of WIKI_FILE,
+            // so a published index.html's relative assets resolve in a tab.
+            _ if path.starts_with(crate::routes::WIKI_ASSET_PREFIX) => route_wiki_asset_prefix(ctx, request, &query, json_header, path),
+
             crate::routes::SETUP_STATUS => route_setup_status(ctx, request, &query, json_header, path),
 
             crate::routes::USAGE_SUMMARIES => route_usage_summaries(ctx, request, &query, json_header, path),
