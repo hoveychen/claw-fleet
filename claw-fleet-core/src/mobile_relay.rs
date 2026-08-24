@@ -677,10 +677,22 @@ where
     *SESSIONS_PROVIDER.lock().unwrap() = Some(Box::new(f));
 }
 
-/// The host's current session list, or `None` when no provider is registered.
+/// The host's current session list, or `None` when there is no authoritative one
+/// to hand out.
+///
+/// An empty list counts as "not scanned yet", not "no sessions" — every host
+/// registers its provider at startup, before its first scan has filled the list,
+/// so a caller that trusted the empty vec would report zero usage and push a
+/// blank roster for as long as the cold scan takes. A host that genuinely has no
+/// sessions falls back to a scan that also returns none, which costs nothing to
+/// walk. (Same reasoning as `session_snapshot`'s first-read contract.) Applied
+/// here rather than in each provider so neither host can forget it.
 fn provided_sessions() -> Option<Vec<crate::session::SessionInfo>> {
     let guard = SESSIONS_PROVIDER.lock().unwrap();
-    guard.as_ref().and_then(|provider| provider())
+    guard
+        .as_ref()
+        .and_then(|provider| provider())
+        .filter(|sessions| !sessions.is_empty())
 }
 
 /// Push the current snapshot to clients right now, bypassing the change-dedup
@@ -6112,6 +6124,20 @@ mod tests {
 
         *SESSIONS_PROVIDER.lock().unwrap() = None;
         *RESULT_CACHE.lock().unwrap() = None;
+    }
+
+    /// Every host registers its provider before its first scan has filled the
+    /// list, so an empty vec means "not scanned yet" and must not be served as
+    /// an answer — see `provided_sessions`.
+    #[test]
+    fn an_empty_provided_list_is_not_an_authoritative_answer() {
+        let _guard = fleet_home_lock();
+        set_sessions_provider(|| Some(Vec::new()));
+        assert!(
+            provided_sessions().is_none(),
+            "an unscanned host must fall back, not report zero"
+        );
+        *SESSIONS_PROVIDER.lock().unwrap() = None;
     }
 
     #[test]
