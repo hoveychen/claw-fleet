@@ -965,6 +965,10 @@ fn handle_request(
             // so a published index.html's relative assets resolve in a tab.
             _ if path.starts_with(crate::routes::WIKI_ASSET_PREFIX) => route_wiki_asset_prefix(ctx, request, &query, json_header, path),
 
+            // ── /decision_asset/<id>/<qidx>/<rel…> — path form of
+            // DECISION_ASSET, so a card's <img src="chart.png"> resolves.
+            _ if path.starts_with(crate::routes::DECISION_ASSET_PREFIX) => route_decision_asset_prefix(ctx, request, &query, json_header, path),
+
             crate::routes::SETUP_STATUS => route_setup_status(ctx, request, &query, json_header, path),
 
             crate::routes::USAGE_SUMMARIES => route_usage_summaries(ctx, request, &query, json_header, path),
