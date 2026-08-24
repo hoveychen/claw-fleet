@@ -629,6 +629,36 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         eprintln!("[fleet serve] scoped public token enabled (FLEET_PUBLIC_TOKEN); external callers limited to the public API surface");
     }
 
+    // Deployments that put their own auth gateway in front of this port can
+    // switch the token tiering off entirely — re-checking here would only be a
+    // second scheme to keep in sync. Off unless asked for, so nothing changes
+    // for callers that rely on the token.
+    let auth_disabled = std::env::var("FLEET_SERVE_NO_AUTH")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if auth_disabled {
+        eprintln!("[fleet serve] FLEET_SERVE_NO_AUTH set — every request is treated as admin; put an auth gateway in front of this port");
+    }
+
+    // Directory holding the web UI's `vite build` output. When set, paths that
+    // match no data route are served from it, so the same process answers both
+    // the API and the browser UI.
+    let web_root = std::env::var("FLEET_WEB_ROOT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from);
+    let web_assets = match web_root {
+        Some(root) if root.is_dir() => {
+            eprintln!("[fleet serve] serving web UI from {}", root.display());
+            Some(crate::web_assets::from_dir(root))
+        }
+        Some(root) => {
+            eprintln!("[fleet serve] FLEET_WEB_ROOT={} is not a directory — web UI disabled", root.display());
+            None
+        }
+        None => None,
+    };
+
     // ── Request worker pool ────────────────────────────────────────────────
     // Every request used to be served from one `for request in
     // server.incoming_requests()` loop on this thread, which made the whole
@@ -662,6 +692,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         let db_path = search_db_path.clone();
         let token = token.clone();
         let public_token = public_token.clone();
+        let web_assets = web_assets.clone();
         let sse = sse.clone();
         let snapshot = snapshot.clone();
         std::thread::spawn(move || {
@@ -674,6 +705,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 db_path,
                 token,
                 public_token,
+                auth_disabled,
+                web_assets,
                 sse,
                 snapshot,
             )
@@ -688,6 +721,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         search_db_path,
         token,
         public_token,
+        auth_disabled,
+        web_assets,
         sse,
         snapshot,
     );
@@ -725,6 +760,8 @@ fn run_request_worker(
     search_db_path: std::path::PathBuf,
     token: String,
     public_token: Option<String>,
+    auth_disabled: bool,
+    web_assets: Option<crate::web_assets::AssetSource>,
     sse: SseBroadcaster,
     snapshot: Arc<crate::session_snapshot::SessionSnapshot>,
 ) {
@@ -751,7 +788,15 @@ fn run_request_worker(
     };
     loop {
         match server.recv() {
-            Ok(request) => handle_request(ctx, request, &token, public_token.as_deref(), &sse),
+            Ok(request) => handle_request(
+                ctx,
+                request,
+                &token,
+                public_token.as_deref(),
+                auth_disabled,
+                web_assets.as_ref(),
+                &sse,
+            ),
             Err(e) => {
                 eprintln!("[fleet serve] recv failed, worker stopping: {e}");
                 return;
@@ -761,11 +806,14 @@ fn run_request_worker(
 }
 
 /// Serve one request: authorize, then dispatch to its route handler.
+#[allow(clippy::too_many_arguments)]
 fn handle_request(
     ctx: &ServeCtx,
     request: tiny_http::Request,
     token: &str,
     public_token: Option<&str>,
+    auth_disabled: bool,
+    web_assets: Option<&crate::web_assets::AssetSource>,
     sse: &SseBroadcaster,
 ) {
     {
@@ -791,7 +839,13 @@ fn handle_request(
             })
             .or_else(|| query.get("token").cloned());
 
-        let outcome = auth::authorize(path, presented.as_deref(), &token, public_token.as_deref());
+        let outcome = auth::authorize(
+            path,
+            presented.as_deref(),
+            &token,
+            public_token.as_deref(),
+            auth_disabled,
+        );
         if !outcome.is_allowed() {
             // 401 when nothing was presented, 403 when a token was presented but
             // is wrong or a scoped token reached a non-public path.
@@ -1189,6 +1243,13 @@ fn handle_request(
             crate::routes::MOBILE_RELAY_STATUS => route_mobile_relay_status(ctx, request, &query, json_header, path),
 
             crate::routes::MOBILE_RELAY_QR => route_mobile_relay_qr(ctx, request, &query, json_header, path),
+
+            // No data route matched. When a web UI bundle is configured this
+            // is a request for one of its files; otherwise it stays a 404.
+            _ if request.method() == &tiny_http::Method::Get && web_assets.is_some() => {
+                let assets = web_assets.expect("checked by the guard");
+                let _ = request.respond(crate::web_assets::respond(assets, path));
+            }
 
             _ => {
                 let _ = request.respond(tiny_http::Response::empty(404));
