@@ -2279,19 +2279,35 @@ fn serve_today_usage(_params: &Value) -> Result<Value, String> {
     // expensive method by total time; the phone and the desktop both poll it, so
     // collapse overlapping calls onto one scan.
     cached_by_key("today_usage", TODAY_USAGE_CACHE_TTL, || {
-        let sources = crate::agent_source::build_sources();
-        let sessions = crate::session::scan_all_sources(&sources);
-        let usage = crate::today_usage::today_usage(&sessions);
+        let usage = crate::today_usage::today_usage(&current_sessions());
         serde_json::to_value(usage).map_err(|e| e.to_string())
     })
+}
+
+/// The session list a read-only projection should work from: the host's warm
+/// copy when it has one, otherwise a scan.
+///
+/// The scan is the fallback, not the norm. It walks every transcript of every
+/// agent source, which measured 319–615ms per `today_usage` call on a host with
+/// ~400 recent transcripts — while `pending_snapshot` on the same connection
+/// answered in 0–1ms. The phone polls `today_usage` every 20s and
+/// [`TODAY_USAGE_CACHE_TTL`] is 5s, so every poll used to pay that in full, and
+/// the desktop's own badge poll paid it again. Both hosts already keep the list
+/// warm (see [`SESSIONS_PROVIDER`]) — this makes the handler read it.
+fn current_sessions() -> Vec<crate::session::SessionInfo> {
+    if let Some(sessions) = provided_sessions() {
+        return sessions;
+    }
+    let sources = crate::agent_source::build_sources();
+    crate::session::scan_all_sources(&sources)
 }
 
 // Per-model receipt breakdown behind the header counter (mirrors
 // `LocalBackend::today_usage_breakdown` / `/today_usage_breakdown`).
 fn serve_today_usage_breakdown(_params: &Value) -> Result<Value, String> {
-    let sources = crate::agent_source::build_sources();
-    let sessions = crate::session::scan_all_sources(&sources);
-    let breakdown = crate::today_usage::today_usage_breakdown(&sessions);
+    // Same projection, same list — see `current_sessions`. Uncached (unlike
+    // `today_usage`) because this one is opened by hand, not polled.
+    let breakdown = crate::today_usage::today_usage_breakdown(&current_sessions());
     serde_json::to_value(breakdown).map_err(|e| e.to_string())
 }
 
