@@ -53,6 +53,77 @@ r = client.responses.create(model="claude-opus-5", input="fix issue #12")
 | `FLEET_WAIT_FOR_CREDS` | no | Wait for the claude credential before serving. `1` (default) / `0`. |
 | `FLEET_CREDS_TIMEOUT` | no | Seconds to wait for the credential, default `60`. |
 | `FLEET_CRED_STORE_URL` | no | Cred-store endpoint the operator's injector uses (informational). |
+| `FLEET_STATE_DIR` | no | Persist `~/.fleet` by symlinking it here instead of mounting a volume at it — for hosts that hand out exactly one volume (muvee). Unset = leave `~/.fleet` where it is. |
+| `FOXY_DATA_DIR` | no | foxy's data dir, default `/home/fleet/.foxy-switcher`. Holds `agent-config.json` (the device token pairing produces) and the daemon's `port` file. Same env var `claw_fleet_core::foxy` reads to source usage from the local daemon. |
+| `FOXY_VAULT_URL` | no | Vault URL printed in the pairing hint when the container is unpaired. Informational only — `pair` takes it as a flag. |
+| `FOXY_AGENT` | no | `0` disables starting the cred-store agent even when paired. |
+| `FOXY_AGENT_PORT` | no | Loopback port for the agent's local API, default `8765`. |
+
+## Credentials in practice: pair this container to the vault
+
+The image ships `foxy-switcher` itself (copied from the published vault image —
+one static binary runs both `--mode=vault` and `--mode=agent`), so the container
+is its own cred-store agent. Pairing is a **device flow**: a human approves a
+code, so it happens once, interactively, and the resulting token is all the
+container keeps.
+
+```sh
+# 1. inside the container (docker exec / muveectl projects exec):
+foxy-switcher pair --vault-url https://vault.example.com \
+                   --data-dir "$FOXY_DATA_DIR" --device-name fleet-cloud
+#    → prints a verification URL + user code; approve it in the vault UI.
+#    → writes $FOXY_DATA_DIR/agent-config.json (mode 0600).
+
+# 2. restart the container. The entrypoint sees agent-config.json, starts
+#    `foxy-switcher --server --mode=agent`, and that leases one Claude + one
+#    Codex account and writes:
+#       ~/.claude/.credentials.json     and     $CODEX_HOME/auth.json
+```
+
+Unpaired containers still serve — the entrypoint logs the exact `pair` command
+and skips the credential wait (nothing would inject), so the API comes up
+agent-less rather than hanging on a timeout.
+
+**Where the device token lives is a deployment decision.** `FOXY_DATA_DIR`
+defaults to the ephemeral layer on purpose: that token can lease accounts from
+the vault, so on a multi-tenant "one customer per container" deployment it must
+never sit on the customer-visible `/workspace` mount — the cost is re-pairing on
+every container recreate. On a single-tenant box you own, pointing it into the
+volume (`FOXY_DATA_DIR=/workspace/.foxy-switcher`) makes pairing survive
+redeploys.
+
+## Deploy on muvee
+
+muvee auto-mounts exactly **one** persistent volume per project, at
+`/workspace`. So `~/.fleet` (Fleet state) rides in that same volume via
+`FLEET_STATE_DIR`, and `/workspace` doubles as the default agent workspace:
+
+```sh
+muveectl projects create --name fleet-cloud \
+  --image-ref ghcr.io/hoveychen/fleet-cloud:latest \
+  --container-port 8080 --volume-mount-path /workspace \
+  --no-auth --memory-limit 4g
+
+# env vars are secrets bound per-variable (muveectl projects env is read-only):
+for pair in \
+  "fleet-cloud-admin-token:FLEET_ADMIN_TOKEN:$(openssl rand -hex 32)" \
+  "fleet-cloud-public-token:FLEET_PUBLIC_TOKEN:$(openssl rand -hex 32)" \
+  "fleet-cloud-workspace:FLEET_PUBLIC_WORKSPACE:/workspace" \
+  "fleet-cloud-state-dir:FLEET_STATE_DIR:/workspace/.fleet-state" \
+  "fleet-cloud-foxy-dir:FOXY_DATA_DIR:/workspace/.foxy-switcher" \
+  "fleet-cloud-foxy-vault:FOXY_VAULT_URL:https://<vault-host>" ; do
+  IFS=: read -r name var value <<<"$pair"
+  id=$(muveectl secrets create --name "$name" --type env_var --value "$value" --json | jq -r .id)
+  muveectl projects bind-secret fleet-cloud --secret-id "$id" --env-var "$var"
+done
+
+muveectl projects deploy fleet-cloud
+muveectl projects describe fleet-cloud | grep 'Image SHA'   # SHA changed = live
+```
+
+`--no-auth` is deliberate: muvee's OAuth (Traefik ForwardAuth) would break SDK
+clients pointed at `/v1`. The gate is the Bearer token — `FLEET_PUBLIC_TOKEN`
+for integrators, `FLEET_ADMIN_TOKEN` for first-party. Both must be secrets.
 
 ## Credential isolation (the seam)
 
