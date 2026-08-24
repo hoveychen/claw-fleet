@@ -1,7 +1,10 @@
+// @vitest-environment jsdom
+// `callProbe` resolves its URL against `window.location.origin`, so the
+// composite test needs a DOM. The fs-based scanners work either way.
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { LIVE_ROUTES } from "./liveProxy";
+import { LIVE_COMPOSITES, LIVE_ROUTES } from "./liveProxy";
 
 /**
  * Commands the frontend reaches through a variable, not a literal — a ternary
@@ -244,5 +247,81 @@ describe("live proxy route table", () => {
       path: "/messages",
       query: { path: "dsh://s-1", tail: "150" },
     });
+  });
+});
+
+/**
+ * `list_pending_decisions` is the frontend's *mount catch-up*: Tauri events are
+ * not buffered, so a card raised before the page loaded is only ever seen
+ * through this one call. `RemoteBackend` builds it by fanning out to all six
+ * `/…/pending` endpoints and then filling in each request's display fields from
+ * the session list — it is not one route, and mapping it to `/guard/pending`
+ * alone left five of the six buckets permanently empty *and* handed the caller
+ * a bare array where it reads `p.elicitation` / `p.fleetAsk` / ….
+ *
+ * `useDecisionEvents` guards with `p.guard?.forEach`, so the wrong shape did
+ * not throw — it silently did nothing, which is why a click-through never
+ * caught it.
+ */
+describe("list_pending_decisions composite", () => {
+  // Paths carry the `/__live` dev-proxy prefix, so match on the suffix.
+  const bucketFor = (path: string) => {
+    if (path.endsWith("/guard/pending")) return [mk("g1", "guard-ws")];
+    if (path.endsWith("/elicitation/pending")) return [mk("e1", "")];
+    if (path.endsWith("/fleet-ask/pending")) return [mk("f1", "")];
+    if (path.endsWith("/a2ui-render/pending")) return [mk("a1", "")];
+    if (path.endsWith("/plan-approval/pending")) return [mk("p1", "")];
+    if (path.endsWith("/permission-prompt/pending")) return [mk("m1", "")];
+    if (path.endsWith("/sessions")) {
+      return [{ id: "s1", workspaceName: "resolved-ws", aiTitle: "resolved-title" }];
+    }
+    return [];
+  };
+  function mk(id: string, workspaceName: string) {
+    return { id, sessionId: "s1", workspaceName, aiTitle: null };
+  }
+
+  it("fans out to all six pending routes and resolves display fields", async () => {
+    const seen: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      seen.push(path);
+      return new Response(JSON.stringify(bucketFor(path)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      const composite = LIVE_COMPOSITES.list_pending_decisions;
+      expect(composite, "list_pending_decisions must be a composite").toBeTypeOf("function");
+      const out = (await composite({})) as Record<string, Array<Record<string, unknown>>>;
+
+      // All six buckets, under the camelCase names the hook destructures.
+      for (const k of [
+        "guard",
+        "elicitation",
+        "fleetAsk",
+        "a2uiRender",
+        "planApproval",
+        "permissionPrompt",
+      ]) {
+        expect(out[k], `bucket ${k}`).toHaveLength(1);
+      }
+      expect(seen.some((p) => p.endsWith("/elicitation/pending"))).toBe(true);
+      expect(seen.some((p) => p.endsWith("/permission-prompt/pending"))).toBe(true);
+
+      // `resolve_pending_display`: fill an empty workspaceName / missing aiTitle
+      // from the session, and leave a value that is already set alone.
+      expect(out.elicitation[0].workspaceName).toBe("resolved-ws");
+      expect(out.elicitation[0].aiTitle).toBe("resolved-title");
+      expect(out.guard[0].workspaceName).toBe("guard-ws");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("is no longer mapped as a single route", () => {
+    expect(LIVE_ROUTES.list_pending_decisions).toBeUndefined();
   });
 });

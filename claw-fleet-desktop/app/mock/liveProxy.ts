@@ -665,11 +665,6 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/memories",
   }),
 
-  list_pending_decisions: () => ({
-    method: "GET",
-    path: "/guard/pending",
-  }),
-
   list_plugins: () => ({
     method: "GET",
     path: "/plugins",
@@ -1219,6 +1214,64 @@ export const LIVE_COMPOSITES: Record<
    * 2000 UTF-16 units, so a CJK context can carry more here. It is a prompt
    * hint either way.
    */
+  /**
+   * `gui::list_pending_decisions` — the frontend's mount catch-up, and the only
+   * way a card raised *before* the page loaded is ever seen (Tauri events are
+   * not buffered for listeners that attach later).
+   *
+   * `RemoteBackend` fans out to all six `/…/pending` endpoints and then fills in
+   * each request's display fields from the session list; it is not one route.
+   * Mapping it to `/guard/pending` alone left five buckets permanently empty and
+   * returned a bare array where the hook reads `p.elicitation` / `p.fleetAsk` /
+   * …. Because the hook guards with `p.guard?.forEach`, that failed silently —
+   * no error, just no catch-up.
+   *
+   * Per-bucket failures degrade to `[]`, mirroring the Rust's `unwrap_or_default`
+   * on each call: one dead endpoint must not lose the other five.
+   */
+  list_pending_decisions: async () => {
+    const buckets: Array<[string, string]> = [
+      ["guard", "/guard/pending"],
+      ["elicitation", "/elicitation/pending"],
+      ["fleetAsk", "/fleet-ask/pending"],
+      ["a2uiRender", "/a2ui-render/pending"],
+      ["planApproval", "/plan-approval/pending"],
+      ["permissionPrompt", "/permission-prompt/pending"],
+    ];
+    const one = async (path: string) => {
+      try {
+        const v = await callProbe({ method: "GET", path });
+        return Array.isArray(v) ? (v as Array<Record<string, unknown>>) : [];
+      } catch {
+        return [];
+      }
+    };
+    const [lists, sessions] = await Promise.all([
+      Promise.all(buckets.map(([, path]) => one(path))),
+      one("/sessions"),
+    ]);
+
+    // `backend::resolve_pending_display`: fill an empty workspaceName / absent
+    // aiTitle from the session, preferring its title override. Values already
+    // set by the producer are left alone.
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const s of sessions) {
+      if (typeof s?.id === "string") byId.set(s.id, s);
+    }
+    const out: Record<string, Array<Record<string, unknown>>> = {};
+    buckets.forEach(([key], i) => {
+      out[key] = lists[i].map((req) => {
+        const s = byId.get(String(req?.sessionId ?? ""));
+        if (!s) return req;
+        const next = { ...req };
+        if (!next.workspaceName) next.workspaceName = s.workspaceName;
+        if (next.aiTitle == null) next.aiTitle = s.titleOverride ?? s.aiTitle ?? null;
+        return next;
+      });
+    });
+    return out;
+  },
+
   get_guard_context: async (a) => {
     const sessions = (await callProbe({ method: "GET", path: "/sessions" })) as
       | Array<{ id?: string; jsonlPath?: string }>
