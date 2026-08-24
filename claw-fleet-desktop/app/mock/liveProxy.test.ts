@@ -241,6 +241,30 @@ describe("live proxy route table", () => {
     expect(LIVE_ROUTES.mobile_relay_qr_svg({}).pick).toBe("svg");
   });
 
+  /**
+   * A pasted screenshot has no path anywhere — not on the host, not in the
+   * page. The desktop parks the bytes in `$TMPDIR/fleet-pasted` and lets a
+   * second command move them into the store; the browser build has no host
+   * temp dir to park in, so the one POST has to land them in the store
+   * directly. Hence `from_clipboard=1`, which is what selects the store over
+   * the temp dir on the route's side.
+   *
+   * The bytes go as the raw body, not inside `body`: JSON-encoding a 3 MB
+   * screenshot as an array of integers is ~4x the bytes for a route that reads
+   * the body verbatim.
+   */
+  it("posts pasted bytes into the persistent store, not as JSON", () => {
+    const req = LIVE_ROUTES.stage_pasted_attachment({ bytes: [1, 2, 3], extension: "png" });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/elicitation/upload");
+    expect(req.query?.from_clipboard).toBe("1");
+    expect(String(req.query?.name)).toMatch(/\.png$/);
+    expect(req.body).toBeUndefined();
+    expect([...(req.rawBody as Uint8Array)]).toEqual([1, 2, 3]);
+    // The route answers `{"path": …}`; the command returns the bare path.
+    expect(req.pick).toBe("path");
+  });
+
   it("builds the tail request the store issues", () => {
     expect(LIVE_ROUTES.get_messages_tail({ jsonlPath: "dsh://s-1", tail: 150 })).toEqual({
       method: "GET",
@@ -263,6 +287,38 @@ describe("live proxy route table", () => {
  * not throw — it silently did nothing, which is why a click-through never
  * caught it.
  */
+/**
+ * Query encoding, which is not a detail: `hooks_server::parse_query` splits on
+ * `&` / `=` and hands each raw value to `percent_decode_str`. Percent-decoding
+ * does not touch `+`, so a value serialized the *form* way — which is what
+ * `URLSearchParams` does — arrives with a literal plus where the space was.
+ *
+ * `RemoteBackend`, the surface this table mirrors, percent-encodes with
+ * `NON_ALPHANUMERIC` and so sends `%20`. Anything named with a space (`/Users/x/
+ * My Project`, `my shot.png`) is the whole failure mode: the route looks up a
+ * path that does not exist and answers 404 or empty, and the UI shows it as
+ * "no data".
+ */
+describe("query encoding matches RemoteBackend", () => {
+  it("sends a space as %20, not as +", async () => {
+    const seen: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response("[]", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const { liveInvoke } = await import("./liveProxy");
+      await liveInvoke("get_messages", { jsonlPath: "/Users/x/My Project/a b.jsonl" });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain("My%20Project");
+    expect(seen[0]).not.toContain("+");
+  });
+});
+
 describe("list_pending_decisions composite", () => {
   // Paths carry the `/__live` dev-proxy prefix, so match on the suffix.
   const bucketFor = (path: string) => {

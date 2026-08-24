@@ -32,9 +32,11 @@ export function joinPath(parent: string, name: string): string {
 interface Props {
   /** Pre-filled target directory (the selected workspace's parent, usually). */
   initialParent: string;
-  /** Remote connection → browse the probe host via the backend picker, since
-   *  the native dialog would browse *this* desktop (mirrors FilesView). */
-  isRemote: boolean;
+  /** Browse the backend host through `DirPickerDialog` rather than the native
+   *  dialog. True whenever the native dialog would browse the wrong machine (a
+   *  remote connection) or does not exist at all (the browser build); FilesView
+   *  owns that decision, since it makes the same one for its own Browse button. */
+  useBackendPicker: boolean;
   /** Clone succeeded; `dest` is the new checkout's absolute path. */
   onDone: (dest: string) => void;
   onCancel: () => void;
@@ -48,7 +50,7 @@ interface Props {
  *  the dialog sitting on a spinner for the whole transfer. That reuses the
  *  existing proc runner wholesale — same detached pty host, same incremental
  *  output polling, already at parity between Local and Remote backends. */
-export function CloneRepoDialog({ initialParent, isRemote, onDone, onCancel }: Props) {
+export function CloneRepoDialog({ initialParent, useBackendPicker, onDone, onCancel }: Props) {
   const { t } = useTranslation();
   const [url, setUrl] = useState("");
   const [parent, setParent] = useState(initialParent);
@@ -66,7 +68,7 @@ export function CloneRepoDialog({ initialParent, isRemote, onDone, onCancel }: P
   const ready = url.trim().length > 0 && dest.length > 0 && !busy;
 
   const browse = async () => {
-    if (isRemote) {
+    if (useBackendPicker) {
       setPicking(true);
       return;
     }

@@ -24,6 +24,7 @@ import { CopyButton } from "./CopyButton";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DirPickerDialog } from "./DirPickerDialog";
+import { isWebBuild } from "../hostEnv";
 import { CloneRepoDialog } from "./CloneRepoDialog";
 import { isTempWorkspacePath, repoRootPath } from "./NewSessionForm";
 import {
@@ -135,11 +136,15 @@ export function FilesView() {
     updateMainViewState("files", { selectedWorkspace });
   const { connection } = useConnectionStore();
   const isRemote = connection?.type === "remote";
+  // The native directory dialog browses the machine the *desktop* runs on, which
+  // is the wrong one under a remote connection — and in the browser build there
+  // is no native dialog at all, only bytes. Both cases go through
+  // `DirPickerDialog`, which lists whatever host the backend is bound to
+  // (mirrors NewSessionForm).
+  const needsBackendDirPicker = isRemote || isWebBuild();
   // Directories the user browsed to by hand this session. They have no sessions
   // of their own, so they'd never surface from the session-derived list — we
   // keep them here (most-recent first) and merge them in as zero-count cards.
-  // Remote-only: the backend-driven directory picker, since the native dialog
-  // would browse *this* desktop rather than the probe (mirrors NewSessionForm).
   const [pickingDir, setPickingDir] = useState(false);
   const [cloning, setCloning] = useState(false);
 
@@ -173,8 +178,10 @@ export function FilesView() {
     count: number;
   }): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
-    // Remote workspaces live on the probe host — nothing to reveal locally.
-    if (!isRemote) {
+    // Opening a file manager needs the host shell. A remote workspace lives on
+    // the probe, and in the browser build `reveal_path` is a no-op — a menu item
+    // that silently does nothing is worse than an absent one.
+    if (!isRemote && !isWebBuild()) {
       const revealKey =
         document.documentElement.getAttribute("data-platform") === "windows"
           ? "paths.reveal_in_explorer"
@@ -282,10 +289,10 @@ export function FilesView() {
     setSelected(path);
   };
 
-  // Local: the native dialog is the better experience and browses the right
-  // machine. Remote: go through the backend picker instead (DirPickerDialog).
+  // Local desktop: the native dialog is the better experience and browses the
+  // right machine. Otherwise, the backend picker (DirPickerDialog).
   const browseWorkspace = async () => {
-    if (isRemote) {
+    if (needsBackendDirPicker) {
       setPickingDir(true);
       return;
     }
@@ -380,7 +387,7 @@ export function FilesView() {
           // Beside the repo in hand by default; the picker starts at the
           // backend host's home when nothing is selected.
           initialParent={selected ? parentDir(selected) : ""}
-          isRemote={isRemote}
+          useBackendPicker={needsBackendDirPicker}
           onDone={(dest) => {
             // The backend already registered the clone destination, but re-adding
             // is idempotent and returns the fresh list — so this both syncs the
@@ -722,6 +729,8 @@ export function ExternalFilePreview({
   const { t } = useTranslation();
   const { connection } = useConnectionStore();
   const isRemote = connection?.type === "remote";
+  // Same reason as the workspace menu above: no host shell to reveal into.
+  const canReveal = !isRemote && !isWebBuild();
 
   // FilePreview keys its read off `relativePath`; for an out-of-tree file the
   // absolute path IS the key, and the rest of the entry is only display data.
@@ -760,7 +769,7 @@ export function ExternalFilePreview({
         <div className={fileStyles.external_actions}>
           <CopyButton text={path} />
           {/* A remote workspace's files are on the probe host, not this Mac. */}
-          {!isRemote && (
+          {canReveal && (
             <button
               className={fileStyles.external_btn}
               onClick={() => void invoke("reveal_path", { path }).catch(() => {})}

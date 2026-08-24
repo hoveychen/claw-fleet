@@ -92,9 +92,33 @@ type LiveReq = {
    * caller expects its text.
    */
   raw?: boolean;
+  /**
+   * Bytes to send as the whole request body, instead of `body` as JSON.
+   *
+   * `/elicitation/upload` is the one route shaped this way: the filename rides
+   * the query string and the body is the attachment, read verbatim. Routing an
+   * attachment through `body` would put a screenshot on the wire as a JSON
+   * array of a few million integers — roughly 4x the bytes, for a route that
+   * does not parse JSON at all.
+   */
+  rawBody?: BodyInit;
 };
 
 const q = (v: unknown) => (v == null ? undefined : String(v));
+
+/**
+ * Store filename for pasted bytes, which arrive with no name of their own.
+ *
+ * Mirrors what the desktop's `stage_pasted_attachment` writes into
+ * `$TMPDIR/fleet-pasted` — a timestamped `pasted-*` stem — because that name
+ * ends up in the store path, and the store path is what the user reads back in
+ * the transcript. The *chip's* label is a separate, prettier value the composer
+ * computes itself; this one only has to be recognisable and unique-ish.
+ */
+function pastedAttachmentName(extension: string): string {
+  const ext = extension.replace(/^\./, "") || "bin";
+  return `pasted-${Date.now()}.${ext}`;
+}
 
 /**
  * Two host preferences the guidance routes need in their request body.
@@ -1067,6 +1091,27 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { url: a.url, dest: a.dest },
   }),
 
+  /**
+   * A pasted screenshot is the one attachment with no path anywhere — not on
+   * the host, not in the page. The desktop parks the bytes in
+   * `$TMPDIR/fleet-pasted` and lets `upload_elicitation_attachment` move them
+   * into the store as a second step; a tab has no host temp dir to park in, so
+   * this single POST has to land them in the store directly. That is what
+   * `from_clipboard=1` selects on the route's side, and it matters because the
+   * path returned here is spliced into the prompt and frozen into the
+   * transcript — the temp dir's reaper would come for it later.
+   */
+  stage_pasted_attachment: (a) => ({
+    method: "POST",
+    path: "/elicitation/upload",
+    query: {
+      name: pastedAttachmentName(String(a.extension ?? "bin")),
+      from_clipboard: "1",
+    },
+    rawBody: new Uint8Array((a.bytes as number[] | undefined) ?? []),
+    pick: "path",
+  }),
+
   suggest_audit_rules: (a) => ({
     method: "POST",
     path: "/audit/rules/suggest",
@@ -1165,14 +1210,29 @@ export function liveProxyReport() {
 
 async function callProbe(req: LiveReq): Promise<unknown> {
   const url = new URL(LIVE_BASE + req.path, window.location.origin);
+  // Built by hand rather than through `searchParams.set`, which serializes a
+  // space as `+` (it is the *form* encoder). `hooks_server::parse_query` splits
+  // on `&`/`=` and percent-decodes each value, and percent-decoding leaves `+`
+  // alone — so `/Users/x/My Project` would be looked up as `/Users/x/My+Project`
+  // and answer 404 or empty, which the UI shows as "no data". `RemoteBackend`,
+  // the surface this table mirrors, percent-encodes (`NON_ALPHANUMERIC`).
+  const pairs: string[] = [];
   for (const [k, v] of Object.entries(req.query ?? {})) {
-    if (v != null && v !== "") url.searchParams.set(k, String(v));
+    if (v != null && v !== "") {
+      pairs.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    }
   }
+  if (pairs.length > 0) url.search = pairs.join("&");
   const started = performance.now();
   const resp = await fetch(url.toString(), {
     method: req.method,
-    headers: req.body != null ? { "Content-Type": "application/json" } : undefined,
-    body: req.body != null ? JSON.stringify(req.body) : undefined,
+    headers:
+      req.rawBody != null
+        ? { "Content-Type": "application/octet-stream" }
+        : req.body != null
+          ? { "Content-Type": "application/json" }
+          : undefined,
+    body: req.rawBody ?? (req.body != null ? JSON.stringify(req.body) : undefined),
   });
   const ms = Math.round(performance.now() - started);
   const text = await resp.text();
@@ -1210,6 +1270,36 @@ async function callProbe(req: LiveReq): Promise<unknown> {
     return (value as Record<string, unknown> | null)?.[req.pick] ?? null;
   }
   return value;
+}
+
+/**
+ * POST one file's bytes into the host's persistent attachment store and return
+ * the path the agent will read it from.
+ *
+ * Shares `callProbe` (and therefore the probe base and the on-page proxy log)
+ * with the route table rather than fetching by hand, so a picked-file upload
+ * shows up in the same trace as every other call. Kept here rather than in
+ * `webAttachments.ts` because `LIVE_BASE` is this module's business.
+ *
+ * `from_clipboard=1` for the same reason `stage_pasted_attachment` uses it: in
+ * a tab the store is the file's only home, so the temp dir would be a path
+ * that stops resolving.
+ */
+export async function uploadAttachmentBytes(
+  name: string,
+  bytes: BodyInit,
+): Promise<string> {
+  const path = await callProbe({
+    method: "POST",
+    path: "/elicitation/upload",
+    query: { name, from_clipboard: "1" },
+    rawBody: bytes,
+    pick: "path",
+  });
+  if (typeof path !== "string" || !path) {
+    throw new Error(`/elicitation/upload accepted "${name}" but returned no path`);
+  }
+  return path;
 }
 
 /**
