@@ -197,13 +197,18 @@ const KNOWN_WEB_GAPS = [
   // there is no HTTP shape to mirror.
   "get_claude_md_content",
   "promote_memory",
-  // Write to the caller's own machine.
+  // Write to the caller's own machine, which is a tab. Still invoked from the
+  // desktop branch of the same components, so still scanned — but the browser
+  // build no longer *offers* them: the AccountInfo panel hides both install
+  // steps, since "put this on the machine you are sitting at" has no meaning
+  // when the machine that matters is the one serving the page.
   "install_fleet_cli",
   "install_fleet_skill",
   "apply_mcp_injector",
-  // Moves bytes through a caller-side filesystem path — here, a path the user
-  // gets to *choose*, which a tab cannot offer. (Its browser equivalent is a
-  // download, and that is not what this command does.)
+  // Write to a destination the *user* picks on the caller's filesystem, which a
+  // tab cannot offer. Both are reached only from the desktop branch now: the
+  // browser build downloads the artifact instead (`downloadWikiExport` /
+  // `downloadFleetSkill`), which is the browser's version of the same intent.
   "export_wiki_doc",
   // Emit onto the desktop's app-event bus, or have no RemoteBackend override.
   "test_decision_frontend_only",

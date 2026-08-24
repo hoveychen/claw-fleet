@@ -8,6 +8,27 @@
 #![allow(unused_variables, unused_mut, clippy::all)]
 use super::*;
 
+/// `GET /fleet_skill` — the bundled Fleet SKILL.md, verbatim.
+///
+/// Deliberately not a Backend method: there is nothing per-host about it. The
+/// desktop already holds the same `include_str!` constant and reads it straight
+/// out of the binary (`save_skill_file`), so adding a trait method would mean
+/// two implementations that both return one compile-time string. What the
+/// browser build lacks is not the *data path* but the *file* — it can neither
+/// see the constant nor be handed a destination to write it to — so this route
+/// exists to let it offer the file as a download.
+///
+/// Not on the public whitelist (`routes::is_public`), so a scoped token cannot
+/// reach it; on `fleet webui` it rides that port's blanket `no_auth`.
+pub(crate) fn route_fleet_skill(request: tiny_http::Request) {
+    let header: tiny_http::Header = "Content-Type: text/markdown; charset=utf-8"
+        .parse()
+        .unwrap();
+    let _ = request.respond(
+        tiny_http::Response::from_string(crate::FLEET_SKILL_MD).with_header(header),
+    );
+}
+
 pub(crate) fn route_health(
     ctx: &ServeCtx,
     request: tiny_http::Request,
