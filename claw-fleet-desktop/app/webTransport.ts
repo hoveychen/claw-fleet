@@ -171,8 +171,25 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     // There is one window here and the browser owns its chrome, so these are
     // no-ops rather than gaps: the callers fire and forget, and reporting a
     // gap for each would bury the ones that matter.
+    // The Settings panel is its own entry point (`settings.html`), which the
+    // desktop opens as a second webview. A second tab is the same thing here,
+    // and it is the *only* way to reach settings in the browser build — the
+    // no-op this used to be left the web UI with no settings panel at all.
+    // `connection` rides the query string exactly as the desktop passes it, so
+    // the panel can render "current connection" without a round trip.
+    case "open_settings_window": {
+      const conn = args.connection;
+      const qs = typeof conn === "string" && conn
+        ? `?connection=${encodeURIComponent(conn)}`
+        : "";
+      window.open(`settings.html${qs}`, "_blank", "noopener");
+      return { handled: true, value: null };
+    }
+
     case "show_main_window":
-    case "open_settings_window":
+    // Not `window.open`-able: the desktop pushes the preview's content over an
+    // app event *after* the window exists, and a fresh tab has its own event
+    // bus, so it would open empty.
     case "open_preview_window":
     case "close_preview_window":
     case "show_decision_float":
