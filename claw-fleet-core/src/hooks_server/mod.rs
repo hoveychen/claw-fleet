@@ -5,6 +5,7 @@
 //! same `serve()` function instead of trampolining through `execvp`.
 
 pub mod auth;
+pub mod multipart;
 pub mod responses;
 pub mod sse;
 
