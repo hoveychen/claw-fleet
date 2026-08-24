@@ -22,11 +22,11 @@ services:
       FLEET_ADMIN_TOKEN: "${FLEET_ADMIN_TOKEN:?set FLEET_ADMIN_TOKEN}"
       # Per-customer scoped token for external integrators (public API only).
       FLEET_PUBLIC_TOKEN: "${FLEET_PUBLIC_TOKEN:-}"
-      # Web UI. The UI needs routes outside the /v1/* scoped whitelist, so
-      # serving it means switching the token tiering off — set this ONLY with
-      # your own auth gateway in front of the published port, since these
-      # routes can start agent sessions. Leave unset for an API-only container.
-      FLEET_SERVE_NO_AUTH: "${FLEET_SERVE_NO_AUTH:-}"
+      # Web UI. The image presets FLEET_WEB_ROOT, so the entrypoint runs
+      # `fleet webui` — a port with NO authentication that can start agent
+      # sessions. Publish it only behind your own auth gateway. Set this to an
+      # empty string to get the API-only container (`fleet serve`) instead.
+      FLEET_WEB_ROOT: "${FLEET_WEB_ROOT-/usr/share/fleet-web}"
       # Wait for the cred store to inject before serving (1=default, 0=skip).
       FLEET_WAIT_FOR_CREDS: "${FLEET_WAIT_FOR_CREDS:-1}"
       # Credential-store wiring (P3). Leave unset to disable.
