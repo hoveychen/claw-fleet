@@ -1342,10 +1342,97 @@ function startSessionsPoll() {
   }, 3000);
 }
 
+// ── Decision stream ─────────────────────────────────────────────────────────
+
+/**
+ * SSE events forwarded verbatim into the app's own event bus.
+ *
+ * `hooks_server` broadcasts these under exactly the names `useDecisionEvents`
+ * listens for, payload included, so the bridge is a rename-free pass-through.
+ *
+ * Deliberately NOT forwarded:
+ *   - `waiting-alert` — the server sends *one* alert; the app's
+ *     `waiting-alerts-updated` carries the whole list, and there is no removal
+ *     event to keep an accumulated list honest. `get_waiting_alerts` answers
+ *     `[]` in this build for the same reason.
+ *   - `sessions-updated` — the 3s poll above already delivers it, and having
+ *     two sources write the board would make a stale one silently win. Left to
+ *     the poller so a proxy that buffers SSE can't freeze the board.
+ */
+const FORWARDED_SSE_EVENTS = [
+  "guard-request",
+  "guard-dismissed",
+  "elicitation-request",
+  "elicitation-dismissed",
+  "fleet-ask-request",
+  "fleet-ask-dismissed",
+  "a2ui-render-request",
+  "a2ui-render-dismissed",
+  "plan-approval-request",
+  "plan-approval-dismissed",
+  "permission-prompt-request",
+  "permission-prompt-dismissed",
+];
+
+let eventStream: EventSource | null = null;
+
+/**
+ * Attach to `GET /events` so decision cards reach this page.
+ *
+ * Two things ride on this connection, and the second one is the load-bearing
+ * one:
+ *
+ *  1. **Live delivery.** `list_pending_decisions` is a mount-only catch-up in
+ *     `useDecisionEvents`; everything after that arrives as an event. Without a
+ *     stream, a card raised while the tab is open never shows up at all.
+ *
+ *  2. **Consumer presence.** `hooks_server`'s watcher loop writes
+ *     `~/.fleet/consumer.heartbeat` only while `client_count() > 0` (or a phone
+ *     is on the relay) — the heartbeat means "a UI is actually watching". The
+ *     `fleet guard` / `fleet elicitation` / `fleet mcp` hooks check it before
+ *     blocking, and fall through to Claude Code's own terminal prompt when it
+ *     is stale. So a browser build that only polls gets no cards *and* silently
+ *     pushes every agent question back to the terminal. Being a real SSE client
+ *     is what makes this page count as the head.
+ *
+ * `EventSource` reconnects on its own (that is its whole contract), and each
+ * reconnect re-registers on the server, so the heartbeat resumes with it.
+ */
+function startEventStream() {
+  if (eventStream) return;
+  try {
+    eventStream = new EventSource(`${LIVE_BASE}/events`);
+  } catch (e) {
+    logLine(`SSE unavailable: ${String(e).slice(0, 120)}`);
+    return;
+  }
+  eventStream.onopen = () => logLine("SSE open → /events (consumer heartbeat now live)");
+  eventStream.onerror = () => {
+    // Not fatal and not worth tearing down: EventSource retries by itself. Log
+    // it so a run can tell "no cards because nothing happened" from "no cards
+    // because the stream is down".
+    logLine("SSE error (EventSource will retry)");
+  };
+  for (const name of FORWARDED_SSE_EVENTS) {
+    eventStream.addEventListener(name, (ev) => {
+      const raw = (ev as MessageEvent).data;
+      let payload: unknown = raw;
+      try {
+        payload = JSON.parse(String(raw));
+      } catch {
+        /* a non-JSON body is forwarded as the string it is */
+      }
+      logLine(`SSE ${name}`);
+      emit(name, payload);
+    });
+  }
+}
+
 export function installLiveProxy() {
   if (document.body) installLogNode();
   else window.addEventListener("DOMContentLoaded", installLogNode);
   logLine(`live proxy armed → ${LIVE_BASE}`);
   startSessionsPoll();
+  startEventStream();
   (window as unknown as Record<string, unknown>).__liveProxyReport = liveProxyReport;
 }
