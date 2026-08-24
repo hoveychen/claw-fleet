@@ -616,6 +616,43 @@ pub(crate) fn route_decision_asset(
                 }
             }
 
+/// `/decision_asset/<id>/<qidx>/<relpath…>` — the same bytes
+/// [`route_decision_asset`] answers, addressed as a path so the served
+/// `index.html` can reach the question's images through relative refs. The
+/// browser build's card preview points here because `fleet-decision://` only
+/// exists on the Tauri webview.
+///
+/// Split mirrors the desktop protocol handler (`gui/mod.rs`): `splitn(3, '/')`
+/// over the tail, decoding each part, so `rel` keeps its own slashes. Traversal
+/// is `read_decision_asset`'s job — it applies the same canonicalize-and-prefix
+/// defense as `wiki::get_file_in` — so this arm deliberately adds no second
+/// opinion about what is safe.
+pub(crate) fn route_decision_asset_prefix(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let dec = |s: &str| percent_decode_str(s).decode_utf8_lossy().to_string();
+    let tail = &path[crate::routes::DECISION_ASSET_PREFIX.len()..];
+    let mut segs = tail.splitn(3, '/');
+    let id = dec(segs.next().unwrap_or(""));
+    let qidx = dec(segs.next().unwrap_or(""));
+    let rel = dec(segs.next().unwrap_or(""));
+    match crate::mcp_ipc::read_decision_asset(&id, &qidx, &rel) {
+        Ok(f) => {
+            let mime_header: tiny_http::Header =
+                format!("Content-Type: {}", f.mime).parse().unwrap();
+            let _ = request
+                .respond(tiny_http::Response::from_data(f.bytes).with_header(mime_header));
+        }
+        Err(_) => {
+            let _ = request.respond(tiny_http::Response::empty(404));
+        }
+    }
+}
+
 pub(crate) fn route_review_doc(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,

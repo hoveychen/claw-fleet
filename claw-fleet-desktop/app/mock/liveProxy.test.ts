@@ -169,6 +169,18 @@ describe("live proxy route table", () => {
     expect(prefixes).toContain("/wiki_asset/");
   });
 
+  /**
+   * Same story for the decision card's preview iframe: `decisionAssetUrl`
+   * builds the `src` by hand, so `LIVE_ROUTES` never sees it, and the served
+   * `index.html` reaches the question's images through relative refs
+   * (`<img src="chart.png">` — the documented contract for `fleet__ask`'s
+   * `images`), which only resolve if the doc keeps its own directory.
+   */
+  it("serves the decision-asset prefix the web build's card preview is built from", () => {
+    const { prefixes } = servedRoutes();
+    expect(prefixes).toContain("/decision_asset/");
+  });
+
   it("covers the session-data commands the detail view depends on", () => {
     for (const cmd of [
       "list_sessions",
