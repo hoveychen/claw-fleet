@@ -125,6 +125,17 @@ muveectl projects describe fleet-cloud | grep 'Image SHA'   # SHA changed = live
 clients pointed at `/v1`. The gate is the Bearer token — `FLEET_PUBLIC_TOKEN`
 for integrators, `FLEET_ADMIN_TOKEN` for first-party. Both must be secrets.
 
+A private GHCR package needs a pull credential on the muvee side: bind a
+`--type registry` secret (`registry-addr ghcr.io`) to the project — no
+`--env-var`, muvee uses it for the pull.
+
+**Ownership:** the container starts as root only to `chown` the mount root (a
+muvee bind mount arrives root-owned) and immediately re-execs itself as `fleet`
+via gosu, so Fleet and every agent it spawns run unprivileged. Without that
+step an image with a `USER` instruction cannot create a single file in its own
+workspace — the first symptom is a crash loop on `mkdir: /workspace/…:
+Permission denied`.
+
 ## Credential isolation (the seam)
 
 Credentials are **not** baked into the image and **not** placed under
