@@ -1,0 +1,79 @@
+name: Cloud Image
+
+# Builds the Fleet Cloud (lean) container — fleet CLI + claude/codex CLIs +
+# the foxy-switcher cred-store agent — and pushes it to GHCR, so muvee pulls a
+# pre-built image instead of compiling Rust on a deploy node.
+#
+# The muvee "fleet-cloud" project is an image-type project pointed at this
+# repository package. main pushes :latest; a prd/fleet-cloud-** branch pushes
+# :preview, so a deployment can be verified against the real vault before the
+# branch merges (GitHub only offers workflow_dispatch for workflows that already
+# live on the default branch, which a brand-new branch cannot use).
+
+on:
+  push:
+    branches:
+      - main
+      - 'prd/fleet-cloud-**'
+    paths:
+      - 'deploy/lean/**'
+      - 'claw-fleet-core/**'
+      - 'fleet-cli/**'
+      - 'fleet-hooks-server/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/cloud-image.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: cloud-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/hoveychen/fleet-cloud
+
+jobs:
+  build-push:
+    name: Build & push cloud image
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=preview,enable=${{ github.ref_name != github.event.repository.default_branch }}
+            type=sha,format=long
+
+      # Build context is the repo root: deploy/lean/Dockerfile compiles
+      # fleet-cli from the workspace. linux/amd64 only — muvee deploy nodes run
+      # amd64, and the foxy-switcher stage is pulled for the same platform.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/lean/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
