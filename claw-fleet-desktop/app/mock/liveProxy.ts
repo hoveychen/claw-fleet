@@ -1375,6 +1375,20 @@ const FORWARDED_SSE_EVENTS = [
 ];
 
 let eventStream: EventSource | null = null;
+/** Failed connection attempts that never reached `onopen`. */
+let eventStreamFailures = 0;
+/**
+ * How many failures before giving up.
+ *
+ * `EventSource` retries forever by design, which is right for a stream that
+ * merely dropped — and wrong for one the deployment cannot serve at all.
+ * Measured against `fleet-cloud.muveeai.com`: `GET /events` answers 404 there
+ * (a direct `fleet webui` upgrades it fine, so it is the reverse proxy in
+ * front, not the server), and an unbounded retry turns that into a 404 every
+ * few seconds per open tab, forever. Three strikes is enough to tell "proxy
+ * won't pass this" from "server restarted".
+ */
+const EVENT_STREAM_MAX_FAILURES = 3;
 
 /**
  * Attach to `GET /events` so decision cards reach this page.
@@ -1406,12 +1420,28 @@ function startEventStream() {
     logLine(`SSE unavailable: ${String(e).slice(0, 120)}`);
     return;
   }
-  eventStream.onopen = () => logLine("SSE open → /events (consumer heartbeat now live)");
+  eventStream.onopen = () => {
+    // A stream that opened is healthy; let EventSource own any later retry.
+    eventStreamFailures = 0;
+    logLine("SSE open → /events (consumer heartbeat now live)");
+  };
   eventStream.onerror = () => {
-    // Not fatal and not worth tearing down: EventSource retries by itself. Log
-    // it so a run can tell "no cards because nothing happened" from "no cards
-    // because the stream is down".
-    logLine("SSE error (EventSource will retry)");
+    eventStreamFailures += 1;
+    if (eventStreamFailures >= EVENT_STREAM_MAX_FAILURES) {
+      // Give up rather than 404 forever. The consequences are worth stating in
+      // the log, because they are silent in the UI: decision cards raised while
+      // this tab is open will not appear (only the mount catch-up runs), and
+      // without an SSE client the server stops writing the consumer heartbeat,
+      // so the agent's questions fall through to its own terminal prompt.
+      eventStream?.close();
+      eventStream = null;
+      logLine(
+        `SSE gave up after ${EVENT_STREAM_MAX_FAILURES} failed attempts — ` +
+          "no live decision cards, and no consumer heartbeat for this page",
+      );
+      return;
+    }
+    logLine(`SSE error ${eventStreamFailures}/${EVENT_STREAM_MAX_FAILURES} (EventSource will retry)`);
   };
   for (const name of FORWARDED_SSE_EVENTS) {
     eventStream.addEventListener(name, (ev) => {
