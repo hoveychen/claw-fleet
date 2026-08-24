@@ -17,6 +17,28 @@ set -euo pipefail
 : "${FLEET_SERVE_HOST:=0.0.0.0}"
 : "${FLEET_SERVE_PORT:=8080}"
 
+# ── Volume ownership, then drop privileges ──────────────────────────────────
+# A host volume arrives owned by root (muvee bind-mounts /opt/muvee/volumes/<id>
+# and does not chown it), but Fleet and the agents run as `fleet`. So the
+# container starts as root purely to take ownership, then re-execs itself
+# unprivileged: nothing after this block runs as root.
+#
+# The chown is deliberately NOT recursive over /workspace. A workspace can hold
+# a large repo tree whose ownership is not ours to rewrite; what we need is the
+# ability to create entries in the mount root, plus the dirs we manage
+# ourselves. If an existing subtree is root-owned, that surfaces as a normal
+# permission error in the agent rather than a silent mass chown.
+if [[ "$(id -u)" -eq 0 ]]; then
+    for dir in "${FLEET_PUBLIC_WORKSPACE:-/workspace}" "${FLEET_STATE_DIR:-}" "${FOXY_DATA_DIR:-}"; do
+        [[ -n "${dir}" ]] || continue
+        mkdir -p "${dir}" 2>/dev/null || true
+        chown fleet:fleet "${dir}" 2>/dev/null \
+            || echo "fleet-entrypoint: could not chown ${dir} — writes there may fail" >&2
+    done
+    echo "fleet-entrypoint: dropping to user fleet" >&2
+    exec gosu fleet "$0" "$@"
+fi
+
 if [[ -z "${FLEET_ADMIN_TOKEN:-}" ]]; then
     echo "fleet-entrypoint: FLEET_ADMIN_TOKEN is required" >&2
     exit 1

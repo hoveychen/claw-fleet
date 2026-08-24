@@ -37,7 +37,7 @@ ARG CLAUDE_CODE_VERSION=2.1.206
 ARG CODEX_VERSION=0.144.5
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates git openssh-client curl \
+        ca-certificates git openssh-client curl gosu \
     && rm -rf /var/lib/apt/lists/* \
     && npm install --global \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
@@ -52,7 +52,14 @@ COPY --from=foxy /usr/local/bin/foxy-switcher /usr/local/bin/foxy-switcher
 COPY deploy/lean/entrypoint.sh /usr/local/bin/fleet-entrypoint
 RUN chmod +x /usr/local/bin/fleet-entrypoint
 
-USER fleet
+# NOTE: no `USER fleet` here — the entrypoint starts as root, takes ownership
+# of the mounted volume (host volumes arrive root-owned; muvee's bind mount is)
+# and then drops to `fleet` with gosu for everything else, agents included.
+# HOME is set explicitly because that drop is what makes it load-bearing: with
+# a `USER` instruction the runtime fills HOME in from /etc/passwd, but gosu
+# keeps the environment it was handed, so an unset HOME would leave the agent
+# reading root's home.
+ENV HOME=/home/fleet
 
 # One home for everything (`FLEET_HOME` intentionally unset, so Fleet's
 # real_home_dir() falls back to $HOME=/home/fleet). This keeps the control
