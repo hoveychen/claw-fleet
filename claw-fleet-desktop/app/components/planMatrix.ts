@@ -71,6 +71,61 @@ export function matrixRows(roots: PlanNode[], collapsed: Set<string>): MatrixRow
   return out;
 }
 
+// ── Responsive metrics ───────────────────────────────────────────────────────
+
+/** Everything on a row that is neither the title nor the cells: the caret hit
+ *  area, the relay slot, the done/total counter, the flex gaps, the strip's
+ *  left margin and the row padding. Measured against the rendered row, not
+ *  guessed — an under-estimate here shows up as a scrollbar the metrics said
+ *  would not be needed. */
+export const ROW_CHROME = 128;
+/** Roomy end of the scale — what a wide window gets. */
+export const TITLE_MAX = 420;
+export const PITCH_MAX = 14;
+/** Floors. Past these the matrix scrolls horizontally rather than shrink into
+ *  illegibility: a 3px cell is a smudge and a 100px title is not a title. */
+export const TITLE_MIN = 140;
+export const PITCH_MIN = 6;
+
+export interface MatrixMetrics {
+  /** Width of the fixed title column — the thing that keeps columns aligned. */
+  titleW: number;
+  /** Cell box and the gap after it; `titleW + n * (cellW + gap)` is the row. */
+  cellW: number;
+  gap: number;
+}
+
+/**
+ * Fit the widest row into `availWidth`.
+ *
+ * The title yields first (420 → 140) because a shrunken *cell* costs the view
+ * its whole point — you read progress down the columns — while a clipped title
+ * still has the drawer and a tooltip behind it. Only once the title is at its
+ * floor do the cells start shrinking, and below `PITCH_MIN` we stop and let the
+ * container scroll instead.
+ */
+export function matrixMetrics(availWidth: number, maxTotal: number): MatrixMetrics {
+  const pitchToParts = (pitch: number) => {
+    const gap = pitch >= 10 ? 3 : pitch >= 8 ? 2 : 1;
+    return { cellW: pitch - gap, gap };
+  };
+  const avail = Math.max(0, availWidth - ROW_CHROME);
+  if (maxTotal <= 0) return { titleW: TITLE_MAX, ...pitchToParts(PITCH_MAX) };
+
+  const titleAtFullPitch = avail - maxTotal * PITCH_MAX;
+  if (titleAtFullPitch >= TITLE_MIN) {
+    return {
+      titleW: Math.min(TITLE_MAX, Math.floor(titleAtFullPitch)),
+      ...pitchToParts(PITCH_MAX),
+    };
+  }
+  const pitch = Math.max(
+    PITCH_MIN,
+    Math.min(PITCH_MAX, Math.floor((avail - TITLE_MIN) / maxTotal)),
+  );
+  return { titleW: TITLE_MIN, ...pitchToParts(pitch) };
+}
+
 export type CellState = "done" | "next" | "todo";
 
 /**
