@@ -220,11 +220,11 @@ const KNOWN_WEB_GAPS = [
 
 /**
  * Handled, but their whole body *is* a side effect on the real window
- * (`location.reload()` / `print()`), so the coverage sweep below asserts them
- * from this list instead of calling them and making jsdom log a
+ * (`location.reload()` / `print()` / `open()`), so the coverage sweep below
+ * asserts them from this list instead of calling them and making jsdom log a
  * "Not implemented" for each run.
  */
-const SIDE_EFFECT_ONLY = ["restart_app", "print_webview"];
+const SIDE_EFFECT_ONLY = ["restart_app", "print_webview", "open_settings_window"];
 
 /** Same scan as `liveProxy.test.ts`, over the whole app. */
 function invokedCommands(dir: string, out = new Set<string>()): Set<string> {
