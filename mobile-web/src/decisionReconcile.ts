@@ -2,11 +2,24 @@ import type { AgentFingerprint, PendingDecision } from "./types";
 
 /** Collapse a fingerprint into the string reconcile compares for equality.
  *  `undefined` when the reply carried no `agent` at all — that's the
- *  "unattributable" case the cooldown below covers. */
+ *  "unattributable" case the cooldown below covers.
+ *
+ *  **`pid` is deliberately excluded.** The key identifies a *desktop*, not a
+ *  process: restarting the app (a local rebuild, a quit-and-reopen) hands the
+ *  same desktop a new pid, and keying on it made the phone treat its own
+ *  desktop as an intruder — the trusted key stayed pinned to the dead pid
+ *  because promotion only happens on a non-empty snapshot (see below), so a
+ *  card answered during the restart window could no longer be cleared.
+ *  What the foreign-empty guard actually defends against is an agent that
+ *  cannot see *this machine's* `~/.fleet` (a stray process under a redirected
+ *  FLEET_HOME), and `home` is what gives that away. A second process on the
+ *  same host reading the same home returns the same truth, so collapsing it
+ *  into one identity costs nothing here — `snapshotSources` still records each
+ *  pid separately, which is where "two providers" stays visible. */
 export function agentKeyOf(agent: AgentFingerprint | undefined): string | undefined {
   if (!agent) return undefined;
-  const { host = "?", pid = 0, home = "?", ver = "?" } = agent;
-  return `${host}/pid=${pid}/home=${home}/v${ver}`;
+  const { host = "?", home = "?", ver = "?" } = agent;
+  return `${host}/home=${home}/v${ver}`;
 }
 
 /** How long to keep suppressing a card the user answered on THIS device but
