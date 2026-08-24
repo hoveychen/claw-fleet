@@ -5736,6 +5736,7 @@ impl AgentSource for CodexSource {
             &spec.prompt,
             spec.model.as_deref(),
             spec.effort.as_deref(),
+            &spec.images,
         )
     }
 
@@ -5752,6 +5753,7 @@ impl AgentSource for CodexSource {
             &spec.prompt,
             spec.model.as_deref(),
             spec.effort.as_deref(),
+            &spec.images,
             on_exit,
         )
     }

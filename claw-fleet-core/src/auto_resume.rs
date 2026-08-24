@@ -1133,6 +1133,7 @@ mod tests {
             "reply with exactly: FIRST",
             None,
             None,
+            &[],
         )
         .expect("initial codex spawn");
         let tid = resp.session_id.expect("thread id");
@@ -1186,6 +1187,7 @@ mod tests {
             "reply with exactly: FIRST",
             None,
             None,
+            &[],
         )
         .expect("initial codex spawn");
         let tid = resp.session_id.expect("thread id");

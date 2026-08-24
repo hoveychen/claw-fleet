@@ -506,6 +506,7 @@ pub(crate) fn resume_session(
             model: model.map(str::to_string),
             effort: effort.map(str::to_string),
             permission_mode: permission_mode.map(str::to_string),
+        images: Vec::new(),
         },
         Box::new(|_| {}),
     )
