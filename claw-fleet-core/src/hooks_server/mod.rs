@@ -322,6 +322,17 @@ pub fn serve(opts: ServeOptions) {
     // Bring up the mobile relay channel if it's configured — on a probe-only
     // machine (no desktop app) this serve process is the agent-side publisher
     // for the mobile web (see the broadcast loop below).
+    //
+    // Hand the relay this process's warm session list first. Its read-only
+    // projections (`today_usage`, polled by the phone every 20s) would otherwise
+    // scan every agent source per request, which is the very cost `snapshot`
+    // exists to keep off the request path — see `session_snapshot`.
+    {
+        let snapshot_for_relay = snapshot.clone();
+        crate::mobile_relay::set_sessions_provider(move || {
+            Some(snapshot_for_relay.sessions())
+        });
+    }
     crate::mobile_relay::ensure_ws_client();
 
     // ── Headless control-plane ticker ──────────────────────────────────────
