@@ -24,6 +24,10 @@ import {
   setHostPrefsSource,
   liveProxyReport,
 } from "./mock/liveProxy";
+// Statically, not lazily: the hidden `<input>`'s click has to land inside the
+// user-activation window opened by the button press, and a lazy chunk fetch
+// would spend it.
+import { pickAndUploadFiles } from "./webAttachments";
 
 /**
  * True when running inside the desktop webview.
@@ -113,10 +117,31 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     // `ask()` is a yes/no prompt, which is exactly `confirm()`.
     case "plugin:dialog|ask":
       return { handled: true, value: window.confirm(String(args.message ?? "")) };
-    // File pickers need the host filesystem; `null` is their "cancelled".
+    // *File* opens are answered asynchronously, before this function runs — see
+    // `webDialogOpen`. What is left here is the directory case, which no browser
+    // dialog can serve: there is no way to obtain a *host* directory path from
+    // a tab. Those call sites switch to `DirPickerDialog` (backend-driven,
+    // over `browse_dir`) instead, the same swap a remote connection makes, so
+    // reaching this line means the caller has no directory to offer and `null`
+    // — the plugin's "cancelled" — is the honest answer.
     case "plugin:dialog|open":
+    // Saving needs a destination on the host; a tab's equivalent is a download,
+    // which is a different operation than the callers are asking for.
     case "plugin:dialog|save":
       return { handled: true, value: null };
+
+    // Second half of the desktop's attachment handshake, where it decides
+    // whether staged bytes get ingested into the persistent store or a picked
+    // file keeps the path it already had.
+    //
+    // Nothing to decide here: the staging POST already ingested (there is no
+    // host temp dir a tab could park bytes in — see the
+    // `stage_pasted_attachment` route), and a path that arrives from anywhere
+    // else is already a path on the host that serves this page. Which puts this
+    // in exactly `LocalBackend`'s position — its `upload_attachment` hands a
+    // picked path straight back, because the agent runs on that very machine.
+    case "upload_elicitation_attachment":
+      return { handled: true, value: String(args.sourcePath ?? "") };
     // Report notifications as not-granted so the frontend keeps them in-app
     // rather than handing them to an OS channel that isn't wired here.
     case "plugin:notification|is_permission_granted":
@@ -298,8 +323,9 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     //     have no HTTP shape to mirror.
     //   - install_fleet_cli, install_fleet_skill, apply_mcp_injector — write to
     //     the *caller's* machine.
-    //   - stage_pasted_attachment, upload_elicitation_attachment,
-    //     export_wiki_doc — move bytes through a caller-side filesystem path.
+    //   - export_wiki_doc — writes to a destination on the caller's own
+    //     filesystem that the *user* chooses; a tab's nearest equivalent is a
+    //     download, which is a different operation.
     //   - test_decision_frontend_only, test_fleet_ask_* — emit onto the
     //     desktop's own app-event bus / have no RemoteBackend override.
     //   - connect_remote, disconnect_remote, delete_connection,
@@ -308,6 +334,27 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     default:
       return { handled: false };
   }
+}
+
+/**
+ * `plugin:dialog|open` for files — the one command that needs to be answered
+ * *asynchronously* and locally, so it cannot live in `localCommand`.
+ *
+ * Returns `{handled:false}` for a directory pick, leaving it to `localCommand`,
+ * because no browser dialog can hand back a host directory path.
+ *
+ * The click on the hidden `<input>` happens inside this call, which is why the
+ * path from the user's button press to here must stay in promise-land: user
+ * activation survives microtasks (`mockIPC`'s handler chain is promise-only,
+ * no timers) but not a real delay, and without it the browser would silently
+ * refuse to open the dialog.
+ */
+async function webDialogOpen(
+  args: Record<string, unknown>,
+): Promise<{ handled: boolean; value?: unknown }> {
+  const options = (args.options ?? {}) as { multiple?: boolean; directory?: boolean };
+  if (options.directory) return { handled: false };
+  return { handled: true, value: await pickAndUploadFiles({ multiple: options.multiple }) };
 }
 
 /** Commands that reached neither the probe nor a local answer, deduped. */
@@ -347,6 +394,12 @@ export async function installWebTransport(): Promise<void> {
 
     const live = await liveInvoke(cmd, a);
     if (live.handled) return live.value;
+
+    // Ahead of `localCommand`, which owns the directory case this declines.
+    if (cmd === "plugin:dialog|open") {
+      const picked = await webDialogOpen(a);
+      if (picked.handled) return picked.value;
+    }
 
     const local = localCommand(cmd, a);
     if (local.handled) return local.value;
