@@ -151,6 +151,24 @@ describe("live proxy route table", () => {
     expect(unserved).toEqual([]);
   });
 
+  /**
+   * `wikiFileUrl` builds an `<iframe src>` by hand, so it never passes through
+   * `LIVE_ROUTES` and the test above cannot see it. It still needs the server
+   * to answer, and specifically at a *prefix*: the published `index.html`
+   * reaches its bundle through relative refs, which the browser resolves
+   * against the URL's directory. The existing `/wiki_file?slug=` query route
+   * cannot serve that shape — one segment carrying the whole doc sends
+   * `assets/style.css` somewhere else entirely.
+   *
+   * Asserted against the served prefix list rather than a substring of the
+   * source: `expect(src).toContain("/wiki_asset")` would also pass for a route
+   * named `/wiki_assets_typo`.
+   */
+  it("serves the wiki-asset prefix the web build's iframe src is built from", () => {
+    const { prefixes } = servedRoutes();
+    expect(prefixes).toContain("/wiki_asset/");
+  });
+
   it("covers the session-data commands the detail view depends on", () => {
     for (const cmd of [
       "list_sessions",
