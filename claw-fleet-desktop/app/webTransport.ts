@@ -36,17 +36,29 @@ const STORE_PREFIX = "fleet-web:";
  * without it `initStorage()` never resolves and nothing renders. localStorage
  * is the natural stand-in: same per-origin, per-device semantics the desktop
  * store has.
+ *
+ * The return *shapes* are load-bearing and are not obvious from the plugin's
+ * TypeScript surface: `load` must hand back a numeric resource id and `get` a
+ * `[value, exists]` tuple. Answering `null` for both throws nothing — the
+ * store's promise simply never settles, `boot()` stops short of
+ * `ReactDOM.render`, and the page stays blank with an empty console. That was
+ * the first version of this function; `webTransport.test.ts` now pins each
+ * shape. `mock/tauri-mock.ts` is the only other written record of them.
  */
-function localCommand(cmd: string, args: Record<string, unknown>): { handled: boolean; value?: unknown } {
+export function localCommand(cmd: string, args: Record<string, unknown>): { handled: boolean; value?: unknown } {
   const key = () => `${STORE_PREFIX}${String(args.key ?? "")}`;
   switch (cmd) {
+    // Resource id — a number is expected, and `null` wedges the boot.
     case "plugin:store|load":
+      return { handled: true, value: 1 };
     case "plugin:store|save":
     case "plugin:store|clear":
     case "plugin:store|reset":
       return { handled: true, value: null };
-    case "plugin:store|get":
-      return { handled: true, value: window.localStorage.getItem(key()) };
+    case "plugin:store|get": {
+      const value = window.localStorage.getItem(key());
+      return { handled: true, value: [value, value !== null] };
+    }
     case "plugin:store|set":
       window.localStorage.setItem(key(), String(args.value));
       return { handled: true, value: null };
@@ -55,7 +67,12 @@ function localCommand(cmd: string, args: Record<string, unknown>): { handled: bo
       return { handled: true, value: null };
     case "plugin:store|entries":
     case "plugin:store|keys":
+    case "plugin:store|values":
       return { handled: true, value: [] };
+    case "plugin:store|length":
+      return { handled: true, value: 0 };
+    case "plugin:store|has":
+      return { handled: true, value: false };
 
     // Host facts the desktop reads from the OS. The browser build reports
     // itself as such rather than impersonating a platform.
@@ -65,9 +82,17 @@ function localCommand(cmd: string, args: Record<string, unknown>): { handled: bo
     case "desktop_build_commit":
       return { handled: true, value: "web" };
 
-    // Window / tray / process control has no browser equivalent. Answering
-    // `null` keeps callers that ignore the result working; the gap list below
-    // records anything that turns out to need more than that.
+    // SSH connection management. The front door only ever talks to the backend
+    // inside the app that served this page, so there is nothing to list — but
+    // the answer must still be a *list*: `ConnectionDialog` reads `.length` off
+    // it during render, and a `null` there throws mid-render and leaves the
+    // whole tree unmounted (root stays empty, no console error, `boot()` still
+    // resolves). That is the failure this pair exists to prevent.
+    case "list_saved_connections":
+    case "list_ssh_profiles":
+      return { handled: true, value: [] };
+
+    // Everything else is left unhandled and rejected by the caller below.
     default:
       return { handled: false };
   }
@@ -104,11 +129,20 @@ export async function installWebTransport(): Promise<void> {
     const local = localCommand(cmd, a);
     if (local.handled) return local.value;
 
+    // Reject rather than resolve `null`.
+    //
+    // `null` looks like the harmless choice and is the opposite: a caller that
+    // does `invoke<T[]>(...).then(setState)` stores the null, and the next
+    // render throws on `.length` — mid-render, so React unmounts the whole
+    // tree and the page goes blank with `boot()` still reporting success.
+    // Rejecting instead lands in the caller's `catch`, or surfaces as an
+    // unhandled rejection, and either way leaves its state at the correctly
+    // typed initial value. Noisy beats blank, and these gaps should be seen.
     if (!gaps.has(cmd)) {
       gaps.add(cmd);
-      console.warn(`[web] no transport for "${cmd}" — returned null`);
+      console.warn(`[web] no transport for "${cmd}" — rejecting`);
     }
-    return null;
+    throw new Error(`command "${cmd}" is not available in the browser build`);
   }, { shouldMockEvents: true });
 
   // Installs the board poller. The desktop pushes `sessions-updated` over an
