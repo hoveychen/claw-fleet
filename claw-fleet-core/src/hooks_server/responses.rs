@@ -1630,12 +1630,20 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
                 images: images.clone(),
             };
             match crate::agent_source::spawn_session(tool, &spec) {
-                Ok(_) => {
+                Ok(resp) => {
+                    // Key the response on the id the source actually used.
+                    // Claude accepts the one we pre-mint (`--session-id`), but
+                    // Codex mints its own thread id and reports it back — keying
+                    // on our uuid there left `GET /v1/responses/{id}` polling an
+                    // id no transcript would ever carry, so a codex run
+                    // completed while the API said "queued" forever.
+                    let sid = effective_session_id(&uuid, resp.session_id.as_deref());
+                    let resp_id = to_resp_id(&sid);
                     // Fresh session starts at turn offset 0 (whole transcript is
                     // this turn); write it explicitly so any stale marker can't
                     // hide the output.
-                    write_turn_offset(&uuid, 0);
-                    Ok((uuid, resp_id, ResponseStatus::Queued))
+                    write_turn_offset(&sid, 0);
+                    Ok((sid, resp_id, ResponseStatus::Queued))
                 }
                 Err(e) => Err((500, "spawn_failed", e)),
             }
@@ -1825,6 +1833,20 @@ fn resolve_attachment_paths(ids: &[String]) -> Result<Vec<std::path::PathBuf>, (
         out.push(path);
     }
     Ok(out)
+}
+
+/// The session id a spawned run is actually keyed by.
+///
+/// Sources differ on who mints it: Claude takes the caller's `--session-id`,
+/// Codex mints its own thread id and returns it. Prefer what the source
+/// reported; fall back to the pre-minted id when it reported nothing (the
+/// degraded Codex case where `thread.started` never arrived). Pure.
+fn effective_session_id(pre_minted: &str, returned: Option<&str>) -> String {
+    returned
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(pre_minted)
+        .to_string()
 }
 
 /// Split resolved attachments into (paths listed in the prompt, paths passed as
@@ -2165,6 +2187,29 @@ mod tests {
         .unwrap();
         assert_eq!(r.attachment_file_ids().unwrap(), Vec::<String>::new());
         assert_eq!(r.prompt_text(), "go");
+    }
+
+    /// Regression: keying a spawned response on our pre-minted uuid works for
+    /// Claude (it accepts `--session-id`) but silently breaks Codex, which mints
+    /// its own thread id — the run completes while `GET /v1/responses/{id}`
+    /// reports `queued` forever. Observed live: a codex rollout answered "Red"
+    /// while the API never left `queued`.
+    #[test]
+    fn spawned_response_uses_the_id_the_source_minted() {
+        // Codex reports a thread id → that wins.
+        assert_eq!(
+            effective_session_id("pre-uuid", Some("01a031e5-b6d5-7e80-a4d7-e52e7b556146")),
+            "01a031e5-b6d5-7e80-a4d7-e52e7b556146"
+        );
+        // Claude echoes the id we handed it.
+        assert_eq!(effective_session_id("pre-uuid", Some("pre-uuid")), "pre-uuid");
+        // Degraded codex spawn (no `thread.started`) → keep the pre-minted id
+        // rather than producing an empty one.
+        assert_eq!(effective_session_id("pre-uuid", None), "pre-uuid");
+        assert_eq!(effective_session_id("pre-uuid", Some("   ")), "pre-uuid");
+        // And the wire id round-trips either way.
+        let sid = effective_session_id("pre-uuid", Some("thread-9"));
+        assert_eq!(session_id_from_resp(&to_resp_id(&sid)), Some("thread-9"));
     }
 
     #[test]
