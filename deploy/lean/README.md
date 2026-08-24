@@ -84,6 +84,17 @@ Unpaired containers still serve — the entrypoint logs the exact `pair` command
 and skips the credential wait (nothing would inject), so the API comes up
 agent-less rather than hanging on a timeout.
 
+**Persisting the data dir has one sharp edge, and the entrypoint handles it.**
+foxy records the write it made in `injected.json` (account id + token hash) and
+`marker-last-write.json`. Those describe a credential that lives on the
+*ephemeral* layer, so after a container recreate the state survives and the
+credential does not — and `credinject`'s reconcile, comparing the vault's token
+hash against the persisted one, concludes "already injected" and returns
+**without logging anything**. The container then serves forever with no
+credential. So on every start, if the credential file is missing while
+`injected.json` exists, the entrypoint deletes both state files (pairing and the
+native backup are untouched) and the agent injects from scratch.
+
 `docker exec` / `muveectl projects exec` land as **root**, so the
 `agent-config.json` that `pair` writes ends up `0600 root:root` and the
 unprivileged agent cannot read its own device token — the container would come
