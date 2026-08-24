@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { stampHostClasses } from "./hostClass";
+import { markWebBuild } from "./hostEnv";
 
 stampHostClasses();
 
@@ -24,6 +25,7 @@ async function boot() {
     // settings at all.
     const { isTauriHost, installWebTransport } = await import("./webTransport");
     if (!isTauriHost()) {
+      markWebBuild();
       await installWebTransport();
     }
   }
