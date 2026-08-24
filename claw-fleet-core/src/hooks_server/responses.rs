@@ -89,6 +89,24 @@ pub struct InputPart {
     pub kind: String,
     #[serde(default)]
     pub text: Option<String>,
+    /// `input_image` / `input_file` referencing an upload from `POST /v1/files`.
+    #[serde(default)]
+    pub file_id: Option<String>,
+    /// Inline image data (`data:` URL or http URL). Captured only so the
+    /// request can be **rejected**: the agent reads attachments from disk, so
+    /// bytes have to be uploaded first. Silently dropping them — which is what
+    /// this surface did before — makes a caller think the image arrived.
+    #[serde(default)]
+    pub image_url: Option<serde_json::Value>,
+    /// Inline file data, rejected for the same reason as `image_url`.
+    #[serde(default)]
+    pub file_data: Option<serde_json::Value>,
+}
+
+/// What went wrong with an attachment part, as an HTTP-shaped error.
+#[derive(Debug)]
+pub struct AttachmentError {
+    pub message: String,
 }
 
 impl CreateResponseRequest {
@@ -117,6 +135,54 @@ impl CreateResponseRequest {
                 out.join("\n")
             }
         }
+    }
+
+    /// Every part of the input, flattened. Helper for the attachment passes.
+    fn parts(&self) -> Vec<&InputPart> {
+        let mut out = Vec::new();
+        if let ResponseInput::Items(items) = &self.input {
+            for it in items {
+                if let InputItem::Message { content: InputContent::Parts(parts), .. } = it {
+                    out.extend(parts.iter());
+                }
+            }
+        }
+        out
+    }
+
+    /// Attachment `file_id`s in request order, after rejecting the shapes this
+    /// surface cannot deliver.
+    ///
+    /// Inline bytes (`image_url`, `file_data`) are an explicit error rather than
+    /// a silent drop: the agent reads attachments as files, so there is nothing
+    /// to hand it, and a caller who gets a 200 back reasonably assumes the image
+    /// was seen. An attachment part with no `file_id` at all is the same class
+    /// of mistake and gets the same answer.
+    pub fn attachment_file_ids(&self) -> Result<Vec<String>, AttachmentError> {
+        let mut ids = Vec::new();
+        for p in self.parts() {
+            let is_attachment = p.kind == "input_image" || p.kind == "input_file";
+            if p.image_url.is_some() || p.file_data.is_some() {
+                return Err(AttachmentError {
+                    message: format!(
+                        "inline attachment data is not supported on {} — upload the bytes with POST /v1/files and reference the returned file_id",
+                        p.kind
+                    ),
+                });
+            }
+            if !is_attachment {
+                continue;
+            }
+            match p.file_id.as_deref().filter(|s| !s.is_empty()) {
+                Some(id) => ids.push(id.to_string()),
+                None => {
+                    return Err(AttachmentError {
+                        message: format!("{} part has no file_id", p.kind),
+                    })
+                }
+            }
+        }
+        Ok(ids)
     }
 
     /// `(call_id, output)` pairs the caller submitted as decision answers.
@@ -873,7 +939,49 @@ struct FileObject {
     bytes: u64,
     created_at: i64,
     filename: String,
-    purpose: &'static str, // "output"
+    /// `"output"` for artifacts the run produced; for uploads, whatever the
+    /// caller declared (OpenAI's own default for non-fine-tuning use is
+    /// `user_data`).
+    purpose: String,
+}
+
+/// Where `POST /v1/files` puts uploads, relative to the workspace root.
+///
+/// Inside the workspace on purpose: the agent reads an attachment by path, so
+/// the bytes have to be somewhere it can reach. Each upload gets its own
+/// subdirectory, so the caller's filename survives verbatim (it shows up in the
+/// prompt, and `photo.png` reads better than a hash) without one upload ever
+/// overwriting another.
+const UPLOADS_DIR: &str = ".fleet-uploads";
+
+/// Cap for a single upload. Same ceiling as a desktop attachment — one number
+/// for "how big a blob may a caller hand the agent".
+const MAX_UPLOAD_BYTES: u64 = crate::backend::MAX_ATTACHMENT_BYTES;
+
+/// Reduce a caller-supplied filename to a bare, safe basename. Traversal
+/// (`../`, absolute paths) and empty/`.`/`..` names collapse to a default, so
+/// the join below can only land inside the upload's own directory. Pure.
+fn sanitize_upload_filename(raw: &str) -> String {
+    let base = std::path::Path::new(raw)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let cleaned: String = base
+        .chars()
+        .map(|c| if c == '/' || c == '\\' || c == '\0' { '_' } else { c })
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        return "upload.bin".to_string();
+    }
+    cleaned.to_string()
+}
+
+/// True when a workspace-relative path lives under the uploads directory —
+/// the only region `DELETE /v1/files/{id}` is allowed to touch. Pure.
+fn is_upload_rel(rel: &str) -> bool {
+    let norm = rel.replace('\\', "/");
+    norm.starts_with(&format!("{UPLOADS_DIR}/"))
 }
 
 /// `file_<base64url(rel)>`. Pure.
@@ -1003,7 +1111,7 @@ fn list_workspace_files() -> Vec<FileObject> {
                     bytes: md.len(),
                     created_at,
                     filename: rel_str,
-                    purpose: "output",
+                    purpose: "output".to_string(),
                 },
                 mtime,
             ));
@@ -1065,6 +1173,12 @@ pub enum V1Route {
     ListFiles(String),
     /// `GET /v1/files/{id}/content`
     FileContent(String),
+    /// `POST /v1/files` — upload an attachment the agent can read.
+    UploadFile,
+    /// `GET /v1/files/{id}` — the file object without its bytes.
+    FileMeta(String),
+    /// `DELETE /v1/files/{id}` — drop an upload.
+    DeleteFile(String),
     /// Unknown `/v1/...` path.
     NotFound,
 }
@@ -1084,6 +1198,9 @@ pub fn parse_v1_route(method: &str, path: &str) -> V1Route {
         }
         ["responses", id, "files"] if method == "GET" => V1Route::ListFiles((*id).to_string()),
         ["files", id, "content"] if method == "GET" => V1Route::FileContent((*id).to_string()),
+        ["files"] if method == "POST" => V1Route::UploadFile,
+        ["files", id] if method == "GET" => V1Route::FileMeta((*id).to_string()),
+        ["files", id] if method == "DELETE" => V1Route::DeleteFile((*id).to_string()),
         _ => V1Route::NotFound,
     }
 }
@@ -1374,6 +1491,9 @@ pub(crate) fn dispatch(
         V1Route::CancelResponse(id) => cancel_response(ctx, request, json_header, &id),
         V1Route::ListFiles(id) => list_files(request, json_header, &id),
         V1Route::FileContent(id) => file_content(request, &id, json_header),
+        V1Route::UploadFile => upload_file(request, json_header),
+        V1Route::FileMeta(id) => file_meta(request, &id, json_header),
+        V1Route::DeleteFile(id) => delete_file(request, &id, json_header),
         V1Route::NotFound => {
             respond_error(request, 404, "not_found", "unknown /v1 route", json_header)
         }
@@ -1454,6 +1574,21 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
         return respond_value(request, 200, &serde_json::to_value(&r).unwrap_or_default(), json_header);
     }
 
+    // Attachments: resolve every referenced upload to a path inside the
+    // workspace and append them to the prompt, so the agent reads the bytes off
+    // disk. Resolved BEFORE launching — a bad file_id must be a 400, not a run
+    // that starts and then can't find its input.
+    let prompt = match req.attachment_file_ids() {
+        Err(e) => return respond_error(request, 400, "invalid_request", e.message, json_header),
+        Ok(ids) => match resolve_attachment_paths(&ids) {
+            Err((status, msg)) => {
+                let code = if status == 403 { "forbidden" } else { "invalid_request" };
+                return respond_error(request, status, code, msg, json_header);
+            }
+            Ok(paths) => prompt_with_attachments(&req.prompt_text(), &paths),
+        },
+    };
+
     // Launch: resume when previous_response_id is set, else spawn a new run.
     // Both yield the internal session id + wire resp_id + initial status.
     let launched: Result<(String, String, ResponseStatus), (u16, &'static str, String)> =
@@ -1467,7 +1602,7 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
                     let spec = crate::agent_source::ResumeSpec {
                         session_id: sid.clone(),
                         workspace_path: public_workspace(),
-                        prompt: req.prompt_text(),
+                        prompt: prompt.clone(),
                         model: model.clone(),
                         ..Default::default()
                     };
@@ -1484,7 +1619,7 @@ fn create_response(ctx: &super::ServeCtx, mut request: tiny_http::Request, json_
             let (resp_id, uuid) = new_resp_id();
             let spec = crate::agent_source::SpawnSpec {
                 workspace_path: public_workspace(),
-                prompt: req.prompt_text(),
+                prompt: prompt.clone(),
                 model: model.clone(),
                 effort: None,
                 permission_mode: None,
@@ -1577,6 +1712,235 @@ fn file_content(request: tiny_http::Request, file_id: &str, json_header: tiny_ht
     }
 }
 
+/// `POST /v1/files` — accept a `multipart/form-data` upload (the shape the
+/// OpenAI SDKs send) and land it in the workspace so the agent can read it.
+///
+/// Fields: `file` (required, the bytes + filename) and `purpose` (optional,
+/// echoed back; OpenAI's non-fine-tuning default is `user_data`). The response
+/// is a file object whose `id` is the same opaque
+/// `file_<base64url(workspace-relative path)>` the artifact routes mint, so
+/// `GET /v1/files/{id}` / `.../content` / `DELETE` all work on it for free.
+fn upload_file(mut request: tiny_http::Request, json_header: tiny_http::Header) {
+    let content_type = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Content-Type"))
+        .map(|h| h.value.as_str().to_string())
+        .unwrap_or_default();
+    let Some(boundary) = super::multipart::boundary_from_content_type(&content_type) else {
+        return respond_error(
+            request,
+            400,
+            "invalid_request",
+            "expected multipart/form-data with a boundary",
+            json_header,
+        );
+    };
+
+    // Reject on the declared length first, then re-check after reading: a body
+    // may lie about (or omit) Content-Length.
+    if let Some(len) = request.body_length() {
+        if len as u64 > MAX_UPLOAD_BYTES {
+            return respond_error(
+                request,
+                413,
+                "file_too_large",
+                format!("upload too large: {len} bytes (max {MAX_UPLOAD_BYTES})"),
+                json_header,
+            );
+        }
+    }
+    let mut body = Vec::new();
+    let mut limited = std::io::Read::take(request.as_reader(), MAX_UPLOAD_BYTES + 1);
+    let _ = std::io::Read::read_to_end(&mut limited, &mut body);
+    if body.len() as u64 > MAX_UPLOAD_BYTES {
+        return respond_error(
+            request,
+            413,
+            "file_too_large",
+            format!("upload too large: >{MAX_UPLOAD_BYTES} bytes"),
+            json_header,
+        );
+    }
+
+    let parts = match super::multipart::parse_multipart(&body, &boundary) {
+        Ok(p) => p,
+        Err(e) => return respond_error(request, 400, "invalid_request", e, json_header),
+    };
+    let Some(file_part) = parts
+        .iter()
+        .find(|p| p.name == "file" && p.filename.is_some())
+        .or_else(|| parts.iter().find(|p| p.filename.is_some()))
+    else {
+        return respond_error(
+            request,
+            400,
+            "invalid_request",
+            "no file part in multipart body (expected a field named \"file\")",
+            json_header,
+        );
+    };
+    let purpose = parts
+        .iter()
+        .find(|p| p.name == "purpose")
+        .map(|p| p.text())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "user_data".to_string());
+
+    let filename = sanitize_upload_filename(file_part.filename.as_deref().unwrap_or(""));
+    let dir_name = uuid::Uuid::new_v4().simple().to_string();
+    let rel = format!("{UPLOADS_DIR}/{dir_name}/{filename}");
+    let root = std::path::PathBuf::from(public_workspace());
+    let dest_dir = root.join(UPLOADS_DIR).join(&dir_name);
+    if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+        return respond_error(request, 500, "internal", format!("create upload dir: {e}"), json_header);
+    }
+    let dest = dest_dir.join(&filename);
+    if let Err(e) = std::fs::write(&dest, &file_part.data) {
+        return respond_error(request, 500, "internal", format!("write upload: {e}"), json_header);
+    }
+
+    let obj = FileObject {
+        id: encode_file_id(&rel),
+        object: "file",
+        bytes: file_part.data.len() as u64,
+        created_at: now_unix(),
+        filename,
+        purpose,
+    };
+    respond_value(request, 200, &serde_json::to_value(&obj).unwrap_or_default(), json_header);
+}
+
+/// Resolve attachment file ids to absolute paths, applying the same confinement
+/// as every other file route. A missing id is a 404 and an out-of-bounds one a
+/// 403 — the caller's mistake either way, so it must not reach a spawn.
+fn resolve_attachment_paths(ids: &[String]) -> Result<Vec<std::path::PathBuf>, (u16, String)> {
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        let (_, path, _) = stat_workspace_file(id)
+            .map_err(|(status, msg)| (status, format!("attachment {id}: {msg}")))?;
+        out.push(path);
+    }
+    Ok(out)
+}
+
+/// Append an attachment manifest to the prompt.
+///
+/// Paths, not bytes: `claude` reads an image or a document off disk with its own
+/// file tools, so the delivery mechanism is telling it where to look. The
+/// instruction is explicit ("read each") because a bare path in a prompt is
+/// easy for a model to acknowledge without opening. Pure; unit-tested.
+fn prompt_with_attachments(prompt: &str, paths: &[std::path::PathBuf]) -> String {
+    if paths.is_empty() {
+        return prompt.to_string();
+    }
+    let mut out = prompt.trim_end().to_string();
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str("Attached files (read each one from disk before answering):\n");
+    for p in paths {
+        out.push_str(&format!("- {}\n", p.display()));
+    }
+    out
+}
+
+/// Seconds since the epoch, or 0 if the clock is before it.
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Resolve a file id to an existing regular file inside the workspace, applying
+/// the same confinement as [`read_workspace_file`] without reading the bytes.
+fn stat_workspace_file(file_id: &str) -> Result<(String, std::path::PathBuf, std::fs::Metadata), (u16, String)> {
+    let rel = decode_file_id(file_id).ok_or((404, "malformed file id".to_string()))?;
+    if is_internal_rel(&rel) {
+        return Err((403, "path is not exposed".to_string()));
+    }
+    let canon_root = std::path::PathBuf::from(public_workspace())
+        .canonicalize()
+        .map_err(|_| (404, "workspace not found".to_string()))?;
+    let canon_file = canon_root
+        .join(&rel)
+        .canonicalize()
+        .map_err(|_| (404, "file not found".to_string()))?;
+    if !canon_file.starts_with(&canon_root) {
+        return Err((403, "path escapes workspace".to_string()));
+    }
+    let md = canon_file
+        .symlink_metadata()
+        .map_err(|_| (404, "file not found".to_string()))?;
+    if !md.is_file() {
+        return Err((404, "not a regular file".to_string()));
+    }
+    Ok((rel, canon_file, md))
+}
+
+/// `GET /v1/files/{file_id}` — the file object, no bytes.
+fn file_meta(request: tiny_http::Request, file_id: &str, json_header: tiny_http::Header) {
+    match stat_workspace_file(file_id) {
+        Ok((rel, _, md)) => {
+            let obj = FileObject {
+                id: file_id.to_string(),
+                object: "file",
+                bytes: md.len(),
+                created_at: md
+                    .modified()
+                    .ok()
+                    .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+                filename: rel.clone(),
+                purpose: if is_upload_rel(&rel) { "user_data".to_string() } else { "output".to_string() },
+            };
+            respond_value(request, 200, &serde_json::to_value(&obj).unwrap_or_default(), json_header);
+        }
+        Err((status, msg)) => {
+            let code = if status == 403 { "forbidden" } else { "not_found" };
+            respond_error(request, status, code, msg, json_header);
+        }
+    }
+}
+
+/// `DELETE /v1/files/{file_id}` — remove an upload.
+///
+/// Confined to [`UPLOADS_DIR`] on purpose: the same id space also names the
+/// agent's own output files, and a delete route that reached those would hand a
+/// scoped caller a way to destroy the run's results. Uploads are the caller's
+/// own bytes, so those it may drop.
+fn delete_file(request: tiny_http::Request, file_id: &str, json_header: tiny_http::Header) {
+    match stat_workspace_file(file_id) {
+        Ok((rel, path, _)) => {
+            if !is_upload_rel(&rel) {
+                return respond_error(
+                    request,
+                    403,
+                    "forbidden",
+                    "only uploaded files can be deleted",
+                    json_header,
+                );
+            }
+            if let Err(e) = std::fs::remove_file(&path) {
+                return respond_error(request, 500, "internal", format!("delete: {e}"), json_header);
+            }
+            // Each upload owns its directory; drop it once empty so the uploads
+            // tree doesn't fill with husks.
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
+            let body = serde_json::json!({"id": file_id, "object": "file", "deleted": true});
+            respond_value(request, 200, &body, json_header);
+        }
+        Err((status, msg)) => {
+            let code = if status == 403 { "forbidden" } else { "not_found" };
+            respond_error(request, status, code, msg, json_header);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1655,6 +2019,178 @@ mod tests {
             Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
             None => std::env::remove_var("FLEET_PUBLIC_WORKSPACE"),
         }
+    }
+
+    /// A file id is `base64url(relative path)` and therefore forgeable, so the
+    /// read path — not the listing — is where escape attempts must die. Both
+    /// shapes an attacker actually has: a `../` id, and a symlink planted inside
+    /// the workspace that points out of it.
+    #[test]
+    fn crafted_ids_and_symlinks_cannot_escape_the_workspace() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("FLEET_PUBLIC_WORKSPACE").ok();
+        let base = std::env::temp_dir().join(format!("fleet-esc-{}", std::process::id()));
+        let root = base.join("ws");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(base.join("outside.txt"), b"not yours").unwrap();
+        std::fs::write(root.join("inside.txt"), b"fine").unwrap();
+        std::env::set_var("FLEET_PUBLIC_WORKSPACE", root.to_string_lossy().to_string());
+
+        // Sanity: an honest id still reads.
+        assert!(read_workspace_file(&encode_file_id("inside.txt")).is_ok());
+
+        // Traversal by crafted id.
+        assert!(read_workspace_file(&encode_file_id("../outside.txt")).is_err());
+        assert!(read_workspace_file(&encode_file_id("/etc/hosts")).is_err());
+        assert!(read_workspace_file("file_not-base64!!").is_err());
+
+        // Symlink planted inside the workspace, pointing out of it.
+        #[cfg(unix)]
+        {
+            let link = root.join("escape.txt");
+            std::os::unix::fs::symlink(base.join("outside.txt"), &link).unwrap();
+            let err = read_workspace_file(&encode_file_id("escape.txt"))
+                .err()
+                .expect("symlink out of the workspace must be refused");
+            assert_eq!(err.0, 403, "expected a confinement error, got {err:?}");
+            // …and it must not show up in the listing either.
+            let listed: Vec<String> =
+                list_workspace_files().into_iter().map(|f| f.filename).collect();
+            assert!(!listed.iter().any(|f| f == "escape.txt"), "got {listed:?}");
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+        match prev {
+            Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
+            None => std::env::remove_var("FLEET_PUBLIC_WORKSPACE"),
+        }
+    }
+
+    #[test]
+    fn attachment_file_ids_collected_in_order() {
+        let r: CreateResponseRequest = serde_json::from_str(
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_text","text":"what is in these?"},
+                {"type":"input_image","file_id":"file_AAA"},
+                {"type":"input_file","file_id":"file_BBB"}
+            ]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.prompt_text(), "what is in these?");
+        assert_eq!(r.attachment_file_ids().unwrap(), vec!["file_AAA", "file_BBB"]);
+    }
+
+    /// The regression this whole surface exists for: an inline image used to
+    /// deserialize fine, contribute nothing, and return 200 — so a caller
+    /// believed the agent had seen it. Now it is a stated error.
+    #[test]
+    fn inline_attachment_data_is_rejected_not_dropped() {
+        for body in [
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_text","text":"hi"},
+                {"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}
+            ]}]}"#,
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_file","filename":"a.pdf","file_data":"data:application/pdf;base64,JVBER"}
+            ]}]}"#,
+            // Chat-Completions object form of image_url.
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_image","image_url":{"url":"https://example.com/a.png"}}
+            ]}]}"#,
+        ] {
+            let r: CreateResponseRequest = serde_json::from_str(body).unwrap();
+            let err = r.attachment_file_ids().err().expect("must be rejected");
+            assert!(
+                err.message.contains("POST /v1/files"),
+                "the error should point at the upload route, got {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn attachment_part_without_file_id_is_rejected() {
+        let r: CreateResponseRequest = serde_json::from_str(
+            r#"{"input":[{"type":"message","role":"user","content":[{"type":"input_image"}]}]}"#,
+        )
+        .unwrap();
+        assert!(r.attachment_file_ids().is_err());
+    }
+
+    #[test]
+    fn unknown_non_attachment_parts_stay_tolerated() {
+        // Forward-compat: an OpenAI client may send part types we don't model.
+        // Those still must not fail the request — only attachments we cannot
+        // deliver do.
+        let r: CreateResponseRequest = serde_json::from_str(
+            r#"{"input":[{"type":"message","role":"user","content":[
+                {"type":"input_text","text":"go"},
+                {"type":"refusal","refusal":"nope"}
+            ]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.attachment_file_ids().unwrap(), Vec::<String>::new());
+        assert_eq!(r.prompt_text(), "go");
+    }
+
+    #[test]
+    fn prompt_gains_an_attachment_manifest() {
+        let paths = vec![
+            std::path::PathBuf::from("/workspace/repo/.fleet-uploads/a/photo.png"),
+            std::path::PathBuf::from("/workspace/repo/.fleet-uploads/b/spec.pdf"),
+        ];
+        let out = prompt_with_attachments("describe it", &paths);
+        assert!(out.starts_with("describe it\n\n"));
+        assert!(out.contains("read each one from disk"));
+        assert!(out.contains("- /workspace/repo/.fleet-uploads/a/photo.png\n"));
+        assert!(out.contains("- /workspace/repo/.fleet-uploads/b/spec.pdf\n"));
+        // No attachments → the prompt is untouched, byte for byte.
+        assert_eq!(prompt_with_attachments("plain", &[]), "plain");
+    }
+
+    #[test]
+    fn upload_filename_sanitizing_defeats_traversal() {
+        assert_eq!(sanitize_upload_filename("shot.png"), "shot.png");
+        assert_eq!(sanitize_upload_filename("../../etc/passwd"), "passwd");
+        assert_eq!(sanitize_upload_filename("/etc/shadow"), "shadow");
+        assert_eq!(sanitize_upload_filename(".."), "upload.bin");
+        assert_eq!(sanitize_upload_filename("."), "upload.bin");
+        assert_eq!(sanitize_upload_filename(""), "upload.bin");
+        assert_eq!(sanitize_upload_filename("   "), "upload.bin");
+        // A Windows-style path arrives as one component on unix; the separator
+        // is neutralized rather than treated as a directory break.
+        assert_eq!(sanitize_upload_filename(r"C:\tmp\a.txt"), "C:_tmp_a.txt");
+    }
+
+    #[test]
+    fn only_uploads_are_deletable_paths() {
+        assert!(is_upload_rel(".fleet-uploads/abc/photo.png"));
+        assert!(!is_upload_rel("src/main.rs"));
+        assert!(!is_upload_rel("fleet-uploads/abc/photo.png"));
+        // A path that merely mentions the dir deeper down is not an upload.
+        assert!(!is_upload_rel("src/.fleet-uploads/x"));
+    }
+
+    #[test]
+    fn file_routes_parse() {
+        assert_eq!(parse_v1_route("POST", "/v1/files"), V1Route::UploadFile);
+        assert_eq!(
+            parse_v1_route("GET", "/v1/files/file_abc"),
+            V1Route::FileMeta("file_abc".to_string())
+        );
+        assert_eq!(
+            parse_v1_route("DELETE", "/v1/files/file_abc"),
+            V1Route::DeleteFile("file_abc".to_string())
+        );
+        assert_eq!(
+            parse_v1_route("GET", "/v1/files/file_abc/content"),
+            V1Route::FileContent("file_abc".to_string())
+        );
+        // Unsupported verbs on a known shape stay 404 rather than silently
+        // matching a neighbouring route.
+        assert_eq!(parse_v1_route("PUT", "/v1/files/file_abc"), V1Route::NotFound);
+        assert_eq!(parse_v1_route("DELETE", "/v1/files"), V1Route::NotFound);
     }
 
     #[test]

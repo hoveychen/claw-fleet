@@ -14,7 +14,12 @@ on:
   push:
     branches:
       - main
+      # Preview builds for cloud work. Both prefixes are listed because the
+      # plans that touch this image have used both (`fleet-cloud-…` for the
+      # deployment itself, `cloud-…` for the API surface) — a branch that misses
+      # the filter looks like a green push with no image behind it.
       - 'prd/fleet-cloud-**'
+      - 'prd/cloud-**'
     paths:
       - 'deploy/lean/**'
       - 'claw-fleet-core/**'
