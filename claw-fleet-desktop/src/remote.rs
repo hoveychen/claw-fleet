@@ -3496,7 +3496,12 @@ mod tests {
             let pf = port_file.clone();
             // `serve` never returns; the thread dies with the test process.
             std::thread::spawn(move || {
-                claw_fleet_core::hooks_server::serve(0, TOKEN.to_string(), Some(pf))
+                claw_fleet_core::hooks_server::serve(claw_fleet_core::hooks_server::ServeOptions {
+                    port: 0,
+                    token: TOKEN.to_string(),
+                    port_file: Some(pf),
+                    ..Default::default()
+                })
             });
         }
 

@@ -94,6 +94,29 @@ enum Commands {
         #[arg(long)]
         port_file: Option<std::path::PathBuf>,
     },
+    /// Serve the web UI (and the API it needs) — the browser build of the app.
+    ///
+    /// Distinct from `serve` on purpose: that one is the token-gated API probe,
+    /// this one is a browser-facing port with no authentication of its own. It
+    /// binds loopback unless --host says otherwise; anything wider belongs
+    /// behind your own auth gateway, since these routes can start agent
+    /// sessions.
+    #[command(name = "webui")]
+    WebUi {
+        /// Port to listen on. 0 lets the OS pick; pair with --port-file.
+        #[arg(short, long, default_value = "4571")]
+        port: u16,
+        /// Directory holding the web UI bundle (the `vite build` output).
+        /// Env fallback: FLEET_WEB_ROOT.
+        #[arg(long)]
+        web_root: Option<std::path::PathBuf>,
+        /// Address to bind. Defaults to loopback; use 0.0.0.0 to expose it.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// If set, the actual bound port is written to this file after bind.
+        #[arg(long)]
+        port_file: Option<std::path::PathBuf>,
+    },
     /// Search session content (full-text search across all sessions)
     Search {
         /// Search query (supports multiple terms for AND matching)
@@ -871,6 +894,7 @@ fn main() {
     if let Some(ref host) = cli.remote {
         match &cli.command {
             Commands::Serve { .. }
+            | Commands::WebUi { .. }
             | Commands::Skill { .. }
             | Commands::Guard { .. }
             | Commands::Elicitation
@@ -883,6 +907,7 @@ fn main() {
                 eprintln!("Error: --remote is not supported with the '{}' subcommand.",
                     match &cli.command {
                         Commands::Serve { .. } => "serve",
+                        Commands::WebUi { .. } => "webui",
                         Commands::Skill { .. } => "skill",
                         Commands::Guard { .. } => "guard",
                         Commands::Elicitation => "elicitation",
@@ -915,7 +940,12 @@ fn main() {
         Commands::Search { query, limit, json } => commands::search::cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => commands::audit::cmd_audit(&level, filter.as_deref(), json),
         Commands::Report { date, backfill, regenerate, lessons, summary, json, lang } => commands::report::cmd_report(date, backfill, regenerate, lessons, summary, json, &lang),
-        Commands::Serve { port, token, port_file } => commands::serve::cmd_serve(port, token, port_file),
+        Commands::Serve { port, token, port_file } => {
+            commands::serve::cmd_serve(port, token, port_file)
+        }
+        Commands::WebUi { port, web_root, host, port_file } => {
+            commands::serve::cmd_webui(port, web_root, host, port_file)
+        }
         Commands::Skill { action } => match action {
             SkillCommands::Install => commands::skill::cmd_skill_install(),
             SkillCommands::Status { json } => commands::skill::cmd_skill_status(json),

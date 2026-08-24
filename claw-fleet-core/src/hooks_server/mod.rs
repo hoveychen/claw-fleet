@@ -90,7 +90,53 @@ pub(crate) struct ServeCtx<'a> {
     pub(crate) snapshot: &'a std::sync::Arc<crate::session_snapshot::SessionSnapshot>,
 }
 
-pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
+/// Everything `serve` needs to start.
+///
+/// One struct rather than a growing argument list, because both entry points
+/// build it: the CLI from flags/env, and the desktop app from its own Tauri
+/// asset bundle. That is what makes "the app's web UI" and "the cloud
+/// container's web UI" literally the same server rather than two lookalikes.
+pub struct ServeOptions {
+    pub port: u16,
+    /// Admin token. May be empty when `no_auth` is set — there is nothing to
+    /// present then.
+    pub token: String,
+    /// Write the actually-bound port here once listening (for `--port 0`).
+    pub port_file: Option<std::path::PathBuf>,
+    /// Skip the token tiering: the deployment fronts this port with its own
+    /// auth gateway. Set by `fleet webui`; never by `fleet serve`.
+    pub no_auth: bool,
+    /// Web UI bundle. `fleet webui` resolves `--web-root` / `FLEET_WEB_ROOT`
+    /// to a directory source; `fleet serve` leaves it unset and stays a pure
+    /// API port.
+    pub web_assets: Option<crate::web_assets::AssetSource>,
+    /// Bind address. `None` keeps the historical behaviour: `FLEET_SERVE_HOST`
+    /// if set, loopback otherwise.
+    pub host: Option<String>,
+}
+
+impl Default for ServeOptions {
+    fn default() -> Self {
+        Self {
+            port: 7007,
+            token: String::new(),
+            port_file: None,
+            no_auth: false,
+            web_assets: None,
+            host: None,
+        }
+    }
+}
+
+pub fn serve(opts: ServeOptions) {
+    let ServeOptions {
+        port,
+        token,
+        port_file,
+        no_auth,
+        web_assets: supplied_assets,
+        host: requested_host,
+    } = opts;
 
     // Inject Fleet's permissions allowlist into ~/.claude/settings.json so
     // fleet guard is the sole audit gate for this serve process. The matching
@@ -223,7 +269,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     // (env FLEET_SERVE_HOST) so the scoped-token API is reachable from outside
     // the container. The scoped-token whitelist above is what makes binding a
     // wider interface safe for external callers.
-    let host = std::env::var("FLEET_SERVE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let host = requested_host
+        .or_else(|| std::env::var("FLEET_SERVE_HOST").ok())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
     let addr = format!("{}:{}", host, port);
     let server = tiny_http::Server::http(&addr).unwrap_or_else(|e| {
         eprintln!("Error: cannot bind to {}: {}", addr, e);
@@ -633,31 +681,22 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     // switch the token tiering off entirely — re-checking here would only be a
     // second scheme to keep in sync. Off unless asked for, so nothing changes
     // for callers that rely on the token.
-    let auth_disabled = std::env::var("FLEET_SERVE_NO_AUTH")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    // Comes from the caller only — `fleet webui` sets it, `fleet serve` never
+    // does. Deliberately not env-readable: the two subcommands are separate
+    // deployments with opposite defaults, and an env var in the environment
+    // would let one silently become the other.
+    let auth_disabled = no_auth;
     if auth_disabled {
-        eprintln!("[fleet serve] FLEET_SERVE_NO_AUTH set — every request is treated as admin; put an auth gateway in front of this port");
+        eprintln!("[fleet serve] auth disabled — every request is treated as admin; put an auth gateway in front of this port");
     }
 
     // Directory holding the web UI's `vite build` output. When set, paths that
     // match no data route are served from it, so the same process answers both
     // the API and the browser UI.
-    let web_root = std::env::var("FLEET_WEB_ROOT")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(std::path::PathBuf::from);
-    let web_assets = match web_root {
-        Some(root) if root.is_dir() => {
-            eprintln!("[fleet serve] serving web UI from {}", root.display());
-            Some(crate::web_assets::from_dir(root))
-        }
-        Some(root) => {
-            eprintln!("[fleet serve] FLEET_WEB_ROOT={} is not a directory — web UI disabled", root.display());
-            None
-        }
-        None => None,
-    };
+    // Caller-supplied only, for the same reason as `auth_disabled`: resolving
+    // FLEET_WEB_ROOT here would let a stray env turn the API port into a web
+    // server. `fleet webui` reads that env itself.
+    let web_assets = supplied_assets;
 
     // ── Request worker pool ────────────────────────────────────────────────
     // Every request used to be served from one `for request in
