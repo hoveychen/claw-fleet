@@ -276,14 +276,6 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     //
     // Deliberately *not* given a stand-in value, because any value would be a
     // lie the UI would present as fact:
-    //   - get/set_permissions_config, get/set_decision_panel_config,
-    //     get/set_auto_resume_config — host settings under `~/.fleet` with no
-    //     endpoint on `fleet serve` (see `hooks_server`: `/auto_resume_config`
-    //     was retired in Phase 4 P3 and the other two never had one). A
-    //     fabricated "current value" would show a toggle that reads as the
-    //     host's state and saves nowhere. Each caller already has a `.catch`
-    //     and a typed initial value, so rejecting degrades cleanly. Wiring
-    //     these needs three new routes, not a frontend change.
     //   - get_claude_md_content, promote_memory — read/write a workspace file
     //     through `memory::` directly instead of the Backend trait, so they
     //     have no HTTP shape to mirror.

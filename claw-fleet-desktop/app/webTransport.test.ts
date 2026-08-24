@@ -98,10 +98,10 @@ describe("host facts", () => {
   });
 
   /**
-   * The three host-settings pairs have no endpoint on `fleet serve`. Handing
-   * back a plausible default would render a toggle that looks like the host's
-   * state and saves nowhere, so they stay unhandled (and therefore rejected and
-   * logged) until the routes exist.
+   * The three host-settings pairs go to the host over HTTP; answering them
+   * locally would be inventing a value for something that lives on the server
+   * (and the writes would land nowhere). They must stay out of `localCommand`
+   * so `LIVE_ROUTES` gets them.
    */
   it.each([
     "get_permissions_config",
@@ -110,7 +110,7 @@ describe("host facts", () => {
     "set_decision_panel_config",
     "get_auto_resume_config",
     "set_auto_resume_config",
-  ])("%s is rejected rather than answered with a fabricated default", (cmd) => {
+  ])("%s is left to the probe rather than answered locally", (cmd) => {
     expect(localCommand(cmd, {}).handled).toBe(false);
   });
 
@@ -193,15 +193,6 @@ describe("plugin:window family", () => {
  * through of every view would find.
  */
 const KNOWN_WEB_GAPS = [
-  // Host settings under `~/.fleet` with no endpoint on `fleet serve`. Wiring
-  // them needs three new routes; a fabricated default would lie. See the
-  // comment on `localCommand`'s default arm.
-  "get_permissions_config",
-  "set_permissions_config",
-  "get_decision_panel_config",
-  "set_decision_panel_config",
-  "get_auto_resume_config",
-  "set_auto_resume_config",
   // Reach a workspace file through `memory::` instead of the Backend trait, so
   // there is no HTTP shape to mirror.
   "get_claude_md_content",
