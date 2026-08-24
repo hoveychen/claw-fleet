@@ -10,6 +10,7 @@ import { useAutoFlip } from "./useAutoFlip";
 import { PageShell } from "./PageShell";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { useConnectionStore, useReportStore, useUIStore } from "../store";
+import { isWebBuild } from "../hostEnv";
 import type { ManagedLesson } from "../types";
 import styles from "./MemoryView.module.css";
 
@@ -240,7 +241,9 @@ export function MemoryView() {
       onSelect: () => void writeText(file.path).catch(() => {}),
     });
     // Memory files on a remote probe live on that host — nothing to reveal here.
-    if (!isRemote) {
+    // Same in the browser build, where `reveal_path` is a no-op: a menu item
+    // that silently does nothing is worse than an absent one.
+    if (!isRemote && !isWebBuild()) {
       const revealKey =
         document.documentElement.getAttribute("data-platform") === "windows"
           ? "paths.reveal_in_explorer"

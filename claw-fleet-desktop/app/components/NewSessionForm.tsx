@@ -18,6 +18,7 @@ import { agentToolsForSources, type SourceInfo } from "../modelChoices";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
+import { isWebBuild } from "../hostEnv";
 import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
 import styles from "./NewSessionForm.module.css";
 
@@ -221,6 +222,12 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   const sessions = useSessionsStore((s) => s.sessions);
   const { connection } = useConnectionStore();
   const isRemote = connection?.type === "remote";
+  // Tauri's native directory dialog browses the machine the *desktop* runs on.
+  // That is the wrong machine under a remote connection (the session spawns on
+  // the probe), and in the browser build there is no such dialog at all — a tab
+  // can only hand back bytes, never a host path. Both cases go through
+  // `DirPickerDialog`, which lists whatever host the backend is bound to.
+  const needsBackendDirPicker = isRemote || isWebBuild();
   // Only offer the agent tools whose source is actually being monitored (source
   // enabled in settings AND the CLI installed). Codex must not appear in the
   // launcher when its source is off — selecting it would only fail at spawn.
@@ -278,9 +285,12 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pathDraft, setPathDraft] = useState("");
-  // Remote-only: the backend-driven directory picker standing in for the native
-  // dialog, which can only browse this desktop's own disk.
-  const [pickingDir, setPickingDir] = useState(false);
+  // Which target the backend-driven directory picker is open for, or null when
+  // it is closed. It stands in for the native dialog wherever that dialog would
+  // browse the wrong machine, and it is now reached from two places — the
+  // workspace pill and the "add directory" attachment item — so "open" is no
+  // longer enough to know what to do with the pick.
+  const [pickingDir, setPickingDir] = useState<"workspace" | "attachment" | null>(null);
   const composerRef = useRef<ChatComposerHandle | null>(null);
 
   // The pure-chat workspace. Unlike a project it has no prior sessions to be
@@ -363,25 +373,40 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
     }
   };
 
+  // Reported, not swallowed: opening the picker can fail (and in the browser
+  // build it also *uploads*, which can be refused for size), and this menu item
+  // has no other way to say so — an unhandled rejection here just leaves the
+  // user staring at a form that ignored their file.
   const pickFiles = async () => {
-    const picked = await openDialog({ multiple: true, directory: false });
-    if (picked == null) return;
-    addPaths(Array.isArray(picked) ? picked : [picked]);
+    try {
+      const picked = await openDialog({ multiple: true, directory: false });
+      if (picked == null) return;
+      addPaths(Array.isArray(picked) ? picked : [picked]);
+    } catch (e) {
+      setError(`${t("composer.attach_failed", "Attachment upload failed")}: ${String(e)}`);
+    }
   };
 
+  // A directory cannot be uploaded — and does not need to be: what the agent
+  // wants is the path. The native dialog can only offer one on the machine the
+  // desktop runs on, so anywhere else (a remote probe, or a browser tab whose
+  // host is the backend) it has to be the backend-driven picker instead.
   const pickDirectory = async () => {
+    if (needsBackendDirPicker) {
+      setPickingDir("attachment");
+      return;
+    }
     const picked = await openDialog({ multiple: false, directory: true });
     if (typeof picked !== "string") return;
     addAttachmentEntry({ path: picked, name: basename(picked) });
   };
 
-  // Local: the native dialog is the better experience (sidebar, favourites,
-  // search) and it browses the right machine. Remote: it would browse *this*
-  // machine while the session spawns on the probe, so go through the backend
-  // instead — that's what DirPickerDialog does.
+  // Local desktop: the native dialog is the better experience (sidebar,
+  // favourites, search) and it browses the right machine. Otherwise it would
+  // browse the wrong one — or not exist — so go through the backend instead.
   const browseWorkspace = async () => {
-    if (isRemote) {
-      setPickingDir(true);
+    if (needsBackendDirPicker) {
+      setPickingDir("workspace");
       return;
     }
     const picked = await openDialog({ multiple: false, directory: true });
@@ -593,10 +618,14 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
         <DirPickerDialog
           initialPath={workspace}
           onPick={(path) => {
-            setWorkspace(path);
-            setPickingDir(false);
+            if (pickingDir === "attachment") {
+              addAttachmentEntry({ path, name: basename(path) });
+            } else {
+              setWorkspace(path);
+            }
+            setPickingDir(null);
           }}
-          onCancel={() => setPickingDir(false)}
+          onCancel={() => setPickingDir(null)}
         />
       )}
     </div>
