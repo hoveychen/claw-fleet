@@ -35,6 +35,15 @@ if [[ "$(id -u)" -eq 0 ]]; then
         chown fleet:fleet "${dir}" 2>/dev/null \
             || echo "fleet-entrypoint: could not chown ${dir} — writes there may fail" >&2
     done
+    # The cred-store dir specifically gets a recursive pass. `docker exec` (and
+    # muvee's `projects exec`) lands as root, and the one thing an operator runs
+    # that way is `foxy-switcher pair` — which writes agent-config.json 0600
+    # root:root. The unprivileged agent then cannot read its own device token,
+    # so the container comes up looking paired and injects nothing. This dir is
+    # ours and tiny, so taking ownership of it wholesale is safe.
+    if [[ -n "${FOXY_DATA_DIR:-}" && -d "${FOXY_DATA_DIR}" ]]; then
+        chown -R fleet:fleet "${FOXY_DATA_DIR}" 2>/dev/null || true
+    fi
     echo "fleet-entrypoint: dropping to user fleet" >&2
     exec gosu fleet "$0" "$@"
 fi

@@ -84,6 +84,12 @@ Unpaired containers still serve — the entrypoint logs the exact `pair` command
 and skips the credential wait (nothing would inject), so the API comes up
 agent-less rather than hanging on a timeout.
 
+`docker exec` / `muveectl projects exec` land as **root**, so the
+`agent-config.json` that `pair` writes ends up `0600 root:root` and the
+unprivileged agent cannot read its own device token — the container would come
+up looking paired and inject nothing. The entrypoint's root phase therefore
+`chown -R`s `$FOXY_DATA_DIR` on every start.
+
 **Where the device token lives is a deployment decision.** `FOXY_DATA_DIR`
 defaults to the ephemeral layer on purpose: that token can lease accounts from
 the vault, so on a multi-tenant "one customer per container" deployment it must
