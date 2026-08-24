@@ -32,6 +32,21 @@ use tiny_http::{Header, Request, Response, Server};
 /// Shared handle on the app's live backend — the same `Arc` `AppState` holds.
 pub type SharedBackend = Arc<RwLock<Box<dyn Backend>>>;
 
+/// One frontend file, resolved by whoever owns the bundle.
+pub struct StaticAsset {
+    pub bytes: Vec<u8>,
+    pub mime: String,
+}
+
+/// Resolves a request path to a frontend file.
+///
+/// Behind this is Tauri's own `AssetResolver`, which serves the very bundle the
+/// desktop webview loads — so the browser gets the same `vite build` output
+/// with nothing embedded twice and no second build step. Kept as a closure
+/// rather than an `AppHandle` so this module stays free of Tauri types and the
+/// tests can inject a fake bundle.
+pub type AssetSource = Arc<dyn Fn(&str) -> Option<StaticAsset> + Send + Sync>;
+
 type Resp = Response<Cursor<Vec<u8>>>;
 
 /// Worker threads serving requests. A transcript read can take seconds on a
@@ -143,6 +158,9 @@ struct Ctx {
     /// app restart forces a re-login — acceptable, and it means a leaked cookie
     /// cannot outlive the process.
     sessions: Mutex<HashSet<String>>,
+    /// Frontend bundle, when one is available. `None` leaves the port as a
+    /// pure data API (what the tests drive).
+    assets: Option<AssetSource>,
 }
 
 impl Ctx {
@@ -158,8 +176,12 @@ impl Ctx {
 /// Bind the front door and serve it from background threads.
 ///
 /// Binds loopback unless `bindLan` is set in `~/.fleet/web-access.json`.
-pub fn start(backend: SharedBackend, port: u16) -> std::io::Result<u16> {
-    start_with_config(backend, port, load_config())
+pub fn start(
+    backend: SharedBackend,
+    port: u16,
+    assets: Option<AssetSource>,
+) -> std::io::Result<u16> {
+    start_with_config(backend, port, load_config(), assets)
 }
 
 /// `start` with the config supplied rather than read from disk — the seam the
@@ -168,6 +190,7 @@ pub fn start_with_config(
     backend: SharedBackend,
     port: u16,
     config: WebAccessConfig,
+    assets: Option<AssetSource>,
 ) -> std::io::Result<u16> {
     if !config.enabled {
         return Err(std::io::Error::other(
@@ -189,6 +212,7 @@ pub fn start_with_config(
         rt,
         password: config.password,
         sessions: Mutex::new(HashSet::new()),
+        assets,
     });
     let server = Arc::new(server);
 
@@ -389,6 +413,117 @@ fn login(ctx: &Ctx, request: &mut Request) -> Resp {
         .with_header(cookie)
 }
 
+/// Whether an unauthorized GET should be answered with the login page rather
+/// than a bare 401. A navigating browser sends `Accept: text/html`; the app's
+/// own `fetch` calls do not, so they still get the 401 their caller expects.
+fn wants_html(request: &Request) -> bool {
+    request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("accept"))
+        .map(|h| h.value.as_str().contains("text/html"))
+        .unwrap_or(false)
+}
+
+/// Served to a browser that hasn't logged in yet.
+///
+/// Self-contained on purpose: it must render before any of the app bundle is
+/// authorized, so it cannot reference `/assets/*`.
+fn login_page() -> Resp {
+    let html = r#"<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fleet</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #f4f1ea; color: #2b2b2b;
+    font: 15px/1.5 -apple-system, system-ui, "Helvetica Neue", sans-serif;
+  }
+  form {
+    background: #fffdf8; border: 1px solid #ddd6c9; border-radius: 10px;
+    padding: 28px 30px; width: 288px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  h1 { margin: 0 0 4px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+  p { margin: 0 0 18px; font-size: 13px; color: #6b6459; }
+  input, button { width: 100%; box-sizing: border-box; font: inherit; }
+  input {
+    padding: 9px 11px; border: 1px solid #d3ccbe; border-radius: 6px;
+    background: #fff; margin-bottom: 12px;
+  }
+  input:focus { outline: 2px solid #b9a06b; outline-offset: -1px; border-color: #b9a06b; }
+  button {
+    padding: 9px 11px; border: 0; border-radius: 6px; cursor: pointer;
+    background: #2b2b2b; color: #f8f6f1; font-weight: 500;
+  }
+  button:active { transform: translateY(.5px); }
+  .err { margin: 12px 0 0; font-size: 13px; color: #b03030; min-height: 1.5em; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1c1b19; color: #e8e4dc; }
+    form { background: #242220; border-color: #3a3733; }
+    p { color: #9a938a; }
+    input { background: #1c1b19; border-color: #45413b; color: inherit; }
+    button { background: #e8e4dc; color: #1c1b19; }
+  }
+</style>
+</head>
+<body>
+<form id="f">
+  <h1>Fleet</h1>
+  <p>输入访问密码</p>
+  <input id="p" type="password" autocomplete="current-password" autofocus>
+  <button type="submit">进入</button>
+  <p class="err" id="e"></p>
+</form>
+<script>
+document.getElementById('f').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const err = document.getElementById('e');
+  err.textContent = '';
+  try {
+    const resp = await fetch('/web/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: document.getElementById('p').value }),
+    });
+    if (resp.ok) { location.reload(); return; }
+    err.textContent = resp.status === 401 ? '密码不对' : '登录失败：' + resp.status;
+  } catch (e) {
+    err.textContent = '连接失败';
+  }
+});
+</script>
+</body>
+</html>"#;
+    let header: Header = "Content-Type: text/html; charset=utf-8".parse().unwrap();
+    Response::from_data(html.as_bytes().to_vec()).with_header(header)
+}
+
+/// Serve a file out of the frontend bundle.
+///
+/// `/` maps to `/index.html`; anything the bundle doesn't have 404s rather than
+/// falling back to index, so a mistyped asset path stays visible as a missing
+/// file instead of silently returning HTML.
+fn serve_static(ctx: &Ctx, path: &str) -> Resp {
+    let Some(assets) = ctx.assets.as_ref() else {
+        return error(404, "no such route");
+    };
+    let wanted = if path == "/" { "/index.html" } else { path };
+    match assets(wanted) {
+        Some(asset) => {
+            let header: Header = format!("Content-Type: {}", asset.mime)
+                .parse()
+                .unwrap_or_else(|_| json_header());
+            Response::from_data(asset.bytes).with_header(header)
+        }
+        None => error(404, "no such file"),
+    }
+}
+
 fn logout(ctx: &Ctx, request: &Request) -> Resp {
     if let Some(token) = session_cookie(request) {
         ctx.sessions.lock().unwrap().remove(&token);
@@ -416,7 +551,14 @@ fn handle(ctx: &Ctx, mut request: Request) {
 
     // Gate first: no route below should have to think about auth.
     if !is_public(&method, path) && !ctx.authorized(&request) {
-        let _ = request.respond(error(401, "login required"));
+        // A browser navigating here gets the password prompt; a data fetch gets
+        // the 401 its caller is written to handle.
+        let denied = if method == "GET" && wants_html(&request) {
+            login_page()
+        } else {
+            error(401, "login required")
+        };
+        let _ = request.respond(denied);
         return;
     }
 
@@ -584,6 +726,9 @@ fn handle(ctx: &Ctx, mut request: Request) {
             Err(_) => error(400, "pid must be a number"),
         },
 
+        // Anything not a data route is a request for the frontend bundle.
+        ("GET", _) => serve_static(ctx, path),
+
         _ => error(404, "no such route"),
     };
 
@@ -646,6 +791,10 @@ mod tests {
     /// Boot a front door on an OS-assigned port with the config supplied, so no
     /// test reads or mints the real `~/.fleet/web-access.json` password.
     fn serve(password: &str) -> String {
+        serve_with_assets(password, None)
+    }
+
+    fn serve_with_assets(password: &str, assets: Option<AssetSource>) -> String {
         let backend: SharedBackend = Arc::new(RwLock::new(Box::new(crate::NullBackend)));
         let port = start_with_config(
             backend,
@@ -655,9 +804,25 @@ mod tests {
                 password: password.to_string(),
                 bind_lan: false,
             },
+            assets,
         )
         .expect("front door must bind");
         format!("http://127.0.0.1:{port}")
+    }
+
+    /// A two-file stand-in for the real `vite build` bundle.
+    fn fake_bundle() -> Option<AssetSource> {
+        Some(Arc::new(|path: &str| match path {
+            "/index.html" => Some(StaticAsset {
+                bytes: b"<html>board</html>".to_vec(),
+                mime: "text/html".to_string(),
+            }),
+            "/assets/app.js" => Some(StaticAsset {
+                bytes: b"console.log(1)".to_vec(),
+                mime: "text/javascript".to_string(),
+            }),
+            _ => None,
+        }))
     }
 
     /// Log in and return the session cookie value. reqwest is built here
@@ -836,8 +1001,87 @@ mod tests {
                 password: TEST_PASSWORD.to_string(),
                 bind_lan: false,
             },
+            None,
         );
         assert!(result.is_err(), "disabled must not open a port");
+    }
+
+    /// A navigating browser must get the password form, not a bare 401 — that
+    /// is the whole login UX, and it has to render before any bundle file is
+    /// authorized.
+    #[test]
+    fn unauthorized_navigation_gets_the_login_page() {
+        let base = serve_with_assets(TEST_PASSWORD, fake_bundle());
+        let resp = reqwest::blocking::Client::new()
+            .get(&base)
+            .header("Accept", "text/html")
+            .send()
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let body = resp.text().unwrap();
+        assert!(body.contains("/web/login"), "login form must post to /web/login");
+        assert!(
+            !body.contains("board"),
+            "the app bundle must not be served before login"
+        );
+    }
+
+    /// The same unauthorized path via `fetch` (no `Accept: text/html`) must stay
+    /// a 401, or the frontend would parse a login page as data.
+    #[test]
+    fn unauthorized_fetch_stays_a_401() {
+        let base = serve_with_assets(TEST_PASSWORD, fake_bundle());
+        let resp = reqwest::blocking::Client::new()
+            .get(format!("{base}/sessions"))
+            .header("Accept", "application/json")
+            .send()
+            .unwrap();
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[test]
+    fn logged_in_browser_gets_the_bundle() {
+        let base = serve_with_assets(TEST_PASSWORD, fake_bundle());
+        let cookie = login_cookie(&base, TEST_PASSWORD);
+        let client = reqwest::blocking::Client::new();
+        let get = |path: String| {
+            client
+                .get(path)
+                .header("Cookie", format!("{COOKIE_NAME}={cookie}"))
+                .header("Accept", "text/html")
+                .send()
+                .unwrap()
+        };
+
+        // `/` resolves to index.html.
+        let index = get(base.clone());
+        assert_eq!(index.status(), 200);
+        assert!(index.text().unwrap().contains("board"));
+
+        // Nested asset paths pass through verbatim, mime included.
+        let js = get(format!("{base}/assets/app.js"));
+        assert_eq!(js.status(), 200);
+        assert_eq!(js.headers()["content-type"], "text/javascript");
+
+        // A file the bundle doesn't have 404s rather than falling back to
+        // index.html — a mistyped asset must stay visibly missing.
+        assert_eq!(get(format!("{base}/assets/nope.js")).status(), 404);
+    }
+
+    /// Data routes must win over the bundle: were the static arm to shadow one,
+    /// the page would receive HTML where it expects JSON.
+    #[test]
+    fn data_routes_are_not_shadowed_by_static() {
+        let base = serve_with_assets(TEST_PASSWORD, fake_bundle());
+        let cookie = login_cookie(&base, TEST_PASSWORD);
+        let resp = reqwest::blocking::Client::new()
+            .get(format!("{base}/sessions"))
+            .header("Cookie", format!("{COOKIE_NAME}={cookie}"))
+            .header("Accept", "text/html")
+            .send()
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.text().unwrap(), "[]");
     }
 
     /// Browsers send every cookie for the origin in one header, and a segment
