@@ -27,6 +27,9 @@ stampHostClasses();
 async function boot() {
   let triggerPromoScene: ((scene: NonNullable<typeof promoScene>) => void) | null = null;
   let triggerMockQaScenario: (() => void) | null = null;
+  // Whether this is the desktop webview. Must be read *before* the web
+  // transport installs, because that installs `__TAURI_INTERNALS__` itself.
+  let isTauriBuild = true;
   // In mock mode, install the Tauri API fakes BEFORE anything else loads.
   if (isMockMode) {
     const mocks = await import("./mock/tauri-mock");
@@ -39,7 +42,8 @@ async function boot() {
     // stand an HTTP transport in for Tauri's IPC. Must also precede everything
     // else — `initStorage()` below is already an `invoke` call.
     const { isTauriHost, installWebTransport } = await import("./webTransport");
-    if (!isTauriHost()) {
+    isTauriBuild = isTauriHost();
+    if (!isTauriBuild) {
       await installWebTransport();
     }
   }
@@ -101,6 +105,13 @@ async function boot() {
           }
         : { type: "local" },
     );
+  } else if (!isTauriBuild) {
+    // The browser build has no connection to choose: the front door serving
+    // this page *is* the app's own backend, and there is no SSH tunnel to set
+    // up from here. Seeding "local" skips ConnectionDialog, which otherwise
+    // renders a picker whose options can't be acted on.
+    const { useConnectionStore } = await import("./store");
+    useConnectionStore.getState().setConnection({ type: "local" });
   }
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
