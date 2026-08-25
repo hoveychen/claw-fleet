@@ -1,8 +1,10 @@
 .list {
-  padding: 16px 20px 80px;
+  padding: 20px 24px 80px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  /* Between assistant records inside one turn. Turn boundaries get their own,
+     wider spacing — see `.message.user` below. */
+  gap: 8px;
 
   /* Reading measure for every TextBlock inside the transcript.
      Declared here rather than in TextBlock so the same component can still run
@@ -207,6 +209,25 @@
 
 .message.user {
   justify-content: flex-end;
+}
+
+/* Turn rhythm.
+   One `.message` is one API record, not one turn — a single user prompt can be
+   answered by a dozen assistant records in a row. So the flat 4px gap was doing
+   the wrong job twice: too tight to separate turns, and no tighter for the
+   records that belong together.
+
+   The user prompt IS the turn boundary, so that is where the air goes. It gets
+   a wide gap above and a narrow one below, which binds each prompt to its own
+   answer instead of leaving it floating equidistant between two. The `.list`
+   gap keeps consecutive assistant records close, the way steps of one thought
+   should sit. */
+.message.user:not(:first-child) {
+  margin-top: 18px;
+}
+
+.message.user {
+  margin-bottom: 2px;
 }
 
 /* Turn-status marker, now inline on the usage row rather than in a gutter. */
