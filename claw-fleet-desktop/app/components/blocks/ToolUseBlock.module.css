@@ -3,7 +3,7 @@
   border: 1px solid var(--color-border);
   overflow: hidden;
   margin: 4px 0;
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
 }
 
 .readonly { border-color: var(--tool-group-border); }
@@ -19,13 +19,13 @@
   cursor: pointer;
   text-align: left;
   color: var(--color-text);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   min-height: 30px;
 }
 
 .header:hover { background: var(--color-bg-tool-hover); }
 
-.arrow { color: var(--color-text-dim); font-size: 10px; flex-shrink: 0; }
+.arrow { color: var(--color-text-dim); font-size: var(--t-meta, 10px); flex-shrink: 0; }
 
 .tool_name {
   font-weight: 600;
@@ -53,7 +53,7 @@
   white-space: nowrap;
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
 }
 
 .spinner {
@@ -68,7 +68,7 @@
 }
 
 .error_badge {
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--color-error-bg);
@@ -94,7 +94,7 @@
 }
 
 .section_label {
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -106,7 +106,7 @@
 .input_text {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
@@ -123,7 +123,7 @@
 .exec_workdir {
   margin-top: 4px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   color: var(--color-text-dim);
   word-break: break-all;
 }
@@ -133,7 +133,7 @@
 }
 
 .exec_script_summary {
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -155,13 +155,13 @@
   align-items: baseline;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-secondary);
   word-break: break-all;
 }
 
 .patch_op {
-  font-size: 9px;
+  font-size: var(--t-meta, 9px);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -185,7 +185,7 @@
   display: flex;
   align-items: baseline;
   gap: 7px;
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   line-height: 1.5;
   color: var(--color-text-secondary);
 }
@@ -193,7 +193,7 @@
 .plan_mark {
   flex-shrink: 0;
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
 }
 
 .plan_text { word-break: break-word; }
@@ -221,7 +221,7 @@
 }
 
 .codex_chip {
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   padding: 1px 6px;
   border-radius: 3px;
   background: var(--color-bg-tool-hover);
@@ -230,7 +230,7 @@
 
 /* wait / write_stdin poll note */
 .codex_note {
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-dim);
   font-style: italic;
 }
@@ -243,7 +243,7 @@
 }
 
 .request_q_text {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text);
   white-space: pre-wrap;
   word-break: break-word;
@@ -252,7 +252,7 @@
 .request_opts {
   margin: 3px 0 0;
   padding-left: 16px;
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-secondary);
   display: flex;
   flex-direction: column;
@@ -272,7 +272,7 @@
   align-items: baseline;
   gap: 8px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
 }
 
 .param_key {
@@ -299,7 +299,7 @@
 }
 
 .param_chip {
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   padding: 1px 6px;
   border-radius: 3px;
   background: var(--color-bg-tool-hover);
@@ -316,13 +316,13 @@
 
 .target_main {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text);
   word-break: break-all;
 }
 
 .target_note {
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   color: var(--color-text-dim);
   flex-shrink: 0;
 }
@@ -354,8 +354,7 @@
 }
 
 .tool_ref {
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-secondary);
@@ -387,7 +386,7 @@
   border: none;
   cursor: pointer;
   text-align: left;
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
 }
 
 .group_toggle:hover { background: var(--tool-group-bg-hover); }
@@ -421,7 +420,7 @@
    row expands, without re-introducing a background band. */
 .rail .summary {
   color: var(--color-text);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
 }
 
 .rail .header:hover .summary { text-decoration: underline; }

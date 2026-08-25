@@ -3,7 +3,7 @@
 .text {
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .text + .text { margin-top: 6px; }
@@ -18,7 +18,7 @@
   gap: 6px;
   flex-wrap: wrap;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
 }
 
 .command_name {
@@ -30,7 +30,7 @@
 
 .command_tag {
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-secondary);

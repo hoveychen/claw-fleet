@@ -5,7 +5,7 @@
 .chip_warn,
 .chip_err {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   white-space: nowrap;
@@ -46,7 +46,7 @@
   background: var(--color-bg-secondary);
   color: var(--color-text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
@@ -56,7 +56,7 @@
 
 .stream_label {
   display: inline-block;
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-text-dim);
@@ -75,7 +75,7 @@
 }
 
 .note {
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-dim);
   font-style: italic;
 }
@@ -93,7 +93,7 @@
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
@@ -101,7 +101,7 @@
 
 /* The subagent's task name, shown alongside its type chip on the input view. */
 .agent_task {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   line-height: 1.4;
   color: var(--color-text);
   font-weight: 500;
@@ -118,7 +118,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xs);
   background: var(--color-bg-secondary);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
 }
 
 .stat_key { color: var(--color-text-dim); }
@@ -134,7 +134,7 @@
   background: none;
   border: none;
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   cursor: pointer;
 }
 
@@ -144,7 +144,7 @@
 .open_agent {
   margin-left: auto;
   padding: 1px 7px;
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   color: var(--color-accent, #60a5fa);
   background: none;
   border: 1px solid var(--color-accent, #60a5fa);
@@ -171,7 +171,7 @@
   display: flex;
   align-items: baseline;
   gap: 7px;
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   line-height: 1.5;
   color: var(--color-text-secondary);
 }
@@ -179,7 +179,7 @@
 .todo_mark {
   flex-shrink: 0;
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
 }
 
 .todo_done .todo_text {
@@ -200,7 +200,7 @@
 
 .todo_new {
   flex-shrink: 0;
-  font-size: 9px;
+  font-size: var(--t-meta, 9px);
   padding: 0 4px;
   border-radius: 3px;
   background: var(--color-bg-secondary);
@@ -209,8 +209,7 @@
 
 /* WebSearch: query headline over one favicon+title+domain row per link */
 .search_query {
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text);
   margin-bottom: 6px;
   word-break: break-word;
@@ -285,7 +284,7 @@
 }
 
 .search_title {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -294,7 +293,7 @@
 }
 
 .search_domain {
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-dim);
   flex-shrink: 0;
   margin-left: auto;
@@ -314,13 +313,13 @@
 }
 
 .fetch_host {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text);
   flex-shrink: 0;
 }
 
 .fetch_path {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -331,10 +330,10 @@
 /* WebFetch: the model's page summary, kept visually quieter than message
    prose — it is tool output, not the agent speaking. */
 .fetch_result {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
 }
 
 .fetch_result > :global(div) {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text-secondary);
 }

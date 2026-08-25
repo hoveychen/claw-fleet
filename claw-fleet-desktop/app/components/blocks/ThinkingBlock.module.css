@@ -16,12 +16,12 @@
   cursor: pointer;
   text-align: left;
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
 }
 
 .toggle:hover { background: var(--thinking-toggle-bg-hover); }
 
-.icon { color: var(--color-accent); font-size: 10px; }
+.icon { color: var(--color-accent); font-size: var(--t-meta, 10px); }
 .label { font-weight: 600; color: var(--thinking-label); white-space: nowrap; }
 
 .preview {
@@ -46,7 +46,7 @@
  * reasoning keeps the muted, smaller "thinking" look instead of matching the
  * main message body. */
 .content > :global(div) {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text-secondary);
 }
 
@@ -61,7 +61,7 @@
 }
 
 .live_bare > :global(div) {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text-secondary);
 }
 
@@ -80,7 +80,7 @@
 }
 
 .rail_window > :global(div) {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text-secondary);
 }
 
