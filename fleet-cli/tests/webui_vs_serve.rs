@@ -38,11 +38,21 @@ impl Drop for ServeGuard {
     }
 }
 
-/// A two-file stand-in for the real bundle.
+/// A two-file stand-in for the real bundle, plus the mobile UI in `m/`.
+///
+/// `m/` is how the mobile bundle ships (deploy/lean/Dockerfile copies
+/// `mobile-web/dist-webui` there): the phone gets its own UI at `/m/` off the
+/// same port, and the desktop `index.html` redirects it there. There is no
+/// route for it — the asset resolver maps paths to files, so a subdirectory is
+/// reachable for free. That "for free" is exactly what could silently stop
+/// being true, hence the assertion below.
 fn write_bundle(root: &Path) {
     std::fs::create_dir_all(root.join("assets")).unwrap();
     std::fs::write(root.join("index.html"), b"<html>fleet board</html>").unwrap();
     std::fs::write(root.join("assets/app.js"), b"console.log('boot')").unwrap();
+    std::fs::create_dir_all(root.join("m/assets")).unwrap();
+    std::fs::write(root.join("m/index.html"), b"<html>fleet mobile</html>").unwrap();
+    std::fs::write(root.join("m/assets/app.js"), b"console.log('mobile')").unwrap();
 }
 
 fn spawn(fleet_home: &Path, args: &[&str], envs: &[(&str, &str)]) -> ServeGuard {
@@ -162,6 +172,25 @@ fn webui_serves_the_bundle_and_data_routes_still_win() {
         body.to_ascii_lowercase().contains("text/javascript"),
         "asset mime missing from headers: {body}"
     );
+
+    // The mobile UI rides the same bundle dir under `m/`. `/m/` has to resolve
+    // to *its* index, not the desktop one — a bundle-relative index fallback
+    // would hand a phone the desktop app instead.
+    let (status, body) = get(port, "/m/index.html", None);
+    assert_eq!(status, 200, "mobile index should be served\n{}", serve.logs());
+    assert!(body.contains("fleet mobile"), "got: {body}");
+
+    let (status, body) = get(port, "/m/assets/app.js", None);
+    assert_eq!(status, 200);
+    assert!(body.contains("mobile"), "got: {body}");
+
+    // The bare directory URL is the one that actually gets typed and redirected
+    // to (`location.replace("/m/")`), so it has to resolve to that directory's
+    // index the same way `/` does. Nothing else in the bundle needs this, which
+    // is why it was missing.
+    let (status, body) = get(port, "/m/", None);
+    assert_eq!(status, 200, "/m/ should serve m/index.html\n{}", serve.logs());
+    assert!(body.contains("fleet mobile"), "got: {body}");
 
     // A data route must not be shadowed by the bundle — the UI would receive
     // HTML where it expects JSON.
