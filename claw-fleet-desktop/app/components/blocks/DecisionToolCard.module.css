@@ -1,32 +1,45 @@
 /* Inline decision card. Deliberately more prominent than a plain tool card —
-   a decision is where the conversation turned, not an implementation detail. */
+   a decision is where the conversation turned, not an implementation detail.
+   It is also the one block in the transcript where the *user* acted, so it
+   should keep its weight.
+
+   What changed is how it gets that weight. It used to be a full accent outline
+   with a thickened left edge, which is the default callout shape twice over.
+   Now the prominence comes from elevation: the card sits on the raised plane
+   (canvas→card now separates at 7.73, so that reads on its own) with a single
+   accent rule along the top edge — the same mark TaskNotification carries, one
+   step heavier, so the two read as one family saying "this one mattered"
+   rather than as two unrelated boxes. */
 .root {
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-accent, #60a5fa);
-  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  border-top: 2px solid var(--color-accent, #60a5fa);
   overflow: hidden;
-  margin: 6px 0;
+  margin: 10px 0;
   font-size: var(--t-ui, 12px);
 }
 
-.root_error { border-color: var(--color-error-fg, #dc5b5b); }
+.root_error { border-top-color: var(--color-error-fg, #dc5b5b); }
 
 .header {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  background: var(--color-bg-tool);
+  padding: 8px 12px;
+  /* Transparent, not the tool band: the root now carries the surface, so a
+     tinted header would cut a seam across a card that should read as one
+     plane. */
+  background: transparent;
   border: none;
   cursor: pointer;
   text-align: left;
   color: var(--color-text);
   font-size: var(--t-ui, 12px);
-  min-height: 30px;
+  min-height: 32px;
 }
 
-.header:hover { background: var(--color-bg-tool-hover); }
+.header:hover { background: var(--color-bg-card-hover); }
 
 .arrow { color: var(--color-text-dim); font-size: var(--t-meta, 10px); flex-shrink: 0; }
 
@@ -112,9 +125,9 @@
 }
 
 .body {
-  padding: 8px 10px 10px;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
+  padding: 2px 12px 12px;
+  border-top: 1px solid var(--color-border-soft, var(--color-border));
+  background: transparent;
 }
 
 .error_text {
@@ -168,14 +181,19 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 5px 8px;
-  border: 1px solid var(--color-border);
+  padding: 6px 9px;
+  /* Recessed, not outlined. A question with four options was rendering as four
+     more boxes inside a box — the stacked-pill problem in miniature. The card
+     is on the raised plane, so dropping the options one step down separates
+     them without a single line. */
+  background: var(--color-bg-sunken);
   border-radius: 5px;
   margin-bottom: 4px;
 }
 
+/* The chosen one is the only coloured thing in the list, so it needs no rule
+   to be found. */
 .option_selected {
-  border-color: var(--color-success);
   background: var(--color-success-bg);
 }
 
