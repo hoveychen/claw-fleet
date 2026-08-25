@@ -823,6 +823,32 @@ fn is_idle_resume_group(group: &Value) -> bool {
     group_invokes_fleet_subcommand(group, "session resume")
 }
 
+// ── Default model (settings.json `model`) ───────────────────────────────────
+
+/// Pin Claude Code's default model in `~/.claude/settings.json`.
+///
+/// A headless host has no interactive `/model` picker, and Fleet only passes
+/// `--model` when the caller named one (`push_session_override_args`) — so a
+/// spawn with no explicit model lands on whatever Claude Code itself defaults
+/// to. `settings.json`'s `model` key is the only lever that moves that default,
+/// and on the Fleet Cloud container `~/.claude` is on the ephemeral layer, so
+/// the write has to happen on every start (`fleet bootstrap`, which the
+/// entrypoint runs before serving).
+///
+/// Accepts either an alias (`opus`, `sonnet`) or a full id (`claude-opus-5`) —
+/// the value is handed to Claude Code verbatim. A blank value is a no-op, which
+/// is what leaves a host on the CLI's own default.
+pub fn apply_default_model(model: &str) -> Result<(), String> {
+    let model = model.trim();
+    if model.is_empty() {
+        return Ok(());
+    }
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+    obj.insert("model".to_string(), json!(model));
+    write_settings(&settings)
+}
+
 // ── Read hook events ─────────────────────────────────────────────────────────
 
 /// Everything the session scan derives from one pass over the hook events.
@@ -1497,6 +1523,59 @@ mod tests {
             wrote,
             "write_settings must create ~/.claude and write settings.json on a fresh host: {res:?}"
         );
+    }
+
+    #[test]
+    fn apply_default_model_sets_model_and_leaves_siblings_alone() {
+        // The Fleet Cloud container re-runs `fleet bootstrap` on every start
+        // (~/.claude is ephemeral), so this write has to be idempotent, must
+        // not disturb the hook groups the other bootstrap steps just wrote, and
+        // must treat a blank model as "keep the CLI's own default".
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-hooks-defaultmodel-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by the fleet_home_lock.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let outcome = (|| -> Result<(), String> {
+            write_settings(&json!({ "hooks": { "PreToolUse": [] } }))?;
+
+            apply_default_model("opus")?;
+            let after = read_settings().ok_or("settings unreadable after apply")?;
+            if after.get("model").and_then(|m| m.as_str()) != Some("opus") {
+                return Err(format!("model not written: {after}"));
+            }
+            if after.get("hooks").is_none() {
+                return Err("apply_default_model clobbered the hooks key".into());
+            }
+
+            // Blank = no-op, not a wipe of the previously pinned model.
+            apply_default_model("  ")?;
+            let after = read_settings().ok_or("settings unreadable after blank apply")?;
+            if after.get("model").and_then(|m| m.as_str()) != Some("opus") {
+                return Err(format!("blank model must not change settings: {after}"));
+            }
+            Ok(())
+        })();
+
+        // Restore env before asserting so a failure can't leak FLEET_HOME.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = fs::remove_dir_all(&tmp);
+
+        outcome.expect("apply_default_model must pin the model without touching siblings");
     }
 
     #[test]

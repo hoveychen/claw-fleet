@@ -116,6 +116,11 @@ ENV CODEX_HOME=/home/fleet/.codex \
 #                      authentication; only publish it behind your own auth
 #                      gateway. Unset it for an API-only container, which then
 #                      requires FLEET_ADMIN_TOKEN.
+# FLEET_CLAUDE_MODEL — default Claude Code model for runs that name none.
+#                      Written to ~/.claude/settings.json by `fleet bootstrap`
+#                      on every start (that file is ephemeral). Defaults to
+#                      `opus`; set it to an empty string to keep the Claude
+#                      Code CLI's own default instead.
 # FLEET_STATE_DIR    — persist ~/.fleet + the transcript dirs by symlink
 #                      instead of mounts (optional)
 # FOXY_VAULT_URL     — cred-store vault the pairing hint points at (optional)

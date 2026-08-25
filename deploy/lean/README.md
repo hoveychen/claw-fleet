@@ -63,6 +63,7 @@ a 400 that points at the upload route — see
 | `FLEET_HOME` | no | Override for Fleet's home root. **Leave unset in the container** so it resolves to `$HOME=/home/fleet` — the same home the agents read, with `~/.fleet` and the transcript dirs on the named state volume, and the rest of `~/.claude` ephemeral. |
 | `FLEET_PUBLIC_WORKSPACE` | no | Workspace bound to every `/v1` response, default `/workspace`. Requests carry no path — this is the confinement root. |
 | `CODEX_HOME` | no | Codex cred/config dir, default `/home/fleet/.codex` (ephemeral, except `sessions/` — see `FLEET_STATE_DIR`). |
+| `FLEET_CLAUDE_MODEL` | no | Default Claude Code model for runs that name none — written to `~/.claude/settings.json` by `fleet bootstrap` on every start (that file is ephemeral). Default `opus`; an alias (`opus`, `sonnet`) or a full id (`claude-opus-5`) both work. Empty string = keep the Claude Code CLI's own default. |
 | `FLEET_WAIT_FOR_CREDS` | no | Wait for the claude credential before serving. `1` (default) / `0`. |
 | `FLEET_CREDS_TIMEOUT` | no | Seconds to wait for the credential, default `60`. |
 | `FLEET_CRED_STORE_URL` | no | Cred-store endpoint the operator's injector uses (informational). |
