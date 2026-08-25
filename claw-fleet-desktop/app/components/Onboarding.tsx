@@ -737,6 +737,32 @@ function PrdModeCard({
   );
 }
 
+/** Purely informational — the sidebar's two modes and what each one holds.
+ *  Unlike every other card here it has no toggle: the split isn't optional, and
+ *  an upgrading user who knew where 任务 or 知识库 used to sit needs to be told
+ *  they are now behind the 工作 tab rather than discovering it by clicking
+ *  around. That's also why "nav_modes" is in ONBOARDING_FEATURES — it makes
+ *  this card surface once in What's New for existing installs. */
+function NavModesCard() {
+  const { t } = useTranslation();
+  return (
+    <div className={`${styles.card} ${styles.card_info}`}>
+      <div className={styles.card_header}>
+        <span className={styles.card_icon}>&#x1F9ED;</span>
+        <span className={styles.card_title}>{t("onboarding.nav_modes.title")}</span>
+      </div>
+      <p className={styles.card_description}>{t("onboarding.nav_modes.description")}</p>
+      <p className={styles.card_description}>
+        <strong>{t("nav_group.steward")}</strong> — {t("onboarding.nav_modes.steward")}
+      </p>
+      <p className={styles.card_description}>
+        <strong>{t("nav_group.work")}</strong> — {t("onboarding.nav_modes.work")}
+      </p>
+      <p className={styles.card_description}>{t("onboarding.nav_modes.hint")}</p>
+    </div>
+  );
+}
+
 function ModelGuidanceCard({
   value,
   defaultOn,
@@ -1464,6 +1490,14 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             <p className={styles.subtitle}>{t("onboarding.whats_new.subtitle")}</p>
           </div>
 
+          {/* First card in What's New: it explains where the pages moved, so it
+              has to come before any of the toggles. */}
+          {unseenFeatures.has("nav_modes") && (
+            <div className={styles.cards}>
+              <NavModesCard />
+            </div>
+          )}
+
           {unseenFeatures.has("appearance") && (
             <div className={styles.cards}>
               <AppearanceCard />
@@ -1635,6 +1669,10 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                 </div>
               </div>
             )}
+
+            <div className={styles.cards}>
+              <NavModesCard />
+            </div>
 
             <div className={styles.cards}>
               <AppearanceCard />
