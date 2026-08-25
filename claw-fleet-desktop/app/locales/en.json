@@ -986,6 +986,13 @@
       "mock_a2": "Roll back the migration",
       "mock_a3": "Show me the failures"
     },
+    "nav_modes": {
+      "title": "Changed: the sidebar now has two modes",
+      "description": "A pair of tabs sits at the top of the nav, splitting what used to be one flat list of pages into two groups by purpose.",
+      "steward": "For keeping watch: session monitoring, audit, the daily report, plus the memory, skills and phone-pairing settings pages.",
+      "work": "For getting work done: tasks, repos, the wiki, schedules and plan trees.",
+      "hint": "If a page seems missing, check the other mode. Each tab remembers the page you left it on; collapse the sidebar to the icon rail and both groups are listed together in one column."
+    },
     "prd_mode": {
       "title": "New: PRD Discipline Mode",
       "description": "Keep Claude Code focused across long multi-step plans (P1–P10). Adds a commit-discipline rule (no proactive commits mid-PRD) and persists your macro plan to TASKS.md at the workspace root, with a UserPromptSubmit hook that re-injects the active region every turn — so context compression no longer makes Claude forget remaining tasks."
