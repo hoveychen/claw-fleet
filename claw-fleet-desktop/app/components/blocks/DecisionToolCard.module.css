@@ -4,22 +4,34 @@
    should keep its weight.
 
    What changed is how it gets that weight. It used to be a full accent outline
-   with a thickened left edge, which is the default callout shape twice over.
-   Now the prominence comes from elevation: the card sits on the raised plane
-   (canvas→card now separates at 7.73, so that reads on its own) with a single
-   accent rule along the top edge — the same mark TaskNotification carries, one
-   step heavier, so the two read as one family saying "this one mattered"
-   rather than as two unrelated boxes. */
+   with a thickened left edge — the default callout shape used twice over. The
+   first pass swapped that for a single accent rule along the top; that was
+   still a coloured line drawn to say "look here", just a shorter one.
+
+   So there is no rule at all now. The card is raised and nothing else: its own
+   surface a step above the canvas (7.73 in luminance ×1000, enough to read
+   unaided) and a soft shadow under it. Nothing else in the transcript sits on
+   a raised plane — the tool steps have no surface, the tool bodies are
+   recessed — so elevation alone makes this the heaviest thing on screen. The
+   accent survives as one word, the `Question` label, which is the only place
+   it was ever carrying meaning rather than drawing attention.
+
+   Error state loses the coloured frame with everything else; the error badge
+   in the header already names it. */
 .root {
   border-radius: var(--radius-md);
   background: var(--color-bg-card);
-  border-top: 2px solid var(--color-accent, #60a5fa);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
-  margin: 10px 0;
+  margin: 12px 0;
   font-size: var(--t-ui, 12px);
 }
 
-.root_error { border-top-color: var(--color-error-fg, #dc5b5b); }
+/* Still referenced by DecisionToolCard.tsx, so it must exist — an undefined
+   CSS-module key stringifies to the literal "undefined" in the class list.
+   An errored card keeps the raised shape and shifts its ground instead of
+   growing a coloured frame back. */
+.root_error { background: var(--color-error-result-bg); }
 
 .header {
   width: 100%;
