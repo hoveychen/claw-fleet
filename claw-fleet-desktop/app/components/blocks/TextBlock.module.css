@@ -88,9 +88,11 @@
 .root :global(a:hover) { text-decoration: underline; }
 
 /* Inline code */
+  /* No outline: the surface ladder now separates this from the canvas on its
+     own (canvas→card measures 7.73 in luminance ×1000, up from 2.89). The
+     1px box was compensating for a step too fine to see. */
 .inline_code {
   background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-xs);
   padding: 1px 4px;
   font-family: var(--font-mono);
@@ -101,10 +103,12 @@
 }
 
 /* Code block wrapper */
+  /* No outline: the surface ladder now separates this from the canvas on its
+     own (canvas→card measures 7.73 in luminance ×1000, up from 2.89). The
+     1px box was compensating for a step too fine to see. */
 .code_wrapper {
   position: relative;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
   margin: 6px 0 10px;
   overflow: hidden;
 }

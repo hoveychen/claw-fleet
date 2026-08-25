@@ -1,12 +1,22 @@
+  /* No outline: the surface ladder now separates this from the canvas on its
+     own (canvas→card measures 7.73 in luminance ×1000, up from 2.89). The
+     1px box was compensating for a step too fine to see. */
 .root {
   border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
   overflow: hidden;
   margin: 4px 0;
   font-size: var(--t-ui, 12px);
 }
 
-.readonly { border-color: var(--tool-group-border); }
+/* Read-only tool (Read / Glob / Grep …) vs one that changes something. This
+   used to tint the card's outline; with the outline gone it would have become
+   a dead rule and the distinction would have silently disappeared, so it moves
+   onto the header ground instead — the same green the read-only tool *groups*
+   already use, so the two say the signal the same way.
+   Rail mode keeps a transparent header by design, so this only shows in the
+   non-rail placements (decision panel, embedded views), exactly as before. */
+.readonly > .header { background: var(--tool-group-bg); }
+.readonly > .header:hover { background: var(--tool-group-bg-hover); }
 
 .header {
   width: 100%;
@@ -369,9 +379,11 @@
 }
 
 /* Grouped */
+  /* No outline: the surface ladder now separates this from the canvas on its
+     own (canvas→card measures 7.73 in luminance ×1000, up from 2.89). The
+     1px box was compensating for a step too fine to see. */
 .group {
   border-radius: var(--radius-sm);
-  border: 1px solid var(--tool-group-border);
   overflow: hidden;
   margin: 4px 0;
 }
@@ -430,7 +442,6 @@
    bleeding into the surrounding steps. */
 .rail .body {
   background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   margin: 4px 0 10px;
   overflow: hidden;

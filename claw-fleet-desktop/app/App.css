@@ -160,12 +160,12 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --thinking-toggle-bg: #1a1a1a;
   --thinking-toggle-bg-hover: #222222;
   --thinking-label: #a78bfa;
-  --thinking-content-bg: #121212;
+  --thinking-content-bg: #171717;
 
   /* Tool groups (bash/subagent collapsible) */
   --tool-group-border: #1e2a1e;
-  --tool-group-bg: #0d1a0d;
-  --tool-group-bg-hover: #101f10;
+  --tool-group-bg: #111e11;
+  --tool-group-bg-hover: #142314;
   --tool-group-label: #86efac;
 
   /* Status / semantic colors */
@@ -176,7 +176,7 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-error-fg: #f87171;
   --color-error: var(--color-error-fg);
   --color-status-error: var(--color-error-fg);
-  --color-error-result-bg: #1a0d0d;
+  --color-error-result-bg: #1f1212;
   /* Bare RGB triples of the three status hues, so a component can tint with
      an alpha via the `rgb(<triple> / 0.15)` form. Components had been
      hand-writing `rgba(248,113,113,0.1)` etc, which pins the DARK hue and so
@@ -230,7 +230,7 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --mascot-accessory-fill: #2e3338;
   --mascot-accessory-stroke: #3e4348;
   --mascot-accessory-accent: #4e5358;
-  --mascot-screen-bg: #151818;
+  --mascot-screen-bg: #191c1c;
   --mascot-screen-fill: #1e2525;
 
   --scrollbar-thumb: rgba(255, 255, 255, 0.12);

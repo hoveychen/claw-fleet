@@ -60,12 +60,14 @@
   font-size: var(--t-meta, 9px);
 }
 
+  /* No outline: the surface ladder now separates this from the canvas on its
+     own (canvas→card measures 7.73 in luminance ×1000, up from 2.89). The
+     1px box was compensating for a step too fine to see. */
 .body {
   margin-top: 8px;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
   font-size: var(--t-ui, 12px);
   color: var(--color-text-secondary);
   word-break: break-word;
