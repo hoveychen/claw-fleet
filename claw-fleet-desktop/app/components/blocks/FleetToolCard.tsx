@@ -364,6 +364,11 @@ interface Props {
   block: ToolUseBlockType;
   result?: ToolResultBlock;
   isPartial?: boolean;
+  /** Rendered as a step inside a work-run rail. The gutter glyph already names
+   *  the operation, so the card sheds its chrome: no tinted band, no teal bar,
+   *  flush-left text lining up with the thinking prose and tool steps around
+   *  it. Same contract as ToolUseBlock's `rail`. */
+  rail?: boolean;
 }
 
 /**
@@ -374,7 +379,7 @@ interface Props {
  * Collapsed by default with a one-line summary — a long session is mostly tool
  * calls, and an always-open card would dominate it (mirrors `DecisionToolCard`).
  */
-export function FleetToolCard({ block, result, isPartial }: Props) {
+export function FleetToolCard({ block, result, isPartial, rail }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
@@ -398,9 +403,12 @@ export function FleetToolCard({ block, result, isPartial }: Props) {
   const intent = intentText(view.input);
 
   return (
-    <div className={`${styles.root} ${isError ? styles.root_error : ""}`}>
+    <div className={`${styles.root} ${isError ? styles.root_error : ""} ${rail ? styles.rail : ""}`}>
       <button className={styles.header} onClick={() => setOpen((o) => !o)}>
-        <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
+        {/* The rail gutter glyph already marks the row; a second chevron in
+            front of it just adds noise (ToolUseBlock hides its own the same
+            way in rail mode). */}
+        {!rail && <span className={styles.arrow}>{open ? "▾" : "▸"}</span>}
         <span className={styles.kind}>{kindLabel}</span>
         <span className={styles.summary}>{summary}</span>
         {intent && <span className={styles.intent} title={intent}>{intent}</span>}

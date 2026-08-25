@@ -1,13 +1,20 @@
 /* A background-agent completion notice, in place of its raw <task-notification>
    XML envelope. Kept a touch more prominent than a plain tool card — it marks
    real work landing — but quieter than a decision card. */
-  /* No outline: the surface ladder now separates this from the canvas on its
-     own (canvas→card measures 7.73 in luminance ×1000, up from 2.89). The
-     1px box was compensating for a step too fine to see. */
+/* No outline: the surface ladder now separates this from the canvas on its own
+   (canvas→card measures 7.73 in luminance ×1000, up from 2.89). The 1px box was
+   compensating for a step too fine to see.
+
+   No accent bar down the left edge either. A tinted panel with a coloured strip
+   on its left is the callout shape every AI tool emits by default; it read as
+   generic here for the same reason it did on the Fleet cards. The notice still
+   needs to be more prominent than a tool row — it marks real work landing — so
+   the emphasis moves to the top edge as a rule in the accent colour. Same
+   signal, a shape that isn't the default one. */
 .root {
   margin: 10px 0;
   border-radius: var(--radius-md);
-  border-left: 3px solid var(--color-accent, #60a5fa);
+  border-top: 2px solid var(--color-accent, #60a5fa);
   overflow: hidden;
   font-size: var(--t-ui, 12px);
   /* Never widen the container that holds us — the user bubble sizes to
