@@ -632,12 +632,21 @@ function WorkspaceExplorer({
     updateMainViewState("files", { activeRootPath: root.path, activeFilePath: null });
   };
 
-  const selectFile = (entry: ExplorerEntry) => {
-    setActiveFile(entry);
-    setExternalPath(null); // picking in the tree leaves the out-of-tree preview
-    setRevealMiss(null);
-    updateMainViewState("files", { activeFilePath: entry.relativePath });
-  };
+  // Memoised because FileTree's reveal effect lists it as a dependency: a fresh
+  // closure every render re-runs that effect continuously, which is wasted work
+  // — and used to be worse than wasted, since the effect's old `stale` guard
+  // then swallowed its own async callbacks (see the nonce guard in
+  // ExplorerPane). The identity is genuinely stable: every call here is either
+  // a setState setter or the zustand action, none of which change.
+  const selectFile = useCallback(
+    (entry: ExplorerEntry) => {
+      setActiveFile(entry);
+      setExternalPath(null); // picking in the tree leaves the out-of-tree preview
+      setRevealMiss(null);
+      updateMainViewState("files", { activeFilePath: entry.relativePath });
+    },
+    [updateMainViewState],
+  );
 
   return (
     <>
