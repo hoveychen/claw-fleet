@@ -1,4 +1,4 @@
-import { ALL_VIEW_MODES, type ViewMode } from "../store";
+import type { ViewMode } from "../viewModes";
 
 /** The two top-level modes the sidebar tab strip switches between.
  *  - `steward` (管家): watching and administering the fleet — sessions, audit,
@@ -52,7 +52,3 @@ export function isInNavGroup(view: ViewMode, group: NavGroup): boolean {
 export function isNavGroup(value: unknown): value is NavGroup {
   return NAV_GROUPS.includes(value as NavGroup);
 }
-
-/** Every view mode, exposed so tests can assert the partition without reaching
- *  into the store module's other exports. */
-export { ALL_VIEW_MODES };

@@ -1,20 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  ALL_VIEW_MODES,
   NAV_GROUPS,
   NAV_GROUP_HOME,
   NAV_GROUP_VIEWS,
   isNavGroup,
   navGroupOf,
 } from "./navGroups";
-
-// navGroups imports ALL_VIEW_MODES from the store, which touches the tauri
-// bridge at module load; stub it so this runs headless.
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => undefined) }));
-vi.mock("@tauri-apps/api/event", () => ({
-  emit: vi.fn(async () => undefined),
-  listen: vi.fn(async () => () => {}),
-}));
+import { ALL_VIEW_MODES } from "../viewModes";
 
 /**
  * The sidebar's 管家 / 工作 tab strip renders each group's nav items from
