@@ -126,3 +126,130 @@
   font-style: italic;
   font-size: var(--t-aux, 11px);
 }
+
+/* ── Fold + full-screen ───────────────────────────────────────────────────────
+   A 400-line edit rendered inline stops being a step in the narrative and
+   becomes the page. The inline copy folds after MAX_INLINE_ROWS with a +/−
+   tally in the path bar; from there you either unfold in place or lift it into
+   a sheet that gets the whole window. */
+
+.counts {
+  flex-shrink: 0;
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.count_add { color: var(--color-success); }
+.count_del { color: var(--color-error-fg); }
+
+.maximize {
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 0 4px;
+  font-size: var(--t-meta, 10px);
+  line-height: 1.4;
+  font-family: inherit;
+  color: var(--color-text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.maximize:hover { color: var(--color-text); }
+
+.unfold {
+  display: block;
+  width: 100%;
+  padding: 5px 0;
+  font-family: var(--font-sans);
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+  background: var(--color-bg-tool);
+  border: none;
+  border-top: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.unfold:hover {
+  color: var(--color-text);
+  background: var(--color-bg-tool-hover);
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: var(--color-bg-modal-overlay);
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1200px;
+  height: 100%;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-modal);
+  overflow: hidden;
+}
+
+.sheet_head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sheet_path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--t-ui, 12px);
+  color: var(--color-text);
+}
+
+.sheet_close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: var(--t-ui, 13px);
+  line-height: 1;
+  font-family: inherit;
+  color: var(--color-text-dim);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.sheet_close:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.sheet_body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px 18px;
+}
+
+/* The sheet already draws the frame; the nested copy is just the rows. */
+.root_full {
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  background: none;
+}
