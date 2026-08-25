@@ -138,6 +138,7 @@
   },
   "select_session": "Select a session to inspect",
   "tokens_out": "tokens out",
+  "detail.metrics": "Session metrics",
   "reasoning_tokens_chip": "reason {{tokens}} · {{percent}}%",
   "reasoning_tokens_tip": "{{tokens}} reasoning tokens, {{percent}}% of output tokens (already included in output)",
   "tokens": "tokens",
