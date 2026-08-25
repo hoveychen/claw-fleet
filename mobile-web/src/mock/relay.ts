@@ -35,9 +35,8 @@ import {
   MOCK_WIKI_ENTRY_B64,
 } from "./data";
 
-export function isMockMode(): boolean {
-  return new URLSearchParams(window.location.search).has("mock");
-}
+// 判断本身搬去了 ../mockMode（零依赖），这里 re-export 保持既有 import 有效。
+export { isMockMode } from "../mockMode";
 
 export class MockRelayClient extends RelayClient {
   // The base class keeps `handlers` private, so hold our own reference.

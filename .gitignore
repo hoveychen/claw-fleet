@@ -12,6 +12,10 @@ node_modules
 # (~/.local/share/pnpm/store) — e.g. under a sandboxed HOME.
 .pnpm-store/
 dist
+# mobile-web 的同源形态产物（`pnpm build:webui`）。另出一份而不是改默认 base，
+# 因为 dist/ 有三个消费方都按根路径假设：fleet-relay 镜像、鸿蒙 rawfile、
+# Capacitor 原生包。`dist` 那条 pattern 不匹配这个名字，所以要单列。
+dist-webui
 dist-ssr
 *.local
 
