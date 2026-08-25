@@ -6,14 +6,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { dateLocale, t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { DirtyFile, RepoDetail, RepoSummary, WorktreeHealth } from "../types";
 import { fetchRepoDetail, pullRepo, pushRepo } from "../repo";
 import styles from "./RepoDetailView.module.css";
 
 interface Props {
   repo: RepoSummary;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   onBack: () => void;
 }
 

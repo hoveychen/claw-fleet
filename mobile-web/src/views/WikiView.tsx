@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookOpen, ChevronRight, FileQuestion, RefreshCw, Search, SearchX } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { dateLocale, t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { WikiDoc } from "../types";
 import { useWikiSearch } from "../useWikiSearch";
 import { listWikiDocs } from "../wiki";
@@ -31,7 +31,7 @@ function leafOf(slug: string): string {
 }
 
 interface Props {
-  client: RelayClient | null;
+  client: FleetTransport | null;
   onOpenDoc: (doc: WikiDoc) => void;
 }
 

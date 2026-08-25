@@ -5,7 +5,31 @@
 
 import { t } from "./i18n";
 import { deriveKeys, isSealed, open, openBytes, seal, type SealedBox } from "./relayCrypto";
+import {
+  ANSWER_MAX_ATTEMPTS,
+  isDesktopRejection,
+  TransportError,
+  type FleetTransport,
+  type TransportHandlers,
+} from "./transport";
 import type { DecisionKind, SessionInfo } from "./types";
+
+// 传输层无关的那部分曾经住在本文件里,现在住在 transport.ts —— 因为同源 HTTP
+// 实现也需要它们,而它不能 import 本文件(见 transport.ts 顶部说明)。从这里
+// re-export,是为了让既有的 `from "./relay"` 全部继续有效:这次改动是把接缝
+// 划出来,不是让二十几个调用点跟着改导入路径。
+export {
+  ANSWER_MAX_ATTEMPTS,
+  ASSET_REQUEST_TIMEOUT_MS,
+  isDesktopRejection,
+  UPLOAD_REQUEST_TIMEOUT_MS,
+} from "./transport";
+export type { FleetTransport, RttSample, TransportHandlers } from "./transport";
+/** 历史名。本体是 `TransportError` —— 它描述的是「请求失败在哪一层」,与是否
+ *  经过 relay 无关。别名留着,免得为一次纯粹的搬家改动一批 catch 分支。 */
+export { TransportError as RelayRequestError } from "./transport";
+/** 历史名,同上。 */
+export type { TransportHandlers as RelayHandlers } from "./transport";
 
 /** Self-description this phone announces to the desktop so it appears in the
  *  desktop 「移动端」 device list. Provided lazily so `pushSubscribed` reflects
@@ -38,35 +62,6 @@ export interface DeviceInfo {
   appCommit: string;
 }
 
-/** A failed `request()`, tagged with *where* the failure came from.
- *
- *  `remote: true` — the desktop received the request, judged it, and said no
- *  (an `ok:false` reply). The message is the desktop's own text. Retrying or
- *  waiting changes nothing; show it to the user now.
- *
- *  `remote: false` — the request never got a verdict: it timed out, the socket
- *  was down, or the reply frame was dropped (the relay forwards best-effort, no
- *  queue, no retry — a phone that switched networks mid-flight never sees it).
- *  The desktop may well have done the work, so the caller is entitled to
- *  confirm out-of-band before declaring failure (see `waitForSessionId`). */
-export class RelayRequestError extends Error {
-  constructor(
-    message: string,
-    readonly remote: boolean,
-  ) {
-    super(message);
-    this.name = "RelayRequestError";
-  }
-}
-
-/** True when the desktop explicitly rejected the request — as opposed to the
- *  reply never arriving. Callers that have a grace-period fallback must gate it
- *  on this being false, or they will sit out the whole window on an error the
- *  desktop already handed them. */
-export function isDesktopRejection(e: unknown): e is RelayRequestError {
-  return e instanceof RelayRequestError && e.remote;
-}
-
 /** Native gzip inflation support (Safari 16.4+, all evergreen Chrome/Firefox).
  *  Announced to the desktop in `client_hello` so it can gate compression. */
 export function gzipSupported(): boolean {
@@ -84,50 +79,6 @@ export function binarySupported(): boolean {
 async function inflateGzipBytes(buf: ArrayBuffer): Promise<string> {
   const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
   return new Response(stream).text();
-}
-
-/** One round trip, broken into the pieces that have different causes.
- *
- *  `totalMs` alone can't say whether a laggy UI is this phone's network, the
- *  desktop's network, or the desktop's own handler — the three fixes are
- *  unrelated, so the split is the whole point of measuring at all.
- *
- *  Both segments are optional because either source can be absent: the relay's
- *  `msg_ack` may lose the race with the reply on a fast link, and a desktop that
- *  predates the `handle_ms` stamp reports nothing. A missing segment degrades the
- *  UI to a coarser answer; it never invents one. */
-export interface RttSample {
-  /** Request → reply, measured entirely on this phone's clock. */
-  totalMs: number;
-  /** Phone ↔ relay round trip, from the relay's own `msg_ack` for the outbound
-   *  frame. The relay acks as soon as it has handed the frame on, so this leg
-   *  excludes the desktop entirely. */
-  phoneRelayMs: number | null;
-  /** What the desktop reported spending inside its handler (`handle_ms`). A
-   *  duration it measured on its own clock, so no clock sync is involved. */
-  desktopHandleMs: number | null;
-}
-
-export interface RelayHandlers {
-  /** WS-level connectivity (this phone ↔ relay). */
-  onStatus?: (connected: boolean) => void;
-  /** Agent-level connectivity (desktop ↔ relay). */
-  onAgentOnline?: (online: boolean) => void;
-  onDecisionCreated?: (kind: DecisionKind, request: unknown) => void;
-  onDecisionResolved?: (kind: DecisionKind, id: string) => void;
-  onSessions?: (sessions: SessionInfo[]) => void;
-  /** Which kind of sessions frame just landed — `full` (whole snapshot) or
-   *  `delta` (incremental upsert/remove). Lets the UI surface whether the
-   *  desktop's delta path is actually engaged. Fired on every sessions update. */
-  onSessionsKind?: (kind: "full" | "delta") => void;
-  /** One request→reply round-trip sample, reported when a reply lands for a
-   *  still-pending request. A weak-link congestion signal, and — via its
-   *  segments — the only way to tell a slow link from a slow desktop. */
-  onRttSample?: (sample: RttSample) => void;
-  /** Fired each time the socket drops and a reconnect is scheduled — a second
-   *  weak-link signal (frequent reconnects ⇒ congested). */
-  onReconnect?: () => void;
-  onAuthError?: (message: string) => void;
 }
 
 /** Decide which relay this device talks to, from the three sources that can
@@ -206,19 +157,10 @@ function relayWsUrl(): string {
   return base.replace(/^http/, "ws") + "/ws";
 }
 
-const REQUEST_TIMEOUT_MS = 15_000;
 /** Control messages (snapshots, tails, marks) are small and 15s is plenty.
- *  Asset/upload requests move MB-scale base64 across a possibly-slow mobile
- *  link, so the default would spuriously abort on weak connections — the
- *  pending entry is dropped, the late reply discarded, and the card's <img>
- *  strands forever with no error (see decisionAsset.test.ts / the e2e repro).
- *  These give the payload a realistic window instead. */
-export const ASSET_REQUEST_TIMEOUT_MS = 60_000;
-export const UPLOAD_REQUEST_TIMEOUT_MS = 120_000;
-/** How many times `answerViaReq` sends the answer before giving up. The desktop
- *  dedups by decision id, so a resend after a lost reply is idempotent; this
- *  bounds how long a weak link is retried before the card reverts to retry. */
-export const ANSWER_MAX_ATTEMPTS = 3;
+ *  The asset/upload budgets that go with it live in `transport.ts` — every
+ *  transport pays the same MB-scale cost on a slow mobile link. */
+const REQUEST_TIMEOUT_MS = 15_000;
 /** How often the phone re-announces itself. The desktop drops a device ~40s
  *  after its last hello, so this must stay comfortably under that. */
 const HELLO_INTERVAL_MS = 15_000;
@@ -229,10 +171,10 @@ const HELLO_INTERVAL_MS = 15_000;
  *  on a weak link. Keeping the backoff growing across flaps is the fix. */
 const STABLE_CONNECTION_MS = 30_000;
 
-export class RelayClient {
+export class RelayClient implements FleetTransport {
   private ws: WebSocket | null = null;
   private secret: string;
-  private handlers: RelayHandlers;
+  private handlers: TransportHandlers;
   private deviceInfo?: () => DeviceInfo;
   private helloTimer: number | null = null;
   // Last full sessions snapshot, kept so `sessions_delta` frames can be applied
@@ -280,7 +222,7 @@ export class RelayClient {
   private encKey?: CryptoKey;
   private keysReady?: Promise<void>;
 
-  constructor(secret: string, handlers: RelayHandlers, deviceInfo?: () => DeviceInfo) {
+  constructor(secret: string, handlers: TransportHandlers, deviceInfo?: () => DeviceInfo) {
     this.secret = secret;
     this.handlers = handlers;
     this.deviceInfo = deviceInfo;
@@ -448,7 +390,7 @@ export class RelayClient {
       this.pending.delete(ackId);
       window.clearTimeout(entry.timer);
       // remote=false → the caller may resend (the desktop dedups by decision id).
-      entry.reject(new RelayRequestError(t("relay 未能转交（桌面离线）"), false));
+      entry.reject(new TransportError(t("relay 未能转交（桌面离线）"), false));
     }
   }
 
@@ -557,7 +499,7 @@ export class RelayClient {
           entry.resolve(payload.data);
         } else {
           // A verdict from the desktop — not a lost frame. See RelayRequestError.
-          entry.reject(new RelayRequestError(String(payload.error ?? t("请求失败")), true));
+          entry.reject(new TransportError(String(payload.error ?? t("请求失败")), true));
         }
         break;
       }
@@ -674,12 +616,12 @@ export class RelayClient {
       // Sealing is async, so probe the socket up front (not via sendPayload's
       // return) to fail-fast the "not connected" case before registering pending.
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        reject(new RelayRequestError(t("尚未连接 relay"), false));
+        reject(new TransportError(t("尚未连接 relay"), false));
         return;
       }
       const timer = window.setTimeout(() => {
         this.pending.delete(reqId);
-        reject(new RelayRequestError(t("请求超时（桌面端可能离线）"), false));
+        reject(new TransportError(t("请求超时（桌面端可能离线）"), false));
       }, timeoutMs ?? REQUEST_TIMEOUT_MS);
       this.pending.set(reqId, {
         resolve: resolve as (v: unknown) => void,
@@ -701,7 +643,7 @@ export class RelayClient {
           if (!entry) return;
           this.pending.delete(reqId);
           window.clearTimeout(entry.timer);
-          entry.reject(new RelayRequestError(t("尚未连接 relay"), false));
+          entry.reject(new TransportError(t("尚未连接 relay"), false));
         },
       );
     });
@@ -724,7 +666,7 @@ export class RelayClient {
       window.clearTimeout(entry.timer);
       // The socket dropped while these were in flight: no verdict, so callers
       // with an out-of-band confirmation path may still use it.
-      entry.reject(new RelayRequestError(message, false));
+      entry.reject(new TransportError(message, false));
     }
     this.pending.clear();
   }

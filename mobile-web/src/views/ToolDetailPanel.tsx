@@ -12,7 +12,7 @@ import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import { useLightbox } from "./Lightbox";
 import { isFleetTool } from "./fleetTools";
 import { FleetBody } from "./FleetBody";
@@ -339,7 +339,7 @@ export function ToolDetailPanel({
   toolUseId,
   isError,
 }: {
-  client: RelayClient | null;
+  client: FleetTransport | null;
   jsonlPath: string;
   toolUseId: string;
   isError?: boolean;

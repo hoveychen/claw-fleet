@@ -10,7 +10,7 @@ import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { dateLocale, t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { WikiDoc } from "../types";
 import { buildWikiHtml, exportWikiDoc, fetchWikiText, listWikiDocs } from "../wiki";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
@@ -19,7 +19,7 @@ import styles from "./WikiDocView.module.css";
 
 interface Props {
   doc: WikiDoc;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   onBack: () => void;
   /** 替换当前打开的文档（`[[slug]]` 站内跳转用）。 */
   onOpenDoc: (doc: WikiDoc) => void;

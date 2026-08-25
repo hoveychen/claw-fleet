@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Paperclip, X } from "lucide-react";
 import { t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import {
   attachmentDataUrl,
   attachmentName,
@@ -67,7 +67,7 @@ export function AttachmentThumbs({
   compact,
 }: {
   paths: string[];
-  client: RelayClient | null;
+  client: FleetTransport | null;
   /** Local `blob:` previews keyed by path, for files this device just picked —
    *  the bytes are already here, so the composer shows them without a round
    *  trip. Absent (and stale after a reload) previews fall back to the relay. */
@@ -132,7 +132,7 @@ function AttachmentThumb({
 }: {
   refr: AttachmentRef;
   alt: string;
-  client: RelayClient;
+  client: FleetTransport;
   preview?: string;
   onRemove?: () => void;
 }) {

@@ -2,17 +2,17 @@
 // 一次回包给出 Claude 账号 + 各 agent 源的限流条。今日累计花费不在这里 —— App 已经
 // 为 header 轮询 `today_usage`，页面直接复用那份数据，不重复扫会话。
 
-import type { RelayClient } from "./relay";
+import type { FleetTransport } from "./transport";
 import type { AccountUsage, CodexUsageHistoryPoint, UsageHistoryPoint } from "./types";
 
 /** Claude 账号档案 + 各源限流用量。桌面端会真去打 Anthropic / codex 的接口。 */
-export function fetchAccountUsage(client: RelayClient): Promise<AccountUsage> {
+export function fetchAccountUsage(client: FleetTransport): Promise<AccountUsage> {
   return client.request<AccountUsage>("account_usage", undefined, ACCOUNT_TIMEOUT_MS);
 }
 
 /** 占用率采样序列（默认近 24h）。桌面端只读它后台采样器落盘的快照，不打网络。 */
 export function fetchUsageHistory(
-  client: RelayClient,
+  client: FleetTransport,
   fromMs: number,
   toMs: number,
 ): Promise<UsageHistoryPoint[]> {
@@ -22,7 +22,7 @@ export function fetchUsageHistory(
 /** codex 占用率采样序列（默认近 24h）。与 `usage_history` 同为纯读盘，只是数据来自
  *  codex 那份快照，百分比是 0–100 整数（画图时 /100）。 */
 export function fetchCodexUsageHistory(
-  client: RelayClient,
+  client: FleetTransport,
   fromMs: number,
   toMs: number,
 ): Promise<CodexUsageHistoryPoint[]> {

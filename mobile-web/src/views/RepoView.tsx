@@ -6,13 +6,13 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, FolderGit2 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { RepoSummary } from "../types";
 import { listRepos } from "../repo";
 import styles from "./RepoView.module.css";
 
 interface Props {
-  client: RelayClient | null;
+  client: FleetTransport | null;
   onBack: () => void;
   onOpenRepo: (repo: RepoSummary) => void;
 }

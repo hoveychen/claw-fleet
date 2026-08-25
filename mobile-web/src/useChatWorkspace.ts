@@ -5,11 +5,11 @@
 // 任务页拿它把聊天会话从项目任务里筛出去。桌面端有一个同名的对应物
 // (claw-fleet-desktop/app/hooks/useChatWorkspace.ts)。
 import { useEffect, useState } from "react";
-import type { RelayClient } from "./relay";
+import type { FleetTransport } from "./transport";
 
 /** `null` 表示还没拿到——relay 未连上、请求在途，或桌面端版本老到不认这个方法。
  *  调用方必须把 null 当作「不知道」而不是「没有聊天目录」。 */
-export function useChatWorkspace(client: RelayClient | null): string | null {
+export function useChatWorkspace(client: FleetTransport | null): string | null {
   const [path, setPath] = useState<string | null>(null);
   useEffect(() => {
     if (!client) return;

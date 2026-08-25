@@ -9,7 +9,7 @@
 // 那边是两级 popover,这边只有原生 <select>,所以改用 <optgroup> 表达同一套分组
 // 规则(vendor 划分与顺序两端一致,菜单不会因为换个端就重排)。
 import { useEffect, useState } from "react";
-import type { RelayClient } from "./relay";
+import type { FleetTransport } from "./transport";
 import type { DshModelCatalog } from "./generated/types";
 
 /** 顶到菜单前面的 openrouter vendor。老板钦定的顺序,不是推导出来的:线上数据
@@ -100,7 +100,7 @@ export function dshEffortsFor(
 
 /** 主机上 dsh 的模型目录。拿不到就返回 null(relay 没连上、请求在途、主机没装
  *  dsh、或桌面端版本老到不认这个方法)—— 调用方把 null 当「只有默认项」。 */
-export function useDshModels(client: RelayClient | null): DshModelCatalog | null {
+export function useDshModels(client: FleetTransport | null): DshModelCatalog | null {
   const [catalog, setCatalog] = useState<DshModelCatalog | null>(null);
   useEffect(() => {
     if (!client) return;

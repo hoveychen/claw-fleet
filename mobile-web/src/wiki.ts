@@ -5,7 +5,7 @@
 // iframe — every relative asset reference (img/css/js/font) is fetched over the
 // relay and rewritten to a blob: URL so the doc looks the same as on desktop.
 
-import { ASSET_REQUEST_TIMEOUT_MS, type RelayClient } from "./relay";
+import { ASSET_REQUEST_TIMEOUT_MS, type FleetTransport } from "./transport";
 import type { WikiDoc, WikiExportPayload, WikiFilePayload, WikiSearchHit } from "./types";
 
 export type {
@@ -118,7 +118,7 @@ function base64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
-export async function listWikiDocs(client: RelayClient): Promise<WikiDoc[]> {
+export async function listWikiDocs(client: FleetTransport): Promise<WikiDoc[]> {
   return client.request<WikiDoc[]>("wiki_list");
 }
 
@@ -126,7 +126,7 @@ export async function listWikiDocs(client: RelayClient): Promise<WikiDoc[]> {
  *  queries under 2 chars to an empty list, mirrored here so we don't round-trip
  *  a single keystroke. */
 export async function searchWikiDocs(
-  client: RelayClient,
+  client: FleetTransport,
   query: string,
 ): Promise<WikiSearchHit[]> {
   if (query.trim().length < 2) return [];
@@ -136,7 +136,7 @@ export async function searchWikiDocs(
 /** Export one doc (single file for markdown/html, a zip for htmlDir) as bytes
  *  plus its suggested download filename. */
 export async function exportWikiDoc(
-  client: RelayClient,
+  client: FleetTransport,
   slug: string,
   version: string,
 ): Promise<{ filename: string; mime: string; bytes: Uint8Array }> {
@@ -149,7 +149,7 @@ export async function exportWikiDoc(
 
 /** Raw bytes + mime for one file (entry or asset) in a doc version. */
 export async function fetchWikiFile(
-  client: RelayClient,
+  client: FleetTransport,
   slug: string,
   version: string,
   relpath: string,
@@ -164,7 +164,7 @@ export async function fetchWikiFile(
 
 /** Decode a file's bytes to text (markdown / html source). */
 export async function fetchWikiText(
-  client: RelayClient,
+  client: FleetTransport,
   slug: string,
   version: string,
   relpath: string,
@@ -204,7 +204,7 @@ function textToDataUri(mime: string, text: string): string {
  *  text assets (css/js/svg) so `html → css → font/img` chains resolve; cycles
  *  break by leaving the ref as-is. */
 export async function buildWikiHtml(
-  client: RelayClient,
+  client: FleetTransport,
   doc: WikiDoc,
   version: string,
 ): Promise<WikiHtmlBundle> {
