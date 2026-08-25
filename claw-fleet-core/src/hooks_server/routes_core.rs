@@ -139,41 +139,40 @@ pub(crate) fn route_stop(
                     return;
                 }
                 let force: bool = query.get("force").map(|s| s == "true").unwrap_or(false);
+                // Probe first so a stale pid still 500s; then take the whole
+                // tree, or the agent's tool children outlive it.
+                //
+                // The probe is unix-only: on Windows `taskkill` reports an
+                // unknown pid through its own non-zero exit, so `kill_pid_tree`
+                // returns the Err and the same 500 comes out below. Gating the
+                // *route* on unix is what used to make this 400 on Windows even
+                // though the kill itself has had a taskkill path all along.
                 #[cfg(unix)]
-                {
-                    // Probe first so a stale pid still 500s; then take the whole
-                    // tree, or the agent's tool children outlive it.
-                    if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
-                        let err = std::io::Error::last_os_error().to_string();
-                        let body = format!(r#"{{"error":"{}"}}"#, err);
+                if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+                    let err = std::io::Error::last_os_error().to_string();
+                    let body = format!(r#"{{"error":"{}"}}"#, err);
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
+                    return;
+                }
+                match crate::session::kill_pid_tree(pid, force) {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"{}"}}"#, e);
                         let _ = request.respond(
                             tiny_http::Response::from_string(body)
                                 .with_status_code(500)
                                 .with_header(json_header),
                         );
-                        return;
                     }
-                    match crate::session::kill_pid_tree(pid, force) {
-                        Ok(()) => {
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(r#"{"ok":true}"#)
-                                    .with_header(json_header),
-                            );
-                        }
-                        Err(e) => {
-                            let body = format!(r#"{{"error":"{}"}}"#, e);
-                            let _ = request.respond(
-                                tiny_http::Response::from_string(body)
-                                    .with_status_code(500)
-                                    .with_header(json_header),
-                            );
-                        }
-                    }
-                }
-                #[cfg(not(unix))]
-                {
-                    let _ = (pid, force);
-                    let _ = request.respond(tiny_http::Response::empty(400));
                 }
             }
 
