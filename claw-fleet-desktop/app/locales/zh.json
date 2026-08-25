@@ -2313,6 +2313,8 @@
     "reveal_in_explorer": "在资源管理器中显示",
     "copy_path": "复制路径",
     "open_hint": "打开 {{path}}",
+    "open_hint_relative": "打开 {{path}}（在 {{root}} 中查找）",
+    "not_found_hint": "{{path}} 找不到对应文件",
     "not_found": "路径不存在"
   },
   "dir_picker": {

@@ -426,6 +426,7 @@ function WorkspaceExplorer({
 }) {
   const { t } = useTranslation();
   const clearFileNav = useUIStore((s) => s.clearFileNav);
+  const markPathUnresolved = useUIStore((s) => s.markPathUnresolved);
   const { showIgnored, tab, activeFilePath } = useUIStore(
     (s) => s.mainViewState.files,
   );
@@ -606,10 +607,14 @@ function WorkspaceExplorer({
           break;
         case "missing":
           setRevealMiss({ relPath, candidates: [] });
+          // Receipt for the chip that sent us here, so it can mark itself
+          // broken. Only for "missing": the other three outcomes all end in
+          // the user seeing something real.
+          markPathUnresolved(prefix + relPath);
           break;
       }
     },
-    [workspace, activeRoot],
+    [workspace, activeRoot, markPathUnresolved],
   );
 
   // Rehydrate the selected file object from its stable root-relative path after

@@ -2317,6 +2317,8 @@
     "reveal_in_explorer": "Show in File Explorer",
     "copy_path": "Copy Path",
     "open_hint": "Open {{path}}",
+    "open_hint_relative": "Open {{path}} (looking under {{root}})",
+    "not_found_hint": "No file found for {{path}}",
     "not_found": "Path not found"
   },
   "dir_picker": {

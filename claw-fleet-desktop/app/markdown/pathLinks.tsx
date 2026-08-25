@@ -29,6 +29,12 @@ export interface PathLinkContext {
   isLocal: boolean;
   /** Open in the 文件 page. `absPath` is already resolved. */
   openInFiles: (absPath: string, line: number | null) => void;
+  /**
+   * Paths a previous click could not resolve to any file. Undefined in the
+   * decision-float window, which hands the click to the main window and never
+   * hears back.
+   */
+  unresolved?: string[];
 }
 
 export function PathChip({
@@ -42,18 +48,34 @@ export function PathChip({
 }) {
   const { t } = useTranslation();
   const [menu, setMenu] = useState<ContextMenuAnchor | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [revealFailed, setRevealFailed] = useState(false);
 
   // resolvePathRef returns null only for `~` with no home dir. We pass none:
   // a `~` path lies outside the workspace anyway (so the 文件 page can't show
   // it), and reveal_path expands `~` host-side. Keeping it as-written is right.
   const absPath = resolvePathRef(pathRef.path, ctx.workspaceRoot, null) ?? pathRef.path;
 
+  // Two ways a chip learns it is broken: the right-click reveal rejected it, or
+  // a previous left click reached the 仓库 page and found nothing there.
+  const failed = revealFailed || (ctx.unresolved?.includes(absPath) ?? false);
+
+  // The join above is a *guess*: agents write paths relative to whatever
+  // directory they had in mind, which is often a subdirectory of the workspace,
+  // so `absPath` may name a file that does not exist. Asserting it in the
+  // tooltip ("打开 /Users/…/public/app-icon.png") stated that guess as fact —
+  // and the path in the tooltip was the wrong one. Show what was written and
+  // where we will look for it, which is all we actually know before the click.
+  const hint = failed
+    ? t("paths.not_found_hint", { path: absPath })
+    : pathRef.path === absPath
+      ? t("paths.open_hint", { path: absPath })
+      : t("paths.open_hint_relative", { path: pathRef.path, root: ctx.workspaceRoot });
+
   const reveal = () => {
     invoke("reveal_path", { path: absPath }).catch(() => {
       // Most often: the path the agent named no longer exists (or never did).
-      setFailed(true);
-      setTimeout(() => setFailed(false), 2000);
+      setRevealFailed(true);
+      setTimeout(() => setRevealFailed(false), 2000);
     });
   };
 
@@ -63,7 +85,7 @@ export function PathChip({
         className={`${styles.path_chip} ${failed ? styles.path_chip_failed : ""}`}
         role="button"
         tabIndex={0}
-        title={failed ? t("paths.not_found") : t("paths.open_hint", { path: absPath })}
+        title={hint}
         onClick={() => ctx.openInFiles(absPath, pathRef.line)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
