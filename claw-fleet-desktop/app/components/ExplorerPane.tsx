@@ -142,9 +142,15 @@ export function FileTree({
     }
     revealedNonce.current = reveal.nonce;
 
-    let stale = false;
+    // "Is this still the request the tree is serving?" — NOT "did this effect
+    // re-run?". A plain re-render re-runs the effect (the parent hands down a
+    // fresh `onPick` closure every time), so a `let stale` flag flipped by the
+    // cleanup goes true within milliseconds and swallowed everything below it,
+    // including the whole reason this reveal reports failures at all. Only a
+    // genuinely newer reveal bumps `revealedNonce`, which is the real signal.
+    const current = () => revealedNonce.current === reveal.nonce;
     const miss = () => {
-      if (stale) return;
+      if (!current()) return;
       onRevealFailed?.(reveal.relPath);
       // Served, in the sense that this request is finished — the caller must
       // still be released, or its pending-nav state sticks forever.
@@ -159,12 +165,12 @@ export function FileTree({
         if (!entries) {
           // Directory gone — leave the tree as it was, but say so.
           if (reveal.reportMiss) miss();
-          else if (!stale) onRevealed?.();
+          else if (current()) onRevealed?.();
           return;
         }
         loaded[dir] = entries;
       }
-      if (stale) return;
+      if (!current()) return;
 
       const parentRel = ancestors.length ? ancestors[ancestors.length - 1] : "";
       const siblings = loaded[parentRel] ?? children[parentRel] ?? [];
@@ -187,9 +193,6 @@ export function FileTree({
       }
       onRevealed?.();
     })();
-    return () => {
-      stale = true;
-    };
   }, [reveal, children, loadDir, onPick, onRevealed, onRevealFailed]);
 
   const toggleDir = useCallback(
