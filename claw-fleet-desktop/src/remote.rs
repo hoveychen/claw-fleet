@@ -975,6 +975,21 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn find_explorer_path(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_suffix: &str,
+    ) -> Result<Vec<String>, String> {
+        self.probe.get(&format!(
+            "{}?ws={}&root={}&rel={}",
+            claw_fleet_core::routes::EXPLORER_FIND,
+            encode_path(workspace),
+            encode_path(root),
+            encode_path(rel_suffix),
+        ))
+    }
+
     fn read_external_file(
         &self,
         path: &str,

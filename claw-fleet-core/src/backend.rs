@@ -661,6 +661,15 @@ pub trait Backend: Send + Sync {
         root: &str,
         rel_path: &str,
     ) -> Result<crate::file_explorer::ExplorerFileContent, String>;
+    /// Root-relative paths of every file under `root` ending with `rel_suffix`.
+    /// The explorer's fallback when a path clicked in agent prose does not
+    /// exist where the literal join put it — see `file_explorer::find_by_suffix`.
+    fn find_explorer_path(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_suffix: &str,
+    ) -> Result<Vec<String>, String>;
     /// Read one absolute path that belongs to no workspace — the `/tmp/foo.md`
     /// an agent just wrote and named in prose. Single file, no listing: see
     /// `file_explorer::read_external_file` for why that is the whole surface.

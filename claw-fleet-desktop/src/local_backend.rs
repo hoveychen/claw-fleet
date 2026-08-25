@@ -2330,6 +2330,15 @@ impl Backend for LocalBackend {
         crate::file_explorer::read_file(workspace, root, rel_path, &self.known_workspaces())
     }
 
+    fn find_explorer_path(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_suffix: &str,
+    ) -> Result<Vec<String>, String> {
+        crate::file_explorer::find_by_suffix(workspace, root, rel_suffix, &self.known_workspaces())
+    }
+
     fn read_external_file(
         &self,
         path: &str,
