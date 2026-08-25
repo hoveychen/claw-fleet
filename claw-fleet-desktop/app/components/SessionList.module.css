@@ -244,7 +244,16 @@
   flex-direction: column;
   gap: 1px;
   padding: 6px 10px 10px;
-  flex-shrink: 0;
+  /* Shrinkable, not fixed: on a short window the collapsed rail's full item
+     column (~442px) plus the header and the footer exceed 100vh, and because
+     .sidebar_content's basis is 0 it has nothing left to give up — the overflow
+     used to push the footer's settings card off screen entirely (measured: its
+     bottom edge at 617px in a 600px window). Letting the nav absorb the
+     overflow and scroll keeps the settings entry reachable. Taller windows
+     never overflow, so nothing scrolls and the layout is unchanged. */
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* ── Mode tab strip (管家 / 工作) ─────────────────────────────────────────────
