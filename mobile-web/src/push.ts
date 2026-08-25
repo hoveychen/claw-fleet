@@ -4,7 +4,7 @@
 // iOS 约束：Safari 只在「添加到主屏幕」后的 standalone PWA 里暴露 PushManager，
 // 页面里要先引导用户 A2HS。
 
-import { relayHttpBase } from "./relay";
+import { SUPPORTS_PUSH } from "./hostMode";
 import type { FleetTransport } from "./transport";
 import { classifyPush, type PushState } from "./push-classify";
 import { hasNativePushToken, nativePushToken } from "./nativePush";
@@ -19,6 +19,10 @@ function isStandalone(): boolean {
 }
 
 export function pushState(): PushState {
+  // 同源形态压根没有推送通道（VAPID 订阅登记在 relay 上，而这条部署按设计不碰
+  // relay）。先答再说，免得下面那串浏览器特性检测报出一个「浏览器支持」的乐观
+  // 结论 —— 缺的不是浏览器能力，是这条部署的能力。
+  if (!SUPPORTS_PUSH) return "unsupported";
   return classifyPush({
     hasServiceWorker: "serviceWorker" in navigator,
     hasPushManager: "PushManager" in window,
@@ -78,8 +82,17 @@ export async function enablePush(client: FleetTransport): Promise<PushState> {
     return permission === "denied" ? "denied" : "prompt";
   }
   const registration = await navigator.serviceWorker.ready;
-  const res = await fetch(`${relayHttpBase().replace(/\/$/, "")}/vapid`);
-  const { publicKey } = (await res.json()) as { publicKey: string };
+  // VAPID 公钥由 relay 提供，而同源构建里不能有 relay.ts —— 所以这条 import 是
+  // 动态的，且守卫直接写 define 的那个表达式而不是 hostMode 的 SUPPORTS_PUSH：
+  // vite 只替换字面出现处，折叠成 `"webui" !== "webui"` 之后 Rollup 才会连
+  // chunk 一起消掉。经 const 中转时它照样会为这条 import 落出一个 relay-*.js
+  // （实测过）。这个 if 在 relay 形态下恒真，纯粹是为了给折叠一个着力点。
+  let publicKey = "";
+  if (import.meta.env.VITE_FLEET_HOST !== "webui") {
+    const { relayHttpBase } = await import("./relay");
+    const res = await fetch(`${relayHttpBase().replace(/\/$/, "")}/vapid`);
+    ({ publicKey } = (await res.json()) as { publicKey: string });
+  }
   const subscription =
     (await registration.pushManager.getSubscription()) ??
     (await registration.pushManager.subscribe({

@@ -282,6 +282,11 @@ export class RelayClient implements FleetTransport {
     return this.authed;
   }
 
+  /** 这台设备说话的对象是中转,不是桌面端 —— 所以显示的是 relay 主机名。 */
+  get endpointLabel(): string {
+    return relayDisplayHost();
+  }
+
   private async open() {
     if (this.closed) return;
     // Keys must exist before we auth: the `auth` frame carries `channelToken`,

@@ -119,6 +119,12 @@ export interface FleetTransport {
   sayGoodbye(): void;
   /** 数据面是否可用。UI 拿它当轮询和「链路是否活着」的闸门。 */
   readonly isAuthed: boolean;
+  /** 「我连到哪」的人类可读形式,给「更多」页显示一行。
+   *
+   *  在接口上而不是让 UI 自己去问 relay:这一行的答案随传输层而变(relay 答
+   *  中转主机名,同源答自己的 origin),而「更多」页不该为了显示一行字就 import
+   *  一个具体实现 —— 那正是会把 relay 拖进同源构建的那类依赖。 */
+  readonly endpointLabel: string;
   /** 向主机发一次数据请求(pending_snapshot / task_plans / …)。 */
   request<T>(
     method: string,
