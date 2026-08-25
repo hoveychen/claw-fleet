@@ -9,7 +9,7 @@
 // base64-framed through the relay's `user_attachment` method (see
 // claw-fleet-core/src/mobile_relay.rs).
 
-import { ASSET_REQUEST_TIMEOUT_MS, type RelayClient } from "./relay";
+import { ASSET_REQUEST_TIMEOUT_MS, type FleetTransport } from "./transport";
 
 /**
  * `~/.fleet/user-attachments/<key>/<name>` — the shape the store returns.
@@ -136,7 +136,7 @@ export interface AttachmentImage {
  * over a phone link, and a spurious abort strands the <img> forever.
  */
 export function fetchAttachmentImage(
-  client: RelayClient,
+  client: FleetTransport,
   ref: AttachmentRef,
   full = false,
 ): Promise<AttachmentImage> {

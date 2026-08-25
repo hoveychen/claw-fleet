@@ -4,11 +4,11 @@
 // 300ms then hit `wiki_search`, which scans doc metadata + entry body and
 // returns WikiSearchHit rows (slug / field / snippet).
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RelayClient } from "./relay";
+import type { FleetTransport } from "./transport";
 import type { WikiSearchHit } from "./types";
 import { searchWikiDocs } from "./wiki";
 
-export function useWikiSearch(client: RelayClient | null, query: string) {
+export function useWikiSearch(client: FleetTransport | null, query: string) {
   const [hits, setHits] = useState<WikiSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const timerRef = useRef<number>(0);

@@ -7,10 +7,10 @@
 // contract: queries < 2 chars return empty (the caller's substring filter
 // covers those), longer queries debounce 300ms then hit the index.
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RelayClient } from "./relay";
+import type { FleetTransport } from "./transport";
 import type { SearchHit } from "./types";
 
-export function useRelaySearch(client: RelayClient | null, filter: string) {
+export function useRelaySearch(client: FleetTransport | null, filter: string) {
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const timerRef = useRef<number>(0);

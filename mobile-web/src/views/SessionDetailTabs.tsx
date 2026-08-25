@@ -11,7 +11,7 @@ import type { Components } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { dateLocale, t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type {
   DecisionHistoryRecord,
   HandoffChain,
@@ -30,7 +30,7 @@ import styles from "./SessionDetailTabs.module.css";
 
 /** One-shot fetch helper: "loading" → data | "error". */
 function useRelayData<T>(
-  client: RelayClient | null,
+  client: FleetTransport | null,
   method: string,
   params: Record<string, unknown>,
 ): T | "loading" | "error" {
@@ -173,7 +173,7 @@ export function DecisionHistoryTab({
   client,
 }: {
   session: SessionInfo;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   const data = useRelayData<DecisionHistoryRecord[]>(client, "session_decisions", {
     sessionId: session.id,
@@ -358,7 +358,7 @@ export function TaskPlansTab({
   client,
 }: {
   session: SessionInfo;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   const data = useRelayData<TaskPlanDetail[]>(client, "task_plans", {
     workspacePath: session.workspacePath,
@@ -467,7 +467,7 @@ function DshTokenTab({
   client,
 }: {
   session: SessionInfo;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   const req = tokenRequestFor(session);
   const data = useRelayData<DshTokenBreakdown>(client, req.method, req.params);
@@ -513,7 +513,7 @@ export function TokenTab({
   client,
 }: {
   session: SessionInfo;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   // dsh 没有 transcript 文件,用量走 RPC 问,字段也和 Claude 那套不通用。
   if (toolForAgentSource(session.agentSource) === "dsh") {
@@ -527,7 +527,7 @@ function ClaudeTokenTab({
   client,
 }: {
   session: SessionInfo;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   const req = tokenRequestFor(session);
   const data = useRelayData<TokenBreakdown>(client, req.method, req.params);
@@ -580,7 +580,7 @@ export function WorkflowTab({
   client,
 }: {
   session: SessionInfo;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   const nav = useAgentNav();
   const data = useRelayData<WorkflowTree[]>(client, "workflow_trees", {
@@ -631,7 +631,7 @@ export function HandoffTab({
   client,
 }: {
   session: SessionInfo;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   const data = useRelayData<HandoffChain | null>(client, "handoff_chain", {
     sessionId: session.id,

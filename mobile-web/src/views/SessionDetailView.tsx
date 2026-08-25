@@ -37,7 +37,7 @@ import { CopyButton } from "./CopyButton";
 import { useLightbox } from "./Lightbox";
 import { AttachmentThumbs } from "./AttachmentThumb";
 import { splitContextFiles } from "../userAttachments";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type {
   ContentBlock,
   LiveThinking,
@@ -329,7 +329,7 @@ interface Props {
   /** The full live session array — the lookup table for subagent drill-down
    *  (`agent-<id>` rows) and the parent breadcrumb. */
   sessions: SessionInfo[];
-  client: RelayClient | null;
+  client: FleetTransport | null;
   onBack: () => void;
   /** Push a session id as a new drill-down layer (subagent / parent nav). */
   onOpenSessionId: (id: string) => void;
@@ -539,7 +539,7 @@ function ToolStep({
   meta,
 }: {
   b: ContentBlock;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   jsonlPath?: string;
   meta?: ToolMeta;
 }) {
@@ -607,7 +607,7 @@ function AssistantBlocks({
   expandedThinking: Set<number>;
   onToggleThinking: (key: number) => void;
   toolMeta?: Map<string, ToolMeta>;
-  client?: RelayClient | null;
+  client?: FleetTransport | null;
   jsonlPath?: string;
 }) {
   return (
@@ -682,7 +682,7 @@ function WorkRunBand({
   onToggleThinking: (key: number) => void;
   live: boolean;
   toolMeta?: Map<string, ToolMeta>;
-  client?: RelayClient | null;
+  client?: FleetTransport | null;
   jsonlPath?: string;
 }) {
   const last = msgs[msgs.length - 1];
@@ -762,7 +762,7 @@ interface MessageRowProps {
   /** Aggregated usage when this row closes an assistant turn. */
   turnUsage?: { inputTokens: number; outputTokens: number; model?: string };
   /** For the tap-to-expand tool_detail fetch; both are stable per session. */
-  client?: RelayClient | null;
+  client?: FleetTransport | null;
   jsonlPath?: string;
 }
 

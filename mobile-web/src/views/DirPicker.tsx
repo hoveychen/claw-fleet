@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronUp, Folder, FolderGit2, X } from "lucide-react";
 import { t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { BrowseDirResponse } from "../types";
 import styles from "./DirPicker.module.css";
 
 interface DirPickerProps {
-  client: RelayClient | null;
+  client: FleetTransport | null;
   /** 起点目录；空字符串从桌面端的 home 开始。 */
   initialPath: string;
   onPick: (path: string) => void;

@@ -3,13 +3,13 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { HistoryLayer } from "../useNavStack";
 import { DecisionsView, KIND_LABEL } from "./DecisionsView";
 import { t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { PendingDecision, SessionInfo } from "../types";
 import styles from "./DecisionDrawer.module.css";
 
 interface Props {
   decisions: PendingDecision[];
-  client: RelayClient | null;
+  client: FleetTransport | null;
   connected: boolean;
   agentOnline: boolean;
   decisionsLoaded: boolean;

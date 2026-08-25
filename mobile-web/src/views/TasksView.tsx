@@ -18,7 +18,7 @@ import {
 import { AgentSourceIcon } from "./AgentSourceIcon";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isFleetOwnedTask, isSessionUnread } from "../types";
 import { useDraft } from "../draft";
@@ -256,7 +256,7 @@ export function groupOpenReadTargets(
 
 interface Props {
   sessions: SessionInfo[];
-  client: RelayClient | null;
+  client: FleetTransport | null;
   /** WS link phone↔relay. */
   connected: boolean;
   /** Desktop↔relay link — false means nothing is there to push a snapshot. */
