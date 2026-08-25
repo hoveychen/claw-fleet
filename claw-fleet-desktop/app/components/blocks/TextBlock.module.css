@@ -48,11 +48,15 @@
 }
 .root :global(li) { margin: 2px 0; }
 
+/* Indent and a lighter voice, not a coloured bar. The 3px accent rule down the
+   left is the same default callout shape being taken off the Fleet cards and
+   the task notice; a quote is already marked as one by being set apart and
+   quieter, which is how print has done it for centuries. */
 .root :global(blockquote) {
-  border-left: 3px solid var(--color-accent);
-  padding-left: 10px;
-  margin: 0 0 10px;
+  padding-left: 18px;
+  margin: 2px 0 12px;
   color: var(--color-text-secondary);
+  font-style: italic;
 }
 
 .root :global(table) {

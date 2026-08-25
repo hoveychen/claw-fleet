@@ -23,6 +23,7 @@ import { DocumentBlock } from "./DocumentBlock";
 import { ExpandableText } from "./ExpandableText";
 import {
   RailStep,
+  railFleetIcon,
   railGroupIcon,
   railThinkingIcon,
   railToolIcon,
@@ -184,14 +185,28 @@ export const ContentBlocks = memo(function ContentBlocks({ content, resultMap, m
 
       // Fleet's MCP control tools (plan/handoff/watch/loop/schedule/wiki) get a
       // structured card instead of the generic `{"action":…}` key/value blob.
-      // Like the decision card, it keeps full width and stays out of the rail.
-      if (isFleetTool(toolBlock.name)) {
-        elements.push(
+      //
+      // It used to sit outside the rail as its own block — a tinted panel with
+      // a teal bar down its left edge. That shape is the callout every AI tool
+      // emits by default, and because these calls arrive in runs of six to ten,
+      // a single turn rendered as a stack of outlined pills. Meanwhile the Read
+      // and Bash steps directly above solved the same problem with a gutter
+      // glyph and a line of text.
+      //
+      // So a Fleet call is now a step like any other: same rail, same
+      // typography, its own glyph. One language for "the agent did a thing",
+      // instead of Fleet's own tools being the exception.
+      const fleetTool = isFleetTool(toolBlock.name);
+      if (fleetTool) {
+        push(
+          railFleetIcon(fleetTool),
+          i,
           <FleetToolCard
             key={i}
             block={toolBlock}
             result={result}
             isPartial={isPartial && !result}
+            rail={rail}
           />
         );
         i++;

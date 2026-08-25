@@ -403,3 +403,61 @@
   font-family: var(--font-mono);
   font-size: var(--t-meta, var(--font-size-2xs));
 }
+
+/* ── Rail mode ────────────────────────────────────────────────────────────────
+   A Fleet call rendered as a step inside a work run, rather than as its own
+   block. Everything that made it a *card* comes off: the teal left bar, the
+   tinted header band, the rounded box. What's left is a line of text lining up
+   with the tool steps and thinking prose around it, and a glyph in the rail
+   gutter naming which control tool ran.
+
+   This replaces a tinted panel with a coloured bar down its left edge — the
+   shape every AI tool reaches for when it needs an inline notice. It read as
+   generic, and because these calls arrive in runs of six to ten, one turn
+   rendered as a stack of outlined pills. The rail steps directly above already
+   had the answer. */
+.rail {
+  border: none;
+  border-radius: 0;
+  margin: 0;
+}
+
+.rail .header {
+  background: transparent;
+  padding: 3px 6px 3px 0;
+  min-height: 24px;
+}
+
+.rail .header:hover { background: transparent; }
+.rail .header:hover .summary { text-decoration: underline; }
+
+/* The kind keeps the teal, but as a word rather than a bar — it is the only
+   colour left on the row, so it carries the whole signal. */
+.rail .kind {
+  font-size: var(--t-ui, 13px);
+}
+
+/* The summary IS the row here, so it takes full ink; the steps around it read
+   the same way (see ToolUseBlock `.rail .summary`). */
+.rail .summary {
+  color: var(--color-text);
+  font-size: var(--t-ui, 13px);
+}
+
+.rail .intent {
+  font-size: var(--t-ui, 13px);
+}
+
+/* Expanded detail sits in a contained panel so params and results read as one
+   artifact instead of bleeding into the neighbouring steps. */
+.rail .body {
+  background: var(--color-bg-card);
+  border-top: none;
+  border-radius: var(--radius-sm);
+  margin: 4px 0 10px;
+  padding: 8px 10px 10px;
+}
+
+/* An errored op loses its red left bar with the rest of the chrome; the error
+   badge in the header already says it, and the row stays legible. */
+.rail.root_error { border-left: none; }
