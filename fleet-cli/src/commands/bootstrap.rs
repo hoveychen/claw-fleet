@@ -32,13 +32,23 @@ struct Step {
 
 /// Install the headless control plane. `locale` falls back to `$FLEET_LOCALE`
 /// then `"en"`; `title` defaults to empty (which renders the locale-correct
-/// Boss/老板 — a literal value would force that same string across all locales).
-pub(crate) fn cmd_bootstrap(locale: Option<String>, title: Option<String>, json: bool) {
+/// Boss/老板 — a literal value would force that same string across all locales);
+/// `model` falls back to `$FLEET_CLAUDE_MODEL` and, when both are absent, is
+/// left alone so the host keeps the Claude Code CLI's own default.
+pub(crate) fn cmd_bootstrap(
+    locale: Option<String>,
+    title: Option<String>,
+    model: Option<String>,
+    json: bool,
+) {
     let locale = locale
         .filter(|s| !s.is_empty())
         .or_else(|| std::env::var("FLEET_LOCALE").ok().filter(|s| !s.is_empty()))
         .unwrap_or_else(|| "en".to_string());
     let title = title.unwrap_or_default();
+    let model = model
+        .or_else(|| std::env::var("FLEET_CLAUDE_MODEL").ok())
+        .unwrap_or_default();
 
     let steps = vec![
         Step {
@@ -80,6 +90,12 @@ pub(crate) fn cmd_bootstrap(locale: Option<String>, title: Option<String>, json:
             name: "model_guidance",
             result: claw_fleet_core::model_guidance::apply_model_guidance(&locale),
         },
+        Step {
+            // No-op when `model` is empty — a host that named no model keeps
+            // whatever the Claude Code CLI defaults to.
+            name: "default_model",
+            result: claw_fleet_core::hooks::apply_default_model(&model),
+        },
     ];
 
     let failed = steps.iter().filter(|s| s.result.is_err()).count();
@@ -99,6 +115,7 @@ pub(crate) fn cmd_bootstrap(locale: Option<String>, title: Option<String>, json:
             "ok": failed == 0,
             "locale": locale,
             "title": title,
+            "model": model,
             "steps": arr,
         });
         println!("{out}");
@@ -110,7 +127,9 @@ pub(crate) fn cmd_bootstrap(locale: Option<String>, title: Option<String>, json:
             }
         }
         if failed == 0 {
-            println!("fleet bootstrap: control plane installed (locale={locale:?}, title={title:?})");
+            println!(
+                "fleet bootstrap: control plane installed (locale={locale:?}, title={title:?}, model={model:?})"
+            );
         } else {
             eprintln!("fleet bootstrap: {failed} step(s) failed");
         }

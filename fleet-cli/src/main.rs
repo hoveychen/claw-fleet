@@ -330,6 +330,14 @@ enum Commands {
         /// that string across all locales.
         #[arg(long)]
         title: Option<String>,
+        /// Default Claude Code model for this host, written to
+        /// ~/.claude/settings.json (alias like "opus" or a full id like
+        /// "claude-opus-5"). A headless host has no /model picker, and Fleet
+        /// only passes --model when a caller names one, so this is what a
+        /// model-less spawn lands on. Defaults to $FLEET_CLAUDE_MODEL; omit
+        /// both to leave the CLI's own default alone.
+        #[arg(long)]
+        model: Option<String>,
         /// Emit a JSON summary instead of human-readable lines.
         #[arg(long)]
         json: bool,
@@ -1016,8 +1024,8 @@ fn main() {
         Commands::Loop { action } => commands::loop_cmd::cmd_loop(action),
         Commands::Watch { action } => commands::watch::cmd_watch(action),
         Commands::Schedule { action } => commands::schedule::cmd_schedule(action),
-        Commands::Bootstrap { locale, title, json } => {
-            commands::bootstrap::cmd_bootstrap(locale, title, json)
+        Commands::Bootstrap { locale, title, model, json } => {
+            commands::bootstrap::cmd_bootstrap(locale, title, model, json)
         }
         Commands::PrdDiscipline { action } => match action {
             PrdDisciplineCommands::Apply { title, locale } => {
