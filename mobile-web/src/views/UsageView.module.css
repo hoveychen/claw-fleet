@@ -27,7 +27,7 @@
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   padding: 4px 8px 4px 0;
   flex-shrink: 0;
 }
@@ -38,7 +38,7 @@
 }
 
 .headerTitle {
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -46,7 +46,7 @@
 }
 
 .refresh {
-  font-size: 18px;
+  font-size: var(--t-h2, 18px);
   color: var(--color-text-secondary);
   padding: 2px 6px;
   line-height: 1;
@@ -75,7 +75,7 @@
 }
 
 .sectionLabel {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -100,13 +100,13 @@
 }
 
 .rowLabel {
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text);
   flex-shrink: 0;
 }
 
 .rowValue {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
   text-align: right;
   overflow-wrap: anywhere;
@@ -119,7 +119,7 @@
 }
 
 .hint {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
   line-height: 1.6;
   padding: 14px;
@@ -142,7 +142,7 @@
 }
 
 .todayTokens {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
 }
 
@@ -169,12 +169,12 @@
 }
 
 .barLabel {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text);
 }
 
 .barPct {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-secondary);
@@ -226,7 +226,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
 }
 

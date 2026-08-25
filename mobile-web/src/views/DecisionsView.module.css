@@ -8,7 +8,7 @@
   text-align: center;
   color: var(--color-text-dim);
   padding: 48px 16px;
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
 }
 
 .card {
@@ -26,7 +26,7 @@
 }
 
 .kindChip {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
@@ -42,7 +42,7 @@
 }
 
 .workspace {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
   color: var(--color-text-secondary);
   overflow: hidden;
@@ -51,7 +51,7 @@
 }
 
 .aiTitle {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
   margin-bottom: 6px;
 }
@@ -63,7 +63,7 @@
 }
 
 .toolName {
-  font-size: 13.5px;
+  font-size: var(--t-ui, 14px);
   margin: 4px 0;
 }
 
@@ -90,7 +90,7 @@
 
 .permFileName {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
   color: var(--color-text);
   word-break: break-all;
@@ -99,7 +99,7 @@
 
 .permFilePath {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
   word-break: break-all;
   margin-top: 2px;
@@ -109,7 +109,7 @@
   background: transparent;
   border: none;
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   padding: 0;
   margin: 2px 0 4px;
   text-decoration: underline;
@@ -124,7 +124,7 @@
 }
 
 .riskChip {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   padding: 2px 8px;
   border-radius: 999px;
   background: rgba(248, 113, 113, 0.14);
@@ -142,7 +142,7 @@
   padding: 11px 0;
   border-radius: 9px;
   font-weight: 600;
-  font-size: 14.5px;
+  font-size: var(--t-ui, 14px);
 }
 
 .primaryButton {
@@ -173,25 +173,25 @@
 .error {
   margin-top: 8px;
   color: var(--color-error);
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
 }
 
 .expandButton {
   color: var(--color-accent);
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   margin-top: 4px;
 }
 
 /* markdown */
 .markdown {
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   overflow-wrap: break-word;
 }
 
 .markdown :global(h1),
 .markdown :global(h2),
 .markdown :global(h3) {
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   margin: 10px 0 4px;
 }
 
@@ -207,7 +207,7 @@
 
 .markdown :global(table) {
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   display: block;
   overflow-x: auto;
 }
@@ -227,7 +227,7 @@
 
 .questionHeader {
   display: inline-block;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--color-text-dim);
@@ -262,7 +262,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-accent);
 }
 
@@ -285,13 +285,13 @@
 }
 
 .optionLabel {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
 
 .optionDesc {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.4;
   color: var(--color-text-secondary);
   overflow-wrap: anywhere;
@@ -306,7 +306,7 @@
 }
 
 .otherLabel {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   font-weight: 500;
   color: var(--color-text);
 }
@@ -366,7 +366,7 @@
   outline: none;
   resize: none;
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   line-height: 1.5;
   color: var(--color-text);
   padding: 2px 0;
@@ -382,7 +382,7 @@
 }
 
 .fieldLabel {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
@@ -403,7 +403,7 @@
   border-radius: 999px;
   border: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
-  font-size: 13.5px;
+  font-size: var(--t-ui, 14px);
 }
 
 .radioChip[data-selected="true"] {
@@ -416,7 +416,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
 }
 
 .rangeRow {
@@ -435,7 +435,7 @@
   min-width: 36px;
   text-align: right;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
 }
 
 /* html preview / gallery */
@@ -469,7 +469,7 @@
 }
 
 .gallery figcaption {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
   margin-top: 4px;
 }
@@ -609,7 +609,7 @@
   padding: 16px 12px;
   margin-top: 8px;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-danger, #c0392b);
   background: var(--color-bg-secondary);
   border: 1px dashed var(--color-border);
@@ -632,14 +632,14 @@
 }
 
 .analysisHead {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   color: var(--color-accent);
   margin-bottom: 4px;
 }
 
 .analysisLoading {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
 }
 
@@ -657,7 +657,7 @@
   color: var(--color-text);
   border-radius: 8px;
   padding: 8px 10px;
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
 }
 
 .prefixItem code {
@@ -665,7 +665,7 @@
 }
 
 .planPath {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   font-family: ui-monospace, monospace;
   margin-bottom: 6px;
@@ -679,7 +679,7 @@
   border-radius: 10px;
   padding: 9px 10px;
   color: var(--color-text);
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
   font-family: ui-monospace, monospace;
   resize: vertical;
@@ -692,7 +692,7 @@
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   padding: 4px 0;
 }
 
@@ -706,7 +706,7 @@
   border-radius: 8px;
   background: var(--color-bg);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.45;
   color: var(--color-text-secondary);
   max-height: 40vh;
@@ -729,7 +729,7 @@
   border-radius: 6px;
   padding: 6px;
   overflow-x: auto;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
 }
 
 .questionTools {
@@ -749,7 +749,7 @@
   color: var(--color-text-dim);
   border-radius: 999px;
   padding: 3px 12px;
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
 }
 
 .toolToggle[data-active="true"] {
@@ -773,7 +773,7 @@
   border: 1px solid var(--color-border);
   border-radius: 999px;
   padding: 3px 6px 3px 10px;
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   max-width: 60vw;
   overflow: hidden;
@@ -794,7 +794,7 @@
 /* ── a2ui placeholder ── */
 
 .a2uiNotice {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border: 1px dashed var(--color-border);
@@ -807,7 +807,7 @@
 .a2uiTexts {
   margin: 8px 0 0;
   padding-left: 18px;
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
 }
 
@@ -826,7 +826,7 @@
 }
 
 .stepLabel {
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   font-weight: 600;
   color: var(--color-text-dim);
 }
@@ -917,7 +917,7 @@
   color: var(--color-accent);
   border-radius: 999px;
   padding: 2px 10px;
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   font-weight: 600;
 }
 
@@ -936,7 +936,7 @@
   color: var(--color-text-dim);
   border-radius: 8px;
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
 }
 
 .precedingBody {
@@ -967,7 +967,7 @@
   background: var(--color-bg-secondary);
   border-radius: 999px;
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
 }
 
 .queueChip[data-active="true"] {
@@ -999,7 +999,7 @@
 
 .queueHint {
   text-align: center;
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
 }
 
@@ -1027,7 +1027,7 @@
 .parkedBadge {
   align-self: flex-start;
   color: var(--color-warning);
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
 }
 
@@ -1045,7 +1045,7 @@
   border: 1px solid var(--color-border);
   border-radius: 8px;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
 }
 
 .sendFailBanner {
@@ -1057,11 +1057,11 @@
   border: 1px solid var(--color-warning);
   border-radius: 8px;
   color: var(--color-warning);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
 }
 
 .parkedHint {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
 }

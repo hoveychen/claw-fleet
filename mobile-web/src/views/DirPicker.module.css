@@ -25,7 +25,7 @@
   justify-content: space-between;
 }
 .title {
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   font-weight: 600;
   color: var(--color-text);
 }
@@ -42,7 +42,7 @@
  * `/` 当中性字符重排到行尾，`/Users/demo` 会显示成 `Users/demo/`。 */
 .crumb {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
   background: var(--color-bg-input);
   border: 1px solid var(--color-border);
@@ -52,7 +52,7 @@
   overflow-x: auto;
 }
 .error {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-error);
   background: var(--color-bg-input);
   border: 1px solid var(--color-border);
@@ -78,7 +78,7 @@
   border-bottom: 1px solid var(--color-border);
   padding: 11px 10px;
   color: var(--color-text);
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   text-align: left;
 }
 .row:last-child {
@@ -103,7 +103,7 @@
 }
 .empty {
   padding: 14px 10px;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
   text-align: center;
 }
@@ -114,7 +114,7 @@
   border: none;
   border-radius: 10px;
   padding: 11px;
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
 }
 .confirm:disabled {

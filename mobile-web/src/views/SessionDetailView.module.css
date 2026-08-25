@@ -25,7 +25,7 @@
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   padding: 4px 8px 4px 0;
   flex-shrink: 0;
 }
@@ -40,7 +40,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
   /* overflow stays visible so the scope dropdown isn't clipped; the title text
      itself ellipsizes via .headerTitleText. */
@@ -54,7 +54,7 @@
 }
 
 .headerSub {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -103,7 +103,7 @@
   border: none;
   background: none;
   color: var(--color-text-dim);
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   padding: 6px 10px 8px;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
@@ -136,7 +136,7 @@
   text-align: center;
   color: var(--color-text-dim);
   padding: 32px 16px;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
 }
 
 .loadMore {
@@ -146,7 +146,7 @@
   color: var(--color-text-secondary);
   border-radius: 999px;
   padding: 6px 16px;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
 }
 
 .userRow {
@@ -163,7 +163,7 @@
   background: var(--color-bg-user);
   border-radius: 8px 8px 2px 8px;
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   line-height: 1.5;
   word-break: break-word;
 }
@@ -179,7 +179,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
 }
 
@@ -187,7 +187,7 @@
    TextBlock convention since the 2026-07 layout redesign). */
 .markdown {
   max-width: 100%;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   line-height: 1.6;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -209,16 +209,16 @@
   border-radius: 8px;
   padding: 8px;
   overflow-x: auto;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
 }
 
 .markdown :global(code) {
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
 }
 
 .markdown :global(table) {
   border-collapse: collapse;
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   display: block;
   overflow-x: auto;
 }
@@ -285,13 +285,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
 }
 
 .tnBadge {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 20px;
@@ -325,7 +325,7 @@
   background: var(--color-bg-card);
   border-top: 1px solid var(--color-border);
   font-family: ui-monospace, monospace;
-  font-size: 10px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -380,7 +380,7 @@
 .toolLine {
   color: var(--color-text);
   font-family: ui-monospace, monospace;
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   line-height: 22px;
   white-space: nowrap;
   overflow: hidden;
@@ -409,7 +409,7 @@
 
 .chip {
   font-family: ui-monospace, monospace;
-  font-size: 10px;
+  font-size: var(--t-meta, 11px);
   line-height: 1;
   padding: 2px 5px;
   border-radius: 4px;
@@ -453,7 +453,7 @@
    masks are alpha masks, not painted color — no theme token needed. */
 .thinkText {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -481,7 +481,7 @@
   background: none;
   padding: 2px 0;
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   text-align: left;
 }
 
@@ -497,7 +497,7 @@
 
 .bandSteps {
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   flex-shrink: 0;
 }
 
@@ -511,7 +511,7 @@
 .doneIcon { color: var(--color-success, #3fa356); }
 
 .doneLabel {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
 }
 
@@ -553,7 +553,7 @@
   background: none;
   padding: 8px 10px;
   color: var(--color-text-dim);
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
 }
 
 .skillIcon {
@@ -581,7 +581,7 @@
   border-top: 1px solid var(--color-border);
   padding: 8px 10px;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   max-height: 360px;
   overflow-y: auto;
 }
@@ -596,7 +596,7 @@
   margin-bottom: 4px;
   color: var(--color-accent);
   font-weight: 600;
-  font-size: 10px;
+  font-size: var(--t-meta, 11px);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -612,7 +612,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-accent);
   margin-bottom: 6px;
 }
@@ -627,7 +627,7 @@
 
 .liveThinkingBody {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -646,7 +646,7 @@
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   cursor: pointer;
 }
 .openSubagent:active {
@@ -660,7 +660,7 @@
   border-radius: 4px;
   background: var(--color-bg-secondary);
   color: var(--color-accent);
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
 }
 
@@ -674,7 +674,7 @@
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   color: var(--color-accent);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -706,7 +706,7 @@
   border-radius: 6px;
   background: var(--color-bg-card);
   color: var(--color-text);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   font-weight: 600;
   cursor: pointer;
 }
@@ -753,7 +753,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--color-text);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   text-align: left;
   cursor: pointer;
 }
@@ -779,7 +779,7 @@
 .scopeItemTail {
   flex-shrink: 0;
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-variant-numeric: tabular-nums;
 }
 
