@@ -7,12 +7,16 @@
 //!
 //! - `fleet serve` — the token-gated API probe. What RemoteBackend, the mobile
 //!   relay and the cloud container's `/v1/*` surface talk to. A token is
-//!   required; the admin/scoped tiering applies.
+//!   required; the admin/scoped tiering applies. Its bind address comes from
+//!   `FLEET_SERVE_HOST` (read inside `hooks_server::serve`); there is no flag.
 //! - `fleet webui` — the browser build of the app: the UI bundle plus the data
 //!   routes it needs. No token, because the UI needs routes outside the
 //!   `/v1/*` scoped whitelist and a credential in the page would protect
-//!   nothing. Loopback by default; widening it is `--host`, and that belongs
-//!   behind your own auth gateway since these routes can start agent sessions.
+//!   nothing. Loopback by default; widening it is `--host` / `FLEET_WEBUI_HOST`,
+//!   and that belongs behind your own auth gateway since these routes can start
+//!   agent sessions.
+//!
+//! The two host env vars are separate on purpose — see [`resolve_webui_host`].
 
 use claw_fleet_core::hooks_server::{self, ServeOptions};
 
@@ -26,13 +30,55 @@ pub(crate) fn cmd_serve(port: u16, token: String, port_file: Option<std::path::P
     });
 }
 
+/// Default bind address for `fleet webui` — loopback, because this port has no
+/// authentication of its own.
+const DEFAULT_WEBUI_HOST: &str = "127.0.0.1";
+/// Default port for `fleet webui`.
+const DEFAULT_WEBUI_PORT: u16 = 4571;
+
+/// `--host` wins, then `FLEET_WEBUI_HOST`, then loopback.
+///
+/// Deliberately *not* `FLEET_SERVE_HOST` (which `hooks_server::serve` reads for
+/// `fleet serve`): that one widens a token-gated API, this one widens a port with
+/// no authentication at all. One env var flipping both to `0.0.0.0` is exactly
+/// the accident worth keeping impossible.
+fn resolve_webui_host(flag: Option<String>, env: Option<String>) -> String {
+    flag.or_else(|| env.filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| DEFAULT_WEBUI_HOST.to_string())
+}
+
+/// `--port` wins, then `FLEET_WEBUI_PORT`, then [`DEFAULT_WEBUI_PORT`].
+///
+/// An unparseable env value is an error rather than a silent fall back to the
+/// default: the operator asked for a specific port, and quietly binding another
+/// one looks like success until something fails to connect.
+fn resolve_webui_port(flag: Option<u16>, env: Option<String>) -> Result<u16, String> {
+    if let Some(p) = flag {
+        return Ok(p);
+    }
+    match env.filter(|s| !s.is_empty()) {
+        Some(raw) => raw
+            .parse::<u16>()
+            .map_err(|e| format!("FLEET_WEBUI_PORT={raw} is not a valid port: {e}")),
+        None => Ok(DEFAULT_WEBUI_PORT),
+    }
+}
+
 /// `fleet webui` — the browser build.
 pub(crate) fn cmd_webui(
-    port: u16,
+    port: Option<u16>,
     web_root: Option<std::path::PathBuf>,
-    host: String,
+    host: Option<String>,
     port_file: Option<std::path::PathBuf>,
 ) {
+    let host = resolve_webui_host(host, std::env::var("FLEET_WEBUI_HOST").ok());
+    let port = match resolve_webui_port(port, std::env::var("FLEET_WEBUI_PORT").ok()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("fleet webui: {e}");
+            std::process::exit(2);
+        }
+    };
     // `--web-root` wins; otherwise the env, which is how the container is
     // configured. Neither → nothing to serve, and a UI-less "web UI" is a
     // misconfiguration worth failing on rather than starting a port that
@@ -52,7 +98,7 @@ pub(crate) fn cmd_webui(
         std::process::exit(2);
     }
     eprintln!("[fleet webui] serving web UI from {}", root.display());
-    if host != "127.0.0.1" && host != "localhost" {
+    if host != DEFAULT_WEBUI_HOST && host != "localhost" {
         eprintln!(
             "[fleet webui] binding {host} — this port has no authentication and can start agent sessions; put an auth gateway in front of it"
         );
@@ -68,4 +114,53 @@ pub(crate) fn cmd_webui(
         web_assets: Some(claw_fleet_core::web_assets::from_dir(root)),
         host: Some(host),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_flag_beats_env_beats_default() {
+        assert_eq!(
+            resolve_webui_host(Some("10.0.0.5".into()), Some("0.0.0.0".into())),
+            "10.0.0.5"
+        );
+        assert_eq!(resolve_webui_host(None, Some("0.0.0.0".into())), "0.0.0.0");
+        assert_eq!(resolve_webui_host(None, None), DEFAULT_WEBUI_HOST);
+    }
+
+    #[test]
+    fn empty_host_env_is_not_a_value() {
+        // Docker passes `-e FLEET_WEBUI_HOST` with no value as an empty string;
+        // binding "" would fail, so it has to read as "unset".
+        assert_eq!(resolve_webui_host(None, Some(String::new())), DEFAULT_WEBUI_HOST);
+    }
+
+    #[test]
+    fn port_flag_beats_env_beats_default() {
+        assert_eq!(resolve_webui_port(Some(9000), Some("8080".into())), Ok(9000));
+        assert_eq!(resolve_webui_port(None, Some("8080".into())), Ok(8080));
+        assert_eq!(resolve_webui_port(None, None), Ok(DEFAULT_WEBUI_PORT));
+        assert_eq!(resolve_webui_port(None, Some(String::new())), Ok(DEFAULT_WEBUI_PORT));
+    }
+
+    #[test]
+    fn port_zero_stays_zero() {
+        // 0 means "let the OS pick" — it must survive both paths rather than
+        // being mistaken for "unset" and replaced by the default.
+        assert_eq!(resolve_webui_port(Some(0), None), Ok(0));
+        assert_eq!(resolve_webui_port(None, Some("0".into())), Ok(0));
+    }
+
+    #[test]
+    fn unparseable_port_env_errors_instead_of_defaulting() {
+        for raw in ["not-a-port", "70000", "-1", "4571 "] {
+            let err = match resolve_webui_port(None, Some(raw.into())) {
+                Err(e) => e,
+                Ok(p) => panic!("{raw:?} must be rejected, was parsed as {p}"),
+            };
+            assert!(err.contains(raw), "message should quote the bad value: {err}");
+        }
+    }
 }
