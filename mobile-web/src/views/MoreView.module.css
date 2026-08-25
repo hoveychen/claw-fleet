@@ -204,12 +204,16 @@
   padding: 0 14px 12px;
 }
 
+/* 告警靠底色而不是左边一条。这块只在异常状态下渲染（频道里冒出第二个
+   agent），该显眼——但显眼的方式换成染底，和详情页去掉的那批彩色左条
+   保持同一套说法。 */
 .sourceItem {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border-left: 2px solid var(--color-warning);
-  padding-left: 8px;
+  background: var(--color-warning-soft, rgba(251, 191, 36, 0.1));
+  border-radius: 6px;
+  padding: 6px 8px;
 }
 
 .sourceHead {

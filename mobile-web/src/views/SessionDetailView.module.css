@@ -253,10 +253,13 @@
 }
 
 /* ── Task-notification card (subagent completion notice) ──────────────────── */
+/* 无外框、无彩色左条：表面梯级抬开之后（canvas→card 亮度差 7.73），
+   .tnHeader 的 card 底色自己就能和画布分开，那圈 1px 只是在补偿一个
+   太细的梯级。左边那条 accent 更是 AI 工具生成行内提示时的默认件——
+   桌面端的同名卡刚去掉，这边跟上，免得两个端对同一条通知给出两种
+   长相。它仍然比周围的工具行重：工具行根本没有表面。 */
 .tnCard {
   width: 100%;
-  border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-accent);
   border-radius: 12px;
   overflow: hidden;
 }

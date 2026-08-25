@@ -32,6 +32,9 @@
   --color-accent: #d97757;
   --color-accent-hover: #c96040;
   --color-accent-soft: rgba(217, 119, 87, 0.18);
+  /* 告警底色（MoreView 的第二 agent 诊断块）——与 accent-soft 同做法，
+     两个主题各自调，免得写死的 rgba 在暖纸底上发脏。 */
+  --color-warning-soft: rgba(251, 191, 36, 0.14);
   /* 用户消息气泡底色，与桌面 App.css 的 --color-bg-user 逐字节一致 */
   --color-bg-user: #1f2534;
   --color-success: #4ade80;
@@ -79,6 +82,7 @@
   --color-accent: #c25232;
   --color-accent-hover: #a94527;
   --color-accent-soft: rgba(194, 82, 50, 0.13);
+  --color-warning-soft: rgba(154, 106, 8, 0.12);
   --color-bg-user: #f0e8dd;
   --color-success: #178042;
   --color-warning: #9a6a08;
