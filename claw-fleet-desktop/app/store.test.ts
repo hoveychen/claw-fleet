@@ -204,6 +204,102 @@ describe("主导航页面浏览上下文", () => {
 });
 
 /**
+ * 侧栏顶部的 管家 / 工作 tab。The active tab is *derived* from `viewMode`
+ * (navGroupOf) rather than stored beside it, so the invariant worth testing is
+ * the other half: each tab remembers the page you left it on, and every path
+ * that moves the main area — the nav itself and the three cross-page requests
+ * (file link, tray click, schedule → new session) — feeds that memory. A path
+ * that wrote `viewMode` directly would leave its tab restoring a stale page.
+ */
+describe("侧栏模式 tab（管家 / 工作）", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("切 tab 回到该 tab 上次停留的页面", async () => {
+    const { useUIStore } = await import("./store");
+    const ui = () => useUIStore.getState();
+
+    ui().setViewMode("audit"); // 管家
+    ui().setViewMode("wiki"); // 工作
+
+    ui().setNavGroup("steward");
+    expect(ui().viewMode).toBe("audit");
+
+    ui().setNavGroup("work");
+    expect(ui().viewMode).toBe("wiki");
+  });
+
+  it("首次进入某个 tab 落在它的主页", async () => {
+    const { useUIStore } = await import("./store");
+
+    useUIStore.getState().setNavGroup("work");
+    expect(useUIStore.getState().viewMode).toBe("history");
+  });
+
+  it("点当前所在 tab 不换页面", async () => {
+    const { useUIStore } = await import("./store");
+
+    useUIStore.getState().setViewMode("plans");
+    useUIStore.getState().setNavGroup("work");
+
+    expect(useUIStore.getState().viewMode).toBe("plans");
+  });
+
+  it("绕过 nav 的跨页跳转同样记进 tab 记忆", async () => {
+    const { useUIStore } = await import("./store");
+    const ui = () => useUIStore.getState();
+
+    // 先让 工作 tab 的记忆停在 计划树，这样「主页兜底」和「真的记账了」两种
+    // 结果不再撞成同一个值 —— 否则跳到 history 的断言不记账也能通过。
+    ui().setViewMode("plans");
+
+    // 托盘/通知点击 → 任务页（工作 tab），走的是 requestOpenTask 而非 setViewMode。
+    ui().requestOpenTask("sess-1");
+    expect(ui().viewMode).toBe("history");
+
+    ui().setNavGroup("steward");
+    expect(ui().viewMode).toBe("gallery");
+
+    // 若 requestOpenTask 没记账，这里会退回上一页 plans。
+    ui().setNavGroup("work");
+    expect(ui().viewMode).toBe("history");
+
+    // 文件链接点击（requestFileNav）是同一类绕过 nav 的路径。
+    ui().requestFileNav({ workspacePath: "/w", absPath: "/w/a.ts", line: 3 });
+    ui().setNavGroup("steward");
+    ui().setNavGroup("work");
+    expect(ui().viewMode).toBe("files");
+  });
+
+  it("把每个 tab 的最后一页写进设置存储", async () => {
+    const { useUIStore } = await import("./store");
+    const { getItem } = await import("./storage");
+
+    useUIStore.getState().setViewMode("memory");
+    useUIStore.getState().setViewMode("files");
+
+    expect(JSON.parse(getItem("nav-group-last-view")!)).toMatchObject({
+      steward: "memory",
+      work: "files",
+    });
+  });
+
+  it("丢弃已不属于该 tab 的存量页面，回落到主页", async () => {
+    const { setItem } = await import("./storage");
+    // wiki 现在归 工作 tab；一份把它记在 管家 名下的旧数据不该让 管家 打开它。
+    setItem("nav-group-last-view", JSON.stringify({ steward: "wiki", work: "nonsense" }));
+
+    const { useUIStore } = await import("./store");
+
+    expect(useUIStore.getState().lastViewByNavGroup).toEqual({
+      steward: "gallery",
+      work: "history",
+    });
+  });
+});
+
+/**
  * gallery is the default session layout, but two paths used to silently pin
  * users to `list` instead: (1) navigateToSessionDetail force-switched to list
  * on every notification/tray click, persisting it as the new default even

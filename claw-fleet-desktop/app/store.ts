@@ -4,6 +4,8 @@ import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
 import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, WaitingAlert } from "./types";
 import { isFleetOwnedTask } from "./types";
+import { NAV_GROUPS, NAV_GROUP_HOME, navGroupOf, type NavGroup } from "./components/navGroups";
+import { isViewMode, type SessionViewMode, type ViewMode } from "./viewModes";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -47,27 +49,11 @@ export async function openSettingsWindow(): Promise<void> {
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-/** Every page the main area can show. A runtime tuple rather than a bare union
- *  so the nav-group split (see components/navGroups.ts) can assert it covers
- *  every view — a new page added here and forgotten there would otherwise fall
- *  through to the default group unnoticed. */
-export const ALL_VIEW_MODES = [
-  "list",
-  "gallery",
-  "history",
-  "audit",
-  "report",
-  "memory",
-  "wiki",
-  "skills",
-  "plugins",
-  "files",
-  "mobile",
-  "schedule",
-  "plans",
-] as const;
-export type ViewMode = (typeof ALL_VIEW_MODES)[number];
-export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
+// The page enum lives in ./viewModes so components/navGroups.ts can build its
+// tab table from it without importing this module (which imports navGroups).
+// Re-exported here because most call sites import ViewMode from the store.
+export { ALL_VIEW_MODES } from "./viewModes";
+export type { ViewMode, SessionViewMode } from "./viewModes";
 /** 启动台's segmented mark filter. "all" shows every bucket. */
 export type MarkFilter = "all" | "pending" | "done";
 
@@ -244,6 +230,12 @@ interface UIState {
    *  "Sessions" nav entry to restore the user's preferred layout when they
    *  navigate back from audit/report/etc. */
   lastSessionViewMode: SessionViewMode;
+  /** Last page visited inside each sidebar tab (管家 / 工作), so switching tabs
+   *  returns you where you left off instead of always landing on the tab's home
+   *  page. Persisted as a JSON blob under "nav-group-last-view". There is
+   *  deliberately no `navGroup` field: the active tab is derived from `viewMode`
+   *  via navGroupOf, so a cross-page hop can't desync the two. */
+  lastViewByNavGroup: Record<NavGroup, ViewMode>;
   liteMode: boolean;
   sidebarCollapsed: boolean;
   /** Per-view collapse state for each view's secondary sidebar (二级侧边栏),
@@ -291,6 +283,9 @@ interface UIState {
   liteDecisionHistorySessionId: string | null;
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
+  /** Switch sidebar tabs: hops to that tab's remembered page (or its home page
+   *  on the first visit). A no-op when the current page already belongs to it. */
+  setNavGroup: (g: NavGroup) => void;
   setLastSessionViewMode: (m: SessionViewMode) => void;
   setLiteMode: (on: boolean) => void;
   setSidebarCollapsed: (on: boolean) => void;
@@ -393,11 +388,43 @@ function readMarkFilter(): MarkFilter {
   return raw === "pending" || raw === "done" ? raw : "all";
 }
 
+/** Per-tab "last page I was on", tolerating an absent / corrupt blob. A stored
+ *  page that no longer belongs to its tab is dropped rather than restored —
+ *  otherwise moving a page between tabs would strand the old tab on a page it
+ *  no longer lists. */
+function readLastViewByNavGroup(): Record<NavGroup, ViewMode> {
+  const result = { ...NAV_GROUP_HOME };
+  const stored = readJson<Record<string, unknown>>("nav-group-last-view", {});
+  for (const group of NAV_GROUPS) {
+    const view = stored[group];
+    if (isViewMode(view) && navGroupOf(view) === group) result[group] = view;
+  }
+  return result;
+}
+
+/** The shared body of every page change. Beyond writing `viewMode`, it records
+ *  the page as its tab's last visited one — which is what makes the tab strip
+ *  restore you where you left off. Every path that moves the main area goes
+ *  through this (setViewMode and the three nav requests below); a path that set
+ *  `viewMode` directly would leave its tab's memory pointing at a stale page. */
+function viewModePatch(s: UIState, m: ViewMode): Partial<UIState> {
+  setItem("viewMode", m);
+  const lastViewByNavGroup = { ...s.lastViewByNavGroup, [navGroupOf(m)]: m };
+  setItem("nav-group-last-view", JSON.stringify(lastViewByNavGroup));
+  const patch: Partial<UIState> = { viewMode: m, lastViewByNavGroup };
+  if (m === "list" || m === "gallery") {
+    setItem("lastSessionViewMode", m);
+    patch.lastSessionViewMode = m;
+  }
+  return patch;
+}
+
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
   viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
   lastSessionViewMode:
     (getItem("lastSessionViewMode") as SessionViewMode) ?? "gallery",
+  lastViewByNavGroup: readLastViewByNavGroup(),
   liteMode: getItem("liteMode") === "true",
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
@@ -448,15 +475,13 @@ export const useUIStore = create<UIState>((set) => ({
     emit("overlay-theme-changed", t).catch(() => {});
     set({ theme: t });
   },
-  setViewMode: (m) => {
-    setItem("viewMode", m);
-    if (m === "list" || m === "gallery") {
-      setItem("lastSessionViewMode", m);
-      set({ viewMode: m, lastSessionViewMode: m });
-    } else {
-      set({ viewMode: m });
-    }
-  },
+  setViewMode: (m) => set((s) => viewModePatch(s, m)),
+  setNavGroup: (g) =>
+    set((s) =>
+      navGroupOf(s.viewMode) === g
+        ? {}
+        : viewModePatch(s, s.lastViewByNavGroup[g] ?? NAV_GROUP_HOME[g]),
+    ),
   setLastSessionViewMode: (m) => {
     setItem("lastSessionViewMode", m);
     set({ lastSessionViewMode: m });
@@ -468,42 +493,31 @@ export const useUIStore = create<UIState>((set) => ({
   },
   fileNav: null,
   requestFileNav: (req) =>
-    set((s) => {
-      // Same persistence as setViewMode — a nav that skipped it would snap
-      // back to the previous view on the next launch.
-      setItem("viewMode", "files");
-      return {
-        viewMode: "files",
-        fileNav: { ...req, nonce: (s.fileNav?.nonce ?? 0) + 1 },
-      };
-    }),
+    set((s) => ({
+      // Same bookkeeping as setViewMode — a nav that skipped it would snap back
+      // to the previous view on the next launch and leave the 工作 tab's memory
+      // pointing at a page the user has since left.
+      ...viewModePatch(s, "files"),
+      fileNav: { ...req, nonce: (s.fileNav?.nonce ?? 0) + 1 },
+    })),
   clearFileNav: () => set({ fileNav: null }),
   newSessionNav: null,
   requestNewSession: (req) =>
-    set((s) => {
+    set((s) => ({
       // Hop to the user's preferred session layout (list/gallery) where the
       // new-session draft tab lives, persisting it like setViewMode.
-      const target = s.lastSessionViewMode;
-      setItem("viewMode", target);
-      setItem("lastSessionViewMode", target);
-      return {
-        viewMode: target,
-        lastSessionViewMode: target,
-        newSessionNav: { ...req, nonce: (s.newSessionNav?.nonce ?? 0) + 1 },
-      };
-    }),
+      ...viewModePatch(s, s.lastSessionViewMode),
+      newSessionNav: { ...req, nonce: (s.newSessionNav?.nonce ?? 0) + 1 },
+    })),
   clearNewSessionNav: () => set({ newSessionNav: null }),
   openTaskNav: null,
   requestOpenTask: (sessionId) =>
-    set((s) => {
+    set((s) => ({
       // Hop to the 任务 (history) page, persisting the view like setViewMode so
       // it survives a relaunch, then bump the nonce for HistoryView to consume.
-      setItem("viewMode", "history");
-      return {
-        viewMode: "history",
-        openTaskNav: { sessionId, nonce: (s.openTaskNav?.nonce ?? 0) + 1 },
-      };
-    }),
+      ...viewModePatch(s, "history"),
+      openTaskNav: { sessionId, nonce: (s.openTaskNav?.nonce ?? 0) + 1 },
+    })),
   clearOpenTaskNav: () => set({ openTaskNav: null }),
   setSidebarCollapsed: (on) => {
     setItem("sidebar-collapsed", on ? "true" : "false");
