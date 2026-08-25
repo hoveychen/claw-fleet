@@ -7,7 +7,7 @@
 //
 // 分工：原生只负责「取到 token」，注册到 relay 这半边留在 web —— channel token、
 // relay 连接、用户的通知开关都在这边。鸿蒙曾经在 ArkTS 里自己开 WebSocket 上报，
-// 为此重写了一份 HKDF（Hkdf.ets + RelayClient.ets，194 行），两套实现各自漂移，
+// 为此重写了一份 HKDF（Hkdf.ets + FleetTransport.ets，194 行），两套实现各自漂移，
 // 已随本次改造删除。
 //
 // 壳侧约定与 shareTarget.ts 同构：`window.__fleetPushToken(token)`，早到的值先

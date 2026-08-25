@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchCodexUsageHistory } from "../account";
 import { dateLocale, t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { CodexUsageHistoryPoint } from "../types";
 import { linePath, timeTicks, type ChartBox } from "../usageChart";
 import styles from "./UsageChart.module.css";
@@ -52,7 +52,7 @@ function latestWindowMins(
   return null;
 }
 
-export function CodexUsageChart({ client }: { client: RelayClient | null }) {
+export function CodexUsageChart({ client }: { client: FleetTransport | null }) {
   const [points, setPoints] = useState<CodexUsageHistoryPoint[] | null>(null);
   // 拉取那一刻的时间戳：窗口右端固定住，避免每次重渲染窗口都在漂。
   const [now, setNow] = useState(() => Date.now());

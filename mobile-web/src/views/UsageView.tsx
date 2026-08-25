@@ -7,14 +7,14 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { fetchAccountUsage } from "../account";
 import { t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { AccountUsage, TodayUsage, UsageBar } from "../types";
 import { UsageChart } from "./UsageChart";
 import { CodexUsageChart } from "./CodexUsageChart";
 import styles from "./UsageView.module.css";
 
 interface Props {
-  client: RelayClient | null;
+  client: FleetTransport | null;
   /** App header 里那份今日累计，直接复用——避免为同一个数字再扫一遍会话。 */
   todayUsage: TodayUsage | null;
   onBack: () => void;

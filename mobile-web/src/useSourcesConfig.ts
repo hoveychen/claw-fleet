@@ -4,7 +4,7 @@
 // codex 源关掉时就不该在启动器里列 Codex。桌面端的对应物是
 // claw-fleet-desktop/app/components/SettingsPanel 里的 get_sources_config。
 import { useEffect, useState } from "react";
-import type { RelayClient } from "./relay";
+import type { FleetTransport } from "./transport";
 
 export interface SourceInfo {
   name: string;
@@ -14,7 +14,7 @@ export interface SourceInfo {
 
 /** `null` 表示还没拿到——relay 未连上、请求在途，或桌面端版本老到不认这个方法。
  *  调用方必须把 null 当作「不知道」而不是「没有源」。 */
-export function useSourcesConfig(client: RelayClient | null): SourceInfo[] | null {
+export function useSourcesConfig(client: FleetTransport | null): SourceInfo[] | null {
   const [sources, setSources] = useState<SourceInfo[] | null>(null);
   useEffect(() => {
     if (!client) return;

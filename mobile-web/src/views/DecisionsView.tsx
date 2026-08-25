@@ -18,7 +18,7 @@ import { fetchDecisionAsset } from "../decisionAsset";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
 import { getLang, t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type {
   A2uiRenderRequest,
   CommandLeaf,
@@ -53,7 +53,7 @@ export const KIND_LABEL: Record<string, string> = {
 
 interface Props {
   decisions: PendingDecision[];
-  client: RelayClient | null;
+  client: FleetTransport | null;
   connected: boolean;
   agentOnline: boolean;
   decisionsLoaded: boolean;
@@ -208,7 +208,7 @@ function SkeletonCard() {
 
 interface CardProps {
   decision: PendingDecision;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   workspaceOf: (sessionId: string) => SessionInfo | undefined;
   onAnswered: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
@@ -396,7 +396,7 @@ function GuardAnalysis({
   session,
 }: {
   request: GuardRequest;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   session: SessionInfo | undefined;
 }) {
   const [state, setState] = useState<"loading" | "unavailable" | string>("loading");
@@ -464,7 +464,7 @@ function GuardCard({
   submit,
 }: {
   request: GuardRequest;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   session: SessionInfo | undefined;
   submit: (f: Record<string, unknown>) => void;
 }) {
@@ -873,7 +873,7 @@ function PrecedingNarration({
   client,
 }: {
   session: SessionInfo | undefined;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   const [chunks, setChunks] = useState<{ key: string; text: string }[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -937,7 +937,7 @@ function QuestionsCard({
 }: {
   request: FleetAskRequest;
   isFleetAsk: boolean;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   session: SessionInfo | undefined;
   submit: (f: Record<string, unknown>) => void;
 }) {
@@ -1323,7 +1323,7 @@ function OtherComposer({
   question: string;
   attachments: Attachment[];
   uploading: boolean;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   previews: Map<string, string>;
   onPick: (files: FileList | null) => void;
   onRemove: (path: string) => void;
@@ -1507,7 +1507,7 @@ function useAssets(
   names: string[],
   requestId: string,
   qidx: number,
-  client: RelayClient | null,
+  client: FleetTransport | null,
 ): AssetsResult {
   const [states, setStates] = useState<Record<string, AssetState>>({});
   // A late resolve after the card unmounts is harmless but noisy; gate on it.
@@ -1574,7 +1574,7 @@ function HtmlPreview({
   images: { name: string }[] | undefined;
   requestId: string;
   qidx: number;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   const names = useMemo(() => (images ?? []).map((i) => i.name), [images]);
   const { states, retry } = useAssets(names, requestId, qidx, client);
@@ -1671,7 +1671,7 @@ function ImageGallery({
   images: { name: string; caption?: string | null }[];
   requestId: string;
   qidx: number;
-  client: RelayClient | null;
+  client: FleetTransport | null;
 }) {
   const names = useMemo(() => images.map((i) => i.name), [images]);
   const { states, retry } = useAssets(names, requestId, qidx, client);

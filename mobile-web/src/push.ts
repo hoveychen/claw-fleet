@@ -4,7 +4,8 @@
 // iOS 约束：Safari 只在「添加到主屏幕」后的 standalone PWA 里暴露 PushManager，
 // 页面里要先引导用户 A2HS。
 
-import { RelayClient, relayHttpBase } from "./relay";
+import { relayHttpBase } from "./relay";
+import type { FleetTransport } from "./transport";
 import { classifyPush, type PushState } from "./push-classify";
 import { hasNativePushToken, nativePushToken } from "./nativePush";
 
@@ -54,7 +55,7 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
 }
 
 /** Subscribe and register on the relay. Returns the resulting PushState. */
-export async function enablePush(client: RelayClient): Promise<PushState> {
+export async function enablePush(client: FleetTransport): Promise<PushState> {
   // 原生壳：token 已由壳交来（系统通知授权也在壳里问过了），这里只剩注册。
   // 不走 Notification.requestPermission —— WebView 里那个 API 要么不存在、要么
   // 恒返回 denied，调了只会把已经能用的推送判死。
@@ -97,7 +98,7 @@ export async function enablePush(client: RelayClient): Promise<PushState> {
  *  in the browser, and persist the opt-out so nothing re-subscribes. Sends the
  *  unsubscribe frame BEFORE `subscription.unsubscribe()` so the endpoint the
  *  relay keys on is still available. Best-effort — always records the opt-out. */
-export async function disablePush(client: RelayClient): Promise<void> {
+export async function disablePush(client: FleetTransport): Promise<void> {
   setPushOptedOut(true);
   if (hasNativePushToken()) {
     // 原生 token 由系统签发，web 侧撤不掉，只能让 relay 别再往它发。

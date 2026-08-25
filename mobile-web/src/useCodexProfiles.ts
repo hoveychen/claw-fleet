@@ -5,7 +5,7 @@
 // `profile:<name>`，由 codex_launch.rs 的 push_model_args 转成 `codex exec -p`。
 // 桌面端的对应物是 SessionOptionPills 里的 list_codex_profiles。
 import { useEffect, useState } from "react";
-import type { RelayClient } from "./relay";
+import type { FleetTransport } from "./transport";
 
 export interface CodexProfile {
   name: string;
@@ -17,7 +17,7 @@ export interface CodexProfile {
 /** 拿不到就返回空数组（relay 未连上、请求在途，或桌面端版本老到不认这个
  *  方法）。这里刻意不用 null 区分「不知道」——调用方只是往内置模型清单后面
  *  追加，空数组的降级行为（只显示官方模型）正好是想要的。 */
-export function useCodexProfiles(client: RelayClient | null): CodexProfile[] {
+export function useCodexProfiles(client: FleetTransport | null): CodexProfile[] {
   const [profiles, setProfiles] = useState<CodexProfile[]>([]);
   useEffect(() => {
     if (!client) return;

@@ -1,5 +1,5 @@
 // Persistent cache of the last sessions snapshot. Without it the task list lives
-// only in React state + the RelayClient's in-memory snapshot, so a cold start —
+// only in React state + the FleetTransport's in-memory snapshot, so a cold start —
 // or iOS evicting the backgrounded PWA — blanks the list until the desktop
 // pushes a fresh full snapshot over the socket. Caching the last list in
 // IndexedDB lets the app paint it instantly on boot, then reconcile live (Gmail-
