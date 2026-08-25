@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { isWebBuild } from "../hostEnv";
+import { htmlHasTable, htmlTableToMarkdown } from "../clipboardTable";
 import { ImageLightbox } from "./ImageLightbox";
 import { useAutoFlip } from "./useAutoFlip";
 import { useWikiMentions } from "./useWikiMentions";
@@ -379,6 +380,33 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const items = e.clipboardData?.items;
       if (!items || items.length === 0) return;
+
+      // A spreadsheet range arrives as three flavors at once — TSV, an HTML
+      // <table>, and a bitmap of the selection. The bitmap is a `file` item, so
+      // before the file scan below claims it (and turns a pasted table into an
+      // image attachment) give the table flavors their chance: convert to a
+      // markdown table when the fragment *is* a table, and otherwise let the
+      // browser paste the text as it normally would.
+      const html = e.clipboardData?.getData("text/html") ?? "";
+      if (htmlHasTable(html)) {
+        const md = htmlTableToMarkdown(html);
+        if (md) {
+          e.preventDefault();
+          const el = e.currentTarget;
+          const start = el.selectionStart ?? value.length;
+          const end = el.selectionEnd ?? start;
+          onChange(value.slice(0, start) + md + value.slice(end));
+          const caret = start + md.length;
+          requestAnimationFrame(() => {
+            el.focus();
+            el.setSelectionRange(caret, caret);
+          });
+          return;
+        }
+        // One cell, or a shape markdown can't hold: still text, not a picture.
+        if ((e.clipboardData?.getData("text/plain") ?? "").trim() !== "") return;
+      }
+
       const files: File[] = [];
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
@@ -430,7 +458,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         }
       }
     },
-    [onAddAttachment, reportError, t],
+    [onAddAttachment, onChange, reportError, t, value],
   );
 
   const handleKeyDown = useCallback(
