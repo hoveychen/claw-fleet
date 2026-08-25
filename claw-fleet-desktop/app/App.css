@@ -62,7 +62,7 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --heatmap-4: #39d353;
 
   /* Linear-inspired cool neutrals (dark) */
-  --color-bg: #08090a;
+  --color-bg: #0f1011;
 
   /* Surface roles. `field` is RAISED (form controls sit a layer above the
      canvas, same plane as cards); `sunken` is RECESSED (segmented-control
@@ -74,29 +74,49 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
      --color-bg-input and half for --color-bg-secondary, and in dark you could
      not tell them apart. The ladder below pulls them back apart, so dark stops
      hiding this class of drift:
-       bg      #08090a  canvas
-       sunken  #0e0f11  recessed (troughs, tab grounds, tool blocks)
-       card    #101113  card plane
-       field   #16171a  raised — form controls
-       hover   #1c1d20  card / tool hover
-       selected #1f2023 card selected */
-  --color-bg-field: #16171a;
-  --color-bg-sunken: #0e0f11;
+       bg      #0f1011  canvas
+       sunken  #191b1e  recessed (troughs, tab grounds, tool blocks)
+       card    #1c1e21  card plane
+       field   #232528  raised — form controls
+       hover   #292b2f  card / tool hover
+       selected #2d2f33 card selected
+
+     The whole ladder moved up together (the canvas from #08090a) so a surface
+     can be told from the one under it *without a border*. The old spacing was
+     too fine for that: canvas→card measured 2.89 in luminance ×1000, which is
+     invisible, which is exactly why every card in the transcript had to draw a
+     1px outline to exist. The new spacing is 7.73 — the same relative ladder,
+     just far enough apart that background alone does the separating.
+
+     Steps are preserved, not just the order, so `sunken` stays recessed
+     relative to `field` and nothing inverts. Measured, not eyeballed:
+       canvas→sunken 2.07 → 5.72
+       canvas→card   2.89 → 7.73
+       card→hover    6.72 → 11.19 */
+  --color-bg-field: #232528;
+  --color-bg-sunken: #191b1e;
 
   --color-bg-secondary: var(--color-bg-sunken);
-  --color-bg-card: #101113;
-  --color-bg-card-hover: #1c1d20;
-  --color-bg-card-selected: #1f2023;
+  --color-bg-card: #1c1e21;
+  --color-bg-card-hover: #292b2f;
+  --color-bg-card-selected: #2d2f33;
   --color-bg-hover: var(--color-bg-card-hover);
   --color-bg-tool: var(--color-bg-sunken);
   --color-bg-tool-hover: var(--color-bg-card-hover);
-  --color-bg-user: #161b29;
-  --color-bg-modal: #1c1d20;
+  --color-bg-user: #1f2534;
+  --color-bg-modal: #292b2f;
   --color-bg-modal-overlay: rgba(0, 0, 0, 0.75);
 
   --color-text: #f7f8f8;
   --color-text-secondary: #8a8f98;
-  --color-text-dim: #62666d;
+  /* Lifted with the canvas (from #62666d). Raising the surfaces costs the
+     dimmest tier contrast — 3.28 → 2.90 against a card — and this pulls it back
+     to 3.71, better than it was before the shift.
+     It still does not clear AA's 4.5: the value that would (#828791) is close
+     enough to --color-text-secondary that the two tiers stop reading as
+     different. Closing that gap properly means re-spacing the whole text ramp,
+     which is a bigger call than this change. */
+  --color-text-dim: #72777f;
   --color-text-muted: var(--color-text-dim);
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-soft: rgba(255, 255, 255, 0.05);
@@ -140,12 +160,12 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --thinking-toggle-bg: #1a1a1a;
   --thinking-toggle-bg-hover: #222222;
   --thinking-label: #a78bfa;
-  --thinking-content-bg: #121212;
+  --thinking-content-bg: #171717;
 
   /* Tool groups (bash/subagent collapsible) */
   --tool-group-border: #1e2a1e;
-  --tool-group-bg: #0d1a0d;
-  --tool-group-bg-hover: #101f10;
+  --tool-group-bg: #111e11;
+  --tool-group-bg-hover: #142314;
   --tool-group-label: #86efac;
 
   /* Status / semantic colors */
@@ -156,7 +176,7 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-error-fg: #f87171;
   --color-error: var(--color-error-fg);
   --color-status-error: var(--color-error-fg);
-  --color-error-result-bg: #1a0d0d;
+  --color-error-result-bg: #1f1212;
   /* Bare RGB triples of the three status hues, so a component can tint with
      an alpha via the `rgb(<triple> / 0.15)` form. Components had been
      hand-writing `rgba(248,113,113,0.1)` etc, which pins the DARK hue and so
@@ -193,7 +213,8 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-warning-bg: #33290a;
   --color-info: #a371f7;
   --color-teal: #39c5cf;
-  --color-text-dim-rgb: 98, 102, 109;
+  /* Must track --color-text-dim above. */
+  --color-text-dim-rgb: 114, 119, 127;
 
   /* Inline code */
   --color-code-fg: #e2c08d;
@@ -209,7 +230,7 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --mascot-accessory-fill: #2e3338;
   --mascot-accessory-stroke: #3e4348;
   --mascot-accessory-accent: #4e5358;
-  --mascot-screen-bg: #151818;
+  --mascot-screen-bg: #191c1c;
   --mascot-screen-fill: #1e2525;
 
   --scrollbar-thumb: rgba(255, 255, 255, 0.12);

@@ -1092,6 +1092,74 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         ],
       },
     },
+    // A resolved fleet__ask card, inline in the transcript. The decision card is
+    // one of Fleet's headline surfaces but had no fixture, so it could never be
+    // screenshotted from mock mode — every design pass on it was flying blind.
+    {
+      type: "assistant",
+      uuid: "msg-4c",
+      timestamp: new Date(NOW - 18 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-ask-1",
+            name: "mcp__fleet__fleet__ask",
+            input: {
+              questions: [
+                {
+                  question:
+                    "Mock \u6570\u636e\u8981\u76d6\u5230\u4ec0\u4e48\u7a0b\u5ea6\uff1f",
+                  header: "Mock \u8303\u56f4",
+                  multiSelect: false,
+                  options: [
+                    {
+                      label: "\u5168\u91cf\u4f1a\u8bdd\u7c7b\u578b",
+                      description:
+                        "\u6bcf\u79cd\u72b6\u6001\u90fd\u9020\u4e00\u6761\uff0c\u622a\u56fe\u80fd\u8986\u76d6\u5168\u90e8\u5206\u652f\uff1b\u6570\u636e\u91cf\u5927\u3002",
+                    },
+                    {
+                      label: "\u53ea\u9020\u5178\u578b\u4e09\u79cd",
+                      description:
+                        "\u8dd1\u4e2d / \u7b49\u8f93\u5165 / \u5df2\u5b8c\u6210\uff0c\u591f\u8dd1\u901a\u4e3b\u6d41\u7a0b\u3002",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 2100, output_tokens: 240 },
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-4d",
+      timestamp: new Date(NOW - 18 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-ask-1",
+            content:
+              '{"answers":{"Mock \u6570\u636e\u8981\u76d6\u5230\u4ec0\u4e48\u7a0b\u5ea6\uff1f":"\u5168\u91cf\u4f1a\u8bdd\u7c7b\u578b"}}',
+          },
+        ],
+      },
+      // The card reads the chosen answer from the JSONL record's top-level
+      // `toolUseResult` first; without it the fixture renders as "Unanswered",
+      // which is the one state a *resolved* demo card must not show.
+      toolUseResult: {
+        answers: {
+          "Mock \u6570\u636e\u8981\u76d6\u5230\u4ec0\u4e48\u7a0b\u5ea6\uff1f":
+            "\u5168\u91cf\u4f1a\u8bdd\u7c7b\u578b",
+        },
+      },
+    },
     {
       type: "assistant",
       uuid: "msg-5",

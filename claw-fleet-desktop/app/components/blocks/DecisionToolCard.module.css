@@ -1,32 +1,57 @@
 /* Inline decision card. Deliberately more prominent than a plain tool card —
-   a decision is where the conversation turned, not an implementation detail. */
+   a decision is where the conversation turned, not an implementation detail.
+   It is also the one block in the transcript where the *user* acted, so it
+   should keep its weight.
+
+   What changed is how it gets that weight. It used to be a full accent outline
+   with a thickened left edge — the default callout shape used twice over. The
+   first pass swapped that for a single accent rule along the top; that was
+   still a coloured line drawn to say "look here", just a shorter one.
+
+   So there is no rule at all now. The card is raised and nothing else: its own
+   surface a step above the canvas (7.73 in luminance ×1000, enough to read
+   unaided) and a soft shadow under it. Nothing else in the transcript sits on
+   a raised plane — the tool steps have no surface, the tool bodies are
+   recessed — so elevation alone makes this the heaviest thing on screen. The
+   accent survives as one word, the `Question` label, which is the only place
+   it was ever carrying meaning rather than drawing attention.
+
+   Error state loses the coloured frame with everything else; the error badge
+   in the header already names it. */
 .root {
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-accent, #60a5fa);
-  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
-  margin: 6px 0;
+  margin: 12px 0;
   font-size: var(--t-ui, 12px);
 }
 
-.root_error { border-color: var(--color-error-fg, #dc5b5b); }
+/* Still referenced by DecisionToolCard.tsx, so it must exist — an undefined
+   CSS-module key stringifies to the literal "undefined" in the class list.
+   An errored card keeps the raised shape and shifts its ground instead of
+   growing a coloured frame back. */
+.root_error { background: var(--color-error-result-bg); }
 
 .header {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  background: var(--color-bg-tool);
+  padding: 8px 12px;
+  /* Transparent, not the tool band: the root now carries the surface, so a
+     tinted header would cut a seam across a card that should read as one
+     plane. */
+  background: transparent;
   border: none;
   cursor: pointer;
   text-align: left;
   color: var(--color-text);
   font-size: var(--t-ui, 12px);
-  min-height: 30px;
+  min-height: 32px;
 }
 
-.header:hover { background: var(--color-bg-tool-hover); }
+.header:hover { background: var(--color-bg-card-hover); }
 
 .arrow { color: var(--color-text-dim); font-size: var(--t-meta, 10px); flex-shrink: 0; }
 
@@ -112,9 +137,9 @@
 }
 
 .body {
-  padding: 8px 10px 10px;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
+  padding: 2px 12px 12px;
+  border-top: 1px solid var(--color-border-soft, var(--color-border));
+  background: transparent;
 }
 
 .error_text {
@@ -168,14 +193,19 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 5px 8px;
-  border: 1px solid var(--color-border);
+  padding: 6px 9px;
+  /* Recessed, not outlined. A question with four options was rendering as four
+     more boxes inside a box — the stacked-pill problem in miniature. The card
+     is on the raised plane, so dropping the options one step down separates
+     them without a single line. */
+  background: var(--color-bg-sunken);
   border-radius: 5px;
   margin-bottom: 4px;
 }
 
+/* The chosen one is the only coloured thing in the list, so it needs no rule
+   to be found. */
 .option_selected {
-  border-color: var(--color-success);
   background: var(--color-success-bg);
 }
 
