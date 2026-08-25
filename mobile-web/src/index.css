@@ -38,6 +38,22 @@
   --color-warning: #fbbf24;
   --color-error: #f87171;
   --color-bg-glass: rgba(15, 16, 17, 0.92);
+  /* 文字梯级。
+
+     改前数了一遍：315 处 font-size 散在 18 个档位上，包括 9.5 / 10.5 /
+     11.5 / 12.5 / 13.5 / 14.5 这些半像素值。那不是梯级，是每处随手挑的
+     数——同一类信息在不同视图里是 11 还是 11.5 全凭当时手感。
+
+     四档，加一档标题。数值取各簇的主导值，正文抬到 16px（手机上 15 偏小，
+     16 也和 iOS 的正文惯例、以及下面输入框的防缩放值对齐）。
+     20 / 26 / 38 这三个大号不进梯级：它们是刻意的展示数字（首屏计数），
+     不是正文体系的一部分。 */
+  --t-meta: 11px; /* 时间戳、徽章、计数   (原 9.5/10/10.5/11) */
+  --t-aux: 12px; /* 次要说明、等宽摘要   (原 11.5/12/12.5)  */
+  --t-ui: 14px; /* 行标题、按钮、标签   (原 13/13.5/14/14.5) */
+  --t-body: 16px; /* 正文、气泡           (原 15/16)         */
+  --t-h2: 18px; /* 小节标题             (原 17/18)         */
+
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Segoe UI", Roboto, system-ui, sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", Menlo, monospace;
@@ -83,7 +99,7 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   line-height: 1.5;
   overscroll-behavior-y: none;
   /* 锁双指/双击缩放：Chrome 48+ 起有意忽略 <meta user-scalable=no / maximum-scale>
@@ -139,7 +155,7 @@ code {
 
 pre {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: 8px;

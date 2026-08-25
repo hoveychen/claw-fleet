@@ -10,19 +10,19 @@
   text-align: center;
   color: var(--color-text-dim);
   padding: 32px 16px;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
 }
 
 .dimNote {
   color: var(--color-text-dim);
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   overflow-wrap: anywhere;
 }
 
 .preWrap {
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
 }
 
@@ -43,7 +43,7 @@
 }
 
 .kindChip {
-  font-size: 10.5px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
@@ -60,7 +60,7 @@
 }
 
 .outcomeChip {
-  font-size: 10.5px;
+  font-size: var(--t-meta, 11px);
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--color-border-strong);
@@ -85,13 +85,13 @@
 
 .recordTime {
   margin-left: auto;
-  font-size: 10.5px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   flex-shrink: 0;
 }
 
 .recordSummary {
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
   color: var(--color-text-secondary);
   white-space: pre-wrap;
@@ -121,7 +121,7 @@
 }
 
 .qaQuestion {
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   font-weight: 600;
   color: var(--color-text);
   line-height: 1.5;
@@ -135,7 +135,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   padding: 5px 8px;
   border-radius: 8px;
   color: var(--color-text-secondary);
@@ -167,7 +167,7 @@
 
 .qaOptionDesc {
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   line-height: 1.45;
   padding-left: 18px; /* align under the label text, past the marker */
   word-break: break-word;
@@ -177,7 +177,7 @@
 
 /* Plan / edited-plan markdown body: sunken scroll box like the desktop. */
 .planBody {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
@@ -191,7 +191,7 @@
 }
 
 .feedback {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
   color: var(--color-text-secondary);
   font-style: italic;
@@ -263,7 +263,7 @@
 .planBody :global(h1),
 .planBody :global(h2),
 .planBody :global(h3) {
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   margin: 0.4em 0 0.25em;
   font-weight: 600;
 }
@@ -282,7 +282,7 @@
 .qaQuestion :global(table),
 .planBody :global(table) {
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   display: block;
   overflow-x: auto;
 }
@@ -307,7 +307,7 @@
 }
 
 .planTitle {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
   /* runId / plan 标题可能是无空格长串(如 workflow runId)，避免撑破卡片。 */
   overflow-wrap: anywhere;
@@ -337,14 +337,14 @@
 }
 .planCount {
   margin-left: 6px;
-  font-size: 10.5px;
+  font-size: var(--t-meta, 11px);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-dim);
 }
 
 .planMarker {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   font-family: ui-monospace, SFMono-Regular, monospace;
   color: var(--color-text-dim);
@@ -366,7 +366,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.45;
   color: var(--color-text-secondary);
   /* overflow-wrap 可继承到文字 span；P 任务文本常含长路径。 */
@@ -396,7 +396,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-success);
   margin-top: 1px;
 }
@@ -418,20 +418,20 @@
 }
 
 .statValue {
-  font-size: 18px;
+  font-size: var(--t-h2, 18px);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .statLabel {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   margin-top: 2px;
 }
 
 .costLine {
   text-align: center;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
 }
 
@@ -441,11 +441,11 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
 }
 
 .wfStatus {
-  font-size: 10px;
+  font-size: var(--t-meta, 11px);
   padding: 1px 7px;
   border-radius: 999px;
   border: 1px solid var(--color-border-strong);
@@ -505,14 +505,14 @@
 }
 
 .hopBadge {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   color: var(--color-accent);
 }
 
 /* Collapsed-leg preview: first two lines of the note, plain text. */
 .notePreview {
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
   color: var(--color-text-secondary);
   display: -webkit-box;
@@ -523,7 +523,7 @@
 }
 
 .markdown {
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.55;
   word-break: break-word;
 }

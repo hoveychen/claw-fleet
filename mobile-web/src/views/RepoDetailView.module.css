@@ -25,7 +25,7 @@
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   padding: 4px 8px 4px 0;
   flex-shrink: 0;
 }
@@ -36,7 +36,7 @@
 }
 
 .headerTitle {
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -44,7 +44,7 @@
 }
 
 .headerSub {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -66,7 +66,7 @@
 
 .hint {
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   padding: 24px 8px;
   text-align: center;
   line-height: 1.6;
@@ -79,7 +79,7 @@
 }
 
 .sectionLabel {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -110,7 +110,7 @@
 }
 
 .rowLabel {
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text);
   min-width: 0;
   overflow: hidden;
@@ -119,7 +119,7 @@
 }
 
 .rowValue {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   flex-shrink: 0;
 }
@@ -128,7 +128,7 @@
    （owner/repo 在尾巴上），而不是把这一行撑出横向滚动。 */
 .remoteValue {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   min-width: 0;
   text-align: right;
@@ -145,7 +145,7 @@
 }
 
 .chip {
-  font-size: 10.5px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   padding: 1px 8px;
   border-radius: 999px;
@@ -195,7 +195,7 @@
   align-items: center;
   gap: 8px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-secondary);
   padding: 2px 6px;
 }
@@ -238,7 +238,7 @@
   flex: 1;
   padding: 10px;
   border-radius: 9px;
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
   border: 1px solid var(--color-border);
   background: var(--color-bg-card);
@@ -270,7 +270,7 @@
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   line-height: 1.5;
   color: var(--color-text-secondary);
   white-space: pre-wrap;
@@ -285,7 +285,7 @@
 }
 
 .emptyNote {
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
   padding: 4px 6px;
 }
@@ -320,7 +320,7 @@
 }
 
 .wtBranch {
-  font-size: 13.5px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -333,7 +333,7 @@
 }
 
 .wtTime {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
 }
 
@@ -347,7 +347,7 @@
 
 .commitHash {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-accent);
   flex-shrink: 0;
   padding-top: 1px;
@@ -362,7 +362,7 @@
 }
 
 .commitSummary {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -370,7 +370,7 @@
 }
 
 .commitMeta {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   overflow: hidden;
   text-overflow: ellipsis;

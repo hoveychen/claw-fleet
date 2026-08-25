@@ -25,7 +25,7 @@
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   padding: 4px 8px 4px 0;
   flex-shrink: 0;
 }
@@ -36,7 +36,7 @@
 }
 
 .headerTitle {
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -44,7 +44,7 @@
 }
 
 .headerSub {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -53,7 +53,7 @@
 
 .versionSelect {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   background: var(--color-bg-input);
   border: 1px solid var(--color-border);
@@ -94,7 +94,7 @@
 
 .hint {
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   padding: 24px 16px;
   text-align: center;
   line-height: 1.6;
@@ -113,7 +113,7 @@
   flex: 1;
   overflow-y: auto;
   padding: 14px 16px calc(20px + env(safe-area-inset-bottom));
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   line-height: 1.65;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -132,11 +132,11 @@
 }
 
 .markdown :global(h2) {
-  font-size: 17px;
+  font-size: var(--t-h2, 18px);
 }
 
 .markdown :global(h3) {
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
 }
 
 .markdown :global(p) {
@@ -164,11 +164,11 @@
   border-radius: 8px;
   padding: 10px;
   overflow-x: auto;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
 }
 
 .markdown :global(code) {
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
 }
 
 .markdown :global(:not(pre) > code) {
@@ -190,7 +190,7 @@
 
 .markdown :global(table) {
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   display: block;
   overflow-x: auto;
   margin: 0 0 10px;

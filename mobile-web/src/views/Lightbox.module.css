@@ -63,7 +63,7 @@
   bottom: calc(var(--safe-bottom) + 16px);
   left: 50%;
   transform: translateX(-50%);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: rgba(255, 255, 255, 0.55);
   pointer-events: none;
   white-space: nowrap;
