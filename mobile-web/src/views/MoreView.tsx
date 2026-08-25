@@ -7,7 +7,6 @@ import { dateLocale, useI18n, type Lang } from "../i18n";
 import type { RttSplit } from "../connQuality";
 import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
-import { relayDisplayHost } from "../relay";
 import { clearSecret } from "../secretStore";
 import { clearCachedSessions } from "../sessionCache";
 import { useTheme, type ThemeSetting } from "../theme";
@@ -20,6 +19,12 @@ const LANG_CHOICES: Array<[Lang, string]> = [
 ];
 
 interface Props {
+  /** 「我连到哪」，由传输层自己回答（relay 主机名 / 同源 origin）。这里不去
+   *  问某个具体实现，否则显示一行字就会把 relay 客户端拖进同源构建。 */
+  endpointLabel: string;
+  /** 这条部署有没有推送通道。同源形态没有（VAPID 订阅登记在 relay 上），
+   *  开关整块隐掉而不是摆一个开了也不响的。 */
+  supportsPush: boolean;
   connected: boolean;
   agentOnline: boolean;
   /** Most recent sessions frame kind + running counts, to show whether the
@@ -43,6 +48,8 @@ interface Props {
 }
 
 export function MoreView({
+  endpointLabel,
+  supportsPush,
   connected,
   agentOnline,
   sessionsFrame,
@@ -220,8 +227,8 @@ export function MoreView({
         <div className={styles.card}>
           <div className={styles.row}>
             {/* 与「关于」里的 Fleet Mobile 同理，Relay 是专名，中英一致，不进字典。 */}
-            <span className={styles.rowLabel}>Relay</span>
-            <span className={styles.relayValue}>{relayDisplayHost()}</span>
+            <span className={styles.rowLabel}>{supportsPush ? "Relay" : t("服务端")}</span>
+            <span className={styles.relayValue}>{endpointLabel}</span>
           </div>
           <div className={styles.divider} />
           <div className={styles.row}>
@@ -319,6 +326,11 @@ export function MoreView({
               )}
             </>
           )}
+          {/* 同源形态没有推送通道（VAPID 订阅登记在 relay 上，而这条部署按设计
+              不碰 relay）。整块隐掉，而不是显示一个「不支持」——那读起来像是
+              浏览器的毛病，其实是这条部署本来就没有这项能力。 */}
+          {supportsPush && (
+            <>
           <div className={styles.divider} />
           <div className={styles.row}>
             <span className={styles.rowLabel}>{t("通知")}</span>
@@ -363,6 +375,8 @@ export function MoreView({
             <div className={styles.rowNote}>
               {t("当前浏览器不支持网页通知，请用桌面端 Fleet 接收决策卡提醒。")}
             </div>
+          )}
+            </>
           )}
         </div>
       </div>

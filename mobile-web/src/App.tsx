@@ -8,13 +8,11 @@ import {
   pushState,
   type PushState,
 } from "./push";
-import { deviceLabel } from "./deviceLabel";
-import { getClientId } from "./clientId";
-// `RelayClient` 是这里唯一还需要具体实现的地方 —— 它是被 `new` 出来的那一个。
-// 其余每个引用都已经降到 `FleetTransport` 接口上,所以换传输层时要改的只有这
-// 一处构造。
-import { RelayClient, gzipSupported, binarySupported } from "./relay";
-import type { FleetTransport, RttSample } from "./transport";
+// 这里不再认识任何一个具体传输层。造哪一个由 main.tsx 按构建模式决定并注入
+// —— 那处选择是一对动态 import，同源构建把 relay 那条分支连同整棵依赖树一起
+// 消掉，而如果 App 静态 import 了 RelayClient，那套安排就白做了。
+import type { FleetTransport, RttSample, TransportHandlers } from "./transport";
+import { NEEDS_PAIRING, SUPPORTS_PUSH } from "./hostMode";
 import {
   computeCongestion,
   formatRttSplit,
@@ -26,7 +24,9 @@ import {
 import { agentKeyOf, reconcileDecisions } from "./decisionReconcile";
 import { recordSnapshotSource, type SnapshotSource } from "./snapshotSources";
 import { reconcilePlan } from "./reconcilePlan";
-import { MockRelayClient, isMockMode } from "./mock/relay";
+// 只取零依赖的开关。`?mock` 那个假客户端 extends RelayClient，从这里 import
+// 会把整棵 relay 依赖树静态拖进同源构建 —— 造它的活儿归 transportRelay.ts。
+import { isMockMode } from "./mockMode";
 import type {
   DecisionKind,
   DecisionRequest,
@@ -85,13 +85,18 @@ type Tab = "decisions" | "tasks" | "wiki" | "more";
 // promo screen-recording pipeline and for quick UI work in a plain browser.
 const MOCK = isMockMode();
 
-export function App() {
+/** 造出这次部署该用的传输层。由 main.tsx 按构建模式注入。 */
+export type TransportFactory = (secret: string, handlers: TransportHandlers) => FleetTransport;
+
+export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
   const { t } = useI18n();
   // `?mock` stands in for a pairing secret so the gate below opens and the
   // effect that builds the client runs — it just builds a MockRelayClient.
+  // 同源形态没有配对这回事（后端就是发出这张页面的那个进程），所以那道门整个
+  // 不存在，直接给一个占位串让下面建连接的 effect 跑起来。
   const [secret, setSecret] = useState<string | null>(() =>
-    MOCK ? "mock-secret" : loadSecretSync(),
+    MOCK ? "mock-secret" : NEEDS_PAIRING ? loadSecretSync() : "same-origin",
   );
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
@@ -392,30 +397,7 @@ export function App() {
       },
       onAuthError: (message: string) => setAuthError(message),
     };
-    const client = MOCK
-      ? new MockRelayClient(handlers)
-      : new RelayClient(
-          secret,
-          handlers,
-          // Announced on every heartbeat so `pushSubscribed` stays current — read
-          // live rather than captured at construction.
-          () => {
-            const { label, platform } = deviceLabel(navigator.userAgent);
-            return {
-              clientId: getClientId(),
-              label,
-              platform,
-              pushSubscribed: pushState() === "granted",
-              supportsGzip: gzipSupported(),
-              supportsBinary: binarySupported(),
-              // Delta application is pure JS (see relay.ts sessions_delta) — no
-              // browser API to feature-detect, so always true.
-              supportsDelta: true,
-              // Static per build; lets the desktop flag a stale bundle.
-              appCommit: __APP_COMMIT__,
-            };
-          },
-        );
+    const client = makeTransport(secret, handlers);
     clientRef.current = client;
     client.connect();
     // Mobile browsers may never run React cleanup on tab close — tell the
@@ -426,7 +408,7 @@ export function App() {
       window.removeEventListener("pagehide", onPageHide);
       client.close();
     };
-  }, [secret, addDecision, removeDecision, refreshPending, recomputeCongestion]);
+  }, [secret, makeTransport, addDecision, removeDecision, refreshPending, recomputeCongestion]);
 
   // Today's cumulative token/cost counter in the header. Polls while the desktop
   // is online; the desktop computes the figure (agent sessions created today +
@@ -775,6 +757,8 @@ export function App() {
           <WikiView client={clientRef.current} onOpenDoc={(doc) => setWikiStack([doc])} />
         ) : (
           <MoreView
+            endpointLabel={clientRef.current?.endpointLabel ?? ""}
+            supportsPush={SUPPORTS_PUSH}
             connected={connected}
             agentOnline={agentOnline}
             sessionsFrame={sessionsFrame}

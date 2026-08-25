@@ -136,6 +136,12 @@ export class HttpTransport implements FleetTransport {
     return this.connected;
   }
 
+  /** 同源:后端就是发出这张页面的那个 origin。显示它而不是一句「本机」——
+   *  一台手机可能同时开着云端容器和局域网里的 webui,分得清才有意义。 */
+  get endpointLabel(): string {
+    return this.base || globalThis.location?.host || "";
+  }
+
   async request<T>(
     method: string,
     params?: Record<string, unknown>,
