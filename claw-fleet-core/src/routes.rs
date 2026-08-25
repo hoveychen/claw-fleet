@@ -122,6 +122,17 @@ pub const MOBILE_RELAY_CONFIG: &str = "/mobile-relay/config";
 pub const MOBILE_RELAY_QR: &str = "/mobile-relay/qr";
 pub const MOBILE_RELAY_ROTATE: &str = "/mobile-relay/rotate";
 pub const MOBILE_RELAY_STATUS: &str = "/mobile-relay/status";
+/// The phone's whole data surface over plain HTTP: `POST {method, params}` onto
+/// [`crate::mobile_relay::serve_request`], answering `{ok, data}` / `{ok, error}`.
+///
+/// One route rather than 48 because the dispatcher already *is* the contract —
+/// mapping each method to its own path would fork it, and the two copies would
+/// drift the moment a method is added on one side only.
+///
+/// Deliberately not `/mobile-relay/…`: nothing here involves the relay. It
+/// exists so the browser build (`fleet webui`) can serve the mobile UI
+/// same-origin with no relay connection, pairing secret or WebSocket at all.
+pub const MOBILE_RPC: &str = "/mobile_rpc";
 pub const PERMISSION_PROMPT_PENDING: &str = "/permission-prompt/pending";
 pub const PERMISSION_PROMPT_RESPOND: &str = "/permission-prompt/respond";
 pub const PLAN_APPROVAL_PENDING: &str = "/plan-approval/pending";
