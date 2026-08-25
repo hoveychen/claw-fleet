@@ -30,6 +30,10 @@ on:
       # nothing: CI stays green, no image is built, and the deployed UI is
       # silently the previous one.
       - 'claw-fleet-desktop/**'
+      # 同上，另一份前端：镜像的 mobileweb 阶段 `pnpm build:webui` 出的产物就是
+      # 手机访问这个容器时看到的 `/m/`。漏掉它的后果和上面一模一样——只改移动端
+      # 的那次推送 CI 全绿、没有镜像、线上还是旧的。
+      - 'mobile-web/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/cloud-image.yml'
