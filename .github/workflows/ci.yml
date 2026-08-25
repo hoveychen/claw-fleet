@@ -68,6 +68,44 @@ jobs:
           || { echo "::error::Generated TS bindings are stale. Run: cargo test -p claw-fleet-core --features ts-export --test ts_export"; exit 1; }
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # mobile-web 的类型检查与单测。
+  #
+  # 在此之前这个包的 tsc 只在 cloud image 的 Dockerfile 里跑过（`build:webui`
+  # 的第一步）。后果实测过一次：一个测试文件里的 TS2493 一路溜到镜像构建才炸
+  # —— 那是整条链上最慢、最贵、最晚的地方，而且它红了就意味着云端拿不到新镜像，
+  # 线上还是旧版本。类型错误应该在推送后几十秒内红，不是几分钟后在 buildx 里红。
+  #
+  # 不含 vite build：产物构建由 cloud image 那边负责，这里只要最快的那道门。
+  # ═══════════════════════════════════════════════════════════════════════════
+  mobile-web:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    name: mobile-web (tsc + vitest)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        run: corepack enable
+
+      - name: Install
+        working-directory: mobile-web
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: mobile-web
+        run: pnpm exec tsc --noEmit
+
+      - name: Unit tests
+        working-directory: mobile-web
+        run: pnpm exec vitest run
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Lint every tracked shell script. shellcheck ships pre-installed on the
   # ubuntu runner, so this is a seconds-long, Rust-free job. Discovering scripts
   # via `git ls-files '*.sh'` auto-covers new scripts without editing this list.
