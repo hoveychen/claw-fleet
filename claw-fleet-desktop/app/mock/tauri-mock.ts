@@ -294,6 +294,11 @@ function handleIPC(
       return MOCK_EXPLORER_ROOTS;
     case "list_explorer_dir":
       return MOCK_EXPLORER_TREE[(args.relativePath as string) ?? ""] ?? [];
+    // The 仓库 page's fallback when a clicked path reveals nothing. Mock mode
+    // has no filesystem to search, so nothing matches — which exercises the
+    // "no such file" notice rather than pretending to rescue the click.
+    case "find_explorer_path":
+      return [];
     case "read_explorer_file": {
       const rel = (args.relPath as string) ?? "";
       // Real HTML (with inline styles + a script) so the iframe preview branch

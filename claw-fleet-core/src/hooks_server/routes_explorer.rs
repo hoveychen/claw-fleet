@@ -230,6 +230,13 @@ pub(crate) fn route_explorer_roots(
                         )
                         .map(|e| serde_json::to_string(&e).unwrap_or_default())
                     }
+                    crate::routes::EXPLORER_FIND => crate::file_explorer::find_by_suffix(
+                        &ws,
+                        &decode("root"),
+                        &decode("rel"),
+                        &known,
+                    )
+                    .map(|p| serde_json::to_string(&p).unwrap_or_default()),
                     crate::routes::SCRATCHPAD_DIR => crate::file_explorer::list_scratchpad_dir(
                         &ws,
                         &decode("session"),

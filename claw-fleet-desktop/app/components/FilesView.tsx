@@ -39,6 +39,7 @@ import { ProcPanel } from "./ProcPanel";
 import { ProcTerminal } from "./ProcTerminal";
 import { FilePreview, FileTree } from "./ExplorerPane";
 import type { ExplorerEntry, ExplorerFileContent, RevealRequest } from "./ExplorerPane";
+import { planRevealFallback } from "./revealFallback";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { PageShell } from "./PageShell";
@@ -448,6 +449,14 @@ function WorkspaceExplorer({
   // `activeFile` rather than inside it: it has no root and no relative path, so
   // it can't take part in tree selection — it only replaces the preview pane.
   const [externalPath, setExternalPath] = useState<string | null>(null);
+  // A clicked path the tree could not reveal and the suffix search could not
+  // rescue: either nothing matches it, or several do. Occupies the preview pane
+  // the same way `externalPath` does — the point is that the click says
+  // *something* back.
+  const [revealMiss, setRevealMiss] = useState<{
+    relPath: string;
+    candidates: string[];
+  } | null>(null);
 
   const procCount = useMemo(
     () => procs.filter((p) => p.workspacePath === workspace).length,
@@ -534,6 +543,7 @@ function WorkspaceExplorer({
       return;
     }
     setExternalPath(null);
+    setRevealMiss(null);
     if (owner.path !== activeRoot.path) {
       setActiveRoot(owner); // this effect retries once the new root is active
       updateMainViewState("files", { activeRootPath: owner.path, activeFilePath: null });
@@ -542,7 +552,7 @@ function WorkspaceExplorer({
 
     const prefix = owner.path.endsWith("/") ? owner.path : `${owner.path}/`;
     const rel = nav.absPath.slice(prefix.length).replace(/\/$/, "");
-    setReveal({ relPath: rel, nonce: nav.nonce });
+    setReveal({ relPath: rel, nonce: nav.nonce, reportMiss: true });
   }, [nav, roots, activeRoot, clearFileNav, updateMainViewState]);
 
   // Reveal a file the user clicked in the source-control panel. Its path is
@@ -556,6 +566,51 @@ function WorkspaceExplorer({
     clickNonce.current -= 1;
     setReveal({ relPath, nonce: clickNonce.current });
   }, []);
+
+  // ── Nothing to reveal: rescue the click or explain it ──────────────────────
+  //
+  // Agents name paths relative to whatever directory they had in mind, which is
+  // often a subdirectory of the workspace — a card saying `public/app-icon.png`
+  // about `claw-fleet-desktop/public/app-icon.png`. The chip's join produces a
+  // path that does not exist, and until this existed the tree failed silently:
+  // the 仓库 page opened and nothing else happened. Ask the backend where that
+  // tail actually lives, and follow it only when the answer is unambiguous.
+  const handleRevealFailed = useCallback(
+    async (relPath: string) => {
+      if (!activeRoot) return;
+      let candidates: string[] = [];
+      try {
+        candidates = await invoke<string[]>("find_explorer_path", {
+          workspace,
+          root: activeRoot.path,
+          relSuffix: relPath,
+        });
+      } catch {
+        candidates = []; // treat a failed search as "found nothing"
+      }
+      const plan = planRevealFallback(relPath, candidates);
+      const prefix = activeRoot.path.endsWith("/") ? activeRoot.path : `${activeRoot.path}/`;
+      switch (plan.kind) {
+        case "retry":
+          clickNonce.current -= 1;
+          setReveal({ relPath: plan.relPath, nonce: clickNonce.current, reportMiss: true });
+          break;
+        case "preview":
+          // The path was right; the tree is just filtering it (gitignored with
+          // 「显示忽略文件」 off). Show it on its own rather than arguing with
+          // the filter.
+          setExternalPath(prefix + plan.relPath);
+          break;
+        case "ambiguous":
+          setRevealMiss({ relPath, candidates: plan.candidates });
+          break;
+        case "missing":
+          setRevealMiss({ relPath, candidates: [] });
+          break;
+      }
+    },
+    [workspace, activeRoot],
+  );
 
   // Rehydrate the selected file object from its stable root-relative path after
   // this explorer remounts. FileTree owns directory loading, so its reveal path
@@ -580,6 +635,7 @@ function WorkspaceExplorer({
   const selectFile = (entry: ExplorerEntry) => {
     setActiveFile(entry);
     setExternalPath(null); // picking in the tree leaves the out-of-tree preview
+    setRevealMiss(null);
     updateMainViewState("files", { activeFilePath: entry.relativePath });
   };
 
@@ -676,6 +732,7 @@ function WorkspaceExplorer({
                   onPick={selectFile}
                   reveal={reveal}
                   onRevealed={clearFileNav}
+                  onRevealFailed={handleRevealFailed}
                 />
               )}
 
@@ -683,7 +740,13 @@ function WorkspaceExplorer({
             </aside>
 
             <div className={styles.detail_body}>
-              {externalPath ? (
+              {revealMiss ? (
+                <RevealMissNotice
+                  miss={revealMiss}
+                  onPick={revealFile}
+                  onClose={() => setRevealMiss(null)}
+                />
+              ) : externalPath ? (
                 <ExternalFilePreview
                   path={externalPath}
                   onClose={() => setExternalPath(null)}
@@ -698,6 +761,61 @@ function WorkspaceExplorer({
         </>
       )}
     </>
+  );
+}
+
+// ── Unresolvable path notice ─────────────────────────────────────────────────
+
+/**
+ * A clicked path the tree could not reveal and the suffix search could not
+ * rescue. Two shapes, one component: no match at all, or several.
+ *
+ * This exists because the alternative — what shipped before — was for the click
+ * to open the 仓库 page and then do nothing whatsoever, which reads as a broken
+ * app rather than as a path the agent got wrong.
+ */
+function RevealMissNotice({
+  miss,
+  onPick,
+  onClose,
+}: {
+  miss: { relPath: string; candidates: string[] };
+  onPick: (relPath: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const ambiguous = miss.candidates.length > 0;
+  return (
+    <div className={fileStyles.external_wrap}>
+      <div className={fileStyles.external_bar}>
+        <div className={fileStyles.external_text}>
+          <span className={fileStyles.external_title}>
+            {t(ambiguous ? "files.reveal_ambiguous_title" : "files.reveal_miss_title")}
+          </span>
+          <span className={fileStyles.external_path}>
+            {t(ambiguous ? "files.reveal_ambiguous_body" : "files.reveal_miss_body", {
+              path: miss.relPath,
+            })}
+          </span>
+        </div>
+        <div className={fileStyles.external_actions}>
+          <button className={fileStyles.external_btn} onClick={onClose}>
+            {t("files.external_close")}
+          </button>
+        </div>
+      </div>
+      {ambiguous && (
+        <ul className={fileStyles.reveal_candidates}>
+          {miss.candidates.map((c) => (
+            <li key={c}>
+              <button className={fileStyles.reveal_candidate} onClick={() => onPick(c)}>
+                {c}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

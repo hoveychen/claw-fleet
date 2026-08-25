@@ -75,6 +75,9 @@ pub const EXPLORER_FILE: &str = "/explorer_file";
 /// prose). Admin-only, like `EXPLORER_FILE` — it carries no workspace gate.
 pub const EXPLORER_EXTERNAL_FILE: &str = "/explorer_external_file";
 pub const EXPLORER_ROOTS: &str = "/explorer_roots";
+/// Locate a file by the tail of its path, for when the literal path an agent
+/// named does not exist. Same workspace gate as `EXPLORER_DIR`.
+pub const EXPLORER_FIND: &str = "/explorer_find";
 pub const FILE_SIZE: &str = "/file_size";
 /// The bundled Fleet SKILL.md, verbatim.
 ///

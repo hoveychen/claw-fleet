@@ -67,6 +67,22 @@ pub(crate) fn read_explorer_file(
         .read_explorer_file(&workspace, &root, &rel_path)
 }
 
+/// Locate a file by the tail of its path. The 仓库 page's fallback when the
+/// literal path a chip resolved to reveals nothing.
+#[tauri::command(async)]
+pub(crate) fn find_explorer_path(
+    workspace: String,
+    root: String,
+    rel_suffix: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .find_explorer_path(&workspace, &root, &rel_suffix)
+}
+
 /// Preview a path that belongs to no workspace — what a `/tmp/foo.md` chip in
 /// agent prose resolves to. Single file, no listing.
 #[tauri::command(async)]
