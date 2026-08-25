@@ -197,7 +197,11 @@ export function defaultAgentTool(
 
 /** The workspace to select by default in a fresh new-session form: the remembered
  *  last-used one when it's still a valid option, else the first entry (now
- *  alphabetical). Returns undefined when there are no options yet. */
+ *  alphabetical), else the chat workspace — a fresh install has no recents at
+ *  all, and leaving the pill on its bare "workspace" placeholder only yields a
+ *  disabled submit button with nothing saying why. Chat needs no directory, so
+ *  it is the one option that is always launchable. Mirrors mobile-web's
+ *  `defaultWorkspace`. Returns undefined only when even chat is unavailable. */
 export function defaultWorkspace(
   recents: WorkspaceOption[],
   chatPath: string | null | undefined,
@@ -206,7 +210,7 @@ export function defaultWorkspace(
   const valid = new Set(recents.map((w) => w.path));
   if (chatPath) valid.add(chatPath);
   if (lastWorkspace && valid.has(lastWorkspace)) return lastWorkspace;
-  return recents[0]?.path;
+  return recents[0]?.path ?? chatPath ?? undefined;
 }
 
 /** Plain "start a new claude session" form — no project, no task, no queue.
@@ -327,20 +331,27 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
     [remoteWorkspaces, recentWorkspaces],
   );
 
-  // Seed the workspace once, on mount, to the repo the user last launched in
-  // (when still available) — else the first option. The form is remounted each
-  // time the user re-enters "new session" mode, so a plain mount effect stands in
-  // for the old modal's open-reset. recentWorkspaces is read once here on purpose
-  // — re-running on every 5s session poll would clobber the user's in-progress
-  // selection.
+  // Seed the workspace to the repo the user last launched in (when still
+  // available) — else the first recent, else chat. Both inputs land
+  // asynchronously: the session list is polled, and `chatPath` costs a backend
+  // round-trip. That rules out the mount-only effect this used to be — on a host
+  // with no recents (fresh install, or a cloud container that has only ever run
+  // chats) mount happens before either is known, and the picker would stay empty
+  // for good, leaving submit disabled with nothing saying why. Re-running is safe
+  // because of the `draft.workspace` guard: once anything is selected — by this
+  // effect or by the user — no later poll can clobber it.
   useEffect(() => {
-    if (!draft.workspace) {
-      const seed = defaultWorkspace(recentWorkspaces, chatPath, loadLastWorkspace());
-      if (seed) patch({ workspace: seed });
-    }
+    if (draft.workspace) return;
+    const seed = defaultWorkspace(recentWorkspaces, chatPath, loadLastWorkspace());
+    if (seed) patch({ workspace: seed });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.workspace, recentWorkspaces, chatPath]);
+
+  // The form is remounted each time the user re-enters "new session" mode, so a
+  // plain mount effect stands in for the old modal's open-reset.
+  useEffect(() => {
     const id = setTimeout(() => composerRef.current?.focus(), 50);
     return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const addAttachmentEntry = (entry: ChatComposerAttachment) => {
