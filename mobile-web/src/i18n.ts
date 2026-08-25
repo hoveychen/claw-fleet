@@ -202,6 +202,11 @@ const DICT: Record<string, string> = {
   更多: "More",
   连接与通知: "Connection & notifications",
   桌面端: "Desktop",
+  // 同源形态（fleet webui 发出的这份）才显示的两行：连的是哪台服务器，
+  // 以及判反了怎么切回桌面版。
+  服务端: "Server",
+  界面: "Interface",
+  切到桌面版: "Desktop layout",
   会话更新: "Session updates",
   增量: "Incremental",
   全量: "Full",
