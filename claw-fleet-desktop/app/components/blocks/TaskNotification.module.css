@@ -5,16 +5,19 @@
    (canvas→card measures 7.73 in luminance ×1000, up from 2.89). The 1px box was
    compensating for a step too fine to see.
 
-   No accent bar down the left edge either. A tinted panel with a coloured strip
-   on its left is the callout shape every AI tool emits by default; it read as
-   generic here for the same reason it did on the Fleet cards. The notice still
-   needs to be more prominent than a tool row — it marks real work landing — so
-   the emphasis moves to the top edge as a rule in the accent colour. Same
-   signal, a shape that isn't the default one. */
+   No coloured rule either, on any edge. The accent bar down the left was the
+   default callout shape; moving it to the top made it a shorter version of the
+   same idea. What separates this notice from the rows around it is that it has
+   a surface at all — the tool steps have none — so the surface is left to do
+   the work alone.
+
+   This tracks the decision card, which dropped its own top rule for the same
+   reason: the heavier of the two blocks must not end up with *less* decoration
+   than the lighter one, or the hierarchy inverts. Decision cards are raised
+   (bg-card + shadow); this sits one step down on the tool plane. */
 .root {
   margin: 10px 0;
   border-radius: var(--radius-md);
-  border-top: 2px solid var(--color-accent, #60a5fa);
   overflow: hidden;
   font-size: var(--t-ui, 12px);
   /* Never widen the container that holds us — the user bubble sizes to
