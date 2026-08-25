@@ -3,6 +3,23 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+
+  /* Reading measure for every TextBlock inside the transcript.
+     Declared here rather than in TextBlock so the same component can still run
+     full-bleed on the document surfaces (wiki, memory, skills, reader modal),
+     where the container width IS the intended measure.
+
+     Measured before: assistant prose rendered 972px wide at 13px Inter — 153
+     characters per line, against a 45–75 comfortable range. Only prose honours
+     this; code, diffs, tables and tool cards keep the whole column.
+
+     The value is in `ch` so it tracks the font size (P2 raises the body to
+     15px) and the character count stays put. Inter runs ~1.29 average
+     characters per `ch`, so 56ch measures ~72 latin characters — and because a
+     CJK glyph is a full em, ~37 Chinese characters, which lands in that
+     script's comfortable band too. Both were measured in the running app,
+     not derived. */
+  --prose-measure: 56ch;
 }
 
 .loading {
@@ -256,9 +273,12 @@
 }
 
 /* The user bubble hugs its text, but never runs the full width — the asymmetry
-   is what makes the two roles distinguishable while scrolling. */
+   is what makes the two roles distinguishable while scrolling. It also honours
+   the reading measure: UserContent renders pre-wrap text runs rather than
+   markdown, so it can't pick the cap up from TextBlock the way assistant prose
+   does. The +24px covers the bubble's own 12px side padding. */
 .message.user .content {
-  max-width: 78%;
+  max-width: min(78%, calc(var(--prose-measure, 100%) + 24px));
   display: flex;
   flex-direction: column;
   align-items: flex-end;

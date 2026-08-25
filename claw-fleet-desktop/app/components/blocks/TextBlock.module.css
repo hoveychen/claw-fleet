@@ -4,6 +4,26 @@
   color: var(--color-text);
 }
 
+/* Reading measure.
+   `--prose-measure` is unset by default, so every surface that reuses TextBlock
+   for document-shaped content (wiki, memory, skills, the reader modal) keeps
+   filling its container exactly as before. The transcript opts in by declaring
+   the var on the message column — see MessageList.module.css.
+
+   Only the *prose* elements are capped. Code blocks, tables, diagrams and the
+   tool cards keep the full column, which is the whole point: 13px prose set
+   153 characters wide reads as a log file, while a diff that wraps at 68ch
+   reads as garbage. Each content type gets the width it actually wants. */
+.root :global(p),
+.root :global(ul),
+.root :global(ol),
+.root :global(blockquote),
+.root :global(h1),
+.root :global(h2),
+.root :global(h3) {
+  max-width: var(--prose-measure, none);
+}
+
 .root :global(p) { margin: 0 0 10px; }
 .root :global(p:last-child) { margin-bottom: 0; }
 
