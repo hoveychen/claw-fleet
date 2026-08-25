@@ -1520,6 +1520,11 @@
     "mute": "静音提示音",
     "unmute": "取消静音"
   },
+  "nav_group": {
+    "aria": "模式",
+    "steward": "管家",
+    "work": "工作"
+  },
   "sidebar": {
     "collapse": "折叠侧边栏",
     "expand": "展开侧边栏",
