@@ -263,9 +263,43 @@ fn build_taskkill_tree_args(pids: &[u32]) -> Option<Vec<String>> {
     Some(args)
 }
 
+/// Turn a finished `taskkill` run into a `Result`.
+///
+/// `taskkill` reports "the pid does not exist" / "access denied" through its
+/// *exit code*, not by failing to spawn — so a caller that only checks
+/// `Command::status()`'s `Err` arm reports every one of those as a successful
+/// kill. That is the Windows counterpart of the unix branch's `kill(pid, 0)`
+/// probe: without it, `/api/kill` on Windows would answer 200 for a pid that is
+/// still very much alive.
+#[cfg(any(not(unix), test))]
+fn taskkill_outcome(args: &[String], status: std::process::ExitStatus) -> Result<(), String> {
+    if status.success() {
+        return Ok(());
+    }
+    Err(format!("taskkill {} exited with {}", args.join(" "), status))
+}
+
 #[cfg(test)]
 mod taskkill_tests {
-    use super::build_taskkill_tree_args;
+    use super::{build_taskkill_tree_args, taskkill_outcome};
+
+    /// A non-zero `taskkill` must surface as an error. `false`/`true` stand in
+    /// for taskkill itself so this runs on the dev machine: what is under test
+    /// is the exit-status mapping, which is platform-independent.
+    #[test]
+    fn nonzero_taskkill_exit_is_an_error() {
+        let args = build_taskkill_tree_args(&[4242]).expect("non-empty");
+
+        let failed = std::process::Command::new("false").status().expect("spawn false");
+        let err = match taskkill_outcome(&args, failed) {
+            Err(e) => e,
+            Ok(()) => panic!("a failed taskkill must not be reported as a successful kill"),
+        };
+        assert!(err.contains("4242"), "error should name the pid: {err}");
+
+        let ok = std::process::Command::new("true").status().expect("spawn true");
+        assert_eq!(taskkill_outcome(&args, ok), Ok(()));
+    }
 
     #[test]
     fn each_pid_gets_its_own_pid_flag_and_empty_is_none() {
@@ -320,12 +354,18 @@ pub fn kill_pid_tree(pid: u32, force: bool) -> Result<(), String> {
 
     #[cfg(not(unix))]
     {
+        // `force` has no Windows counterpart: taskkill's only tree-kill is /F,
+        // there is no SIGTERM-then-escalate tier to choose between.
         let _ = force;
-        crate::process_util::command("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
+        let args = build_taskkill_tree_args(&[pid]).expect("one pid is never empty");
+        let status = crate::process_util::command("taskkill")
+            .args(&args)
             .status()
             .map_err(|e| format!("taskkill failed: {e}"))?;
-        Ok(())
+        crate::log_debug(&format!("kill_pid: taskkill {args:?} -> {status}"));
+        // A dead/unknown pid comes back as a non-zero exit, which is what makes
+        // the route answer 500 for a stale pid the way the unix probe does.
+        taskkill_outcome(&args, status)
     }
 }
 
@@ -412,7 +452,7 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
             "kill_workspace: taskkill {:?} for '{}' -> {}",
             args, workspace_path, status
         ));
-        Ok(())
+        taskkill_outcome(&args, status)
     }
 }
 

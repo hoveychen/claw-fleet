@@ -104,15 +104,17 @@ enum Commands {
     #[command(name = "webui")]
     WebUi {
         /// Port to listen on. 0 lets the OS pick; pair with --port-file.
-        #[arg(short, long, default_value = "4571")]
-        port: u16,
+        /// Env fallback: FLEET_WEBUI_PORT. Default: 4571.
+        #[arg(short, long)]
+        port: Option<u16>,
         /// Directory holding the web UI bundle (the `vite build` output).
         /// Env fallback: FLEET_WEB_ROOT.
         #[arg(long)]
         web_root: Option<std::path::PathBuf>,
-        /// Address to bind. Defaults to loopback; use 0.0.0.0 to expose it.
-        #[arg(long, default_value = "127.0.0.1")]
-        host: String,
+        /// Address to bind; use 0.0.0.0 to expose it.
+        /// Env fallback: FLEET_WEBUI_HOST. Default: 127.0.0.1 (loopback).
+        #[arg(long)]
+        host: Option<String>,
         /// If set, the actual bound port is written to this file after bind.
         #[arg(long)]
         port_file: Option<std::path::PathBuf>,
