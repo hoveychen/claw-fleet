@@ -27,6 +27,7 @@ import { installScrollBoxResizeRevive } from "../scrollLayerRevive";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
+import { PlanProgressRow } from "./PlanProgressRow";
 import { WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
 import type { PathLinkContext } from "../markdown/pathLinks";
@@ -1069,6 +1070,21 @@ export function SessionDetail({
                 {metricsOpen ? "×" : "···"}
               </button>
             </div>
+            {/* Pinned plan.
+                Cursor keeps plans as first-class objects in its sidebar, Jules
+                gives the plan its own card above the activity feed, Devin has a
+                Progress tab — the shape they converge on is that the plan does
+                not scroll away with the work. Fleet already had this row on the
+                session cards and the data on SessionInfo; it was only missing
+                where you actually read the run. Clicking opens the Tasks tab,
+                the same destination as from a card. */}
+            {liveSession.taskPlan && (
+              <PlanProgressRow
+                plan={liveSession.taskPlan}
+                variant="header"
+                onOpen={() => pickTab("tasks")}
+              />
+            )}
             {/* Handoff relay chain — chip toggles the chain detail panel */}
             {liveSession.handoff && <HandoffChainRow session={liveSession} />}
             {/* Active fleet-watch(es) — what this session is waiting on */}
