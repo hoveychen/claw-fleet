@@ -1876,7 +1876,15 @@ fn known_workspaces() -> Vec<String> {
         .collect()
 }
 
-fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
+/// The phone's whole data surface, as one method-name → handler table.
+///
+/// Public because the relay WebSocket is no longer the only way in: the browser
+/// build served by `fleet webui` reaches the same methods over `POST
+/// /mobile_rpc` ([`crate::routes::MOBILE_RPC`]), same-origin, with no relay
+/// connection at all. Every handler below is plain core logic against this
+/// host's files — none of them read the relay's connection state — so the two
+/// callers get identical answers and neither drags a dependency on the other.
+pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
     match method {
         // ── Read methods ─────────────────────────────────────────────────
         "pending_snapshot" => serve_pending_snapshot(params),

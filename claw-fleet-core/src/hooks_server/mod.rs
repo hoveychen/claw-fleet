@@ -1317,6 +1317,8 @@ fn handle_request(
 
             crate::routes::MOBILE_RELAY_QR => route_mobile_relay_qr(ctx, request, &query, json_header, path),
 
+            crate::routes::MOBILE_RPC if request.method() == &tiny_http::Method::Post => route_mobile_rpc(ctx, request, &query, json_header, path),
+
             // No data route matched. When a web UI bundle is configured this
             // is a request for one of its files; otherwise it stays a 404.
             _ if request.method() == &tiny_http::Method::Get && web_assets.is_some() => {
