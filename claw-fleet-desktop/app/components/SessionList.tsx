@@ -1,8 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, ListChecks, Coffee, ListTree } from "lucide-react";
+import { Menu, Shield, ListChecks, Coffee, ListTree, Gauge, Hammer } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
@@ -35,6 +35,7 @@ import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
+import { NAV_GROUPS, navGroupOf, type NavGroup } from "./navGroups";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
@@ -48,6 +49,7 @@ export function SessionList() {
   const {
     viewMode,
     setViewMode,
+    setNavGroup,
     lastSessionViewMode,
     setLiteMode,
     theme,
@@ -91,6 +93,24 @@ export function SessionList() {
   // Total running workspace commands across all repos — surfaced as a badge on
   // the 仓库 (files) nav item, mirroring the green per-repo badge in FilesView.
   const runningProcCount = useProcStore((s) => runningProcTotal(s.procs));
+  // Which tab (管家 / 工作) the sidebar is showing. Derived from the page rather
+  // than stored beside it (see navGroups.ts), so the cross-page hops that bypass
+  // the nav — audit → sessions, a wiki [[slug]] mention, a tray click into the
+  // 任务 page — carry the tab along instead of leaving it on a group that isn't
+  // on screen.
+  const navGroup = navGroupOf(viewMode);
+  // The hidden tab's nav items take their badges with them, which is how an
+  // unread critical audit event or a waiting task goes unnoticed for an hour.
+  // Roll each group's counts up onto its tab and show them there while its nav
+  // is collapsed away, using the same red/green vocabulary as the items.
+  const groupBadges: Record<NavGroup, { alert: number; running: number; dot: boolean }> = {
+    steward: { alert: unreadCriticalCount, running: 0, dot: hasNewReport },
+    work: { alert: unreadLaunchpadCount, running: runningProcCount, dot: false },
+  };
+  const GROUP_ICON: Record<NavGroup, ReactNode> = {
+    steward: <Gauge size={14} strokeWidth={1.5} />,
+    work: <Hammer size={14} strokeWidth={1.5} />,
+  };
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
   const {
@@ -244,6 +264,119 @@ export function SessionList() {
   const COLLAPSED_WIDTH = 64;
   const effectiveWidth = sidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
 
+  // The two modes' nav items. Held as values rather than inlined twice so
+  // the expanded view (one group at a time) and the collapsed icon rail
+  // (both groups flattened) render the exact same buttons.
+  const stewardItems = (
+    <>
+      <button
+        className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
+        onClick={() => {
+          if (!isSessionView) setViewMode(lastSessionViewMode);
+        }}
+      >
+        <span className={styles.nav_icon}><Menu size={14} strokeWidth={1.5} /></span>
+        <span className={styles.nav_label}>{t("view_sessions")}</span>
+      </button>
+      <button
+        className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
+        onClick={() => navTo("audit")}
+      >
+        <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
+        <span className={styles.nav_label}>{t("view_audit")}</span>
+        {unreadCriticalCount > 0 && (
+          <span className={styles.nav_badge}>{unreadCriticalCount}</span>
+        )}
+      </button>
+      <button
+        className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
+        onClick={() => setViewMode("report")}
+      >
+        <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
+        <span className={styles.nav_label}>{t("view_report")}</span>
+        {hasNewReport && <span className={styles.nav_dot} />}
+      </button>
+
+      <div className={styles.nav_divider} />
+
+      <button
+        className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
+        onClick={() => navTo("memory")}
+      >
+        <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
+        <span className={styles.nav_label}>{t("view_memory")}</span>
+      </button>
+      <button
+        className={`${styles.nav_item} ${viewMode === "skills" || viewMode === "plugins" ? styles.nav_active : ""}`}
+        onClick={() => navTo(viewMode === "plugins" ? "plugins" : "skills")}
+      >
+        <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
+        <span className={styles.nav_label}>{t("view_skills")}</span>
+      </button>
+      {/* Mobile pairing is a desktop-host feature: the relay channel is
+          opened by *this* machine's Fleet process and the QR code pairs a
+          phone to it. In the browser build you are already the remote
+          client, so the panel has nothing to offer. */}
+      {!isWebBuild() && (
+        <button
+          className={`${styles.nav_item} ${viewMode === "mobile" ? styles.nav_active : ""}`}
+          onClick={() => navTo("mobile")}
+        >
+          <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="1.5" width="8" height="13" rx="1.6"/><line x1="7" y1="12.5" x2="9" y2="12.5"/></svg></span>
+          <span className={styles.nav_label}>{t("view_mobile", "移动端")}</span>
+        </button>
+      )}
+    </>
+  );
+  const workItems = (
+    <>
+      <button
+        className={`${styles.nav_item} ${viewMode === "history" ? styles.nav_active : ""}`}
+        onClick={() => navTo("history")}
+      >
+        <span className={styles.nav_icon}><ListChecks size={14} strokeWidth={1.5} /></span>
+        <span className={styles.nav_label}>{t("view_history", "任务")}</span>
+        {unreadLaunchpadCount > 0 && (
+          <span className={styles.nav_badge}>{unreadLaunchpadCount}</span>
+        )}
+      </button>
+      <button
+        className={`${styles.nav_item} ${viewMode === "files" ? styles.nav_active : ""}`}
+        onClick={() => navTo("files")}
+      >
+        <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5V4Z"/></svg></span>
+        <span className={styles.nav_label}>{t("view_files", "仓库")}</span>
+        {runningProcCount > 0 && (
+          <span className={styles.nav_badge_running}>{runningProcCount}</span>
+        )}
+      </button>
+      <button
+        className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
+        onClick={() => navTo("wiki")}
+      >
+        <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3.5C6.8 2.4 5.2 2 3.5 2c-.6 0-1 .4-1 1v8.5c0 .6.4 1 1 1 1.7 0 3.3.4 4.5 1.5 1.2-1.1 2.8-1.5 4.5-1.5.6 0 1-.4 1-1V3c0-.6-.4-1-1-1-1.7 0-3.3.4-4.5 1.5Z"/><path d="M8 3.5V14"/></svg></span>
+        <span className={styles.nav_label}>{t("view_wiki", "知识库")}</span>
+      </button>
+
+      <div className={styles.nav_divider} />
+
+      <button
+        className={`${styles.nav_item} ${viewMode === "schedule" ? styles.nav_active : ""}`}
+        onClick={() => navTo("schedule")}
+      >
+        <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="3" width="11" height="10.5" rx="1.5"/><path d="M2.5 6.5H13.5"/><path d="M5.5 1.5V3.5"/><path d="M10.5 1.5V3.5"/><path d="M8 8.5v2l1.3.8"/></svg></span>
+        <span className={styles.nav_label}>{t("view_schedule", "计划")}</span>
+      </button>
+      <button
+        className={`${styles.nav_item} ${viewMode === "plans" ? styles.nav_active : ""}`}
+        onClick={() => navTo("plans")}
+      >
+        <span className={styles.nav_icon}><ListTree size={14} strokeWidth={1.5} /></span>
+        <span className={styles.nav_label}>{t("view_plans", "计划树")}</span>
+      </button>
+    </>
+  );
+
   return (
     <>
       <aside
@@ -269,107 +402,62 @@ export function SessionList() {
           </svg>
         </button>
 
-        {/* Sidebar nav — sessions / audit / report + memory / skills. Plugins
-            are a source of skills, so they live under the 技能 entry as a
-            segmented tab (SkillsSourceTabs), not a separate nav item. */}
+        {/* Sidebar nav, split into two top-level modes by the tab strip below:
+            管家 (watching / administering — sessions, audit, report, memory,
+            skills, phone) and 工作 (what you reach for while an agent works —
+            tasks, repos, wiki, schedules, plan trees). Plugins are a source of
+            skills, so they live under the 技能 entry as a segmented tab
+            (SkillsSourceTabs), not a separate nav item. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
-          <button
-            className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
-            onClick={() => {
-              if (!isSessionView) setViewMode(lastSessionViewMode);
-            }}
-          >
-            <span className={styles.nav_icon}><Menu size={14} strokeWidth={1.5} /></span>
-            <span className={styles.nav_label}>{t("view_sessions")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "history" ? styles.nav_active : ""}`}
-            onClick={() => navTo("history")}
-          >
-            <span className={styles.nav_icon}><ListChecks size={14} strokeWidth={1.5} /></span>
-            <span className={styles.nav_label}>{t("view_history", "任务")}</span>
-            {unreadLaunchpadCount > 0 && (
-              <span className={styles.nav_badge}>{unreadLaunchpadCount}</span>
-            )}
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
-            onClick={() => navTo("audit")}
-          >
-            <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
-            <span className={styles.nav_label}>{t("view_audit")}</span>
-            {unreadCriticalCount > 0 && (
-              <span className={styles.nav_badge}>{unreadCriticalCount}</span>
-            )}
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("report")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
-            <span className={styles.nav_label}>{t("view_report")}</span>
-            {hasNewReport && <span className={styles.nav_dot} />}
-          </button>
+          <div className={styles.nav_tabs} role="tablist" aria-label={t("nav_group.aria", "模式")}>
+            {NAV_GROUPS.map((group) => {
+              const badge = groupBadges[group];
+              const label = t(`nav_group.${group}`, group === "steward" ? "管家" : "工作");
+              const selected = navGroup === group;
+              return (
+                <button
+                  key={group}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  className={`${styles.nav_tab} ${selected ? styles.nav_tab_active : ""}`}
+                  onClick={() => setNavGroup(group)}
+                  title={label}
+                >
+                  <span className={styles.nav_tab_icon}>{GROUP_ICON[group]}</span>
+                  <span className={styles.nav_tab_label}>{label}</span>
+                  {/* Only while this tab's own nav is hidden — an active tab's
+                      items carry their own badges. */}
+                  {!selected && badge.alert > 0 && (
+                    <span className={styles.nav_tab_badge}>{badge.alert}</span>
+                  )}
+                  {!selected && badge.running > 0 && (
+                    <span className={styles.nav_tab_badge_running}>{badge.running}</span>
+                  )}
+                  {!selected && badge.alert === 0 && badge.dot && (
+                    <span className={styles.nav_tab_dot} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
-          <div className={styles.nav_divider} />
-
-          <button
-            className={`${styles.nav_item} ${viewMode === "files" ? styles.nav_active : ""}`}
-            onClick={() => navTo("files")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5V4Z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_files", "仓库")}</span>
-            {runningProcCount > 0 && (
-              <span className={styles.nav_badge_running}>{runningProcCount}</span>
-            )}
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
-            onClick={() => navTo("memory")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
-            <span className={styles.nav_label}>{t("view_memory")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "schedule" ? styles.nav_active : ""}`}
-            onClick={() => navTo("schedule")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="3" width="11" height="10.5" rx="1.5"/><path d="M2.5 6.5H13.5"/><path d="M5.5 1.5V3.5"/><path d="M10.5 1.5V3.5"/><path d="M8 8.5v2l1.3.8"/></svg></span>
-            <span className={styles.nav_label}>{t("view_schedule", "计划")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "plans" ? styles.nav_active : ""}`}
-            onClick={() => navTo("plans")}
-          >
-            <span className={styles.nav_icon}><ListTree size={14} strokeWidth={1.5} /></span>
-            <span className={styles.nav_label}>{t("view_plans", "计划树")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
-            onClick={() => navTo("wiki")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3.5C6.8 2.4 5.2 2 3.5 2c-.6 0-1 .4-1 1v8.5c0 .6.4 1 1 1 1.7 0 3.3.4 4.5 1.5 1.2-1.1 2.8-1.5 4.5-1.5.6 0 1-.4 1-1V3c0-.6-.4-1-1-1-1.7 0-3.3.4-4.5 1.5Z"/><path d="M8 3.5V14"/></svg></span>
-            <span className={styles.nav_label}>{t("view_wiki", "知识库")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "skills" || viewMode === "plugins" ? styles.nav_active : ""}`}
-            onClick={() => navTo(viewMode === "plugins" ? "plugins" : "skills")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_skills")}</span>
-          </button>
-          {/* Mobile pairing is a desktop-host feature: the relay channel is
-              opened by *this* machine's Fleet process and the QR code pairs a
-              phone to it. In the browser build you are already the remote
-              client, so the panel has nothing to offer. */}
-          {!isWebBuild() && (
-            <button
-              className={`${styles.nav_item} ${viewMode === "mobile" ? styles.nav_active : ""}`}
-              onClick={() => navTo("mobile")}
-            >
-              <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="1.5" width="8" height="13" rx="1.6"/><line x1="7" y1="12.5" x2="9" y2="12.5"/></svg></span>
-              <span className={styles.nav_label}>{t("view_mobile", "移动端")}</span>
-            </button>
+          {/* Collapsed to the 64px rail, the mode strip is hidden and both
+              groups are flattened into one icon column: a rail exists to reach
+              every page in the least space, and a mode layer on top of it would
+              only add a click. Two labelled segments don't fit there anyway —
+              every narrow rail in this class of app (VS Code's activity bar,
+              JetBrains' tool-window strip) stacks icons vertically instead. */}
+          {sidebarCollapsed ? (
+            <>
+              {stewardItems}
+              <div className={styles.nav_divider} />
+              {workItems}
+            </>
+          ) : navGroup === "steward" ? (
+            stewardItems
+          ) : (
+            workItems
           )}
         </nav>
 
