@@ -35,6 +35,7 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
   const sessions = useSessionsStore((s) => s.sessions);
   const connection = useConnectionStore((s) => s.connection);
   const requestFileNav = useUIStore((s) => s.requestFileNav);
+  const unresolvedPaths = useUIStore((s) => s.unresolvedPaths);
   const float = useMemo(isFloatWindow, []);
 
   return useMemo(() => {
@@ -44,6 +45,10 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
     return {
       workspaceRoot: workspacePath,
       isLocal: connection?.type !== "remote",
+      // The float window's clicks are served by the *main* window's explorer,
+      // whose findings never come back across the window boundary — so a chip
+      // there has nothing to go on and stays neutral.
+      unresolved: float ? undefined : unresolvedPaths,
       openInFiles: (absPath, line) => {
         const req: OpenFilePayload = { workspacePath, absPath, line };
         if (float) {
@@ -54,7 +59,7 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
         }
       },
     };
-  }, [sessionId, sessions, connection?.type, requestFileNav, float]);
+  }, [sessionId, sessions, connection?.type, requestFileNav, float, unresolvedPaths]);
 }
 
 /**
