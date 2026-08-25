@@ -9,6 +9,7 @@ import { WatchStatusRow } from "./WatchStatusRow";
 import styles from "./SessionCard.module.css";
 import { BG_TASK_KINDS } from "../bgTaskKinds";
 import { isKeyboardActivationKey } from "../keyboard";
+import { PlanProgressRow } from "./PlanProgressRow";
 
 // ── Rate-limit countdown ──────────────────────────────────────────────────────
 
@@ -560,51 +561,17 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
         })()
       )}
 
-      {/* TASKS.md plan progress row — click to open the detail Tasks tab */}
-      {session.taskPlan && session.taskPlan.total > 0 && (
-        (() => {
-          const tp = session.taskPlan!;
-          const donePct = (tp.done / tp.total) * 100;
-          const stripMd = (s: string) => s.replace(/\*\*/g, "");
-          const planName = tp.currentPlan ? stripMd(tp.currentPlan) : null;
-          const currentTask = tp.currentTask ? stripMd(tp.currentTask) : null;
-          const tip = t("card.tip_task_plan", {
-            done: tp.done,
-            total: tp.total,
-          });
-          const openTasks = (e: React.SyntheticEvent) => {
+      {/* TASKS.md plan progress row — click to open the detail Tasks tab.
+          Shared with the SessionDetail header via PlanProgressRow so the two
+          placements cannot drift. */}
+      {session.taskPlan && (
+        <PlanProgressRow
+          plan={session.taskPlan}
+          onOpen={(e) => {
             e.stopPropagation();
             openDetail(session, undefined, "tasks");
-          };
-          return (
-            <div
-              className={styles.taskplan_row}
-              title={tip}
-              role="button"
-              tabIndex={0}
-              onClick={openTasks}
-              onKeyDown={(e) => {
-                if (!isKeyboardActivationKey(e.key)) return;
-                e.preventDefault();
-                openTasks(e);
-              }}
-            >
-              <div className={styles.taskplan_head}>
-                <span className={styles.taskplan_icon} aria-hidden>📋</span>
-                {planName && (
-                  <span className={styles.taskplan_name} title={planName}>{planName}</span>
-                )}
-                <div className={styles.taskplan_bar} role="progressbar" aria-valuenow={tp.done} aria-valuemax={tp.total}>
-                  <div className={styles.taskplan_bar_done} style={{ width: `${donePct}%` }} />
-                </div>
-                <span className={styles.taskplan_count}>{tp.done}/{tp.total}</span>
-              </div>
-              {currentTask && (
-                <div className={styles.taskplan_current} title={currentTask}>{currentTask}</div>
-              )}
-            </div>
-          );
-        })()
+          }}
+        />
       )}
 
       {/* Background tasks the session is still waiting on when it last yielded.

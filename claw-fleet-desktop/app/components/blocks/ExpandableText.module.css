@@ -6,7 +6,7 @@
 .text {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   line-height: 1.45;
   color: var(--color-text-secondary);
   white-space: pre-wrap;
@@ -32,7 +32,7 @@
   padding: 0;
   background: none;
   border: none;
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   color: var(--color-accent, #60a5fa);
   cursor: pointer;
 }
@@ -40,7 +40,7 @@
 .toggle:hover { text-decoration: underline; }
 
 .capped {
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   color: var(--color-warning, #dcaa3c);
 }
 

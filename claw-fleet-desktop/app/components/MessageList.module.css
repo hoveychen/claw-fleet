@@ -1,8 +1,49 @@
 .list {
-  padding: 16px 20px 80px;
+  padding: 20px 24px 80px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  /* Between assistant records inside one turn. Turn boundaries get their own,
+     wider spacing — see `.message.user` below. */
+  gap: 8px;
+
+  /* Reading measure for every TextBlock inside the transcript.
+     Declared here rather than in TextBlock so the same component can still run
+     full-bleed on the document surfaces (wiki, memory, skills, reader modal),
+     where the container width IS the intended measure.
+
+     Measured before: assistant prose rendered 972px wide at 13px Inter — 153
+     characters per line, against a 45–75 comfortable range. Only prose honours
+     this; code, diffs, tables and tool cards keep the whole column.
+
+     The value is in `ch` so it tracks the font size (P2 raises the body to
+     15px) and the character count stays put. Inter runs ~1.29 average
+     characters per `ch`, so 56ch measures ~72 latin characters — and because a
+     CJK glyph is a full em, ~37 Chinese characters, which lands in that
+     script's comfortable band too. Both were measured in the running app,
+     not derived. */
+  --prose-measure: 56ch;
+
+  /* Type scale for the transcript.
+
+     Counted before: 147 font-size declarations across the message blocks, on
+     six tiers — 9 / 10 / 11 / 12 / 13 / 14px — with 89 of them at 11px or
+     below. Six tiers inside a 5px range can't signal hierarchy, so the blocks
+     leaned on 1px borders to separate things instead, which is what made the
+     pane read like a devtools inspector.
+
+     Four tiers, with real distance between the one you read and the one you
+     glance at. Every block now asks for a token with its old value as the
+     fallback, so surfaces that don't opt in (ReaderModal, wiki, memory) are
+     byte-identical to before — the scale only applies inside a transcript. */
+  --t-body: 15px;  /* prose, user bubble          (was 13) */
+  --t-ui:   13px;  /* tool headers, step labels   (was 12) */
+  --t-aux:  12px;  /* mono summaries, params      (was 11) */
+  --t-meta: 11px;  /* timestamps, badges, chips   (was 10 and 9) */
+  --t-h2:   17px;  /* markdown h2                 (was 14) */
+  --t-h1:   19px;  /* markdown h1                 (was 16) */
+
+  /* See TextBlock .root — longer measure, more leading. */
+  --prose-leading: 1.72;
 }
 
 .loading {
@@ -13,7 +54,7 @@
   justify-content: center;
   height: 100%;
   color: var(--color-text-dim);
-  font-size: 13px;
+  font-size: var(--t-body, 13px);
   text-align: center;
   padding: 0 24px;
 }
@@ -21,7 +62,7 @@
 /* Retry for a transcript fetch that blew its deadline. */
 .stalled_retry {
   padding: 5px 14px;
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-accent, #60a5fa);
   background: none;
   border: 1px solid var(--color-border);
@@ -39,7 +80,7 @@
   display: block;
   width: 100%;
   padding: 8px 0;
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-accent, #60a5fa);
   background: none;
   border: 1px dashed var(--color-border);
@@ -85,7 +126,7 @@
   gap: 4px;
   padding: 4px 8px;
   margin-bottom: 4px;
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -105,7 +146,7 @@
   width: 20px;
   height: 20px;
   padding: 0;
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   line-height: 1;
   color: var(--color-text);
   background: var(--color-bg);
@@ -153,7 +194,7 @@
 }
 
 .day_sep_label {
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   letter-spacing: 0.03em;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
@@ -168,6 +209,25 @@
 
 .message.user {
   justify-content: flex-end;
+}
+
+/* Turn rhythm.
+   One `.message` is one API record, not one turn — a single user prompt can be
+   answered by a dozen assistant records in a row. So the flat 4px gap was doing
+   the wrong job twice: too tight to separate turns, and no tighter for the
+   records that belong together.
+
+   The user prompt IS the turn boundary, so that is where the air goes. It gets
+   a wide gap above and a narrow one below, which binds each prompt to its own
+   answer instead of leaving it floating equidistant between two. The `.list`
+   gap keeps consecutive assistant records close, the way steps of one thought
+   should sit. */
+.message.user:not(:first-child) {
+  margin-top: 18px;
+}
+
+.message.user {
+  margin-bottom: 2px;
 }
 
 /* Turn-status marker, now inline on the usage row rather than in a gutter. */
@@ -215,7 +275,7 @@
   width: 22px;
   height: 22px;
   padding: 0;
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   line-height: 1;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
@@ -256,9 +316,12 @@
 }
 
 /* The user bubble hugs its text, but never runs the full width — the asymmetry
-   is what makes the two roles distinguishable while scrolling. */
+   is what makes the two roles distinguishable while scrolling. It also honours
+   the reading measure: UserContent renders pre-wrap text runs rather than
+   markdown, so it can't pick the cap up from TextBlock the way assistant prose
+   does. The +24px covers the bubble's own 12px side padding. */
 .message.user .content {
-  max-width: 78%;
+  max-width: min(78%, calc(var(--prose-measure, 100%) + 24px));
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -269,11 +332,14 @@
    markup whitespace must not be preserved. */
 .user_text {
   background: var(--color-bg-user);
-  /* Tail on the bottom-right: the bubble now sits against the right edge. */
-  border-radius: 8px 8px 2px 8px;
-  padding: 8px 12px;
-  font-size: 13px;
-  line-height: 1.5;
+  /* Tail on the bottom-right: the bubble now sits against the right edge.
+     Radius and padding scale with the body type — a 15px line inside 8px of
+     padding on a 8px radius reads cramped, which is half of why the pane felt
+     like a log view. */
+  border-radius: 12px 12px 4px 12px;
+  padding: 10px 14px;
+  font-size: var(--t-body, 13px);
+  line-height: 1.6;
   color: var(--color-text);
   word-break: break-word;
   /* The bubble is a flex item under `align-items: flex-end`, so its width is
@@ -288,7 +354,7 @@
    `↑in ↓out · model · time` run keeps its separator spacing; the status dot
    just rides along as an inline-block. */
 .usage {
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   color: var(--color-text-dim);
   margin-top: 4px;
   padding-left: 2px;
@@ -313,7 +379,7 @@
   gap: 8px;
   padding: 10px 2px;
   color: var(--color-warning);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
 }
 
 /* A turn that failed instead of replying. Deliberately not an assistant
@@ -328,13 +394,13 @@
   border-radius: 8px;
   background: var(--color-error-bg);
   color: var(--color-error-fg);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   line-height: 1.5;
 }
 
 .turn_error_icon {
   flex: none;
-  font-size: 13px;
+  font-size: var(--t-body, 13px);
   line-height: 1.4;
 }
 
@@ -368,7 +434,7 @@
   gap: 8px;
   padding: 10px 2px;
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
 }
 
 .working_dots {

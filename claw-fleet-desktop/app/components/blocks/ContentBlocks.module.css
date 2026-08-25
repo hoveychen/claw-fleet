@@ -1,5 +1,5 @@
 .redacted {
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   color: var(--color-text-dim);
   font-style: italic;
   padding: 2px 0;
@@ -18,7 +18,7 @@
 .unknown_type {
   display: block;
   margin-bottom: 4px;
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;

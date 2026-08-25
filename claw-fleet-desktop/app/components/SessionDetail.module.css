@@ -137,16 +137,45 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
   border: 1px solid transparent;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: var(--radius-xs);
+  /* Digits align because of tabular-nums, not because the whole chip is set in
+     a code face. The monospace stack was doing the aligning job twice and, in
+     doing so, telling the reader "this is machine output" about the session's
+     own model name and workspace. */
   font-variant-numeric: tabular-nums;
-  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
   white-space: nowrap;
+}
+
+/* Reveals the folded numeric chips. Sized to the chip row so the control reads
+   as one more chip rather than a button bolted onto the end. */
+.metrics_toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 1;
+  font-family: inherit;
+  color: var(--color-text-dim);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.metrics_toggle:hover,
+.metrics_toggle_open {
+  color: var(--color-text);
+  border-color: var(--color-accent);
 }
 
 .meta_chip_warn {

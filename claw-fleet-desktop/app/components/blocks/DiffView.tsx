@@ -1,7 +1,18 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import type { PatchHunk } from "../../toolResults";
 import { rowsFromHunks, type DiffLine, type Row } from "../../diffRows";
 import styles from "./DiffView.module.css";
+
+/** Rows shown before the diff folds itself.
+ *
+ *  A transcript is a narrative; a 400-line edit rendered inline stops being a
+ *  step in that narrative and becomes the page. Jules solves this by showing a
+ *  mini-diff in the activity feed that expands into a full diff editor, and
+ *  that is the split adopted here: enough rows to see *what kind* of change it
+ *  was, then a choice between unfolding in place or opening it full-screen. */
+const MAX_INLINE_ROWS = 14;
 
 interface Props {
   filePath?: string;
@@ -18,6 +29,9 @@ interface Props {
   tag?: string;
   /** Lines of unchanged context around each change. */
   context?: number;
+  /** Set by the full-screen copy of itself: no row cap, no maximize control.
+   *  Not part of the public call surface — the transcript never passes it. */
+  full?: boolean;
 }
 
 const MAX_LCS_CELLS = 4_000_000; // ~2k × 2k lines budget
@@ -90,7 +104,25 @@ function asNewFileRows(content: string): Row[] {
   return lines.map((text, i) => ({ kind: "add" as const, newLine: i + 1, text }));
 }
 
-export function DiffView({ filePath, before, after, hunks, tag, context = 3 }: Props) {
+export function DiffView({ filePath, before, after, hunks, tag, context = 3, full = false }: Props) {
+  const { t } = useTranslation();
+  /** Unfolded in place — distinct from `maximized`, which is the modal. */
+  const [unfolded, setUnfolded] = useState(false);
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!maximized) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Same reason ReaderModal swallows it: one Escape should close one thing,
+      // not this modal *and* the detail tab behind it.
+      e.stopPropagation();
+      setMaximized(false);
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [maximized]);
+
   const { rows, tooLarge, isNew, baselineMissing, allEqual } = useMemo(() => {
     if (hunks && hunks.length > 0) {
       return {
@@ -128,14 +160,41 @@ export function DiffView({ filePath, before, after, hunks, tag, context = 3 }: P
 
   const rightTag = tag ?? (isNew ? "New file" : "Diff");
 
+  const added = rows.reduce((n, r) => n + (r.kind === "add" ? 1 : 0), 0);
+  const removed = rows.reduce((n, r) => n + (r.kind === "del" ? 1 : 0), 0);
+
+  // The fold. `full` (the modal copy) and an explicit unfold both opt out.
+  const folded = !full && !unfolded && rows.length > MAX_INLINE_ROWS;
+  const shown = folded ? rows.slice(0, MAX_INLINE_ROWS) : rows;
+
   return (
-    <div className={styles.root}>
-      {filePath && (
+    <div className={`${styles.root} ${full ? styles.root_full : ""}`}>
+      {(filePath || !full) && (
         <div className={styles.path_bar}>
           <span className={styles.path}>{filePath}</span>
+          {/* The +/− tally is the one number worth reading without unfolding:
+              it says how big the change was, which is what you actually want
+              from a step you are only scanning past. */}
+          {(added > 0 || removed > 0) && (
+            <span className={styles.counts}>
+              {added > 0 && <span className={styles.count_add}>+{added}</span>}
+              {removed > 0 && <span className={styles.count_del}>−{removed}</span>}
+            </span>
+          )}
           <span className={`${styles.tag} ${isNew ? styles.tag_new : ""} ${baselineMissing ? styles.tag_baseline_missing : ""}`}>
             {rightTag}
           </span>
+          {!full && !tooLarge && !allEqual && rows.length > 0 && (
+            <button
+              type="button"
+              className={styles.maximize}
+              onClick={() => setMaximized(true)}
+              title={t("diff.full") || "Open full diff"}
+              aria-label={t("diff.full") || "Open full diff"}
+            >
+              ⤢
+            </button>
+          )}
         </div>
       )}
       <div className={styles.body}>
@@ -144,7 +203,7 @@ export function DiffView({ filePath, before, after, hunks, tag, context = 3 }: P
         ) : allEqual ? (
           <div className={styles.empty_note}>No textual changes.</div>
         ) : (
-          rows.map((r, idx) => {
+          shown.map((r, idx) => {
             if (r.kind === "sep") {
               return <div key={idx} className={styles.hunk_sep}>⋯</div>;
             }
@@ -166,6 +225,54 @@ export function DiffView({ filePath, before, after, hunks, tag, context = 3 }: P
           })
         )}
       </div>
+      {folded && (
+        <button
+          type="button"
+          className={styles.unfold}
+          onClick={() => setUnfolded(true)}
+        >
+          {t("diff.unfold", { count: rows.length - MAX_INLINE_ROWS })}
+        </button>
+      )}
+      {maximized &&
+        createPortal(
+          // Portalled to body for ImageLightbox's reason: a fixed overlay nested
+          // under a transformed ancestor is clipped to that ancestor's box.
+          <div className={styles.overlay} onClick={() => setMaximized(false)}>
+            <div
+              className={styles.sheet}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label={filePath ?? rightTag}
+            >
+              <div className={styles.sheet_head}>
+                <span className={styles.sheet_path}>{filePath ?? rightTag}</span>
+                <button
+                  type="button"
+                  className={styles.sheet_close}
+                  onClick={() => setMaximized(false)}
+                  title={t("diff.close")}
+                  aria-label={t("diff.close")}
+                >
+                  ×
+                </button>
+              </div>
+              <div className={styles.sheet_body}>
+                <DiffView
+                  filePath={filePath}
+                  before={before}
+                  after={after}
+                  hunks={hunks}
+                  tag={tag}
+                  context={context}
+                  full
+                />
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

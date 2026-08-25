@@ -27,6 +27,7 @@ import { installScrollBoxResizeRevive } from "../scrollLayerRevive";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
+import { PlanProgressRow } from "./PlanProgressRow";
 import { WatchStatusRow } from "./WatchStatusRow";
 import { MessageList } from "./MessageList";
 import type { PathLinkContext } from "../markdown/pathLinks";
@@ -409,6 +410,12 @@ export function SessionDetail({
     | "bgtasks"
     | "scratchpad";
   const [viewTab, setViewTab] = useState<ViewTab>("messages");
+  /* The header's numeric chips — spend, tokens, reasoning share, compactions —
+     are reference figures you look up, not identity you read at a glance. Seven
+     of them in a row turned the title area into a status bar, so they collapse
+     behind one toggle and the row keeps only what names the session. Context %
+     is the exception: see the render for why the warn state stays out. */
+  const [metricsOpen, setMetricsOpen] = useState(false);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
   const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
@@ -992,7 +999,12 @@ export function SessionDetail({
                   {liveSession.thinkingLevel}
                 </span>
               )}
-              {liveSession.contextPercent != null && (
+              {/* Context stays out of the fold once it crosses the warn line.
+                  Below it, it is a figure; above it, it is an alarm — the
+                  session is about to compact — and an alarm you have to click
+                  to see is not an alarm. */}
+              {liveSession.contextPercent != null &&
+                (metricsOpen || liveSession.contextPercent >= 0.8) && (
                 <span
                   className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
                   title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
@@ -1000,15 +1012,17 @@ export function SessionDetail({
                   ctx {Math.round(liveSession.contextPercent * 100)}%
                 </span>
               )}
-              {(liveSession.totalCostUsd ?? 0) >= 0.005 && (
+              {metricsOpen && (liveSession.totalCostUsd ?? 0) >= 0.005 && (
                 <span className={styles.meta_chip} title={t("card.tip_cost")}>
                   ${liveSession.totalCostUsd.toFixed(2)}
                 </span>
               )}
-              <span className={styles.meta_chip} title={t("tokens_out")}>
-                {liveSession.totalOutputTokens.toLocaleString()} tok
-              </span>
-              {liveSession.reasoningOutputTokens > 0 && (
+              {metricsOpen && (
+                <span className={styles.meta_chip} title={t("tokens_out")}>
+                  {liveSession.totalOutputTokens.toLocaleString()} tok
+                </span>
+              )}
+              {metricsOpen && liveSession.reasoningOutputTokens > 0 && (
                 <span
                   className={styles.meta_chip}
                   title={t("reasoning_tokens_tip", {
@@ -1022,7 +1036,7 @@ export function SessionDetail({
                   })}
                 </span>
               )}
-              {(liveSession.compactCount ?? 0) > 0 && (
+              {metricsOpen && (liveSession.compactCount ?? 0) > 0 && (
                 <span
                   className={styles.meta_chip}
                   title={t("card.tip_compact", {
@@ -1044,7 +1058,33 @@ export function SessionDetail({
                 </span>
               )}
               <ScheduleProvenanceChip session={liveSession} />
+              {/* Reveals the numeric chips above. Sits last so the identity run
+                  reads uninterrupted and the control lands at the row's end. */}
+              <button
+                type="button"
+                className={`${styles.metrics_toggle} ${metricsOpen ? styles.metrics_toggle_open : ""}`}
+                onClick={() => setMetricsOpen((v) => !v)}
+                title={t("detail.metrics") || "Session metrics"}
+                aria-expanded={metricsOpen}
+              >
+                {metricsOpen ? "×" : "···"}
+              </button>
             </div>
+            {/* Pinned plan.
+                Cursor keeps plans as first-class objects in its sidebar, Jules
+                gives the plan its own card above the activity feed, Devin has a
+                Progress tab — the shape they converge on is that the plan does
+                not scroll away with the work. Fleet already had this row on the
+                session cards and the data on SessionInfo; it was only missing
+                where you actually read the run. Clicking opens the Tasks tab,
+                the same destination as from a card. */}
+            {liveSession.taskPlan && (
+              <PlanProgressRow
+                plan={liveSession.taskPlan}
+                variant="header"
+                onOpen={() => pickTab("tasks")}
+              />
+            )}
             {/* Handoff relay chain — chip toggles the chain detail panel */}
             {liveSession.handoff && <HandoffChainRow session={liveSession} />}
             {/* Active fleet-watch(es) — what this session is waiting on */}
