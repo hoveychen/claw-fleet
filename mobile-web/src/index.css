@@ -47,14 +47,14 @@
      11.5 / 12.5 / 13.5 / 14.5 这些半像素值。那不是梯级，是每处随手挑的
      数——同一类信息在不同视图里是 11 还是 11.5 全凭当时手感。
 
-     四档，加一档标题。数值取各簇的主导值，正文抬到 16px（手机上 15 偏小，
-     16 也和 iOS 的正文惯例、以及下面输入框的防缩放值对齐）。
+     四档，加一档标题。数值取各簇的主导值，正文抬到 17px —— iOS 原生正文
+     就是 17，手机上 15 明显偏小。已在 390×844 下量过横向溢出确认不撑破。
      20 / 26 / 38 这三个大号不进梯级：它们是刻意的展示数字（首屏计数），
      不是正文体系的一部分。 */
   --t-meta: 11px; /* 时间戳、徽章、计数   (原 9.5/10/10.5/11) */
   --t-aux: 12px; /* 次要说明、等宽摘要   (原 11.5/12/12.5)  */
   --t-ui: 14px; /* 行标题、按钮、标签   (原 13/13.5/14/14.5) */
-  --t-body: 16px; /* 正文、气泡           (原 15/16)         */
+  --t-body: 17px; /* 正文、气泡           (原 15/16)         */
   --t-h2: 18px; /* 小节标题             (原 17/18)         */
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
@@ -103,7 +103,7 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
-  font-size: var(--t-body, 16px);
+  font-size: var(--t-body, 17px);
   line-height: 1.5;
   overscroll-behavior-y: none;
   /* 锁双指/双击缩放：Chrome 48+ 起有意忽略 <meta user-scalable=no / maximum-scale>
@@ -133,7 +133,9 @@ input,
 textarea,
 select {
   font-family: inherit;
-  font-size: 16px; /* <16px 会触发 iOS 聚焦缩放 */
+  /* 跟随正文字号。下限是 16px：聚焦时 <16px 会触发 iOS 页面缩放，所以这里
+     可以比 16 大、绝不能比 16 小。 */
+  font-size: var(--t-body, 17px);
   color: var(--color-text);
   background: var(--color-bg-input);
   border: 1px solid var(--color-border);
