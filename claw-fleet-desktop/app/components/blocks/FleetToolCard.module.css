@@ -130,14 +130,22 @@
   white-space: pre-wrap;
 }
 
+/* A long value is prose by default — a handoff note, a plan title, a prompt.
+   Only the shell-command fields (`until` / `capture`) keep the code face; see
+   SHELL_FIELDS in FleetToolCard.tsx. */
 .param_block .param_val {
-  font-family: var(--font-mono);
-  font-size: var(--t-meta, var(--font-size-2xs));
+  font-size: var(--t-aux, var(--font-size-xs));
   line-height: 1.5;
   padding: 4px 6px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-secondary);
 }
+
+.param_block .param_val_shell {
+  font-family: var(--font-mono);
+  font-size: var(--t-meta, var(--font-size-2xs));
+}
+
 
 /* ── confirmation (mutate `ok: …`) ────────────────────────────────────────── */
 .confirm {

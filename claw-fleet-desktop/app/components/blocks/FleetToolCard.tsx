@@ -26,7 +26,16 @@ const PARAM_ORDER = [
 /** Long free-text fields render as a block rather than an inline value. */
 const LONG_FIELDS = new Set(["note", "text", "prompt", "until", "capture", "title"]);
 
-function paramRows(input: Record<string, unknown>): Array<{ key: string; value: string; long: boolean }> {
+/** Of those, the ones that hold a shell command rather than prose. `until` and
+ *  `capture` are literally passed to a shell by `fleet watch`, so they keep the
+ *  code face; a handoff note or a plan title is a sentence and should not be
+ *  set in one. Splitting these two out is the whole point — before, all six
+ *  long fields shared one monospace rule and four of them were prose. */
+const SHELL_FIELDS = new Set(["until", "capture"]);
+
+function paramRows(
+  input: Record<string, unknown>,
+): Array<{ key: string; value: string; long: boolean; shell: boolean }> {
   const keys = Object.keys(input).filter((k) => k !== "action" && input[k] != null && input[k] !== "");
   keys.sort((a, b) => {
     const ia = PARAM_ORDER.indexOf(a);
@@ -36,7 +45,7 @@ function paramRows(input: Record<string, unknown>): Array<{ key: string; value: 
   return keys.map((k) => {
     const raw = input[k];
     const value = typeof raw === "string" ? raw : JSON.stringify(raw);
-    return { key: k, value, long: LONG_FIELDS.has(k) };
+    return { key: k, value, long: LONG_FIELDS.has(k), shell: SHELL_FIELDS.has(k) };
   });
 }
 
@@ -406,7 +415,9 @@ export function FleetToolCard({ block, result, isPartial }: Props) {
               {rows.map((r) => (
                 <div key={r.key} className={r.long ? styles.param_block : styles.param_row}>
                   <span className={styles.param_key}>{t(`fleet.param.${r.key}`, r.key)}</span>
-                  <span className={styles.param_val}>{r.value}</span>
+                  <span className={`${styles.param_val} ${r.shell ? styles.param_val_shell : ""}`}>
+                    {r.value}
+                  </span>
                 </div>
               ))}
             </div>

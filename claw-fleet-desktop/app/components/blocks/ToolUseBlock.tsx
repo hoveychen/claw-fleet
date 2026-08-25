@@ -1066,10 +1066,19 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
 
   // codex's function-call tools get a friendly one-liner instead of their raw
   // args object; everything else falls back to the generic formatter.
-  const summary =
+  //
+  // Which branch answered also decides the typeface. The two named summaries
+  // return translated prose ("Updated the plan", "Loaded tool schemas");
+  // `formatInput` returns the raw thing the tool was pointed at — a path, a
+  // command, a pattern. Setting a sentence in a code face tells the reader
+  // "this is machine output" about a line we wrote ourselves, so only the
+  // fallback keeps monospace. The distinction was already computed here; it
+  // just wasn't reaching the CSS.
+  const namedSummary =
     codexToolSummary(block.name, block.input, t) ??
-    claudeToolSummary(block.name, block.input, t) ??
-    formatInput(block.input, block.name);
+    claudeToolSummary(block.name, block.input, t);
+  const summary = namedSummary ?? formatInput(block.input, block.name);
+  const summaryIsProse = namedSummary !== null;
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
   const custom = hasCustomBody(block.name, meta, result);
@@ -1096,7 +1105,9 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
           </span>
         )}
         {(rail || !open) && (
-          <span className={styles.summary}>{summary}</span>
+          <span className={`${styles.summary} ${summaryIsProse ? styles.summary_prose : ""}`}>
+            {summary}
+          </span>
         )}
         {stats}
         {isPartial && !result && (

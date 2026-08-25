@@ -62,8 +62,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text-secondary);
+  /* Monospace because the default summary IS the raw target — a path, a
+     command, a glob. Tools whose summary we phrase ourselves opt out below. */
   font-family: var(--font-mono);
   font-size: var(--t-aux, 11px);
+}
+
+/* Set by ToolUseBlock when codexToolSummary / claudeToolSummary answered, i.e.
+   the line is a translated sentence rather than the tool's raw argument. */
+.summary_prose {
+  font-family: var(--font-sans);
+  font-size: var(--t-ui, 12px);
 }
 
 .spinner {
