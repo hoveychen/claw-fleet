@@ -47,7 +47,26 @@ export async function openSettingsWindow(): Promise<void> {
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-export type ViewMode = "list" | "gallery" | "history" | "audit" | "report" | "memory" | "wiki" | "skills" | "plugins" | "files" | "mobile" | "schedule" | "plans";
+/** Every page the main area can show. A runtime tuple rather than a bare union
+ *  so the nav-group split (see components/navGroups.ts) can assert it covers
+ *  every view — a new page added here and forgotten there would otherwise fall
+ *  through to the default group unnoticed. */
+export const ALL_VIEW_MODES = [
+  "list",
+  "gallery",
+  "history",
+  "audit",
+  "report",
+  "memory",
+  "wiki",
+  "skills",
+  "plugins",
+  "files",
+  "mobile",
+  "schedule",
+  "plans",
+] as const;
+export type ViewMode = (typeof ALL_VIEW_MODES)[number];
 export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
 /** 启动台's segmented mark filter. "all" shows every bucket. */
 export type MarkFilter = "all" | "pending" | "done";
