@@ -1,0 +1,116 @@
+/* TASKS.md plan progress. Two placements, one implementation:
+   - `card`   — inside a SessionCard, where it is one row among many.
+   - `header` — pinned under the session title in SessionDetail, where the plan
+                is the frame for everything below it and gets its own band.
+   Extracted from SessionCard.module.css when the detail header grew the same
+   row; the card variant is byte-for-byte what it rendered before. */
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  padding: 2px 4px;
+  margin-left: -4px;
+  margin-right: -4px;
+  transition: background 0.15s;
+}
+
+.row:hover {
+  background: var(--color-bg-hover);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.bar {
+  position: relative;
+  flex: 0 0 54px;
+  height: 4px;
+  border-radius: var(--radius-xs);
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.bar_done {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--color-success);
+  transition: width 0.2s;
+}
+
+.count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+
+.current {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-dim);
+  padding-left: 18px;
+}
+
+/* ── header variant ───────────────────────────────────────────────────────────
+   Pinned under the session title. Reads as a band rather than a list row: its
+   own tinted ground, a wider bar (the plan is the thing you are tracking, so
+   the progress deserves the width), and the current P-task at body weight
+   instead of dimmed — in this position it is the answer to "what is this
+   session doing right now", which the title alone never says. */
+.header_variant {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  font-size: var(--t-meta, 11px);
+  gap: 3px;
+}
+
+.header_variant:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.header_variant .name {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+}
+
+.header_variant .bar {
+  flex: 0 0 90px;
+  height: 5px;
+}
+
+.header_variant .current {
+  padding-left: 18px;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+}
