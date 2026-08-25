@@ -297,6 +297,13 @@ interface UIState {
   fileNav: FileNavRequest | null;
   requestFileNav: (req: Omit<FileNavRequest, "nonce">) => void;
   clearFileNav: () => void;
+  /** Absolute paths the 仓库 page was asked to open and could not resolve to
+   *  any file. The path chips in agent prose read this to mark themselves as
+   *  broken *after* a click — deliberately not before, since knowing in advance
+   *  would mean a filesystem walk per chip on hover (measured at ~140ms warm
+   *  against this repo, seconds cold) for a tooltip nobody asked for. */
+  unresolvedPaths: string[];
+  markPathUnresolved: (absPath: string) => void;
   /** Schedule page → "新建" shortcut: seed the new-session composer with a
    *  scheduling-assistant template and hop to the session view, so the agent
    *  (not a form) authors the schedule. Consumed by HistoryView. */
@@ -459,6 +466,15 @@ export const useUIStore = create<UIState>((set) => ({
       };
     }),
   clearFileNav: () => set({ fileNav: null }),
+  unresolvedPaths: [],
+  markPathUnresolved: (absPath) =>
+    set((s) =>
+      s.unresolvedPaths.includes(absPath)
+        ? s
+        : // Bounded: a long session shouldn't accumulate these forever, and the
+          // only consumer is "is *this* chip broken", so old entries earn nothing.
+          { unresolvedPaths: [...s.unresolvedPaths.slice(-49), absPath] },
+    ),
   newSessionNav: null,
   requestNewSession: (req) =>
     set((s) => {
