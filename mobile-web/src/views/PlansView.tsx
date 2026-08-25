@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, GitBranch, ListTree, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
-import type { RelayClient } from "../relay";
+import type { FleetTransport } from "../transport";
 import type { PlanForest, PlanNode, SessionInfo } from "../types";
 import {
   cellStates,
@@ -23,7 +23,7 @@ import styles from "./PlansView.module.css";
 
 interface Props {
   sessions: SessionInfo[];
-  client: RelayClient | null;
+  client: FleetTransport | null;
   onBack: () => void;
 }
 

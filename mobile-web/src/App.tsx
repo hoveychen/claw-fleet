@@ -10,7 +10,11 @@ import {
 } from "./push";
 import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
-import { RelayClient, type RttSample, gzipSupported, binarySupported } from "./relay";
+// `RelayClient` 是这里唯一还需要具体实现的地方 —— 它是被 `new` 出来的那一个。
+// 其余每个引用都已经降到 `FleetTransport` 接口上,所以换传输层时要改的只有这
+// 一处构造。
+import { RelayClient, gzipSupported, binarySupported } from "./relay";
+import type { FleetTransport, RttSample } from "./transport";
 import {
   computeCongestion,
   formatRttSplit,
@@ -219,7 +223,7 @@ export function App() {
   // new-session sheet mounts (that's where the attachment state lives).
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [exitArmed, setExitArmed] = useState(false);
-  const clientRef = useRef<RelayClient | null>(null);
+  const clientRef = useRef<FleetTransport | null>(null);
   // ids answered on THIS device whose answer is still in flight → timestamp.
   // Suppresses the just-answered card from flickering back when a fallback
   // `pending_snapshot` (which lags the send on a slow link) still lists it.
@@ -281,7 +285,7 @@ export function App() {
     setDecisions((prev) => prev.filter((d) => d.id !== id));
   }, []);
 
-  const refreshPending = useCallback(async (client: RelayClient) => {
+  const refreshPending = useCallback(async (client: FleetTransport) => {
     try {
       const snap = await client.request<PendingSnapshot>("pending_snapshot");
       const kinds: Array<[DecisionKind, DecisionRequest[] | undefined]> = [

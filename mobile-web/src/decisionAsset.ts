@@ -3,7 +3,7 @@
 // React render. The bytes come back base64-framed through the relay's
 // `decision_asset` method (see claw-fleet-core/src/mobile_relay.rs).
 
-import { ASSET_REQUEST_TIMEOUT_MS, type RelayClient } from "./relay";
+import { ASSET_REQUEST_TIMEOUT_MS, type FleetTransport } from "./transport";
 
 export interface DecisionAsset {
   mime: string;
@@ -16,7 +16,7 @@ export interface DecisionAsset {
  *  strands the card's <img> forever (the reply arrives after the pending entry
  *  was already dropped, so it is silently discarded). */
 export function fetchDecisionAsset(
-  client: RelayClient,
+  client: FleetTransport,
   requestId: string,
   qidx: number,
   name: string,

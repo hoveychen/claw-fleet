@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
 import { useDraft, loadDraft, saveDraft } from "../draft";
 import { t } from "../i18n";
-import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type RelayClient } from "../relay";
+import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type FleetTransport } from "../transport";
 import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
@@ -91,7 +91,7 @@ export interface UploadedAttachment extends Attachment {
  *  whose content:// URIs are fetched into `File`s (see shareTarget.ts). Both
  *  are handled by the `Array.from` below. */
 export async function uploadAttachmentFiles(
-  client: RelayClient,
+  client: FleetTransport,
   files: FileList | File[],
 ): Promise<UploadedAttachment[]> {
   const out: UploadedAttachment[] = [];
@@ -126,7 +126,7 @@ export async function uploadAttachmentFiles(
 // draftKey 让已选附件的 chip 列表跟着表单文本一起持久化——意外关闭 sheet / 切会话
 // 回来后附件不用重挑。存的是已上传到 relay 的路径；万一桌面端清过 user-attachments
 // 存储，恢复的路径会失效，但 chip 可手动删除，故不额外做存在性校验。
-function useAttachments(client: RelayClient | null, draftKey: string) {
+function useAttachments(client: FleetTransport | null, draftKey: string) {
   const [attachments, setAttachments, clearAttachments] = useDraft<Attachment[]>(draftKey, []);
   const [uploading, setUploading] = useState(false);
   // path → `blob:` URL for files picked in *this* page life. Not state: it is
@@ -218,7 +218,7 @@ function AttachmentRow({
   uploading: boolean;
   onPick: (files: FileList | null) => void;
   onRemove: (path: string) => void;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   previews?: Map<string, string>;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -276,7 +276,7 @@ function OptionSelects({
   tool?: string;
   /** 用来向主机要 codex profile / dsh 模型目录（第三方模型的唯一来源）。
    *  null 时只显示内置模型。 */
-  client: RelayClient | null;
+  client: FleetTransport | null;
   model: string;
   effort: string;
   permissionMode: string;
@@ -375,7 +375,7 @@ function OptionSelects({
 
 interface NewSessionProps {
   sessions: SessionInfo[];
-  client: RelayClient | null;
+  client: FleetTransport | null;
   /** 别的 app 分享进来的文件（见 shareTarget.ts）。附件状态住在本组件里，
    *  所以 App 只把 File 递过来，由这里在 client 就绪后走正常上传路径。 */
   initialFiles?: File[];
@@ -735,7 +735,7 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
 
 interface ResumeProps {
   session: SessionInfo;
-  client: RelayClient | null;
+  client: FleetTransport | null;
   /** `"resume"`: turn ended, submit resumes now. `"enqueue"`: turn still
    *  running, submit queues the message for delivery when the turn ends. */
   mode?: "resume" | "enqueue";
