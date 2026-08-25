@@ -2,8 +2,12 @@
   font-family: var(--font-mono);
   font-size: var(--t-aux, 11px);
   border-radius: var(--radius-xs);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
+  /* Was `--color-bg` + a 1px outline: the diff painted itself the same colour
+     as the page and then drew a line to prove it was there. Now it sits on the
+     sunken plane and the step does that job — which is the whole point of
+     raising the ladder. Changing the background is load-bearing here; dropping
+     the border alone would have made the diff invisible. */
+  background: var(--color-bg-sunken);
   overflow: hidden;
   margin: 4px 0;
 }
