@@ -1,9 +1,14 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  BookMarked,
   Bot,
   Brain,
+  CalendarClock,
   CircleCheck,
+  Radar,
+  RefreshCw,
+  Share2,
   File,
   FileArchive,
   FileBox,
@@ -44,6 +49,21 @@ const AGENT_TOOLS = new Set(["Agent", "spawn_agent", "wait_agent"]);
 const PLAN_TOOLS = new Set([
   "TodoWrite", "TodoRead", "update_plan", "EnterPlanMode", "ExitPlanMode",
 ]);
+
+/** Icon for one of Fleet's own MCP control tools, by tail segment. These used
+ *  to render as callout blocks outside the rail; they are now steps like any
+ *  other, so they need gutter glyphs in the same lucide stroke family. */
+export function railFleetIcon(tool: string): ReactNode {
+  switch (tool) {
+    case "plan": return <ListTodo />;
+    case "handoff": return <Share2 />;
+    case "watch": return <Radar />;
+    case "loop": return <RefreshCw />;
+    case "schedule": return <CalendarClock />;
+    case "wiki": return <BookMarked />;
+    default: return <Wrench />;
+  }
+}
 
 /** Icon for a tool-call step, by tool name. Unknown tools (MCP, future) get a
  *  generic wrench rather than nothing, so the rail never has a hole. */
