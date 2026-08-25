@@ -47,14 +47,14 @@
 }
 
 .peekKind {
-  font-size: 13.5px;
+  font-size: var(--t-ui, 14px);
   font-weight: 700;
   color: var(--color-text);
   flex-shrink: 0;
 }
 
 .peekWs {
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -63,7 +63,7 @@
 
 .peekCount {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 700;
   color: #fff;
   background: var(--color-accent);
@@ -125,7 +125,7 @@
 }
 
 .sheetTitle {
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   font-weight: 700;
   color: var(--color-text);
 }

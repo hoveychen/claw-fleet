@@ -56,18 +56,18 @@
 }
 
 .title {
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   font-weight: 600;
   color: var(--color-text);
   line-height: 1.35;
 }
 
 .root[data-compact] .title {
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
 }
 
 .description {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
   line-height: 1.55;
   max-width: 280px;

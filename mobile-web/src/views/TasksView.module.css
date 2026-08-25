@@ -31,7 +31,7 @@
   border-radius: 10px;
   padding: 8px 12px 8px 32px;
   color: var(--color-text);
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   outline: none;
 }
 
@@ -70,7 +70,7 @@
   border-radius: 8px;
   padding: 6px 8px;
   color: var(--color-text);
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
 }
 
 .filterToggle {
@@ -82,7 +82,7 @@
   color: var(--color-text-dim);
   border-radius: 8px;
   padding: 6px 10px;
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   flex-shrink: 0;
 }
 
@@ -113,7 +113,7 @@
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   flex-shrink: 0;
   padding: 6px 0;
 }
@@ -138,7 +138,7 @@
   color: var(--color-text-dim);
   border-radius: 8px;
   padding: 6px 0;
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
 }
 
 .segmentButton[data-active="true"] {
@@ -151,7 +151,7 @@
 }
 
 .segmentCount {
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -208,7 +208,7 @@
   color: var(--color-error);
   border-radius: 999px;
   padding: 3px 12px;
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
 }
 
 .stopButton[data-mode="interrupt"] {
@@ -230,7 +230,7 @@
   text-align: center;
   color: var(--color-text-dim);
   padding: 48px 16px;
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
 }
 
 .card {
@@ -291,7 +291,7 @@
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   padding: 4px 6px;
 }
 
@@ -352,7 +352,7 @@
 
 .title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -364,7 +364,7 @@
   margin-left: auto;
   flex-shrink: 0;
   color: var(--color-text-dim);
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
 }
 
 /* Meta line under the title — project (folder), handoff chip, live runtime.
@@ -375,7 +375,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
   min-width: 0;
 }
@@ -401,7 +401,7 @@
 
 .snippet {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -418,7 +418,7 @@
 
 .preview {
   margin-top: 6px;
-  font-size: 12.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -435,7 +435,7 @@
 }
 
 .statusLabel {
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--color-bg-secondary);
@@ -454,7 +454,7 @@
 
 .planChip,
 .todoChip {
-  font-size: 11.5px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   padding: 2px 8px;
@@ -488,7 +488,7 @@
 
 .detailHint {
   color: var(--color-text-dim);
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
 }
 
 .plan + .plan {
@@ -497,7 +497,7 @@
 
 .planTitle {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   margin-bottom: 6px;
 }
 
@@ -505,7 +505,7 @@
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   padding: 3px 0;
   color: var(--color-text);
 }
@@ -522,7 +522,7 @@
   margin-top: 2px;
   border: 1px solid var(--color-border-strong);
   border-radius: 4px;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -541,7 +541,7 @@
   gap: 6px;
   margin: 0 0 6px;
   padding: 5px 10px;
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-dim);
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);

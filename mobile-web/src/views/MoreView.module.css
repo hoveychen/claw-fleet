@@ -11,7 +11,7 @@
 }
 
 .sectionLabel {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -42,13 +42,13 @@
 }
 
 .rowLabel {
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text);
   flex-shrink: 0;
 }
 
 .rowValue {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
 }
 
@@ -62,7 +62,7 @@
 }
 
 .rowNote {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   color: var(--color-text-secondary);
   line-height: 1.55;
   padding: 0 14px 12px;
@@ -80,7 +80,7 @@
 .segmentButton {
   padding: 5px 13px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
 }
 
@@ -115,12 +115,12 @@
 }
 
 .connLabel {
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text-secondary);
 }
 
 .frameCount {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
 }
 
@@ -130,7 +130,7 @@
   border-radius: 7px;
   padding: 6px 16px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
 }
 
 .actionButton:active {
@@ -141,7 +141,7 @@
   width: 100%;
   text-align: left;
   padding: 13px 14px;
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-error);
 }
 
@@ -178,12 +178,12 @@
 }
 
 .navLabel {
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   color: var(--color-text);
 }
 
 .navSub {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -204,34 +204,38 @@
   padding: 0 14px 12px;
 }
 
+/* 告警靠底色而不是左边一条。这块只在异常状态下渲染（频道里冒出第二个
+   agent），该显眼——但显眼的方式换成染底，和详情页去掉的那批彩色左条
+   保持同一套说法。 */
 .sourceItem {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border-left: 2px solid var(--color-warning);
-  padding-left: 8px;
+  background: var(--color-warning-soft, rgba(251, 191, 36, 0.1));
+  border-radius: 6px;
+  padding: 6px 8px;
 }
 
 .sourceHead {
-  font-size: 12px;
+  font-size: var(--t-aux, 12px);
   font-weight: 600;
   color: var(--color-text);
 }
 
 .sourceHome {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-secondary);
   word-break: break-all;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .sourceStat {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
 }
 
 .sourceNote {
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
   line-height: 1.55;
 }
