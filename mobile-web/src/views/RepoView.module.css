@@ -25,7 +25,7 @@
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   padding: 4px 8px 4px 0;
   flex-shrink: 0;
 }
@@ -36,7 +36,7 @@
 }
 
 .headerTitle {
-  font-size: 15px;
+  font-size: var(--t-body, 16px);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -44,7 +44,7 @@
 }
 
 .refresh {
-  font-size: 18px;
+  font-size: var(--t-h2, 18px);
   color: var(--color-text-secondary);
   padding: 2px 6px;
   line-height: 1;
@@ -64,7 +64,7 @@
 
 .hint {
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--t-ui, 14px);
   padding: 24px 8px;
   text-align: center;
   line-height: 1.6;
@@ -105,7 +105,7 @@
 }
 
 .repoTitle {
-  font-size: 14px;
+  font-size: var(--t-ui, 14px);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -117,12 +117,12 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--t-meta, 11px);
   color: var(--color-text-dim);
 }
 
 .badge {
-  font-size: 10.5px;
+  font-size: var(--t-meta, 11px);
   font-weight: 600;
   padding: 1px 7px;
   border-radius: 999px;
