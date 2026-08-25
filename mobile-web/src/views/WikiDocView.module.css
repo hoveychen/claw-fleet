@@ -177,11 +177,14 @@
   padding: 1px 5px;
 }
 
+/* 缩进 + 更轻的声音，不是一条竖线。桌面端的引用块刚做了同样的处理：
+   引用本来就靠「被抽离出来、语气更轻」标记自己。wiki 文档两端都会渲染，
+   这里不跟上就会出现同一篇文档两种样子。 */
 .markdown :global(blockquote) {
-  margin: 0 0 10px;
-  padding-left: 12px;
-  border-left: 3px solid var(--color-border-strong);
+  margin: 2px 0 12px;
+  padding-left: 18px;
   color: var(--color-text-secondary);
+  font-style: italic;
 }
 
 .markdown :global(img) {
