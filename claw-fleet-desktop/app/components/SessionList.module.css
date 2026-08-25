@@ -28,36 +28,14 @@
   width: 100%;
 }
 
-/* At 64px there is no room for two labelled segments — the strip keeps both
-   tabs side by side as icons only, so switching modes stays one click away
-   without having to expand the sidebar first. */
-.sidebar_collapsed .nav_tab_label {
+/* The 64px rail carries no mode strip: two labelled segments don't fit, and an
+   icons-only pair squeezed into 18px each read as clutter (the rolled-up counts
+   spilled out of the strip and collided with the nav icons below). The rail
+   flattens both groups into one icon column instead — the shape every narrow
+   rail in this class of app uses — so nothing needs a mode layer to be
+   reachable. SessionList.tsx does the flattening; this just hides the strip. */
+.sidebar_collapsed .nav_tabs {
   display: none;
-}
-
-.sidebar_collapsed .nav_tab {
-  padding: 6px 0;
-  gap: 0;
-}
-
-/* An 18px-wide segment has no room for a two-digit count: the numbers spilled
-   out of the strip and collided with the nav icons below. Collapsed, every
-   rolled-up signal degrades to a dot — "there is something in the other mode"
-   is all the rail can carry; the count is one click away. */
-.sidebar_collapsed .nav_tab_badge,
-.sidebar_collapsed .nav_tab_badge_running,
-.sidebar_collapsed .nav_tab_dot {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 6px;
-  height: 6px;
-  min-width: 0;
-  padding: 0;
-  border-radius: 50%;
-  overflow: hidden;
-  text-indent: -99px;
-  line-height: 6px;
 }
 
 .sidebar_collapsed .nav_badge {
