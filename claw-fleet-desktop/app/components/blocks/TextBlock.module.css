@@ -1,6 +1,9 @@
 .root {
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: var(--t-body, 13px);
+  /* Leading rides with the measure: a longer line needs more leading to keep
+     the eye from dropping to the wrong row on the return sweep. Transcript
+     prose opts into 1.72; the document surfaces keep 1.6. */
+  line-height: var(--prose-leading, 1.6);
   color: var(--color-text);
 }
 
@@ -34,9 +37,9 @@
   margin: 16px 0 6px;
   color: var(--color-text);
 }
-.root :global(h1) { font-size: 16px; }
-.root :global(h2) { font-size: 14px; }
-.root :global(h3) { font-size: 13px; }
+.root :global(h1) { font-size: var(--t-h1, 16px); }
+.root :global(h2) { font-size: var(--t-h2, 14px); }
+.root :global(h3) { font-size: var(--t-body, 13px); }
 
 .root :global(ul),
 .root :global(ol) {
@@ -58,7 +61,7 @@
   max-width: 100%;
   overflow-x: auto;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   margin-bottom: 10px;
 }
 .root :global(th),
@@ -91,7 +94,7 @@
   border-radius: var(--radius-xs);
   padding: 1px 4px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   color: var(--color-code-fg);
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -110,7 +113,7 @@
   position: absolute;
   top: 6px;
   left: 10px;
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   line-height: 16px;
   color: var(--color-text-dim);
   font-family: var(--font-mono);
@@ -121,7 +124,7 @@
   position: absolute;
   top: 5px;
   right: 8px;
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   padding: 2px 6px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
