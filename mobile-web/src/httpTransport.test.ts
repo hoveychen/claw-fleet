@@ -174,7 +174,10 @@ describe("connect 时的首屏补拉", () => {
     t.connect();
     await vi.waitFor(() => expect(seen.length).toBe(1));
 
-    expect(fetchImpl.mock.calls[0][0]).toBe("/sessions");
+    // `vi.fn(async () => …)` 的参数类型被推成空元组，直接下标取 [0][0] 是
+    // 越界（TS2493）。断言成实际的调用形状再取。
+    const calls = fetchImpl.mock.calls as unknown as [string][];
+    expect(calls[0][0]).toBe("/sessions");
     expect(seen[0]).toEqual([{ id: "s1" }, { id: "s2" }]);
     expect(kinds).toEqual(["full"]);
   });
