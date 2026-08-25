@@ -23,6 +23,9 @@ const ALL_KEYS = [
   "viewMode",
   // Which session sub-view (list vs gallery) the unified "Sessions" nav returns to.
   "lastSessionViewMode",
+  // Last page visited under each sidebar tab (管家 / 工作), as a JSON blob. The
+  // active tab itself is derived from "viewMode", so it is not stored.
+  "nav-group-last-view",
   // One-shot flag: existing users' stored "list" has been flipped to the new
   // gallery default (see migrateSessionViewDefault). Must be readable on boot
   // so the migration never re-runs and clobbers a later deliberate "list".
@@ -111,6 +114,9 @@ const ALL_KEYS = [
 // Each ID represents a configurable feature card in onboarding.
 // Adding a new ID here will trigger a "What's New" overlay for existing users.
 export const ONBOARDING_FEATURES = [
+  // Not a toggle like the rest — it tells upgrading users that the sidebar now
+  // has two modes and which pages moved behind the 工作 tab.
+  "nav_modes",
   "appearance",
   "notifications",
   "hooks_guard_elicitation",
