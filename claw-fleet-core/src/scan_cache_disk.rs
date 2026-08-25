@@ -22,7 +22,17 @@ const CACHE_FILE_NAME: &str = "session-cache.json";
 // v2: SessionInfo gained `fleet_spawned`. Discarding v1 entries forces a fresh
 // parse so grandfathered sessions get the marker-or-cutoff value instead of the
 // serde default (`false`) a v1 entry would deserialize to.
-const CACHE_VERSION: u32 = 2;
+//
+// v3: `workspace_name` learned to see through a symlinked `~/.fleet` (the chat
+// workspace was being labelled `chat` instead of `Chat` wherever the fleet dir
+// is a link — Fleet Cloud). Bump for the same reason as v2, and note the
+// general rule: **a change to how a SessionInfo field is derived needs a bump
+// too, not just a change to its shape.** Entries are keyed by jsonl mtime, so
+// an idle session's stale value is served verbatim forever — the new logic
+// never runs for it. Verified on the live cloud container: after the fixed
+// binary shipped, `fleet agents` still printed `chat`, and deleting
+// `~/.fleet/session-cache.json` by hand was what made it print `Chat`.
+const CACHE_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache {
