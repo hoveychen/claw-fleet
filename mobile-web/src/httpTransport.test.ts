@@ -72,10 +72,10 @@ describe("HttpTransport.request", () => {
     );
     const t = make({}, fetchImpl as unknown as typeof fetch);
 
-    const err = await t.request("nope").catch((e) => e);
+    const err: unknown = await t.request("nope").catch((e) => e);
 
     expect(isDesktopRejection(err)).toBe(true);
-    expect(String(err.message)).toContain("unknown method");
+    expect(String((err as Error).message)).toContain("unknown method");
   });
 
   // 请求根本没落地（网关 502、断网）—— 主机可能已经把活干了，调用方有权另行确认。
