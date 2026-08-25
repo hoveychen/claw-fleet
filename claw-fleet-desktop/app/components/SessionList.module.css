@@ -28,6 +28,16 @@
   width: 100%;
 }
 
+/* The 64px rail carries no mode strip: two labelled segments don't fit, and an
+   icons-only pair squeezed into 18px each read as clutter (the rolled-up counts
+   spilled out of the strip and collided with the nav icons below). The rail
+   flattens both groups into one icon column instead — the shape every narrow
+   rail in this class of app uses — so nothing needs a mode layer to be
+   reachable. SessionList.tsx does the flattening; this just hides the strip. */
+.sidebar_collapsed .nav_tabs {
+  display: none;
+}
+
 .sidebar_collapsed .nav_badge {
   position: absolute;
   top: 2px;
@@ -234,6 +244,112 @@
   flex-direction: column;
   gap: 1px;
   padding: 6px 10px 10px;
+  /* Shrinkable, not fixed: on a short window the collapsed rail's full item
+     column (~442px) plus the header and the footer exceed 100vh, and because
+     .sidebar_content's basis is 0 it has nothing left to give up — the overflow
+     used to push the footer's settings card off screen entirely (measured: its
+     bottom edge at 617px in a 600px window). Letting the nav absorb the
+     overflow and scroll keeps the settings entry reachable. Taller windows
+     never overflow, so nothing scrolls and the layout is unchanged. */
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ── Mode tab strip (管家 / 工作) ─────────────────────────────────────────────
+   Sits at the top of the nav, directly above the items it governs, so the
+   grouping reads as ownership rather than as two unrelated controls. Track +
+   raised active pill, the same segmented vocabulary as .view_toggle in
+   SessionsBanner. */
+.nav_tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 6px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+
+.nav_tab {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 6px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+  position: relative;
+}
+
+.nav_tab:hover {
+  color: var(--color-text);
+}
+
+.nav_tab_active,
+.nav_tab_active:hover {
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  box-shadow: var(--shadow-card);
+}
+
+.nav_tab_icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.nav_tab_active .nav_tab_icon {
+  opacity: 1;
+}
+
+.nav_tab_label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Rolled-up badges for the tab whose items are currently hidden — same red /
+   green vocabulary as .nav_badge / .nav_badge_running on the items. */
+.nav_tab_badge,
+.nav_tab_badge_running {
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: var(--radius-md);
+  padding: 0 4px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+
+.nav_tab_badge {
+  background: var(--color-error-solid);
+  color: var(--color-on-error);
+}
+
+.nav_tab_badge_running {
+  background: var(--color-success);
+  color: var(--color-bg-card);
+}
+
+.nav_tab_dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-error-solid);
   flex-shrink: 0;
 }
 
