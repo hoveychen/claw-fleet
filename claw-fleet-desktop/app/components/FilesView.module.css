@@ -693,3 +693,32 @@
   min-height: 0;
   overflow: auto;
 }
+
+/* Candidates offered when one path tail matches several files. */
+.reveal_candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+}
+
+.reveal_candidate {
+  width: 100%;
+  text-align: left;
+  padding: 5px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.reveal_candidate:hover {
+  background: var(--color-bg-secondary);
+}

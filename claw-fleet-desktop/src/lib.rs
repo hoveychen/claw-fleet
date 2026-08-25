@@ -142,6 +142,9 @@ impl Backend for NullBackend {
     ) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
         Err("backend not ready".into())
     }
+    fn find_explorer_path(&self, _: &str, _: &str, _: &str) -> Result<Vec<String>, String> {
+        Err("backend not ready".into())
+    }
     fn read_external_file(
         &self,
         _: &str,
