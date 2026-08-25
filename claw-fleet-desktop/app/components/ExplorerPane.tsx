@@ -68,6 +68,15 @@ export function formatSize(bytes: number): string {
 export interface RevealRequest {
   relPath: string;
   nonce: number;
+  /**
+   * Report a reveal that finds nothing, via `onRevealFailed`.
+   *
+   * Only set for requests a *user* made — a path clicked in agent prose. The
+   * tree also reveals on its own behalf (restoring the selection after a
+   * remount), and a stale selection pointing at a deleted file must not raise
+   * "no such file" at someone who never asked for it.
+   */
+  reportMiss?: boolean;
 }
 
 export function FileTree({
@@ -76,6 +85,7 @@ export function FileTree({
   onPick,
   reveal,
   onRevealed,
+  onRevealFailed,
 }: {
   /** Lists one level; "" is the root. null means the level is unreadable. */
   loadDir: (rel: string) => Promise<ExplorerEntry[] | null>;
@@ -85,6 +95,13 @@ export function FileTree({
   reveal?: RevealRequest | null;
   /** Fired once the request above has been served (or found to be unservable). */
   onRevealed?: () => void;
+  /**
+   * The path isn't in this tree — a missing ancestor directory, a missing leaf,
+   * or a leaf the current filters hide. Only fired for `reportMiss` requests.
+   * Before this existed the reveal just `return`ed, which is what made a click
+   * on a path the agent got slightly wrong land on the 仓库 page and stop dead.
+   */
+  onRevealFailed?: (relPath: string) => void;
 }) {
   const { t } = useTranslation();
   const [children, setChildren] = useState<Record<string, ExplorerEntry[]>>({});
@@ -126,13 +143,25 @@ export function FileTree({
     revealedNonce.current = reveal.nonce;
 
     let stale = false;
+    const miss = () => {
+      if (stale) return;
+      onRevealFailed?.(reveal.relPath);
+      // Served, in the sense that this request is finished — the caller must
+      // still be released, or its pending-nav state sticks forever.
+      onRevealed?.();
+    };
     void (async () => {
       // Every ancestor directory, outermost first: a/b/c.rs → ["a", "a/b"].
       const ancestors = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
       const loaded: Record<string, ExplorerEntry[]> = {};
       for (const dir of ancestors) {
         const entries = children[dir] ?? (await loadDir(dir));
-        if (!entries) return; // directory gone — leave the tree as it was
+        if (!entries) {
+          // Directory gone — leave the tree as it was, but say so.
+          if (reveal.reportMiss) miss();
+          else if (!stale) onRevealed?.();
+          return;
+        }
         loaded[dir] = entries;
       }
       if (stale) return;
@@ -150,12 +179,18 @@ export function FileTree({
         return next;
       });
       if (target && !target.isDir) onPick(target);
+      // Ancestors all loaded but the leaf isn't there — deleted, renamed, or
+      // filtered out by 「显示忽略文件」. Expanding to its parent and stopping
+      // silently reads as "nothing happened", so report it like a missing dir.
+      if (!target && reveal.reportMiss) {
+        onRevealFailed?.(reveal.relPath);
+      }
       onRevealed?.();
     })();
     return () => {
       stale = true;
     };
-  }, [reveal, children, loadDir, onPick, onRevealed]);
+  }, [reveal, children, loadDir, onPick, onRevealed, onRevealFailed]);
 
   const toggleDir = useCallback(
     async (rel: string) => {
