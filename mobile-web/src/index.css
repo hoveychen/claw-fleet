@@ -1,25 +1,43 @@
 /* Fleet 移动端 — 与桌面端同一套 Linear 冷灰 + Anthropic 珊瑚 token */
 
+/* 暗色表面梯级，与桌面 App.css 的 ladder 对齐：
+     bg      #0f1011  画布
+     sunken  #191b1e  下沉（secondary：分组底、工具块）
+     card    #1c1e21  卡片平面
+     field   #232528  抬起（输入控件）
+     hover   #292b2f  卡片/工具 hover
+
+   整条梯子相对旧值一起上移了一档。旧的 canvas→card 亮度差是 2.89（×1000），
+   肉眼看不出来，所以每张卡都得画一圈 1px 边框才能「存在」；新的是 7.73，
+   背景差本身就够分层。桌面端两轮改造后的实测值，这里逐字节跟上，免得两个
+   端看起来不像同一个产品。
+
+   顺带修掉一处旧的塌陷：secondary / card-hover / input 三个 token 原本
+   全指向同一个 #18191b，于是「下沉」和「抬起」在暗色下根本分不出来——桌面
+   端的注释把这个 bug 记了很久，移动端一直还在。现在三者各归各位。 */
 :root {
-  --color-bg: #08090a;
-  --color-bg-secondary: #18191b;
-  --color-bg-card: #101113;
-  --color-bg-card-hover: #18191b;
-  --color-bg-input: #18191b;
+  --color-bg: #0f1011;
+  --color-bg-secondary: #191b1e;
+  --color-bg-card: #1c1e21;
+  --color-bg-card-hover: #292b2f;
+  --color-bg-input: #232528;
   --color-text: #f7f8f8;
   --color-text-secondary: #8a8f98;
-  --color-text-dim: #62666d;
+  /* 跟着表面一起抬（原 #62666d）：抬高底色会让最暗那档文字对卡片的对比度
+     从 3.28 掉到 2.90，这个值把它拉回 3.71，比改前还好。仍未达 AA 4.5——
+     能达到的值会和 secondary 糊成一档，补齐需要重排整条文字梯级。 */
+  --color-text-dim: #72777f;
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-strong: rgba(255, 255, 255, 0.15);
   --color-accent: #d97757;
   --color-accent-hover: #c96040;
   --color-accent-soft: rgba(217, 119, 87, 0.18);
   /* 用户消息气泡底色，与桌面 App.css 的 --color-bg-user 逐字节一致 */
-  --color-bg-user: #161b29;
+  --color-bg-user: #1f2534;
   --color-success: #4ade80;
   --color-warning: #fbbf24;
   --color-error: #f87171;
-  --color-bg-glass: rgba(8, 9, 10, 0.92);
+  --color-bg-glass: rgba(15, 16, 17, 0.92);
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Segoe UI", Roboto, system-ui, sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", Menlo, monospace;
