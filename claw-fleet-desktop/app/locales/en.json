@@ -1523,6 +1523,11 @@
     "mute": "Mute alert sounds",
     "unmute": "Unmute alert sounds"
   },
+  "nav_group": {
+    "aria": "Mode",
+    "steward": "Steward",
+    "work": "Work"
+  },
   "sidebar": {
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
