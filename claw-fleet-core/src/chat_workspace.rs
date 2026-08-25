@@ -128,30 +128,76 @@ const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — 
 堆调查子任务。真有值得长期留存的产出，再用 `fleet wiki publish` 归档。
 "#;
 
-/// Absolute path of the chat workspace. `None` only when the home directory
-/// can't be resolved at all.
-pub fn chat_workspace_path() -> Option<PathBuf> {
+/// Where the chat workspace is *created*: straight under the fleet dir, whose
+/// own path may still contain symlinks. Writes go here; identity comparisons go
+/// through [`chat_workspace_path`].
+fn chat_workspace_link_path() -> Option<PathBuf> {
     get_fleet_dir().map(|d| d.join(CHAT_DIR))
 }
 
-/// True when `path` denotes the chat workspace. Compared with trailing
-/// separators stripped, so both `~/.fleet/chat` and `~/.fleet/chat/` match —
-/// the launcher round-trips this string through the UI and a stray slash must
-/// not silently demote a chat session to an ordinary one.
+/// Resolve `path` through symlinks, or `None` when it doesn't exist yet.
+///
+/// On Windows `canonicalize` hands back a `\\?\`-prefixed verbatim path, which
+/// no other Fleet surface ever produces — strip it so the result still compares
+/// equal to an ordinary path string.
+fn resolved(path: &Path) -> Option<PathBuf> {
+    let canonical = fs::canonicalize(path).ok()?;
+    let text = canonical.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(stripped) => Some(PathBuf::from(stripped)),
+        None => Some(canonical),
+    }
+}
+
+/// Absolute path of the chat workspace, with symlinks resolved once it exists.
+/// `None` only when the home directory can't be resolved at all.
+///
+/// Resolving matters wherever `~/.fleet` is itself a link — Fleet Cloud's
+/// entrypoint points it into the single persistent volume
+/// (`/home/fleet/.fleet -> /workspace/.fleet-state`), and macOS resolves
+/// `/var` to `/private/var`. A process spawned with cwd `~/.fleet/chat` reports
+/// the resolved path (`getcwd(2)` keeps no symlinks), and that is the path the
+/// scanner and the launcher's recents list carry, so it has to be the one this
+/// function hands out too.
+pub fn chat_workspace_path() -> Option<PathBuf> {
+    let raw = chat_workspace_link_path()?;
+    Some(resolved(&raw).unwrap_or(raw))
+}
+
+/// True when `path` denotes the chat workspace. Both the link path
+/// (`~/.fleet/chat`) and its resolved form match, and trailing separators are
+/// stripped, so neither a symlinked fleet dir nor a stray slash round-tripped
+/// through the UI can silently demote a chat session to an ordinary one.
 pub fn is_chat_workspace(path: &str) -> bool {
-    let Some(chat) = chat_workspace_path() else {
+    let trim = |s: &str| s.trim_end_matches(['/', '\\']).to_string();
+    let target = trim(path);
+    // Cheap prefilter: the workspace directory is always named `chat`, so
+    // anything else is out without touching the filesystem. `workspace_name`
+    // calls this for every scanned session — the canonicalize below must not
+    // ride on that path.
+    if Path::new(&target).file_name().and_then(|n| n.to_str()) != Some(CHAT_DIR) {
+        return false;
+    }
+    let Some(raw) = chat_workspace_link_path() else {
         return false;
     };
-    let trim = |s: &str| s.trim_end_matches(['/', '\\']).to_string();
-    trim(path) == trim(&chat.to_string_lossy())
+    if target == trim(&raw.to_string_lossy()) {
+        return true;
+    }
+    resolved(&raw).is_some_and(|r| target == trim(&r.to_string_lossy()))
 }
 
 /// Create the chat workspace if absent and (re)write its `CLAUDE.md`, then
-/// return its absolute path. Rewriting on every call is deliberate: the file is
-/// Fleet-managed, so an edited or truncated copy self-heals on the next spawn.
+/// return its absolute path — resolved, because the launcher pins this string
+/// and dedups its recents list against it (see [`chat_workspace_path`]).
+/// Rewriting the brief on every call is deliberate: the file is Fleet-managed,
+/// so an edited or truncated copy self-heals on the next spawn.
 pub fn ensure_chat_workspace() -> Result<String, String> {
-    let path = chat_workspace_path().ok_or_else(|| "no fleet dir".to_string())?;
+    let path = chat_workspace_link_path().ok_or_else(|| "no fleet dir".to_string())?;
     fs::create_dir_all(&path).map_err(|e| format!("create chat workspace: {e}"))?;
+    // Only resolvable after create_dir_all, hence not `chat_workspace_path()`
+    // above.
+    let path = resolved(&path).unwrap_or(path);
     let md = path.join("CLAUDE.md");
     // Only rewrite when the content actually differs — a chat session may be
     // reading this file while a sibling spawn ensures the workspace.
@@ -240,7 +286,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         with_home(tmp.path(), || {
             let path = ensure_chat_workspace().unwrap();
-            assert_eq!(path, tmp.path().join(".fleet/chat").to_string_lossy());
+            // Resolved, not the raw join: on macOS the tempdir lives under
+            // `/var/folders/...`, which is itself a symlink into `/private`.
+            // See `chat_workspace_path` for why callers get the resolved form.
+            let expected = std::fs::canonicalize(tmp.path().join(".fleet/chat")).unwrap();
+            assert_eq!(path, expected.to_string_lossy());
             let md = tmp.path().join(".fleet/chat/CLAUDE.md");
             assert!(md.is_file(), "chat CLAUDE.md must be written");
             let body = std::fs::read_to_string(&md).unwrap();
@@ -290,6 +340,41 @@ mod tests {
             assert!(!is_chat_workspace("/Users/foo/my-project"));
             // A sibling under ~/.fleet must not be mistaken for it.
             assert!(!is_chat_workspace(&format!("{chat}-other")));
+        });
+    }
+
+    /// Regression: on a host where `~/.fleet` is a **symlink** (Fleet Cloud's
+    /// entrypoint links it into the one persistent volume, e.g.
+    /// `/home/fleet/.fleet -> /workspace/.fleet-state`), a chat session spawned
+    /// with cwd `~/.fleet/chat` reports the *resolved* path — `getcwd(2)` has no
+    /// symlinks left, and Claude Code encodes that resolved path into
+    /// `~/.claude/projects/`. A raw string compare against the link path then
+    /// fails, so the scanner labelled the chat workspace "chat" instead of
+    /// "Chat" and the launcher listed it a second time next to its own pinned
+    /// entry.
+    #[cfg(unix)]
+    #[test]
+    fn is_chat_workspace_sees_through_a_symlinked_fleet_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let state = tmp.path().join("state");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        std::os::unix::fs::symlink(&state, home.join(".fleet")).unwrap();
+        with_home(&home, || {
+            let returned = ensure_chat_workspace().unwrap();
+            // What the spawned process (and therefore the scanner) will report.
+            let resolved = std::fs::canonicalize(state.join(CHAT_DIR)).unwrap();
+            let resolved = resolved.to_string_lossy().to_string();
+            assert!(
+                is_chat_workspace(&resolved),
+                "resolved chat path {resolved} must still be the chat workspace",
+            );
+            // The link path stays valid too — drafts and older clients hold it.
+            assert!(is_chat_workspace(&home.join(".fleet/chat").to_string_lossy()));
+            // The launcher pins whatever this hands back and dedups the recents
+            // against it by string equality, so it must be the resolved form.
+            assert_eq!(returned, resolved);
         });
     }
 
