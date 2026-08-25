@@ -6,9 +6,10 @@
 #    pulled at runtime so they live only in the container process, never in the
 #    image and never under the customer's /workspace mount.
 # 2. Run `fleet bootstrap` to install the control plane (guard/elicitation/
-#    plan-approval/idle/prd hooks + guidance) — makes this a *controlled* host,
-#    not a bare request/response API. Runs every start because ~/.claude is on
-#    the ephemeral layer; all apply_* steps are idempotent.
+#    plan-approval/idle/prd hooks + guidance + the default Claude Code model) —
+#    makes this a *controlled* host, not a bare request/response API. Runs every
+#    start because ~/.claude is on the ephemeral layer; all apply_* steps are
+#    idempotent.
 # 3. Start the HTTP server. Which one depends on FLEET_WEB_ROOT:
 #      set   → `fleet webui`: the browser UI plus the data routes it needs, no
 #              token. Put your own auth gateway in front of the published port.
@@ -216,8 +217,15 @@ fi
 # each container start). A bootstrap failure aborts startup (set -e): a host
 # without guard/idle/prd hooks is not a controlled host. Locale from
 # FLEET_LOCALE (default en); no user title in a headless host.
+#
+# --model pins Claude Code's default model in ~/.claude/settings.json. It has to
+# be re-applied here for the same reason the hooks do: ~/.claude is ephemeral.
+# Without it a run that names no model falls back to the CLI's own default,
+# which on this container is nobody's deliberate choice — there is no
+# interactive /model picker to correct it. Override with FLEET_CLAUDE_MODEL
+# (empty string = leave the CLI default alone).
 echo "fleet-entrypoint: installing control plane (fleet bootstrap) ..." >&2
-fleet bootstrap --locale "${FLEET_LOCALE:-en}"
+fleet bootstrap --locale "${FLEET_LOCALE:-en}" --model "${FLEET_CLAUDE_MODEL-opus}"
 
 export FLEET_SERVE_HOST
 if [[ -n "${FLEET_WEB_ROOT:-}" ]]; then
