@@ -644,6 +644,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { from: q(a.from), to: q(a.to) },
   }),
 
+  find_explorer_path: (a) => ({
+    method: "GET",
+    path: "/explorer_find",
+    query: { ws: q(a.workspace), root: q(a.root), rel: q(a.relSuffix) },
+  }),
+
   list_explorer_dir: (a) => ({
     method: "GET",
     path: "/explorer_dir",
