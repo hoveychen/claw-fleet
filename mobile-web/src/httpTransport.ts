@@ -84,6 +84,17 @@ export class HttpTransport implements FleetTransport {
       this.handlers.onAgentOnline?.(true);
     };
 
+    // 首屏 catch-up。**不能只等 SSE**:服务端那条 `sessions-updated` 只在
+    // sessions 变化时广播(hooks_server/mod.rs 的 `if sessions_changed`),所以
+    // 一个后接入的客户端,只要连上之后什么都没变,就永远收不到任何帧,任务页
+    // 就永远停在「正在接收首屏快照」。relay 路径为此专门多了一个
+    // `|| mobile_clients > prev_mobile_clients` 条件;SSE 没有等价物。
+    //
+    // 修在这边而不是让服务端为新客户端重推:SSE 是广播给所有连接的,为一个新
+    // 客户端重推全量会打扰其他所有客户端。mount 时自己拉一次本来就是 HTTP
+    // 客户端该做的事 —— 桌面 webui 的 liveProxy 一直这么干。
+    void this.catchUpSessions();
+
     stream.onerror = () => {
       if (this.closed || !this.connected) return;
       this.connected = false;
@@ -116,6 +127,26 @@ export class HttpTransport implements FleetTransport {
       // 报 "delta" 会让 UI 显示一条并不存在的增量链路。
       this.handlers.onSessionsKind?.("full");
     });
+  }
+
+  /** 拉一次 sessions 全量,补上 SSE 不会为新客户端重放的那一帧。
+   *
+   *  失败就安静算了:SSE 那条路仍然可能把数据送到,而这里抛出去只会把一次
+   *  可恢复的首屏缺失变成整个连接失败。 */
+  private async catchUpSessions(): Promise<void> {
+    const fetchImpl = this.opts.fetchImpl ?? globalThis.fetch;
+    try {
+      const res = await fetchImpl(`${this.base}/sessions`);
+      if (!res.ok) return;
+      const sessions = await res.json();
+      // 已经被 close() 或被一帧真正的 SSE 抢先都无所谓 —— 两边给的都是全量,
+      // 后到的覆盖先到的，结果一致。
+      if (this.closed || !Array.isArray(sessions)) return;
+      this.handlers.onSessions?.(sessions as SessionInfo[]);
+      this.handlers.onSessionsKind?.("full");
+    } catch {
+      // 见上:安静降级。
+    }
   }
 
   close(): void {

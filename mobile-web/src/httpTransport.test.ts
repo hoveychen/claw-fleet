@@ -92,6 +92,114 @@ describe("HttpTransport.request", () => {
   });
 });
 
+describe("HttpTransport 的首屏 catch-up", () => {
+  // 老板报的 bug:同源移动端「任务」tab 永远停在「正在加载任务…桌面端在线,
+  // 正在接收首屏快照」。
+  //
+  // 根因在服务端那条 SSE 的性质:`sessions-updated` 只在 **sessions 变化时**
+  // 广播(hooks_server/mod.rs 的 `if sessions_changed`)。relay 路径为此专门多
+  // 了一个条件 —— `|| mobile_clients > prev_mobile_clients`,注释原话是「新客户端
+  // 刚上线时也要推,因为它需要一份初始快照,即使什么都没变」。SSE 没有这个等价物。
+  //
+  // 于是一个后接入的客户端,只要在它连上之后 sessions 一直没变,就永远收不到任何
+  // 帧,`sessionsLoaded` 永远为 false。实测复现过:同一个 webui 进程连第二个
+  // 客户端,任务页 8 秒后仍停在那句文案,与老板的截图逐字一致。
+  //
+  // 修在客户端而不是服务端:SSE 是广播给所有连接的,为一个新客户端重推全量会打扰
+  // 其他所有客户端;而 mount 时自己拉一次 catch-up 本来就是 HTTP 客户端该做的事
+  // ——桌面 webui 的 liveProxy 一直就是这么干的(它 mount 时调 list_sessions)。
+  it("connect() 之后主动拉一次 /sessions,不能只等 SSE 推", async () => {
+    const seen: unknown[][] = [];
+    const kinds: string[] = [];
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string) => {
+      calls.push(url);
+      if (String(url).endsWith("/sessions")) {
+        return jsonResponse([{ id: "s1" }, { id: "s2" }]);
+      }
+      return jsonResponse({ ok: true, data: null });
+    });
+    const t = make(
+      { onSessions: (s) => seen.push(s), onSessionsKind: (k) => kinds.push(k) },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    t.connect();
+    // catch-up 是异步的;给微任务队列跑完的机会。
+    await vi.waitFor(() => expect(seen.length).toBe(1));
+
+    expect(calls).toContain("/sessions");
+    expect(seen[0]).toEqual([{ id: "s1" }, { id: "s2" }]);
+    expect(kinds).toEqual(["full"]);
+  });
+
+  // catch-up 失败不该让整个连接算失败 —— SSE 那条路仍然可能把数据送到。
+  it("catch-up 拉取失败时安静降级,不抛出去", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    const t = make({}, fetchImpl as unknown as typeof fetch);
+
+    expect(() => t.connect()).not.toThrow();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+  });
+});
+
+describe("connect 时的首屏补拉", () => {
+  // 老板报的 bug：手机上任务页永远停在「正在加载任务…」，知识库却正常。
+  //
+  // 根因不在前端渲染，在推送语义：服务端那个 2 秒循环只在**会话列表发生变化
+  // 时**才广播 `sessions-updated`（hooks_server/mod.rs 的 `if sessions_changed`）。
+  // 一个稳定的容器列表不变，于是新连上来的客户端永远收不到第一帧，
+  // `sessionsLoaded` 一直是 false。relay 那条路有「新客户端上线强制推一次全量」
+  // 的补偿，SSE 这条没有。
+  //
+  // 实测确认过：先挂一个 curl /events 消费掉首帧，第二个 curl 在 8 秒里收到
+  // 0 条 sessions-updated。
+  //
+  // 所以首屏不能等推送 —— 桌面 webui 也是 mount 时主动拉一次做 catch-up，
+  // 这里照做。推送只负责「之后的变化」。
+  it("connect 后主动拉一次 /sessions，不等 SSE", async () => {
+    const seen: unknown[][] = [];
+    const kinds: string[] = [];
+    const fetchImpl = vi.fn(async () => jsonResponse([{ id: "s1" }, { id: "s2" }]));
+    const t = new HttpTransport(
+      { onSessions: (s) => seen.push(s), onSessionsKind: (k) => kinds.push(k) },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+      },
+    );
+
+    t.connect();
+    await vi.waitFor(() => expect(seen.length).toBe(1));
+
+    expect(fetchImpl.mock.calls[0][0]).toBe("/sessions");
+    expect(seen[0]).toEqual([{ id: "s1" }, { id: "s2" }]);
+    expect(kinds).toEqual(["full"]);
+  });
+
+  // 补拉失败（网关 502、断网）不能把连接判死：SSE 还连着，之后的变化照样能到。
+  it("首屏补拉失败时不抛，也不谎报空列表", async () => {
+    const seen: unknown[][] = [];
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    const t = new HttpTransport(
+      { onSessions: (s) => seen.push(s) },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+      },
+    );
+
+    expect(() => t.connect()).not.toThrow();
+    await new Promise((r) => setTimeout(r, 20));
+    // 空数组会让 UI 翻成「还没有会话」——那是个断言，而我们其实什么都不知道。
+    expect(seen).toEqual([]);
+  });
+});
+
 describe("HttpTransport 的 SSE 映射", () => {
   it("六类决策卡的 *-request 事件都落到 onDecisionCreated", () => {
     const created: [string, unknown][] = [];
