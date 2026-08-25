@@ -381,6 +381,93 @@ pub fn read_external_file(path: &str) -> Result<ExplorerFileContent, String> {
     read_file_content(&canon)
 }
 
+/// Cap on the entries a suffix search will look at. A monorepo checkout with
+/// its ignored trees pruned lands well under this; the cap is a backstop
+/// against a workspace that keeps a huge *tracked* tree.
+const SUFFIX_SEARCH_VISIT_CAP: usize = 60_000;
+/// More hits than this and the caller cannot pick one anyway.
+const SUFFIX_SEARCH_HIT_CAP: usize = 10;
+
+/// Every file under `root` whose root-relative path ends with `rel_suffix`,
+/// matched on whole path segments (`icon.png` does not match `my-icon.png`).
+///
+/// This exists because agents name paths relative to whatever directory they
+/// were thinking in, not to the session's workspace root — a card saying
+/// `public/app-icon.png` about `claw-fleet-desktop/public/app-icon.png` used to
+/// resolve to a path that does not exist. The explorer falls back to this when
+/// the literal path reveals nothing, and only follows a *unique* hit: two
+/// candidates mean guessing, which is worse than saying so.
+///
+/// The walk skips `.git` and any gitignored *directory* — `target/` and
+/// `node_modules/` are where a dev checkout's file count actually lives.
+/// Gitignored *files* are still reported: they exist, and the preview can show
+/// them even when the tree is filtering them out.
+pub fn find_by_suffix(
+    workspace: &str,
+    root: &str,
+    rel_suffix: &str,
+    known_workspaces: &[String],
+) -> Result<Vec<String>, String> {
+    let ws = validate_workspace(workspace, known_workspaces)?;
+    let root = resolve_root(&ws, root)?;
+
+    let needle = rel_suffix.replace('\\', "/");
+    let needle = needle.trim_matches('/');
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let repo = git2::Repository::open(&root).ok();
+    let mut hits = Vec::new();
+    let mut visited = 0usize;
+    // Breadth-first, so a shallow match is found before the walk hits its cap.
+    let mut queue = std::collections::VecDeque::from([String::new()]);
+
+    while let Some(rel_dir) = queue.pop_front() {
+        if visited >= SUFFIX_SEARCH_VISIT_CAP || hits.len() >= SUFFIX_SEARCH_HIT_CAP {
+            break;
+        }
+        let dir = if rel_dir.is_empty() { root.clone() } else { root.join(&rel_dir) };
+        let Ok(rd) = crate::tcc::guarded_read_dir(&dir) else {
+            continue; // unreadable level — the rest of the walk still stands
+        };
+        for entry in rd.flatten() {
+            visited += 1;
+            if visited >= SUFFIX_SEARCH_VISIT_CAP {
+                break;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if name == ".git" {
+                continue;
+            }
+            let rel = if rel_dir.is_empty() { name } else { format!("{rel_dir}/{name}") };
+            // Symlinked directories are not followed: a link back up the tree
+            // would loop, and every real file is reachable without them.
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                let ignored = repo
+                    .as_ref()
+                    .map(|r| r.is_path_ignored(Path::new(&rel)).unwrap_or(false))
+                    .unwrap_or(false);
+                if !ignored {
+                    queue.push_back(rel);
+                }
+                continue;
+            }
+            if rel == needle || rel.ends_with(&format!("/{needle}")) {
+                hits.push(rel);
+                if hits.len() >= SUFFIX_SEARCH_HIT_CAP {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(hits)
+}
+
 // ── Validation ────────────────────────────────────────────────────────────────
 
 /// Validate `workspace` is known and `root` is one of its browsable roots,
@@ -834,6 +921,97 @@ mod tests {
         let shown = list_dir(w, w, "", true, &known(&ws)).unwrap();
         let target = shown.iter().find(|e| e.name == "target").expect("target visible");
         assert!(target.is_ignored);
+    }
+
+    // ── Suffix search ─────────────────────────────────────────────────────────
+    //
+    // Motivating bug: an agent writes `public/app-icon.png` in a decision card,
+    // meaning it relative to a *sub*directory of the repo. The path chip joins
+    // it onto the session workspace root instead, producing a path that does not
+    // exist — and the tree then failed to reveal it in total silence.
+
+    #[test]
+    fn suffix_search_finds_the_one_file_under_a_subdirectory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(ws.join("desktop").join("public")).unwrap();
+        fs::write(ws.join("desktop").join("public").join("app-icon.png"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        let hits = find_by_suffix(w, w, "public/app-icon.png", &known(&ws)).unwrap();
+        assert_eq!(hits, vec!["desktop/public/app-icon.png".to_string()]);
+    }
+
+    #[test]
+    fn suffix_search_reports_every_match_so_the_caller_can_refuse_to_guess() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(ws.join("a").join("public")).unwrap();
+        fs::create_dir_all(ws.join("b").join("public")).unwrap();
+        fs::write(ws.join("a").join("public").join("icon.png"), "x").unwrap();
+        fs::write(ws.join("b").join("public").join("icon.png"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        let mut hits = find_by_suffix(w, w, "public/icon.png", &known(&ws)).unwrap();
+        hits.sort();
+        assert_eq!(
+            hits,
+            vec!["a/public/icon.png".to_string(), "b/public/icon.png".to_string()]
+        );
+    }
+
+    #[test]
+    fn suffix_search_matches_whole_segments_only_and_returns_nothing_when_absent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        // `my-icon.png` must NOT answer a search for `icon.png`: a suffix that
+        // cuts mid-segment would send the user to an unrelated file.
+        fs::write(ws.join("my-icon.png"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        assert!(find_by_suffix(w, w, "icon.png", &known(&ws)).unwrap().is_empty());
+        assert!(find_by_suffix(w, w, "nope/gone.txt", &known(&ws)).unwrap().is_empty());
+    }
+
+    /// The whole point of walking at all is that it must stay cheap in a real dev
+    /// checkout, where `target/` and `node_modules/` hold the overwhelming
+    /// majority of files. Both are gitignored, so the walk skips them — and a
+    /// gitignored *file* is still reported, since the tree can preview it.
+    #[test]
+    fn suffix_search_skips_gitignored_dirs_and_dot_git_but_keeps_ignored_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        init_repo(&ws);
+        fs::write(ws.join(".gitignore"), "target/\nsecret.env\n").unwrap();
+        fs::create_dir_all(ws.join("target").join("public")).unwrap();
+        fs::write(ws.join("target").join("public").join("icon.png"), "x").unwrap();
+        fs::create_dir_all(ws.join("app").join("public")).unwrap();
+        fs::write(ws.join("app").join("public").join("icon.png"), "x").unwrap();
+        fs::write(ws.join("secret.env"), "x").unwrap();
+        let w = ws.to_str().unwrap();
+
+        assert_eq!(
+            find_by_suffix(w, w, "public/icon.png", &known(&ws)).unwrap(),
+            vec!["app/public/icon.png".to_string()],
+            "the copy under the gitignored target/ must not be offered"
+        );
+        assert_eq!(
+            find_by_suffix(w, w, "secret.env", &known(&ws)).unwrap(),
+            vec!["secret.env".to_string()],
+            "an ignored file is still a real file the preview can show"
+        );
+    }
+
+    #[test]
+    fn suffix_search_inherits_the_workspace_access_gate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        let w = ws.to_str().unwrap();
+        let err = find_by_suffix(w, w, "a.txt", &[]).unwrap_err();
+        assert!(err.contains("not a known session workspace"), "got: {err}");
     }
 
     #[test]
