@@ -356,8 +356,20 @@ pub fn read_scratchpad_file(
 ///
 /// Requires an absolute path that canonicalizes to a regular file. Same size
 /// caps and text/image/binary classification as [`read_file`].
+///
+/// A leading `~/` is expanded first, against *this* machine's home — so a
+/// remote workspace resolves it on the probe host, which is the home the file
+/// actually lives under. The front end hands paths through as the agent wrote
+/// them (`pathLinks.tsx`), and agents write `~/Downloads/…` constantly, so
+/// this expansion mirrors what `reveal_path` already does for the same string.
 pub fn read_external_file(path: &str) -> Result<ExplorerFileContent, String> {
-    let p = Path::new(path);
+    let expanded = match path.strip_prefix("~/") {
+        Some(rest) => crate::session::real_home_dir()
+            .ok_or_else(|| "home directory unknown".to_string())?
+            .join(rest),
+        None => PathBuf::from(path),
+    };
+    let p = expanded.as_path();
     if !p.is_absolute() {
         return Err("external path must be absolute".into());
     }
@@ -675,6 +687,38 @@ mod tests {
             tmp.path().join("missing.md").to_str().unwrap()
         )
         .is_err());
+    }
+
+    /// Regression: agents write `~/Downloads/x.html` in prose far more often
+    /// than the absolute spelling, and the front end hands the chip's text to
+    /// this reader verbatim (`pathLinks.tsx` deliberately leaves `~` alone,
+    /// because the *other* consumer — `reveal_path` — expands it host-side).
+    /// So a tilde path arriving here is the normal case, not a malformed one,
+    /// and rejecting it as "not absolute" painted 读取文件失败 on a file that
+    /// exists and is readable.
+    #[test]
+    fn external_read_expands_a_leading_tilde_like_reveal_path_does() {
+        let _lock = crate::session::fleet_home_lock();
+        let home = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", home.path()) };
+
+        fs::create_dir_all(home.path().join("Downloads")).unwrap();
+        fs::write(home.path().join("Downloads/note.md"), b"# from home").unwrap();
+
+        let read = read_external_file("~/Downloads/note.md");
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+
+        match read.expect("a `~/` path must read, not be refused as non-absolute") {
+            ExplorerFileContent::Text { content, .. } => assert_eq!(content, "# from home"),
+            other => panic!("expected text, got {other:?}"),
+        }
     }
 
     /// The front end decides a path is "external" by comparing it against the
