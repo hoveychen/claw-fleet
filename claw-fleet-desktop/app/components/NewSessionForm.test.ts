@@ -217,6 +217,16 @@ describe("defaultWorkspace", () => {
     expect(defaultWorkspace(recents, "/chat", "/chat")).toBe("/chat");
   });
 
+  // A fresh install (or a cloud container that has never run a project session)
+  // has no recents at all. Leaving the workspace unset renders the pill as the
+  // bare "工作目录" placeholder and keeps submit disabled with no explanation —
+  // so fall through to chat, which needs no directory. Mirrors mobile-web's
+  // `defaultWorkspace`.
+  it("falls back to the chat workspace when there are no recents", () => {
+    expect(defaultWorkspace([], "/chat", null)).toBe("/chat");
+    expect(defaultWorkspace([], "/chat", "/w/gone")).toBe("/chat");
+  });
+
   it("returns undefined when there are no options at all", () => {
     expect(defaultWorkspace([], null, "/w/gone")).toBeUndefined();
   });
