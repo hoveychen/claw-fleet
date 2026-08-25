@@ -1,6 +1,6 @@
 .root {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
   border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
   background: var(--color-bg);
@@ -15,7 +15,7 @@
   padding: 4px 8px;
   background: var(--color-bg-tool);
   border-bottom: 1px solid var(--color-border);
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   color: var(--color-text-dim);
 }
 
@@ -31,7 +31,7 @@
 .tag {
   flex-shrink: 0;
   margin-left: 8px;
-  font-size: 9px;
+  font-size: var(--t-meta, 9px);
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: var(--color-bg-secondary);
@@ -69,7 +69,7 @@
   text-align: right;
   padding: 0 6px 0 0;
   color: var(--color-text-dim);
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   user-select: none;
   border-right: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
@@ -115,7 +115,7 @@
   padding: 2px 8px;
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
-  font-size: 10px;
+  font-size: var(--t-meta, 10px);
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
@@ -124,5 +124,5 @@
   padding: 8px 12px;
   color: var(--color-text-dim);
   font-style: italic;
-  font-size: 11px;
+  font-size: var(--t-aux, 11px);
 }

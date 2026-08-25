@@ -52,6 +52,6 @@
 .done_icon { color: var(--color-success); }
 
 .done_label {
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   color: var(--color-text-secondary);
 }

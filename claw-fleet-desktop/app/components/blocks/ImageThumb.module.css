@@ -36,7 +36,7 @@
   border-radius: 5px;
   background: none;
   color: var(--color-text-secondary, #888);
-  font-size: 12px;
+  font-size: var(--t-ui, 12px);
   line-height: 1.3;
 }
 
