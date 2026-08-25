@@ -14,6 +14,60 @@
     <meta name="apple-mobile-web-app-title" content="Fleet" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Claw Fleet</title>
+
+    <!-- 手机打开 `fleet webui` 时送到 /m/（同源移动端 UI）。两套 UI 的信息密度
+         差得太远，桌面版在手机上是不可用的。
+
+         为什么是 head 里的内联脚本而不是 main.tsx 里的一句：走 bundle 的话手机
+         要先下完整个桌面 bundle 才跳走，白等一次首屏。判定逻辑挂成纯函数，
+         app/mobileRedirect.test.ts 直接抽这段源码执行来测，所以「测的」和
+         「跑的」是同一份，不会漂。
+
+         Tauri 壳加载的也是这份 index.html，所以第一条就是排除它 —— 桌面 app
+         里没有 /m/ 这个路径，跳过去就是白屏。 -->
+    <script id="mobile-redirect">
+      (function () {
+        // 参数化而不是直接读全局，这样测试能喂各种环境组合进来。
+        // 返回要跳的地址，或 null 表示留在桌面版。
+        window.__fleetDecideMobileRedirect = function (env) {
+          if (env.tauri) return null;
+          // 已经在移动端路径下了。这条防的是死循环：万一因为缓存或误配，这段
+          // 脚本在 /m/ 下也跑了一遍。
+          if (env.pathname.indexOf("/m/") === 0) return null;
+          // ?desktop 是当场的强制，记住的偏好是之前某次强制留下的。
+          // 两条路径都在函数里判，外层只负责取环境：判定完整地住在能被测的
+          // 地方，外层就没有「自己算一半」的余地。
+          if (env.forcedDesktop) return null;
+          if (new URLSearchParams(env.search).has("desktop")) return null;
+          // 粗指针单独不够——带触摸屏的笔记本也是粗指针，桌面版在那儿好得很。
+          // 短边尺寸才是「这块屏放不下桌面版」的判据；平板（>= 900）留桌面版。
+          if (env.coarsePointer && env.minScreenPx < 900) return "/m/" + env.search;
+          return null;
+        };
+
+        try {
+          var loc = window.location;
+          var search = new URLSearchParams(loc.search);
+          var KEY = "fleet:force-desktop";
+          // 带上 ?desktop 既是这一次的选择，也记下来给以后。移动端「更多」页的
+          // 「切到桌面版」就是把人送到带这个参数的根路径。
+          if (search.has("desktop")) window.localStorage.setItem(KEY, "1");
+          var target = window.__fleetDecideMobileRedirect({
+            search: loc.search,
+            tauri: "__TAURI_INTERNALS__" in window,
+            coarsePointer: window.matchMedia("(pointer: coarse)").matches,
+            minScreenPx: Math.min(window.screen.width, window.screen.height),
+            forcedDesktop: window.localStorage.getItem(KEY) === "1",
+            pathname: loc.pathname,
+          });
+          // replace 而不是 assign：跳过去之后按返回键该回到上一个页面，
+          // 而不是回到这里再被弹走一次。
+          if (target) loc.replace(target + loc.hash);
+        } catch (e) {
+          // 判定出任何岔子都留在桌面版 —— 它至少是能用的。
+        }
+      })();
+    </script>
   </head>
 
   <body>

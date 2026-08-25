@@ -694,7 +694,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </span>
       </header>
 
-      {!MOCK && needsA2hsForDurableStorage() && !a2hsDismissed && (
+      {/* 这条横幅讲的是「iOS 7 天不用会抹掉本地配对，得重新扫码」——同源形态
+          根本没有配对可丢（后端就是发出这张页面的那个进程），显示它纯属误导。
+          用 NEEDS_PAIRING 而不是 SUPPORTS_PUSH：这条说的是配对，不是推送。 */}
+      {NEEDS_PAIRING && !MOCK && needsA2hsForDurableStorage() && !a2hsDismissed && (
         <div className={styles.pushBanner}>
           <span>
             {t(

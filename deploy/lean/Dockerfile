@@ -39,6 +39,22 @@ RUN pnpm install --frozen-lockfile
 COPY claw-fleet-desktop/ ./
 RUN pnpm run build
 
+# ── Build the mobile web UI (same-origin variant) ───────────────────────────
+# 手机打开这个容器时给的是移动端 UI，不是桌面版 —— 两套的信息密度差得太远。
+# `--mode webui` 出的产物 base 是 `/m/`，且构建期就把 relay 客户端摇掉了
+# （见 mobile-web/src/hostMode.ts）：这条部署里数据走同源的 `POST /mobile_rpc`
+# 和 `GET /events`，没有中转、没有配对密钥。
+#
+# 与默认 `pnpm build` 是两份产物，互不影响：那一份 base 为根，给 fleet-relay
+# 镜像、鸿蒙 rawfile 和 Capacitor 原生包用。
+FROM node:22-bookworm-slim AS mobileweb
+RUN corepack enable
+WORKDIR /src/mobile-web
+COPY mobile-web/package.json mobile-web/pnpm-lock.yaml mobile-web/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY mobile-web/ ./
+RUN pnpm run build:webui
+
 # ── Build the fleet CLI ─────────────────────────────────────────────────────
 FROM rust:1.90-slim-bookworm AS build
 WORKDIR /src
@@ -68,6 +84,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=build /src/target/release/fleet-cli /usr/local/bin/fleet
 COPY --from=webui /src/claw-fleet-desktop/dist /usr/share/fleet-web
+# 移动端 UI 落在 web root 的 `m/` 子目录下，于是它就在 `/m/` 这个 URL 上 ——
+# web_assets 是按路径映射到文件的，子目录天然可达，服务端不需要任何新路由。
+# 桌面 index.html 里那段判定脚本把手机送到这里。
+COPY --from=mobileweb /src/mobile-web/dist-webui /usr/share/fleet-web/m
 COPY --from=foxy /usr/local/bin/foxy-switcher /usr/local/bin/foxy-switcher
 COPY deploy/lean/entrypoint.sh /usr/local/bin/fleet-entrypoint
 RUN chmod +x /usr/local/bin/fleet-entrypoint

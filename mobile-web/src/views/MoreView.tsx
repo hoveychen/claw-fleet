@@ -230,6 +230,26 @@ export function MoreView({
             <span className={styles.rowLabel}>{supportsPush ? "Relay" : t("服务端")}</span>
             <span className={styles.relayValue}>{endpointLabel}</span>
           </div>
+          {/* 同源形态才有得切：桌面版和这套移动端是同一个服务器发出来的两份
+              产物。判定按屏幕短边走（见桌面 index.html 的 mobile-redirect），
+              大屏手机或折叠屏上有可能判反 —— 给个出口，别让人卡死在这一边。
+              `?desktop` 会被那段脚本记进 localStorage，所以只需选一次。 */}
+          {!supportsPush && (
+            <>
+              <div className={styles.divider} />
+              <div className={styles.row}>
+                <span className={styles.rowLabel}>{t("界面")}</span>
+                <button
+                  className={styles.actionButton}
+                  onClick={() => {
+                    window.location.href = "/?desktop=1";
+                  }}
+                >
+                  {t("切到桌面版")}
+                </button>
+              </div>
+            </>
+          )}
           <div className={styles.divider} />
           <div className={styles.row}>
             <span className={styles.rowLabel}>{t("桌面端")}</span>

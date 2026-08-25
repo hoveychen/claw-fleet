@@ -54,12 +54,23 @@ pub fn from_dir(root: PathBuf) -> AssetSource {
 
 /// Map a request path onto the bundle and build its response.
 ///
-/// `/` resolves to `/index.html`. A path the bundle doesn't have is a 404
-/// rather than a fallback to index: a mistyped asset should stay visibly
-/// missing instead of quietly returning HTML that the caller then fails to
-/// parse.
+/// Any path ending in `/` resolves to that directory's `index.html` — `/` to
+/// `/index.html`, `/m/` to `/m/index.html`. The subdirectory case is not
+/// hypothetical: the mobile UI ships as `m/` inside this same bundle dir and
+/// `/m/` is the URL the desktop page redirects a phone to, so without this it
+/// 404s on the one path that actually gets requested.
+///
+/// A path *not* ending in `/` that the bundle doesn't have stays a 404 rather
+/// than falling back to index: a mistyped asset should stay visibly missing
+/// instead of quietly returning HTML that the caller then fails to parse.
 pub fn respond(assets: &AssetSource, path: &str) -> Response<Cursor<Vec<u8>>> {
-    let wanted = if path == "/" { "/index.html" } else { path };
+    let dir_index;
+    let wanted = if path.ends_with('/') {
+        dir_index = format!("{path}index.html");
+        dir_index.as_str()
+    } else {
+        path
+    };
     match assets(wanted) {
         Some(asset) => {
             let header: Header = format!("Content-Type: {}", asset.mime)
