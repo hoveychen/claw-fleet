@@ -221,13 +221,19 @@
 }
 .close_btn:hover { background: var(--color-bg-secondary); color: var(--color-text); }
 
-/* Resume composer, docked at the bottom of the 对话 tab for Fleet-managed idle
-   sessions. Stays pinned below the scroll area as an inline reply box. */
+/* Resume composer for Fleet-managed sessions. It used to be a full-width bar
+   below the scroll area, fenced off by a border-top — which read as a separate
+   panel bolted under the transcript rather than the bottom of the conversation.
+   It now floats over the scroller (see .dock_layer) on the transcript's own
+   reading column, the way every chat client docks its input. */
 .resume_dock {
-  flex-shrink: 0;
-  padding: 6px 16px 10px;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
+  width: 100%;
+  /* Same column as MessageList `.list` and .inline_fleet_ask: the column plus
+     the 24px of side padding those apply, so the composer's border lines up
+     with the message text rather than the pane edge. */
+  max-width: calc(var(--transcript-column) + 48px);
+  padding: 0 24px;
+  box-sizing: border-box;
 }
 
 /* Tab bar (agent segmented control + view tabs combined) */
@@ -420,7 +426,19 @@
   word-break: break-word;
 }
 
-/* Scroll area */
+/* 对话 tab: the transcript scroller with the composer floating over its bottom
+   edge. Positioning context for .dock_layer. */
+.messages_pane {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scroll area. `padding-bottom` is set inline from the dock's measured height
+   (SessionDetail), so the last message can always scroll clear of the composer
+   however tall the draft grows. */
 .scroll_area {
   flex: 1;
   overflow-y: auto;
@@ -452,32 +470,58 @@
 /* The "load earlier" button moved into MessageList, which owns the render
    window it used to duplicate. Its styles live in MessageList.module.css. */
 
-/* Auto-follow indicator */
-.follow_bar {
-  flex-shrink: 0;
-  padding: 4px 16px;
-  font-size: 11px;
-  color: var(--color-text-dim);
-  text-align: center;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
+/* The floating bottom layer: composer plus, when the reader has scrolled away
+   from the newest message, the jump-back pill. It overlays the scroller instead
+   of taking flow space, so the transcript runs the full height of the pane and
+   passes *behind* the composer — the fade below stands in for the border-top
+   this used to have. */
+.dock_layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  padding-bottom: 12px;
+  /* The layer spans the pane, but only the controls in it are targets — the
+     fade must stay transparent to wheel and clicks aimed at the transcript. */
+  pointer-events: none;
+  /* A fixed 28px fade, not a percentage: the layer's height swings with the
+     draft, and a percentage stop would leave the queued-message chips sitting
+     in the translucent part on a tall composer. */
+  background: linear-gradient(
+    to bottom,
+    transparent 0,
+    var(--color-bg) 28px,
+    var(--color-bg) 100%
+  );
+}
+.dock_layer > * {
+  pointer-events: auto;
 }
 
-.follow_bar_btn {
-  flex-shrink: 0;
-  width: 100%;
-  padding: 6px 16px;
+/* Jump back to the newest message. A pill riding above the composer, not a
+   full-width bar: it appears and disappears with the reader's scroll position,
+   and a bar doing that made the whole bottom chrome jump. */
+.follow_pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
   font-size: 11px;
-  color: var(--color-accent, #60a5fa);
-  text-align: center;
-  border: none;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
+  color: var(--color-accent);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-card);
   cursor: pointer;
   transition: background 0.15s;
 }
-.follow_bar_btn:hover {
-  background: var(--color-bg-secondary);
+.follow_pill:hover {
+  background: var(--color-bg-card-hover);
 }
 
 /* ── Lite portrait mode: fill the LiteApp container instead of drawer ────── */

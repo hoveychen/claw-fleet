@@ -1,8 +1,9 @@
+/* The host (SessionDetail `.dock_layer`) owns the spacing around the composer
+   now that it floats over the transcript — no margin of its own. */
 .wrap {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 8px;
 }
 
 .error {
