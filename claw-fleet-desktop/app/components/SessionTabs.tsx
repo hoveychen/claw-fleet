@@ -29,10 +29,12 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
+  Columns2,
   SquareSplitHorizontal,
   SquareSplitVertical,
 } from "lucide-react";
 import { useSessionsStore } from "../store";
+import { parseTabKind } from "../tabKind";
 import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
 import { isKeyboardActivationKey } from "../keyboard";
 import { preferredSessionTitle, rowBarColor, type SessionInfo } from "../types";
@@ -44,6 +46,13 @@ import styles from "./SessionTabs.module.css";
  *  for sessions the scanner hasn't titled yet. */
 function tabLabel(s: SessionInfo): string {
   return preferredSessionTitle(s) || s.slug || s.workspaceName || s.id.slice(0, 8);
+}
+
+/** Both views of a session wear its title, so the strip would otherwise show the
+ *  same name twice with nothing to say which is which. The badge is on the
+ *  *second* one only: the first is the session, this is a view of it. */
+function isSecondView(tabId: string): boolean {
+  return parseTabKind(tabId).kind === "sessionview";
 }
 
 /** One entry in the strip. `session` is the live session behind the tab, or
@@ -276,7 +285,7 @@ export function SessionTabs({
           // The draft tab has no backing session — it wears its own label and no
           // status dot. Real tabs resolve their live session from the store so a
           // long-parked tab still shows the agent's current title and dot.
-          const live = tab.session ? liveById.get(tab.id) ?? tab.session : null;
+          const live = tab.session ? liveById.get(tab.session.id) ?? tab.session : null;
           const dot = live ? rowBarColor(live) : null;
           const isActive = tab.id === activeId;
           const label = live ? tabLabel(live) : tab.label ?? "";
@@ -344,11 +353,24 @@ export function SessionTabs({
                 onClose(tab.id);
               }}
             >
-              {tab.session && (
+              {tab.session && !isSecondView(tab.id) && (
                 <span
+                  data-testid="tab-status-dot"
                   className={styles.dot}
                   style={dot ? { background: dot } : undefined}
                   data-idle={dot ? undefined : ""}
+                />
+              )}
+              {/* Takes the status dot's place rather than sitting beside it: one
+                  session has one status, and showing it twice reads as two
+                  agents. The badge is the thing worth saying here — that this
+                  tab is the *other* look at a session already open. */}
+              {isSecondView(tab.id) && (
+                <Columns2
+                  data-testid="tab-second-view"
+                  size={11}
+                  strokeWidth={1.8}
+                  className={styles.second_view}
                 />
               )}
               <span className={styles.label}>{label}</span>
