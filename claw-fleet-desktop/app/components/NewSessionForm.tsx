@@ -38,8 +38,11 @@ export interface NewSessionCreated {
 export interface NewSessionFormProps {
   /** Fired once the backend has spawned the detached `claude -p` process. */
   onCreated: (info: NewSessionCreated) => void;
-  /** Fired when the user backs out of the form without creating a session. */
-  onCancel: () => void;
+  /** Fired when the user backs out of the form without creating a session.
+   *  Omitted where the form is the pane's *resting* state rather than something
+   *  the user opened — an empty editor group — since there is nothing to back
+   *  out to. The close button is then hidden along with it. */
+  onCancel?: () => void;
   /** Narrow-host (lite mode) rendering: compact option pills so the toolbar
    *  fits the 340px strip without wrapping to a third line. */
   compact?: boolean;
@@ -572,18 +575,20 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
     <div className={styles.form}>
       <div className={styles.header}>
         <h3>{t("new_session.title")}</h3>
-        <button
-          type="button"
-          className={styles.close_btn}
-          onClick={() => {
-            clear();
-            onCancel();
-          }}
-          disabled={submitting}
-          aria-label={t("cancel")}
-        >
-          ×
-        </button>
+        {onCancel && (
+          <button
+            type="button"
+            className={styles.close_btn}
+            onClick={() => {
+              clear();
+              onCancel();
+            }}
+            disabled={submitting}
+            aria-label={t("cancel")}
+          >
+            ×
+          </button>
+        )}
       </div>
 
       <ChatComposer

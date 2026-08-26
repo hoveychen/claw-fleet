@@ -63,6 +63,7 @@ import {
   inGroup,
   moveTabToGroup,
   openSecondView,
+  openTabInActiveGroup,
   openTabRouted,
   parsePersistedGroups,
   pruneMissingGroupTabs,
@@ -964,6 +965,20 @@ export function HistoryView() {
     openRouted(DRAFT_TAB_ID);
   };
 
+  // Materialise the draft tab inside one specific group. The empty pane renders
+  // the compose form without any tab behind it, so at the moment it spawns
+  // there has to *become* one — the spawn correlation below keys off
+  // `DRAFT_TAB_ID` being open (it is the tab that morphs into the session), and
+  // with no tab it would give up and the new session would never surface.
+  // Deliberately not `openRouted`: that lands the tab in whichever group holds
+  // the focus, which need not be the half whose form was just submitted.
+  const openDraftIn = useCallback(
+    (groupId: string) => {
+      applyGroups((s) => openTabInActiveGroup(focusGroup(s, groupId), DRAFT_TAB_ID));
+    },
+    [applyGroups],
+  );
+
   // Schedule page "新建" shortcut: seed the new-session composer with a
   // scheduling-assistant template, then open (or refocus) the draft tab. The
   // store hop to list/gallery mounts this view; we react to the nonce once.
@@ -1133,6 +1148,17 @@ export function HistoryView() {
    * The three readers are the *same components* the 仓库 and 知识库 pages use, so
    * a file or doc looks identical whether it is open here or there.
    */
+  // A half with nothing open rests on the compose form rather than on a "pick
+  // something" hint: the one thing you can do from an empty column is start
+  // work, and the form is already just a pane (see the draft tab below), so it
+  // costs nothing to show it there.
+  //
+  // Suppressed while a draft tab exists anywhere, because the draft's fields
+  // live in a *shared* store keyed "new" — a second mounted form would mirror
+  // every keystroke of the real one, in the other half, which reads as a bug.
+  // `pending` is the same story mid-spawn: the draft tab is holding the spinner.
+  const draftFormElsewhere = allTabIds.includes(DRAFT_TAB_ID) || pending != null;
+
   const renderPane = (tab: TabItem, visible: boolean) => {
     const kind = parseTabKind(tab.id);
     switch (kind.kind) {
@@ -1473,12 +1499,31 @@ export function HistoryView() {
                   );
                 })}
 
-                {items.length === 0 && (
-                  <div className={styles.detail_empty}>
-                    <History size={28} strokeWidth={1.2} />
-                    <span>{t("history.select_hint", "从左侧选择一个会话查看详情")}</span>
-                  </div>
-                )}
+                {/* Nothing open in this half. It gets the compose form — but
+                    only one half may, so a split column doesn't grow two forms
+                    typing into the same shared draft; the other keeps the hint. */}
+                {items.length === 0 &&
+                  (!draftFormElsewhere &&
+                  (groupsState.groups.length === 1 || isActiveGroup) ? (
+                    <div className={styles.pane}>
+                      <NewSessionForm
+                        // No `onCancel`: this form is the pane's resting state,
+                        // not something opened on top of anything, so there is
+                        // nothing to close back to (the × is hidden with it).
+                        onCreated={(info) => {
+                          // Give the spawn a draft tab to morph into *before*
+                          // arming the correlation — see `openDraftIn`.
+                          openDraftIn(grp.id);
+                          handleCreated(info);
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className={styles.detail_empty}>
+                      <History size={28} strokeWidth={1.2} />
+                      <span>{t("history.select_hint", "从左侧选择一个会话查看详情")}</span>
+                    </div>
+                  ))}
               </div>
             </div>
             </Fragment>
