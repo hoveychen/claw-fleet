@@ -17,34 +17,31 @@
 
      The value is in `ch` so it tracks the font size (P2 raises the body to
      15px) and the character count stays put. Inter runs ~1.29 average
-     characters per `ch`, so 56ch measures ~72 latin characters — and because a
-     CJK glyph is a full em, ~37 Chinese characters, which lands in that
-     script's comfortable band too. Both were measured in the running app,
-     not derived.
+     characters per `ch`, so 78ch measures ~100 latin characters — and because a
+     CJK glyph is a full em, ~49 Chinese characters. Both were measured in the
+     running app, not derived.
+
+     56ch was the first attempt at this and it read as a slot: at 15px it is
+     529.9px, which on the 924px detail pane of a 1512px window left 173px of
+     dead space on *each* side. The count is now set from the pane rather than
+     from a typographic ideal — a transcript is not a novel, and its paragraphs
+     sit next to tables, diffs and tool cards that want every pixel of the
+     column.
 
      `ch` resolves against each *reader's* font size, which is the point:
-     top-level prose at 15px gets 529.92px, while the 13px paragraphs nested
-     inside a tool card's rail get 459.27px — different pixels, same 56
-     characters. (Both re-measured in the running app, headless Chromium
-     against the bundled Inter woff2.) So this token can't double as the column
-     width below; that one has to be a single number every element agrees on. */
-  --prose-measure: 56ch;
+     top-level prose at 15px gets 738px, while the 13px paragraphs nested
+     inside a tool card's rail get ~640px — different pixels, same 78
+     characters. So this token can't double as the column width; that one has to
+     be a single number every element agrees on, and lives in App.css `:root`
+     as `--transcript-column`. Keep the two in step: 78ch at 15px = 46.13rem. */
+  --prose-measure: 78ch;
 
-  /* The column, in `rem` so it resolves identically wherever it is read, set to
-     what `--prose-measure` works out to at the 15px body size: 33.12rem =
-     529.9px. Top-level prose therefore fills the column edge to edge instead of
-     stopping short of it.
-
-     Before this the column ran the full pane while only paragraphs were capped,
-     so on a wide drawer every line sat against the left edge with ~131px of
-     permanent dead space on its right (measured, 1280px window). Code, diffs,
-     tables and tool cards now share the column rather than keeping the whole
-     pane — one aligned edge on each side is worth more than the extra width,
-     and those blocks scroll horizontally on their own anyway.
-
-     `max-width` simply stops applying once the pane is narrower than this, so
-     the lite/portrait and minimum-width (360px) forms are untouched. */
-  --transcript-column: 33.12rem;
+  /* The column itself is `--transcript-column`, defined in App.css `:root` —
+     SessionDetail `.inline_fleet_ask` needs the same number and is a sibling of
+     this element, so it can't inherit a token scoped here. Code, diffs, tables
+     and tool cards share the column rather than keeping the whole pane: one
+     aligned edge on each side is worth more than the extra width, and those
+     blocks scroll horizontally on their own anyway. */
   width: 100%;
   max-width: calc(var(--transcript-column) + 48px); /* + the 24px side padding */
   margin-inline: auto;
