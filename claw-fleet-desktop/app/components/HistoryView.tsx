@@ -62,6 +62,7 @@ import {
   focusGroupAt,
   inGroup,
   moveTabToGroup,
+  openSecondView,
   openTabRouted,
   parsePersistedGroups,
   pruneMissingGroupTabs,
@@ -1115,8 +1116,13 @@ export function HistoryView() {
       openFile: (absPath) => openRouted(fileTabId(absPath)),
       openWiki: (slug) => openRouted(wikiTabId(slug)),
       openWeb: (url) => openRouted(webTabId(url)),
+      // Not `openRouted`: both views are the same *kind*, so the routing
+      // heuristic would put the copy in the conversation's own group — the one
+      // place it is useless. See `openSecondView`.
+      openSecondView: (sessionId) =>
+        applyGroups((st) => openSecondView(st, sessionId, canSplitRef.current)),
     }),
-    [openRouted],
+    [openRouted, applyGroups],
   );
 
   /**
@@ -1197,6 +1203,7 @@ export function HistoryView() {
             sessionInfo={tab.session!}
             searchQuery={queryById[tab.id] ?? null}
             tabOpener={detailTabs}
+            secondView={kind.kind === "sessionview"}
             // `visible` here is per group, which is precisely "is in
             // `visibleIds`" — one unpaused pane per group.
             paused={!visible}

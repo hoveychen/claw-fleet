@@ -1550,6 +1550,8 @@
     "overflow": "所有标签",
     "search": "搜索标签…",
     "no_match": "无匹配标签",
+    "open_second_view": "在旁边再开一份",
+    "open_second_view_sub": "同一会话两个面板，各看各的",
     "file_readonly": "只读预览",
     "wiki_missing": "该文档未发布，或已被删除",
     "wiki_open_page": "在知识库中打开",

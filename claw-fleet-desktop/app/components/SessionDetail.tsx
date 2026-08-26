@@ -145,6 +145,7 @@ export function SessionDetail({
   searchQuery: standaloneSearchQuery = null,
   paused = false,
   tabOpener,
+  secondView = false,
 }: {
   lite?: boolean;
   inline?: boolean;
@@ -172,6 +173,11 @@ export function SessionDetail({
    *  in the global drawer and Lite mode, which have nowhere to put a tab and so
    *  keep the page-switching behaviour. */
   tabOpener?: DetailTabOpener;
+  /** This pane is the *second* view of a session already open in the column.
+   *  Only drops the header's "open beside" item — it would offer to open the
+   *  very pane you are looking at. Everything else about the two is identical,
+   *  which is the point: the copy is a second look, not a lesser mode. */
+  secondView?: boolean;
 } = {}) {
   const { t } = useTranslation();
   const isStandalone = sessionInfo != null;
@@ -952,6 +958,14 @@ export function SessionDetail({
                 jsonlPath={liveSession.jsonlPath}
                 workspacePath={liveSession.workspacePath}
                 isLocal={connection?.type !== "remote"}
+                // Absent without a tab strip (the global drawer, Lite mode) —
+                // there is nowhere to put the second pane — and absent in the
+                // second pane itself, where it would offer to open this one.
+                onOpenSecondView={
+                  tabOpener && !secondView
+                    ? () => tabOpener.openSecondView(liveSession.id)
+                    : undefined
+                }
               />
               {!inline && (
                 <button className={styles.close_btn} onClick={close} title={t("common.close") || "Close"}>
