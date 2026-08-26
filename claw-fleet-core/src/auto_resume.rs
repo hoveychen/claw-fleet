@@ -222,6 +222,26 @@ pub fn should_auto_resume(
 ///
 /// `usage` is the latest cached usage snapshot, read once by the caller and
 /// shared across every session's [`should_auto_resume`] check this tick.
+/// Could a resume spawned into this workspace possibly start?
+///
+/// `spawn_claude_detached` refuses a cwd that isn't a directory, so a session
+/// whose workspace has vanished fails before any process exists — the scheduler
+/// then just backs off and tries again on the next window, forever, with
+/// nothing but a debug-log line to show for it. Two cases are deliberately NOT
+/// treated as missing:
+/// - a TCC-protected path, because the only way to check it is the `stat` that
+///   fires the macOS permission dialog. Fleet never withholds an action on the
+///   strength of a check it refuses to run.
+/// - a registered remote workspace, whose local mirror directory is created at
+///   launch time by `remote_workspace::wrap_launch` — its absence right now
+///   says nothing about whether the resume would succeed.
+fn can_reach_workspace(path: &str) -> bool {
+    let p = std::path::Path::new(path);
+    crate::tcc::is_tcc_protected(p)
+        || p.is_dir()
+        || crate::remote_workspace::find_for_path(path).is_some()
+}
+
 pub fn select_resume_candidates(
     sessions: &[crate::session::SessionInfo],
     config: &AutoResumeConfig,
@@ -240,6 +260,7 @@ pub fn select_resume_candidates(
         // against. The server-error retry path skips `proc_alive` in its caller
         // closure; centralise it here so both schedulers (local + remote) get it.
         .filter(|s| !s.proc_alive)
+        .filter(|s| can_reach_workspace(&s.workspace_path))
         .filter(|s| !skip(&s.id))
         .take(slots)
         .map(|s| (s.id.clone(), s.workspace_path.clone()))
@@ -288,6 +309,9 @@ pub fn select_server_error_retries(
     sessions
         .iter()
         .filter(|s| should_retry_server_error(s, config))
+        // Same gate as the rate-limit path: a workspace we can prove is gone
+        // cannot host a spawn, so retrying it only burns slots and log lines.
+        .filter(|s| can_reach_workspace(&s.workspace_path))
         .filter(|s| !skip(&s.id))
         .take(slots)
         .map(|s| (s.id.clone(), s.workspace_path.clone()))
@@ -507,7 +531,10 @@ mod tests {
     fn mk_session(status: SessionStatus, rl: Option<RateLimitState>) -> SessionInfo {
         SessionInfo {
             id: "s1".into(),
-            workspace_path: "/w".into(),
+            // A directory that really exists: selection now refuses a workspace
+            // it can prove is gone (`can_reach_workspace`), so a made-up path
+            // would make every eligibility test vacuously pass.
+            workspace_path: std::env::temp_dir().to_string_lossy().into_owned(),
             workspace_name: "w".into(),
             ide_name: None,
             entrypoint: None,
@@ -831,6 +858,26 @@ mod tests {
         );
         let ids: Vec<&str> = picked.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["dead"], "a still-live rate-limited session must be skipped");
+    }
+
+    /// A session whose workspace directory is gone can never be resumed —
+    /// `spawn_claude_detached` bails with "Workspace directory not found" before
+    /// any process exists. Firing it anyway costs a concurrency slot and a
+    /// stderr log every time the failure backoff expires, and the user sees
+    /// none of it (issue #105: the resumes that kept going out with a shredded
+    /// cwd). Skip it at selection instead.
+    #[test]
+    fn select_skips_sessions_whose_workspace_is_gone() {
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12, ..Default::default() };
+        let mut gone = mk_eligible_with_id("gone");
+        gone.workspace_path = std::env::temp_dir()
+            .join(format!("fleet-no-such-ws-{}", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        let here = mk_eligible_with_id("here");
+        let picked = select_resume_candidates(&[gone, here], &cfg, Utc::now(), None, |_| false, 5);
+        let ids: Vec<&str> = picked.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["here"], "a vanished workspace can never resume");
     }
 
     #[test]
