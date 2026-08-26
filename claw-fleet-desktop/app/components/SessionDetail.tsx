@@ -22,8 +22,7 @@ import {
   type FollowInput,
   type FollowState,
 } from "../followState";
-import { installScrollFreezeProbe } from "../scrollFreezeProbe";
-import { installScrollBoxResizeRevive } from "../scrollLayerRevive";
+import { nestedScrollerWillConsume } from "../nestedScroll";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
@@ -720,15 +719,6 @@ export function SessionDetail({
     setIsFollowing(next.following);
   }, []);
 
-  // Auto-follow writes that actually moved the viewport, read by the scroll
-  // freeze probe to tell "the pin dragged it back" from "nothing moved at all".
-  const pinCountRef = useRef(0);
-
-  // Last content height change, also for the probe. `at: 0` means the content
-  // has not changed since this transcript was opened — reported as
-  // `sinceGrow=none`, which is a different fact from "grew 0px just now".
-  const growthRef = useRef({ at: 0, byPx: 0, height: 0 });
-
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -743,6 +733,10 @@ export function SessionDetail({
     // reader is still inside the slack window at that point, so the distance
     // rule would keep following and the pin would drag them back down.
     const onWheel = (ev: WheelEvent) => {
+      // Wheel bubbles, so scrolling *inside* a card in the transcript lands
+      // here too. Reading back through a subagent's result is not a request to
+      // stop following the transcript, so let the card have its own gesture.
+      if (nestedScrollerWillConsume(el, ev)) return;
       applyFollow({ kind: "gesture", intent: ev.deltaY });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -777,102 +771,20 @@ export function SessionDetail({
     const el = scrollRef.current;
     if (!el) return;
 
-    // A fresh transcript has no growth history; the first observation below
-    // establishes the baseline rather than counting as a change.
-    growthRef.current = { at: 0, byPx: 0, height: el.scrollHeight };
-
     const pin = () => {
       if (!followRef.current.following) return;
-      const before = el.scrollTop;
       el.scrollTop = el.scrollHeight;
-      // Only count a pin that actually moved the viewport. Re-pinning a box
-      // already at the bottom is a no-op, and counting those would let the
-      // freeze probe blame the pin for gestures it never touched.
-      if (el.scrollTop !== before) pinCountRef.current += 1;
-    };
-
-    // Timestamp content height changes for the freeze probe: they are what
-    // WebKit bug 150974 blames for a scrollable container losing its scroll,
-    // and this observer already fires on exactly that event, so the probe reads
-    // it from here instead of installing a second one on the same children.
-    const noteHeight = () => {
-      const height = el.scrollHeight;
-      if (height !== growthRef.current.height) {
-        growthRef.current = {
-          at: Date.now(),
-          byPx: height - growthRef.current.height,
-          height,
-        };
-      }
     };
 
     // Observe the children, not the scroll box: the box's own border box never
     // changes size, it is the content inside it that grows. Re-subscribing when
     // the child set changes (loading placeholder -> list, live thinking block)
     // is why those two flags are in the dependency list.
-    const ro = new ResizeObserver(() => {
-      noteHeight();
-      pin();
-    });
+    const ro = new ResizeObserver(pin);
     for (const child of Array.from(el.children)) ro.observe(child);
     pin();
     return () => ro.disconnect();
   }, [viewTab, liveSession?.id, hasMessages, hasLiveThinking, inlineFleetAsk?.id]);
-
-  // Render-synced mirror so the probe below reports the *current* session
-  // without re-installing its listener on every poll.
-  const probeStateRef = useRef({
-    sessionId: null as string | null,
-    status: null as string | null,
-    messageCount: 0,
-  });
-  probeStateRef.current = {
-    sessionId: liveSession?.id ?? null,
-    status: liveSession?.status ?? null,
-    messageCount: displayedMessages.length,
-  };
-
-  // Catch the conversation pane refusing to scroll. Reported repeatedly, never
-  // caught in the act: it starts at no identifiable moment, a release build has
-  // no devtools, and the state is gone by the time it gets described. The probe
-  // watches every wheel gesture and writes one line to the host debug log when
-  // a gesture that had somewhere to go doesn't land — with the metrics that say
-  // whether it was a layout fault, the auto-follow pin, or the compositor.
-  useEffect(() => {
-    if (viewTab !== "messages") return;
-    const el = scrollRef.current;
-    if (!el) return;
-    return installScrollFreezeProbe(
-      el,
-      {
-        sessionId: () => probeStateRef.current.sessionId,
-        status: () => probeStateRef.current.status,
-        messageCount: () => probeStateRef.current.messageCount,
-        isFollowing: () => followRef.current.following,
-        pinCount: () => pinCountRef.current,
-        contentGrowth: () => {
-          const g = growthRef.current;
-          return g.at === 0 ? null : { sinceMs: Date.now() - g.at, byPx: g.byPx };
-        },
-      },
-      (line) => {
-        // Absent outside Tauri (the mock browser preview); nothing to report to.
-        invoke("log_frontend_debug", { msg: line }).catch(() => {});
-      },
-    );
-  }, [viewTab, liveSession?.id]);
-
-  // Rebuild the scroll layer whenever the box itself gets resized — the
-  // squeeze from the composer dock swapping underneath is the transition the
-  // freeze correlates with. Separate from the pin's ResizeObserver above,
-  // which watches the *children*: this squeeze comes from a sibling, so only
-  // this box's own border box changes.
-  useEffect(() => {
-    if (viewTab !== "messages") return;
-    const el = scrollRef.current;
-    if (!el) return;
-    return installScrollBoxResizeRevive(el);
-  }, [viewTab, liveSession?.id]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
