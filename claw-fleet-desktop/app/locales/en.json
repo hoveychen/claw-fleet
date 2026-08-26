@@ -1553,6 +1553,8 @@
     "overflow": "All Tabs",
     "search": "Search tabs…",
     "no_match": "No matching tabs",
+    "open_second_view": "Open a second view beside",
+    "open_second_view_sub": "Two panes on one session, each on its own tab",
     "file_readonly": "Read-only preview",
     "wiki_missing": "This doc isn't published, or was deleted",
     "wiki_open_page": "Open in the wiki page",
