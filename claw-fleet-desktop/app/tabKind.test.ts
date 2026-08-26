@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   fileTabId,
   parseTabKind,
+  sessionViewTabId,
   tabKindLabel,
+  tabSessionId,
   tabSurvivesScan,
   webTabId,
   wikiTabId,
@@ -58,6 +60,48 @@ describe("parseTabKind", () => {
     expect(parseTabKind("file:")).toEqual({ kind: "session", sessionId: "file:" });
     expect(parseTabKind("wiki:")).toEqual({ kind: "session", sessionId: "wiki:" });
     expect(parseTabKind("web:")).toEqual({ kind: "session", sessionId: "web:" });
+    expect(parseTabKind("sessionview:")).toEqual({
+      kind: "session",
+      sessionId: "sessionview:",
+    });
+  });
+
+  it("round-trips a second view of a session", () => {
+    const sid = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    expect(parseTabKind(sessionViewTabId(sid))).toEqual({
+      kind: "sessionview",
+      sessionId: sid,
+    });
+  });
+
+  it("gives the second view an id distinct from the first, or it would dedupe", () => {
+    // The whole point: `openTabRouted` reveals an id another group already holds
+    // instead of opening a copy, so the two views must not share an id.
+    const sid = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    expect(sessionViewTabId(sid)).not.toBe(sid);
+  });
+
+  it("still reads a bare session id as the FIRST view, with the prefix present", () => {
+    // Regression guard: adding a prefix must not change how the unprefixed id —
+    // every session tab persisted before this existed — is read.
+    const sid = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    expect(parseTabKind(sid)).toEqual({ kind: "session", sessionId: sid });
+    expect(parseTabKind(DRAFT_TAB_ID)).toEqual({ kind: "draft" });
+  });
+});
+
+describe("tabSessionId", () => {
+  it("answers with the same session for both views", () => {
+    const sid = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    expect(tabSessionId(sid)).toBe(sid);
+    expect(tabSessionId(sessionViewTabId(sid))).toBe(sid);
+  });
+
+  it("answers null for tabs that name no session", () => {
+    expect(tabSessionId(DRAFT_TAB_ID)).toBe(null);
+    expect(tabSessionId(fileTabId("/repo/main.rs"))).toBe(null);
+    expect(tabSessionId(wikiTabId("arch/overview"))).toBe(null);
+    expect(tabSessionId(webTabId("https://example.com"))).toBe(null);
   });
 });
 
@@ -92,6 +136,7 @@ describe("tabKindLabel", () => {
     // Session tabs read their title from the scan, and the draft tab from i18n;
     // neither is derivable from the id.
     expect(tabKindLabel({ kind: "session", sessionId: "x" })).toBe(null);
+    expect(tabKindLabel({ kind: "sessionview", sessionId: "x" })).toBe(null);
     expect(tabKindLabel({ kind: "draft" })).toBe(null);
   });
 });
@@ -119,5 +164,14 @@ describe("tabSurvivesScan", () => {
     expect(tabSurvivesScan(fileTabId("/repo/src/main.rs"), hasSession)).toBe(true);
     expect(tabSurvivesScan(wikiTabId("arch/overview"), hasSession)).toBe(true);
     expect(tabSurvivesScan(webTabId("https://example.com"), hasSession)).toBe(true);
+  });
+
+  it("prunes a second view on the same terms as the first", () => {
+    // Both name one session: a deleted transcript must take the copy with it,
+    // and a live one must keep it across the first scan after a restart.
+    expect(tabSurvivesScan(sessionViewTabId(known), hasSession)).toBe(true);
+    expect(tabSurvivesScan(sessionViewTabId("deleted-session-id"), hasSession)).toBe(
+      false,
+    );
   });
 });
