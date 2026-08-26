@@ -204,14 +204,14 @@ describe("主导航页面浏览上下文", () => {
 });
 
 /**
- * 侧栏顶部的 管家 / 工作 tab。The active tab is *derived* from `viewMode`
+ * 侧栏顶部的 舰队 / 工作 tab。The active tab is *derived* from `viewMode`
  * (navGroupOf) rather than stored beside it, so the invariant worth testing is
  * the other half: each tab remembers the page you left it on, and every path
  * that moves the main area — the nav itself and the three cross-page requests
  * (file link, tray click, schedule → new session) — feeds that memory. A path
  * that wrote `viewMode` directly would leave its tab restoring a stale page.
  */
-describe("侧栏模式 tab（管家 / 工作）", () => {
+describe("侧栏模式 tab（舰队 / 工作）", () => {
   beforeEach(() => {
     vi.resetModules();
   });
@@ -220,7 +220,7 @@ describe("侧栏模式 tab（管家 / 工作）", () => {
     const { useUIStore } = await import("./store");
     const ui = () => useUIStore.getState();
 
-    ui().setViewMode("audit"); // 管家
+    ui().setViewMode("audit"); // 舰队
     ui().setViewMode("wiki"); // 工作
 
     ui().setNavGroup("steward");
@@ -287,7 +287,7 @@ describe("侧栏模式 tab（管家 / 工作）", () => {
 
   it("丢弃已不属于该 tab 的存量页面，回落到主页", async () => {
     const { setItem } = await import("./storage");
-    // wiki 现在归 工作 tab；一份把它记在 管家 名下的旧数据不该让 管家 打开它。
+    // wiki 现在归 工作 tab；一份把它记在 舰队 名下的旧数据不该让 舰队 打开它。
     setItem("nav-group-last-view", JSON.stringify({ steward: "wiki", work: "nonsense" }));
 
     const { useUIStore } = await import("./store");

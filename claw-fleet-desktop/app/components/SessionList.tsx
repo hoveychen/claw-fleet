@@ -93,7 +93,7 @@ export function SessionList() {
   // Total running workspace commands across all repos — surfaced as a badge on
   // the 仓库 (files) nav item, mirroring the green per-repo badge in FilesView.
   const runningProcCount = useProcStore((s) => runningProcTotal(s.procs));
-  // Which tab (管家 / 工作) the sidebar is showing. Derived from the page rather
+  // Which tab (舰队 / 工作) the sidebar is showing. Derived from the page rather
   // than stored beside it (see navGroups.ts), so the cross-page hops that bypass
   // the nav — audit → sessions, a wiki [[slug]] mention, a tray click into the
   // 任务 page — carry the tab along instead of leaving it on a group that isn't
@@ -104,7 +104,7 @@ export function SessionList() {
   // Roll each group's counts up onto its tab and show them there while its nav
   // is collapsed away, using the same red/green vocabulary as the items.
   const groupBadges: Record<NavGroup, { alert: number; running: number; dot: boolean }> = {
-    // 管家 carries no count pill — a red digit on a tab you are not looking at
+    // 舰队 carries no count pill — a red digit on a tab you are not looking at
     // reads as an error rather than a nudge. Its unread-critical-audit signal
     // folds into the same quiet dot the new daily report already uses; the exact
     // count still sits on the 审计 nav item inside the tab.
@@ -403,7 +403,7 @@ export function SessionList() {
         </button>
 
         {/* Sidebar nav, split into two top-level modes by the tab strip below:
-            管家 (watching / administering — sessions, audit, report, memory,
+            舰队 (watching / administering — sessions, audit, report, memory,
             skills, phone) and 工作 (what you reach for while an agent works —
             tasks, repos, wiki, schedules, plan trees). Plugins are a source of
             skills, so they live under the 技能 entry as a segmented tab
@@ -412,7 +412,7 @@ export function SessionList() {
           <div className={styles.nav_tabs} role="tablist" aria-label={t("nav_group.aria", "模式")}>
             {NAV_GROUPS.map((group) => {
               const badge = groupBadges[group];
-              const label = t(`nav_group.${group}`, group === "steward" ? "管家" : "工作");
+              const label = t(`nav_group.${group}`, group === "steward" ? "舰队" : "工作");
               const selected = navGroup === group;
               return (
                 <button

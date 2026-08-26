@@ -256,7 +256,7 @@
   overflow-y: auto;
 }
 
-/* ── Mode tab strip (管家 / 工作) ─────────────────────────────────────────────
+/* ── Mode tab strip (舰队 / 工作) ─────────────────────────────────────────────
    Sits at the top of the nav, directly above the items it governs, so the
    grouping reads as ownership rather than as two unrelated controls. Track +
    raised active pill, the same segmented vocabulary as .view_toggle in
