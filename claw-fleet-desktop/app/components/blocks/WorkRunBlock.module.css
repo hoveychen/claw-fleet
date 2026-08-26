@@ -46,25 +46,21 @@
   color: var(--color-text);
 }
 
-.stats {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Steps · tokens · end time ride together right behind the headline. They used
+   to be pinned to the header's right edge, which on a wide transcript column
+   left the timestamp floating alone hundreds of pixels from the text it
+   belonged to. */
+.meta {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-shrink: 0;
   white-space: nowrap;
   color: var(--color-text-dim);
   font-size: var(--t-aux, 11px);
 }
 
-.tokens {
-  color: var(--color-text-dim);
-  font-size: var(--t-aux, 11px);
-  flex-shrink: 0;
-}
-
 .time {
-  color: var(--color-text-dim);
-  font-size: var(--t-aux, 11px);
-  flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
 
