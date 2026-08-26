@@ -111,19 +111,21 @@ export function WorkRunBlock({
         ) : (
           <span className={`${styles.category}${shimmer}`}>{t(`detail.work_cat_${summary.category}`)}</span>
         )}
-        {/* Just the step count — the per-tool breakdown reads better as the
-            rail itself, one click away. */}
-        <span className={styles.stats}>
-          {t("detail.work_steps", { count: summary.steps })}
+        {/* Step count, tokens and end time trail the headline as one dot-joined
+            meta cluster — the same idiom the unfolded tool rows use. Anchoring
+            them to the far right instead left them stranded across a wide
+            reading column, reading as a second unrelated column. */}
+        <span className={styles.meta}>
+          {/* Just the step count — the per-tool breakdown reads better as the
+              rail itself, one click away. */}
+          <span>{t("detail.work_steps", { count: summary.steps })}</span>
+          {summary.outputTokens > 0 && <span>· ↓{fmtTokens(summary.outputTokens)}</span>}
+          {lastTime && (
+            <span className={styles.time} title={lastTime.full}>
+              · {lastTime.short}
+            </span>
+          )}
         </span>
-        {summary.outputTokens > 0 && (
-          <span className={styles.tokens}>↓{fmtTokens(summary.outputTokens)}</span>
-        )}
-        {lastTime && (
-          <span className={styles.time} title={lastTime.full}>
-            {lastTime.short}
-          </span>
-        )}
       </button>
       {open && (
         <div className={styles.body}>
