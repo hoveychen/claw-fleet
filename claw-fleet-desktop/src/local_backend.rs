@@ -857,6 +857,25 @@ impl LocalBackend {
                         &sess_ar, &ar_ar, &arif_ar, &arfail_ar, &arse_ar,
                     );
                     claw_fleet_core::headless_runtime::maybe_drain_pending_messages(&sess_ar);
+
+                    // Reclaim the dev servers / persistent browsers finished
+                    // sessions left running. Deliberately after the liveness
+                    // refresh above, so `proc_alive` is the corrected value and
+                    // a session that just ended is already visible as dead.
+                    // Only sessions Fleet actually knows about are eligible —
+                    // see `orphan_reaper::select_reapable`.
+                    let dead: std::collections::HashSet<String> = sess_ar
+                        .lock()
+                        .map(|s| {
+                            s.iter()
+                                .filter(|x| !x.proc_alive)
+                                .map(|x| x.id.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if !dead.is_empty() {
+                        claw_fleet_core::orphan_reaper::reap_orphaned_session_processes(&dead);
+                    }
                 }
             });
         }
