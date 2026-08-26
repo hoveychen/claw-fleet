@@ -1397,7 +1397,10 @@ pub fn scan_sessions_for_date(date: &str) -> Vec<crate::session::SessionInfo> {
         // Decode workspace path from directory name
         let stripped = encoded_name.trim_start_matches('-');
         let parts: Vec<&str> = stripped.split('-').collect();
-        let workspace_path = decode_workspace_path_with_parts(&parts);
+        let workspace_path = crate::session::heal_workspace_path(
+            &ws_path,
+            decode_workspace_path_with_parts(&parts),
+        );
         // Shared helper: collapse `.worktrees/<task-id>` to the repo so a repo's
         // worktree sessions group under one project, matching the session list.
         let workspace_name = crate::session::workspace_name(&workspace_path);
