@@ -2,7 +2,7 @@
 // through the relay's `upload_attachment` (bytes → desktop's user-attachments
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
 import { useDraft, loadDraft, saveDraft } from "../draft";
 import { t } from "../i18n";
@@ -748,6 +748,11 @@ interface ResumeProps {
    *  tail / live-thinking pollers and yield the single serialized WS to the
    *  resume req/reply instead of contending with a big tail response. */
   onSubmitInFlight?: (inFlight: boolean) => void;
+  /** The transcript is being read back (the reader scrolled up), so the box
+   *  folds away to give the messages the screen. A request, not an order: an
+   *  unsent draft, a focused field, a picked attachment or a queued follow-up
+   *  all outrank it — nothing the user is mid-way through may vanish. */
+  hidden?: boolean;
 }
 
 export function ResumeComposer({
@@ -756,6 +761,7 @@ export function ResumeComposer({
   mode = "resume",
   onOptimisticSend,
   onSubmitInFlight,
+  hidden,
 }: ResumeProps) {
   const enqueueing = mode === "enqueue";
   // 会话所属的源决定给哪套 model/effort 清单——认不出的源退回 Claude，那是
@@ -779,6 +785,26 @@ export function ResumeComposer({
     client,
     `resume:${session.id}:attachments`,
   );
+  const [focused, setFocused] = useState(false);
+  // Folded only when the parent asked AND the user has nothing in flight here.
+  const collapsed =
+    !!hidden &&
+    !focused &&
+    !prompt.trim() &&
+    attachments.length === 0 &&
+    pendingMessages.length === 0;
+  // The fold slides the box out and reclaims its space by cancelling its own
+  // height with a negative margin — measured rather than animated as a height,
+  // so an expanded box is never capped (a dragged-taller textarea or a long
+  // queue would be clipped by a max-height).
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [openHeight, setOpenHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!el || collapsed) return;
+    const h = el.offsetHeight;
+    setOpenHeight((prev) => (prev === h ? prev : h));
+  });
 
   const cancelQueued = async (index: number, text: string) => {
     if (!client) return;
@@ -866,7 +892,13 @@ export function ResumeComposer({
   };
 
   return (
-    <div className={styles.resumeBox}>
+    <div
+      className={styles.resumeBox}
+      ref={boxRef}
+      data-hidden={collapsed || undefined}
+      style={collapsed && openHeight ? { marginBottom: -openHeight } : undefined}
+      aria-hidden={collapsed || undefined}
+    >
       {pendingMessages.length > 0 && (
         <div className={styles.queuedList}>
           <div className={styles.queuedLabel}>{t("已排队，本轮结束后自动发送")}</div>
@@ -897,6 +929,8 @@ export function ResumeComposer({
         rows={2}
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
       />
       <AttachmentRow
         attachments={attachments}
