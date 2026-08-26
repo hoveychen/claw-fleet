@@ -97,6 +97,26 @@ describe("installScrollFreezeProbe", () => {
     el.dispatchEvent(ev);
   };
 
+  /** A scrollable box inside the pane — a subagent card, a diff, a thinking
+   *  block. Same jsdom metric stand-in as `sizeAs`, applied to a child. */
+  const nestedScroller = (m: { scrollHeight: number; clientHeight: number; scrollTop: number }) => {
+    const box = document.createElement("div");
+    box.style.overflowY = "auto";
+    Object.defineProperty(box, "scrollHeight", { value: m.scrollHeight, configurable: true });
+    Object.defineProperty(box, "clientHeight", { value: m.clientHeight, configurable: true });
+    box.scrollTop = m.scrollTop;
+    el.appendChild(box);
+    return box;
+  };
+
+  /** A wheel the reader aimed at `from`, bubbling up to the pane as a real one
+   *  does — which is how these events reach the probe at all. */
+  const wheelFrom = (from: HTMLElement, deltaY: number) => {
+    const ev = new Event("wheel", { bubbles: true }) as WheelEvent;
+    Object.defineProperty(ev, "deltaY", { value: deltaY });
+    from.dispatchEvent(ev);
+  };
+
   /** rAF callbacks the probe queued, run on demand by `flushFrames`. */
   let frames: FrameRequestCallback[];
 
@@ -214,6 +234,34 @@ describe("installScrollFreezeProbe", () => {
 
       expect(revives).toBe(0);
       expect(el.scrollTop).toBe(8200);
+    });
+
+    it("ignores a wheel a nested scroller inside the pane is consuming", () => {
+      // Reported as 「滚动里面的内容，外部的滚动条也一起滚」: wheel bubbles, so a
+      // gesture over a subagent result card (a `max-height` + `overflow-y:auto`
+      // box inside the transcript) arrives here too. The pane standing still is
+      // *correct* then — the card ate the scroll — but the probe read it as a
+      // freeze, took over, and drove the transcript in lockstep with the card.
+      sizeAs(9000, 800, 8200);
+      const card = nestedScroller({ scrollHeight: 3000, clientHeight: 420, scrollTop: 900 });
+
+      wheelFrom(card, -300);
+      flushFrames();
+
+      expect(revives).toBe(0);
+      expect(el.scrollTop).toBe(8200);
+    });
+
+    it("still repairs once the nested scroller has run out in that direction", () => {
+      // The card at its top and the reader still scrolling up: this one really
+      // does belong to the transcript, so the freeze repair must stay armed.
+      sizeAs(9000, 800, 8200);
+      const card = nestedScroller({ scrollHeight: 3000, clientHeight: 420, scrollTop: 0 });
+
+      wheelFrom(card, -300);
+      flushFrames();
+
+      expect(el.scrollTop).toBe(7900);
     });
 
     it("still reports the freeze it took over, so the log keeps its evidence", () => {

@@ -88,6 +88,44 @@ export function classifyScrollAttempt(a: ScrollAttempt): FreezeVerdict {
   return "frozen";
 }
 
+/**
+ * Whether a scrollable box *between* the wheel's target and the pane is about
+ * to absorb this gesture.
+ *
+ * `wheel` bubbles, so every gesture aimed at something inside the transcript —
+ * a subagent result card, a diff, a thinking block, all of which are
+ * `max-height` + `overflow-y: auto` boxes — also arrives at the pane's own
+ * listeners. The pane not moving is then the correct outcome, not a freeze:
+ * the box ate the scroll. Without this check the probe read exactly that as a
+ * frozen pane and drove `scrollTop` itself, so the transcript scrolled in
+ * lockstep with the card the reader was actually reading
+ * (「滚动里面的内容，外部的滚动条也一起滚」).
+ *
+ * Room in the wheel's own direction is what decides it. A box scrolled to its
+ * end stops absorbing, the browser chains the rest to the pane, and from there
+ * the gesture really is the pane's — so the freeze repair has to stay armed for
+ * it. Shared with `SessionDetail`'s auto-follow listener, which sits on the
+ * same element and has the same reason to ignore these events.
+ */
+export function nestedScrollerWillConsume(pane: HTMLElement, ev: WheelEvent): boolean {
+  const delta = ev.deltaY;
+  if (!delta) return false;
+
+  let node = ev.target instanceof Node ? ev.target : null;
+  while (node && node !== pane) {
+    if (node instanceof HTMLElement) {
+      const overflowY = window.getComputedStyle(node).overflowY;
+      if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") {
+        const overflow = node.scrollHeight - node.clientHeight;
+        const room = delta > 0 ? overflow - node.scrollTop : node.scrollTop;
+        if (overflow > NO_OVERFLOW_PX && room > AT_LIMIT_PX) return true;
+      }
+    }
+    node = node.parentNode;
+  }
+  return false;
+}
+
 /** Verdicts worth writing to the log. The rest are normal scrolling. */
 export function isFaultVerdict(v: FreezeVerdict): boolean {
   return v === "no-overflow" || v === "yanked" || v === "frozen";
@@ -320,6 +358,10 @@ export function installScrollFreezeProbe(
   };
 
   const onWheel = (ev: WheelEvent) => {
+    // Not this pane's gesture — a card inside it is taking the scroll. Bailing
+    // before the gesture even opens also keeps a takeover from latching onto
+    // one, which would drive the pane for every wheel event that follows.
+    if (nestedScrollerWillConsume(el, ev)) return;
     if (startTop === null) {
       startTop = el.scrollTop;
       startPins = ctx.pinCount();
