@@ -204,9 +204,12 @@
   }
 
   /* Diagrams. What a figure needs on paper depends on which palette mermaid
-     rendered it with, and MermaidBlock picks that from `[data-theme]`:
-     light → mermaid's "default" (pale nodes, dark labels), otherwise → its
-     "dark" theme (dark nodes, pale labels).
+     rendered it with, and MermaidBlock picks that from `[data-theme]` — see
+     mermaidTheme.ts, which now feeds mermaid the app's own tokens instead of
+     its built-in themes: light → pale nodes with dark labels, dark → dark
+     nodes with pale labels. The two directions are what matter here; the exact
+     hexes below only have to match mermaidTheme's `background` for the dark
+     mode plate.
 
      So the canvas has to follow the theme. An earlier revision gave every
      diagram a dark plate unconditionally, having only checked the dark theme;
@@ -222,7 +225,7 @@
        the first version printed: a flowchart ran off the bottom of page one and
        resumed headless on page two. Bound it to the printable height and let the
        viewBox scale it down instead. */
-    background: #16181a !important;
+    background: #0f1011 !important;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
     max-width: 100% !important;
