@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import {
@@ -405,6 +405,12 @@ export function SessionDetail({
   // or when viewing a subagent (show sibling tabs + parent).
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowing, setIsFollowing] = useState(true);
+  // The composer floats over the bottom of the transcript (chatbot-style), so
+  // the scroller has to reserve exactly its height as bottom padding or the
+  // last message hides underneath it. Measured, not guessed: the box grows with
+  // the draft, the option pills and the queued-follow-up chips.
+  const dockRef = useRef<HTMLDivElement>(null);
+  const [dockHeight, setDockHeight] = useState(0);
   type ViewTab =
     | "decisions"
     | "skills"
@@ -791,6 +797,38 @@ export function SessionDetail({
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
+
+  // Keep the transcript's bottom padding equal to the floating dock's height.
+  // The dock mounts and unmounts with the composer / follow pill, so this
+  // re-subscribes on those flags; its *size* changes (a growing draft) come
+  // through the observer.
+  const showsComposer = (canResume || canEnqueue) && !!liveSession;
+  useEffect(() => {
+    if (viewTab !== "messages") {
+      setDockHeight(0);
+      return;
+    }
+    const el = dockRef.current;
+    if (!el) {
+      setDockHeight(0);
+      return;
+    }
+    const measure = () => setDockHeight(el.offsetHeight);
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, [viewTab, showsComposer, isFollowing, liveSession?.id]);
+
+  // Padding is applied by React on the next paint, which grows scrollHeight
+  // under a reader who is pinned to the newest message. Re-pin in the same
+  // frame so a composer that expands while typing doesn't leave the last
+  // message drifting up behind it.
+  useLayoutEffect(() => {
+    if (!followRef.current.following) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [dockHeight]);
 
   const tabs = useMemo((): SessionInfo[] => {
     if (!liveSession) return [];
@@ -1256,8 +1294,12 @@ export function SessionDetail({
           )}
 
           {viewTab === "messages" && (
-            <>
-              <div ref={scrollRef} className={styles.scroll_area}>
+            <div className={styles.messages_pane}>
+              <div
+                ref={scrollRef}
+                className={styles.scroll_area}
+                style={{ paddingBottom: dockHeight }}
+              >
                 {/* The "load earlier" control lives inside MessageList, which
                     owns the render window this button used to duplicate. */}
                 <AgentNavProvider nav={agentNav}>
@@ -1290,35 +1332,38 @@ export function SessionDetail({
                 </AgentNavProvider>
               </div>
 
-              {/* Auto-follow indicator */}
-              {isFollowing ? (
-                <div className={styles.follow_bar}>
-                  {t("detail.following")}
-                </div>
-              ) : (
-                <button className={styles.follow_bar_btn} onClick={scrollToBottom}>
-                  ↓ {t("detail.scroll_to_latest")}
-                </button>
-              )}
+              {/* Composer + follow control, floating over the bottom of the
+                  transcript instead of sitting in a separate docked bar below
+                  it: same reading column as the messages, and the conversation
+                  scrolls under it behind a fade. The scroller reserves this
+                  element's measured height as bottom padding.
 
-              {/* Resume/enqueue composer, docked at the bottom of the
-                  conversation. When the turn has ended it resumes; while the
-                  turn is still running it queues a follow-up (delivered when the
-                  turn ends). One of canResume / canEnqueue holds at a time. */}
-              {(canResume || canEnqueue) && liveSession && (
-                <div className={styles.resume_dock}>
-                  <ResumeComposer
-                    sessionId={liveSession.id}
-                    workspacePath={liveSession.workspacePath}
-                    agentSource={liveSession.agentSource}
-                    session={liveSession}
-                    onResumed={handleResumed}
-                    mode={canEnqueue ? "enqueue" : "resume"}
-                    pendingMessages={liveSession.pendingMessages ?? []}
-                  />
+                  Resume/enqueue: when the turn has ended submit resumes; while
+                  the turn is still running it queues a follow-up (delivered
+                  when the turn ends). One of canResume / canEnqueue holds. */}
+              {(showsComposer || !isFollowing) && (
+                <div ref={dockRef} className={styles.dock_layer}>
+                  {!isFollowing && (
+                    <button className={styles.follow_pill} onClick={scrollToBottom}>
+                      ↓ {t("detail.scroll_to_latest")}
+                    </button>
+                  )}
+                  {showsComposer && liveSession && (
+                    <div className={styles.resume_dock}>
+                      <ResumeComposer
+                        sessionId={liveSession.id}
+                        workspacePath={liveSession.workspacePath}
+                        agentSource={liveSession.agentSource}
+                        session={liveSession}
+                        onResumed={handleResumed}
+                        mode={canEnqueue ? "enqueue" : "resume"}
+                        pendingMessages={liveSession.pendingMessages ?? []}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
-            </>
+            </div>
           )}
         </>
       )}
