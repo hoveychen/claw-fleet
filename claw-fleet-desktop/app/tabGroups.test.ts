@@ -26,7 +26,7 @@ import {
   type TabGroup,
 } from "./tabGroups";
 import { closeTab, DRAFT_TAB_ID } from "./sessionTabs";
-import { fileTabId, webTabId, wikiTabId } from "./tabKind";
+import { fileTabId, sessionViewTabId, webTabId, wikiTabId } from "./tabKind";
 
 /** Terse group literal. `weight` defaults to an equal share, which doubles as
  *  regression cover: any reducer that rebuilds a group without carrying its
@@ -437,6 +437,14 @@ describe("tabAffinity", () => {
   it("counts sessions and the new-session draft as primary", () => {
     expect(tabAffinity("7c9e6679-7425-40de-944b-e07fc1f90ae7")).toBe("primary");
     expect(tabAffinity(DRAFT_TAB_ID)).toBe("primary");
+  });
+
+  it("counts a second view of a session as primary too", () => {
+    // It is a session pane, so a path clicked inside it must route to the docs
+    // half rather than landing on top of the transcript it was clicked in.
+    expect(tabAffinity(sessionViewTabId("7c9e6679-7425-40de-944b-e07fc1f90ae7"))).toBe(
+      "primary",
+    );
   });
 
   it("counts the reading material as side", () => {

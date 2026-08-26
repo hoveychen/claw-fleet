@@ -325,11 +325,15 @@ export function openTabInActiveGroup(state: GroupsState, tabId: string): GroupsS
  */
 export type TabAffinity = "primary" | "side";
 
-/** A session (or the draft that becomes one) is the work; a file, a wiki doc and
- *  a web page are what you read beside it. */
+/** A session (either view of one, or the draft that becomes one) is the work; a
+ *  file, a wiki doc and a web page are what you read beside it. A second view is
+ *  still a session pane — so a path clicked inside one routes to the docs half
+ *  exactly as it does from the first view, rather than landing on top of it. */
 export function tabAffinity(id: string): TabAffinity {
   const kind = parseTabKind(id).kind;
-  return kind === "session" || kind === "draft" ? "primary" : "side";
+  return kind === "session" || kind === "sessionview" || kind === "draft"
+    ? "primary"
+    : "side";
 }
 
 /** Does this group already hold tabs of that affinity — i.e. is it a home for

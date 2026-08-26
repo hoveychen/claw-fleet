@@ -586,24 +586,26 @@ export function HistoryView() {
             const kind = parseTabKind(id);
             if (kind.kind === "draft")
               return { id, session: null, label: t("new_session.button") };
-            if (kind.kind !== "session") {
-              return {
-                id,
-                session: null,
-                // Basename / last slug segment / host — short enough for a
-                // strip. The full thing goes in the tooltip, where a session
-                // tab shows its workspace.
-                label: tabKindLabel(kind) ?? id,
-                tooltip:
-                  kind.kind === "file"
-                    ? kind.absPath
-                    : kind.kind === "wiki"
-                      ? kind.slug
-                      : kind.url,
-              };
+            // Both views of a session resolve the same way — the second one is
+            // the same live session under a different tab id.
+            if (kind.kind === "session" || kind.kind === "sessionview") {
+              const s = sessionById.get(kind.sessionId);
+              return s ? { id, session: s } : null;
             }
-            const s = sessionById.get(kind.sessionId);
-            return s ? { id, session: s } : null;
+            return {
+              id,
+              session: null,
+              // Basename / last slug segment / host — short enough for a
+              // strip. The full thing goes in the tooltip, where a session
+              // tab shows its workspace.
+              label: tabKindLabel(kind) ?? id,
+              tooltip:
+                kind.kind === "file"
+                  ? kind.absPath
+                  : kind.kind === "wiki"
+                    ? kind.slug
+                    : kind.url,
+            };
           })
           .filter((x): x is TabItem => x != null),
       );
