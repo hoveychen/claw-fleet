@@ -395,6 +395,14 @@ function readMarkFilter(): MarkFilter {
   return raw === "pending" || raw === "done" ? raw : "all";
 }
 
+/** Keys this blob used to be written under, for tabs that have been renamed.
+ *  Read-only fallbacks: the first write after a restart re-keys the blob, so an
+ *  entry here only has to survive one boot on an already-installed machine. */
+const LEGACY_NAV_GROUP_KEYS: Partial<Record<NavGroup, string>> = {
+  // The 舰队 tab was `steward` until 2026-08.
+  fleet: "steward",
+};
+
 /** Per-tab "last page I was on", tolerating an absent / corrupt blob. A stored
  *  page that no longer belongs to its tab is dropped rather than restored —
  *  otherwise moving a page between tabs would strand the old tab on a page it
@@ -403,7 +411,10 @@ function readLastViewByNavGroup(): Record<NavGroup, ViewMode> {
   const result = { ...NAV_GROUP_HOME };
   const stored = readJson<Record<string, unknown>>("nav-group-last-view", {});
   for (const group of NAV_GROUPS) {
-    const view = stored[group];
+    const legacy = LEGACY_NAV_GROUP_KEYS[group];
+    // Current key wins; the legacy one only fills in for a blob written before
+    // the tab was renamed.
+    const view = stored[group] ?? (legacy ? stored[legacy] : undefined);
     if (isViewMode(view) && navGroupOf(view) === group) result[group] = view;
   }
   return result;

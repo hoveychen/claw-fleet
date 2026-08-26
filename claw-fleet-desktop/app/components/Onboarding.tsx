@@ -753,7 +753,7 @@ function NavModesCard() {
       </div>
       <p className={styles.card_description}>{t("onboarding.nav_modes.description")}</p>
       <p className={styles.card_description}>
-        <strong>{t("nav_group.steward")}</strong> — {t("onboarding.nav_modes.steward")}
+        <strong>{t("nav_group.fleet")}</strong> — {t("onboarding.nav_modes.fleet")}
       </p>
       <p className={styles.card_description}>
         <strong>{t("nav_group.work")}</strong> — {t("onboarding.nav_modes.work")}

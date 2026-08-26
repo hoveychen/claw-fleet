@@ -108,7 +108,7 @@ export function SessionList() {
     // reads as an error rather than a nudge. Its unread-critical-audit signal
     // folds into the same quiet dot the new daily report already uses; the exact
     // count still sits on the 审计 nav item inside the tab.
-    steward: { alert: 0, running: 0, dot: hasNewReport || unreadCriticalCount > 0 },
+    fleet: { alert: 0, running: 0, dot: hasNewReport || unreadCriticalCount > 0 },
     work: { alert: unreadLaunchpadCount, running: runningProcCount, dot: false },
   };
   const [filter, setFilter] = useState("");
@@ -267,7 +267,7 @@ export function SessionList() {
   // The two modes' nav items. Held as values rather than inlined twice so
   // the expanded view (one group at a time) and the collapsed icon rail
   // (both groups flattened) render the exact same buttons.
-  const stewardItems = (
+  const fleetItems = (
     <>
       <button
         className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
@@ -412,7 +412,7 @@ export function SessionList() {
           <div className={styles.nav_tabs} role="tablist" aria-label={t("nav_group.aria", "模式")}>
             {NAV_GROUPS.map((group) => {
               const badge = groupBadges[group];
-              const label = t(`nav_group.${group}`, group === "steward" ? "舰队" : "工作");
+              const label = t(`nav_group.${group}`, group === "fleet" ? "舰队" : "工作");
               const selected = navGroup === group;
               return (
                 <button
@@ -449,12 +449,12 @@ export function SessionList() {
               JetBrains' tool-window strip) stacks icons vertically instead. */}
           {sidebarCollapsed ? (
             <>
-              {stewardItems}
+              {fleetItems}
               <div className={styles.nav_divider} />
               {workItems}
             </>
-          ) : navGroup === "steward" ? (
-            stewardItems
+          ) : navGroup === "fleet" ? (
+            fleetItems
           ) : (
             workItems
           )}
