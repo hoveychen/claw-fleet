@@ -34,7 +34,7 @@ describe("nav group partition", () => {
 
   it("routes the monitoring / management pages to 舰队", () => {
     for (const view of ["gallery", "list", "audit", "report", "memory", "skills", "plugins", "mobile"] as const) {
-      expect(navGroupOf(view)).toBe("steward");
+      expect(navGroupOf(view)).toBe("fleet");
     }
   });
 
@@ -45,7 +45,7 @@ describe("nav group partition", () => {
   });
 
   it("rejects non-group values read back from storage", () => {
-    expect(isNavGroup("steward")).toBe(true);
+    expect(isNavGroup("fleet")).toBe(true);
     expect(isNavGroup("work")).toBe(true);
     expect(isNavGroup("")).toBe(false);
     expect(isNavGroup(undefined)).toBe(false);
