@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import styles from "./MermaidBlock.module.css";
 import { repairMermaidContrastInSvg } from "./mermaidContrast";
+import { type MermaidMode, mermaidThemeConfig } from "./mermaidTheme";
 
 /** Distinct ids per render — mermaid mounts a scratch node keyed by this. */
 let seq = 0;
 
 /** Reads the theme the app stamps on <html> (absent means dark; see App.css). */
-function currentTheme(): "dark" | "default" {
+function currentTheme(): MermaidMode {
   return document.documentElement.getAttribute("data-theme") === "light"
-    ? "default"
+    ? "light"
     : "dark";
 }
 
@@ -42,15 +43,13 @@ export function MermaidBlock({ code }: { code: string }) {
         const mermaid = (await import("mermaid")).default;
         mermaid.initialize({
           startOnLoad: false,
-          theme,
+          // mermaid 的内置 default/dark 色板（姜黄 subgraph、淡紫节点）是全应用
+          // 唯一不吃 App.css token 的地方，改走 base + 自己的变量表。字体栈也在
+          // 那里（量宽和画宽必须解析成同一个栈，见 mermaidTheme 注释）。
+          ...mermaidThemeConfig(theme),
           // mermaid runs its own DOMPurify pass at this level, so labels
           // carrying HTML can't smuggle script into the SVG we inject below.
           securityLevel: "strict",
-          // 不能用 "inherit"：mermaid 量文字宽度时把图挂在 document.body 下
-          // （那里是 sans），而渲染出来的图可能落在 markdown 的 <pre> 里继承到
-          // 等宽字体 —— 量出来 92px 的标签实际画 116px，直接被节点框切掉。
-          // 给一个两处都解析成同一个栈的 CSS 变量，量和画就对得上了。
-          fontFamily: "var(--font-sans)",
         });
         const { svg } = await mermaid.render(`mermaid-${seq++}`, code);
         if (cancelled) return;
