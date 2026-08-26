@@ -16,6 +16,61 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
+# ── Serialise concurrent builds ──────────────────────────────────────────────
+# One build runs ~10 parallel rustc (measured peak: 1224MB for the largest
+# single rustc, 2.9GB for all of them together) on top of vite/esbuild and the
+# tauri bundler. Two overlapping builds are what turn a busy machine into a
+# swapping one.
+#
+# The lock is machine-global on purpose, not under target/: every worktree has
+# its own target/, so a repo-local lock would not see a build running in a
+# sibling worktree — which is exactly the overlap that happens in practice.
+#
+# `mkdir` is the atomic primitive here because macOS has no `flock(1)`.
+BUILD_LOCK="${TMPDIR:-/tmp}/claw-fleet-build-local.lock"
+if ! mkdir "$BUILD_LOCK" 2>/dev/null; then
+  holder="$(cat "$BUILD_LOCK/owner" 2>/dev/null || true)"
+  holder_pid="${holder%% *}"
+  if [[ -n "$holder_pid" ]] && kill -0 "$holder_pid" 2>/dev/null; then
+    echo "==> Another build-local.sh is already running:" >&2
+    echo "    $holder" >&2
+    echo "    Wait for it, or kill $holder_pid, then re-run." >&2
+    exit 1
+  fi
+  # Holder is gone (Ctrl-C, crash, reboot) — the lock is stale, not held.
+  # Without this a single interrupted build would wedge every later one.
+  echo "==> Clearing a stale build lock left by: ${holder:-unknown}" >&2
+  rm -rf "$BUILD_LOCK"
+  mkdir "$BUILD_LOCK" || { echo "==> could not acquire build lock" >&2; exit 1; }
+fi
+trap 'rm -rf "$BUILD_LOCK"' EXIT
+echo "$$ $ROOT_DIR $(date '+%Y-%m-%d %H:%M:%S')" > "$BUILD_LOCK/owner"
+
+# ── Cap cargo's parallelism against *available* memory ───────────────────────
+# Not against core count: on a machine already carrying a day's worth of agent
+# sessions, 10 concurrent rustc is fine when there is room and ruinous when
+# there isn't. The 2GB divisor comes from the measured 1224MB peak of a single
+# rustc in this workspace, rounded up for headroom. Only lowers the job count,
+# never raises it, and FLEET_BUILD_JOBS overrides the whole calculation.
+if [[ -z "${FLEET_BUILD_JOBS:-}" ]] && command -v vm_stat >/dev/null 2>&1; then
+  _page=$(vm_stat | sed -n '1s/.*page size of \([0-9]*\).*/\1/p')
+  _free=$(vm_stat | awk '/Pages (free|inactive|speculative)/ {gsub(/\./,"",$NF); s+=$NF} END {print s+0}')
+  if [[ -n "$_page" && "$_free" -gt 0 ]]; then
+    _avail_gb=$(( _free * _page / 1073741824 ))
+    _ncpu=$(sysctl -n hw.ncpu)
+    _jobs=$(( _avail_gb / 2 ))
+    (( _jobs < 2 )) && _jobs=2
+    if (( _jobs < _ncpu )); then
+      export CARGO_BUILD_JOBS="$_jobs"
+      echo "==> Only ${_avail_gb}GB available — capping cargo at $_jobs jobs (of $_ncpu cores)"
+    fi
+  fi
+fi
+if [[ -n "${FLEET_BUILD_JOBS:-}" ]]; then
+  export CARGO_BUILD_JOBS="$FLEET_BUILD_JOBS"
+  echo "==> FLEET_BUILD_JOBS set — cargo capped at $CARGO_BUILD_JOBS jobs"
+fi
+
 # ── Load signing config (optional) ───────────────────────────────────────────
 SIGNING_CONF="$SCRIPT_DIR/signing.local"
 APPLE_SIGNING_IDENTITY=""
