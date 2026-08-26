@@ -27,7 +27,13 @@ import {
   type TabGroup,
 } from "./tabGroups";
 import { closeTab, DRAFT_TAB_ID } from "./sessionTabs";
-import { fileTabId, sessionViewTabId, webTabId, wikiTabId } from "./tabKind";
+import {
+  fileTabId,
+  sessionViewTabId,
+  tabSurvivesScan,
+  webTabId,
+  wikiTabId,
+} from "./tabKind";
 
 /** Terse group literal. `weight` defaults to an equal share, which doubles as
  *  regression cover: any reducer that rebuilds a group without carrying its
@@ -635,6 +641,57 @@ describe("openSecondView", () => {
     const out = closeTabAnywhere(split, VIEW);
 
     expect(out.groups.map((x) => x.tabIds)).toEqual([[SESSION]]);
+    expectInvariants(out);
+  });
+});
+
+/**
+ * The second view across a restart. Nothing about it is stored separately — the
+ * layout blob already carries every tab id — but "already works" is only worth
+ * as much as a test that would notice it stopping.
+ */
+describe("second view survives a restart", () => {
+  const SESSION = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+  const VIEW = sessionViewTabId(SESSION);
+
+  it("round-trips both halves through the persisted layout", () => {
+    const before = st([g("g1", [SESSION], SESSION), g("g2", [VIEW], VIEW)], "g2");
+    const after = parsePersistedGroups(serializeGroups(before));
+    expect(after).toEqual(before);
+    expectInvariants(after);
+  });
+
+  it("does not collapse the two views as a duplicate tab on the way in", () => {
+    // The parser drops a tab id it has already seen (invariant 3). The two views
+    // must therefore be *distinct* ids all the way down to storage, or a restart
+    // would quietly restore one pane.
+    const raw = JSON.stringify({
+      groups: [
+        { id: "g1", tabIds: [SESSION], activeId: SESSION },
+        { id: "g2", tabIds: [VIEW], activeId: VIEW },
+      ],
+      activeGroupId: "g1",
+      orientation: "row",
+    });
+    expect(parsePersistedGroups(raw).groups.map((x) => x.tabIds)).toEqual([
+      [SESSION],
+      [VIEW],
+    ]);
+  });
+
+  it("keeps both through the first-scan prune while the session lives", () => {
+    const s = st([g("g1", [SESSION], SESSION), g("g2", [VIEW], VIEW)], "g1");
+    const out = pruneMissingGroupTabs(s, (id) =>
+      tabSurvivesScan(id, (sid) => sid === SESSION),
+    );
+    expect(out).toEqual(s);
+  });
+
+  it("takes both with it when the transcript is gone", () => {
+    // Leaving the copy behind would strand an unopenable orphan in the strip.
+    const s = st([g("g1", [SESSION], SESSION), g("g2", [VIEW], VIEW)], "g1");
+    const out = pruneMissingGroupTabs(s, (id) => tabSurvivesScan(id, () => false));
+    expect(out.groups.flatMap((x) => x.tabIds)).toEqual([]);
     expectInvariants(out);
   });
 });
