@@ -2,7 +2,14 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { Copy, FileJson2, Folder, FolderOpen, MoreHorizontal } from "lucide-react";
+import {
+  Columns2,
+  Copy,
+  FileJson2,
+  Folder,
+  FolderOpen,
+  MoreHorizontal,
+} from "lucide-react";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionHeaderMenu.module.css";
 
@@ -20,11 +27,15 @@ export function SessionHeaderMenu({
   jsonlPath,
   workspacePath,
   isLocal,
+  onOpenSecondView,
 }: {
   sessionId: string;
   jsonlPath: string;
   workspacePath: string;
   isLocal: boolean;
+  /** Open a second pane on this session beside the first. Absent where there is
+   *  no tab strip to hold it, and in the second pane itself. */
+  onOpenSecondView?: () => void;
 }) {
   const { t } = useTranslation();
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -45,7 +56,21 @@ export function SessionHeaderMenu({
       ? "paths.reveal_in_explorer"
       : "paths.reveal_in_finder";
 
-  const items: ContextMenuItem[] = [
+  const items: ContextMenuItem[] = [];
+
+  // Leads the menu: it is the one item that *does* something to the layout,
+  // where the rest hand you a string to paste elsewhere.
+  if (onOpenSecondView) {
+    items.push({
+      id: "second-view",
+      label: t("tabs.open_second_view", "在旁边再开一份"),
+      sub: t("tabs.open_second_view_sub", "同一会话两个面板，各看各的"),
+      icon: <Columns2 size={13} />,
+      onSelect: onOpenSecondView,
+    });
+  }
+
+  items.push(
     {
       id: "copy-id",
       label: t("detail.copy_session_id"),
@@ -67,7 +92,7 @@ export function SessionHeaderMenu({
       icon: <Folder size={13} />,
       onSelect: () => copy(workspacePath),
     },
-  ];
+  );
 
   // A remote workspace's files are not on this machine — nothing to reveal.
   if (isLocal) {

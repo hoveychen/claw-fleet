@@ -37,7 +37,7 @@ import {
   replaceTab,
   type TabState,
 } from "./sessionTabs";
-import { parseTabKind } from "./tabKind";
+import { parseTabKind, sessionViewTabId } from "./tabKind";
 
 /** One group: its open tabs left→right, the one it shows, and its share of the
  *  split axis. `weight` is relative — two groups at 1 each split the axis in
@@ -406,6 +406,53 @@ export function openTabRouted(
   if (!canSplit) return inGroup(state, active.id, (t) => openTab(t, tabId));
   const split = splitGroup(state, active.id, state.orientation);
   return inGroup(split, split.activeGroupId, (t) => openTab(t, tabId));
+}
+
+/**
+ * Put a *second* view of `sessionId` beside the one already open.
+ *
+ * Deliberately not `openTabRouted`: that heuristic asks "where do things of this
+ * kind live", and both views are the same kind, so it would land the copy in the
+ * very group the conversation is in — the one place it is useless. "Beside"
+ * here means the group after the one holding the conversation, which is what the
+ * user pointed at when they asked for it.
+ *
+ *  1. already open → revealed, as every other open path does;
+ *  2. the conversation's group has a neighbour → the copy goes there, so a
+ *     column the user has already arranged isn't split further;
+ *  3. otherwise → a new group right after it;
+ *  4. no room to split (`canSplit` false) → the conversation's own group, so the
+ *     action is never a silent no-op. It lands as a second tab you can drag out
+ *     once the window is wide enough — the same fallback `openTabRouted` takes.
+ */
+export function openSecondView(
+  state: GroupsState,
+  sessionId: string,
+  canSplit: boolean,
+): GroupsState {
+  const viewId = sessionViewTabId(sessionId);
+  const existing = findGroupOf(state, viewId);
+  if (existing) {
+    return focusGroup(
+      inGroup(state, existing.id, (t) => ({ ...t, activeId: viewId })),
+      existing.id,
+    );
+  }
+  // The conversation may not be open at all (the row's context menu can ask for
+  // this without opening the session first) — then "beside" is relative to the
+  // focused group.
+  const home = findGroupOf(state, sessionId) ?? activeGroup(state);
+  const idx = state.groups.findIndex((g) => g.id === home.id);
+  const neighbour = state.groups[idx + 1];
+  if (neighbour) {
+    return focusGroup(
+      inGroup(state, neighbour.id, (t) => openTab(t, viewId)),
+      neighbour.id,
+    );
+  }
+  if (!canSplit) return inGroup(state, home.id, (t) => openTab(t, viewId));
+  const split = splitGroup(state, home.id, state.orientation);
+  return inGroup(split, split.activeGroupId, (t) => openTab(t, viewId));
 }
 
 /** Close a tab whichever group holds it — the strip's ✕ and middle-click, plus

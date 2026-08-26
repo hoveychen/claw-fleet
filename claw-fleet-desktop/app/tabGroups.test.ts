@@ -19,6 +19,7 @@ import {
   serializeGroups,
   singleGroup,
   splitGroup,
+  openSecondView,
   openTabRouted,
   tabAffinity,
   visibleTabIds,
@@ -557,6 +558,83 @@ describe("openTabRouted", () => {
     const out = openTabRouted(s, FILE, true);
 
     expect(out.orientation).toBe("column");
+    expectInvariants(out);
+  });
+});
+
+/**
+ * The second view: one session, two panes, so a conversation and the artefacts
+ * it produced can sit side by side.
+ */
+describe("openSecondView", () => {
+  const SESSION = "sess-a";
+  const VIEW = sessionViewTabId(SESSION);
+  const FILE = fileTabId("/repo/main.rs");
+
+  it("splits a lone group and puts the copy in the new half", () => {
+    const s = st([g("g1", [SESSION], SESSION)], "g1");
+    const out = openSecondView(s, SESSION, true);
+
+    expect(out.groups.map((x) => x.tabIds)).toEqual([[SESSION], [VIEW]]);
+    // Focus follows what you just opened — you asked to look at it.
+    expect(out.activeGroupId).toBe(out.groups[1].id);
+    expectInvariants(out);
+  });
+
+  it("does NOT land the copy in the conversation's own group", () => {
+    // The whole point. Routing by kind would do exactly this, since both views
+    // are the same kind — which is why this has its own reducer.
+    const s = st([g("g1", [SESSION], SESSION)], "g1");
+    const out = openSecondView(s, SESSION, true);
+    expect(out.groups[0].tabIds).toEqual([SESSION]);
+  });
+
+  it("reuses the neighbouring group rather than splitting again", () => {
+    const s = st([g("g1", [SESSION], SESSION), g("g2", [FILE], FILE)], "g1");
+    const out = openSecondView(s, SESSION, true);
+
+    expect(out.groups).toHaveLength(2);
+    expect(out.groups[1].tabIds).toEqual([FILE, VIEW]);
+    expect(out.groups[1].activeId).toBe(VIEW);
+    expect(out.activeGroupId).toBe("g2");
+    expectInvariants(out);
+  });
+
+  it("reveals the copy instead of opening a third pane", () => {
+    const s = st([g("g1", [SESSION], SESSION), g("g2", [VIEW, FILE], FILE)], "g1");
+    const out = openSecondView(s, SESSION, true);
+
+    expect(out.groups.map((x) => x.tabIds)).toEqual([[SESSION], [VIEW, FILE]]);
+    expect(out.groups[1].activeId).toBe(VIEW);
+    expect(out.activeGroupId).toBe("g2");
+    expectInvariants(out);
+  });
+
+  it("falls back to the conversation's group when the column can't split", () => {
+    // Never a silent no-op: it lands as a tab you can drag out once there's room.
+    const s = st([g("g1", [SESSION], SESSION)], "g1");
+    const out = openSecondView(s, SESSION, false);
+
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups[0].tabIds).toEqual([SESSION, VIEW]);
+    expect(out.groups[0].activeId).toBe(VIEW);
+    expectInvariants(out);
+  });
+
+  it("splits from the focused group when the session isn't open at all", () => {
+    const s = st([g("g1", [FILE], FILE)], "g1");
+    const out = openSecondView(s, SESSION, true);
+
+    expect(out.groups.map((x) => x.tabIds)).toEqual([[FILE], [VIEW]]);
+    expectInvariants(out);
+  });
+
+  it("keeps the two views independent: closing one leaves the other", () => {
+    const s = st([g("g1", [SESSION], SESSION)], "g1");
+    const split = openSecondView(s, SESSION, true);
+    const out = closeTabAnywhere(split, VIEW);
+
+    expect(out.groups.map((x) => x.tabIds)).toEqual([[SESSION]]);
     expectInvariants(out);
   });
 });

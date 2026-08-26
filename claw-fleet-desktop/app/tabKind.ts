@@ -127,6 +127,11 @@ export interface DetailTabOpener {
   openFile: (absPath: string, line: number | null) => void;
   openWiki: (slug: string) => void;
   openWeb: (url: string) => void;
+  /** A second pane on the *same* session, beside the first — the move that lets
+   *  one half stay on the conversation while the other sits on Tokens or 计划.
+   *  Lives here because it is the same capability as the three above: it is only
+   *  meaningful where a tab strip exists to hold the extra pane. */
+  openSecondView: (sessionId: string) => void;
 }
 
 /**
