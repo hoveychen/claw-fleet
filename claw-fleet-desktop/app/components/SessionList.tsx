@@ -1,8 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, ListChecks, Coffee, ListTree, Gauge, Hammer } from "lucide-react";
+import { Menu, Shield, ListChecks, Coffee, ListTree } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
@@ -106,10 +106,6 @@ export function SessionList() {
   const groupBadges: Record<NavGroup, { alert: number; running: number; dot: boolean }> = {
     steward: { alert: unreadCriticalCount, running: 0, dot: hasNewReport },
     work: { alert: unreadLaunchpadCount, running: runningProcCount, dot: false },
-  };
-  const GROUP_ICON: Record<NavGroup, ReactNode> = {
-    steward: <Gauge size={14} strokeWidth={1.5} />,
-    work: <Hammer size={14} strokeWidth={1.5} />,
   };
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -424,7 +420,6 @@ export function SessionList() {
                   onClick={() => setNavGroup(group)}
                   title={label}
                 >
-                  <span className={styles.nav_tab_icon}>{GROUP_ICON[group]}</span>
                   <span className={styles.nav_tab_label}>{label}</span>
                   {/* Only while this tab's own nav is hidden — an active tab's
                       items carry their own badges. */}

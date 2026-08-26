@@ -303,18 +303,6 @@
   box-shadow: var(--shadow-card);
 }
 
-.nav_tab_icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  opacity: 0.8;
-}
-
-.nav_tab_active .nav_tab_icon {
-  opacity: 1;
-}
-
 .nav_tab_label {
   white-space: nowrap;
   overflow: hidden;
