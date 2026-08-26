@@ -50,6 +50,26 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
      surface. Consumers: MobileView `.qr`, WikiView `.html_frame`,
      blocks/DecisionToolCard `.html_preview`. */
   --canvas-fixed-light: #fbfaf7;
+
+  /* Width of the centred reading column in a session transcript, in `rem` so it
+     resolves identically wherever it is read. Two elements share it and must
+     not drift: MessageList `.list` (the transcript itself) and SessionDetail
+     `.inline_fleet_ask` (a sibling of the list, so it can't inherit a token
+     scoped to it). It lives here because that second consumer is what made the
+     value get copied by hand once already.
+
+     46.13rem = 738px, which is what `--prose-measure: 78ch` works out to at the
+     15px transcript body size — prose therefore fills the column edge to edge
+     instead of stopping short of it. Measured in the running app on a 1512px
+     window: the detail pane is 924px wide, so the column takes 786px of it
+     (738 + 2×24 padding) and leaves a 69px gutter on each side. The previous
+     value (33.12rem / 56ch) left 173px of dead space per side — 37% of the pane
+     — which is what made the pane feel like reading through a slot.
+
+     `max-width` simply stops applying once the pane is narrower than this, so
+     the lite/portrait and minimum-width (360px) forms are untouched; the cap is
+     what keeps a maximized 2560px window from rendering 2000px lines. */
+  --transcript-column: 46.13rem;
 }
 
 /* ── CSS variables (dark theme) ───────────────────────────────────────────── */
