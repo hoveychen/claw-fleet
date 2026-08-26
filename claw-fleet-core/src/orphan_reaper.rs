@@ -271,6 +271,95 @@ mod tests {
         assert!(select_reapable(&c, &dead(&["dead-session"])).is_empty());
     }
 
+    /// End-to-end over the real machine: the pure rule above says nothing about
+    /// whether `sysinfo` can actually read another process's environment on
+    /// this OS, which is the one link the whole design rests on. Spawn a fake
+    /// vite server stamped with a session id, let it reparent to init, and
+    /// assert the sweep finds and kills it.
+    #[cfg(unix)]
+    #[test]
+    fn sweep_kills_a_real_orphan_it_reads_the_session_id_off_of() {
+        use std::io::Write as _;
+
+        // The fake has to be run by `node`, and the two obvious cheaper fakes
+        // are both dead ends on macOS:
+        //
+        // * copying `/bin/sleep` into the temp dir invalidates its code
+        //   signature and AMFI SIGKILLs it the instant it execs (rc=137), so it
+        //   dies before the sweep ever sees it;
+        // * a `#!/bin/sh` script runs under `/bin/sh`, and the environment of a
+        //   system-signed binary is not readable by another process — not via
+        //   `sysinfo`, not even via `ps eww`. The sweep would find the right
+        //   command line and no session id.
+        //
+        // node is also what the real leak classes run under (vite, patchwright),
+        // and their environments *are* readable — which is the property this
+        // test exists to pin down.
+        let Some(node) = ["/opt/homebrew/bin/node", "/usr/local/bin/node"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+        else {
+            eprintln!("skipping: no node found; this test needs a non-system interpreter");
+            return;
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("vite/bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let fake = bin_dir.join("vite.js");
+        {
+            let mut f = std::fs::File::create(&fake).unwrap();
+            writeln!(f, "setTimeout(() => {{}}, 300000);").unwrap();
+        }
+
+        let sid = "11111111-2222-3333-4444-555555555555";
+        // Double-fork through `sh`: the shell prints the child's pid and exits,
+        // so the fake reparents to pid 1 — the exact shape of a real leftover.
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "CLAUDE_CODE_SESSION_ID={sid} {node} \"{}\" >/dev/null 2>&1 & echo $!",
+                fake.display()
+            ))
+            .output()
+            .unwrap();
+        let pid: u32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+
+        let orphaned = (0..50).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::process::Command::new("ps")
+                .args(["-o", "ppid=", "-p", &pid.to_string()])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
+                .unwrap_or(false)
+        });
+        assert!(orphaned, "fake vite (pid {pid}) never reparented to 1");
+
+        // A session id nobody knows is dead must not be touched...
+        assert_eq!(reap_orphaned_session_processes(&dead(&["unrelated"])), 0);
+        assert!(
+            unsafe { libc::kill(pid as i32, 0) } == 0,
+            "sweep killed pid {pid} despite its session not being known-dead"
+        );
+
+        // ...and once it is known dead, it goes.
+        reap_orphaned_session_processes(&dead(&[sid]));
+
+        let killed = (0..50).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            unsafe { libc::kill(pid as i32, 0) != 0 }
+        });
+        if !killed {
+            // Don't let a red run leak the fake it just created.
+            unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        }
+        assert!(
+            killed,
+            "sweep did not kill orphan pid {pid} — sysinfo likely could not read its environ"
+        );
+    }
+
     #[test]
     fn leaves_an_unrecognised_leftover_alone() {
         // Not in REAPABLE: a build that outlived its session is still not ours
