@@ -1,14 +1,14 @@
 import type { ViewMode } from "../viewModes";
 
 /** The two top-level modes the sidebar tab strip switches between.
- *  - `steward` (舰队): watching and administering the fleet — sessions, audit,
+ *  - `fleet` (舰队): watching and administering the fleet — sessions, audit,
  *    the daily report, memory rules, skills, phone pairing.
  *  - `work` (工作): what you reach for while an agent is actually working —
  *    tasks, repos, the wiki, schedules, plan trees. */
-export type NavGroup = "steward" | "work";
+export type NavGroup = "fleet" | "work";
 
 /** Tab order in the strip. */
-export const NAV_GROUPS: readonly NavGroup[] = ["steward", "work"];
+export const NAV_GROUPS: readonly NavGroup[] = ["fleet", "work"];
 
 /** Which pages hang under each tab — the single source of truth. The nav
  *  renders its items from this map and {@link navGroupOf} is derived from it, so
@@ -16,14 +16,14 @@ export const NAV_GROUPS: readonly NavGroup[] = ["steward", "work"];
  *  open" cannot drift apart. Every {@link ViewMode} must appear exactly once;
  *  navGroups.test.ts asserts the partition. */
 export const NAV_GROUP_VIEWS: Record<NavGroup, readonly ViewMode[]> = {
-  steward: ["list", "gallery", "audit", "report", "memory", "skills", "plugins", "mobile"],
+  fleet: ["list", "gallery", "audit", "report", "memory", "skills", "plugins", "mobile"],
   work: ["history", "files", "wiki", "schedule", "plans"],
 };
 
 /** Where a tab lands when it has no remembered last page (first click ever, or
  *  a stored value that no longer belongs to the group). */
 export const NAV_GROUP_HOME: Record<NavGroup, ViewMode> = {
-  steward: "gallery",
+  fleet: "gallery",
   work: "history",
 };
 

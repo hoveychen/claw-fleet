@@ -223,7 +223,7 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
     ui().setViewMode("audit"); // 舰队
     ui().setViewMode("wiki"); // 工作
 
-    ui().setNavGroup("steward");
+    ui().setNavGroup("fleet");
     expect(ui().viewMode).toBe("audit");
 
     ui().setNavGroup("work");
@@ -258,7 +258,7 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
     ui().requestOpenTask("sess-1");
     expect(ui().viewMode).toBe("history");
 
-    ui().setNavGroup("steward");
+    ui().setNavGroup("fleet");
     expect(ui().viewMode).toBe("gallery");
 
     // 若 requestOpenTask 没记账，这里会退回上一页 plans。
@@ -267,7 +267,7 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
 
     // 文件链接点击（requestFileNav）是同一类绕过 nav 的路径。
     ui().requestFileNav({ workspacePath: "/w", absPath: "/w/a.ts", line: 3 });
-    ui().setNavGroup("steward");
+    ui().setNavGroup("fleet");
     ui().setNavGroup("work");
     expect(ui().viewMode).toBe("files");
   });
@@ -280,7 +280,7 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
     useUIStore.getState().setViewMode("files");
 
     expect(JSON.parse(getItem("nav-group-last-view")!)).toMatchObject({
-      steward: "memory",
+      fleet: "memory",
       work: "files",
     });
   });
@@ -288,14 +288,37 @@ describe("侧栏模式 tab（舰队 / 工作）", () => {
   it("丢弃已不属于该 tab 的存量页面，回落到主页", async () => {
     const { setItem } = await import("./storage");
     // wiki 现在归 工作 tab；一份把它记在 舰队 名下的旧数据不该让 舰队 打开它。
-    setItem("nav-group-last-view", JSON.stringify({ steward: "wiki", work: "nonsense" }));
+    setItem("nav-group-last-view", JSON.stringify({ fleet: "wiki", work: "nonsense" }));
 
     const { useUIStore } = await import("./store");
 
     expect(useUIStore.getState().lastViewByNavGroup).toEqual({
-      steward: "gallery",
+      fleet: "gallery",
       work: "history",
     });
+  });
+
+  it("认得改名前写下的 steward 记忆", async () => {
+    const { setItem } = await import("./storage");
+    // 这个 tab 的代号在 2026-08 从 steward 改成 fleet。已经在用的机器上，磁盘里
+    // 存的还是旧键；读不认它的话，老板的「舰队 tab 上次停在记忆页」会静默丢掉。
+    setItem("nav-group-last-view", JSON.stringify({ steward: "memory", work: "files" }));
+
+    const { useUIStore } = await import("./store");
+
+    expect(useUIStore.getState().lastViewByNavGroup).toEqual({
+      fleet: "memory",
+      work: "files",
+    });
+  });
+
+  it("新键优先于同时存在的旧键", async () => {
+    const { setItem } = await import("./storage");
+    setItem("nav-group-last-view", JSON.stringify({ fleet: "skills", steward: "memory", work: "files" }));
+
+    const { useUIStore } = await import("./store");
+
+    expect(useUIStore.getState().lastViewByNavGroup.fleet).toBe("skills");
   });
 });
 
