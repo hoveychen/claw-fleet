@@ -230,7 +230,7 @@ interface UIState {
    *  "Sessions" nav entry to restore the user's preferred layout when they
    *  navigate back from audit/report/etc. */
   lastSessionViewMode: SessionViewMode;
-  /** Last page visited inside each sidebar tab (管家 / 工作), so switching tabs
+  /** Last page visited inside each sidebar tab (舰队 / 工作), so switching tabs
    *  returns you where you left off instead of always landing on the tab's home
    *  page. Persisted as a JSON blob under "nav-group-last-view". There is
    *  deliberately no `navGroup` field: the active tab is derived from `viewMode`

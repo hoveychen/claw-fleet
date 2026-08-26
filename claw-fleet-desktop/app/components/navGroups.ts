@@ -1,7 +1,7 @@
 import type { ViewMode } from "../viewModes";
 
 /** The two top-level modes the sidebar tab strip switches between.
- *  - `steward` (管家): watching and administering the fleet — sessions, audit,
+ *  - `steward` (舰队): watching and administering the fleet — sessions, audit,
  *    the daily report, memory rules, skills, phone pairing.
  *  - `work` (工作): what you reach for while an agent is actually working —
  *    tasks, repos, the wiki, schedules, plan trees. */
