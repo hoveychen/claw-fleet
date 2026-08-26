@@ -82,6 +82,7 @@ import {
   fileTabId,
   parseTabKind,
   tabKindLabel,
+  tabSessionId,
   tabSurvivesScan,
   webTabId,
   wikiTabId,
@@ -1070,9 +1071,10 @@ export function HistoryView() {
   const groupHeaderChainsRef = useRef(groupHeaderChains);
   groupHeaderChainsRef.current = groupHeaderChains;
   useEffect(() => {
-    // Only session tabs dwell — the draft, a file, a wiki doc and a web page
-    // have no session whose unread dot could be cleared.
-    if (!activeId || parseTabKind(activeId).kind !== "session") return;
+    // Only tabs naming a session dwell — the draft, a file, a wiki doc and a web
+    // page have no session whose unread dot could be cleared. Reading a session
+    // in its second view is still reading it.
+    if (!activeId || tabSessionId(activeId) == null) return;
     const id = setTimeout(() => {
       const target = activeSessionRef.current;
       // A group header aggregates unread over the whole chain, so dwelling on it
@@ -1090,7 +1092,14 @@ export function HistoryView() {
   const railSnippetFor = (jsonlPath: string) =>
     query.trim().length >= 2 ? snippetByPath.get(jsonlPath) : undefined;
   const railIsUnread = (s: SessionInfo) => sessionUnread(s, readOverrides[s.id]);
-  const openTabIds = useMemo(() => new Set(allTabIds), [allTabIds]);
+  // The rail marks rows by *session*, so both views of one collapse to the same
+  // row: a session open only as a second view still reads as open, and focusing
+  // that view still highlights its row rather than deselecting everything.
+  const openTabIds = useMemo(
+    () => new Set(allTabIds.map((id) => tabSessionId(id) ?? id)),
+    [allTabIds],
+  );
+  const railActiveId = activeId == null ? null : tabSessionId(activeId) ?? activeId;
 
   // The column's "open this beside what I'm reading" capability, handed to
   // every pane that renders links: a path, a `[[slug]]` or an external url
@@ -1176,6 +1185,11 @@ export function HistoryView() {
             <WebTabPane url={kind.url} />
           </div>
         );
+      // Both views of a session render the same pane. They are two *instances*,
+      // and standalone mode holds its messages, scroll and view-tab per
+      // instance — which is what makes the second one useful without any new
+      // state model: leave one on 叙事流 and put the other on Tokens.
+      case "sessionview":
       default:
         return (
           <SessionDetail
@@ -1324,7 +1338,7 @@ export function HistoryView() {
             <SessionRail
               items={displayItems}
               chainMembersAll={chainMembersAll}
-              activeId={activeId}
+              activeId={railActiveId}
               openIds={openTabIds}
               snippetFor={railSnippetFor}
               isUnread={railIsUnread}

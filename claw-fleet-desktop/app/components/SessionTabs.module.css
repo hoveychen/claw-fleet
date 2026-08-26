@@ -204,6 +204,15 @@
   opacity: 0.5;
 }
 
+/* The second-view badge stands where the status dot would: same footprint, so
+ * titles stay aligned down the strip. Dimmed, because it labels the tab rather
+ * than reporting anything about the agent. */
+.second_view {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  opacity: 0.75;
+}
+
 .label {
   overflow: hidden;
   text-overflow: ellipsis;

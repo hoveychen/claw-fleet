@@ -10,6 +10,8 @@ vi.mock("../store", () => ({
 
 import "../i18n";
 import { SessionTabs, type TabItem } from "./SessionTabs";
+import { sessionViewTabId } from "../tabKind";
+import type { SessionInfo } from "../types";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 // jsdom ships no ResizeObserver, and SessionTabs constructs one in a mount
@@ -255,5 +257,75 @@ describe("SessionTabs pointer drag", () => {
     dragTo(el, g2Strip);
     act(() => el.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(calls.onActivate).not.toHaveBeenCalled();
+  });
+});
+
+// ── The second view of a session ─────────────────────────────────────────────
+// Both views wear the session's title, so without a marker the strip shows the
+// same name twice with nothing to tell them apart.
+
+describe("second-view tabs", () => {
+  const SESSION_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+  const session = {
+    id: SESSION_ID,
+    aiTitle: "重构 auth 中间件",
+    status: "live",
+    workspaceName: "claude-fleet",
+  } as unknown as SessionInfo;
+
+  function renderPair() {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const pair: TabItem[] = [
+      { id: SESSION_ID, session },
+      { id: sessionViewTabId(SESSION_ID), session },
+    ];
+    act(() =>
+      root!.render(
+        <SessionTabs
+          tabs={pair}
+          activeId={SESSION_ID}
+          groupId="g1"
+          isActiveGroup
+          splittable
+          drag={null}
+          onDragStart={vi.fn()}
+          onDragEnd={vi.fn()}
+          onDragHover={vi.fn()}
+          onDropTab={vi.fn()}
+          onActivate={vi.fn()}
+          onClose={vi.fn()}
+          onCloseOthers={vi.fn()}
+          onCloseRight={vi.fn()}
+          onCloseAll={vi.fn()}
+          onReorder={vi.fn()}
+          onSplitRight={vi.fn()}
+          onSplitDown={vi.fn()}
+        />,
+      ),
+    );
+  }
+
+  it("shows both views, each wearing the session's live title", () => {
+    renderPair();
+    const rendered = [...container!.querySelectorAll<HTMLElement>('[role="tab"]')];
+    expect(rendered).toHaveLength(2);
+    for (const tab of rendered) {
+      expect(tab.textContent).toContain("重构 auth 中间件");
+    }
+  });
+
+  it("gives the status dot to the first view only — one session, one status", () => {
+    renderPair();
+    const [first, second] = [
+      ...container!.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ];
+    expect(first.querySelector('[data-testid="tab-status-dot"]')).not.toBe(null);
+    expect(first.querySelector('[data-testid="tab-second-view"]')).toBe(null);
+    // The second view takes the dot's place rather than sitting beside it:
+    // showing one session's status twice reads as two agents.
+    expect(second.querySelector('[data-testid="tab-status-dot"]')).toBe(null);
+    expect(second.querySelector('[data-testid="tab-second-view"]')).not.toBe(null);
   });
 });
