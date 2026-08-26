@@ -104,7 +104,11 @@ export function SessionList() {
   // Roll each group's counts up onto its tab and show them there while its nav
   // is collapsed away, using the same red/green vocabulary as the items.
   const groupBadges: Record<NavGroup, { alert: number; running: number; dot: boolean }> = {
-    steward: { alert: unreadCriticalCount, running: 0, dot: hasNewReport },
+    // 管家 carries no count pill — a red digit on a tab you are not looking at
+    // reads as an error rather than a nudge. Its unread-critical-audit signal
+    // folds into the same quiet dot the new daily report already uses; the exact
+    // count still sits on the 审计 nav item inside the tab.
+    steward: { alert: 0, running: 0, dot: hasNewReport || unreadCriticalCount > 0 },
     work: { alert: unreadLaunchpadCount, running: runningProcCount, dot: false },
   };
   const [filter, setFilter] = useState("");
