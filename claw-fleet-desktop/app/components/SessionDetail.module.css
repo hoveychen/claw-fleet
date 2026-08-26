@@ -431,12 +431,12 @@
    request has no top-level transcript row until it is answered, so keep the
    live card in the conversation flow from the decision store. */
 .inline_fleet_ask {
-  /* Rides the transcript's centred reading column (MessageList.module.css
-     `.list`, `--transcript-column`). This card is a sibling of the list inside
-     .scroll_area, not a child, so it can't inherit that token — the width is
-     restated here. Keep the two in step if the column ever moves. */
+  /* Rides the transcript's centred reading column. This card is a sibling of
+     MessageList `.list` inside .scroll_area, not a child, so it can't inherit a
+     token scoped to it — which is why `--transcript-column` is defined in
+     App.css `:root` and read by both. */
   width: 100%;
-  max-width: calc(33.12rem + 48px);
+  max-width: calc(var(--transcript-column) + 48px);
   margin: 10px auto 16px;
   padding: 0 24px;
 }
