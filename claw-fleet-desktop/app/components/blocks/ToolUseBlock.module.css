@@ -13,8 +13,9 @@
    a dead rule and the distinction would have silently disappeared, so it moves
    onto the header ground instead — the same green the read-only tool *groups*
    already use, so the two say the signal the same way.
-   Rail mode keeps a transparent header by design, so this only shows in the
-   non-rail placements (decision panel, embedded views), exactly as before. */
+   Rail mode wants a transparent header, but `.rail .header` is only (0,2,0) and
+   loses to the (0,3,0) hover rule below — so rail undoes it explicitly further
+   down (see `.rail.readonly > .header`). */
 .readonly > .header { background: var(--tool-group-bg); }
 .readonly > .header:hover { background: var(--tool-group-bg-hover); }
 
@@ -445,6 +446,13 @@
 }
 
 .rail .header:hover .summary { text-decoration: underline; }
+
+/* The read-only green band at the top of this file is (0,3,0) on hover, which
+   outguns `.rail .header`'s (0,2,0) — so a Read/Glob/Grep step in the rail sat
+   transparent at rest and flashed mint on hover, while the Edit/Bash step right
+   under it did nothing. Same specificity, later in the file, so this wins. */
+.rail.readonly > .header,
+.rail.readonly > .header:hover { background: transparent; }
 
 /* Expanded detail sits in a bordered panel — the claude.ai search-card look —
    so command/stdout/results read as one contained artifact instead of
