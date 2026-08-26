@@ -7,12 +7,16 @@
   background: var(--color-bg);
 }
 
+/* One line, not two: the workspace name rides after the title as a dim suffix
+   instead of owning a second row. Together with the flatter .tabBar below this
+   takes the detail page's top chrome from ~101px to ~72px on a 390×844 phone —
+   the transcript is what the page is for. */
 .header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  padding-top: calc(10px + env(safe-area-inset-top));
+  padding: 7px 12px;
+  padding-top: calc(7px + env(safe-area-inset-top));
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   flex-shrink: 0;
@@ -45,20 +49,40 @@
   /* overflow stays visible so the scope dropdown isn't clipped; the title text
      itself ellipsizes via .headerTitleText. */
 }
+/* The title outranks both of its neighbours: it keeps a readable floor while the
+   scope switcher and the workspace suffix ellipsize away around it. Without the
+   floor a long `⎇ general-purpose-deep-research` squeezed it down to "Fi…". */
 .headerTitleText {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 4em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Workspace name, inline after the title (see .header). Shrinks first and is
+   capped, so it can never be the reason the row overflows. */
+/* The title is the item with an expendable tail, so it absorbs the row's
+   deficit; the workspace gives up almost nothing (a tiny shrink factor rather
+   than none, so it degrades gracefully on a very narrow screen) and is capped
+   so it can never be the reason the row overflows. */
 .headerSub {
+  flex: 0 1 auto;
+  flex-shrink: 0.1;
+  min-width: 0;
+  max-width: 34%;
   font-size: var(--t-meta, 11px);
+  font-weight: 500;
   color: var(--color-text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.headerSub::before {
+  content: "·";
+  margin-right: 4px;
+  opacity: 0.55;
 }
 
 .statusDot {
@@ -87,7 +111,7 @@
 .tabBar {
   display: flex;
   gap: 4px;
-  padding: 8px 12px 0;
+  padding: 2px 12px 0;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   overflow-x: auto;
@@ -104,7 +128,7 @@
   background: none;
   color: var(--color-text-dim);
   font-size: var(--t-ui, 14px);
-  padding: 6px 10px 8px;
+  padding: 5px 10px 6px;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
   flex-shrink: 0;
@@ -657,14 +681,22 @@
 }
 
 /* Inline "⎇ <type>" badge before a subagent session's title. */
+/* Same shrink contract as .scopeTrigger — an untyped-family subagent shows this
+   static badge instead of the switcher, and a long agentType must ellipsize
+   here too rather than push the title off the row. */
 .subagentBadge {
-  margin-right: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 40%;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--color-bg-secondary);
   color: var(--color-accent);
   font-size: var(--t-meta, 11px);
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* "↑ 来自 <父会话>" breadcrumb bar under the header of a subagent detail. */
@@ -672,7 +704,7 @@
   display: block;
   width: 100%;
   text-align: left;
-  padding: 6px 16px;
+  padding: 4px 16px;
   border: none;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
@@ -693,17 +725,30 @@
 
 /* ── Agent scope switcher (main ⇄ subagents), ported from desktop ─────────── */
 
-/* Positioning context for the drop-down menu; sits inline in the title row. */
+/* Positioning context for the drop-down menu; sits inline in the title row.
+   It used to be flex-shrink:0 with no cap, so an agentType like
+   `general-purpose-deep-research` grew the trigger to 244px — squeezing the
+   session title down to "Fi…", and past ~40 characters pushing the status dot
+   clean off a 390px screen (header scrollWidth measured 566px). It now shrinks
+   and is capped; the label inside ellipsizes. */
 .scopeWrap {
   position: relative;
   display: inline-flex;
-  flex-shrink: 0;
+  /* Still flex-shrink:0 — the identity label is useless half-rendered — but now
+     bounded: at most 40% of the title row, past which the label inside
+     ellipsizes. The bug was the missing cap, not the shrink. The title (which
+     keeps only a 4em floor) absorbs the rest, so the row can't overflow. */
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 40%;
 }
 
 .scopeTrigger {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
   padding: 3px 8px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -713,6 +758,13 @@
   font-weight: 600;
   cursor: pointer;
 }
+
+.scopeTriggerLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .scopeTrigger[data-subagent="true"] {
   color: var(--color-accent);
 }
@@ -721,6 +773,7 @@
 }
 .scopeChevron {
   opacity: 0.6;
+  flex-shrink: 0;
 }
 
 /* Full-screen tap catcher that dismisses the menu. */

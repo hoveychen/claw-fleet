@@ -75,6 +75,19 @@ const TAIL_POLL_MS = 2500;
 const TAIL_INITIAL = 120;
 const TAIL_STEP = 200;
 const LIVE_THINKING_POLL_MS = 1200;
+/** Downward travel that folds the follow-up composer away, and the (smaller)
+ *  upward travel that brings it back — coming back should feel eager. */
+const COMPOSER_HIDE_DELTA = 48;
+const COMPOSER_SHOW_DELTA = 24;
+/** Only fold while at least this much transcript is still below the viewport.
+ *  Folding hands the pane the composer's own ~161–197px, so a smaller gap than
+ *  this would leave the transcript fully visible — nothing left to scroll, and
+ *  therefore no scroll event left to bring the composer back. */
+const COMPOSER_HIDE_FLOOR = 320;
+/** Folding animates the composer's height away over ~180ms, and that reflow can
+ *  clamp scrollTop and fire scroll events of its own. Ignore scroll for a beat
+ *  after a toggle so the layout's own events can't immediately undo it. */
+const COMPOSER_SETTLE_MS = 300;
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
 
 /** Max subagents listed in the scope switcher — a parent that fanned out
@@ -947,6 +960,12 @@ export function SessionDetailView({
     // Never carry one session's pending echo (or a stuck in-flight flag) over.
     setOptimisticSends([]);
     submitInFlightRef.current = false;
+    // A new transcript starts at the bottom with the composer showing.
+    setComposerHidden(false);
+    composerHiddenRef.current = false;
+    composerSettleUntil.current = 0;
+    lastScrollTop.current = 0;
+    scrollAccum.current = 0;
     const timer = window.setTimeout(() => {
       if (!dwellFired.current) {
         dwellFired.current = true;
@@ -975,6 +994,21 @@ export function SessionDetailView({
   const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
+  // Composer auto-hide (see onScroll): folded while reading back through the
+  // transcript, unfolded on an upward scroll, at the bottom, or whenever the
+  // composer itself has something in it (the composer overrides this).
+  const [composerHidden, setComposerHidden] = useState(false);
+  const composerHiddenRef = useRef(false);
+  const composerSettleUntil = useRef(0);
+  const lastScrollTop = useRef(0);
+  const scrollAccum = useRef(0);
+  /** Toggle + open the settle window, but only on a real change. */
+  const setComposerFolded = useCallback((v: boolean) => {
+    if (composerHiddenRef.current === v) return;
+    composerHiddenRef.current = v;
+    composerSettleUntil.current = Date.now() + COMPOSER_SETTLE_MS;
+    setComposerHidden(v);
+  }, []);
   const working = WORKING.includes(session.status);
 
   // ── Message polling (only while the 消息 tab is showing) ──────────────
@@ -1113,16 +1147,57 @@ export function SessionDetailView({
   }, [client, session.id, working, tab]);
 
   // ── Auto-scroll: stick to bottom unless the user scrolled up ──────────
+  //
+  // The same handler drives the composer's auto-hide. Reading back through the
+  // transcript, the 161–197px follow-up box is dead weight; scrolling down folds
+  // it away and scrolling back up (or reaching the bottom) brings it back.
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  }, []);
+    const top = el.scrollTop;
+    const fromBottom = el.scrollHeight - top - el.clientHeight;
+    stickToBottom.current = fromBottom < 80;
+    const delta = top - lastScrollTop.current;
+    lastScrollTop.current = top;
+    // Folding changes the pane's height, which can clamp scrollTop and emit
+    // scroll events that read as an upward flick — which would instantly undo
+    // the fold. Swallow everything for a beat after a toggle.
+    if (Date.now() < composerSettleUntil.current) {
+      scrollAccum.current = 0;
+      return;
+    }
+    if (Math.abs(delta) < 2) return; // sub-pixel jitter / rubber band
+    // Accumulate in the current direction, reset on a reversal, so a slow drag
+    // still crosses the threshold while a twitch never does.
+    scrollAccum.current = Math.sign(delta) === Math.sign(scrollAccum.current)
+      ? scrollAccum.current + delta
+      : delta;
+    if (fromBottom < 80) {
+      scrollAccum.current = 0;
+      setComposerFolded(false);
+    } else if (scrollAccum.current > COMPOSER_HIDE_DELTA && fromBottom > COMPOSER_HIDE_FLOOR) {
+      scrollAccum.current = 0;
+      setComposerFolded(true);
+    } else if (scrollAccum.current < -COMPOSER_SHOW_DELTA) {
+      scrollAccum.current = 0;
+      setComposerFolded(false);
+    }
+  }, [setComposerFolded]);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages, liveThinking]);
+
+  // Safety net for the fold: a pane with nothing left to scroll emits no scroll
+  // events, so a composer folded into that state could never be scrolled back
+  // into view. COMPOSER_HIDE_FLOOR is meant to prevent it; this catches the case
+  // where the transcript shrinks (a collapsed band, a switched tab) afterwards.
+  useEffect(() => {
+    if (!composerHidden) return;
+    const el = scrollRef.current;
+    if (el && el.scrollHeight - el.clientHeight < 40) setComposerFolded(false);
+  }, [composerHidden, messages, setComposerFolded]);
 
   const toggleThinking = useCallback((idx: number) => {
     setExpandedThinking((prev) => {
@@ -1225,8 +1300,10 @@ export function SessionDetailView({
             <span className={styles.headerTitleText}>
               {session.titleOverride || session.aiTitle || session.slug || t("会话")}
             </span>
+            {/* Workspace rides inline after the title as a dim "· name" suffix —
+                a second header row costs ~19px of transcript on every phone. */}
+            <span className={styles.headerSub}>{session.workspaceName}</span>
           </div>
-          <div className={styles.headerSub}>{session.workspaceName}</div>
         </div>
         <span className={styles.statusDot} data-working={working} />
       </header>
@@ -1370,6 +1447,7 @@ export function SessionDetailView({
         <ResumeComposer
           session={session}
           client={client}
+          hidden={composerHidden}
           onOptimisticSend={handleOptimisticSend}
           onSubmitInFlight={handleSubmitInFlight}
         />
@@ -1379,6 +1457,7 @@ export function SessionDetailView({
           session={session}
           client={client}
           mode="enqueue"
+          hidden={composerHidden}
           onSubmitInFlight={handleSubmitInFlight}
         />
       )}

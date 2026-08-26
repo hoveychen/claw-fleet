@@ -57,7 +57,9 @@ export function AgentScopeSwitcher({
           setOpen((o) => !o);
         }}
       >
-        {agentLabel(current)}
+        {/* The label owns the ellipsis: a long agentType shortens here instead of
+            widening the trigger until the session title has no room left. */}
+        <span className={styles.scopeTriggerLabel}>{agentLabel(current)}</span>
         <ChevronDown size={11} className={styles.scopeChevron} />
       </button>
       {open && (

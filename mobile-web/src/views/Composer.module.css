@@ -192,6 +192,25 @@
   flex-direction: column;
   gap: 8px;
   flex-shrink: 0;
+  transition:
+    transform 0.18s ease,
+    margin-bottom 0.18s ease,
+    opacity 0.14s ease;
+}
+
+/* Folded while the reader scrolls back through the transcript: it slides down
+   out of view and gives its space back (the negative margin is set inline from
+   its measured height — see ResumeComposer). */
+.resumeBox[data-hidden] {
+  transform: translateY(100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resumeBox {
+    transition: none;
+  }
 }
 
 .resumeActions {
