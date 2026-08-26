@@ -22,7 +22,7 @@ import {
   type FollowInput,
   type FollowState,
 } from "../followState";
-import { installScrollFreezeProbe } from "../scrollFreezeProbe";
+import { installScrollFreezeProbe, nestedScrollerWillConsume } from "../scrollFreezeProbe";
 import { installScrollBoxResizeRevive } from "../scrollLayerRevive";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
@@ -743,6 +743,10 @@ export function SessionDetail({
     // reader is still inside the slack window at that point, so the distance
     // rule would keep following and the pin would drag them back down.
     const onWheel = (ev: WheelEvent) => {
+      // Wheel bubbles, so scrolling *inside* a card in the transcript lands
+      // here too. Reading back through a subagent's result is not a request to
+      // stop following the transcript, so let the card have its own gesture.
+      if (nestedScrollerWillConsume(el, ev)) return;
       applyFollow({ kind: "gesture", intent: ev.deltaY });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
