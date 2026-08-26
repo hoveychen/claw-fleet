@@ -1,9 +1,8 @@
+/* 没有底色也没有边框：图自己的 subgraph 已经带框了，外面再套一层就是框中框。
+   图直接坐在正文纸面上，只靠上下留白和正文分开。 */
 .diagram {
-  margin: 10px 0;
-  padding: 10px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  margin: 16px 0;
+  padding: 4px 0;
   overflow-x: auto;
   text-align: center;
   /* 这个块常常挂在 markdown 的 <pre> 里面，会继承到等宽字体；图的排版是按
