@@ -443,10 +443,21 @@ pub fn resolve_session_cwd(session_id: &str) -> Option<String> {
     session_cwd_from_jsonl(&find_session_jsonl(session_id)?)
 }
 
-fn session_cwd_from_jsonl(path: &Path) -> Option<String> {
-    let raw = fs::read_to_string(path).ok()?;
-    raw.lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+/// The first `cwd` a transcript records, read by streaming the file.
+///
+/// Streamed rather than slurped because [`crate::session::paths`] calls this on
+/// transcripts it has not otherwise parsed, purely to recover a workspace path —
+/// a long-running session's jsonl runs to hundreds of megabytes, and the answer
+/// is on one of the first few lines. (The opening records are `queue-operation`
+/// entries that carry no `cwd`, hence "first line that has one", not "first
+/// line".)
+pub(crate) fn session_cwd_from_jsonl(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let file = fs::File::open(path).ok()?;
+    std::io::BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .filter_map(|l| serde_json::from_str::<Value>(&l).ok())
         .find_map(|v| {
             v.get("cwd")
                 .and_then(|c| c.as_str())

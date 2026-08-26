@@ -301,7 +301,12 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 .any(|f| encode_workspace_path(f) == encoded)
         });
 
-        // Use the exact path from the lock file when available; fall back to lossy decode.
+        // Use the exact path from the lock file when available; fall back to the
+        // lossy decode, healed against the transcripts' own `cwd` when it names
+        // nothing on disk (issue #105 — see `heal_workspace_path`). An IDE
+        // holding the folder open used to be the only thing keeping such a
+        // workspace correct here, so closing the editor was enough to poison the
+        // cache with a shredded path and break every later resume.
         let workspace_path = ide
             .and_then(|s| {
                 s.workspace_folders
@@ -309,7 +314,9 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     .find(|f| encode_workspace_path(f) == encoded)
             })
             .cloned()
-            .unwrap_or_else(|| decode_workspace_path(&encoded));
+            .unwrap_or_else(|| {
+                heal_workspace_path(&workspace_dir, decode_workspace_path(&encoded))
+            });
 
         // Sessions whose workspace directory no longer exists — e.g. a git
         // worktree that was removed. Their transcripts linger under
@@ -372,6 +379,15 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 // Try session cache first (skip re-reading unchanged files).
                 if let Some((mut info, age)) = check_session_cache(&path, &session_cache_snapshot) {
                     age_out_status(&mut info, age);
+                    // Re-stamp the workspace identity resolved above rather than
+                    // trusting the cached copy. The cache is keyed on transcript
+                    // mtime, so a workspace path that was wrong when it was
+                    // written (issue #105) would otherwise stay wrong — on disk,
+                    // in `~/.fleet/session-cache.json`, across restarts —  for as
+                    // long as the session stays quiet. This scan's value is
+                    // derived from the same project dir and can only be better.
+                    info.workspace_path = workspace_path.clone();
+                    info.workspace_name = ws_name.clone();
                     apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id), age);
                     info.background_tasks = hook_snapshot
                         .background_tasks
@@ -500,6 +516,9 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     // Try session cache first for subagents too.
                     if let Some((mut info, age)) = check_session_cache(&agent_path, &session_cache_snapshot) {
                         age_out_status(&mut info, age);
+                        // Same re-stamp as the main-session cache hit above.
+                        info.workspace_path = workspace_path.clone();
+                        info.workspace_name = ws_name.clone();
                         info.pid = sub_pid;
                         info.pid_precise = false;
                         info.ide_name = ide_name.clone();

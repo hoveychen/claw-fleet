@@ -350,6 +350,59 @@ pub(crate) fn decode_workspace_path(encoded: &str) -> String {
     decode_workspace_path_with_parts(&parts)
 }
 
+/// The workspace a `~/.claude/projects/<slug>/` directory really belongs to.
+///
+/// `decoded` is [`decode_workspace_path`]'s best effort. That decode is
+/// filesystem-guided, so it lands on the real path whenever every level of the
+/// path can be listed — but the slug encoding is lossy (`-` is both a path
+/// separator and a literal character in a directory name), so the moment a
+/// level *cannot* be listed the walk falls back to one-dash-per-slash and
+/// shreds every hyphenated directory name in the path. That happens for a
+/// workspace under a TCC-protected folder (`~/Documents`, `~/Desktop`, …, where
+/// [`read_level_dirs`] deliberately returns nothing rather than fire a
+/// permission dialog) and for any `read_dir` denial — an unmounted volume, a
+/// sandbox without folder access.
+///
+/// The transcripts in the directory carry the authoritative answer: Claude Code
+/// stamps the session's real `cwd` on its records. So when the decode names
+/// something that isn't a directory, believe the transcript instead.
+pub(crate) fn heal_workspace_path(project_dir: &std::path::Path, decoded: String) -> String {
+    // A TCC-protected decode can't be checked with `is_dir` — that stat is the
+    // permission dialog we spend `read_level_dirs` avoiding. It is also exactly
+    // where the decode is known to be unreliable, so skip the check and let the
+    // transcript speak.
+    if !crate::tcc::is_tcc_protected(std::path::Path::new(&decoded))
+        && std::path::Path::new(&decoded).is_dir()
+    {
+        return decoded;
+    }
+    newest_transcript_cwd(project_dir).unwrap_or(decoded)
+}
+
+/// The `cwd` recorded by the most recently written transcript in a project
+/// directory, if any.
+///
+/// Newest wins because a session can be resumed from a checkout that has since
+/// moved, which leaves older transcripts in the same directory pointing at a
+/// path that no longer exists.
+fn newest_transcript_cwd(project_dir: &std::path::Path) -> Option<String> {
+    let mut transcripts: Vec<(std::time::SystemTime, std::path::PathBuf)> =
+        std::fs::read_dir(project_dir)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+            .filter_map(|p| {
+                let mtime = std::fs::metadata(&p).ok()?.modified().ok()?;
+                Some((mtime, p))
+            })
+            .collect();
+    transcripts.sort_by(|a, b| b.0.cmp(&a.0));
+    transcripts
+        .into_iter()
+        .find_map(|(_, p)| super::parse::session_cwd_from_jsonl(&p))
+}
+
 /// Detect a Windows drive-letter prefix among dash-split path parts. Claude's
 /// `sanitizePath` maps both `:` and `\` to `-`, so `C:\Users\foo` encodes as
 /// `C--Users-foo`, which `split('-')` yields as `["C", "", "Users", "foo"]` —
@@ -534,6 +587,123 @@ fn workspace_path_key_with(windows: bool, p: &str) -> String {
         s = s.to_lowercase();
     }
     s
+}
+
+#[cfg(test)]
+mod heal_workspace_path_tests {
+    use super::heal_workspace_path;
+
+    /// Build a project dir holding one transcript whose records carry `cwd`.
+    /// The first lines deliberately lack `cwd` — Claude Code opens a transcript
+    /// with `queue-operation` records, so a "read the first line" shortcut would
+    /// miss it.
+    fn project_dir_with_cwd(tag: &str, cwd: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "fleet-heal-ws-{}-{}-{}",
+            tag,
+            std::process::id(),
+            cwd.len()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("00000000-0000-0000-0000-000000000000.jsonl"),
+            format!(
+                "{}\n{}\n",
+                r#"{"type":"queue-operation","operation":"enqueue"}"#,
+                serde_json::json!({ "type": "user", "cwd": cwd })
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    /// The bug from issue #105: when a level of the path can't be listed the
+    /// greedy decode shreds every hyphenated directory name
+    /// (`~/w/my-org/sub-project` → `~/w/my/org/sub/project`). The transcript's
+    /// own `cwd` is authoritative and must win over that wreckage.
+    #[test]
+    fn nonexistent_decode_is_replaced_by_the_transcript_cwd() {
+        let real = std::env::temp_dir().join(format!("fleet-heal-real-{}", std::process::id()));
+        let hyphenated = real.join("my-org").join("sub-project");
+        std::fs::create_dir_all(&hyphenated).unwrap();
+        let cwd = hyphenated.to_string_lossy().into_owned();
+
+        let dir = project_dir_with_cwd("mangled", &cwd);
+        // What the naive one-dash-per-slash fallback produces for that path.
+        let mangled = cwd.replace('-', "/");
+        assert!(
+            !std::path::Path::new(&mangled).is_dir(),
+            "fixture is pointless unless the mangled path is really absent"
+        );
+
+        assert_eq!(heal_workspace_path(&dir, mangled), cwd);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&real);
+    }
+
+    /// A decode that names a real directory is already right — the transcript
+    /// must not be allowed to override it (a session can be resumed from a
+    /// moved/copied checkout, so its recorded `cwd` may be stale).
+    #[test]
+    fn existing_decode_is_kept_even_when_the_transcript_disagrees() {
+        let real = std::env::temp_dir().join(format!("fleet-heal-keep-{}", std::process::id()));
+        std::fs::create_dir_all(&real).unwrap();
+        let dir = project_dir_with_cwd("keep", "/somewhere/else/entirely");
+
+        let decoded = real.to_string_lossy().into_owned();
+        assert_eq!(heal_workspace_path(&dir, decoded.clone()), decoded);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&real);
+    }
+
+    /// The reported scenario end to end (issue #105): a workspace with
+    /// hyphenated directory names living under a TCC-protected folder.
+    /// `read_level_dirs` refuses to list anything below `~/Documents` (listing it
+    /// is what fires the macOS permission dialog), so the greedy walk has no
+    /// filesystem to steer by and shreds `my-org/sub-project` into
+    /// `my/org/sub/project`. The transcript has to rescue it.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tcc_protected_workspace_decodes_wrong_and_is_healed() {
+        let _guard = crate::session::fleet_home_lock();
+        let home = std::env::temp_dir().join(format!("fleet-heal-tcc-{}", std::process::id()));
+        let workspace = home.join("Documents").join("my-org").join("sub-project");
+        std::fs::create_dir_all(&workspace).unwrap();
+        // SAFETY: every test touching FLEET_HOME serialises on the lock above.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+
+        let real = workspace.to_string_lossy().into_owned();
+        let decoded = super::decode_workspace_path(&super::encode_workspace_path(&real));
+        assert_ne!(
+            decoded, real,
+            "fixture is pointless unless the decode really is broken under Documents"
+        );
+
+        let dir = project_dir_with_cwd("tcc", &real);
+        assert_eq!(heal_workspace_path(&dir, decoded), real);
+
+        unsafe { std::env::remove_var("FLEET_HOME") };
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// No transcript carries a usable `cwd` → nothing better is known, so the
+    /// decode stands rather than collapsing to an empty path.
+    #[test]
+    fn missing_transcript_cwd_leaves_the_decode_alone() {
+        let dir = std::env::temp_dir().join(format!("fleet-heal-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.jsonl"), "{\"type\":\"user\"}\n").unwrap();
+
+        let decoded = "/no/such/place".to_string();
+        assert_eq!(heal_workspace_path(&dir, decoded.clone()), decoded);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]
