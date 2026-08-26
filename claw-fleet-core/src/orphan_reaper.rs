@@ -61,18 +61,25 @@ const NEVER_REAP: &[&str] = &[
 /// the rule has to be deliberate:
 ///
 /// 1. it carries a `CLAUDE_CODE_SESSION_ID` (it is a session's descendant);
-/// 2. that session is no longer alive (a live session still owns its servers);
+/// 2. that id is in `dead_sessions` — a session Fleet *knows about* and knows
+///    has finished;
 /// 3. `ppid == 1` — it has already outlived its parent chain, so nothing else
 ///    is in a position to wait on it;
 /// 4. its command line matches [`REAPABLE`] and none of [`NEVER_REAP`].
-pub fn select_reapable(candidates: &[ProcCandidate], live_sessions: &HashSet<String>) -> Vec<u32> {
+///
+/// Condition 2 is deliberately "known dead", not "absent from the live set".
+/// Fleet learns about a session from its transcript, so a session that started
+/// seconds ago is in neither set — and under a "not known live ⇒ dead" rule its
+/// brand-new dev server would be killed out from under it. Unknown ids are
+/// skipped; the leftover simply gets collected on a later tick instead.
+pub fn select_reapable(candidates: &[ProcCandidate], dead_sessions: &HashSet<String>) -> Vec<u32> {
     candidates
         .iter()
         .filter(|c| {
             let Some(sid) = c.session_id.as_deref() else {
                 return false;
             };
-            if live_sessions.contains(sid) {
+            if !dead_sessions.contains(sid) {
                 return false;
             }
             if c.ppid != 1 {
@@ -87,13 +94,13 @@ pub fn select_reapable(candidates: &[ProcCandidate], live_sessions: &HashSet<Str
         .collect()
 }
 
-/// Scan every process on the machine and reclaim the leftovers of sessions not
-/// in `live_sessions`. Returns how many were killed.
+/// Scan every process on the machine and reclaim the leftovers of the sessions
+/// in `dead_sessions`. Returns how many were killed.
 ///
-/// `live_sessions` is the set of session ids still running; anything else is
-/// treated as finished. Passing an empty set is therefore *not* a no-op — it
-/// means "no session is alive", so give it the real list.
-pub fn reap_orphaned_session_processes(live_sessions: &HashSet<String>) -> usize {
+/// `dead_sessions` is the set of session ids Fleet knows about *and* knows have
+/// finished. An empty set is a no-op, which is the safe direction: a tick with
+/// no knowledge kills nothing.
+pub fn reap_orphaned_session_processes(dead_sessions: &HashSet<String>) -> usize {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
     let mut sys = System::new();
@@ -130,7 +137,7 @@ pub fn reap_orphaned_session_processes(live_sessions: &HashSet<String>) -> usize
         })
         .collect();
 
-    let doomed = select_reapable(&candidates, live_sessions);
+    let doomed = select_reapable(&candidates, dead_sessions);
     for pid in &doomed {
         let cmd = candidates
             .iter()
@@ -159,7 +166,7 @@ mod tests {
         }
     }
 
-    fn live(ids: &[&str]) -> HashSet<String> {
+    fn dead(ids: &[&str]) -> HashSet<String> {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
@@ -171,7 +178,7 @@ mod tests {
             Some("dead-session"),
             "node /repo/node_modules/.bin/../vite/bin/vite.js --port 1430",
         )];
-        assert_eq!(select_reapable(&c, &live(&["other"])), vec![500]);
+        assert_eq!(select_reapable(&c, &dead(&["dead-session"])), vec![500]);
     }
 
     #[test]
@@ -182,7 +189,7 @@ mod tests {
             Some("dead-session"),
             "node /opt/homebrew/lib/node_modules/patchwright-cli/cli.js -s=uiold",
         )];
-        assert_eq!(select_reapable(&c, &live(&[])), vec![501]);
+        assert_eq!(select_reapable(&c, &dead(&["dead-session"])), vec![501]);
     }
 
     #[test]
@@ -193,7 +200,22 @@ mod tests {
             Some("live-session"),
             "node /repo/node_modules/.bin/../vite/bin/vite.js --port 1430",
         )];
-        assert!(select_reapable(&c, &live(&["live-session"])).is_empty());
+        assert!(select_reapable(&c, &dead(&["some-other-dead-one"])).is_empty());
+    }
+
+    /// Fleet learns about a session from its transcript, so one that started
+    /// seconds ago is in neither the live nor the dead set. Under a
+    /// "not known live ⇒ dead" rule its brand-new dev server would be killed
+    /// out from under it on the very next tick.
+    #[test]
+    fn leaves_an_unknown_sessions_server_alone() {
+        let c = vec![cand(
+            509,
+            1,
+            Some("brand-new-session-fleet-has-not-scanned-yet"),
+            "node /repo/node_modules/.bin/../vite/bin/vite.js --port 1430",
+        )];
+        assert!(select_reapable(&c, &dead(&["dead-session"])).is_empty());
     }
 
     #[test]
@@ -205,14 +227,14 @@ mod tests {
             Some("dead-session"),
             "node /repo/node_modules/.bin/../vite/bin/vite.js --port 1430",
         )];
-        assert!(select_reapable(&c, &live(&[])).is_empty());
+        assert!(select_reapable(&c, &dead(&["dead-session"])).is_empty());
     }
 
     #[test]
     fn leaves_a_process_without_a_session_id_alone() {
         // The user's own `pnpm dev`, started from their terminal.
         let c = vec![cand(504, 1, None, "node /repo/.bin/../vite/bin/vite.js")];
-        assert!(select_reapable(&c, &live(&[])).is_empty());
+        assert!(select_reapable(&c, &dead(&["dead-session"])).is_empty());
     }
 
     /// The finding that forced the whitelist: Docker Desktop inherits the id of
@@ -235,7 +257,7 @@ mod tests {
                 "/Applications/Docker.app/Contents/MacOS/com.docker.backend services",
             ),
         ];
-        assert!(select_reapable(&c, &live(&[])).is_empty());
+        assert!(select_reapable(&c, &dead(&["dead-session"])).is_empty());
     }
 
     #[test]
@@ -246,7 +268,7 @@ mod tests {
             Some("dead-session"),
             "/Applications/Claw Fleet.app/Contents/MacOS/fleet watch fire 9407e601 1",
         )];
-        assert!(select_reapable(&c, &live(&[])).is_empty());
+        assert!(select_reapable(&c, &dead(&["dead-session"])).is_empty());
     }
 
     #[test]
@@ -254,6 +276,6 @@ mod tests {
         // Not in REAPABLE: a build that outlived its session is still not ours
         // to guess about. Opt-in only.
         let c = vec![cand(508, 1, Some("dead-session"), "zig build-exe -fllvm")];
-        assert!(select_reapable(&c, &live(&[])).is_empty());
+        assert!(select_reapable(&c, &dead(&["dead-session"])).is_empty());
     }
 }
