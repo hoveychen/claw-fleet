@@ -216,14 +216,18 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     const el = textareaRef.current;
     if (!el) return;
     // Collapse to 0 before reading scrollHeight so it reflects content height,
-    // not the current box. `last` short-circuits the observer's own
-    // set→observe→set feedback once the height has converged.
-    let last = -1;
+    // not the current box.
+    //
+    // What stops the observer's own set→observe→set feedback is that the loop
+    // converges on its own: once the content height is settled, `grow` writes
+    // back the height the box already had, that is not a size change, and no
+    // further notification is delivered. (This used to carry a `last` variable
+    // documented as the short-circuit; it was assigned on every call and then
+    // used as the value to write, so it was always equal to the fresh reading
+    // and short-circuited nothing.)
     const grow = () => {
       el.style.height = "0px";
-      const next = el.scrollHeight;
-      if (next !== last) last = next;
-      el.style.height = `${last}px`;
+      el.style.height = `${el.scrollHeight}px`;
     };
     grow();
     const ro = new ResizeObserver(grow);

@@ -83,30 +83,47 @@ const CHIME_FNS: Record<ChimePreset, (ctx: AudioContext) => void> = {
 /** Shared AudioContext — reused across chime calls to avoid autoplay-policy issues. */
 let sharedCtx: AudioContext | null = null;
 
+/**
+ * How long to wait on `resume()` before giving up on *waiting* (not on the
+ * context). Measured in WebKit, a resume that is going to work takes ~17ms, so
+ * this is ~18x the healthy case.
+ */
+const RESUME_PATIENCE_MS = 300;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 /** Get or create a running AudioContext.  If the existing context is stuck in
  *  "suspended" state (e.g. it was created outside a user-gesture on WKWebView),
  *  close it and create a fresh one so a subsequent resume() from a click handler
  *  can succeed. */
-async function ensureAudioContext(): Promise<AudioContext> {
+export function __resetAudioContextForTests() {
+  sharedCtx = null;
+}
+
+export async function ensureAudioContext(): Promise<AudioContext> {
   if (!sharedCtx || sharedCtx.state === "closed") {
     sharedCtx = new AudioContext();
   }
 
   if (sharedCtx.state === "suspended") {
     // Race resume() against a short timeout — on WKWebView, resume() may
-    // hang indefinitely when called outside a user gesture.
-    const resumed = await Promise.race([
-      sharedCtx.resume().then(() => true),
-      new Promise<false>((r) => setTimeout(() => r(false), 300)),
-    ]);
-    if (!resumed || sharedCtx.state === "suspended") {
-      // Context is stuck — tear it down and create a new one.
+    // hang indefinitely when called outside a user gesture, and a chime must
+    // not block the caller on that.
+    await Promise.race([sharedCtx.resume().catch(() => {}), sleep(RESUME_PATIENCE_MS)]);
+
+    // `state`, not "did the race time out". Losing patience says nothing about
+    // the context: a resume that took 350ms and then started leaves a perfectly
+    // running context, and tearing that one down would drop the chime we were
+    // asked to play. Only a context still suspended once we stop waiting has
+    // actually failed to start.
+    if (sharedCtx.state === "suspended") {
       console.debug("[audio] AudioContext stuck in suspended state, recreating");
       sharedCtx.close().catch(() => {});
       sharedCtx = new AudioContext();
-      // This new context is created within the current (user-gesture) call
-      // stack, so resume should succeed immediately.
-      await sharedCtx.resume().catch(() => {});
+      // Created within the current (user-gesture) call stack, so resume should
+      // succeed immediately — but it is the same call that can hang, so give it
+      // the same bound rather than awaiting it unguarded.
+      await Promise.race([sharedCtx.resume().catch(() => {}), sleep(RESUME_PATIENCE_MS)]);
     }
   }
 
