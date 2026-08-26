@@ -190,6 +190,19 @@
 .resume_btn:hover:not(:disabled) { background: #fecaca; }
 .resume_btn:disabled { opacity: 0.5; cursor: default; }
 
+/* Why a resume click did nothing. The failure used to go only to the devtools
+   console, so a resume into a workspace that no longer exists looked exactly
+   like a resume that worked (issue #105). Truncated inline; the full message is
+   the `title`. */
+.resume_error {
+  font-size: 11px;
+  color: #b91c1c;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Status icon ───────────────────────────────────────────────────────────
    Linear-style: a single 6px filled circle. Each StatusBadge sets `color`
    per status, the SVG inherits via `currentColor`. */

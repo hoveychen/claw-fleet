@@ -50,11 +50,13 @@ export function RateLimitCountdown({ state }: { state: RateLimitState }) {
 export function RateLimitControls({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
   const [resuming, setResuming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   if (session.status !== "rateLimited" || !session.rateLimit) return null;
   const handleResume = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (resuming) return;
     setResuming(true);
+    setError(null);
     try {
       await invoke("resume_rate_limited_session", {
         sessionId: session.id,
@@ -62,7 +64,7 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
         agentSource: session.agentSource,
       });
     } catch (err) {
-      console.error("resume failed", err);
+      setError(resumeErrorText(err));
     } finally {
       setResuming(false);
     }
@@ -85,6 +87,11 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
   return (
     <>
       <RateLimitCountdown state={session.rateLimit} />
+      {error && (
+        <span className={styles.resume_error} title={error}>
+          {error}
+        </span>
+      )}
       {canResume && (
         <button
           className={styles.resume_btn}
@@ -99,16 +106,30 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
   );
 }
 
+/**
+ * A resume that fails never starts a process, so nothing downstream will ever
+ * show the user why — the card is the only surface left. Tauri rejects a command
+ * with the plain string the Rust side returned (e.g. "Workspace directory not
+ * found: …"); anything else gets stringified as-is.
+ */
+function resumeErrorText(err: unknown): string {
+  if (typeof err === "string") return err;
+  const msg = (err as { message?: unknown } | null)?.message;
+  return typeof msg === "string" ? msg : String(err);
+}
+
 // ── Server-error controls (auto-retry indicator + manual retry) ─────────────
 
 export function ServerErrorControls({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
   const [resuming, setResuming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   if (session.status !== "serverErrored") return null;
   const handleResume = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (resuming) return;
     setResuming(true);
+    setError(null);
     try {
       await invoke("resume_rate_limited_session", {
         sessionId: session.id,
@@ -116,7 +137,7 @@ export function ServerErrorControls({ session }: { session: SessionInfo }) {
         agentSource: session.agentSource,
       });
     } catch (err) {
-      console.error("resume failed", err);
+      setError(resumeErrorText(err));
     } finally {
       setResuming(false);
     }
@@ -132,6 +153,11 @@ export function ServerErrorControls({ session }: { session: SessionInfo }) {
   return (
     <>
       <span className={styles.rate_limit_countdown}>{t("serverError.retrying")}</span>
+      {error && (
+        <span className={styles.resume_error} title={error}>
+          {error}
+        </span>
+      )}
       {canResume && (
         <button
           className={styles.resume_btn}
