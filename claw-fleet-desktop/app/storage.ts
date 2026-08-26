@@ -23,7 +23,7 @@ const ALL_KEYS = [
   "viewMode",
   // Which session sub-view (list vs gallery) the unified "Sessions" nav returns to.
   "lastSessionViewMode",
-  // Last page visited under each sidebar tab (管家 / 工作), as a JSON blob. The
+  // Last page visited under each sidebar tab (舰队 / 工作), as a JSON blob. The
   // active tab itself is derived from "viewMode", so it is not stored.
   "nav-group-last-view",
   // One-shot flag: existing users' stored "list" has been flipped to the new

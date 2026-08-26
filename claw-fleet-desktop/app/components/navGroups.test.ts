@@ -9,12 +9,12 @@ import {
 import { ALL_VIEW_MODES } from "../viewModes";
 
 /**
- * The sidebar's 管家 / 工作 tab strip renders each group's nav items from
+ * The sidebar's 舰队 / 工作 tab strip renders each group's nav items from
  * NAV_GROUP_VIEWS and derives the highlighted tab through navGroupOf. Those two
  * only stay in sync because the lookup map is built from the same table — and
  * because the table covers every page. A new ViewMode added to the store and
  * forgotten here would silently render in neither tab's nav while still being
- * reachable through a cross-page hop, leaving the strip pointing at 管家 with a
+ * reachable through a cross-page hop, leaving the strip pointing at 舰队 with a
  * 工作 page on screen. These tests are that guard.
  */
 describe("nav group partition", () => {
@@ -32,7 +32,7 @@ describe("nav group partition", () => {
     }
   });
 
-  it("routes the monitoring / management pages to 管家", () => {
+  it("routes the monitoring / management pages to 舰队", () => {
     for (const view of ["gallery", "list", "audit", "report", "memory", "skills", "plugins", "mobile"] as const) {
       expect(navGroupOf(view)).toBe("steward");
     }
