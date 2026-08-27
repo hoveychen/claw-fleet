@@ -38,6 +38,7 @@
 pub mod agent;
 pub mod attachments;
 pub mod conn;
+pub mod decisions;
 pub mod jsonrpc;
 pub mod stdio;
 pub mod tools;
