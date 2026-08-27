@@ -734,6 +734,43 @@ pub fn serve(opts: ServeOptions) {
     // serve()'s "never returns" contract and the ctrlc handler's ownership of
     // process exit unchanged.
     drop(search_index);
+
+    // ── ACP listener ───────────────────────────────────────────────────────
+    // Its own port, not a route here: tiny_http's upgraded stream cannot be
+    // split into concurrent halves, and ACP needs the reader parked on the
+    // socket while the turn thread streams `session/update`. See
+    // `crate::acp::ws` for the full reasoning. Same process, same `authorize`
+    // decision — only the socket is separate. A bind failure is logged and
+    // skipped: no ACP, but the rest of the server still comes up.
+    if let Some(addr) = crate::acp::ws::listen_addr() {
+        let acp_auth: crate::acp::ws::Authorizer = {
+            let admin = token.clone();
+            let public = public_token.clone();
+            std::sync::Arc::new(move |presented: Option<&str>| {
+                auth::authorize(
+                    crate::routes::ACP,
+                    presented,
+                    &admin,
+                    public.as_deref(),
+                    auth_disabled,
+                )
+                .is_allowed()
+            })
+        };
+        match crate::acp::ws::spawn_listener(&addr, sources.clone(), acp_auth) {
+            Ok(bound) => eprintln!("[fleet serve] ACP listening on ws://{bound}"),
+            // A taken port usually means another Fleet process already owns the
+            // ACP surface — normal with several instances on one machine, not a
+            // misconfiguration. Say which it is, so nobody goes hunting.
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => eprintln!(
+                "[fleet serve] ACP not started: {addr} is already in use \
+                 (another Fleet instance likely owns it; set FLEET_ACP_PORT to change, \
+                 or 0 to disable)"
+            ),
+            Err(e) => eprintln!("[fleet serve] ACP listener disabled ({addr}: {e})"),
+        }
+    }
+
     let workers = worker_count();
     eprintln!("[fleet serve] {workers} request worker(s)");
     let server = Arc::new(server);
@@ -1110,6 +1147,12 @@ fn handle_request(
             // never had a session is the entire point. `workspace_browse` carries
             // its own boundary (home + off-home known workspaces, canonical).
             crate::routes::BROWSE_DIR if request.method() == &tiny_http::Method::Get => route_browse_dir(ctx, request, &query, json_header, path),
+
+            // ...and the one write that picker needs: make a directory to pick.
+            // Same boundary as the listing above — `workspace_browse` refuses a
+            // parent outside the roots and a name that is anything but one plain
+            // component.
+            crate::routes::CREATE_DIR if request.method() == &tiny_http::Method::Post => route_create_dir(ctx, request, &query, json_header, path),
 
             // Spawn a brand-new headless Claude Code session (sessions page's
             // "new session" button, remote backend). Detached `claude -p`;

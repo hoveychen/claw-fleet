@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronUp, Folder, FolderGit2 } from "lucide-react";
+import { ChevronUp, Folder, FolderGit2, FolderPlus, HardDrive } from "lucide-react";
 import styles from "./DirPickerDialog.module.css";
 
 /** Mirrors `claw_fleet_core::workspace_browse::BrowseDirResponse`. */
@@ -15,6 +15,10 @@ interface BrowseDirResponse {
   parent: string | null;
   entries: BrowseEntry[];
   truncated: boolean;
+  /** Every browsable root. A root has no parent, so this is the only way back
+   *  out of one — and the listing can start in a root that is not home. An
+   *  older backend host omits it. */
+  roots?: string[];
 }
 
 interface Props {
@@ -66,6 +70,31 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
     void load(initialPath.trim() || undefined, true);
   }, [load, initialPath]);
 
+  // Make a directory to pick. A picker that can only walk down an existing tree
+  // has no answer at all on a host whose tree is empty — a freshly provisioned
+  // one always is. `create_dir` replies with the new directory's own listing, so
+  // one round trip both creates it and steps into it.
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submitNew = async () => {
+    const name = newName.trim();
+    if (!data || !name || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      setData(await invoke<BrowseDirResponse>("create_dir", { path: data.path, name }));
+      setNewName("");
+      setCreating(false);
+    } catch (e) {
+      // Name taken, no write permission — stay in the input so a retype retries.
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Long paths matter at their tail (which directory am I in), not their head.
   const crumbRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -92,6 +121,23 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
         {error && <div className={styles.error}>{error}</div>}
 
         <div className={styles.list}>
+          {/* Standing in a root there is no "up" — a root does not expose its
+              parent. On a cloud host the listing *starts* in such a root (the
+              persistent volume) with home on another one, so the other roots are
+              listed as rows; otherwise the only way across is typing a path. */}
+          {!data?.parent &&
+            (data?.roots ?? [])
+              .filter((r) => r !== data?.path)
+              .map((r) => (
+                <button key={r} className={styles.row} onClick={() => void load(r)}>
+                  <HardDrive size={13} strokeWidth={1.7} className={styles.icon} />
+                  {/* Name first: a whole path on one row gets ellipsized at the
+                      tail, and the tail is the part that identifies it. The full
+                      path trails behind, where truncation costs nothing. */}
+                  <span className={styles.name}>{r.split("/").filter(Boolean).pop() ?? r}</span>
+                  <span className={styles.rowPath}>{r}</span>
+                </button>
+              ))}
           {data?.parent && (
             <button className={styles.row} onClick={() => void load(data.parent!)}>
               <ChevronUp size={13} strokeWidth={1.7} className={styles.icon} />
@@ -114,6 +160,60 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
           {data?.truncated && <div className={styles.empty}>{t("dir_picker.truncated")}</div>}
           {loading && <div className={styles.empty}>{t("dir_picker.loading")}</div>}
         </div>
+
+        {creating ? (
+          <div className={styles.newRow}>
+            <input
+              className={styles.newInput}
+              autoFocus
+              value={newName}
+              placeholder={t("dir_picker.new_name")}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void submitNew();
+                // Escape backs out of the input, not the whole dialog — stop it
+                // before the window-level handler treats it as a cancel.
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setError(null);
+                  setCreating(false);
+                }
+              }}
+            />
+            <button
+              className={styles.confirm}
+              disabled={!newName.trim() || saving}
+              onClick={() => void submitNew()}
+            >
+              {saving ? t("dir_picker.creating") : t("dir_picker.create")}
+            </button>
+            <button
+              className={styles.cancel}
+              onClick={() => {
+                // Drop the error with the input: "already exists" was about that
+                // attempt, and left on screen it reads as a problem with the
+                // directory being browsed.
+                setError(null);
+                setCreating(false);
+              }}
+            >
+              {t("cancel")}
+            </button>
+          </div>
+        ) : (
+          <button
+            className={styles.newBtn}
+            disabled={!data}
+            onClick={() => {
+              setNewName("");
+              setError(null);
+              setCreating(true);
+            }}
+          >
+            <FolderPlus size={13} strokeWidth={1.7} className={styles.icon} />
+            <span>{t("dir_picker.new")}</span>
+          </button>
+        )}
 
         <div className={styles.actions}>
           <button className={styles.cancel} onClick={onCancel}>

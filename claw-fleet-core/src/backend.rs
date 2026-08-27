@@ -354,6 +354,18 @@ pub trait Backend: Send + Sync {
         &self,
         path: Option<String>,
     ) -> Result<crate::workspace_browse::BrowseDirResponse, String>;
+    /// Create one directory under `path` (`None` = the backend host's home) and
+    /// answer with the *new* directory's listing, so the picker lands inside it.
+    ///
+    /// Browsing alone is not enough to choose a workspace on a host whose tree
+    /// is empty — and it always is on a freshly provisioned one. Same backend
+    /// reasoning as `browse_dir`: the directory is created where the session
+    /// will spawn, which under a remote connection is the probe host.
+    fn create_dir(
+        &self,
+        path: Option<String>,
+        name: String,
+    ) -> Result<crate::workspace_browse::BrowseDirResponse, String>;
     /// The remote-workspace registry (workspaces executed through rca; see
     /// [`crate::remote_workspace`]). Lives on the backend host — that is where
     /// sessions spawn, so that is whose `~/.fleet/remote-workspaces.json`

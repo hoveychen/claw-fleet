@@ -2058,6 +2058,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "dsh_token_breakdown" => serve_dsh_token_breakdown(params),
         "browse_dir" => serve_browse_dir(params),
         // ── Write methods ────────────────────────────────────────────────
+        "create_dir" => serve_create_dir(params),
         "spawn_session" => serve_spawn_session(params),
         // Both carry the user's typed text and both have a process-spawning
         // side effect, so a lost reply must not turn into a second turn.
@@ -2716,6 +2717,18 @@ fn serve_browse_dir(params: &Value) -> Result<Value, String> {
 // ── Write methods ────────────────────────────────────────────────
 // All of these run inside `spawn_blocking` (see ws_connect_once), so
 // process spawns / kills / file writes never block the ws runtime.
+
+/// Make one directory inside the picker. The listing above can only walk a tree
+/// that already exists, which is nothing at all on a fresh host — so without
+/// this the picker has no reachable answer. Boundary is `browse_dir`'s, and the
+/// reply is the new directory's own listing so the client lands inside it.
+fn serve_create_dir(params: &Value) -> Result<Value, String> {
+    let path = params.get("path").and_then(Value::as_str).filter(|s| !s.is_empty());
+    let name = params.get("name").and_then(Value::as_str).ok_or("missing name")?;
+    let resp = crate::workspace_browse::create_dir(path, name, &known_workspaces())?;
+    serde_json::to_value(resp).map_err(|e| e.to_string())
+}
+
 fn serve_spawn_session(params: &Value) -> Result<Value, String> {
     let req: crate::session_launch::SpawnSessionRequest =
         serde_json::from_value(params.clone())

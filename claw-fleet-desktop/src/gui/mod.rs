@@ -2046,6 +2046,7 @@ pub fn run() {
             spawn_new_claude_session,
             chat_workspace,
             browse_dir,
+            create_dir,
             list_remote_workspaces,
             upsert_remote_workspace,
             remove_remote_workspace,

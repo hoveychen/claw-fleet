@@ -249,6 +249,12 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { path: q(a.path) },
   }),
 
+  create_dir: (a) => ({
+    method: "POST",
+    path: "/create_dir",
+    body: { path: q(a.path) ?? null, name: a.name },
+  }),
+
   cancel_loop: (a) => ({
     method: "POST",
     path: "/loop_cancel",

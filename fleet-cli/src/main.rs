@@ -193,6 +193,21 @@ enum Commands {
     /// [internal] MCP server — exposes `fleet__ask` over stdio JSON-RPC
     #[command(hide = true)]
     Mcp,
+    /// Agent Client Protocol agent over stdio — point an ACP editor at this
+    ///
+    /// Register it as an agent in Zed, JetBrains, VS Code, Neovim, Emacs or any
+    /// other ACP client. Without `--url` it drives this machine's workspace;
+    /// with `--url` it proxies to a remote Fleet's `/acp` endpoint.
+    Acp {
+        /// Proxy to a remote Fleet instead of running locally, e.g.
+        /// `wss://fleet.example.com/acp`
+        #[arg(long)]
+        url: Option<String>,
+        /// Bearer token for `--url`. Falls back to `FLEET_PUBLIC_TOKEN` so it
+        /// need not sit in an editor's settings file.
+        #[arg(long)]
+        token: Option<String>,
+    },
     /// [internal] Plan-approval hook — intercepts ExitPlanMode for Fleet UI
     #[command(hide = true)]
     PlanApproval,
@@ -972,6 +987,7 @@ fn main() {
             | Commands::Guard { .. }
             | Commands::Elicitation
             | Commands::Mcp
+            | Commands::Acp { .. }
             | Commands::PlanApproval
             | Commands::PrdContext
             | Commands::DshContext { .. }
@@ -985,6 +1001,7 @@ fn main() {
                         Commands::Guard { .. } => "guard",
                         Commands::Elicitation => "elicitation",
                         Commands::Mcp => "mcp",
+                        Commands::Acp { .. } => "acp",
                         Commands::PlanApproval => "plan-approval",
                         Commands::PrdContext => "prd-context",
                         Commands::DshContext { .. } => "dsh-context",
@@ -1036,6 +1053,9 @@ fn main() {
         },
         Commands::Elicitation => commands::guard::cmd_elicitation(),
         Commands::Mcp => commands::guard::cmd_mcp(),
+        Commands::Acp { url, token } => {
+            commands::acp::cmd_acp(url.as_deref(), token.as_deref())
+        }
         Commands::PlanApproval => commands::guard::cmd_plan_approval(),
         Commands::PrdContext => commands::prd::cmd_prd_context(),
         Commands::DshContext {

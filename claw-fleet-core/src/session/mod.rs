@@ -278,7 +278,7 @@ pub struct SessionInfo {
 
 mod paths;
 mod detect;
-mod stats;
+pub mod stats;
 mod parse;
 mod scan;
 mod kill;
