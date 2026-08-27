@@ -231,6 +231,9 @@ impl LocalBackend {
         // ── Startup zombie recovery ───────────────────────────────────────
         // Start the outbound mobile relay channel (outbound WS to fleet-relay);
         // no-op unless enabled with a secret in ~/.fleet/mobile-relay.json.
+        // The desktop outranks a headless `fleet serve` / `fleet webui` for the
+        // machine's single agent role, so declare our kind before joining.
+        claw_fleet_core::mobile_relay::set_desktop_agent();
         claw_fleet_core::mobile_relay::ensure_ws_client();
         step!("zombie recovery done");
 
