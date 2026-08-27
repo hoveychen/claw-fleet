@@ -254,10 +254,11 @@ interface UIState {
    *  would fire an FTS query the user never asked for. */
   historyMarkFilter: MarkFilter;
   historyWorkspaceFilter: string;
-  /** Chat mode: show the pure-chat workspace and nothing else. Independent of
-   *  `historyWorkspaceFilter` rather than a value inside it, so flipping it off
-   *  returns to whatever directory was selected before. See
-   *  `matchesWorkspaceFilter` for the mutual exclusion the pair encodes. */
+  /** Chat-only mode: show the pure-chat workspace and nothing else. Off is not
+   *  its mirror image — it simply stops filtering by mode, so chat sessions show
+   *  up under 「全部目录」 too. Independent of `historyWorkspaceFilter` rather
+   *  than a value inside it, so flipping it off returns to whatever directory
+   *  was selected before. See `matchesWorkspaceFilter`. */
   historyChatOnly: boolean;
   historyActiveOnly: boolean;
   historyQuery: string;
@@ -436,9 +437,9 @@ function readMarkFilter(): MarkFilter {
 const LEGACY_CHAT_ONLY_FILTER = "chat";
 const LEGACY_CHAT_HIDDEN_FILTER = "no-chat";
 
-/** The workspace filter and the chat-mode toggle, migrating the two retired
- *  pseudo-values above. "chat" becomes the toggle; "no-chat" is simply what
- *  every directory filter means now, so it collapses to "all". The rewrite is
+/** The workspace filter and the chat-only toggle, migrating the two retired
+ *  pseudo-values above. "chat" becomes the toggle; "no-chat" has no equivalent
+ *  left — 「全部目录」 now includes chat — so it collapses to "all". The rewrite is
  *  persisted, not just derived — leaving the legacy string on disk would let it
  *  re-force chat mode on the next boot after the user turned the toggle off. */
 function readHistoryWorkspaceFilters(): { filter: string; chatOnly: boolean } {

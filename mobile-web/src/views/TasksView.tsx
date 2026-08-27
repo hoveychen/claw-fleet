@@ -143,25 +143,21 @@ const LEGACY_CHAT_ONLY = "chat";
 const LEGACY_CHAT_HIDDEN = "no-chat";
 
 /** Does `s` pass the workspace filter? Mirrors the desktop launchpad's
- *  `matchesWorkspaceFilter`: the directory `<select>` and the `chatOnly` toggle
- *  are two mutually exclusive halves. Chat mode shows the pure-chat workspace
- *  and nothing else (the directory filter is ignored underneath it); directory
- *  mode shows directories only, so chat never mixes into "all".
+ *  `matchesWorkspaceFilter`: `chatOnly` is a chat-*only* toggle, not a
+ *  chat-on/chat-off switch. On, it shows the pure-chat workspace and nothing
+ *  else (the directory filter is ignored underneath it); off, nothing is
+ *  filtered by mode, so chat sessions sit in "all" alongside the repos.
  *
  *  `chatPath` is the desktop host's `~/.fleet/chat`, `null` until the relay
- *  answers (or if it never does) — neither half can be honoured without it, so
- *  the toggle goes inert rather than showing an empty list. */
+ *  answers (or if it never does) — the toggle cannot be honoured without it, so
+ *  it goes inert rather than showing an empty list. */
 export function matchesWorkspaceFilter(
   s: SessionInfo,
   filter: string,
   chatPath: string | null,
   chatOnly: boolean,
 ): boolean {
-  if (chatPath != null) {
-    const isChat = s.workspacePath === chatPath;
-    if (chatOnly) return isChat;
-    if (isChat) return false;
-  }
+  if (chatPath != null && chatOnly) return s.workspacePath === chatPath;
   if (!filter) return true;
   return s.workspacePath === filter;
 }
@@ -293,7 +289,8 @@ export function TasksView({
   // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
   const [search, setSearch] = useDraft<string>("tasks:search", "");
   const [workspace, setWorkspace] = useDraft<string>("tasks:workspace", "");
-  // 聊天模式 —— 和上面的目录筛选互斥的另一半（见 matchesWorkspaceFilter）。
+  // 仅聊天模式 —— 打开时盖过上面的目录筛选；关闭时不按模式过滤，聊天会话照常
+  // 混在列表里（见 matchesWorkspaceFilter）。
   const [chatOnly, setChatOnly] = useDraft<boolean>("tasks:chatOnly", false);
   const [activeOnly, setActiveOnly] = useDraft<boolean>("tasks:activeOnly", false);
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
@@ -340,8 +337,8 @@ export function TasksView({
   }, [all, chatPath]);
 
   // 迁移：聊天还是下拉里一条选项时存下来的值。"chat" 交给 toggle，"no-chat"
-  // 正是现在每个目录筛选的默认含义，直接归零。要抢在下面那个孤儿路径回退之
-  // 前跑，否则「只看聊天」会被静默还原成「看全部」。
+  // 已经没有对应项了（「全部目录」现在也含聊天），直接归零。要抢在下面那个孤
+  // 儿路径回退之前跑，否则「只看聊天」会被静默还原成「看全部」。
   useEffect(() => {
     if (workspace === LEGACY_CHAT_ONLY) {
       setWorkspace("");

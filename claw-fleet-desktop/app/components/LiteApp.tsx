@@ -69,8 +69,9 @@ export function LiteApp() {
   const [query, setQuery] = useState("");
   const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
-  // Chat mode — mutually exclusive with the directory filter above, exactly as
-  // on the desktop task page (see matchesWorkspaceFilter).
+  // Chat-only mode — while on it overrides the directory filter above; while
+  // off chat sessions just sit in the list with the rest, exactly as on the
+  // desktop task page (see matchesWorkspaceFilter).
   const [chatOnly, setChatOnly] = useState(false);
   const [activeOnly, setActiveOnly] = useState(false);
   // New-session composer + auto-open of the freshly spawned session.
@@ -290,7 +291,7 @@ export function LiteApp() {
                 disabled={chatOnly}
                 title={
                   chatOnly
-                    ? t("history.filter_workspace_off", "聊天模式下不按目录筛选")
+                    ? t("history.filter_workspace_off", "仅聊天模式下不按目录筛选")
                     : t("history.filter_workspace", "按工作目录筛选")
                 }
               >
@@ -309,10 +310,10 @@ export function LiteApp() {
                   className={`${styles.active_toggle} ${chatOnly ? styles.chat_toggle_on : ""}`}
                   aria-pressed={chatOnly}
                   onClick={() => setChatOnly((v) => !v)}
-                  title={t("history.filter_chat_tip", "只显示纯聊天会话，不按目录筛选")}
+                  title={t("history.filter_chat_tip", "只显示纯聊天会话，不按目录筛选；关闭时全部目录也含聊天")}
                 >
                   <MessageCircle size={11} strokeWidth={1.8} />
-                  {t("history.chat_mode", "聊天")}
+                  {t("history.chat_mode", "仅聊天")}
                 </button>
               )}
               <button
