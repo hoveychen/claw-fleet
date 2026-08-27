@@ -353,6 +353,8 @@ const DICT: Record<string, string> = {
   计划审批: "Plan approval",
   用户输入: "User prompt",
   决策卡: "Decision card",
+  // Collapsed rail line of a multi-question decision card: "<label · gist>（N 题）".
+  "{0}（{1} 题）": "{0} ({1} questions)",
   已回答: "Answered",
   已拒答: "Declined",
   已取消: "Cancelled",

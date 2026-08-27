@@ -1,0 +1,152 @@
+/* Read-only decision question/answer body. Lifted out of
+   SessionDetailTabs.module.css when the 决策 tab and the 消息 tab's expanded tool
+   step started sharing one renderer (DecisionQa.tsx). */
+
+.qaBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qaQuestion {
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.5;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Option rows: marker + markdown label, description indented under it. Selected
+   rows read on a soft green fill (mirrors the desktop option_selected). */
+.qaOption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--t-aux, 12px);
+  padding: 5px 8px;
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+}
+
+.qaOption[data-picked="true"] {
+  background: rgba(74, 222, 128, 0.12);
+  color: var(--color-text);
+}
+
+.qaOptionLabel {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: 600;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.qaOptionMarker {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  color: var(--color-text-dim);
+}
+
+.qaOption[data-picked="true"] .qaOptionMarker {
+  color: var(--color-success);
+}
+
+.qaOptionDesc {
+  color: var(--color-text-dim);
+  font-size: var(--t-meta, 11px);
+  line-height: 1.45;
+  padding-left: 18px; /* align under the label text, past the marker */
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Marker standing in for an html / image preview that can no longer be served. */
+.dimNote {
+  color: var(--color-text-dim);
+  font-size: var(--t-aux, 12px);
+  overflow-wrap: anywhere;
+}
+
+/* Free-text answer to an option-less card. */
+.preWrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--t-aux, 12px);
+  line-height: 1.5;
+}
+
+.mdLink {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+/* Markdown typography for the question body and option text. Selectors are
+   :global because ReactMarkdown emits real tags, not CSS-module classes. */
+.qaQuestion :global(p) {
+  margin: 0 0 0.4em;
+}
+.qaQuestion > :global(*:first-child) {
+  margin-top: 0;
+}
+.qaQuestion > :global(*:last-child) {
+  margin-bottom: 0;
+}
+.qaQuestion :global(code),
+.qaOptionLabel :global(code),
+.qaOptionDesc :global(code) {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--color-bg-card);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.qaQuestion :global(pre) {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  padding: 6px 8px;
+  border-radius: 6px;
+  margin: 0.3em 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.qaQuestion :global(pre code) {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+.qaQuestion :global(ul),
+.qaQuestion :global(ol) {
+  margin: 0.3em 0;
+  padding-left: 1.4em;
+}
+.qaQuestion :global(li) {
+  margin-bottom: 0.15em;
+}
+.qaQuestion :global(strong),
+.qaOptionLabel :global(strong),
+.qaOptionDesc :global(strong) {
+  font-weight: 700;
+}
+.qaQuestion :global(hr) {
+  border: none;
+  border-top: 1px dashed var(--color-border);
+  margin: 0.5em 0;
+}
+.qaQuestion :global(table) {
+  border-collapse: collapse;
+  font-size: var(--t-meta, 11px);
+  display: block;
+  overflow-x: auto;
+}
+.qaQuestion :global(td),
+.qaQuestion :global(th) {
+  border: 1px solid var(--color-border);
+  padding: 3px 7px;
+}

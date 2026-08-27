@@ -225,6 +225,11 @@ export interface ContentBlock {
   /** Server-side stat digest of the stripped toolUseResult on a tool_result
    *  block — feeds the tool chip's header stats (see mobile_relay.rs). */
   _digest?: ToolDigest;
+  /** Decision-card gist on a `tool_use` block (AskUserQuestion / fleet__ask /
+   *  request_user_input). The card itself lives in `input.questions`, which the
+   *  relay's input whitelist drops, so without this every decision chip in a
+   *  session would read the same bare 「决策卡」. */
+  _ask?: AskSummary;
   /** Base64 JPEG thumbnails of screenshots embedded in a tool_result body. */
   _thumbs?: string[];
   /** Image block whose `source` is a server-side JPEG thumbnail, not the
@@ -233,9 +238,19 @@ export interface ContentBlock {
   source?: { type?: string; media_type?: string; data?: string };
 }
 
+/** A decision card's gist, computed relay-side from the `tool_use` input. */
+export interface AskSummary {
+  /** The first question's opening line (its TTS summary), capped. */
+  q?: string;
+  /** How many questions the card asked. */
+  n?: number;
+}
+
 /** Flat stat digest the relay computes from a stripped `toolUseResult`.
  *  Every field is optional — which ones exist depends on the tool. */
 export interface ToolDigest {
+  /** A decision card's chosen answer (one of them, on a multi-question card). */
+  answer?: string;
   added?: number;
   removed?: number;
   stdoutLines?: number;

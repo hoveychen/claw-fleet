@@ -72,6 +72,20 @@ export function friendlyToolName(rawId: string, tr: Translate = t): string {
   return id;
 }
 
+/**
+ * Collapsed rail line for a decision card. The card body never reaches the
+ * phone (the relay's input whitelist drops `questions`), so the gist rides on
+ * the block as `_ask` — without it every decision chip in a session reads the
+ * same bare 「决策卡」 and the reader cannot tell which question was which.
+ */
+export function decisionSummary(block: ContentBlock, tr: Translate = t): string {
+  const label = tr("决策卡");
+  const gist = block._ask?.q?.trim();
+  const count = block._ask?.n ?? 0;
+  const head = gist ? `${label} · ${gist}` : label;
+  return count > 1 ? tr("{0}（{1} 题）", head, count) : head;
+}
+
 /** The readable one-line label shown beside a mobile transcript tool icon. */
 export function toolSummary(block: ContentBlock): string {
   const input = block.input;
