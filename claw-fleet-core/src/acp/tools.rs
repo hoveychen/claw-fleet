@@ -183,6 +183,179 @@ fn clip(s: &str) -> String {
     format!("{head}\n… (truncated)")
 }
 
+// ───────────────────── Transcript → session/update ──────────────────
+
+/// Project transcript records into the `session/update` stream.
+///
+/// Handles both on-disk shapes. Claude writes `{type:"assistant", message:
+/// {content:[…]}}` with `text` / `thinking` / `tool_use` blocks; Codex writes
+/// `{type:"response_item", payload:{…}}` where a call is `function_call` or
+/// `custom_tool_call`, correlated by `call_id` rather than `id`.
+///
+/// `include_user` is off during a live turn — the client sent that message and
+/// does not need it echoed — and on while replaying for `session/load`, where
+/// both sides of the conversation are being rebuilt.
+pub fn project_updates(messages: &[Value], include_user: bool) -> Vec<super::types::SessionUpdate> {
+    use super::types::SessionUpdate as U;
+    let mut out = Vec::new();
+
+    for msg in messages {
+        match msg.get("type").and_then(|t| t.as_str()) {
+            Some("assistant") => {
+                for b in blocks(msg.get("message")) {
+                    match b.get("type").and_then(|t| t.as_str()) {
+                        Some("text") => push_text(&mut out, b.get("text"), U::agent_text),
+                        // Claude keeps the reasoning under its own key, beside
+                        // a signature that is not ours to forward.
+                        Some("thinking") => push_text(&mut out, b.get("thinking"), U::thought),
+                        Some("tool_use") => {
+                            if let Some(call) = tool_call_from_use(b) {
+                                out.push(U::ToolCall(call));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Some("user") => {
+                for b in blocks(msg.get("message")) {
+                    match b.get("type").and_then(|t| t.as_str()) {
+                        Some("tool_result") => {
+                            if let Some(up) = tool_call_update_from_result(b) {
+                                out.push(U::ToolCallUpdate(up));
+                            }
+                        }
+                        Some("text") if include_user => {
+                            push_text(&mut out, b.get("text"), U::user_text)
+                        }
+                        _ => {}
+                    }
+                }
+                // Claude also writes a bare-string user message.
+                if include_user {
+                    if let Some(s) =
+                        msg.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str())
+                    {
+                        push_text(&mut out, Some(&Value::from(s)), U::user_text);
+                    }
+                }
+            }
+            Some("response_item") => project_codex_item(&mut out, msg.get("payload"), include_user),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// One Codex `response_item` payload.
+fn project_codex_item(
+    out: &mut Vec<super::types::SessionUpdate>,
+    payload: Option<&Value>,
+    include_user: bool,
+) {
+    use super::types::SessionUpdate as U;
+    let Some(p) = payload else { return };
+    match p.get("type").and_then(|t| t.as_str()) {
+        Some("message") => {
+            let is_user = p.get("role").and_then(|r| r.as_str()) == Some("user");
+            if is_user && !include_user {
+                return;
+            }
+            let make = if is_user { U::user_text } else { U::agent_text };
+            for b in p.get("content").and_then(|c| c.as_array()).map(|v| v.as_slice()).unwrap_or(&[])
+            {
+                if matches!(b.get("type").and_then(|t| t.as_str()), Some("output_text" | "input_text"))
+                {
+                    push_text(out, b.get("text"), make);
+                }
+            }
+        }
+        // Codex encrypts its reasoning and usually leaves `summary` empty, so
+        // there is normally nothing to show. Forward a summary when there is
+        // one; never touch `encrypted_content`.
+        Some("reasoning") => {
+            for s in p.get("summary").and_then(|s| s.as_array()).map(|v| v.as_slice()).unwrap_or(&[])
+            {
+                let text = s.as_str().map(Value::from).or_else(|| s.get("text").cloned());
+                push_text(out, text.as_ref(), U::thought);
+            }
+        }
+        Some("function_call" | "custom_tool_call") => {
+            if let Some(call) = codex_tool_call(p) {
+                out.push(U::ToolCall(call));
+            }
+        }
+        Some("function_call_output" | "custom_tool_call_output") => {
+            if let Some(up) = codex_tool_result(p) {
+                out.push(U::ToolCallUpdate(up));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Build a `tool_call` from a Codex call payload.
+///
+/// Keyed on `call_id`, not `id`: the output payload carries only `call_id`, so
+/// using `id` here would leave every Codex call stuck at `in_progress`.
+fn codex_tool_call(p: &Value) -> Option<ToolCall> {
+    let id = p.get("call_id")?.as_str()?.to_string();
+    let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+    // `function_call` carries a JSON *string* of arguments; `custom_tool_call`
+    // carries free-form `input`.
+    let input = p
+        .get("arguments")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .or_else(|| p.get("input").cloned())
+        .unwrap_or(Value::Null);
+
+    let mut content = Vec::new();
+    if let Some(d) = diff_for(name, &input) {
+        content.push(d);
+    }
+    Some(ToolCall {
+        tool_call_id: id,
+        title: title_for(name, &input),
+        kind: kind_for_tool(name),
+        status: ToolCallStatus::InProgress,
+        content,
+        locations: locations_for(name, &input),
+        raw_input: (!input.is_null()).then_some(input),
+    })
+}
+
+fn codex_tool_result(p: &Value) -> Option<ToolCallUpdate> {
+    let id = p.get("call_id")?.as_str()?.to_string();
+    let text = p.get("output").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+    Some(ToolCallUpdate {
+        tool_call_id: id,
+        status: Some(ToolCallStatus::Completed),
+        content: text.map(|t| vec![ToolCallContent::text(clip(t))]),
+        raw_output: None,
+    })
+}
+
+/// The content blocks of a `message`, or empty when it is not an array.
+fn blocks(message: Option<&Value>) -> &[Value] {
+    message
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+        .map(|v| v.as_slice())
+        .unwrap_or(&[])
+}
+
+/// Push a non-empty string field as an update built by `make`.
+fn push_text(
+    out: &mut Vec<super::types::SessionUpdate>,
+    field: Option<&Value>,
+    make: fn(String) -> super::types::SessionUpdate,
+) {
+    if let Some(s) = field.and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        out.push(make(s.to_string()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,6 +557,158 @@ mod tests {
         assert_eq!(v["status"], "completed");
         assert!(v.get("content").is_none(), "absent means unchanged");
         assert!(v.get("rawOutput").is_none());
+    }
+
+    // ── transcript projection ───────────────────────────────────────
+
+    use super::super::types::SessionUpdate as U;
+
+    #[test]
+    fn a_claude_turn_projects_text_thinking_and_the_tool_round_trip() {
+        // Shapes taken from real transcripts: thinking lives under its own
+        // key beside a signature, tool_use carries `id`, tool_result carries
+        // `tool_use_id`.
+        let msgs = vec![
+            json!({"type": "assistant", "message": {"content": [
+                {"type": "thinking", "thinking": "let me look", "signature": "sig"},
+                {"type": "text", "text": "checking"},
+                {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}
+            ]}}),
+            json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "a.txt"}
+            ]}}),
+            json!({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "there is one file"}
+            ]}}),
+        ];
+        let ups = project_updates(&msgs, false);
+        assert_eq!(ups.len(), 5);
+        assert!(matches!(ups[0], U::AgentThoughtChunk { .. }), "thinking is its own channel");
+        assert!(matches!(ups[1], U::AgentMessageChunk { .. }));
+        match &ups[2] {
+            U::ToolCall(c) => {
+                assert_eq!(c.tool_call_id, "t1");
+                assert_eq!(c.kind, ToolKind::Execute);
+            }
+            other => panic!("expected a tool_call, got {other:?}"),
+        }
+        match &ups[3] {
+            U::ToolCallUpdate(u) => {
+                assert_eq!(u.tool_call_id, "t1", "the result must name the call it completes");
+                assert_eq!(u.status, Some(ToolCallStatus::Completed));
+            }
+            other => panic!("expected a tool_call_update, got {other:?}"),
+        }
+        assert!(matches!(ups[4], U::AgentMessageChunk { .. }));
+    }
+
+    #[test]
+    fn the_signature_beside_a_thinking_block_is_not_forwarded() {
+        let msgs = vec![json!({"type": "assistant", "message": {"content": [
+            {"type": "thinking", "thinking": "reasoning", "signature": "SECRET"}
+        ]}})];
+        let json = serde_json::to_string(&project_updates(&msgs, false)).unwrap();
+        assert!(json.contains("reasoning"));
+        assert!(!json.contains("SECRET"), "the signature is not ours to forward");
+    }
+
+    #[test]
+    fn user_messages_are_echoed_only_when_replaying() {
+        let msgs = vec![
+            json!({"type": "user", "message": {"content": [{"type": "text", "text": "hello"}]}}),
+            // Claude also writes a bare-string user message.
+            json!({"type": "user", "message": {"content": "bare string"}}),
+        ];
+        // During a live turn the client sent these; echoing them would double
+        // them up in its transcript.
+        assert!(project_updates(&msgs, false).is_empty());
+
+        let replayed = project_updates(&msgs, true);
+        assert_eq!(replayed.len(), 2, "both shapes must survive a replay");
+        assert!(replayed.iter().all(|u| matches!(u, U::UserMessageChunk { .. })));
+    }
+
+    #[test]
+    fn a_codex_turn_projects_through_call_id() {
+        // Codex's output payload carries only `call_id`; keying the call on
+        // `id` would leave every one of them stuck at in_progress.
+        let msgs = vec![
+            json!({"type": "response_item", "payload": {
+                "type": "function_call", "id": "fc_1", "call_id": "call_A",
+                "name": "Read", "arguments": "{\"file_path\":\"/w/a.rs\"}"
+            }}),
+            json!({"type": "response_item", "payload": {
+                "type": "function_call_output", "call_id": "call_A", "output": "fn main"
+            }}),
+            json!({"type": "response_item", "payload": {
+                "type": "message", "role": "assistant",
+                "content": [{"type": "output_text", "text": "read it"}]
+            }}),
+        ];
+        let ups = project_updates(&msgs, false);
+        assert_eq!(ups.len(), 3);
+        match &ups[0] {
+            U::ToolCall(c) => {
+                assert_eq!(c.tool_call_id, "call_A");
+                assert_eq!(c.kind, ToolKind::Read);
+                // `arguments` is a JSON *string* and must be parsed, or the
+                // title and locations come out empty.
+                assert_eq!(c.locations.first().map(|l| l.path.as_str()), Some("/w/a.rs"));
+            }
+            other => panic!("expected a tool_call, got {other:?}"),
+        }
+        match &ups[1] {
+            U::ToolCallUpdate(u) => assert_eq!(u.tool_call_id, "call_A"),
+            other => panic!("expected an update, got {other:?}"),
+        }
+        assert!(matches!(ups[2], U::AgentMessageChunk { .. }));
+    }
+
+    #[test]
+    fn a_codex_custom_tool_call_uses_its_free_form_input() {
+        let msgs = vec![json!({"type": "response_item", "payload": {
+            "type": "custom_tool_call", "call_id": "call_B", "name": "exec",
+            "input": "console.log(1)"
+        }})];
+        match &project_updates(&msgs, false)[0] {
+            U::ToolCall(c) => {
+                assert_eq!(c.tool_call_id, "call_B");
+                assert_eq!(c.raw_input, Some(json!("console.log(1)")));
+            }
+            other => panic!("expected a tool_call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codex_encrypted_reasoning_yields_nothing_rather_than_noise() {
+        // Codex encrypts its reasoning and usually leaves `summary` empty.
+        let empty = vec![json!({"type": "response_item", "payload": {
+            "type": "reasoning", "summary": [], "encrypted_content": "gAAAAA..."
+        }})];
+        let ups = project_updates(&empty, false);
+        assert!(ups.is_empty());
+        let json = serde_json::to_string(&ups).unwrap();
+        assert!(!json.contains("gAAAAA"), "encrypted content is never forwarded");
+
+        // When a summary is present it is worth showing.
+        let summarised = vec![json!({"type": "response_item", "payload": {
+            "type": "reasoning", "summary": ["planned the edit"]
+        }})];
+        assert!(matches!(project_updates(&summarised, false)[0], U::AgentThoughtChunk { .. }));
+    }
+
+    #[test]
+    fn malformed_records_are_skipped_not_fatal() {
+        let msgs = vec![
+            json!({"type": "assistant"}),
+            json!({"type": "assistant", "message": {"content": "not an array"}}),
+            json!({"type": "response_item"}),
+            json!({"type": "something_new"}),
+            json!({}),
+            // Empty text must not produce an empty chunk.
+            json!({"type": "assistant", "message": {"content": [{"type": "text", "text": ""}]}}),
+        ];
+        assert!(project_updates(&msgs, true).is_empty());
     }
 
     #[test]

@@ -430,22 +430,10 @@ impl AcpAgent {
         let Ok(messages) = src.get_messages(&path) else {
             return;
         };
-        for msg in &messages {
-            match msg.get("type").and_then(|t| t.as_str()) {
-                Some("user") => {
-                    if let Some(text) = user_message_text(msg) {
-                        self.notify_update(acp_session_id, SessionUpdate::user_text(text));
-                    }
-                }
-                _ => {
-                    let text = crate::hooks_server::responses::project_output_text(
-                        std::slice::from_ref(msg),
-                    );
-                    if !text.is_empty() {
-                        self.notify_update(acp_session_id, SessionUpdate::agent_text(text));
-                    }
-                }
-            }
+        // `include_user` is on here: a replay rebuilds both sides of the
+        // conversation, not a monologue.
+        for update in super::tools::project_updates(&messages, true) {
+            self.notify_update(acp_session_id, update);
         }
     }
 
@@ -473,11 +461,19 @@ impl AcpAgent {
             if let Some((path, src)) = self.resolve_source(internal_id) {
                 if let Ok((msgs, new_offset)) = src.tail_incremental(&path, offset) {
                     offset = new_offset;
-                    let delta =
-                        crate::hooks_server::responses::project_output_text(&msgs);
-                    if !delta.is_empty() {
-                        self.notify_update(acp_session_id, SessionUpdate::agent_text(delta));
-                        emitted = true;
+                    // The whole trace, not just the prose: tool calls, their
+                    // results and the agent's reasoning all reach the client.
+                    // `include_user` is off — the client sent that message and
+                    // does not need it echoed back.
+                    for update in super::tools::project_updates(&msgs, false) {
+                        // Only assistant prose counts as "the turn produced
+                        // output". A tool call alone does not end a turn, and
+                        // treating it as output would complete the turn the
+                        // moment the agent reached for its first tool.
+                        if matches!(update, SessionUpdate::AgentMessageChunk { .. }) {
+                            emitted = true;
+                        }
+                        self.notify_update(acp_session_id, update);
                     }
                 }
                 if emitted && self.turn_is_idle(internal_id) {
@@ -559,25 +555,6 @@ fn iso8601_from_unix_ms(ms: u64) -> Option<String> {
         return None;
     }
     chrono::DateTime::from_timestamp_millis(ms as i64).map(|dt| dt.to_rfc3339())
-}
-
-/// Text of a transcript `user` record.
-///
-/// Claude writes `message.content` as either a bare string or an array of
-/// blocks, so both shapes have to be read — a replay that only handled one
-/// would drop half the user's side of the conversation.
-fn user_message_text(msg: &Value) -> Option<String> {
-    let content = msg.get("message")?.get("content")?;
-    if let Some(s) = content.as_str() {
-        return (!s.is_empty()).then(|| s.to_string());
-    }
-    let joined: Vec<String> = content
-        .as_array()?
-        .iter()
-        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
-        .filter_map(|b| b.get("text").and_then(|t| t.as_str()).map(String::from))
-        .collect();
-    (!joined.is_empty()).then(|| joined.join("\n"))
 }
 
 /// Handle one inbound frame against an agent. Returns the frame to write back,
@@ -885,28 +862,6 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code, jsonrpc::codes::INVALID_PARAMS);
         assert!(err.message.contains("effort"));
-    }
-
-    #[test]
-    fn user_message_text_reads_both_transcript_shapes() {
-        // Claude writes `message.content` as a bare string or as blocks;
-        // handling only one would drop half the replayed conversation.
-        assert_eq!(
-            user_message_text(&json!({"message": {"content": "plain"}})).as_deref(),
-            Some("plain")
-        );
-        assert_eq!(
-            user_message_text(&json!({"message": {"content": [
-                {"type": "text", "text": "a"},
-                {"type": "tool_result", "content": "ignored"},
-                {"type": "text", "text": "b"}
-            ]}}))
-            .as_deref(),
-            Some("a\nb")
-        );
-        assert_eq!(user_message_text(&json!({"message": {"content": []}})), None);
-        assert_eq!(user_message_text(&json!({"message": {"content": ""}})), None);
-        assert_eq!(user_message_text(&json!({"nothing": true})), None);
     }
 
     #[test]
