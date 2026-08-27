@@ -59,6 +59,9 @@ pub struct AcpAgent {
     /// JSON-RPC request id → the ACP session its turn is running for, so
     /// `$/cancel_request` (which names a request, not a session) can stop it.
     in_flight: Mutex<HashMap<String, String>>,
+    /// Set once the peer hangs up, so the decision watcher stands down
+    /// instead of polling for a client that is gone.
+    closed: std::sync::atomic::AtomicBool,
     /// Sessions hidden from `session/list` by `session/delete`.
     ///
     /// Deliberately in-memory and not a transcript deletion: the schema only
@@ -87,6 +90,7 @@ impl AcpAgent {
             sessions: Mutex::new(HashMap::new()),
             client_caps: Mutex::new(ClientCapabilities::default()),
             in_flight: Mutex::new(HashMap::new()),
+            closed: std::sync::atomic::AtomicBool::new(false),
             deleted: Mutex::new(std::collections::HashSet::new()),
         }
     }
@@ -169,7 +173,40 @@ impl AcpAgent {
     /// The peer hung up: fail every parked request so blocked decision-card
     /// threads unwind now rather than at their timeout.
     pub fn disconnect(&self) {
+        self.closed.store(true, std::sync::atomic::Ordering::Release);
         self.peer.fail_all(RpcError::internal("client disconnected"));
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Ask the client something and block until it answers.
+    ///
+    /// This is the direction the Responses surface could not go: HTTP gave the
+    /// agent no way to speak first, so a decision card could only be surfaced
+    /// on whatever poll came next.
+    pub fn request_client(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, RpcError> {
+        self.peer.request_blocking(method, params, timeout)
+    }
+
+    /// The ACP session id driving a given internal session, if this connection
+    /// owns it.
+    ///
+    /// Returning `None` is what keeps one customer's card off another
+    /// customer's client.
+    pub fn acp_session_for_internal(&self, internal_id: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, st)| st.internal_id.as_deref() == Some(internal_id))
+            .map(|(acp_id, _)| acp_id.clone())
     }
 
     #[cfg(test)]

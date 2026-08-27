@@ -26,33 +26,28 @@ use super::types::{
 /// The option ids Fleet answers on. Stable strings, not indexes, so a client
 /// echoing one back cannot be misread if the option list ever changes order.
 pub const OPT_ALLOW: &str = "allow";
-pub const OPT_ALLOW_ALWAYS: &str = "allow_always";
 pub const OPT_REJECT: &str = "reject";
 
-/// The two-or-three choices Fleet offers on a permission card.
+/// The choices Fleet offers on a permission card.
 ///
-/// `allow_always` is included only where Fleet can actually remember the
-/// answer — offering a "don't ask again" that is silently forgotten is worse
-/// than not offering it.
-pub fn permission_options(allow_always: bool) -> Vec<PermissionOption> {
-    let mut opts = vec![PermissionOption {
-        option_id: OPT_ALLOW.to_string(),
-        name: "Allow".to_string(),
-        kind: PermissionOptionKind::AllowOnce,
-    }];
-    if allow_always {
-        opts.push(PermissionOption {
-            option_id: OPT_ALLOW_ALWAYS.to_string(),
-            name: "Allow and remember".to_string(),
-            kind: PermissionOptionKind::AllowAlways,
-        });
-    }
-    opts.push(PermissionOption {
-        option_id: OPT_REJECT.to_string(),
-        name: "Reject".to_string(),
-        kind: PermissionOptionKind::RejectOnce,
-    });
-    opts
+/// Allow or reject, and nothing else. Both of Fleet's permission channels
+/// answer with a two-valued decision (`GuardDecision`,
+/// `PermissionPromptDecision`), so an "allow and remember" would have nowhere
+/// to go on the way back — and a choice that is silently forgotten is worse
+/// than one that was never offered.
+pub fn permission_options() -> Vec<PermissionOption> {
+    vec![
+        PermissionOption {
+            option_id: OPT_ALLOW.to_string(),
+            name: "Allow".to_string(),
+            kind: PermissionOptionKind::AllowOnce,
+        },
+        PermissionOption {
+            option_id: OPT_REJECT.to_string(),
+            name: "Reject".to_string(),
+            kind: PermissionOptionKind::RejectOnce,
+        },
+    ]
 }
 
 /// Whether an outcome means "go ahead".
@@ -63,15 +58,8 @@ pub fn permission_options(allow_always: bool) -> Vec<PermissionOption> {
 pub fn outcome_allows(outcome: &RequestPermissionOutcome) -> bool {
     match outcome {
         RequestPermissionOutcome::Cancelled => false,
-        RequestPermissionOutcome::Selected { option_id } => {
-            option_id == OPT_ALLOW || option_id == OPT_ALLOW_ALWAYS
-        }
+        RequestPermissionOutcome::Selected { option_id } => option_id == OPT_ALLOW,
     }
-}
-
-/// Whether the user asked Fleet to remember the answer.
-pub fn outcome_is_always(outcome: &RequestPermissionOutcome) -> bool {
-    matches!(outcome, RequestPermissionOutcome::Selected { option_id } if option_id == OPT_ALLOW_ALWAYS)
 }
 
 // ─────────────────────── guard / permission-prompt ──────────────────
@@ -94,8 +82,7 @@ pub fn guard_to_permission(
             content: None,
             raw_output: None,
         },
-        // Guard rules are persisted by Fleet, so "remember this" is real here.
-        options: permission_options(true),
+        options: permission_options(),
     }
 }
 
@@ -130,9 +117,7 @@ pub fn permission_prompt_to_permission(
             content: None,
             raw_output: None,
         },
-        // Claude Code owns this decision for the turn; Fleet has nowhere to
-        // persist an "always" for it, so it is not offered.
-        options: permission_options(false),
+        options: permission_options(),
     }
 }
 
@@ -394,9 +379,12 @@ mod tests {
         assert_eq!(r.session_id, "sess");
         assert_eq!(r.tool_call.tool_call_id, "g1");
         assert_eq!(r.tool_call.status, Some(ToolCallStatus::Pending));
-        // Guard rules persist, so "remember" is a real choice here.
-        assert_eq!(r.options.len(), 3);
-        assert!(r.options.iter().any(|o| o.kind == PermissionOptionKind::AllowAlways));
+        // GuardDecision is Allow or Block only, so "remember" is not offered:
+        // it could not be honoured on the way back.
+        assert_eq!(r.options.len(), 2);
+        assert!(r.options.iter().all(|o| o.kind != PermissionOptionKind::AllowAlways));
+        assert_eq!(r.options[0].option_id, OPT_ALLOW);
+        assert_eq!(r.options[1].option_id, OPT_REJECT);
     }
 
     #[test]
@@ -432,28 +420,14 @@ mod tests {
         // with `cancelled`; reading that as consent would run a command
         // nobody approved.
         assert!(!outcome_allows(&RequestPermissionOutcome::Cancelled));
-        assert!(!outcome_is_always(&RequestPermissionOutcome::Cancelled));
 
         assert!(outcome_allows(&RequestPermissionOutcome::Selected { option_id: OPT_ALLOW.into() }));
-        assert!(outcome_allows(&RequestPermissionOutcome::Selected {
-            option_id: OPT_ALLOW_ALWAYS.into()
-        }));
         assert!(!outcome_allows(&RequestPermissionOutcome::Selected {
             option_id: OPT_REJECT.into()
         }));
         // An id we never offered is not an approval either.
         assert!(!outcome_allows(&RequestPermissionOutcome::Selected {
             option_id: "something-else".into()
-        }));
-    }
-
-    #[test]
-    fn only_allow_always_asks_fleet_to_remember() {
-        assert!(outcome_is_always(&RequestPermissionOutcome::Selected {
-            option_id: OPT_ALLOW_ALWAYS.into()
-        }));
-        assert!(!outcome_is_always(&RequestPermissionOutcome::Selected {
-            option_id: OPT_ALLOW.into()
         }));
     }
 
