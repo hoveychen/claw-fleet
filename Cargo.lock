@@ -2228,6 +2228,7 @@ dependencies = [
  "chrono",
  "clap",
  "claw-fleet-core",
+ "flate2",
  "git2",
  "libc",
  "percent-encoding",
