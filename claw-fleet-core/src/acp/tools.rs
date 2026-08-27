@@ -36,6 +36,23 @@ pub fn kind_for_tool(name: &str) -> ToolKind {
     }
 }
 
+/// Whether a tool's job is to put a question in front of a human.
+///
+/// These are the calls that produce a Fleet decision card, so they get two
+/// projections: this `tool_call`, and — once the decision channel is wired —
+/// the question itself as a `request_permission` or an `elicitation/create`.
+/// The client sees both "a tool is waiting" and "a question is being asked",
+/// which is the honest description of what is happening.
+///
+/// They start at [`ToolCallStatus::Pending`] rather than `in_progress`, because
+/// the schema defines pending as "the input is either streaming or we're
+/// awaiting approval" — nothing is executing while a human is being asked.
+pub fn is_interactive_tool(name: &str) -> bool {
+    matches!(name, "AskUserQuestion" | "ExitPlanMode")
+        || name.ends_with("__fleet__ask")
+        || name.ends_with("__fleet__render_a2ui")
+}
+
 /// A one-line human summary of a call, for the client's tool list.
 ///
 /// Prefers the argument a person would recognise — the command, the path, the
@@ -127,13 +144,23 @@ pub fn tool_call_from_use(block: &Value) -> Option<ToolCall> {
         tool_call_id: id,
         title: title_for(name, &input),
         kind: kind_for_tool(name),
-        // The block exists because the agent decided to call it; execution is
-        // under way by the time we see it in the transcript.
-        status: ToolCallStatus::InProgress,
+        status: initial_status(name),
         content,
         locations: locations_for(name, &input),
         raw_input: (!input.is_null()).then_some(input),
     })
+}
+
+/// The status a call starts in.
+///
+/// Everything is executing by the time it reaches the transcript, except the
+/// tools whose whole job is to wait for a person — see [`is_interactive_tool`].
+pub fn initial_status(name: &str) -> ToolCallStatus {
+    if is_interactive_tool(name) {
+        ToolCallStatus::Pending
+    } else {
+        ToolCallStatus::InProgress
+    }
 }
 
 /// How much of a tool's output to forward.
@@ -318,7 +345,7 @@ fn codex_tool_call(p: &Value) -> Option<ToolCall> {
         tool_call_id: id,
         title: title_for(name, &input),
         kind: kind_for_tool(name),
-        status: ToolCallStatus::InProgress,
+        status: initial_status(name),
         content,
         locations: locations_for(name, &input),
         raw_input: (!input.is_null()).then_some(input),
@@ -479,6 +506,54 @@ mod tests {
         assert_eq!(call.locations.len(), 1);
         assert!(matches!(call.content.first(), Some(ToolCallContent::Diff(_))));
         assert!(call.raw_input.is_some());
+    }
+
+    #[test]
+    fn a_tool_that_asks_a_human_starts_pending_not_in_progress() {
+        // The schema's `pending` is "awaiting approval". Nothing is executing
+        // while a person is being asked, and this is the tool half of the
+        // double projection — the question itself follows on the decision
+        // channel.
+        for name in [
+            "AskUserQuestion",
+            "ExitPlanMode",
+            "mcp__fleet__fleet__ask",
+            "mcp__fleet__fleet__render_a2ui",
+        ] {
+            assert!(is_interactive_tool(name), "{name} asks a human");
+            assert_eq!(initial_status(name), ToolCallStatus::Pending, "{name}");
+        }
+        // Everything else really is running by the time it hits the transcript.
+        for name in ["Bash", "Edit", "Read", "mcp__fleet__fleet__plan", "WebFetch"] {
+            assert!(!is_interactive_tool(name), "{name} does not ask a human");
+            assert_eq!(initial_status(name), ToolCallStatus::InProgress, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_pending_status_survives_the_projection_for_both_agents() {
+        let claude = json!({"id": "t1", "name": "mcp__fleet__fleet__ask", "input": {}});
+        assert_eq!(tool_call_from_use(&claude).unwrap().status, ToolCallStatus::Pending);
+
+        let codex = json!({"type": "response_item", "payload": {
+            "type": "custom_tool_call", "call_id": "c1",
+            "name": "mcp__fleet__fleet__ask", "input": "{}"
+        }});
+        match &project_updates(std::slice::from_ref(&codex), false)[0] {
+            U::ToolCall(c) => assert_eq!(c.status, ToolCallStatus::Pending),
+            other => panic!("expected a tool_call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn answering_an_interactive_tool_completes_it() {
+        // The result arrives once the human answers, which is what closes the
+        // pending call — the same transition an ordinary tool makes.
+        let up = tool_call_update_from_result(&json!({
+            "tool_use_id": "t1", "content": "{\"answers\":{\"Q\":\"A\"}}"
+        }))
+        .unwrap();
+        assert_eq!(up.status, Some(ToolCallStatus::Completed));
     }
 
     #[test]

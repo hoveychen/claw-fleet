@@ -449,6 +449,9 @@ impl AcpAgent {
         let deadline = Instant::now() + TURN_TIMEOUT;
         let mut offset = self.transcript_len(internal_id);
         let mut emitted = false;
+        // Last usage/title we told the client, so an unchanged tick stays
+        // silent instead of resending the same numbers every 300ms.
+        let mut last_metrics = SessionMetrics::default();
 
         loop {
             if self.take_cancelled(acp_session_id) {
@@ -476,12 +479,48 @@ impl AcpAgent {
                         self.notify_update(acp_session_id, update);
                     }
                 }
+                self.notify_session_metrics(acp_session_id, internal_id, &mut last_metrics);
+
                 if emitted && self.turn_is_idle(internal_id) {
                     return StopReason::EndTurn;
                 }
             }
             std::thread::sleep(TAIL_INTERVAL);
         }
+    }
+
+
+    /// Emit `usage_update` and `session_info_update` when they change.
+    ///
+    /// Both come free with ACP: the numbers were already on `SessionInfo` and
+    /// had nowhere to go on the Responses surface. Sent only on change, since
+    /// the turn loop ticks several times a second and a client redrawing a
+    /// token counter that has not moved is pure noise.
+    fn notify_session_metrics(
+        &self,
+        acp_session_id: &str,
+        internal_id: &str,
+        last: &mut SessionMetrics,
+    ) {
+        let sessions = crate::session::scan_all_sources(&self.sources);
+        let Some(s) = sessions.iter().find(|s| s.id == internal_id) else {
+            return;
+        };
+        let used = s.total_input_tokens.saturating_add(s.total_output_tokens);
+        // The window depends on the model — and on whether a `[1m]` suffix was
+        // asked for — so it comes from the existing helper rather than a
+        // constant that would quietly be wrong for half the models.
+        let size = s
+            .model
+            .as_deref()
+            .and_then(|m| crate::session::stats::context_window_for_model(m, s.total_input_tokens))
+            .unwrap_or(0);
+
+        let next = SessionMetrics { used, size, title: s.ai_title.clone() };
+        for update in metrics_updates(&next, last, iso8601_from_unix_ms(s.last_activity_ms)) {
+            self.notify_update(acp_session_id, update);
+        }
+        *last = next;
     }
 
     fn notify_update(&self, session_id: &str, update: SessionUpdate) {
@@ -555,6 +594,45 @@ fn iso8601_from_unix_ms(ms: u64) -> Option<String> {
         return None;
     }
     chrono::DateTime::from_timestamp_millis(ms as i64).map(|dt| dt.to_rfc3339())
+}
+
+
+/// The usage and title last reported, so only changes are sent.
+#[derive(Default, PartialEq, Clone)]
+struct SessionMetrics {
+    used: u64,
+    size: u64,
+    title: Option<String>,
+}
+
+
+/// Which metric updates a tick should emit. Pure, so the "only on change" rule
+/// is testable without a live session.
+///
+/// A zero window means the model is unknown to `context_window_for_model`;
+/// reporting `size: 0` would have clients render a full or empty gauge, so the
+/// usage update is withheld instead of guessed at.
+fn metrics_updates(
+    next: &SessionMetrics,
+    last: &SessionMetrics,
+    updated_at: Option<String>,
+) -> Vec<SessionUpdate> {
+    let mut out = Vec::new();
+    if next == last {
+        return out;
+    }
+    if next.size > 0 && (next.used, next.size) != (last.used, last.size) {
+        out.push(SessionUpdate::UsageUpdate(UsageUpdate { used: next.used, size: next.size }));
+    }
+    if next.title != last.title {
+        if let Some(title) = next.title.clone() {
+            out.push(SessionUpdate::SessionInfoUpdate(SessionInfoUpdate {
+                title: Some(title),
+                updated_at,
+            }));
+        }
+    }
+    out
 }
 
 /// Handle one inbound frame against an agent. Returns the frame to write back,
@@ -862,6 +940,53 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code, jsonrpc::codes::INVALID_PARAMS);
         assert!(err.message.contains("effort"));
+    }
+
+
+    #[test]
+    fn metrics_are_sent_only_when_they_change() {
+        let base = SessionMetrics { used: 100, size: 200_000, title: Some("T".into()) };
+        // An unchanged tick is silent — the loop runs several times a second.
+        assert!(metrics_updates(&base, &base.clone(), None).is_empty());
+
+        // Token movement alone sends usage, not the title.
+        let more = SessionMetrics { used: 150, ..base.clone() };
+        let ups = metrics_updates(&more, &base, None);
+        assert_eq!(ups.len(), 1);
+        assert!(matches!(ups[0], SessionUpdate::UsageUpdate(_)));
+
+        // A new title alone sends session_info, not usage.
+        let renamed = SessionMetrics { title: Some("T2".into()), ..base.clone() };
+        let ups = metrics_updates(&renamed, &base, Some("2026-01-01T00:00:00Z".into()));
+        assert_eq!(ups.len(), 1);
+        match &ups[0] {
+            SessionUpdate::SessionInfoUpdate(i) => {
+                assert_eq!(i.title.as_deref(), Some("T2"));
+                assert!(i.updated_at.is_some());
+            }
+            other => panic!("expected session_info_update, got {other:?}"),
+        }
+
+        // Both changing sends both.
+        let both = SessionMetrics { used: 150, size: 200_000, title: Some("T2".into()) };
+        assert_eq!(metrics_updates(&both, &base, None).len(), 2);
+    }
+
+    #[test]
+    fn an_unknown_context_window_withholds_usage_rather_than_reporting_zero() {
+        // size 0 means context_window_for_model did not recognise the model.
+        // Sending it would make a client draw a full or empty gauge.
+        let unknown = SessionMetrics { used: 500, size: 0, title: None };
+        let prev = SessionMetrics::default();
+        assert!(metrics_updates(&unknown, &prev, None).is_empty());
+    }
+
+    #[test]
+    fn a_session_with_no_title_yet_sends_no_title_update() {
+        let untitled = SessionMetrics { used: 10, size: 200_000, title: None };
+        let ups = metrics_updates(&untitled, &SessionMetrics::default(), None);
+        assert_eq!(ups.len(), 1, "usage only");
+        assert!(matches!(ups[0], SessionUpdate::UsageUpdate(_)));
     }
 
     #[test]
