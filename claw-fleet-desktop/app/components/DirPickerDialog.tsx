@@ -154,6 +154,7 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
                 // before the window-level handler treats it as a cancel.
                 if (e.key === "Escape") {
                   e.stopPropagation();
+                  setError(null);
                   setCreating(false);
                 }
               }}
@@ -165,7 +166,16 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
             >
               {saving ? t("dir_picker.creating") : t("dir_picker.create")}
             </button>
-            <button className={styles.cancel} onClick={() => setCreating(false)}>
+            <button
+              className={styles.cancel}
+              onClick={() => {
+                // Drop the error with the input: "already exists" was about that
+                // attempt, and left on screen it reads as a problem with the
+                // directory being browsed.
+                setError(null);
+                setCreating(false);
+              }}
+            >
               {t("cancel")}
             </button>
           </div>
@@ -175,6 +185,7 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
             disabled={!data}
             onClick={() => {
               setNewName("");
+              setError(null);
               setCreating(true);
             }}
           >

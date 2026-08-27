@@ -114,7 +114,10 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") void submitNew();
-                if (e.key === "Escape") setCreating(false);
+                if (e.key === "Escape") {
+                  setError(null);
+                  setCreating(false);
+                }
               }}
             />
             <button
@@ -124,7 +127,15 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
             >
               {saving ? t("创建中…") : t("创建")}
             </button>
-            <button className={styles.newCancel} onClick={() => setCreating(false)}>
+            <button
+              className={styles.newCancel}
+              onClick={() => {
+                // 退出输入态时把错误一并清掉——「已存在」说的是刚才那次尝试，
+                // 留在屏上会像是当前目录本身有问题。
+                setError(null);
+                setCreating(false);
+              }}
+            >
               {t("取消")}
             </button>
           </div>
@@ -134,6 +145,7 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
             disabled={!data}
             onClick={() => {
               setNewName("");
+              setError(null);
               setCreating(true);
             }}
           >
