@@ -7,7 +7,6 @@ import { Check, CheckCircle2, ChevronRight, ListTodo, Waypoints, Workflow } from
 import { EmptyState } from "./EmptyState";
 import { splitMarker } from "./planMatrix";
 import ReactMarkdown from "react-markdown";
-import type { Components } from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import { dateLocale, t } from "../i18n";
@@ -22,8 +21,7 @@ import type {
   TaskItem,
 } from "../types";
 import { useAgentNav } from "./AgentNavContext";
-import { AttachmentThumbs } from "./AttachmentThumb";
-import { splitAnswerAttachments } from "../userAttachments";
+import { DecisionQa, Md } from "./DecisionQa";
 import { tokenRequestFor, toolForAgentSource } from "../agentSource";
 import type { DshTokenBreakdown } from "../generated/types";
 import styles from "./SessionDetailTabs.module.css";
@@ -116,57 +114,10 @@ function recordSummary(r: DecisionHistoryRecord): string {
   return r.aiTitle ?? r.workspaceName ?? t("计划审批");
 }
 
-// Markdown for decision bodies: the shared plugin chain (GFM + CJK bold + KaTeX
-// + sanitize) plus mermaidMarkdownComponents, which is what actually turns a
-// ```mermaid fence into a diagram — the plugin chain alone leaves it as code.
-// Links are rendered inert (mobile has no in-app path navigation in this tab).
-// The inline variant unwraps <p> so it can sit inside the option
-// label/description <span>s.
-const mdLink: Components["a"] = ({ children }) => (
-  <span className={styles.mdLink}>{children}</span>
-);
-export const MD_BLOCK: Components = { ...mermaidMarkdownComponents, a: mdLink };
-export const MD_INLINE: Components = { ...MD_BLOCK, p: ({ children }) => <>{children}</> };
-
-function Md({ text, inline }: { text: string; inline?: boolean }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={mdRemarkPlugins}
-      rehypePlugins={mdRehypePlugins}
-      components={inline ? MD_INLINE : MD_BLOCK}
-    >
-      {text}
-    </ReactMarkdown>
-  );
-}
-
-/** Option row with a ✓/○/▸ marker + markdown label/description, mirroring the
- *  desktop DecisionHistory option layout. */
-function OptionRow({
-  label,
-  description,
-  selected,
-  marker,
-}: {
-  label: string;
-  description?: string | null;
-  selected: boolean;
-  marker?: string;
-}) {
-  return (
-    <div className={styles.qaOption} data-picked={selected}>
-      <span className={styles.qaOptionLabel}>
-        <span className={styles.qaOptionMarker}>{marker ?? (selected ? "✓" : "○")}</span>
-        <Md text={label} inline />
-      </span>
-      {description && (
-        <span className={styles.qaOptionDesc}>
-          <Md text={description} inline />
-        </span>
-      )}
-    </div>
-  );
-}
+// Markdown for decision bodies (the shared plugin chain plus mermaid, links
+// rendered inert) and the Q/A option rows both live in DecisionQa — the 消息
+// tab's expanded decision step renders through the very same component.
+export { MD_BLOCK, MD_INLINE } from "./DecisionQa";
 
 export function DecisionHistoryTab({
   session,
@@ -223,31 +174,15 @@ export function DecisionHistoryTab({
 
             {expanded && r.kind === "elicitation" && (
               <div className={styles.recordBody} onClick={(e) => e.stopPropagation()}>
-                {r.questions.map((q, i) => {
-                  const picked = r.answers[q.question];
-                  const selectedLabels =
-                    picked && !picked.other
-                      ? picked.label.split(",").map((s) => s.trim())
-                      : [];
-                  return (
-                    <div key={i} className={styles.qaBlock}>
-                      <div className={styles.qaQuestion}>
-                        <Md text={q.question} />
-                      </div>
-                      {q.options.map((o, j) => (
-                        <OptionRow
-                          key={j}
-                          label={o.label}
-                          description={o.description}
-                          selected={selectedLabels.includes(o.label)}
-                        />
-                      ))}
-                      {picked?.other && (
-                        <OptionRow label={t("其他")} description={picked.label} selected marker="✓" />
-                      )}
-                    </div>
-                  );
-                })}
+                {/* An elicitation answer is `{label, other}`; the shared renderer
+                    takes plain strings and re-derives "other" by label matching. */}
+                <DecisionQa
+                  questions={r.questions}
+                  answers={Object.fromEntries(
+                    Object.entries(r.answers).map(([k, v]) => [k, v.label]),
+                  )}
+                  client={client}
+                />
               </div>
             )}
 
@@ -257,16 +192,16 @@ export function DecisionHistoryTab({
                   <Md text={r.planContent} />
                 </div>
                 {r.editedPlan && (
-                  <div className={styles.qaBlock}>
-                    <div className={styles.qaQuestion}>{t("用户编辑后的计划")}</div>
+                  <div className={styles.section}>
+                    <div className={styles.sectionLabel}>{t("用户编辑后的计划")}</div>
                     <div className={styles.planBody}>
                       <Md text={r.editedPlan} />
                     </div>
                   </div>
                 )}
                 {r.feedback && (
-                  <div className={styles.qaBlock}>
-                    <div className={styles.qaQuestion}>{t("驳回意见")}</div>
+                  <div className={styles.section}>
+                    <div className={styles.sectionLabel}>{t("驳回意见")}</div>
                     <div className={styles.feedback}>
                       <Md text={r.feedback} />
                     </div>
@@ -283,65 +218,7 @@ export function DecisionHistoryTab({
 
             {expanded && r.kind === "fleet-ask" && (
               <div className={styles.recordBody} onClick={(e) => e.stopPropagation()}>
-                {r.questions.map((q, i) => {
-                  // An answer can carry `@/path` mentions for the files the user
-                  // attached. They are part of the answer string, so they have to
-                  // come off before the label matching below — and they are what
-                  // the thumbnails at the end of the block render.
-                  const { core: raw, attachments } = splitAnswerAttachments(
-                    r.answers[q.question] ?? "",
-                  );
-                  const opts = q.options ?? [];
-                  const fields = q.formFields ?? [];
-                  const selectedLabels = raw
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                  const matched = opts.some((o) => selectedLabels.includes(o.label));
-                  const isOther = !matched && raw.length > 0 && opts.length > 0;
-                  return (
-                    <div key={i} className={styles.qaBlock}>
-                      <div className={styles.qaQuestion}>
-                        <Md text={q.question} />
-                      </div>
-                      {q.images && q.images.length > 0 ? (
-                        <div className={styles.dimNote}>{t("[当时展示过图片预览]")}</div>
-                      ) : (
-                        q.html && (
-                          <div className={styles.dimNote}>{t("[当时展示过 HTML 预览]")}</div>
-                        )
-                      )}
-                      {opts.map((o, j) => (
-                        <OptionRow
-                          key={j}
-                          label={o.label}
-                          description={o.description}
-                          selected={selectedLabels.includes(o.label)}
-                        />
-                      ))}
-                      {isOther && (
-                        <OptionRow label={t("其他")} description={raw} selected marker="✓" />
-                      )}
-                      {fields.map((f, fi) => {
-                        const v = r.answers[f.name];
-                        if (v === undefined || v === "") return null;
-                        return (
-                          <OptionRow
-                            key={`f-${fi}`}
-                            label={f.label || f.name}
-                            description={v}
-                            selected
-                            marker="▸"
-                          />
-                        );
-                      })}
-                      {opts.length === 0 && fields.length === 0 && raw && (
-                        <div className={styles.preWrap}>{raw}</div>
-                      )}
-                      <AttachmentThumbs paths={attachments} client={client} />
-                    </div>
-                  );
-                })}
+                <DecisionQa questions={r.questions} answers={r.answers} client={client} />
               </div>
             )}
           </div>
