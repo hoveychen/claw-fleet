@@ -1051,6 +1051,7 @@ dependencies = [
  "dirs 5.0.1",
  "flate2",
  "futures",
+ "futures-util",
  "git2",
  "hkdf",
  "image",
