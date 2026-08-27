@@ -6,7 +6,9 @@
 
 const LS_KEY = "fleet-client-id";
 
-function randomId(): string {
+/** A random id: `crypto.randomUUID()` where available, otherwise good enough.
+ *  Also used for per-submit idempotency keys (see Composer). */
+export function randomId(): string {
   try {
     return crypto.randomUUID();
   } catch {

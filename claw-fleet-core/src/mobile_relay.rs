@@ -409,6 +409,60 @@ static ANSWERED_DECISIONS: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None
 /// than the phone's bounded resend window, short enough to self-clean.
 const ANSWER_DEDUP_TTL_MS: u64 = 5 * 60 * 1000;
 
+/// Client-supplied idempotency keys for write methods, mapped to
+/// `(when_ms, reply)`. Sibling of [`ANSWERED_DECISIONS`], generalised to the
+/// write methods whose key is minted per submit rather than derived from a
+/// decision id. Kept in its own map (not [`RESULT_CACHE`]) because that cache's
+/// prune runs at the *calling* method's TTL — a 5s `today_usage` sweep would
+/// quietly cut this window down to a minute.
+static IDEMPOTENT_WRITES: Mutex<Option<HashMap<String, (u64, Value)>>> = Mutex::new(None);
+
+/// How long a write's idempotency key is remembered.
+const WRITE_DEDUP_TTL_MS: u64 = 5 * 60 * 1000;
+
+/// Run a write handler at most once per client-supplied `idempotencyKey`.
+///
+/// Relay delivery is best-effort (`fleet-relay::registry::forward`) and the
+/// phone's socket is short-lived, so a submit whose reply frame is lost looks
+/// identical to one that never arrived — and the user taps send again. Without a
+/// key that second tap is a second `claude --resume` on the same transcript.
+/// Requests with no key run as before, so an older client build is unaffected.
+fn idempotent_write<F>(method: &str, params: &Value, run: F) -> Result<Value, String>
+where
+    F: FnOnce() -> Result<Value, String>,
+{
+    let Some(raw) = params
+        .get("idempotencyKey")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+    else {
+        return run();
+    };
+    let key = format!("{method}:{raw}");
+    // Hold the per-key guard across check→run→record: a duplicate that arrives
+    // while the first one is still spawning waits here and then sees the
+    // recorded reply, instead of running alongside it.
+    let guard = dedup_key_guard(&format!("idem:{key}"));
+    let _held = guard.lock().unwrap();
+    let now = now_ms();
+    if let Some(map) = IDEMPOTENT_WRITES.lock().unwrap().as_ref() {
+        if let Some((at, v)) = map.get(&key) {
+            if now.saturating_sub(*at) < WRITE_DEDUP_TTL_MS {
+                crate::log_debug(&format!("[relay] duplicate {key}; replaying the first reply"));
+                return Ok(v.clone());
+            }
+        }
+    }
+    // A failed write is not recorded: it must stay retryable.
+    let value = run()?;
+    let mut outer = IDEMPOTENT_WRITES.lock().unwrap();
+    let map = outer.get_or_insert_with(HashMap::new);
+    map.retain(|_, (at, _)| now.saturating_sub(*at) < WRITE_DEDUP_TTL_MS);
+    map.insert(key, (now, value.clone()));
+    Ok(value)
+}
+
 /// Whether `id`'s answer was already delivered recently (a dedup hit). Prunes
 /// expired entries as a side effect so the map stays bounded.
 ///
@@ -624,6 +678,25 @@ fn live_devices() -> Vec<MobileClientInfo> {
 // ── Outbound publishing ──────────────────────────────────────────────────────
 
 static WS_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Set by the desktop app before [`ensure_ws_client`]. Everything else — `fleet
+/// serve`, `fleet webui` — is a headless host and yields the relay agent role to
+/// a running desktop (see [`crate::relay_role`]).
+static DESKTOP_AGENT: AtomicBool = AtomicBool::new(false);
+
+/// Declare this process the desktop app for relay-role arbitration. Idempotent;
+/// call it before `ensure_ws_client`.
+pub fn set_desktop_agent() {
+    DESKTOP_AGENT.store(true, Ordering::SeqCst);
+}
+
+fn agent_kind() -> crate::relay_role::AgentKind {
+    if DESKTOP_AGENT.load(Ordering::SeqCst) {
+        crate::relay_role::AgentKind::Desktop
+    } else {
+        crate::relay_role::AgentKind::Headless
+    }
+}
 static CONNECTED: AtomicBool = AtomicBool::new(false);
 static CLIENTS: AtomicUsize = AtomicUsize::new(0);
 /// Bumped on every config save; the connect loop drops the current socket
@@ -1919,8 +1992,10 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "browse_dir" => serve_browse_dir(params),
         // ── Write methods ────────────────────────────────────────────────
         "spawn_session" => serve_spawn_session(params),
-        "resume_session" => serve_resume_session(params),
-        "enqueue_message" => serve_enqueue_message(params),
+        // Both carry the user's typed text and both have a process-spawning
+        // side effect, so a lost reply must not turn into a second turn.
+        "resume_session" => idempotent_write(method, params, || serve_resume_session(params)),
+        "enqueue_message" => idempotent_write(method, params, || serve_enqueue_message(params)),
         "cancel_pending_message" => serve_cancel_pending_message(params),
         "interrupt" => serve_interrupt(params),
         "stop" => serve_stop(params),
@@ -3076,11 +3151,32 @@ pub fn ensure_ws_client() {
 }
 
 async fn ws_run_loop() {
+    // Logged once per yield/resume transition, not per retry — this loop wakes
+    // every 15s while yielding.
+    let mut yielding = false;
     loop {
         let cfg = load_config();
         if !cfg.enabled || cfg.secret.is_empty() {
             WS_STARTED.store(false, Ordering::SeqCst);
             return;
+        }
+        // Only one process per machine may hold the agent role. The relay hands
+        // every client frame to *all* agents in the channel, so a second local
+        // agent runs every phone-side write a second time — see `relay_role`.
+        if !crate::relay_role::claim(agent_kind()) {
+            if !yielding {
+                yielding = true;
+                crate::log_debug(
+                    "[mobile-relay] another local Fleet process holds the agent role; \
+                     staying out of the channel",
+                );
+            }
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            continue;
+        }
+        if yielding {
+            yielding = false;
+            crate::log_debug("[mobile-relay] agent role is ours; joining the channel");
         }
         let gen = CONFIG_GEN.load(Ordering::SeqCst);
         match ws_connect_once(&cfg, gen).await {
@@ -3453,6 +3549,12 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                 if CONFIG_GEN.load(Ordering::SeqCst) != gen {
                     return Err("config changed; reconnecting".into());
                 }
+                // The desktop app just claimed the agent role out from under us
+                // (see `relay_role`): drop the socket now rather than doubling
+                // every phone write until the next reconnect.
+                if crate::relay_role::is_preempted() {
+                    return Err("relay role taken over by another local Fleet process".into());
+                }
             }
         }
     }
@@ -3462,6 +3564,82 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
 mod tests {
     use super::*;
     use crate::session::fleet_home_lock;
+
+    // ── write idempotency keys (resume_session / enqueue_message) ───────────
+
+    /// Unique per test run so the process-wide map can't leak between tests.
+    fn idem_params(key: &str) -> Value {
+        json!({ "idempotencyKey": format!("{key}-{}", now_ms()) })
+    }
+
+    #[test]
+    fn same_idempotency_key_runs_the_write_once() {
+        let params = idem_params("dup-resume");
+        let runs = std::cell::Cell::new(0);
+        let once = || {
+            runs.set(runs.get() + 1);
+            Ok(json!({"pid": 4242}))
+        };
+        let first = idempotent_write("resume_session", &params, once).unwrap();
+        let second = idempotent_write("resume_session", &params, once).unwrap();
+        assert_eq!(runs.get(), 1, "the duplicate must not spawn a second turn");
+        assert_eq!(first, second, "the duplicate gets the first reply verbatim");
+    }
+
+    #[test]
+    fn different_idempotency_keys_both_run() {
+        let runs = std::cell::Cell::new(0);
+        let mut run_once = |k: &str| {
+            let p = idem_params(k);
+            idempotent_write("resume_session", &p, || {
+                runs.set(runs.get() + 1);
+                Ok(json!(null))
+            })
+            .unwrap();
+        };
+        run_once("distinct-a");
+        run_once("distinct-b");
+        assert_eq!(runs.get(), 2);
+    }
+
+    #[test]
+    fn missing_idempotency_key_always_runs() {
+        let params = json!({ "sessionId": "s" });
+        let runs = std::cell::Cell::new(0);
+        let bump = || {
+            runs.set(runs.get() + 1);
+            Ok(json!(null))
+        };
+        idempotent_write("resume_session", &params, bump).unwrap();
+        idempotent_write("resume_session", &params, bump).unwrap();
+        assert_eq!(runs.get(), 2, "no key = no dedup (older client builds)");
+    }
+
+    #[test]
+    fn a_failed_write_stays_retryable() {
+        let params = idem_params("failed-resume");
+        let runs = std::cell::Cell::new(0);
+        let boom = || {
+            runs.set(runs.get() + 1);
+            Err::<Value, String>("workspace gone".into())
+        };
+        assert!(idempotent_write("resume_session", &params, boom).is_err());
+        assert!(idempotent_write("resume_session", &params, boom).is_err());
+        assert_eq!(runs.get(), 2);
+    }
+
+    #[test]
+    fn the_same_key_on_a_different_method_is_a_different_write() {
+        let params = idem_params("shared-key");
+        let runs = std::cell::Cell::new(0);
+        let bump = || {
+            runs.set(runs.get() + 1);
+            Ok(json!(null))
+        };
+        idempotent_write("resume_session", &params, bump).unwrap();
+        idempotent_write("enqueue_message", &params, bump).unwrap();
+        assert_eq!(runs.get(), 2);
+    }
 
     // ── spawn_session idempotent-resend dedup (方案 C 桌面去重) ──────────────
 

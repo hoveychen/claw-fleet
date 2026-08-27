@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
+import { randomId } from "../clientId";
 import { useDraft, loadDraft, saveDraft } from "../draft";
 import { t } from "../i18n";
 import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type FleetTransport } from "../transport";
@@ -869,11 +870,15 @@ export function ResumeComposer({
       window.setTimeout(() => setSent(false), 3000);
     };
     const method = enqueueing ? "enqueue_message" : "resume_session";
+    // 每次提交一把新钥匙:relay 投递是尽力而为,回执丢了这条请求可能被重放
+    // (或被同机第二个 agent 收到),桌面凭它认出重复,不会再起一轮 claude。
+    const idempotencyKey = randomId();
     const params = enqueueing
-      ? { sessionId: session.id, workspacePath: session.workspacePath, text }
+      ? { sessionId: session.id, workspacePath: session.workspacePath, text, idempotencyKey }
       : {
           sessionId: session.id,
           workspacePath: session.workspacePath,
+          idempotencyKey,
           // Empty prompt = "continue" (relay side supplies the fallback).
           prompt: text || undefined,
           // The relay routes the resume by source (blank → claude); a Codex
