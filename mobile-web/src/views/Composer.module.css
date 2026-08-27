@@ -53,6 +53,34 @@
   font-size: var(--t-ui, 14px);
 }
 
+/* 纯聊天模式开关 —— 和目录下拉同宽、互斥（打开时下拉整个不渲染）。做成一整条
+   而不是小 pill：它替代的是原来下拉里那条最长的选项，得撑得住副标题。 */
+.chatToggle {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: var(--color-text-dim);
+  font-size: var(--t-ui, 14px);
+}
+
+.chatToggle[data-active="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.chatToggleSub {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+}
+
 /* 手输框 + 浏览按钮。输入框吃掉剩余宽度，按钮保持自身尺寸不被压扁。 */
 .customPathRow {
   display: flex;
