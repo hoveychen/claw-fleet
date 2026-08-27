@@ -74,6 +74,8 @@ pub fn serve_local() -> std::io::Result<()> {
     let peer = Arc::new(Peer::new(Box::new(StdoutSink(Mutex::new(std::io::stdout())))));
     let sources = Arc::new(crate::agent_source::build_sources());
     let agent = Arc::new(AcpAgent::new(peer, sources));
+    // Push decision cards to the client as they appear.
+    super::watcher::spawn(agent.clone());
     let stdin = std::io::stdin();
     conn::run_connection(agent, stdin.lock());
     Ok(())
