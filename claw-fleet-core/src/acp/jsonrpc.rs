@@ -235,6 +235,12 @@ impl Peer {
         self.sink.send(&notification(method, params))
     }
 
+    /// Write an already-serialized frame. Used by the connection loop, which
+    /// gets its replies back from the dispatcher pre-encoded.
+    pub fn send_raw(&self, frame: &str) -> bool {
+        self.sink.send(frame)
+    }
+
     /// Answer an inbound request.
     pub fn reply(&self, id: &Value, result: Result<Value, RpcError>) -> bool {
         let frame = match &result {

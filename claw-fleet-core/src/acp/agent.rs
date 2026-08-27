@@ -161,6 +161,22 @@ impl AcpAgent {
         self.client_caps.lock().unwrap().supports_elicitation_form()
     }
 
+    /// Write one already-serialized frame to the peer.
+    pub fn send_frame(&self, frame: &str) -> bool {
+        self.peer.send_raw(frame)
+    }
+
+    /// The peer hung up: fail every parked request so blocked decision-card
+    /// threads unwind now rather than at their timeout.
+    pub fn disconnect(&self) {
+        self.peer.fail_all(RpcError::internal("client disconnected"));
+    }
+
+    #[cfg(test)]
+    pub fn peer_for_test(&self) -> Arc<Peer> {
+        self.peer.clone()
+    }
+
     // ── session/new ─────────────────────────────────────────────────
 
     fn session_new(&self, params: &Value) -> Result<Value, RpcError> {
