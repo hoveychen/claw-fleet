@@ -231,7 +231,7 @@ impl AcpAgent {
         // exactly the confinement hole the public surface exists to close. A
         // mismatch is reported rather than silently ignored, so a client cannot
         // believe it is running against its own checkout.
-        let workspace = crate::hooks_server::responses::public_workspace();
+        let workspace = crate::hooks_server::public_files::public_workspace();
         if !req.cwd.is_empty() && req.cwd != workspace {
             return Err(RpcError::invalid_params(format!(
                 "this agent is bound to {workspace}; it cannot run in {}",
@@ -270,7 +270,7 @@ impl AcpAgent {
             (st.internal_id.clone(), st.tool, st.model.clone())
         };
 
-        let workspace = crate::hooks_server::responses::public_workspace();
+        let workspace = crate::hooks_server::public_files::public_workspace();
 
         // ACP carries files inline in the prompt, so they are materialised into
         // the workspace here — Fleet's agents read attachments off disk. A bad
@@ -385,7 +385,7 @@ impl AcpAgent {
         if let Some(cwd) = req.cwd.as_deref().filter(|c| !c.is_empty()) {
             self.check_cwd(cwd)?;
         }
-        let workspace = crate::hooks_server::responses::public_workspace();
+        let workspace = crate::hooks_server::public_files::public_workspace();
         let deleted = self.deleted.lock().unwrap().clone();
 
         let sessions = crate::session::scan_all_sources(&self.sources)
@@ -433,7 +433,7 @@ impl AcpAgent {
 
     /// Reject a client-supplied cwd that is not the bound workspace.
     fn check_cwd(&self, cwd: &str) -> Result<(), RpcError> {
-        let workspace = crate::hooks_server::responses::public_workspace();
+        let workspace = crate::hooks_server::public_files::public_workspace();
         if !cwd.is_empty() && cwd != workspace {
             return Err(RpcError::invalid_params(format!(
                 "this agent is bound to {workspace}; it cannot run in {cwd}"
@@ -445,7 +445,7 @@ impl AcpAgent {
     /// Register an existing on-disk session under its own id so this connection
     /// can drive it. Errors when no such session exists in the workspace.
     fn adopt(&self, session_id: &str) -> Result<String, RpcError> {
-        let workspace = crate::hooks_server::responses::public_workspace();
+        let workspace = crate::hooks_server::public_files::public_workspace();
         let found = crate::session::scan_all_sources(&self.sources)
             .into_iter()
             .find(|s| s.id == session_id && s.workspace_path == workspace)
@@ -773,7 +773,7 @@ mod tests {
     #[test]
     fn session_new_mints_an_id_and_defers_the_spawn() {
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws, "mcpServers": []})).unwrap();
         let sid = v["sessionId"].as_str().expect("a session id");
         assert!(!sid.is_empty());
@@ -832,7 +832,7 @@ mod tests {
     #[test]
     fn a_cancel_notification_marks_the_session_and_is_consumed_once() {
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
@@ -868,7 +868,7 @@ mod tests {
         // `$/cancel_request` carries `requestId`; `session/cancel` carries
         // `sessionId`. Reading the wrong field would make the cancel a no-op.
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
@@ -908,7 +908,7 @@ mod tests {
     #[test]
     fn load_and_resume_of_an_unknown_session_are_invalid_params() {
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         for method in ["session/load", "session/resume"] {
             let err = a
                 .dispatch(&json!(1), method, &json!({"sessionId": "nope", "cwd": ws}))
@@ -920,7 +920,7 @@ mod tests {
     #[test]
     fn close_cancels_the_turn_and_drops_the_session() {
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
@@ -939,7 +939,7 @@ mod tests {
         // A transcript is the user's data; destroying it is not something a
         // client gets to trigger.
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
