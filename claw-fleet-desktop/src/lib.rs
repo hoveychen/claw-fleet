@@ -351,6 +351,44 @@ impl Backend for NullBackend {
     ) -> Result<claw_fleet_core::mcp_ipc::ReviewDocContent, String> {
         Err("backend not ready".into())
     }
+    fn list_artifacts(&self) -> Vec<claw_fleet_core::artifacts::Artifact> {
+        vec![]
+    }
+    fn get_artifact(&self, _: &str) -> Result<claw_fleet_core::artifacts::Artifact, String> {
+        Err("backend not ready".into())
+    }
+    fn add_artifact(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: Option<&str>,
+    ) -> Result<claw_fleet_core::artifacts::Artifact, String> {
+        Err("backend not ready".into())
+    }
+    fn update_artifact(
+        &self,
+        _: &str,
+        _: Option<&str>,
+        _: Option<&str>,
+        _: Option<bool>,
+    ) -> Result<claw_fleet_core::artifacts::Artifact, String> {
+        Err("backend not ready".into())
+    }
+    fn delete_artifact(&self, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn read_artifact_bytes(
+        &self,
+        _: &str,
+        _: Option<(u64, u64)>,
+    ) -> Result<claw_fleet_core::artifacts::ArtifactBytes, String> {
+        Err("backend not ready".into())
+    }
+    fn artifact_usage(&self) -> claw_fleet_core::artifacts::StoreUsage {
+        Default::default()
+    }
     fn delete_wiki_doc(&self, _: &str) -> Result<(), String> {
         Err("backend not ready".into())
     }
