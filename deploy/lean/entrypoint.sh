@@ -240,16 +240,22 @@ if [[ -n "${FLEET_WEB_ROOT:-}" ]]; then
     # real directory is served from disk (mount one there to pin a different UI
     # build); otherwise the built-in copy is used.
     #
-    # The -d test is load-bearing, not defensive: `fleet webui --web-root` at a
+    # The test is load-bearing, not defensive: `fleet webui --web-root` at a
     # path that does not exist exits 2, so passing the image's preset value
     # unconditionally would refuse to start the moment the bundle stopped being
     # on disk.
+    #
+    # It looks for index.html rather than just the directory because an EMPTY
+    # directory is not a bundle: a volume mounted there before it was populated
+    # (or a mount that silently produced nothing) would pass a -d test and then
+    # serve 404 for every page. Falling back to the built-in copy is strictly
+    # better than a UI that loads nothing.
     webui_args=(--port "${FLEET_SERVE_PORT}" --host "${FLEET_SERVE_HOST}")
-    if [[ -d "${FLEET_WEB_ROOT}" ]]; then
+    if [[ -f "${FLEET_WEB_ROOT}/index.html" ]]; then
         echo "fleet-entrypoint: serving the web UI from ${FLEET_WEB_ROOT}" >&2
         webui_args+=(--web-root "${FLEET_WEB_ROOT}")
     else
-        echo "fleet-entrypoint: no bundle at ${FLEET_WEB_ROOT} — serving the web UI built into the fleet binary (mount a bundle there to override)" >&2
+        echo "fleet-entrypoint: no bundle at ${FLEET_WEB_ROOT}/index.html — serving the web UI built into the fleet binary (mount a bundle there to override)" >&2
     fi
     # --host explicitly: `fleet webui` binds loopback by default, which inside a
     # container means nothing outside it could ever connect.
