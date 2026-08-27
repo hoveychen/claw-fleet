@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./fonts";
 import "./App.css";
 import { DecisionPanel } from "./components/DecisionPanel";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
-import { resolveTheme, useDecisionStore, useSessionsStore, useUIStore } from "./store";
+import { applyWindowTheme, useDecisionStore, useSessionsStore, useUIStore } from "./store";
 import i18n from "./i18n";
 import type { PendingDecision, SessionInfo } from "./types";
 
@@ -87,11 +86,7 @@ export default function DecisionFloatApp() {
   // float was the only one calling resolveTheme() and discarding the result.
   useEffect(() => {
     const applyTheme = (theme: "dark" | "light" | "system") => {
-      const resolved = resolveTheme(theme);
-      document.documentElement.setAttribute("data-theme", resolved);
-      getCurrentWindow()
-        .setTheme(resolved === "dark" ? "dark" : "light")
-        .catch(() => {});
+      applyWindowTheme(theme).catch(() => {});
     };
     applyTheme(useUIStore.getState().theme);
     // Follow the OS when the user's choice is "system".

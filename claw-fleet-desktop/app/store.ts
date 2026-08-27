@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
 import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, ManagedLesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, WaitingAlert } from "./types";
@@ -374,6 +375,33 @@ function getSystemTheme(): "dark" | "light" {
 
 export function resolveTheme(theme: Theme): "dark" | "light" {
   return theme === "system" ? getSystemTheme() : theme;
+}
+
+/** Stamp the resolved palette onto `<html>` and hand tauri the window theme.
+ *
+ *  `system` MUST pass `null`. On macOS tao's `set_theme` reaches
+ *  `[NSApp setAppearance:]` (tao `platform_impl/macos/window.rs`), i.e. it
+ *  forces the *application* appearance — and WKWebView answers
+ *  `prefers-color-scheme` from that same appearance, which is exactly what
+ *  `getSystemTheme` reads back. Passing the resolved value would therefore
+ *  latch the app into whatever it was last set to: once the user had picked
+ *  dark, "system" resolved to the dark we ourselves forced and could never
+ *  return to following the OS. `null` maps to `setAppearance: nil`, which
+ *  releases the app back to the system setting.
+ *
+ *  Resolves once the window theme is applied, so callers can chain native
+ *  chrome fixups onto it. */
+export function applyWindowTheme(theme: Theme): Promise<void> {
+  const stamp = () =>
+    document.documentElement.setAttribute("data-theme", resolveTheme(theme));
+  stamp();
+  return getCurrentWindow()
+    .setTheme(theme === "system" ? null : theme)
+    .then(() => {
+      // Un-latching only lands once the call returns, so the value stamped
+      // above can still be the forced one — re-read now that we follow the OS.
+      stamp();
+    });
 }
 
 /** Read the persisted per-view secondary-sidebar collapse map from
