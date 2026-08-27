@@ -40,3 +40,4 @@ pub mod conn;
 pub mod jsonrpc;
 pub mod stdio;
 pub mod types;
+pub mod ws;
