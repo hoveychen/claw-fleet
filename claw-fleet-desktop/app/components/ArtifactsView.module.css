@@ -1,0 +1,331 @@
+/* 产出 page. Card grid over the artifact store, plus a full-width detail pane.
+ *
+ * No secondary rail on purpose: the filters are three chips and a select, which
+ * fit the sub-bar, and every pixel of width is worth more to a video or a PDF
+ * preview than to a tree nobody navigates. */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--space-5);
+  padding: var(--space-7);
+  align-content: start;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.card:hover {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-border);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* Fixed-ratio well so a grid of mixed thumbnails and icons stays on a baseline
+ * instead of stair-stepping with each image's aspect. */
+.thumb {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-sunken);
+  border-bottom: 1px solid var(--color-border-soft);
+  overflow: hidden;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumb_icon {
+  color: var(--color-text-dim);
+}
+
+.kind_tag {
+  position: absolute;
+  left: var(--space-2);
+  bottom: var(--space-2);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border-soft);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-2xs);
+}
+
+.star_btn {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  padding: var(--space-1);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-modal);
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.star_btn:hover {
+  color: var(--color-text);
+}
+
+.star_on {
+  color: var(--color-warning);
+}
+
+.card_body {
+  padding: var(--space-4) var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.card_title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card_meta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-dim);
+  min-width: 0;
+}
+
+.ws_chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drift_flag {
+  color: var(--color-warning);
+  flex-shrink: 0;
+}
+
+/* ── Sub-bar ─────────────────────────────────────────────────────────────── */
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-7);
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.chip_on {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.select {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.usage {
+  margin-left: auto;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-dim);
+}
+
+/* ── Detail ──────────────────────────────────────────────────────────────── */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.detail_bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-7);
+  border-bottom: 1px solid var(--color-border-soft);
+  flex-wrap: wrap;
+}
+
+.detail_title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail_actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.action_danger:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-7);
+  background: var(--color-bg-sunken);
+  overflow: auto;
+}
+
+.stage img,
+.stage video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-md);
+  background: var(--canvas-fixed-light);
+}
+
+/* A PDF has no intrinsic size to shrink-wrap; give the frame the whole stage. */
+.pdf_frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--canvas-fixed-light);
+}
+
+.text_pre {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.no_preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text-dim);
+  text-align: center;
+  max-width: 380px;
+}
+
+.no_preview_title {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.no_preview_hint {
+  font-size: var(--font-size-xs);
+}
+
+.detail_meta {
+  padding: var(--space-4) var(--space-7);
+  border-top: 1px solid var(--color-border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.meta_row {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-dim);
+}
+
+.note_input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  resize: vertical;
+  min-height: 44px;
+}
+
+.drift_banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: var(--font-size-xs);
+}
+
+.error_line {
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+  padding: 0 var(--space-7) var(--space-3);
+}

@@ -21,6 +21,17 @@ pub const APPLY_MODEL_GUIDANCE: &str = "/apply_model_guidance";
 pub const APPLY_PLAN_APPROVAL_HOOK: &str = "/apply_plan_approval_hook";
 pub const APPLY_PRD_MODE: &str = "/apply_prd_mode";
 pub const APPLY_WIKI_GUIDANCE: &str = "/apply_wiki_guidance";
+/// Artifact store (the 产出 page). `ARTIFACT_BLOB` is the only route here that
+/// answers bytes rather than JSON, and the only one in this file that honours
+/// a `Range` request header — a deliverable can be a video, and a viewer that
+/// cannot seek has to buffer the whole thing first.
+pub const ARTIFACTS: &str = "/artifacts";
+pub const ARTIFACT: &str = "/artifact";
+pub const ARTIFACT_ADD: &str = "/artifact_add";
+pub const ARTIFACT_BLOB: &str = "/artifact_blob";
+pub const ARTIFACT_DELETE: &str = "/artifact_delete";
+pub const ARTIFACT_UPDATE: &str = "/artifact_update";
+pub const ARTIFACT_USAGE: &str = "/artifact_usage";
 pub const AUDIT: &str = "/audit";
 /// The three host-settings pairs the Settings panel reads and writes: GET
 /// returns the current config, POST saves it and answers with the stored value.

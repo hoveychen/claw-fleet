@@ -210,6 +210,9 @@ const KNOWN_WEB_GAPS = [
   // browser build downloads the artifact instead (`downloadWikiExport` /
   // `downloadFleetSkill`), which is the browser's version of the same intent.
   "export_wiki_doc",
+  // Same shape: writes to a path the user picks on the caller's filesystem.
+  // The browser build downloads the blob instead (`downloadArtifact`).
+  "export_artifact",
   // Emit onto the desktop's app-event bus, or have no RemoteBackend override.
   "test_decision_frontend_only",
   "test_fleet_ask_end_to_end",
