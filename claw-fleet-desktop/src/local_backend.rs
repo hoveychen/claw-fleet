@@ -2249,6 +2249,60 @@ impl Backend for LocalBackend {
         crate::mcp_ipc::read_review_doc(doc)
     }
 
+    fn list_artifacts(&self) -> Vec<crate::artifacts::Artifact> {
+        crate::artifacts::list()
+    }
+
+    fn get_artifact(&self, id: &str) -> Result<crate::artifacts::Artifact, String> {
+        crate::artifacts::get(id)
+    }
+
+    fn add_artifact(
+        &self,
+        source_path: &str,
+        title: &str,
+        note: &str,
+        workspace_path: &str,
+        session_id: Option<&str>,
+    ) -> Result<crate::artifacts::Artifact, String> {
+        fn opt(s: &str) -> Option<&str> {
+            if s.trim().is_empty() { None } else { Some(s) }
+        }
+        crate::artifacts::add(
+            std::path::Path::new(source_path),
+            opt(title),
+            opt(note),
+            std::path::Path::new(workspace_path),
+            session_id,
+        )
+    }
+
+    fn update_artifact(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        note: Option<&str>,
+        starred: Option<bool>,
+    ) -> Result<crate::artifacts::Artifact, String> {
+        crate::artifacts::update(id, title, note, starred)
+    }
+
+    fn delete_artifact(&self, id: &str) -> Result<(), String> {
+        crate::artifacts::delete(id)
+    }
+
+    fn read_artifact_bytes(
+        &self,
+        id: &str,
+        range: Option<(u64, u64)>,
+    ) -> Result<crate::artifacts::ArtifactBytes, String> {
+        crate::artifacts::read_bytes(id, range)
+    }
+
+    fn artifact_usage(&self) -> crate::artifacts::StoreUsage {
+        crate::artifacts::usage()
+    }
+
     fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
         crate::wiki::delete_doc(slug)
     }

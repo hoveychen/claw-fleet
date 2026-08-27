@@ -11,6 +11,7 @@ pub mod sse;
 
 pub use sse::{handle_sse_upgrade, SseBroadcaster, SseClient};
 
+mod routes_artifacts;
 mod routes_audit;
 mod routes_core;
 mod routes_daily_report;
@@ -31,6 +32,7 @@ mod routes_settings;
 mod routes_skills;
 mod routes_spawn;
 mod routes_wiki;
+use routes_artifacts::*;
 use routes_audit::*;
 use routes_core::*;
 use routes_daily_report::*;
@@ -1010,6 +1012,22 @@ fn handle_request(
             crate::routes::MEMORY_HISTORY => route_memory_history(ctx, request, &query, json_header, path),
 
             crate::routes::HANDOFF_CHAIN => route_handoff_chain(ctx, request, &query, json_header, path),
+
+            // ── Artifact store (产出) ────────────────────────────────────────
+            crate::routes::ARTIFACTS => route_artifacts(ctx, request, &query, json_header, path),
+
+            crate::routes::ARTIFACT => route_artifact(ctx, request, &query, json_header, path),
+
+            crate::routes::ARTIFACT_USAGE => route_artifact_usage(ctx, request, &query, json_header, path),
+
+            // The one bytes-answering route that honours `Range`/`206`.
+            crate::routes::ARTIFACT_BLOB => route_artifact_blob(ctx, request, &query, json_header, path),
+
+            crate::routes::ARTIFACT_ADD if request.method() == &tiny_http::Method::Post => route_artifact_add(ctx, request, &query, json_header, path),
+
+            crate::routes::ARTIFACT_UPDATE if request.method() == &tiny_http::Method::Post => route_artifact_update(ctx, request, &query, json_header, path),
+
+            crate::routes::ARTIFACT_DELETE if request.method() == &tiny_http::Method::Post => route_artifact_delete(ctx, request, &query, json_header, path),
 
             crate::routes::WIKI_DOCS => route_wiki_docs(ctx, request, &query, json_header, path),
 

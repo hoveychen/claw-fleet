@@ -591,6 +591,43 @@ pub trait Backend: Send + Sync {
         mode: crate::wiki::TextPublishMode,
     ) -> Result<crate::wiki::WikiDoc, String>;
 
+    // ── Artifact store (产出) ────────────────────────────────────────────────
+    /// Every artifact under `~/.fleet/artifacts`, newest first.
+    fn list_artifacts(&self) -> Vec<crate::artifacts::Artifact>;
+    fn get_artifact(&self, id: &str) -> Result<crate::artifacts::Artifact, String>;
+    /// Ingest `source_path` into the store. `workspace_path` is the directory
+    /// the producing session ran in; empty `title`/`note` mean "no opinion".
+    fn add_artifact(
+        &self,
+        source_path: &str,
+        title: &str,
+        note: &str,
+        workspace_path: &str,
+        session_id: Option<&str>,
+    ) -> Result<crate::artifacts::Artifact, String>;
+    /// Patch the user-editable fields; `None` leaves one alone.
+    fn update_artifact(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        note: Option<&str>,
+        starred: Option<bool>,
+    ) -> Result<crate::artifacts::Artifact, String>;
+    fn delete_artifact(&self, id: &str) -> Result<(), String>;
+    /// Blob bytes, whole or by inclusive byte range — the one Backend method
+    /// that takes a range, because it backs `fleet-artifact://` and a `<video>`
+    /// element seeks by asking for ranges. Every other bytes-returning method
+    /// here ([`Backend::get_wiki_file`], [`Backend::get_decision_asset`])
+    /// answers whole files, which is fine for a page but not for a 400 MB
+    /// render. `None` means the whole blob.
+    fn read_artifact_bytes(
+        &self,
+        id: &str,
+        range: Option<(u64, u64)>,
+    ) -> Result<crate::artifacts::ArtifactBytes, String>;
+    /// What the store occupies, for the cleanup UI.
+    fn artifact_usage(&self) -> crate::artifacts::StoreUsage;
+
     // ── Decision-card assets (fleet__ask images) ─────────────────────────────
     /// Raw bytes + mime of one file in a `fleet__ask` question's decision-asset
     /// dir (`~/.fleet/decision-assets/<id>/q<idx>/<relpath>`). Backs the
