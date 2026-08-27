@@ -84,6 +84,32 @@ workspace。\n\
 `--all` 放宽),它会搜标题、slug 和正文并给出片段。\n\
 - 想看某篇的版本历史和 entry 文件名就 `fleet wiki show <slug>`。\n\
 \n\
+## 交付物走产出库,不是 wiki\n\
+\n\
+当你产出的是**要交给人的文件**——PDF、幻灯片(pptx)、表格(xlsx)、Word \
+文档、渲染好的视频或图片、导出的数据集——用产出库,不要试图 publish 进 \
+wiki:\n\
+\n\
+```\nfleet artifact add <path> [--title \"<标题>\"] [--note \"<一句话说明>\"]\n```\n\
+\n\
+> **若工具列表里有 `fleet__artifact` MCP 工具(Fleet 启动的会话都有),优先\
+用它(`action=\"add\"/\"list\"/\"get\"/\"delete\"`)而不是 `fleet artifact` CLI\
+——理由与 `fleet__wiki` 相同:远端(rca)会话里 Bash 跑 `fleet` 会被路由到\
+没有 fleet 的远端而失败。**\n\
+\n\
+- **wiki 装不下这些格式,不是风格问题而是硬限制。**知识库的 kind 只有 \
+`html`/`htmlDir`/`markdown`,entry 必须是可渲染的文本文件;一份 `.xlsx` \
+publish 进去,列表能列出来、点开是白板。\n\
+- **产出一旦生成就立刻入库,别等到最后。**交付物通常写在 \
+`.worktrees/<task-id>` 里,而那个目录会在计划合并时被删掉——到那时文件就\
+没了。这跟「合并前抢救 gitignored 产物」是同一条命,只是这里有现成的地方放。\n\
+- **`--title` 和 `--note` 值得认真写。**它们就是用户在卡片上读到的全部\
+内容;缺省标题是文件名,而「out.xlsx」对人没有任何意义。\n\
+- 一次一个文件,不接受目录——要存一整个文件夹先打包成 zip。\n\
+- 入库后出现在 Fleet 桌面端的「产出」板块:可按 workspace 筛选、收藏、\
+预览(图片/视频/音频/PDF/文本直接看,Office 给类型占位符并提供导出与\
+系统应用打开)、导出到任意位置。\n\
+\n\
 ## 什么时候不该用 wiki\n\
 \n\
 渲染一份东西给人看,有三个近亲手段,别混用:\n\
@@ -93,6 +119,8 @@ workspace。\n\
 - **要把链接发给别人**→ 用 Claude Code 的 Artifact 工具(如果本 session \
 有)。它托管在 claude.ai 上、可分享,代价是内容会上传到外部服务,且必须单\
 文件自包含(CSS/JS 内联、图片转 data URI)。私有项目的产物别走这条。\n\
+- **要交给人的二进制文件**(PDF / pptx / xlsx / 视频 / 图片)→ 产出库,\
+见上一节。wiki 根本渲染不了它们。\n\
 - **要沉淀、之后还要读回来**→ wiki。只有 wiki 的文档能被后续 session 用 \
 `fleet wiki cat` 读到正文、用 `[[slug]]` 交叉引用、按 workspace 筛选和全文\
 搜索,也只有 wiki 收得下带 `assets/` 的多文件目录。\n\
@@ -163,6 +191,38 @@ by default, `--all` to widen), matching titles, slugs and body text.\n\
 - `fleet wiki show <slug>` shows a doc's version history and entry \
 filename.\n\
 \n\
+## Deliverables go to the artifact store, not the wiki\n\
+\n\
+When what you produced is a **file meant to be handed to a person** — a PDF, a \
+slide deck (pptx), a spreadsheet (xlsx), a Word document, a rendered video or \
+image, an exported dataset — store it as an artifact instead of trying to \
+publish it to the wiki:\n\
+\n\
+```\nfleet artifact add <path> [--title \"<title>\"] [--note \"<one line>\"]\n```\n\
+\n\
+> **If your tool list includes the `fleet__artifact` MCP tool (every \
+Fleet-launched session has it), prefer it (`action=\"add\"/\"list\"/\"get\"/\
+\"delete\"`) over the `fleet artifact` CLI — same reason as `fleet__wiki`: in \
+an rca remote session a Bash `fleet` is routed to a remote executor with no \
+`fleet` and fails.**\n\
+\n\
+- **The wiki cannot hold these formats — a hard limit, not a preference.** Its \
+kinds are `html`/`htmlDir`/`markdown` and the entry must be a renderable text \
+file; an `.xlsx` published there lists fine and opens blank.\n\
+- **Store it the moment you produce it, not at the end.** Deliverables are \
+usually written inside `.worktrees/<task-id>`, and that directory is deleted \
+when the plan merges — after which the file is gone. Same hazard as rescuing \
+gitignored output before removing a worktree, except here there is a place \
+built to put it.\n\
+- **`--title` and `--note` are worth writing properly.** They are the entire \
+content the user reads on the card; the default title is the filename, and \
+\"out.xlsx\" tells a person nothing.\n\
+- One file per call, not a directory — zip a folder first.\n\
+- Stored artifacts appear on the desktop's 产出 board: filter by workspace, \
+star them, preview them (images / video / audio / PDF / text render inline; \
+Office formats get a typed placeholder plus export and open-with-system-app), \
+and export anywhere.\n\
+\n\
 ## When NOT to use the wiki\n\
 \n\
 Three close cousins render something for a human to look at. Don't confuse \
@@ -176,6 +236,9 @@ session has one. It's hosted on claude.ai and shareable; the cost is that the \
 content is uploaded to an external service, and it must be a single \
 self-contained file (inlined CSS/JS, images as data URIs). Keep private \
 project output off it.\n\
+- **A binary file meant for a person** (PDF / pptx / xlsx / video / image) \
+→ the artifact store, see the section above. The wiki cannot render any of \
+them.\n\
 - **Something that will be read again later** → the wiki. Only wiki docs can \
 be read back by a later session with `fleet wiki cat`, cross-linked with \
 `[[slug]]`, filtered by workspace, and full-text searched — and only the wiki \
@@ -306,6 +369,33 @@ mod tests {
             assert!(g.contains("fleet wiki publish"), "{locale} guidance must mention the command");
             assert!(g.contains("slug"), "{locale} guidance must explain slug reuse");
             assert!(g.contains("[[slug]]"), "{locale} guidance must document cross-links");
+        }
+    }
+
+    /// The artifact store is the ONLY ingest path for deliverables — the
+    /// desktop has no "add" button — so if this guidance stops naming it, an
+    /// agent that produces a deck has nowhere to put it and the 产出 page
+    /// silently stays empty. Both locales must steer the binary formats there
+    /// and say why the wiki cannot take them.
+    #[test]
+    fn render_both_locales_route_deliverables_to_the_artifact_store() {
+        for locale in ["zh", "en"] {
+            let g = render_guidance(locale);
+            assert!(
+                g.contains("fleet__artifact"),
+                "{locale}: guidance must name the MCP tool, not just the CLI"
+            );
+            assert!(
+                g.contains("fleet artifact add"),
+                "{locale}: guidance must show the CLI fallback"
+            );
+            for fmt in ["pptx", "xlsx", "PDF"] {
+                assert!(g.contains(fmt), "{locale}: guidance must name {fmt}");
+            }
+            assert!(
+                g.contains("worktree") || g.contains(".worktrees"),
+                "{locale}: guidance must say why storing it late loses the file"
+            );
         }
     }
 

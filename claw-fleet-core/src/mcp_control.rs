@@ -31,13 +31,14 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Names of the control tools, in `tools/list` order.
-pub const CONTROL_TOOL_NAMES: [&str; 8] = [
+pub const CONTROL_TOOL_NAMES: [&str; 9] = [
     "fleet__plan",
     "fleet__handoff",
     "fleet__watch",
     "fleet__loop",
     "fleet__schedule",
     "fleet__wiki",
+    "fleet__artifact",
     "fleet__inspect",
     "fleet__control",
 ];
@@ -57,6 +58,7 @@ pub fn control_tool_defs() -> Vec<Value> {
         loop_tool_def(),
         schedule_tool_def(),
         wiki_tool_def(),
+        artifact_tool_def(),
         crate::mcp_inspect::inspect_tool_def(),
         crate::mcp_inspect::control_tool_def(),
     ]
@@ -196,6 +198,26 @@ fn wiki_tool_def() -> Value {
     })
 }
 
+fn artifact_tool_def() -> Value {
+    json!({
+        "name": "fleet__artifact",
+        "description": "Store a finished DELIVERABLE in the Fleet artifact library (the desktop's 产出 page) so the user can find it, preview it and hand it to someone. Use this instead of the `fleet artifact` CLI. This is for files whose point is to be given to a person — a PDF, a slide deck, a spreadsheet, a rendered video or image, an exported dataset. NOT for source code (that lives in the repo) and NOT for reusable knowledge (that is `fleet__wiki`, which only holds html/markdown and cannot render these formats at all). Add the artifact as soon as you produce it: the file is usually written inside a `.worktrees/<task-id>` checkout that gets deleted when the plan merges, and once that happens the deliverable is gone. Actions: add (--path required; --title/--note optional and worth filling in — they are what the user reads on the card), list, get (--id required), delete (--id required). `add` reads a path on the host serving this session.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["add", "list", "get", "delete"]},
+                "path": {"type": "string", "description": "File to store. Required for add. One file, not a directory — zip a folder first."},
+                "title": {"type": "string", "description": "Display name on the card (add only). Defaults to the filename; a real title is much more useful."},
+                "note": {"type": "string", "description": "One line on what this is and who it is for (add only). Shown under the preview."},
+                "id": {"type": "string", "description": "Artifact id. Required for get and delete."},
+                "all": {"type": "boolean", "description": "List every workspace's artifacts instead of just this one (list only)."}
+            },
+            "required": ["action"],
+            "additionalProperties": false
+        }
+    })
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 /// Execute a control tool. Returns `Ok(text)` for the agent on success, or
@@ -216,6 +238,7 @@ pub fn handle(
         "fleet__loop" => handle_loop(args, session_id),
         "fleet__schedule" => handle_schedule(args, session_id),
         "fleet__wiki" => handle_wiki(args, cwd),
+        "fleet__artifact" => handle_artifact(args, session_id, cwd),
         "fleet__inspect" => crate::mcp_inspect::handle_inspect(args, &action_of(args)?),
         "fleet__control" => crate::mcp_inspect::handle_control(args, &action_of(args)?),
         other => Err(format!("unknown control tool: {other}")),
@@ -722,6 +745,94 @@ fn handle_schedule(args: &Value, sid: Option<&str>) -> Result<String, String> {
 }
 
 // ── wiki ─────────────────────────────────────────────────────────────────────
+
+/// `fleet__artifact` — the artifact store (产出 page).
+///
+/// Deliberately the only ingest path: the desktop offers no "add" button, so if
+/// an agent does not call this, the page stays empty. That is why the tool
+/// description leans on *when* to call it rather than just how.
+fn handle_artifact(args: &Value, session_id: Option<&str>, cwd: &Path) -> Result<String, String> {
+    use crate::artifacts;
+    let action = action_of(args)?;
+    match action.as_str() {
+        "add" => {
+            let path = req(args, "path")?;
+            let a = artifacts::add(
+                Path::new(&path),
+                arg(args, "title").as_deref(),
+                arg(args, "note").as_deref(),
+                cwd,
+                session_id,
+            )?;
+            Ok(format!(
+                "Stored artifact {} — {} ({}, {} bytes){}. It is now on the 产出 page.",
+                a.id,
+                a.title,
+                a.kind,
+                a.size_bytes,
+                if a.hardlinked { ", hard-linked" } else { ", copied" }
+            ))
+        }
+        "list" => {
+            let all = args.get("all").and_then(Value::as_bool).unwrap_or(false);
+            let here = crate::wiki::resolve_workspace_path(cwd);
+            let items: Vec<_> = artifacts::list()
+                .into_iter()
+                .filter(|a| all || crate::wiki::workspace_contains(&a.workspace_path, &here))
+                .collect();
+            if items.is_empty() {
+                return Ok(if all {
+                    "No artifacts stored yet.".to_string()
+                } else {
+                    "No artifacts from this workspace yet (pass all:true to see every workspace)."
+                        .to_string()
+                });
+            }
+            let mut out = String::new();
+            for a in &items {
+                out.push_str(&format!(
+                    "{}  {}  [{}]  {} bytes  {}{}\n",
+                    a.id,
+                    a.title,
+                    a.kind,
+                    a.size_bytes,
+                    a.workspace_name,
+                    if a.drifted { "  (source rewritten since)" } else { "" }
+                ));
+            }
+            Ok(out)
+        }
+        "get" => {
+            let id = req(args, "id")?;
+            let a = artifacts::get(&id)?;
+            Ok(format!(
+                "{}  —  {}\n  file: {}   kind: {}   mime: {}\n  size: {} bytes\n  workspace: {}\n  added: {}\n  from: {}\n  note: {}{}",
+                a.id,
+                a.title,
+                a.name,
+                a.kind,
+                a.mime,
+                a.size_bytes,
+                a.workspace_path,
+                fmt_ms(a.created_ms),
+                a.source_path,
+                if a.note.is_empty() { "(none)" } else { &a.note },
+                if a.drifted {
+                    "\n  WARNING: hard-linked, and the source has been rewritten in place since — \
+                     the stored bytes are no longer what was archived."
+                } else {
+                    ""
+                }
+            ))
+        }
+        "delete" => {
+            let id = req(args, "id")?;
+            artifacts::delete(&id)?;
+            Ok(format!("Deleted artifact {id}."))
+        }
+        other => Err(format!("unknown artifact action: {other}")),
+    }
+}
 
 fn handle_wiki(args: &Value, cwd: &Path) -> Result<String, String> {
     use crate::wiki;
