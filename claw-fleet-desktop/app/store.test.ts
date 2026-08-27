@@ -1,5 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo } from "./types";
+
+// applyWindowTheme talks to the tauri window API; capture what it hands over.
+const winMock = vi.hoisted(() => ({
+  setTheme: vi.fn(async (_value: unknown) => undefined),
+}));
+vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => winMock }));
 
 // navigateToSessionDetail → useDetailStore.open touches the tauri bridge; stub
 // it so the store logic runs headless.
@@ -497,5 +503,68 @@ describe("详情取数期限", () => {
 
     expect(useDetailStore.getState().isLoading).toBe(false);
     expect(useDetailStore.getState().loadStalled).toBe(true);
+  });
+});
+
+/**
+ * 主题「系统」档必须把 `null` 交给 tauri，而不是解析后的 dark/light。
+ *
+ * macOS 上 tao 的 `set_theme` 落到 `[NSApp setAppearance:]`（application 级，
+ * 不是单窗口），而 WKWebView 的 `prefers-color-scheme` 正是从这个 app
+ * appearance 解析出来的 —— 也就是 `getSystemTheme` 读回来的那个值。所以传
+ * 具体值会把 app 焊死在自己刚设的那一档：老板选过一次暗色之后，再切回
+ * 「系统」读到的仍是我们自己焊上去的 dark，白天也回不到亮色。
+ */
+describe("applyWindowTheme", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    winMock.setTheme.mockReset();
+    winMock.setTheme.mockImplementation(async () => undefined);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Stub the pair the latch runs through: the webview's media query answers
+   *  from whatever appearance was last forced, and `null` releases it back to
+   *  the OS — which here is light. Returns the data-theme values stamped. */
+  function stubLatchedDarkWebview(): string[] {
+    const stamped: string[] = [];
+    let forced: "dark" | "light" | null = "dark";
+    winMock.setTheme.mockImplementation(async (value: unknown) => {
+      forced = value === null ? null : (value as "dark" | "light");
+    });
+    vi.stubGlobal("window", {
+      matchMedia: (q: string) => ({
+        // OS setting is light; only a forced dark appearance reads back dark.
+        matches: q.includes("dark") && forced === "dark",
+      }),
+    });
+    vi.stubGlobal("document", {
+      documentElement: {
+        setAttribute: (_k: string, v: string) => stamped.push(v),
+      },
+    });
+    return stamped;
+  }
+
+  it("「系统」档传 null，让 app 松开回到跟随系统", async () => {
+    const stamped = stubLatchedDarkWebview();
+
+    const { applyWindowTheme } = await import("./store");
+    await applyWindowTheme("system");
+
+    expect(winMock.setTheme).toHaveBeenCalledWith(null);
+    // Re-read after un-latching: the OS is light, so that's what gets stamped.
+    expect(stamped.at(-1)).toBe("light");
+  });
+
+  it("显式档位仍然把自己那一档焊给窗口", async () => {
+    stubLatchedDarkWebview();
+
+    const { applyWindowTheme } = await import("./store");
+    await applyWindowTheme("light");
+
+    expect(winMock.setTheme).toHaveBeenCalledWith("light");
   });
 });

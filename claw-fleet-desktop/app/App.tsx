@@ -19,7 +19,7 @@ import { Wizard } from "./components/Wizard";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
-import { type Connection, navigateToSessionDetail, resolveTheme, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
+import { type Connection, applyWindowTheme, navigateToSessionDetail, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
@@ -246,14 +246,11 @@ function App() {
 
   useEffect(() => {
     const apply = () => {
-      const resolved = resolveTheme(theme);
-      document.documentElement.setAttribute("data-theme", resolved);
       // setTheme triggers an NSAppearance change on macOS, which makes
       // AppKit relayout the standard window buttons back to the system
       // default — overriding our trafficLightPosition. Nudging the
       // content view forces tao to re-apply the inset on next draw.
-      getCurrentWindow()
-        .setTheme(resolved === "dark" ? "dark" : "light")
+      applyWindowTheme(theme)
         .then(() => invoke("nudge_traffic_lights"))
         .catch(() => {});
     };

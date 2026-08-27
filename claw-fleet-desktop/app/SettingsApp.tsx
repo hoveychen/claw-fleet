@@ -3,18 +3,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./fonts";
 import "./App.css";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { resolveTheme, useUIStore } from "./store";
+import { applyWindowTheme, useUIStore } from "./store";
 
 function SettingsApp() {
   const { theme } = useUIStore();
 
   useEffect(() => {
     const apply = () => {
-      const resolved = resolveTheme(theme);
-      document.documentElement.setAttribute("data-theme", resolved);
-      getCurrentWindow()
-        .setTheme(resolved === "dark" ? "dark" : "light")
-        .catch(() => {});
+      applyWindowTheme(theme).catch(() => {});
     };
     apply();
 
