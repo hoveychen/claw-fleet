@@ -188,11 +188,12 @@ describe("sessionEq", () => {
 });
 
 /**
- * Chat is its own mode, not a workspace: the `chatOnly` toggle and the
- * directory `<select>` are mutually exclusive halves of the rail's filter. The
- * cases that matter: each half owns its sessions outright, neither leaks into
- * the other, and a chat path the backend never handed us must not silently
- * empty the rail.
+ * `chatOnly` narrows the rail to the pure-chat workspace and nothing else; with
+ * it off the rail is not filtered by mode at all, so chat sessions show up
+ * alongside the repos under "all directories". The cases that matter: the
+ * toggle owns the rail outright while on (a directory left selected underneath
+ * must not narrow it), chat is included rather than dropped while off, and a
+ * chat path the backend never handed us must not silently empty the rail.
  */
 describe("matchesWorkspaceFilter", () => {
   const CHAT = "/Users/foo/.fleet/chat";
@@ -211,10 +212,10 @@ describe("matchesWorkspaceFilter", () => {
     expect(matchesWorkspaceFilter(repoSession, "/Users/foo/repo", CHAT, true)).toBe(false);
   });
 
-  // The mirror image: "all directories" means all *directories*. Chat is no
-  // longer one of them, so it stays out until the toggle is flipped.
-  it("drops chat sessions from every directory filter", () => {
-    expect(matchesWorkspaceFilter(chatSession, "all", CHAT, false)).toBe(false);
+  // The toggle is chat-*only*, not chat-on/chat-off: with it off the rail is
+  // unfiltered by mode, so "all directories" includes the chat sessions too.
+  it("includes chat sessions under the all-directories filter", () => {
+    expect(matchesWorkspaceFilter(chatSession, "all", CHAT, false)).toBe(true);
     expect(matchesWorkspaceFilter(repoSession, "all", CHAT, false)).toBe(true);
   });
 

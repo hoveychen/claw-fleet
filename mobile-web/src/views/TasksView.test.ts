@@ -36,10 +36,10 @@ describe("matchesWorkspaceFilter", () => {
     expect(matchesWorkspaceFilter(repo, "/Users/foo/repo", CHAT, true)).toBe(false);
   });
 
-  // The mirror image: "all directories" means all *directories*. Chat is no
-  // longer one of them.
-  it("drops chat sessions from every directory filter", () => {
-    expect(matchesWorkspaceFilter(chat, "", CHAT, false)).toBe(false);
+  // The toggle is chat-*only*, not chat-on/chat-off: with it off the list is
+  // unfiltered by mode, so "all directories" includes the chat sessions too.
+  it("includes chat sessions under the all-directories filter", () => {
+    expect(matchesWorkspaceFilter(chat, "", CHAT, false)).toBe(true);
     expect(matchesWorkspaceFilter(repo, "", CHAT, false)).toBe(true);
   });
 

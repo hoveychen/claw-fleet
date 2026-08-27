@@ -194,28 +194,25 @@ function markBucket(s: SessionInfo): "pending" | "done" {
 
 /** Does `s` pass the rail's workspace filter?
  *
- *  The filter has two mutually exclusive halves. `chatOnly` is the chat-mode
- *  toggle: while it is on the rail shows the pure-chat workspace and nothing
- *  else, and `filter` (the directory `<select>`) is ignored — a directory left
- *  selected underneath must not narrow the chat list. While it is off the rail
- *  shows directories only, so chat sessions are dropped even under "all"; chat
- *  is a mode now, not one more workspace mixed in among the repos.
+ *  `chatOnly` is a chat-*only* toggle, not a chat-on/chat-off switch: while it
+ *  is on the rail shows the pure-chat workspace and nothing else, and `filter`
+ *  (the directory `<select>`) is ignored — a directory left selected underneath
+ *  must not narrow the chat list. While it is off nothing is filtered by mode,
+ *  so "all" means all: chat sessions sit in the rail alongside the repos. (A
+ *  concrete directory filter still leaves them out, since the chat workspace is
+ *  not that directory.)
  *
  *  `chatPath` is the pure-chat workspace, `null` while the backend call is in
- *  flight or if it failed. Neither half can be honoured without it, so the
- *  toggle goes inert and this degrades to a plain directory filter rather than
- *  emptying the rail on a guess. */
+ *  flight or if it failed. The toggle cannot be honoured without it, so it goes
+ *  inert and this degrades to a plain directory filter rather than emptying the
+ *  rail on a guess. */
 export function matchesWorkspaceFilter(
   s: SessionInfo,
   filter: string,
   chatPath: string | null,
   chatOnly: boolean,
 ): boolean {
-  if (chatPath != null) {
-    const isChat = s.workspacePath === chatPath;
-    if (chatOnly) return isChat;
-    if (isChat) return false;
-  }
+  if (chatPath != null && chatOnly) return s.workspacePath === chatPath;
   if (filter === "all") return true;
   // Options are collapsed to repo roots (see the dropdown's distinctWorkspaces),
   // so a session inside `<repo>/.worktrees/<task>` matches its root's option.
@@ -1306,7 +1303,7 @@ export function HistoryView() {
               disabled={chatOnly}
               title={
                 chatOnly
-                  ? t("history.filter_workspace_off", "聊天模式下不按目录筛选")
+                  ? t("history.filter_workspace_off", "仅聊天模式下不按目录筛选")
                   : t("history.filter_workspace", "按工作目录筛选")
               }
             >
@@ -1321,10 +1318,10 @@ export function HistoryView() {
                 className={`${styles.chat_toggle} ${chatOnly ? styles.chat_toggle_on : ""}`}
                 aria-pressed={chatOnly}
                 onClick={() => setChatOnly(!chatOnly)}
-                title={t("history.filter_chat_tip", "只显示纯聊天会话，不按目录筛选")}
+                title={t("history.filter_chat_tip", "只显示纯聊天会话，不按目录筛选；关闭时全部目录也含聊天")}
               >
                 <MessageCircle size={12} strokeWidth={1.8} />
-                {t("history.chat_mode", "聊天")}
+                {t("history.chat_mode", "仅聊天")}
               </button>
             )}
           </div>
