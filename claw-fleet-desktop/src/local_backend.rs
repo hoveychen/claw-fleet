@@ -1927,6 +1927,18 @@ impl Backend for LocalBackend {
         claw_fleet_core::workspace_browse::browse_dir(path.as_deref(), &self.known_workspaces())
     }
 
+    fn create_dir(
+        &self,
+        path: Option<String>,
+        name: String,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        claw_fleet_core::workspace_browse::create_dir(
+            path.as_deref(),
+            &name,
+            &self.known_workspaces(),
+        )
+    }
+
     fn list_remote_workspaces(&self) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
         claw_fleet_core::remote_workspace::load()
     }

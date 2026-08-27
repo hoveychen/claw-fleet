@@ -214,6 +214,14 @@ impl Backend for NullBackend {
         Err("backend not ready".into())
     }
 
+    fn create_dir(
+        &self,
+        _path: Option<String>,
+        _name: String,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        Err("backend not ready".into())
+    }
+
     fn list_remote_workspaces(&self) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
         claw_fleet_core::remote_workspace::RemoteWorkspacesConfig::default()
     }

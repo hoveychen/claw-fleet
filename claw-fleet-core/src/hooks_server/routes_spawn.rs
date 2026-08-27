@@ -209,6 +209,46 @@ pub(crate) fn route_browse_dir(
                 }
             }
 
+pub(crate) fn route_create_dir(
+    ctx: &ServeCtx,
+    mut request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let sources = ctx.sources;
+
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let body: serde_json::Value = serde_json::from_str(&buf).unwrap_or_default();
+                let parent = body
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty());
+                let name = body.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+                let known: Vec<String> = sources
+                    .iter()
+                    .flat_map(|s| s.scan_sessions())
+                    .map(|s| s.workspace_path)
+                    .collect();
+                match crate::workspace_browse::create_dir(parent, name, &known) {
+                    Ok(resp) => {
+                        let body = serde_json::to_string(&resp).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
 pub(crate) fn route_spawn_session(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,

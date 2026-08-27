@@ -549,6 +549,23 @@ impl crate::backend::Backend for RemoteBackend {
             .map_err(|e| format!("probe /browse_dir failed: {e}"))
     }
 
+    fn create_dir(
+        &self,
+        path: Option<String>,
+        name: String,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        // Created on the probe host, for the same reason its siblings are listed
+        // from there. An omitted `path` stays omitted so the probe resolves its
+        // own home.
+        let body = serde_json::json!({
+            "path": path.as_deref().map(str::trim).filter(|p| !p.is_empty()),
+            "name": name,
+        });
+        self.probe
+            .post_json(claw_fleet_core::routes::CREATE_DIR, &body)
+            .map_err(|e| format!("probe /create_dir failed: {e}"))
+    }
+
     fn list_remote_workspaces(
         &self,
     ) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {

@@ -1093,6 +1093,12 @@ fn handle_request(
             // its own boundary (home + off-home known workspaces, canonical).
             crate::routes::BROWSE_DIR if request.method() == &tiny_http::Method::Get => route_browse_dir(ctx, request, &query, json_header, path),
 
+            // ...and the one write that picker needs: make a directory to pick.
+            // Same boundary as the listing above — `workspace_browse` refuses a
+            // parent outside the roots and a name that is anything but one plain
+            // component.
+            crate::routes::CREATE_DIR if request.method() == &tiny_http::Method::Post => route_create_dir(ctx, request, &query, json_header, path),
+
             // Spawn a brand-new headless Claude Code session (sessions page's
             // "new session" button, remote backend). Detached `claude -p`;
             // the session appears via the scanner once its JSONL exists.
