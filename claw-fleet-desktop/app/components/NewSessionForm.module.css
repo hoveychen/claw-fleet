@@ -53,6 +53,22 @@
   cursor: default;
 }
 
+/* Chat mode's switch — PillMenu's `ghost_pill` shape (it is exported for
+   exactly this) with an accent-filled "on" state, so a mode reads as held down
+   rather than as one more dropdown sitting in the context row. */
+   The class is doubled to out-specify `ghost_pill`'s own rules, which live in
+   another stylesheet — with equal specificity the winner would come down to
+   whichever module's CSS the bundler happened to emit last. */
+.chat_pill_on.chat_pill_on {
+  background: rgba(var(--color-accent-rgb), 0.14);
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.chat_pill_on.chat_pill_on:hover:not(:disabled) {
+  background: rgba(var(--color-accent-rgb), 0.2);
+}
+
 .hint {
   margin: 0;
   font-size: 11px;
