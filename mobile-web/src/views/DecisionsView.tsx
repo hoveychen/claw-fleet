@@ -41,6 +41,7 @@ import styles from "./DecisionsView.module.css";
 import { StructuredCommand } from "./StructuredCommand";
 import { basename } from "./taskNotification";
 import { permissionPrimary } from "./permissionPrimary";
+import { stripTtsDivider } from "./decisionCall";
 
 export const KIND_LABEL: Record<string, string> = {
   guard: "命令审批",
@@ -1712,14 +1713,6 @@ function ImageGallery({
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-
-/** Drop the Fleet TTS divider (a lone `---` line splits summary/body). */
-function stripTtsDivider(text: string): string {
-  const idx = text.split("\n").findIndex((l) => l.trim() === "---");
-  if (idx === -1) return text;
-  const lines = text.split("\n");
-  return [...lines.slice(0, idx), ...lines.slice(idx + 1)].join("\n");
-}
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
