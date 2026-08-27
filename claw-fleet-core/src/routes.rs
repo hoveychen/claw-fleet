@@ -272,8 +272,19 @@ pub const DECISION_ASSET_PREFIX: &str = "/decision_asset/";
 /// items, artifacts via `/v1/responses/{id}/files`, usage via the response
 /// `usage` field), so nothing external is lost.
 pub fn is_public(path: &str) -> bool {
-    path == HEALTH || path == ACP || path.starts_with("/v1/")
+    path == HEALTH
+        || path == ACP
+        || path.starts_with("/v1/")
+        // A card carrying `html`/`images` goes out as a URL-mode elicitation
+        // pointing at the existing `/decision_asset/` handler — ACP has no way
+        // to put HTML in a form. The card id in the path is a per-question
+        // UUID, so the URL is an unguessable capability: a client's browser can
+        // open it without a bearer token riding in the query string, where it
+        // would land in history and proxy logs. The handler already confines
+        // itself to `~/.fleet/decision-assets`.
+        || path.starts_with(DECISION_ASSET_PREFIX)
 }
+
 
 /// The Agent Client Protocol surface.
 ///

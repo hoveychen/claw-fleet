@@ -285,6 +285,96 @@ pub fn plan_approval_to_form(
     )
 }
 
+
+// ───────────────────────── url-mode elicitations ────────────────────
+
+/// Whether a fleet-ask question carries a preview a form cannot render.
+pub fn has_rich_preview(q: &crate::mcp_ipc::FleetAskQuestion) -> bool {
+    q.html.is_some() || !q.images.is_empty()
+}
+
+/// The URL serving a question's rendered preview.
+///
+/// Points at the existing `/decision_asset/` handler, which already serves the
+/// `index.html` the desktop card loads over `fleet-decision://` and confines
+/// itself to `~/.fleet/decision-assets`. Returns `None` when no public base URL
+/// is configured, since a link the client cannot resolve is worse than none.
+pub fn preview_url(card_id: &str, question_index: usize) -> Option<String> {
+    let base = super::attachments::public_base_url()?;
+    Some(format!("{base}/decision_asset/{card_id}/q{question_index}/index.html"))
+}
+
+/// A fleet-ask card as a URL-mode elicitation.
+///
+/// Used when the card carries `html`/`images` and the client advertised URL
+/// support. The rendered page is the question; the answer comes back as an
+/// accept/decline, since a URL elicitation normally carries no content.
+pub fn fleet_ask_to_url(
+    session_id: &str,
+    req: &crate::mcp_ipc::FleetAskRequest,
+    url: String,
+) -> CreateElicitationRequest {
+    let message = req
+        .questions
+        .first()
+        .map(|q| q.question.clone())
+        .unwrap_or_else(|| "Fleet needs your input".to_string());
+    CreateElicitationRequest::url(session_id, message, req.id.clone(), url)
+}
+
+/// An A2UI card as a URL-mode elicitation.
+///
+/// A2UI is its own rendering protocol with no ACP equivalent, so the only
+/// honest options are "render it somewhere and link" or "do not show it at
+/// all". This is the former.
+pub fn a2ui_to_url(
+    session_id: &str,
+    req: &crate::mcp_a2ui_ipc::A2uiRenderRequest,
+    url: String,
+) -> CreateElicitationRequest {
+    CreateElicitationRequest::url(
+        session_id,
+        "Fleet rendered an interactive view".to_string(),
+        req.id.clone(),
+        url,
+    )
+}
+
+/// How a card can be delivered, given what the client said it supports.
+///
+/// The spec is explicit that an agent **MUST NOT** use URL mode against a
+/// client that did not advertise it, and a client advertising neither mode
+/// cannot be asked at all — see [`Delivery::Unsupported`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    Form,
+    Url,
+    /// The client cannot host this question. It stays open for another surface
+    /// (the desktop app, the phone) rather than being answered on its behalf.
+    Unsupported,
+}
+
+/// Choose a delivery for a card.
+///
+/// A rich preview prefers URL mode but degrades to a form rather than
+/// disappearing: losing the picture beats losing the question.
+///
+/// Takes the capabilities rather than two booleans — writing this with three
+/// positional flags got their order wrong on the first attempt, and a
+/// mis-ordered call here would silently pick the wrong channel.
+pub fn choose_delivery(rich: bool, caps: &super::types::ClientCapabilities) -> Delivery {
+    let form = caps.supports_elicitation_form();
+    let url = caps.supports_elicitation_url();
+    if rich && url {
+        return Delivery::Url;
+    }
+    if form {
+        return Delivery::Form;
+    }
+    // Neither a form to fall back to, nor permission to use URL mode.
+    Delivery::Unsupported
+}
+
 // ─────────────────────── answers → Fleet responses ──────────────────
 
 /// Turn an elicitation answer into a fleet-ask response.
@@ -566,6 +656,87 @@ mod tests {
 
     fn accept(v: Value) -> ElicitationAction {
         ElicitationAction::Accept { content: Some(v.as_object().unwrap().clone()) }
+    }
+
+
+    fn caps(form: bool, url: bool) -> super::super::types::ClientCapabilities {
+        let mut v = serde_json::Map::new();
+        let mut e = serde_json::Map::new();
+        if form {
+            e.insert("form".into(), json!({}));
+        }
+        if url {
+            e.insert("url".into(), json!({}));
+        }
+        v.insert("elicitation".into(), Value::Object(e));
+        serde_json::from_value(Value::Object(v)).unwrap()
+    }
+
+    #[test]
+    fn rich_previews_prefer_url_but_fall_back_to_a_form() {
+        // Losing the picture beats losing the question.
+        assert_eq!(choose_delivery(true, &caps(true, true)), Delivery::Url);
+        assert_eq!(choose_delivery(true, &caps(false, true)), Delivery::Url);
+        assert_eq!(
+            choose_delivery(true, &caps(true, false)),
+            Delivery::Form,
+            "no url support: show the question without its picture"
+        );
+        // Plain questions never need URL mode.
+        assert_eq!(choose_delivery(false, &caps(true, true)), Delivery::Form);
+        assert_eq!(choose_delivery(false, &caps(true, false)), Delivery::Form);
+    }
+
+    #[test]
+    fn a_client_without_form_support_cannot_be_asked() {
+        // The spec forbids using URL mode against a client that did not
+        // advertise it, so there is nothing left to try.
+        assert_eq!(choose_delivery(false, &caps(false, false)), Delivery::Unsupported);
+        assert_eq!(choose_delivery(true, &caps(false, false)), Delivery::Unsupported);
+        // A plain question with only url support has no form to render.
+        assert_eq!(choose_delivery(false, &caps(false, true)), Delivery::Unsupported);
+    }
+
+    #[test]
+    fn a_question_is_rich_only_when_it_carries_a_preview() {
+        let mut q = ask_req().questions.remove(0);
+        assert!(!has_rich_preview(&q));
+        q.html = Some("<b>hi</b>".into());
+        assert!(has_rich_preview(&q));
+        q.html = None;
+        q.images = vec![crate::mcp_ipc::FleetAskImage {
+            name: "a.png".into(),
+            path: String::new(),
+            caption: None,
+        }];
+        assert!(has_rich_preview(&q));
+    }
+
+    #[test]
+    fn a_preview_url_needs_a_configured_base() {
+        let prev = std::env::var("FLEET_PUBLIC_BASE_URL").ok();
+        std::env::remove_var("FLEET_PUBLIC_BASE_URL");
+        assert!(preview_url("card1", 0).is_none(), "a link nothing resolves is worse than none");
+
+        std::env::set_var("FLEET_PUBLIC_BASE_URL", "https://f.example.com");
+        assert_eq!(
+            preview_url("card1", 2).as_deref(),
+            Some("https://f.example.com/decision_asset/card1/q2/index.html"),
+            "must match the existing /decision_asset/ handler's path shape"
+        );
+        match prev {
+            Some(v) => std::env::set_var("FLEET_PUBLIC_BASE_URL", v),
+            None => std::env::remove_var("FLEET_PUBLIC_BASE_URL"),
+        }
+    }
+
+    #[test]
+    fn a_url_elicitation_carries_the_card_id_as_its_elicitation_id() {
+        let e = fleet_ask_to_url("sess", &ask_req(), "https://x.test/p".into());
+        assert_eq!(e.mode, "url");
+        assert_eq!(e.elicitation_id.as_deref(), Some("a1"));
+        assert_eq!(e.url.as_deref(), Some("https://x.test/p"));
+        assert!(e.requested_schema.is_none());
     }
 
     #[test]

@@ -208,6 +208,9 @@ fn ask_elicitation(agent: &AcpAgent, acp_session: &str, id: &str) {
     }) else {
         return;
     };
+    if !agent.client_supports_elicitation_form() {
+        return leave_for_another_surface(agent, acp_session);
+    }
     let ask = decisions::elicitation_to_form(acp_session, &req);
     let Some(action) = create_elicitation(agent, ask) else { return };
     let resp = decisions::form_answer_to_elicitation(id, &action);
@@ -229,7 +232,20 @@ fn ask_fleet_ask(agent: &AcpAgent, acp_session: &str, id: &str) {
     }) else {
         return;
     };
-    let ask = decisions::fleet_ask_to_form(acp_session, &req);
+
+    // A card with `html`/`images` wants URL mode, but only if the client said
+    // it supports it — the spec forbids using it otherwise.
+    let rich = req.questions.iter().any(decisions::has_rich_preview);
+    let caps = agent.client_capabilities();
+    let ask = match decisions::choose_delivery(rich, &caps) {
+        decisions::Delivery::Url => match decisions::preview_url(&req.id, 0) {
+            Some(url) => decisions::fleet_ask_to_url(acp_session, &req, url),
+            // No public base URL configured, so there is nothing to link to.
+            None => decisions::fleet_ask_to_form(acp_session, &req),
+        },
+        decisions::Delivery::Form => decisions::fleet_ask_to_form(acp_session, &req),
+        decisions::Delivery::Unsupported => return leave_for_another_surface(agent, acp_session),
+    };
     let Some(action) = create_elicitation(agent, ask) else { return };
     let resp = decisions::form_answer_to_fleet_ask(id, &action);
     let _ =
@@ -246,10 +262,29 @@ fn ask_plan(agent: &AcpAgent, acp_session: &str, id: &str) {
     }) else {
         return;
     };
+    if !agent.client_supports_elicitation_form() {
+        return leave_for_another_surface(agent, acp_session);
+    }
     let ask = decisions::plan_approval_to_form(acp_session, &req);
     let Some(action) = create_elicitation(agent, ask) else { return };
     let resp = decisions::form_answer_to_plan(id, &action);
     let _ = crate::parked::deliver(&resp.id, &resp, false, crate::plan_approval::write_response);
+}
+
+/// Tell the client a question exists that it cannot host, and leave the card
+/// open.
+///
+/// The alternative — answering on the user's behalf — would either approve
+/// something nobody saw or reject work for a reason that is not the user's.
+/// Fleet's desktop and mobile surfaces can still answer it.
+fn leave_for_another_surface(agent: &AcpAgent, acp_session: &str) {
+    agent.notify_session(
+        acp_session,
+        super::types::SessionUpdate::agent_text(
+            "A Fleet decision card is waiting, but this client did not advertise \
+             elicitation support. Answer it in the Fleet desktop or mobile app.",
+        ),
+    );
 }
 
 /// Send `session/request_permission` and wait. `None` when the client never
