@@ -114,6 +114,51 @@ impl ProbeClient {
         })?
     }
 
+    /// GET endpoint with an optional HTTP byte range, returning the body, its
+    /// `Content-Type`, the blob's full size and the range actually served.
+    ///
+    /// Separate from [`ProbeClient::get_bytes`] because artifacts are the only
+    /// thing here big enough to seek into: a `<video>` in the webview asks for
+    /// ranges, and answering every one of them with the whole file defeats the
+    /// point. The probe replies `206` with `Content-Range: bytes s-e/total`;
+    /// a probe too old to know the route answers `200` with the whole body,
+    /// which parses as "no range, total = body length" and still plays — just
+    /// without seeking.
+    fn get_bytes_range(
+        &self,
+        endpoint: &str,
+        range: Option<(u64, u64)>,
+    ) -> Result<(Vec<u8>, String, u64, Option<(u64, u64)>), String> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        off_runtime(|| {
+            let mut req = self
+                .client
+                .get(&url)
+                .header("Authorization", &self.auth_header);
+            if let Some((start, end)) = range {
+                req = req.header("Range", format!("bytes={start}-{end}"));
+            }
+            let resp = req.send().map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            let header = |name: &str| {
+                resp.headers()
+                    .get(name)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string)
+            };
+            let mime = header("content-type").unwrap_or_else(|| "application/octet-stream".into());
+            let content_range = header("content-range");
+            let bytes = resp.bytes().map_err(|e| e.to_string())?.to_vec();
+            let (total, served) = match content_range.as_deref().and_then(parse_content_range) {
+                Some((s, e, total)) => (total, Some((s, e))),
+                None => (bytes.len() as u64, None),
+            };
+            Ok((bytes, mime, total, served))
+        })?
+    }
+
     /// GET endpoint, only check that the status is 2xx.
     fn get_ok(&self, endpoint: &str) -> Result<(), String> {
         let url = format!("{}{}", self.base_url, endpoint);
@@ -281,6 +326,55 @@ impl Drop for RemoteBackend {
 /// Encode a path for use in a query parameter.
 fn encode_path(path: &str) -> String {
     utf8_percent_encode(path, NON_ALPHANUMERIC).to_string()
+}
+
+/// Parse `Content-Range: bytes <start>-<end>/<total>` into its three numbers.
+///
+/// Returns `None` for anything else — including the legal `*/total` form used
+/// on a 416, and `bytes s-e/*` where the total is unknown. Neither is something
+/// the artifact routes emit, and guessing at a malformed header would be worse
+/// than falling back to "no range".
+fn parse_content_range(value: &str) -> Option<(u64, u64, u64)> {
+    let rest = value.trim().strip_prefix("bytes ")?;
+    let (span, total) = rest.split_once('/')?;
+    let (start, end) = span.split_once('-')?;
+    Some((
+        start.trim().parse().ok()?,
+        end.trim().parse().ok()?,
+        total.trim().parse().ok()?,
+    ))
+}
+
+/// Body of `POST /artifact_add`. Module-level for the same reason as
+/// [`WikiMoveReq`]: the integration tests send the production schema.
+#[derive(serde::Serialize)]
+pub(crate) struct ArtifactAddReq<'a> {
+    pub source_path: &'a str,
+    pub title: &'a str,
+    pub note: &'a str,
+    pub workspace_path: &'a str,
+    pub session_id: Option<&'a str>,
+}
+
+/// Body of `POST /artifact_update`. Every field but `id` is optional and a
+/// `None` means "leave it alone" — `skip_serializing_if` keeps an absent field
+/// absent on the wire rather than sending an explicit null the server would
+/// have to distinguish from "clear it".
+#[derive(serde::Serialize)]
+pub(crate) struct ArtifactUpdateReq<'a> {
+    pub id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starred: Option<bool>,
+}
+
+/// Body of `POST /artifact_delete`.
+#[derive(serde::Serialize)]
+pub(crate) struct ArtifactIdReq<'a> {
+    pub id: &'a str,
 }
 
 /// Body of `POST /wiki_move` and `POST /wiki_move_folder`. Module-level rather
@@ -826,6 +920,79 @@ impl crate::backend::Backend for RemoteBackend {
             encode_path(relpath),
         ))?;
         Ok(crate::wiki::WikiFileBytes { bytes, mime })
+    }
+
+    fn is_remote(&self) -> bool {
+        true
+    }
+
+    fn list_artifacts(&self) -> Vec<crate::artifacts::Artifact> {
+        self.probe.get(claw_fleet_core::routes::ARTIFACTS).unwrap_or_default()
+    }
+
+    fn get_artifact(&self, id: &str) -> Result<crate::artifacts::Artifact, String> {
+        self.probe.get(&format!(
+            "{}?id={}",
+            claw_fleet_core::routes::ARTIFACT,
+            encode_path(id)
+        ))
+    }
+
+    fn add_artifact(
+        &self,
+        source_path: &str,
+        title: &str,
+        note: &str,
+        workspace_path: &str,
+        session_id: Option<&str>,
+    ) -> Result<crate::artifacts::Artifact, String> {
+        // `source_path` names a file on the PROBE's host, not the desktop's —
+        // ingest happens where the agent wrote the file. A desktop-side picker
+        // would need an upload route instead; that is not this method.
+        self.probe.post_json(
+            claw_fleet_core::routes::ARTIFACT_ADD,
+            &ArtifactAddReq { source_path, title, note, workspace_path, session_id },
+        )
+    }
+
+    fn update_artifact(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        note: Option<&str>,
+        starred: Option<bool>,
+    ) -> Result<crate::artifacts::Artifact, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::ARTIFACT_UPDATE,
+            &ArtifactUpdateReq { id, title, note, starred },
+        )
+    }
+
+    fn delete_artifact(&self, id: &str) -> Result<(), String> {
+        self.probe
+            .post_json_ok(claw_fleet_core::routes::ARTIFACT_DELETE, &ArtifactIdReq { id })
+    }
+
+    fn read_artifact_bytes(
+        &self,
+        id: &str,
+        range: Option<(u64, u64)>,
+    ) -> Result<crate::artifacts::ArtifactBytes, String> {
+        let (bytes, mime, total_size, served) = self.probe.get_bytes_range(
+            &format!(
+                "{}?id={}",
+                claw_fleet_core::routes::ARTIFACT_BLOB,
+                encode_path(id)
+            ),
+            range,
+        )?;
+        Ok(crate::artifacts::ArtifactBytes { bytes, mime, total_size, range: served })
+    }
+
+    fn artifact_usage(&self) -> crate::artifacts::StoreUsage {
+        self.probe
+            .get(claw_fleet_core::routes::ARTIFACT_USAGE)
+            .unwrap_or_default()
     }
 
     fn get_decision_asset(
@@ -3396,6 +3563,27 @@ mod tests {
     use std::sync::MutexGuard;
 
     const TOKEN: &str = "integration-test-token";
+
+    /// `Content-Range` is how a ranged artifact read learns the blob's *full*
+    /// size — the body only carries the slice. Get this wrong and a `<video>`
+    /// over a remote workspace gets a duration derived from one chunk.
+    #[test]
+    fn content_range_yields_the_slice_and_the_total() {
+        use super::parse_content_range;
+        assert_eq!(parse_content_range("bytes 0-1023/1048576"), Some((0, 1023, 1048576)));
+        assert_eq!(parse_content_range("  bytes 10-19/20  "), Some((10, 19, 20)));
+
+        for bad in [
+            "bytes */1048576", // the 416 form: no slice to report
+            "bytes 0-1023/*",  // total unknown
+            "0-1023/1048576",  // no unit
+            "items 0-1/2",
+            "bytes 0-1023",
+            "",
+        ] {
+            assert_eq!(parse_content_range(bad), None, "must refuse {bad:?}");
+        }
+    }
 
     /// tauri `(async)` commands run their sync bodies on tokio runtime workers,
     /// where reqwest::blocking panics ("Cannot drop a runtime…") and the panic

@@ -3064,6 +3064,71 @@ export const MOCK_TIMELINE_REPORTS: Map<string, DailyReport> = new Map([
   ...TIMELINE_SUMMARIES.map((e) => [dateStr(e.daysAgo), buildMockReport(e)] as [string, DailyReport]),
 ]);
 
+// ── Artifacts ───────────────────────────────────────────────────────────────
+// Same reason as MOCK_WIKI_DOCS below: without these the mock's `default:`
+// branch answers null for list_artifacts and the grid renders empty, which
+// looks like a working page with no data rather than a missing mock.
+export const MOCK_ARTIFACTS = [
+  {
+    id: "20260827-142530",
+    name: "Q3-财务分析.xlsx",
+    title: "Q3 财务分析",
+    note: "按季度拆分的收入明细，发给财务的版本",
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    kind: "sheet",
+    sizeBytes: 184_320,
+    createdMs: NOW - 2 * HOUR,
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
+    sessionId: "4cb9bfd1-b5ce-4684-9d94-616cca85b863",
+    sourcePath: "/Users/demo/workspace/claw-fleet/.worktrees/q3/out.xlsx",
+    starred: true,
+    hardlinked: true,
+    drifted: false,
+  },
+  {
+    id: "20260827-101204",
+    name: "产品发布片.mp4",
+    title: "产品发布片 v3",
+    note: "",
+    mime: "video/mp4",
+    kind: "video",
+    sizeBytes: 412_663_296,
+    createdMs: NOW - 6 * HOUR,
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
+    sessionId: null,
+    sourcePath: "/Users/demo/workspace/claw-fleet/promo/out/launch.mp4",
+    starred: false,
+    hardlinked: true,
+    // The one card that shows the drift warning, so the state is visible in mock.
+    drifted: true,
+  },
+  {
+    id: "20260826-173311",
+    name: "架构评审.pdf",
+    title: "架构评审",
+    note: "给评审会的版本",
+    mime: "application/pdf",
+    kind: "pdf",
+    sizeBytes: 2_284_100,
+    createdMs: NOW - 1 * DAY,
+    workspacePath: "/Users/demo/workspace/netferry",
+    workspaceName: "netferry",
+    sessionId: null,
+    sourcePath: "/Users/demo/workspace/netferry/docs/review.pdf",
+    starred: false,
+    hardlinked: false,
+    drifted: false,
+  },
+];
+
+export const MOCK_ARTIFACT_USAGE = {
+  count: MOCK_ARTIFACTS.length,
+  totalBytes: MOCK_ARTIFACTS.reduce((n, a) => n + a.sizeBytes, 0),
+  hardlinkedBytes: MOCK_ARTIFACTS.filter((a) => a.hardlinked).reduce((n, a) => n + a.sizeBytes, 0),
+};
+
 // ── Wiki ────────────────────────────────────────────────────────────────────
 // Without these the mock's `default:` branch returns null for list_wiki_docs,
 // WikiView does setDocs(null), and the first docs.filter() blanks the app.

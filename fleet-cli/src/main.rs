@@ -78,6 +78,13 @@ enum Commands {
         json: bool,
     },
     /// Publish and browse docs in the Fleet wiki knowledge base (~/.fleet/wiki)
+    /// Store and browse finished deliverables — the 产出 page. For files whose
+    /// point is to be handed to a person (PDF, deck, spreadsheet, video,
+    /// image), which the wiki cannot hold: it only renders html/markdown.
+    Artifact {
+        #[command(subcommand)]
+        action: ArtifactCommands,
+    },
     Wiki {
         #[command(subcommand)]
         action: WikiCommands,
@@ -753,6 +760,61 @@ pub(crate) enum PlanCommands {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum ArtifactCommands {
+    /// Store one file in the artifact library. Add it as soon as it is
+    /// produced: deliverables are usually written inside a `.worktrees/<id>`
+    /// checkout that is deleted when the plan merges.
+    Add {
+        /// Path to the file. One file, not a directory — zip a folder first.
+        path: std::path::PathBuf,
+        /// Display name on the card. Default: the filename.
+        #[arg(long)]
+        title: Option<String>,
+        /// One line on what this is and who it is for.
+        #[arg(long)]
+        note: Option<String>,
+        /// Workspace to tag it with. Default: current directory.
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
+        /// Output the stored artifact's metadata as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// List artifacts from the current workspace, newest first (--all for
+    /// every workspace)
+    #[command(alias = "ls")]
+    List {
+        /// List artifacts from every workspace
+        #[arg(long)]
+        all: bool,
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one artifact's metadata
+    Get {
+        /// Artifact id
+        id: String,
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Copy an artifact's bytes out of the store to a path of your choosing
+    Export {
+        /// Artifact id
+        id: String,
+        /// Destination path
+        dest: std::path::PathBuf,
+    },
+    /// Remove an artifact and its stored bytes
+    #[command(alias = "rm")]
+    Delete {
+        /// Artifact id
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
 pub(crate) enum WikiCommands {
     /// Publish a .html file, a .md file, or a directory containing an HTML
     /// entry. Re-publishing an existing slug creates a new version (old
@@ -964,6 +1026,7 @@ fn main() {
         Commands::Account { json } => commands::account::cmd_account(json),
         Commands::Speed { json } => commands::agents::cmd_speed(json),
         Commands::Memory { file, json } => commands::memory::cmd_memory(file, json),
+        Commands::Artifact { action } => commands::artifact::cmd_artifact(action),
         Commands::Wiki { action } => commands::wiki::cmd_wiki(action),
         Commands::Search { query, limit, json } => commands::search::cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => commands::audit::cmd_audit(&level, filter.as_deref(), json),

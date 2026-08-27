@@ -170,6 +170,10 @@ pub fn slug_basename(slug: &str) -> &str {
 
 /// Extension → mime map for serving wiki files. Hand-rolled (repo has no
 /// mime-guessing dep); unknown extensions fall back to octet-stream.
+///
+/// Also the artifact store's mime source ([`crate::artifacts`]), which is why
+/// the table carries Office/archive types the wiki itself never serves: one
+/// table beats two that drift.
 pub fn mime_for_path(path: &Path) -> &'static str {
     let ext = path
         .extension()
@@ -196,11 +200,37 @@ pub fn mime_for_path(path: &Path) -> &'static str {
         "ttf" => "font/ttf",
         "otf" => "font/otf",
         "wasm" => "application/wasm",
-        "mp4" => "video/mp4",
+        "mp4" | "m4v" => "video/mp4",
         "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "flac" => "audio/flac",
+        "ogg" | "oga" => "audio/ogg",
         "pdf" => "application/pdf",
+        // Office — the formats that motivated the artifact store. The webview
+        // renders none of them; they are here so downloads/`open` get the right
+        // handler and the UI can pick an icon.
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "doc" => "application/msword",
+        "xls" => "application/vnd.ms-excel",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+        "odp" => "application/vnd.oasis.opendocument.presentation",
+        "rtf" => "application/rtf",
+        "epub" => "application/epub+zip",
+        // Archives.
+        "zip" => "application/zip",
+        "gz" | "tgz" => "application/gzip",
+        "tar" => "application/x-tar",
+        "7z" => "application/x-7z-compressed",
+        "rar" => "application/vnd.rar",
         _ => "application/octet-stream",
     }
 }
@@ -1736,18 +1766,27 @@ mod tests {
     #[test]
     fn search_meta_content_and_miss() {
         let root = tmp();
-        let ws = tmp();
-        let md = ws.path().join("perf-report.md");
+        let ws_parent = tmp();
+        // A named subdirectory, not the tempdir itself: `workspace_name` is part
+        // of the searchable meta (see `search_docs_in`), and `TempDir::new()`
+        // picks a random name — one that happened to contain "perf" made the
+        // "perf" query match BOTH docs and this test fail at random. Verified by
+        // isolation: publishing a doc from a dir literally named
+        // `superperf-project` reproduces the extra hit on demand.
+        let ws = ws_parent.path().join("wiki-search-fixture");
+        fs::create_dir_all(&ws).unwrap();
+        let ws = ws.as_path();
+        let md = ws.join("perf-report.md");
         fs::write(&md, "# Perf Report\n\n压测显示 tokenizer 吞吐率下降 40%。\n").unwrap();
-        publish_in(root.path(), &md, None, None, ws.path()).unwrap();
-        let html = ws.path().join("demo.html");
+        publish_in(root.path(), &md, None, None, ws).unwrap();
+        let html = ws.join("demo.html");
         fs::write(
             &html,
             "<html><head><title>Demo</title><script>var secret=1;</script></head>\
              <body><p>latency budget exceeded</p></body></html>",
         )
         .unwrap();
-        publish_in(root.path(), &html, None, None, ws.path()).unwrap();
+        publish_in(root.path(), &html, None, None, ws).unwrap();
 
         // Title match → meta hit, no snippet.
         let hits = search_docs_in(root.path(), "perf");
