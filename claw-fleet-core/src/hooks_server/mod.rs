@@ -757,6 +757,14 @@ pub fn serve(opts: ServeOptions) {
         };
         match crate::acp::ws::spawn_listener(&addr, sources.clone(), acp_auth) {
             Ok(bound) => eprintln!("[fleet serve] ACP listening on ws://{bound}"),
+            // A taken port usually means another Fleet process already owns the
+            // ACP surface — normal with several instances on one machine, not a
+            // misconfiguration. Say which it is, so nobody goes hunting.
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => eprintln!(
+                "[fleet serve] ACP not started: {addr} is already in use \
+                 (another Fleet instance likely owns it; set FLEET_ACP_PORT to change, \
+                 or 0 to disable)"
+            ),
             Err(e) => eprintln!("[fleet serve] ACP listener disabled ({addr}: {e})"),
         }
     }
