@@ -134,25 +134,35 @@ function markBucket(s: SessionInfo): SessionMark {
   return s.userMark === "done" ? "done" : "pending";
 }
 
-/** Pseudo-workspaces pinned above the real directories in the workspace filter,
- *  mirroring the desktop launchpad (`HistoryView`'s CHAT_ONLY / CHAT_HIDDEN).
- *  "" is "all"; every other real value is an absolute path, so these bare words
- *  can't collide with one. */
-export const CHAT_ONLY = "chat";
-export const CHAT_HIDDEN = "no-chat";
+/** Values the workspace filter used to take back when the pure-chat workspace
+ *  was still an option inside the `<select>` rather than its own toggle. "" is
+ *  "all" and every real value is an absolute path, so these bare words could
+ *  never collide with one. Read-only: migrated away on the first render that
+ *  finds one persisted (see the effect in TasksView). */
+const LEGACY_CHAT_ONLY = "chat";
+const LEGACY_CHAT_HIDDEN = "no-chat";
 
-/** Does `s` pass the workspace filter? `chatPath` is the desktop host's
- *  `~/.fleet/chat`, `null` until the relay answers (or if it never does) — in
- *  which case the two chat pseudo-values degrade to "all" rather than showing
- *  an empty list. */
+/** Does `s` pass the workspace filter? Mirrors the desktop launchpad's
+ *  `matchesWorkspaceFilter`: the directory `<select>` and the `chatOnly` toggle
+ *  are two mutually exclusive halves. Chat mode shows the pure-chat workspace
+ *  and nothing else (the directory filter is ignored underneath it); directory
+ *  mode shows directories only, so chat never mixes into "all".
+ *
+ *  `chatPath` is the desktop host's `~/.fleet/chat`, `null` until the relay
+ *  answers (or if it never does) — neither half can be honoured without it, so
+ *  the toggle goes inert rather than showing an empty list. */
 export function matchesWorkspaceFilter(
   s: SessionInfo,
   filter: string,
   chatPath: string | null,
+  chatOnly: boolean,
 ): boolean {
+  if (chatPath != null) {
+    const isChat = s.workspacePath === chatPath;
+    if (chatOnly) return isChat;
+    if (isChat) return false;
+  }
   if (!filter) return true;
-  if (filter === CHAT_ONLY) return chatPath == null || s.workspacePath === chatPath;
-  if (filter === CHAT_HIDDEN) return chatPath == null || s.workspacePath !== chatPath;
   return s.workspacePath === filter;
 }
 
@@ -283,6 +293,8 @@ export function TasksView({
   // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
   const [search, setSearch] = useDraft<string>("tasks:search", "");
   const [workspace, setWorkspace] = useDraft<string>("tasks:workspace", "");
+  // 聊天模式 —— 和上面的目录筛选互斥的另一半（见 matchesWorkspaceFilter）。
+  const [chatOnly, setChatOnly] = useDraft<boolean>("tasks:chatOnly", false);
   const [activeOnly, setActiveOnly] = useDraft<boolean>("tasks:activeOnly", false);
   const [markFilter, setMarkFilter] = useDraft<MarkFilter>("tasks:markFilter", "all");
   // Group handoff-relay chains into one collapsible card. Default on; the setter
@@ -327,14 +339,26 @@ export function TasksView({
     return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [all, chatPath]);
 
+  // 迁移：聊天还是下拉里一条选项时存下来的值。"chat" 交给 toggle，"no-chat"
+  // 正是现在每个目录筛选的默认含义，直接归零。要抢在下面那个孤儿路径回退之
+  // 前跑，否则「只看聊天」会被静默还原成「看全部」。
+  useEffect(() => {
+    if (workspace === LEGACY_CHAT_ONLY) {
+      setWorkspace("");
+      setChatOnly(true);
+    } else if (workspace === LEGACY_CHAT_HIDDEN) {
+      setWorkspace("");
+    }
+  }, [workspace, setWorkspace, setChatOnly]);
+
   // A persisted workspace path can outlive its sessions (all done + pruned, or a
   // repo we haven't touched this launch). Left as-is it would silently filter the
   // list to empty while the <select> falls back to showing "全部目录" — looks like
   // a bug. Once the first snapshot has landed, drop an orphaned real path back to
-  // "all". The chat pseudo-values degrade to "all" on their own, so leave them.
+  // "all". Chat mode is unaffected: it lives in its own toggle.
   useEffect(() => {
     if (!sessionsLoaded) return;
-    if (!workspace || workspace === CHAT_ONLY || workspace === CHAT_HIDDEN) return;
+    if (!workspace || workspace === LEGACY_CHAT_ONLY || workspace === LEGACY_CHAT_HIDDEN) return;
     if (workspaces.some(([path]) => path === workspace)) return;
     setWorkspace("");
   }, [sessionsLoaded, workspace, workspaces, setWorkspace]);
@@ -347,7 +371,7 @@ export function TasksView({
   const preMark = useMemo(() => {
     const q = search.trim().toLowerCase();
     return all.filter((s) => {
-      if (!matchesWorkspaceFilter(s, workspace, chatPath)) return false;
+      if (!matchesWorkspaceFilter(s, workspace, chatPath, chatOnly)) return false;
       if (activeOnly && !LIVE.includes(s.status)) return false;
       if (q) {
         const clientMatch =
@@ -363,7 +387,7 @@ export function TasksView({
       }
       return true;
     });
-  }, [all, search, workspace, chatPath, activeOnly, ftsMatchPaths]);
+  }, [all, search, workspace, chatPath, chatOnly, activeOnly, ftsMatchPaths]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -743,24 +767,31 @@ export function TasksView({
           {searching && <span className={styles.searchSpinner} />}
         </div>
         <div className={styles.filterRow}>
+          {/* 目录下拉和聊天开关是同一个筛选的两半，互斥：聊天模式占满整个
+              列表，所以下拉在它底下置灰失效，而不是偷偷收窄一个它已经管不着
+              的列表。relay 没报出聊天目录时整个开关不显示——那时它没法生效。*/}
           <select
             className={styles.workspaceSelect}
             value={workspace}
             onChange={(e) => setWorkspace(e.target.value)}
+            disabled={chatOnly}
           >
             <option value="">{t("全部目录")}</option>
-            {chatPath && (
-              <>
-                <option value={CHAT_ONLY}>{t("💬 仅聊天")}</option>
-                <option value={CHAT_HIDDEN}>{t("🚫 隐藏聊天")}</option>
-              </>
-            )}
             {workspaces.map(([path, name]) => (
               <option key={path} value={path}>
                 {name}
               </option>
             ))}
           </select>
+          {chatPath && (
+            <button
+              className={styles.filterToggle}
+              data-active={chatOnly}
+              onClick={() => setChatOnly((v) => !v)}
+            >
+              💬 {t("聊天")}
+            </button>
+          )}
           <button
             className={styles.filterToggle}
             data-active={activeOnly}

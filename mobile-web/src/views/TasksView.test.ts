@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRenderItems,
-  CHAT_HIDDEN,
-  CHAT_ONLY,
   groupOpenReadTargets,
   matchesWorkspaceFilter,
   statusTone,
@@ -20,35 +18,42 @@ function session(workspacePath: string): SessionInfo {
 
 describe("matchesWorkspaceFilter", () => {
   const CHAT = "/Users/foo/.fleet/chat";
+  /** The relay never answered `chat_workspace` — neither half of the filter can
+   *  be honoured, so both go inert. */
+  const CHAT_UNKNOWN = null;
   const chat = session(CHAT);
   const repo = session("/Users/foo/repo");
 
-  it("passes everything when no workspace is picked, chat included", () => {
-    expect(matchesWorkspaceFilter(chat, "", CHAT)).toBe(true);
-    expect(matchesWorkspaceFilter(repo, "", CHAT)).toBe(true);
+  it("keeps only chat sessions while the chat toggle is on", () => {
+    expect(matchesWorkspaceFilter(chat, "", CHAT, true)).toBe(true);
+    expect(matchesWorkspaceFilter(repo, "", CHAT, true)).toBe(false);
   });
 
-  it("keeps only chat sessions under CHAT_ONLY", () => {
-    expect(matchesWorkspaceFilter(chat, CHAT_ONLY, CHAT)).toBe(true);
-    expect(matchesWorkspaceFilter(repo, CHAT_ONLY, CHAT)).toBe(false);
+  // Chat mode owns the whole list — a directory left selected underneath must
+  // not narrow it.
+  it("ignores the directory filter while the chat toggle is on", () => {
+    expect(matchesWorkspaceFilter(chat, "/Users/foo/repo", CHAT, true)).toBe(true);
+    expect(matchesWorkspaceFilter(repo, "/Users/foo/repo", CHAT, true)).toBe(false);
   });
 
-  it("drops chat sessions under CHAT_HIDDEN", () => {
-    expect(matchesWorkspaceFilter(chat, CHAT_HIDDEN, CHAT)).toBe(false);
-    expect(matchesWorkspaceFilter(repo, CHAT_HIDDEN, CHAT)).toBe(true);
+  // The mirror image: "all directories" means all *directories*. Chat is no
+  // longer one of them.
+  it("drops chat sessions from every directory filter", () => {
+    expect(matchesWorkspaceFilter(chat, "", CHAT, false)).toBe(false);
+    expect(matchesWorkspaceFilter(repo, "", CHAT, false)).toBe(true);
   });
 
   it("still matches a plain workspace path", () => {
-    expect(matchesWorkspaceFilter(repo, "/Users/foo/repo", CHAT)).toBe(true);
-    expect(matchesWorkspaceFilter(chat, "/Users/foo/repo", CHAT)).toBe(false);
+    expect(matchesWorkspaceFilter(repo, "/Users/foo/repo", CHAT, false)).toBe(true);
+    expect(matchesWorkspaceFilter(chat, "/Users/foo/repo", CHAT, false)).toBe(false);
   });
 
-  it("degrades to 'all' when the desktop never sent a chat path", () => {
+  it("degrades to a plain directory filter when the desktop never sent a chat path", () => {
     // An older desktop doesn't know the `chat_workspace` method. Showing every
     // session beats blanking the list.
     for (const s of [chat, repo]) {
-      expect(matchesWorkspaceFilter(s, CHAT_ONLY, null)).toBe(true);
-      expect(matchesWorkspaceFilter(s, CHAT_HIDDEN, null)).toBe(true);
+      expect(matchesWorkspaceFilter(s, "", CHAT_UNKNOWN, true)).toBe(true);
+      expect(matchesWorkspaceFilter(s, "", CHAT_UNKNOWN, false)).toBe(true);
     }
   });
 });
