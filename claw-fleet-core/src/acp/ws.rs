@@ -204,6 +204,8 @@ fn serve_connection(
 
         let peer = Arc::new(Peer::new(Box::new(ChannelSink(out_tx))));
         let agent = Arc::new(AcpAgent::new(peer, sources));
+        // Push decision cards to the client as they appear.
+        super::watcher::spawn(agent.clone());
 
         // Dispatch runs on its own thread, never on the executor.
         //

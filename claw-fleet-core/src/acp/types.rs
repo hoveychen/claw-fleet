@@ -452,6 +452,166 @@ pub struct SessionInfoUpdate {
     pub updated_at: Option<String>,
 }
 
+// ──────────────────── session/request_permission ────────────────────
+
+/// What a permission choice means, so the client can style it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionOptionKind {
+    AllowOnce,
+    AllowAlways,
+    RejectOnce,
+    RejectAlways,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionOption {
+    pub option_id: String,
+    pub name: String,
+    pub kind: PermissionOptionKind,
+}
+
+/// `session/request_permission` params.
+///
+/// The permission is attached to a tool call — this channel is for "may I run
+/// this", not for open questions. Free-form questions go through
+/// [`CreateElicitationRequest`] instead.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestPermissionRequest {
+    pub session_id: String,
+    pub tool_call: ToolCallUpdate,
+    pub options: Vec<PermissionOption>,
+}
+
+/// What the client answered.
+///
+/// `cancelled` is not a denial: the schema requires a client that sends
+/// `session/cancel` to answer every pending permission request this way, so it
+/// means "the turn went away", not "the user said no".
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum RequestPermissionOutcome {
+    Cancelled,
+    Selected {
+        #[serde(rename = "optionId")]
+        option_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RequestPermissionResponse {
+    pub outcome: RequestPermissionOutcome,
+}
+
+// ─────────────────────────── elicitation ────────────────────────────
+
+/// A JSON-Schema-ish description of the form to render.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElicitationSchema {
+    #[serde(rename = "type")]
+    pub kind: &'static str, // always "object"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub properties: serde_json::Map<String, Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub required: Vec<String>,
+}
+
+impl ElicitationSchema {
+    pub fn object(properties: serde_json::Map<String, Value>, required: Vec<String>) -> Self {
+        Self { kind: "object", title: None, properties, required }
+    }
+}
+
+/// `elicitation/create` params.
+///
+/// The wire form is flat: a `mode` discriminator, the scope (`sessionId` here —
+/// Fleet's questions always belong to a session), and whichever fields that
+/// mode needs. Form mode carries `requestedSchema`; URL mode carries
+/// `elicitationId` + `url`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateElicitationRequest {
+    pub session_id: String,
+    pub mode: &'static str,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_schema: Option<ElicitationSchema>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elicitation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+impl CreateElicitationRequest {
+    pub fn form(
+        session_id: impl Into<String>,
+        message: impl Into<String>,
+        schema: ElicitationSchema,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            mode: "form",
+            message: message.into(),
+            requested_schema: Some(schema),
+            elicitation_id: None,
+            url: None,
+        }
+    }
+
+    pub fn url(
+        session_id: impl Into<String>,
+        message: impl Into<String>,
+        elicitation_id: impl Into<String>,
+        url: impl Into<String>,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            mode: "url",
+            message: message.into(),
+            requested_schema: None,
+            elicitation_id: Some(elicitation_id.into()),
+            url: Some(url.into()),
+        }
+    }
+}
+
+/// How the user answered an elicitation.
+///
+/// `content` is meaningful only on `accept`; the spec says receivers ignore it
+/// for the other two.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum ElicitationAction {
+    Accept {
+        #[serde(default)]
+        content: Option<serde_json::Map<String, Value>>,
+    },
+    Decline,
+    Cancel,
+}
+
+impl ElicitationAction {
+    /// The submitted values, empty unless the user accepted with content.
+    pub fn content(&self) -> serde_json::Map<String, Value> {
+        match self {
+            ElicitationAction::Accept { content: Some(c) } => c.clone(),
+            _ => serde_json::Map::new(),
+        }
+    }
+
+    /// True when the user did not answer — declined or dismissed.
+    ///
+    /// Both map to Fleet's "declined"/"cancelled" flags, which is what lets a
+    /// parked card resume the session instead of hanging.
+    pub fn is_refusal(&self) -> bool {
+        !matches!(self, ElicitationAction::Accept { .. })
+    }
+}
+
 // ─────────────────────────── session/update ─────────────────────────
 
 /// `session/update` params.
