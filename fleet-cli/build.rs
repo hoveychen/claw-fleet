@@ -1,32 +1,97 @@
-//! Compiles the web UI bundle into the binary when the `embed-webui` feature
-//! is on.
+//! Build script for `fleet-cli`. Three unrelated jobs, kept in one place
+//! because cargo only allows one build script per crate:
 //!
-//! Why a build script rather than a runtime directory: Linux has no desktop
-//! bundle, so `fleet webui` *is* the app there. Asking every Linux user to
-//! download a second file and keep it next to the binary is a step that only
-//! exists because of how we build, not because of anything they want.
-//!
-//! Why it is a feature and not the default: this same crate produces the
-//! `fleet` probe that every macOS/Windows desktop bundle embeds twice (x64 +
-//! arm64) as a resource for remote SSH deployment. That probe serves the HTTP
-//! API to a desktop app that already has its own UI, so embedding the bundle
-//! there would add ~8 MB × 2 to every installer to ship a UI nothing loads.
-//! Default off, on only for the Linux release binary.
-//!
-//! Assets are stored gzipped (`Compression::best()`) and inflated per request:
-//! the bundle is ~17 MB raw and ~7.7 MB compressed, and a local UI can afford
-//! the few milliseconds an inflate costs far more easily than the binary can
-//! afford the other 9 MB.
+//! 1. [`embed_webui`] — compile the web UI bundle into the binary when the
+//!    `embed-webui` feature is on.
+//! 2. Windows: link `advapi32`, which libgit2-sys forgets to emit.
+//! 3. macOS: generate and embed an `Info.plist`.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=Cargo.toml");
+
+    embed_webui();
+
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    // libgit2-sys 0.16 (pulled in by the `git2` dev-dependency used by the
+    // cli_e2e integration test) forgets to emit advapi32 on Windows MSVC,
+    // so test link fails on Crypt*/Reg*/GetNamedSecurityInfoW. Add it here.
+    if target_os == "windows" {
+        println!("cargo:rustc-link-lib=advapi32");
+    }
+
+    if target_os != "macos" {
+        return;
+    }
+
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
+    let plist_path = std::path::Path::new(&out_dir).join("Info.plist");
+
+    let plist = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>English</string>
+    <key>CFBundleExecutable</key>
+    <string>fleet</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.hoveychen.claw-fleet.serve</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Claw Fleet</string>
+    <key>CFBundleDisplayName</key>
+    <string>Claw Fleet</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{version}</string>
+    <key>CFBundleVersion</key>
+    <string>{version}</string>
+    <key>CFBundleIconFile</key>
+    <string>icon.icns</string>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>
+"#
+    );
+    std::fs::write(&plist_path, plist).expect("write Info.plist");
+
+    let plist_str = plist_path.to_string_lossy();
+    println!("cargo:rustc-link-arg-bin=fleet-cli=-Wl,-sectcreate,__TEXT,__info_plist,{plist_str}");
+}
 
 /// What the generated file says when there is nothing embedded. The table is
 /// generated either way so the runtime code compiles identically with and
 /// without the feature — "no embedded bundle" is an empty slice, not a `cfg`.
 const EMPTY_TABLE: &str = "pub static EMBEDDED_WEBUI: &[(&str, &[u8])] = &[];\n";
 
-fn main() {
+/// Compile the web UI bundle into the binary when `embed-webui` is on.
+///
+/// Why embed at all: Linux has no desktop bundle, so `fleet webui` *is* the app
+/// there. Asking every Linux user to download a second file and keep it next to
+/// the binary is a step that only exists because of how we build, not because
+/// of anything they want.
+///
+/// Why a feature and not the default: this same crate produces the `fleet`
+/// probe that every macOS/Windows desktop bundle embeds twice (x64 + arm64) as
+/// a resource for remote SSH deployment. That probe serves the HTTP API to a
+/// desktop app that already has its own UI, so embedding the bundle there would
+/// add ~7 MB × 2 to every installer to ship a UI nothing loads.
+///
+/// Assets are stored gzipped (`Compression::best()`) and inflated per request:
+/// the bundle is ~17 MB raw and ~8 MB compressed, and a local UI can afford the
+/// few milliseconds an inflate costs far more easily than the binary can afford
+/// the other 9 MB.
+fn embed_webui() {
     println!("cargo:rerun-if-env-changed=FLEET_WEBUI_DIR");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR is always set by cargo"));
@@ -76,8 +141,7 @@ fn main() {
             .expect("create staging dir");
 
         let raw = std::fs::read(&from).unwrap_or_else(|e| panic!("read {}: {e}", from.display()));
-        let mut enc =
-            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
         enc.write_all(&raw).expect("gzip write");
         let gz = enc.finish().expect("gzip finish");
         std::fs::write(&to, gz).unwrap_or_else(|e| panic!("write {}: {e}", to.display()));
