@@ -2306,6 +2306,130 @@ mod range_breakdown_tests {
         assert!(!b.has_codex_approximation);
     }
 
+    /// A codex rollout with an explicit sequence of timestamped cumulative
+    /// snapshots — the shape real rollouts have (measured: all 7124 `token_count`
+    /// events across this host's 276 rollouts carry a `timestamp`).
+    fn codex_session_snapshots(
+        tag: &str,
+        created_ms: i64,
+        last_activity_ms: i64,
+        model: &str,
+        snaps: &[(&str, u64, u64, u64)],
+    ) -> SessionInfo {
+        let mut lines = vec![
+            serde_json::json!({ "type": "turn_context", "payload": { "model": model } }).to_string(),
+        ];
+        for (iso, raw, cached, output) in snaps {
+            lines.push(
+                serde_json::json!({
+                    "type": "event_msg",
+                    "timestamp": iso,
+                    "payload": { "type": "token_count", "info": { "total_token_usage": {
+                        "input_tokens": raw, "cached_input_tokens": cached, "output_tokens": output
+                    }}}
+                })
+                .to_string(),
+            );
+        }
+        let dir = std::env::temp_dir().join(format!("fleet-range-test-{tag}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout.jsonl");
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        let mut s: SessionInfo =
+            serde_json::from_value(session_skeleton("codex", created_ms, last_activity_ms))
+                .expect("construct SessionInfo");
+        s.created_at_ms = created_ms.max(0) as u64;
+        s.last_activity_ms = last_activity_ms.max(0) as u64;
+        s.jsonl_path = format!("codex://{}", path.to_string_lossy());
+        s.agent_source = "codex".to_string();
+        s
+    }
+
+    /// A codex session that ran across midnight must split its spend over the
+    /// days it actually spent it, like Claude does.
+    ///
+    /// Codex used to be attributed whole-session to its creation day because the
+    /// rollout was read as a single cumulative figure. It is not: every
+    /// `token_count` event carries both the running `total_token_usage` **and** a
+    /// timestamp, so consecutive snapshots differ by exactly that turn's usage.
+    /// Measured on this host: only 5 of 243 codex sessions span two local days,
+    /// but they hold 63.3M of 817.7M tokens — 7.75% of all codex usage was
+    /// landing on the wrong day.
+    #[test]
+    fn codex_snapshots_split_across_the_days_they_happened_on() {
+        // Day 1: 60k raw in (40k cached) / 2k out. Day 2 adds 40k raw / 3k out.
+        let s = codex_session_snapshots(
+            "codexsplit",
+            ts("2026-07-15T12:00:00Z"),
+            ts("2026-07-16T18:00:00Z"),
+            "gpt-5.6-sol",
+            &[
+                ("2026-07-15T13:00:00Z", 60_000, 40_000, 2_000),
+                ("2026-07-16T13:00:00Z", 100_000, 60_000, 5_000),
+            ],
+        );
+        let from = ts("2026-07-14T00:00:00Z");
+        let to = ts("2026-07-17T00:00:00Z");
+        let b = build_range_breakdown(&[s], from, to);
+
+        let d1 = local_date_str(ts("2026-07-15T13:00:00Z"));
+        let d2 = local_date_str(ts("2026-07-16T13:00:00Z"));
+        assert_ne!(d1, d2, "fixture must straddle a local-date boundary");
+
+        assert_eq!(
+            b.daily.len(),
+            2,
+            "codex spend collapsed onto one day: {:?}",
+            b.daily.iter().map(|d| &d.date).collect::<Vec<_>>()
+        );
+        let day1 = b.daily.iter().find(|d| d.date == d1).expect("day 1 point");
+        let day2 = b.daily.iter().find(|d| d.date == d2).expect("day 2 point");
+
+        // Day 1 = first snapshot. full-price input = raw − cached = 20k.
+        assert_eq!((day1.input_tokens, day1.cache_read_tokens, day1.output_tokens), (20_000, 40_000, 2_000));
+        // Day 2 = the delta: raw +40k of which cached +20k → full-price +20k.
+        assert_eq!((day2.input_tokens, day2.cache_read_tokens, day2.output_tokens), (20_000, 20_000, 3_000));
+
+        // The split must not change the session's total.
+        let l = &b.lines[0];
+        assert_eq!(l.input_tokens, 40_000, "Σ days == full-price input");
+        assert_eq!(l.cache_read_tokens, 60_000);
+        assert_eq!(l.output_tokens, 5_000);
+    }
+
+    /// The window prune for codex must be the same overlap test Claude gets:
+    /// a session created **before** the window that kept spending **inside** it
+    /// still has in-window turns. Pruning on the creation instant dropped them.
+    #[test]
+    fn codex_session_created_before_window_still_contributes_its_in_window_days() {
+        let s = codex_session_snapshots(
+            "codexcarry",
+            ts("2026-07-10T12:00:00Z"), // created well before the window
+            ts("2026-07-15T18:00:00Z"),
+            "gpt-5.6-sol",
+            &[
+                ("2026-07-10T13:00:00Z", 10_000, 0, 500), // out of window
+                ("2026-07-15T13:00:00Z", 50_000, 20_000, 2_500), // in window
+            ],
+        );
+        let from = ts("2026-07-14T00:00:00Z");
+        let to = ts("2026-07-17T00:00:00Z");
+        let b = build_range_breakdown(&[s], from, to);
+
+        assert_eq!(
+            b.daily.len(),
+            1,
+            "only the in-window day counts: {:?}",
+            b.daily.iter().map(|d| &d.date).collect::<Vec<_>>()
+        );
+        assert_eq!(b.daily[0].date, local_date_str(ts("2026-07-15T13:00:00Z")));
+        // Delta from the out-of-window snapshot: raw +40k, cached +20k → 20k
+        // full-price, and output +2000.
+        assert_eq!(b.daily[0].input_tokens, 20_000);
+        assert_eq!(b.daily[0].cache_read_tokens, 20_000);
+        assert_eq!(b.daily[0].output_tokens, 2_000);
+    }
+
     #[test]
     /// The sidebar's "今日累计" must not count Fleet's own overhead either. This
     /// one drives the real `today_usage()` (which reads
