@@ -1,19 +1,25 @@
 //! "Today's cumulative usage" aggregation for the desktop nav-bar / mobile
 //! header counter.
 //!
-//! Attribution口径 (decided by Boss 2026-07-12): "today" = sessions **created
-//! today** (local timezone), summing each session's own live `total_cost_usd` /
-//! `total_output_tokens` (the incremental figures `StatsAcc` folds off the JSONL
-//! tail — the freshest source), **plus** Fleet's own LLM spend today (guard /
-//! audit / daily-report summaries, logged in `fleet_llm_usage.jsonl`).
+//! Attribution口径 (revised by Boss 2026-08-27): "today" = every **turn**
+//! whose own `timestamp` falls in today's local day, whenever its session
+//! started. Agent spend only — Fleet's own LLM overhead is excluded (see the
+//! note inside [`build_today_usage_cached`]).
 //!
-//! Every session contributes its own cost exactly once — we sum
-//! `SessionInfo.total_cost_usd`, never `agent_total_cost_usd` (the roll-up that
-//! already folds in subagents and would double-count).
+//! The original口径 (Boss 2026-07-12) was "sessions **created** today", summing
+//! each session's live `SessionInfo.total_cost_usd`. It was replaced because a
+//! session that outlived midnight — every handoff chain, every long-running
+//! agent — had its post-midnight spend attributed nowhere: the badge showed $37
+//! on 2026-08-27 against $225 actually spent, and the receipt's own "近 7 天"
+//! view (which already folded per turn) disagreed with its "今天" page by 7.7×.
 //!
-//! No new pricing math lives here: session costs come pre-computed by
-//! `session::StatsAcc` (via `model_cost::turn_cost_usd`), and Fleet's spend comes
-//! from `llm_usage` (also via `turn_cost_usd`).
+//! Both the badge ([`today_usage`]) and the receipt
+//! ([`today_usage_breakdown`]) are now derived from the same per-turn
+//! projection as the arbitrary-range view, so all three agree by construction
+//! and `Σ line.cost_usd == TodayUsage.cost_usd` still holds to the cent.
+//!
+//! No new pricing math lives here: per-turn cost comes from
+//! `model_cost::turn_cost_usd`, the same function `session::StatsAcc` uses.
 
 use serde::{Deserialize, Serialize};
 
@@ -73,27 +79,27 @@ fn day_bounds_ms(now_ms: i64) -> (i64, i64, String) {
     (start, end, date.format("%Y-%m-%d").to_string())
 }
 
-/// Sum the live cost / input- / output-token totals of every session **created
-/// today**. Returns `(cost_usd, input_tokens, output_tokens,
-/// top_level_session_count)`. Pure — the unit tests drive this directly.
-fn sum_today_sessions(sessions: &[SessionInfo], day_start_ms: i64) -> (f64, u64, u64, u64) {
-    let start = day_start_ms.max(0) as u64;
-    let mut cost = 0.0;
-    let mut input = 0u64;
-    let mut output = 0u64;
+/// Count the top-level (non-subagent) sessions that actually spent tokens on
+/// `date`. This is the badge's "N sessions" figure, on the same per-turn口径 as
+/// the cost beside it: a session counts on every day it burned tokens, not only
+/// on the day its transcript was born.
+fn count_sessions_active_on(
+    sessions: &[SessionInfo],
+    date: &str,
+    cache: &mut UsageBreakdownCache,
+) -> u64 {
     let mut count = 0u64;
     for s in sessions {
-        if s.created_at_ms < start {
+        if s.is_subagent {
             continue;
         }
-        cost += s.total_cost_usd;
-        input = input.saturating_add(s.total_input_tokens);
-        output = output.saturating_add(s.total_output_tokens);
-        if !s.is_subagent {
+        // Cells were already folded by the breakdown pass above, so this is a
+        // cache hit for every session; no transcript is re-read here.
+        if cache.cells(s).keys().any(|(d, _)| d == date) {
             count += 1;
         }
     }
-    (cost, input, output, count)
+    count
 }
 
 /// Aggregate today's cumulative usage from an already-scanned session list.
@@ -119,15 +125,31 @@ fn build_today_usage(sessions: &[SessionInfo], now_ms: i64) -> TodayUsage {
 
 /// Pure core of [`today_usage`], with `now_ms` and the projection cache injected
 /// so the badge口径 is unit-testable without a global cache or a wall clock.
+///
+/// The badge is derived from the very receipt it opens
+/// ([`build_breakdown_cached`]) rather than from a parallel fold, so
+/// `Σ line.cost_usd == TodayUsage.cost_usd` holds by construction. It used to
+/// sum each session's live `SessionInfo.total_cost_usd` for sessions *created*
+/// today; that made a session which outlived midnight invisible to the badge for
+/// the rest of its life (see
+/// `sidebar_badge_reconciles_with_the_receipt_across_midnight`).
 fn build_today_usage_cached(
     sessions: &[SessionInfo],
     now_ms: i64,
-    _cache: &mut UsageBreakdownCache,
+    cache: &mut UsageBreakdownCache,
 ) -> TodayUsage {
-    let (day_start_ms, _day_end_ms, date) = day_bounds_ms(now_ms);
+    let b = build_breakdown_cached(sessions, now_ms, cache);
+    let session_count = count_sessions_active_on(sessions, &b.date, cache);
 
-    let (agent_cost_usd, input_tokens, output_tokens, session_count) =
-        sum_today_sessions(sessions, day_start_ms);
+    let agent_cost_usd = b.total_cost_usd;
+    // `TodayUsage.input_tokens` is the cache-inclusive "tokens sent to the API"
+    // figure, so it takes all three input-side rows the receipt itemises apart.
+    let input_tokens = b
+        .total_input_tokens
+        .saturating_add(b.total_cache_creation_tokens)
+        .saturating_add(b.total_cache_read_tokens);
+    let output_tokens = b.total_output_tokens;
+    let date = b.date;
 
 // Fleet's own LLM calls (guard analysis, audit-rule suggestions, daily-report
 // summaries, session outcome analysis, mascot quips) are deliberately NOT part of
@@ -1456,10 +1478,6 @@ fn build_range_breakdown_cached(
 mod tests {
     use super::*;
 
-    fn session(created_at_ms: u64, cost: f64, output: u64, is_subagent: bool) -> SessionInfo {
-        session_with_input(created_at_ms, cost, 0, output, is_subagent)
-    }
-
     fn session_with_input(
         created_at_ms: u64,
         cost: f64,
@@ -1467,7 +1485,8 @@ mod tests {
         output: u64,
         is_subagent: bool,
     ) -> SessionInfo {
-        // Only the fields `sum_today_sessions` reads matter; the rest default.
+        // Only the fields `cloud_usage`'s cumulative sum reads matter; the rest
+        // default.
         let mut s: SessionInfo = serde_json::from_value(serde_json::json!({
             "id": "x",
             "workspacePath": "/tmp",
@@ -1512,41 +1531,13 @@ mod tests {
     }
 
     #[test]
-    fn sums_only_sessions_created_today() {
-        let day_start = 1_784_000_000_000i64;
-        let sessions = vec![
-            session(day_start as u64 - 1, 5.0, 1000, false), // yesterday → excluded
-            session(day_start as u64, 1.0, 100, false),      // exactly at midnight → included
-            session(day_start as u64 + 10, 2.0, 200, false), // today → included
-            session(day_start as u64 + 20, 0.5, 50, true),   // today subagent → cost yes, count no
-        ];
-        let (cost, _input, output, count) = sum_today_sessions(&sessions, day_start);
-        assert!((cost - 3.5).abs() < 1e-9, "cost was {cost}");
-        assert_eq!(output, 350);
-        assert_eq!(count, 2); // two non-subagent sessions
-    }
-
-    #[test]
-    fn sums_input_tokens_of_today_sessions() {
-        // Regression: "today's cumulative" must count input on the same口径 as
-        // the daily report (input + output), not output alone.
-        let day_start = 1_784_000_000_000i64;
-        let sessions = vec![
-            session_with_input(day_start as u64 - 1, 5.0, 9999, 1000, false), // yesterday → excluded
-            session_with_input(day_start as u64, 1.0, 4000, 100, false),      // today
-            session_with_input(day_start as u64 + 10, 2.0, 1000, 200, false), // today
-            session_with_input(day_start as u64 + 20, 0.5, 500, 50, true),    // today subagent
-        ];
-        let (_cost, input, output, _count) = sum_today_sessions(&sessions, day_start);
-        assert_eq!(
-            input, 5500,
-            "input = 4000 + 1000 + 500 (yesterday excluded)"
-        );
-        assert_eq!(output, 350);
-    }
-
-    #[test]
     fn cloud_usage_cumulative_sums_all_sessions_regardless_of_date() {
+        // `cloud_usage` folds today's window through the shared projection cache,
+        // which persists to `$FLEET_HOME`; keep that off the real ~/.fleet.
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("FLEET_HOME", tmp.path());
+
         // Cumulative is the customer billing basis: every retained agent session
         // counts regardless of when it was created; subagents contribute tokens
         // but not to the top-level session count.
@@ -1561,14 +1552,8 @@ mod tests {
         assert_eq!(u.cumulative_output_tokens, 330); // 200 + 50 + 80
         assert!((u.cumulative_agent_cost_usd - 6.0).abs() < 1e-9);
         assert_eq!(u.cumulative_session_count, 2); // subagent excluded from count
-    }
 
-    #[test]
-    fn empty_when_nothing_today() {
-        let day_start = 1_784_000_000_000i64;
-        let sessions = vec![session(day_start as u64 - 100, 9.0, 999, false)];
-        let (cost, input, output, count) = sum_today_sessions(&sessions, day_start);
-        assert_eq!((cost, input, output, count), (0.0, 0, 0, 0));
+        std::env::remove_var("FLEET_HOME");
     }
 }
 
@@ -1625,6 +1610,9 @@ mod breakdown_tests {
         // prune skips sessions with no activity at/after the window start, so a
         // fixture left at 0 would be pruned before its turns are ever read.
         s.last_activity_ms = now_ms;
+        // The projection cache is keyed by session id, so fixtures sharing one id
+        // would serve each other's cells when a test passes several sessions.
+        s.id = tag.to_string();
         s.jsonl_path = path.to_string_lossy().to_string();
         s.agent_source = source.to_string();
         s
@@ -1826,6 +1814,100 @@ mod breakdown_tests {
         assert_eq!(u.output_tokens, 100, "badge output tokens");
         assert_eq!(u.input_tokens, 1000, "badge input tokens (cache-inclusive)");
         assert_eq!(u.session_count, 1, "the carry-over session counts today");
+    }
+
+    /// The badge's cost / output figures cover exactly today's turns, and its
+    /// session count covers exactly the non-subagent sessions that spent
+    /// something today. (Replaces the retired `sums_only_sessions_created_today`,
+    /// which asserted the birth-day口径.)
+    #[test]
+    fn badge_counts_only_today_dated_turns() {
+        let yesterday_iso =
+            chrono::DateTime::from_timestamp_millis(
+                chrono::Local::now().timestamp_millis() - 30 * 3_600_000,
+            )
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .to_rfc3339();
+
+        // 1000 in / 100 out on Sonnet = $0.003 + $0.0015 = $0.0045 per session.
+        let today_a = today_session_with_jsonl(
+            "badge-a",
+            "claude-code",
+            &turn("a", "claude-sonnet-4-5", 1000, 0, 0, 100),
+            false,
+        );
+        let today_b = today_session_with_jsonl(
+            "badge-b",
+            "claude-code",
+            &turn("b", "claude-sonnet-4-5", 1000, 0, 0, 100),
+            false,
+        );
+        // Subagent: its spend counts, its head does not.
+        let sub = today_session_with_jsonl(
+            "badge-sub",
+            "claude-code",
+            &turn("s", "claude-sonnet-4-5", 1000, 0, 0, 100),
+            true,
+        );
+        // Only yesterday-dated turns → contributes nothing to today.
+        let stale = today_session_with_jsonl(
+            "badge-stale",
+            "claude-code",
+            &turn_stamped("o", &yesterday_iso, "claude-sonnet-4-5", 9_000, 0, 0, 900),
+            false,
+        );
+
+        // After the fixtures: their `created_at_ms` is stamped at construction,
+        // and a window ending before that prunes them all.
+        let now = chrono::Local::now().timestamp_millis();
+        let u = build_today_usage(&[today_a, today_b, sub, stale], now);
+
+        assert!(
+            (u.cost_usd - 0.0135).abs() < 1e-9,
+            "3 × $0.0045 (yesterday's turns excluded), got ${}",
+            u.cost_usd
+        );
+        assert_eq!(u.output_tokens, 300, "3 × 100 output");
+        assert_eq!(u.session_count, 2, "subagent and idle-today session excluded");
+    }
+
+    /// The badge's `input_tokens` is the cache-inclusive "sent to the API"
+    /// figure, so cache writes and reads count toward it — the receipt itemises
+    /// them apart, the badge does not. (Replaces the retired
+    /// `sums_input_tokens_of_today_sessions`.)
+    #[test]
+    fn badge_input_tokens_are_cache_inclusive() {
+        let jsonl = turn("cache", "claude-sonnet-4-5", 1000, 2000, 5000, 500);
+        let s = today_session_with_jsonl("badge-cache", "claude-code", &jsonl, false);
+        let now = chrono::Local::now().timestamp_millis();
+
+        let u = build_today_usage(&[s], now);
+
+        assert_eq!(u.input_tokens, 8000, "1000 input + 2000 write + 5000 read");
+        assert_eq!(u.output_tokens, 500);
+    }
+
+    /// Nothing spent today → an all-zero badge, not last night's figure.
+    /// (Replaces the retired `empty_when_nothing_today`.)
+    #[test]
+    fn badge_empty_when_nothing_today() {
+        let jsonl = turn_stamped(
+            "old",
+            "2001-09-09T01:46:40Z",
+            "claude-sonnet-4-5",
+            9_000,
+            0,
+            0,
+            900,
+        );
+        let s = today_session_with_jsonl("badge-empty", "claude-code", &jsonl, false);
+        let now = chrono::Local::now().timestamp_millis();
+
+        let u = build_today_usage(&[s], now);
+
+        assert_eq!(u.cost_usd, 0.0);
+        assert_eq!((u.input_tokens, u.output_tokens, u.session_count), (0, 0, 0));
     }
 
     /// A minimal codex rollout: one `turn_context` (for the model) and one
