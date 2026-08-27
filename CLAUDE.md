@@ -11,6 +11,12 @@ New features must always support both LocalBackend (local file system) and Remot
 5. Tauri commands in `claw-fleet-desktop/src/gui.rs` must delegate via `state.backend.lock().unwrap()`
 6. Types that cross the HTTP boundary need both `Serialize` and `Deserialize`
 
+## Relay agent role
+
+Only **one** process per machine may join the mobile-relay channel as an agent. The relay hands every client frame to *all* agents in the channel (`fleet-relay/src/registry.rs::deliver_or_queue`) and each agent runs the handler for real, so a second local agent executes every phone-side write twice — on 2026-08-27 the desktop app plus a hand-started `fleet webui` turned one phone submit into two `claude --resume` processes on the same transcript.
+
+The arbitration lives in `claw-fleet-core/src/relay_role.rs` (`~/.fleet/relay-agent.json`, pid + start_time). A new long-lived process that calls `mobile_relay::ensure_ws_client()` gets it for free; the desktop additionally calls `mobile_relay::set_desktop_agent()` first, which is what lets it take the role over from a headless `fleet serve` / `fleet webui`. Never bypass `ensure_ws_client` to open a relay socket directly.
+
 ## Permissions injector
 
 Fleet injects rules into `~/.claude/settings.json`'s `permissions.allow` so `fleet guard` is the sole audit gate for shell commands — `Bash` on macOS/Linux/Windows-with-Git-Bash and `PowerShell` on Windows-without-Git-Bash (no double-prompting against Claude Code's native permission layer). Both the injected allow rules (`Bash(*)` + `PowerShell(*)`) and the guard hook matcher (`Bash|PowerShell`) must name both tools. Implementation: `claw-fleet-core/src/permissions_injector.rs`, lock file `~/.fleet/permissions-lock.json`, toggle config `~/.fleet/permissions-config.json`.
