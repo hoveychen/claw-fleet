@@ -192,11 +192,13 @@
   word-break: break-word;
 }
 
-/* 用户自己敲进去的内容不套用中文正文首行缩进（index.css 的 `.cjk-indent`）：
-   聊天气泡不是正文段落，缩进会让「进度」这种两字消息的气泡凭空宽出两个字、
-   文字被顶到右侧。桌面端用户气泡根本不走 markdown，所以只有移动端会中招。 */
-.userBubble :global(.cjk-indent) {
-  text-indent: 0;
+/* 用户敲的内容是纯文本、保留空白（与桌面 UserContent.tsx 一致），不过 markdown：
+   单个换行不会被并成一段，中文正文的首行缩进（index.css 的 `.cjk-indent`）也
+   不再落到聊天气泡上。 */
+.userText {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .assistantRow {
