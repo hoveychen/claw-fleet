@@ -84,6 +84,10 @@ export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
 
 export interface UseComposerDraft {
   draft: ComposerDraft;
+  /** Has this slot been materialized (anything written into it), as opposed to
+   *  reading back the defaults? Distinguishes "the user emptied a field" from
+   *  "there is no draft yet" — an empty *value* can't, since both look alike. */
+  exists: boolean;
   /** Merge a partial update into this slot's draft. Pass an updater
    *  `(prev) => partial` when the new value depends on the current draft (e.g.
    *  appending an attachment) so looped writes accumulate instead of clobbering
@@ -108,6 +112,7 @@ export function useComposerDraft(
 
   return {
     draft,
+    exists: stored != null,
     // On the first write for a fresh slot, fold the defaults in so seeded
     // fields (e.g. permissionMode) aren't lost the moment the user types.
     // Both patch shapes are supported: an updater is wrapped so its result is
