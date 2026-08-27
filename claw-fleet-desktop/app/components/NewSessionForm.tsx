@@ -313,6 +313,35 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
 
   const isChat = !!chatPath && workspace === chatPath;
 
+  // Chat mode is a mode, not a workspace, but the backend still spawns into a
+  // directory — so the toggle below writes `chatPath` into the same `workspace`
+  // field the picker uses, and this remembers what to put back. Without it,
+  // leaving chat mode would land on an empty picker and a disabled submit with
+  // nothing on screen saying why.
+  const lastProjectWorkspace = useRef("");
+  useEffect(() => {
+    if (workspace && workspace !== chatPath) lastProjectWorkspace.current = workspace;
+  }, [workspace, chatPath]);
+
+  const setChatMode = (on: boolean) => {
+    if (on) {
+      if (chatPath) setWorkspace(chatPath);
+      return;
+    }
+    // Never hand the remembered launch target back when it *is* chat — that
+    // would leave the toggle off with the chat directory still selected.
+    const remembered = loadLastWorkspace();
+    setWorkspace(
+      lastProjectWorkspace.current ||
+        defaultWorkspace(
+          recentWorkspaces,
+          null,
+          remembered === chatPath ? null : remembered,
+        ) ||
+        "",
+    );
+  };
+
   // Registered rca-routed remote workspaces: badge them in the picker, and
   // offer the ones with no sessions yet (they can't appear in recents).
   const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspace[]>([]);
@@ -466,28 +495,34 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
     }
   };
 
+  // Chat mode's own switch, ahead of the workspace pill. Chat used to be one
+  // more entry inside that pill's menu, which framed it as a special directory;
+  // it is a mode, so it gets its own control and the picker disappears under it
+  // (chat has no directory to choose). Hidden when the backend couldn't name the
+  // chat workspace, since there would be nothing to switch into.
+  const chatModePill = chatPath ? (
+    <button
+      type="button"
+      className={`${pillStyles.ghost_pill} ${compact ? pillStyles.ghost_pill_compact : ""} ${
+        isChat ? styles.chat_pill_on : ""
+      }`}
+      aria-pressed={isChat}
+      disabled={submitting}
+      onClick={() => setChatMode(!isChat)}
+      title={t("new_session.chat_sub")}
+      data-testid="chat-mode-pill"
+    >
+      <MessageCircle size={13} strokeWidth={1.7} />
+      <span className={pillStyles.pill_label}>{t("new_session.chat")}</span>
+    </button>
+  ) : null;
+
   const workspacePill = (
     <PillMenu
       placement="below"
-      icon={
-        isChat ? (
-          <MessageCircle size={13} strokeWidth={1.7} />
-        ) : (
-          <FolderOpen size={13} strokeWidth={1.7} />
-        )
-      }
-      label={
-        isChat
-          ? t("new_session.chat")
-          : workspace
-            ? basename(workspace)
-            : t("new_session.workspace")
-      }
-      title={
-        isChat
-          ? t("new_session.chat_sub")
-          : workspace || t("new_session.workspace_placeholder")
-      }
+      icon={<FolderOpen size={13} strokeWidth={1.7} />}
+      label={workspace ? basename(workspace) : t("new_session.workspace")}
+      title={workspace || t("new_session.workspace_placeholder")}
       disabled={submitting}
       testId="workspace-pill"
       menuHeader={(close) => (
@@ -510,21 +545,6 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
         </div>
       )}
       items={[
-        // Pinned first: the chat workspace is a destination, not a recent.
-        ...(chatPath
-          ? [
-              {
-                // No `icon` here on purpose: PillMenu renders `item.icon` *in
-                // place of* the check column, which would hide the selected
-                // state. The pill's own icon already marks chat mode.
-                id: chatPath,
-                label: t("new_session.chat"),
-                sub: t("new_session.chat_sub"),
-                checked: isChat,
-                onSelect: () => setWorkspace(chatPath),
-              },
-            ]
-          : []),
         ...recentWorkspaces.map((w) => ({
           id: w.path,
           label: w.name,
@@ -606,7 +626,12 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
         placeholder={t("new_session.prompt_placeholder")}
         disabled={submitting}
         wikiMentions
-        contextSlot={workspacePill}
+        contextSlot={
+          <>
+            {chatModePill}
+            {!isChat && workspacePill}
+          </>
+        }
         toolbarSlot={optionPills}
         addMenuItems={[
           {
@@ -624,8 +649,15 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
         ]}
       />
 
+      {/* With chat pulled out of the picker, turning the toggle off on a host
+          with no recents at all leaves nothing selected — say so, instead of
+          leaving a disabled submit button to be puzzled over. */}
       <p className={styles.hint}>
-        {isChat ? t("new_session.hint_chat") : t("new_session.hint")}
+        {isChat
+          ? t("new_session.hint_chat")
+          : workspace
+            ? t("new_session.hint")
+            : t("new_session.hint_pick_workspace")}
       </p>
 
       {error && <div className={styles.error}>{error}</div>}
