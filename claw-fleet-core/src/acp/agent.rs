@@ -165,6 +165,12 @@ impl AcpAgent {
         self.client_caps.lock().unwrap().supports_elicitation_form()
     }
 
+    /// A snapshot of what the client said it can render, for choosing how to
+    /// deliver a decision card.
+    pub fn client_capabilities(&self) -> ClientCapabilities {
+        self.client_caps.lock().unwrap().clone()
+    }
+
     /// Write one already-serialized frame to the peer.
     pub fn send_frame(&self, frame: &str) -> bool {
         self.peer.send_raw(frame)
@@ -558,6 +564,12 @@ impl AcpAgent {
             self.notify_update(acp_session_id, update);
         }
         *last = next;
+    }
+
+    /// Send one `session/update`. Public so the decision watcher can report
+    /// a card it cannot deliver.
+    pub fn notify_session(&self, session_id: &str, update: SessionUpdate) {
+        self.notify_update(session_id, update)
     }
 
     fn notify_update(&self, session_id: &str, update: SessionUpdate) {
