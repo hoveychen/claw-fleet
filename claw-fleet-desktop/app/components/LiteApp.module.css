@@ -180,6 +180,21 @@
   color: var(--color-text);
 }
 
+/* Chat mode reuses .active_toggle's shape but tints with the accent, so the two
+   pills sharing this row don't read as the same filter. */
+.chat_toggle_on {
+  background: rgba(var(--color-accent-rgb), 0.14);
+  border-color: var(--color-accent, var(--color-text-dim));
+  color: var(--color-text);
+}
+
+/* Disabled beneath chat mode — dimmed, not hidden: the directory selection is
+   still there and returns the moment the toggle goes off. */
+.ws_select:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* Mark-all-read shortcut — a compact icon+count button sharing the filter row
    with the active toggle, shown only when there are unread tasks. */
 .mark_all_read {
