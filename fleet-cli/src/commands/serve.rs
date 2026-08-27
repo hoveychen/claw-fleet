@@ -79,25 +79,45 @@ pub(crate) fn cmd_webui(
             std::process::exit(2);
         }
     };
-    // `--web-root` wins; otherwise the env, which is how the container is
-    // configured. Neither → nothing to serve, and a UI-less "web UI" is a
-    // misconfiguration worth failing on rather than starting a port that
-    // answers 404 for every page.
+    // `--web-root` wins, then the env (how the container is configured), then
+    // whatever this build compiled in. A directory beats the embedded copy on
+    // purpose: that is how you iterate on the frontend without rebuilding the
+    // binary, and how the cloud image keeps shipping its own bundle.
+    //
+    // Nothing at all → a UI-less "web UI" is a misconfiguration worth failing
+    // on rather than starting a port that answers 404 for every page.
     let root = web_root.or_else(|| {
         std::env::var("FLEET_WEB_ROOT")
             .ok()
             .filter(|s| !s.is_empty())
             .map(std::path::PathBuf::from)
     });
-    let Some(root) = root else {
-        eprintln!("fleet webui: no bundle to serve — pass --web-root <dir> or set FLEET_WEB_ROOT");
-        std::process::exit(2);
+    let assets = match root {
+        Some(root) => {
+            if !root.is_dir() {
+                eprintln!("fleet webui: {} is not a directory", root.display());
+                std::process::exit(2);
+            }
+            eprintln!("[fleet webui] serving web UI from {}", root.display());
+            claw_fleet_core::web_assets::from_dir(root)
+        }
+        None => match crate::webui_embed::asset_source() {
+            Some(assets) => {
+                eprintln!(
+                    "[fleet webui] serving the web UI built into this binary ({} files)",
+                    crate::webui_embed::embedded_file_count()
+                );
+                assets
+            }
+            None => {
+                eprintln!(
+                    "fleet webui: no bundle to serve — this binary was built without the web UI, \
+                     so pass --web-root <dir> or set FLEET_WEB_ROOT"
+                );
+                std::process::exit(2);
+            }
+        },
     };
-    if !root.is_dir() {
-        eprintln!("fleet webui: {} is not a directory", root.display());
-        std::process::exit(2);
-    }
-    eprintln!("[fleet webui] serving web UI from {}", root.display());
     if host != DEFAULT_WEBUI_HOST && host != "localhost" {
         eprintln!(
             "[fleet webui] binding {host} — this port has no authentication and can start agent sessions; put an auth gateway in front of it"
@@ -111,7 +131,7 @@ pub(crate) fn cmd_webui(
         token: String::new(),
         port_file,
         no_auth: true,
-        web_assets: Some(claw_fleet_core::web_assets::from_dir(root)),
+        web_assets: Some(assets),
         host: Some(host),
     });
 }
