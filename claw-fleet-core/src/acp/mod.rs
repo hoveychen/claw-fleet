@@ -40,5 +40,6 @@ pub mod attachments;
 pub mod conn;
 pub mod jsonrpc;
 pub mod stdio;
+pub mod tools;
 pub mod types;
 pub mod ws;
