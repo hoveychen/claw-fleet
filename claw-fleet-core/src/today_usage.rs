@@ -31,22 +31,20 @@ use crate::session::SessionInfo;
 pub struct TodayUsage {
     /// YYYY-MM-DD in the user's local timezone.
     pub date: String,
-    /// Cumulative input tokens today (input + cache creation + cache read, cache
-    /// re-reads included) — the "tokens sent to the API" total, on the same口径
-    /// as cost. Per agent session it's the cumulative `SessionInfo.total_input_tokens`
-    /// (for both Claude and Codex sources, which now agree). **Agent sessions
-    /// only** — Fleet's own LLM calls are excluded (see [`today_usage`]). NOTE:
-    /// this is cache-read-dominated and can reach billions/day — it is NOT the
-    /// daily report's old last-turn snapshot (the report sums cumulatively too, so
-    /// both agree on口径, though the sidebar also counts Codex which the
-    /// Claude-only report does not).
+    /// Input tokens across today's turns (input + cache creation + cache read,
+    /// cache re-reads included) — the "tokens sent to the API" total, on the same
+    /// 口径 as cost. **Agent sessions only** — Fleet's own LLM calls are excluded
+    /// (see [`today_usage`]). NOTE: this is cache-read-dominated and can reach
+    /// billions/day — it is NOT the daily report's old last-turn snapshot (the
+    /// report sums cumulatively too, so both agree on口径, though the sidebar also
+    /// counts Codex which the Claude-only report does not).
     pub input_tokens: u64,
-    /// Output tokens today from agent sessions created today.
+    /// Output tokens across today's turns.
     pub output_tokens: u64,
     /// Total USD cost today — equal to `agent_cost_usd`, since Fleet's own
     /// overhead is excluded from this surface.
     pub cost_usd: f64,
-    /// Cost from agent (Claude Code / Codex) sessions created today.
+    /// Cost of today's agent (Claude Code / Codex) turns.
     pub agent_cost_usd: f64,
     /// **Always 0.0.** Fleet's own LLM spend is no longer folded into this
     /// surface; the field is retained only so mobile clients that render an
@@ -54,7 +52,8 @@ pub struct TodayUsage {
     /// live in [`crate::llm_usage::list_usage_daily_buckets`], which powers
     /// Settings → Usage.
     pub fleet_cost_usd: f64,
-    /// Number of top-level (non-subagent) sessions created today that contributed.
+    /// Number of top-level (non-subagent) sessions that spent tokens today,
+    /// whenever they started.
     pub session_count: u64,
 }
 
@@ -180,7 +179,7 @@ fn build_today_usage_cached(
 /// Consolidated per-container token usage for the Fleet Cloud lean deployment.
 ///
 /// One customer per container, so this container's usage **is** the customer's
-/// usage. `today` reuses [`today_usage`] (agent sessions created today); the
+/// usage. `today` reuses [`today_usage`] (today's agent turns); the
 /// `cumulative_*` fields sum **agent sessions only**
 /// (claude/codex consumption — the token basis you'd bill on) across every
 /// session currently retained on disk.
@@ -367,10 +366,10 @@ fn fold_codex_session(
 
 /// Build today's per-model receipt on the same口径 as [`today_usage`].
 ///
-/// `sessions` is the already-scanned session list (subagents included). Each
-/// session **created today** contributes every finalized turn of its JSONL,
-/// folded per model. Fleet's own LLM spend today is folded per model from
-/// `fleet_llm_usage.jsonl`. Lines are returned sorted by descending cost.
+/// `sessions` is the already-scanned session list (subagents included). Every
+/// finalized turn **timestamped today** contributes, whenever its session
+/// started, folded per model. Fleet's own LLM spend is excluded (agent-only
+/// surface). Lines are returned sorted by descending cost.
 pub fn today_usage_breakdown(sessions: &[SessionInfo]) -> TodayUsageBreakdown {
     let now_ms = chrono::Local::now().timestamp_millis();
     let mut cache = usage_cache().lock().unwrap();
@@ -471,10 +470,12 @@ fn build_lines(
 
 // ── Arbitrary-range breakdown (receipt + per-day trend) ──────────────────────
 //
-// The today receipt above is hard-scoped to sessions *created today*. The
-// Settings "usage" view wants that same per-model itemisation over a longer
-// window (7d / 30d / all) plus a per-day trend line. This section generalises
-// the fold to an arbitrary inclusive `[from_ms, to_ms]` window.
+// This is **the** fold: the arbitrary inclusive `[from_ms, to_ms]` window that
+// every usage surface goes through. The today receipt and the sidebar badge are
+// its `[local midnight, now]` case (see `build_breakdown_cached`), so all three
+// agree by construction and `Σ line.cost == TodayUsage.cost` still reconciles to
+// the cent. The Settings "usage" view adds the longer presets (7d / 30d / all)
+// and the per-day trend line.
 //
 // Attribution differs by source, and this asymmetry is deliberate:
 //   • **Claude** sessions are folded **per turn**: each finalized turn is
@@ -484,11 +485,9 @@ fn build_lines(
 //     snapshot per session (no per-turn deltas), so a Codex session is
 //     attributed **whole to its creation day**. `has_codex_approximation` flags
 //     this so the UI can footnote that Codex trend placement is approximate.
-//
-// This path is intentionally separate from `today_usage_breakdown`, which must
-// stay session-level so `Σ line.cost == TodayUsage.cost` reconciles with the
-// sidebar badge to the cent. The range view has no such invariant, so it can
-// afford the more accurate per-turn fold.
+//     That also means a Codex session outliving midnight still under-reports on
+//     the later days — the Claude-side bug this fold fixed has no Codex cure
+//     until codex logs per-turn deltas.
 
 /// One day's totals in a range breakdown — a point on the trend chart.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

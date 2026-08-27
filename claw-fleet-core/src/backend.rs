@@ -457,8 +457,9 @@ pub trait Backend: Send + Sync {
     /// Fetch usage summaries for all detected sources (for tray menu display).
     fn usage_summaries(&self) -> Vec<SourceUsageSummary>;
     /// Today's cumulative token/cost counter (desktop nav-bar / mobile header).
-    /// Sums live per-session totals for sessions created today plus Fleet's own
-    /// LLM spend today. See [`crate::today_usage`].
+    /// Sums every agent turn timestamped today, whenever its session started —
+    /// agent spend only, Fleet's own LLM overhead excluded. See
+    /// [`crate::today_usage`].
     fn today_usage(&self) -> TodayUsage;
     /// Per-model "receipt" breakdown behind the [`Self::today_usage`] counter:
     /// one line per (source, model) with token counts, official unit prices and
