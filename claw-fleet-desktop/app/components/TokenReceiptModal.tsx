@@ -251,7 +251,7 @@ export function TokenReceiptModal({ onClose }: Props) {
                     <div className={styles.codex_note}>
                       {t(
                         "token_receipt.codex_note",
-                        "Codex 无逐轮明细,其用量整体归到会话起始日,趋势为近似",
+                        "该 Codex 会话有未带时间戳的轮次,这部分归到了会话起始日,趋势为近似",
                       )}
                     </div>
                   )}
