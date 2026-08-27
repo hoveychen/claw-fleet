@@ -17,6 +17,7 @@ import {
   Folder,
   FolderOpen,
   History,
+  MessageCircle,
   PanelRightOpen,
   Pencil,
   Plus,
@@ -191,25 +192,31 @@ function markBucket(s: SessionInfo): "pending" | "done" {
   return s.userMark === "done" ? "done" : "pending";
 }
 
-/** The two pseudo-workspaces the workspace `<select>` pins above the real
- *  directories. Every real value is an absolute path, so these bare words can
- *  never collide with one — including on Windows, where a path starts with a
- *  drive letter. They are persisted like any other filter value. */
-export const CHAT_ONLY = "chat";
-export const CHAT_HIDDEN = "no-chat";
-
-/** Does `s` pass the workspace filter? `chatPath` is the pure-chat workspace,
- *  `null` while the backend call is in flight or if it failed — in which case
- *  the two chat pseudo-values degrade to "all" rather than silently emptying
- *  the rail. */
+/** Does `s` pass the rail's workspace filter?
+ *
+ *  The filter has two mutually exclusive halves. `chatOnly` is the chat-mode
+ *  toggle: while it is on the rail shows the pure-chat workspace and nothing
+ *  else, and `filter` (the directory `<select>`) is ignored — a directory left
+ *  selected underneath must not narrow the chat list. While it is off the rail
+ *  shows directories only, so chat sessions are dropped even under "all"; chat
+ *  is a mode now, not one more workspace mixed in among the repos.
+ *
+ *  `chatPath` is the pure-chat workspace, `null` while the backend call is in
+ *  flight or if it failed. Neither half can be honoured without it, so the
+ *  toggle goes inert and this degrades to a plain directory filter rather than
+ *  emptying the rail on a guess. */
 export function matchesWorkspaceFilter(
   s: SessionInfo,
   filter: string,
   chatPath: string | null,
+  chatOnly: boolean,
 ): boolean {
+  if (chatPath != null) {
+    const isChat = s.workspacePath === chatPath;
+    if (chatOnly) return isChat;
+    if (isChat) return false;
+  }
   if (filter === "all") return true;
-  if (filter === CHAT_ONLY) return chatPath == null || s.workspacePath === chatPath;
-  if (filter === CHAT_HIDDEN) return chatPath == null || s.workspacePath !== chatPath;
   // Options are collapsed to repo roots (see the dropdown's distinctWorkspaces),
   // so a session inside `<repo>/.worktrees/<task>` matches its root's option.
   return repoRootPath(s.workspacePath) === filter;
@@ -291,6 +298,8 @@ export function HistoryView() {
   const setQuery = useUIStore((s) => s.setHistoryQuery);
   const workspaceFilter = useUIStore((s) => s.historyWorkspaceFilter);
   const setWorkspaceFilter = useUIStore((s) => s.setHistoryWorkspaceFilter);
+  const chatOnly = useUIStore((s) => s.historyChatOnly);
+  const setChatOnly = useUIStore((s) => s.setHistoryChatOnly);
   // Re-render on a slow tick so the relative "last updated" and the live
   // Elapsed-runtime durations keep counting even when no scan lands (a waiting-input
   // session can sit idle for minutes). 30s granularity matches the minute-level
@@ -403,9 +412,9 @@ export function HistoryView() {
     [sessions],
   );
 
-  // The pure-chat workspace is filtered through its own pinned options, so it
-  // is kept out of the project list below — otherwise it would sit in there a
-  // second time, alphabetised among the repos as plain "Chat".
+  // The pure-chat workspace is its own mode, reached through the toggle beside
+  // the <select>, so it is kept out of the project list below — otherwise it
+  // would sit in there a second time, alphabetised among the repos as "Chat".
   const chatPath = useChatWorkspace();
 
   // Same derivation as the New Session launcher (distinctWorkspaces): temp
@@ -420,21 +429,26 @@ export function HistoryView() {
     [adhocSessions, chatPath],
   );
 
-  // A filter persisted before the chat workspace got its own option is a raw
-  // chat path; it no longer appears among the project options, so promote it to
-  // the pseudo-value instead of letting the reset below silently drop it.
+  // A filter persisted back when the chat workspace was still an option in the
+  // <select> may be a raw chat path. It is no longer among the project options,
+  // so hand it to the toggle instead of letting the reset below drop it — that
+  // would silently turn "I only want my chats" into "show me everything".
+  // (`store.ts` migrates the two retired pseudo-values; only the raw path needs
+  // `chatPath`, which the store has no way to read.)
   useEffect(() => {
-    if (chatPath && workspaceFilter === chatPath) setWorkspaceFilter(CHAT_ONLY);
-  }, [chatPath, workspaceFilter, setWorkspaceFilter]);
+    if (chatPath && workspaceFilter === chatPath) {
+      setWorkspaceFilter("all");
+      setChatOnly(true);
+    }
+  }, [chatPath, workspaceFilter, setWorkspaceFilter, setChatOnly]);
 
   // The workspace filter is persisted, but the dropdown's options only cover
   // workspaces with sessions inside the scanner's 7-day window. A restored path
   // whose sessions have aged out would render a blank <select> over an empty
   // rail, with no obvious way back — fall back to "all" once the scan lands.
-  // The two chat pseudo-values are always offered, so they never age out.
+  // Chat mode is unaffected: it lives in its own always-available toggle.
   useEffect(() => {
     if (!scanReady || workspaceFilter === "all") return;
-    if (workspaceFilter === CHAT_ONLY || workspaceFilter === CHAT_HIDDEN) return;
     if (workspaceFilter === chatPath) return; // promoted by the effect above
     if (!workspaces.some(([path]) => path === workspaceFilter)) {
       setWorkspaceFilter("all");
@@ -447,7 +461,7 @@ export function HistoryView() {
     // this set so each count reflects how many rows its segment would reveal
     // under the current workspace / query / active filters.
     const preMark = adhocSessions
-      .filter((s) => matchesWorkspaceFilter(s, workspaceFilter, chatPath))
+      .filter((s) => matchesWorkspaceFilter(s, workspaceFilter, chatPath, chatOnly))
       .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
       .filter((s) => {
         if (!q) return true;
@@ -480,7 +494,7 @@ export function HistoryView() {
       // `lastActivityMs` would be stale, but the tree is very much alive.
       .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
     return { rows, markCounts: counts };
-  }, [adhocSessions, workspaceFilter, chatPath, activeOnly, query, ftsMatchPaths, markFilter]);
+  }, [adhocSessions, workspaceFilter, chatPath, chatOnly, activeOnly, query, ftsMatchPaths, markFilter]);
 
   // Whether the task page currently mixes agent sources (Claude + Codex + …).
   // Only then does the per-row source glyph earn its place; a uniform list gets
@@ -1278,27 +1292,41 @@ export function HistoryView() {
       secondary={
         <>
         <div className={styles.controls}>
+          {/* The directory <select> and the chat toggle are the two halves of
+              one filter, and they are mutually exclusive: chat mode owns the
+              whole rail, so the <select> is inert (and dimmed) underneath it
+              rather than silently narrowing a list it no longer governs. The
+              toggle is hidden entirely when the backend couldn't name the chat
+              workspace, since it could not then be honoured. */}
           <div className={styles.filter_row}>
             <select
               className={styles.project_select}
               value={workspaceFilter}
               onChange={(e) => setWorkspaceFilter(e.target.value)}
-              title={t("history.filter_workspace", "按工作目录筛选")}
+              disabled={chatOnly}
+              title={
+                chatOnly
+                  ? t("history.filter_workspace_off", "聊天模式下不按目录筛选")
+                  : t("history.filter_workspace", "按工作目录筛选")
+              }
             >
               <option value="all">{t("history.all_workspaces", "全部目录")}</option>
-              {/* The chat workspace is a category, not a project — pinned above
-                  the repos, in both directions. Hidden entirely if the backend
-                  couldn't name it, since neither option could then be honoured. */}
-              {chatPath && (
-                <>
-                  <option value={CHAT_ONLY}>{t("history.chat_only", "💬 仅聊天")}</option>
-                  <option value={CHAT_HIDDEN}>{t("history.chat_hidden", "🚫 隐藏聊天")}</option>
-                </>
-              )}
               {workspaces.map(([path, name]) => (
                 <option key={path} value={path} title={path}>{name}</option>
               ))}
             </select>
+            {chatPath && (
+              <button
+                type="button"
+                className={`${styles.chat_toggle} ${chatOnly ? styles.chat_toggle_on : ""}`}
+                aria-pressed={chatOnly}
+                onClick={() => setChatOnly(!chatOnly)}
+                title={t("history.filter_chat_tip", "只显示纯聊天会话，不按目录筛选")}
+              >
+                <MessageCircle size={12} strokeWidth={1.8} />
+                {t("history.chat_mode", "聊天")}
+              </button>
+            )}
           </div>
           {/* Row 2: the "only active" pill sits beside the mark segments rather
               than inside the workspace-select row. On WebKit (Tauri's WKWebView)

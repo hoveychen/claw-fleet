@@ -94,6 +94,43 @@
   cursor: pointer;
 }
 
+/* Chat mode owns the whole rail, so the directory <select> is disabled beneath
+   it. Dimmed rather than hidden: the selection is still there and comes back
+   the moment the toggle goes off. */
+.project_select:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Chat mode — the pure-chat workspace pulled out of the <select> beside it into
+   a mode of its own. Same pill shape as .active_toggle (row 2), tinted with the
+   accent instead of the success colour so the two read as different filters. */
+.chat_toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.chat_toggle:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.chat_toggle_on {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+  background: rgba(var(--color-accent-rgb), 0.12);
+}
+
 /* Row 2 of the filter block: the "only active" pill + the mark segments,
    sharing one line. Kept separate from .filter_row (the workspace <select>)
    because a WebKit <select> won't shrink to share a row — see HistoryView.tsx. */

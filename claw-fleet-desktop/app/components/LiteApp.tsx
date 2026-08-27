@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { CheckCheck, Plus, Search } from "lucide-react";
+import { CheckCheck, MessageCircle, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,7 +15,7 @@ import { LIVE_STATUSES, isFleetOwnedTask, sessionUnread } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { getItem, setItem } from "../storage";
-import { CHAT_HIDDEN, CHAT_ONLY, matchesWorkspaceFilter } from "./HistoryView";
+import { matchesWorkspaceFilter } from "./HistoryView";
 import { LiteDecisionHistory } from "./LiteDecisionHistory";
 import { SessionRail } from "./SessionRail";
 import { useMultiSource } from "./SessionCard";
@@ -69,6 +69,9 @@ export function LiteApp() {
   const [query, setQuery] = useState("");
   const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
+  // Chat mode — mutually exclusive with the directory filter above, exactly as
+  // on the desktop task page (see matchesWorkspaceFilter).
+  const [chatOnly, setChatOnly] = useState(false);
   const [activeOnly, setActiveOnly] = useState(false);
   // New-session composer + auto-open of the freshly spawned session.
   const [composing, setComposing] = useState(false);
@@ -130,7 +133,7 @@ export function LiteApp() {
     const unreadSessions = adhoc.filter((s) => sessionUnread(s, readOverrides[s.id]));
     const q = query.trim().toLowerCase();
     const preMark = adhoc
-      .filter((s) => matchesWorkspaceFilter(s, workspaceFilter, chatPath))
+      .filter((s) => matchesWorkspaceFilter(s, workspaceFilter, chatPath, chatOnly))
       .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
       .filter((s) => {
         if (!q) return true;
@@ -173,7 +176,7 @@ export function LiteApp() {
       }
     }
     return { rows, items, chainMembersAll, groupHeaderChains, markCounts: counts, workspaces, activeCount, unreadSessions };
-  }, [sessions, query, ftsMatchPaths, markFilter, workspaceFilter, activeOnly, chatPath, readOverrides]);
+  }, [sessions, query, ftsMatchPaths, markFilter, workspaceFilter, chatOnly, activeOnly, chatPath, readOverrides]);
 
   // Opening a row also clears its unread (and its whole relay chain's, for a
   // group header) — same dwell-read the desktop rail does on click.
@@ -185,7 +188,7 @@ export function LiteApp() {
   // A workspace filter naming a directory whose sessions have all aged out would
   // strand an empty list behind a blank select — fall back to "all".
   useEffect(() => {
-    if (workspaceFilter === "all" || workspaceFilter === CHAT_ONLY || workspaceFilter === CHAT_HIDDEN) return;
+    if (workspaceFilter === "all") return;
     if (workspaceFilter === chatPath) return;
     if (!workspaces.some(([path]) => path === workspaceFilter)) setWorkspaceFilter("all");
   }, [workspaces, workspaceFilter, chatPath]);
@@ -284,19 +287,34 @@ export function LiteApp() {
                 className={styles.ws_select}
                 value={workspaceFilter}
                 onChange={(e) => setWorkspaceFilter(e.target.value)}
-                title={t("history.filter_workspace", "按工作目录筛选")}
+                disabled={chatOnly}
+                title={
+                  chatOnly
+                    ? t("history.filter_workspace_off", "聊天模式下不按目录筛选")
+                    : t("history.filter_workspace", "按工作目录筛选")
+                }
               >
                 <option value="all">{t("history.all_workspaces", "全部目录")}</option>
-                {chatPath && (
-                  <>
-                    <option value={CHAT_ONLY}>{t("history.chat_only", "💬 仅聊天")}</option>
-                    <option value={CHAT_HIDDEN}>{t("history.chat_hidden", "🚫 隐藏聊天")}</option>
-                  </>
-                )}
                 {workspaces.map(([path, name]) => (
                   <option key={path} value={path} title={path}>{name}</option>
                 ))}
               </select>
+              {/* Chat mode — the other half of the workspace filter, mutually
+                  exclusive with the <select> it sits beside (which is why that
+                  one is disabled above). Hidden when the backend couldn't name
+                  the chat workspace, since it could not then be honoured. */}
+              {chatPath && (
+                <button
+                  type="button"
+                  className={`${styles.active_toggle} ${chatOnly ? styles.chat_toggle_on : ""}`}
+                  aria-pressed={chatOnly}
+                  onClick={() => setChatOnly((v) => !v)}
+                  title={t("history.filter_chat_tip", "只显示纯聊天会话，不按目录筛选")}
+                >
+                  <MessageCircle size={11} strokeWidth={1.8} />
+                  {t("history.chat_mode", "聊天")}
+                </button>
+              )}
               <button
                 type="button"
                 className={`${styles.active_toggle} ${activeOnly ? styles.active_toggle_on : ""}`}
