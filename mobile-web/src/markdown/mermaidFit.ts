@@ -41,3 +41,30 @@ export function fitDiagramWidth(
   const floor = naturalWidth * minScale;
   return containerWidth < floor ? floor : null;
 }
+
+/**
+ * 把上面算出来的结论落到 svg 上。挂在这里而不是组件里，是为了能在 jsdom 里直接测。
+ *
+ * mermaid 吐出来的 svg 是 `width="100%"` + **内联** `style="max-width:<自然宽>px"`
+ * （setupViewPortForSVG → configureSvgSize，那个数和 viewBox 的宽同源）。那句内联
+ * max-width 是唯一拦着图别被拉满容器的东西 —— 样式表里的 `.diagram svg{max-width:100%}`
+ * 压不过它，一旦被 `removeProperty("max-width")` 抹掉，svg 就只剩 `width="100%"`，
+ * viewBox 会把整张图连字一起放大到容器宽（桌面端实测：阅读模式里自然宽 135px 的窄
+ * 流程图被画成 778px，5.78 倍，节点里的字大到溢出方框）。
+ *
+ * 所以"不插手"这条路径必须把自然宽**写回去**，而不是删掉。
+ */
+export function applyDiagramWidth(el: SVGElement, containerWidth: number): void {
+  const natural = naturalWidthFromViewBox(el.getAttribute("viewBox"));
+  // 量不到自然宽就彻底不碰：既然没量到，下面那条钉宽路径也从没走过，无需撤销。
+  if (natural === null) return;
+  const pinned = fitDiagramWidth(natural, containerWidth);
+  if (pinned === null) {
+    el.style.removeProperty("width");
+    el.style.maxWidth = `${natural}px`;
+    return;
+  }
+  // 钉宽时 max-width 必须一起让路，否则 mermaid 那句自然宽会把它拽回去。
+  el.style.width = `${pinned}px`;
+  el.style.maxWidth = "none";
+}
