@@ -64,7 +64,7 @@ import {
 import { parseSkillInjection } from "../skillInjection";
 import { groupMetaRuns } from "./metaGrouping";
 import { countSteps, groupWorkRuns, isDecisionTool, workRunTitle } from "./workRuns";
-import { friendlyToolName, toolSummary } from "./toolSummary";
+import { decisionSummary, friendlyToolName, toolSummary } from "./toolSummary";
 import { userDisplayText } from "./slashCommand";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
@@ -516,6 +516,16 @@ function DigestChips({ meta }: { meta: ToolMeta }) {
         <span key="t" className={styles.chip}>{`${d.todoDone ?? 0}/${d.todoTotal}`}</span>,
       );
     }
+    // A decision card's chosen answer — what the reader scrolls back to find.
+    // Free text can be a whole paragraph, so the chip clamps and the expanded
+    // body carries the content.
+    if (d.answer) {
+      chips.push(
+        <span key="ans" className={`${styles.chip} ${styles.chipAnswer}`} title={d.answer}>
+          {d.answer}
+        </span>,
+      );
+    }
   }
   if (chips.length === 0) return null;
   return <span className={styles.chipRow}>{chips}</span>;
@@ -561,7 +571,11 @@ function ToolStep({
   const nav = useAgentNav();
   const name = b.name ?? "";
   const fleetTool = isFleetTool(name);
-  const summary = fleetTool ? fleetSummary(fleetTool, b.input ?? {}) : toolSummary(b);
+  const summary = fleetTool
+    ? fleetSummary(fleetTool, b.input ?? {})
+    : isDecisionTool(name)
+      ? decisionSummary(b)
+      : toolSummary(b);
   const expandable = !!b.id && !!client && !!jsonlPath;
   // "打开子代理": an Agent tool whose result carries the subagent's id and whose
   // transcript the snapshot has surfaced (`agent-<id>` row present).

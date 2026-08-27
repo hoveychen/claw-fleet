@@ -16,6 +16,9 @@ import type { FleetTransport } from "../transport";
 import { useLightbox } from "./Lightbox";
 import { isFleetTool } from "./fleetTools";
 import { FleetBody } from "./FleetBody";
+import { isDecisionTool } from "./workRuns";
+import { readDecisionQuestions, resolveAnswers } from "./decisionCall";
+import { DecisionQa } from "./DecisionQa";
 import styles from "./ToolDetailPanel.module.css";
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
@@ -304,7 +307,16 @@ function GenericBody({ detail }: { detail: ToolDetail }) {
   );
 }
 
-function DetailBody({ detail, isError }: { detail: ToolDetail; isError?: boolean }) {
+function DetailBody({
+  detail,
+  isError,
+  client,
+}: {
+  detail: ToolDetail;
+  isError?: boolean;
+  /** Only a decision body needs it — to fetch the answer's attachment thumbs. */
+  client: FleetTransport | null;
+}) {
   const name = detail.name ?? "";
   const result = asRecord(detail.toolUseResult);
   const fallback = contentText(detail.content);
@@ -329,6 +341,21 @@ function DetailBody({ detail, isError }: { detail: ToolDetail; isError?: boolean
   const fleetTool = isFleetTool(name);
   if (fleetTool) {
     return <FleetBody tool={fleetTool} input={detail.input ?? {}} content={fallback} />;
+  }
+  // A decision card, if its input still parses — a rejected call or a future
+  // schema falls through to the generic body rather than rendering nothing.
+  // Rendered by the very component the 决策 tab uses for a history record.
+  if (isDecisionTool(name)) {
+    const questions = readDecisionQuestions(detail.input ?? {});
+    if (questions.length > 0) {
+      return (
+        <DecisionQa
+          questions={questions}
+          answers={resolveAnswers(detail.toolUseResult, fallback, questions)}
+          client={client}
+        />
+      );
+    }
   }
   return <GenericBody detail={detail} />;
 }
@@ -390,7 +417,7 @@ export function ToolDetailPanel({
       {error && <div className={styles.empty}>{error}</div>}
       {detail && (
         <>
-          <DetailBody detail={detail} isError={isError} />
+          <DetailBody detail={detail} isError={isError} client={client} />
           {detail.images && detail.images.length > 0 && (
             <div className={styles.imageList}>
               {detail.images.map((img, i) => {

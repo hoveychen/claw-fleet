@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { friendlyToolName, patchToolSummary } from "./toolSummary";
+import { decisionSummary, friendlyToolName, patchToolSummary } from "./toolSummary";
 
 const tr = (key: string, ...args: Array<string | number>) => {
   let out = key;
@@ -22,6 +22,31 @@ describe("friendlyToolName", () => {
 
   it("passes a plain tool name through unchanged", () => {
     expect(friendlyToolName("AskUserQuestion", tr)).toBe("AskUserQuestion");
+  });
+});
+
+describe("decisionSummary", () => {
+  const block = (ask?: { q?: string; n?: number }) => ({
+    type: "tool_use",
+    name: "mcp__fleet__fleet__ask",
+    _ask: ask,
+  });
+
+  it("shows the relay's gist beside the label", () => {
+    expect(decisionSummary(block({ q: "查清楚了，缺的是渲染器。", n: 1 }), tr)).toBe(
+      "决策卡 · 查清楚了，缺的是渲染器。",
+    );
+  });
+
+  it("appends the question count on a multi-question card", () => {
+    expect(decisionSummary(block({ q: "两件事要定", n: 3 }), tr)).toBe(
+      "决策卡 · 两件事要定（3 题）",
+    );
+  });
+
+  it("degrades to the bare label when the block carries no gist", () => {
+    expect(decisionSummary(block(), tr)).toBe("决策卡");
+    expect(decisionSummary(block({ q: "   " }), tr)).toBe("决策卡");
   });
 });
 
