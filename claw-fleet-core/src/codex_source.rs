@@ -1086,6 +1086,123 @@ fn latest_total_token_usage(lines: &[Value]) -> Option<(u64, u64, u64)> {
     None
 }
 
+/// One turn's usage, recovered by differencing consecutive cumulative
+/// `total_token_usage` snapshots. Same field semantics as
+/// [`CodexTokenBreakdown`]: `input_tokens` is the full-price portion (cached
+/// excluded) and `output_tokens` already includes reasoning.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CodexTokenDelta {
+    /// The `token_count` event's own `timestamp` in epoch ms, when parseable.
+    /// `None` for a rollout predating the field — the caller then cannot place
+    /// this turn on a day.
+    pub timestamp_ms: Option<i64>,
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// A rollout's per-turn usage timeline plus the model to price it with.
+#[derive(Clone, Debug, Default)]
+pub struct CodexTokenTimeline {
+    /// Model id from the rollout's `turn_context`, when resolvable. A rollout
+    /// that switched models mid-session reports the last one — same rule
+    /// [`CodexTokenBreakdown`] already uses, so both surfaces price alike.
+    pub model: Option<String>,
+    pub deltas: Vec<CodexTokenDelta>,
+}
+
+/// Recover the per-turn usage timeline from a `codex://` rollout URI.
+///
+/// Codex writes one `event_msg`/`token_count` per turn carrying the **running**
+/// `total_token_usage` (plus a `last_token_usage` for that turn). This
+/// differences consecutive cumulative snapshots rather than summing
+/// `last_token_usage`, which matters: measured across this host's 276 rollouts,
+/// summing `last_token_usage` over-counted in 34 of 243 sessions (codex emits
+/// duplicate `token_count` events for a turn — up to 1.5M tokens of double
+/// count), while differencing telescopes to the final total by construction and
+/// a duplicate event simply contributes a zero delta. 241 of 243 sessions
+/// reconcile exactly; the 2 that don't have a cumulative snapshot that steps
+/// *backwards* (2 events out of 7124), which `saturating_sub` clamps to zero.
+pub fn codex_token_timeline(uri: &str) -> Result<CodexTokenTimeline, String> {
+    let file_path = resolve_uri(uri).ok_or_else(|| format!("Invalid Codex URI: {uri}"))?;
+    let content = read_session_content(&file_path)?;
+    let lines: Vec<Value> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let model = extract_model(&lines);
+    Ok(CodexTokenTimeline {
+        model,
+        deltas: codex_token_deltas_from_lines(&lines),
+    })
+}
+
+/// Pure core of [`codex_token_timeline`] — differences the cumulative snapshots
+/// in `lines`. Split out so the delta math is unit-testable without a file.
+fn codex_token_deltas_from_lines(lines: &[Value]) -> Vec<CodexTokenDelta> {
+    let mut out = Vec::new();
+    // Running previous snapshot, in the rollout's own (raw, cached, output)
+    // terms — the full-price split is derived per delta, not carried.
+    let (mut prev_raw, mut prev_cached, mut prev_output) = (0u64, 0u64, 0u64);
+
+    for line in lines {
+        if line.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let Some(payload) = line.get("payload") else {
+            continue;
+        };
+        if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
+            continue;
+        }
+        let Some(usage) = payload.get("info").and_then(|i| i.get("total_token_usage")) else {
+            continue;
+        };
+        let raw = usage
+            .get("input_tokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        // cached is a subset of raw; clamp so `raw − cached` can't underflow.
+        let cached = usage
+            .get("cached_input_tokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0)
+            .min(raw);
+        let output = usage
+            .get("output_tokens")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+
+        // saturating_sub: a snapshot that steps backwards (observed twice in
+        // 7124 real events) yields a zero delta rather than wrapping to ~1.8e19.
+        let d_raw = raw.saturating_sub(prev_raw);
+        let d_cached = cached.saturating_sub(prev_cached);
+        let d_output = output.saturating_sub(prev_output);
+        // Advance even on an all-zero delta (a duplicate event), so the next
+        // real turn is still measured against the true running total.
+        prev_raw = prev_raw.max(raw);
+        prev_cached = prev_cached.max(cached);
+        prev_output = prev_output.max(output);
+
+        if d_raw == 0 && d_output == 0 {
+            continue;
+        }
+        out.push(CodexTokenDelta {
+            timestamp_ms: line
+                .get("timestamp")
+                .and_then(|t| t.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.timestamp_millis()),
+            // Full-price portion of *this turn's* input.
+            input_tokens: d_raw.saturating_sub(d_cached),
+            cached_input_tokens: d_cached,
+            output_tokens: d_output,
+        });
+    }
+    out
+}
+
 /// Build the Codex-native [`CodexTokenBreakdown`] for a `codex://` rollout URI.
 /// Returns `Ok` with zeroed token counts (cost 0, no context%) when the rollout
 /// exists but has no `token_count` event yet — the panel then simply shows a
@@ -1667,7 +1784,8 @@ mod tests {
         build_session_from_sqlite, clamp_dead_session_status, codex_cost_and_input,
         codex_last_turn_incomplete, codex_rate_limit_state_from_rollout,
         codex_rate_limit_state_from_usage, codex_rollout_rate_limit,
-        codex_token_breakdown_from_lines, codex_usage_from_foxy, compute_token_stats,
+        codex_token_breakdown_from_lines, codex_token_deltas_from_lines, codex_usage_from_foxy,
+        compute_token_stats,
         determine_status, exec_note_from_script, parse_codex_session, plan_type_from_foxy_label,
         USAGE_SOURCE_FOXY,
         derive_codex_title,
@@ -3090,6 +3208,62 @@ mod tests {
         );
         assert!(sub.is_subagent, "JSON subagent source stays a subagent");
         assert_eq!(sub.parent_thread_id.as_deref(), Some("019d"));
+    }
+
+    /// Differencing the cumulative snapshots must telescope to the final total,
+    /// survive codex's duplicate `token_count` events (which would double-count
+    /// if `last_token_usage` were summed instead — 34 of this host's 243
+    /// sessions do that), and clamp a backwards-stepping snapshot to zero
+    /// instead of wrapping.
+    #[test]
+    fn codex_token_deltas_telescope_and_survive_duplicates_and_regressions() {
+        let snap = |ts: Option<&str>, raw: u64, cached: u64, out: u64| {
+            let mut v = json!({
+                "type": "event_msg",
+                "payload": { "type": "token_count", "info": { "total_token_usage": {
+                    "input_tokens": raw, "cached_input_tokens": cached, "output_tokens": out
+                }}}
+            });
+            if let Some(t) = ts {
+                v["timestamp"] = json!(t);
+            }
+            v
+        };
+        let lines = vec![
+            snap(Some("2026-07-15T10:00:00Z"), 1_000, 400, 100),
+            // Duplicate of the same turn: identical cumulative figures → zero
+            // delta, so it must not open a second entry.
+            snap(Some("2026-07-15T10:00:00Z"), 1_000, 400, 100),
+            snap(Some("2026-07-16T10:00:00Z"), 3_000, 1_400, 250),
+            // A backwards step: clamped, and must not corrupt the next delta.
+            snap(Some("2026-07-16T11:00:00Z"), 2_000, 900, 200),
+            snap(Some("2026-07-16T12:00:00Z"), 4_000, 1_900, 400),
+            // No timestamp → still measured, but unplaceable on a day.
+            snap(None, 5_000, 2_400, 450),
+        ];
+
+        let deltas = codex_token_deltas_from_lines(&lines);
+
+        assert_eq!(deltas.len(), 4, "duplicate and backwards events dropped: {deltas:?}");
+        // Turn 1: raw 1000 (400 cached) → 600 full-price.
+        assert_eq!(deltas[0].input_tokens, 600);
+        assert_eq!(deltas[0].cached_input_tokens, 400);
+        assert_eq!(deltas[0].output_tokens, 100);
+        assert!(deltas[0].timestamp_ms.is_some());
+        // Turn 2: raw +2000, cached +1000 → 1000 full-price, output +150.
+        assert_eq!((deltas[1].input_tokens, deltas[1].cached_input_tokens, deltas[1].output_tokens), (1_000, 1_000, 150));
+        // Turn 3 is measured against the true running max (3000/1400/250), not
+        // the backwards snapshot: raw +1000, cached +500, output +150.
+        assert_eq!((deltas[2].input_tokens, deltas[2].cached_input_tokens, deltas[2].output_tokens), (500, 500, 150));
+        assert_eq!(deltas[3].timestamp_ms, None, "undated turn keeps a None stamp");
+
+        // Telescoping: Σ deltas == the final cumulative snapshot.
+        let sum_full: u64 = deltas.iter().map(|d| d.input_tokens).sum();
+        let sum_cached: u64 = deltas.iter().map(|d| d.cached_input_tokens).sum();
+        let sum_out: u64 = deltas.iter().map(|d| d.output_tokens).sum();
+        assert_eq!(sum_full + sum_cached, 5_000, "Σ input == final raw input");
+        assert_eq!(sum_cached, 2_400, "Σ cached == final cached");
+        assert_eq!(sum_out, 450, "Σ output == final output");
     }
 
     #[test]
