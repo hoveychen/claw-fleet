@@ -1329,6 +1329,45 @@ fn base64_image_source(block: &Value) -> Option<(&str, &str)> {
 const TAIL_TOOL_INPUT_FIELDS: [&str; 7] =
     ["command", "file_path", "pattern", "path", "query", "url", "skill"];
 
+/// Chars kept of a decision card's summary line / chosen answer. Long enough to
+/// tell two cards apart on a phone-width chip, short enough that the skeleton
+/// stream stays KB-scale.
+const ASK_SUMMARY_MAX_CHARS: usize = 80;
+
+/// The decision tools, matched the same way the clients do (`isDecisionTool` in
+/// `mobile-web/src/views/workRuns.ts`): MCP namespaces `fleet__ask`, so match
+/// its tail; `request_user_input` is codex's.
+fn is_decision_tool(name: &str) -> bool {
+    name == "AskUserQuestion" || name == "request_user_input" || name.ends_with("fleet__ask")
+}
+
+/// Truncate on a char boundary (question text is mostly CJK — slicing by byte
+/// would panic).
+fn truncate_chars(s: &str, max: usize) -> String {
+    let mut out: String = s.chars().take(max).collect();
+    if out.chars().count() < s.chars().count() {
+        out.push('…');
+    }
+    out
+}
+
+/// Summarize a decision card's `input` for the collapsed tool chip: the first
+/// question's opening line plus the question count. The whole card (`questions`)
+/// is far too big to ship in the skeleton stream and the input whitelist drops
+/// it, which otherwise leaves every decision chip in a session reading the same
+/// bare 「决策卡」. The opening line is exactly the right gist — Fleet's
+/// interaction mode requires each question to start with a one-line summary
+/// above a lone `---` divider.
+fn ask_summary(input: &Map<String, Value>) -> Option<Value> {
+    let questions = input.get("questions").and_then(Value::as_array)?;
+    let first = questions.first()?.get("question").and_then(Value::as_str)?;
+    let line = first.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let mut out = Map::new();
+    out.insert("q".into(), truncate_chars(line, ASK_SUMMARY_MAX_CHARS).into());
+    out.insert("n".into(), (questions.len() as u64).into());
+    Some(Value::Object(out))
+}
+
 /// Digest a record's `toolUseResult` into a flat, few-dozen-byte stat object
 /// for the tool chip's header (diff ± counts, match counts, subagent totals…),
 /// so the phone can show the desktop's stat chips without downloading result
@@ -1338,8 +1377,31 @@ const TAIL_TOOL_INPUT_FIELDS: [&str; 7] =
 /// calls degrade `toolUseResult` to a bare string — no digest, the block's
 /// `is_error` bit already tells the story.
 fn tool_result_digest(meta: &Value) -> Option<Value> {
-    let obj = meta.as_object()?;
+    // MCP tools (`fleet__ask`) hand back their payload as a JSON *string* where
+    // native tools hand back an object; parse that form too so a decision card's
+    // answer digests like any other stat. An errored call's bare prose string
+    // fails to parse and yields no digest, as before.
+    let parsed: Value;
+    let obj = match meta {
+        Value::Object(o) => o,
+        Value::String(s) => {
+            parsed = serde_json::from_str(s).ok()?;
+            parsed.as_object()?
+        }
+        _ => return None,
+    };
     let mut d = Map::new();
+    // Decision card: the chosen label, for the collapsed chip. `answers` is
+    // keyed by question text; on a multi-question card the map is key-sorted
+    // (serde_json without `preserve_order`), so the chip shows one answer of
+    // several — the expanded body is where every question is spelled out.
+    if let Some(answer) = obj
+        .get("answers")
+        .and_then(Value::as_object)
+        .and_then(|a| a.values().find_map(Value::as_str))
+    {
+        d.insert("answer".into(), truncate_chars(answer, ASK_SUMMARY_MAX_CHARS).into());
+    }
     // Edit / Write: unified-diff hunks → ±line counts.
     if let Some(hunks) = obj.get("structuredPatch").and_then(Value::as_array) {
         let (mut added, mut removed) = (0u64, 0u64);
@@ -1453,6 +1515,11 @@ fn slim_tail_block(block: &Value) -> Value {
         }
         if !slim_input.is_empty() {
             out.insert("input".into(), Value::Object(slim_input));
+        }
+        if obj.get("name").and_then(Value::as_str).is_some_and(is_decision_tool) {
+            if let Some(ask) = ask_summary(input) {
+                out.insert("_ask".into(), ask);
+            }
         }
     }
     match obj.get("type").and_then(Value::as_str) {
@@ -6709,6 +6776,85 @@ mod tests {
         assert!(
             slim[0]["message"]["content"][0].get("_digest").is_none(),
             "string toolUseResult yields no digest"
+        );
+    }
+
+    /// A decision card (`AskUserQuestion` / `fleet__ask` / codex's
+    /// `request_user_input`) keeps its whole card in `input.questions`, which
+    /// the input whitelist drops — so without `_ask` every decision chip in a
+    /// session reads the same bare 「决策卡」. Ship the first question's opening
+    /// line (the TTS summary line, above the `---` divider) plus the question
+    /// count, and digest the chosen answer off `toolUseResult`.
+    #[test]
+    fn slim_tail_summarizes_decision_cards() {
+        let ask_use = |name: &str| {
+            json!({
+                "type": "assistant", "uuid": "a1",
+                "message": { "role": "assistant", "content": [{
+                    "type": "tool_use", "id": "toolu_ask", "name": name,
+                    "input": { "questions": [
+                        { "question": "查清楚了，缺的是一个渲染器。\n\n---\n\n详细报告正文……\n\n按哪个范围做？",
+                          "header": "渲染范围", "multiSelect": false,
+                          "options": [
+                            { "label": "展开体 + 折叠行 chip", "description": "…" },
+                            { "label": "只做展开体", "description": "…" }
+                          ] },
+                        { "question": "第二题", "header": "其二", "multiSelect": false }
+                    ]}
+                }]}
+            })
+        };
+
+        for name in ["mcp__fleet__fleet__ask", "AskUserQuestion", "request_user_input"] {
+            let slim = slim_tail_messages(vec![ask_use(name)]);
+            let block = &slim[0]["message"]["content"][0];
+            assert_eq!(
+                block["_ask"]["q"], json!("查清楚了，缺的是一个渲染器。"),
+                "{name}: the chip shows the first question's opening line"
+            );
+            assert_eq!(block["_ask"]["n"], json!(2), "{name}: question count");
+            assert!(
+                block["input"].get("questions").is_none(),
+                "{name}: the full card body still stays stripped"
+            );
+        }
+
+        // A non-decision tool grows no `_ask`.
+        let slim = slim_tail_messages(vec![json!({
+            "type": "assistant", "uuid": "a2",
+            "message": { "role": "assistant", "content": [{
+                "type": "tool_use", "id": "toolu_b", "name": "Bash",
+                "input": { "command": "ls", "description": "list" }
+            }]}
+        })]);
+        assert!(slim[0]["message"]["content"][0].get("_ask").is_none());
+
+        // `fleet__ask` returns its answers as a JSON *string* toolUseResult;
+        // AskUserQuestion returns an object. Both digest to the chosen label.
+        let result = |tool_use_result: Value| {
+            json!({
+                "type": "user", "uuid": "u9",
+                "message": { "role": "user", "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_ask", "content": "…" }
+                ]},
+                "toolUseResult": tool_use_result
+            })
+        };
+        let slim = slim_tail_messages(vec![result(json!(
+            r#"{"answers":{"查清楚了，缺的是一个渲染器。\n\n---\n\n按哪个范围做？":"展开体 + 折叠行 chip"}}"#
+        ))]);
+        assert_eq!(
+            slim[0]["message"]["content"][0]["_digest"]["answer"],
+            json!("展开体 + 折叠行 chip"),
+            "string toolUseResult carrying answers digests to the label"
+        );
+        let slim = slim_tail_messages(vec![result(json!({
+            "questions": [{ "question": "Q", "header": "h", "multiSelect": false }],
+            "answers": { "Q": "选项甲" }
+        }))]);
+        assert_eq!(
+            slim[0]["message"]["content"][0]["_digest"]["answer"],
+            json!("选项甲")
         );
     }
 
