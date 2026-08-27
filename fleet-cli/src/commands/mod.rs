@@ -5,6 +5,7 @@
 //! private helpers.
 
 pub(crate) mod account;
+pub(crate) mod acp;
 pub(crate) mod agents;
 pub(crate) mod audit;
 pub(crate) mod bootstrap;
