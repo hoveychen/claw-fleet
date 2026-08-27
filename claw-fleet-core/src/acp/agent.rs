@@ -227,8 +227,16 @@ impl AcpAgent {
             (st.internal_id.clone(), st.tool, st.model.clone())
         };
 
-        let prompt = req.prompt_text();
         let workspace = crate::hooks_server::responses::public_workspace();
+
+        // ACP carries files inline in the prompt, so they are materialised into
+        // the workspace here — Fleet's agents read attachments off disk. A bad
+        // attachment fails the whole prompt rather than being dropped: a turn
+        // that ran without the image the user attached is worse than an error.
+        let attachments = super::attachments::ingest(&workspace, &req.prompt)
+            .map_err(|e| RpcError::invalid_params(e.0))?;
+        let (listed, images) = super::attachments::split_for_tool(tool, &attachments);
+        let prompt = super::attachments::prompt_with_attachments(&req.prompt_text(), &listed);
 
         let internal_id = match internal_id {
             // Follow-up turn: resume the existing process.
@@ -238,6 +246,7 @@ impl AcpAgent {
                     workspace_path: workspace,
                     prompt,
                     model,
+                    images,
                     ..Default::default()
                 };
                 crate::agent_source::resume_session(tool, &spec, Box::new(|_| {}))
@@ -255,7 +264,7 @@ impl AcpAgent {
                     // Claude honours this; Codex ignores it and reports its own.
                     session_id: Some(req.session_id.clone()),
                     entrypoint: String::new(),
-                    images: Vec::new(),
+                    images,
                 };
                 let resp =
                     crate::agent_source::spawn_session(tool, &spec).map_err(RpcError::internal)?;
