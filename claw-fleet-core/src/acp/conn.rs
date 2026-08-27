@@ -20,22 +20,45 @@
 //! what unblocks a parked request.
 
 use std::io::BufRead;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use super::agent::{handle_frame, AcpAgent};
+
+/// How long to let in-flight requests finish after the peer stops sending.
+///
+/// A blocking request runs on its own thread, so returning the moment stdin
+/// ends would drop whatever it was about to answer. Bounded, because a turn can
+/// legitimately run for half an hour and a departed client is not worth waiting
+/// that long for.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 
 /// Drive one ACP connection to completion. Returns when the peer hangs up.
 ///
 /// `lines` yields one JSON-RPC frame per item: newline-delimited for stdio,
 /// one WebSocket text frame per item for `/acp`.
 pub fn run_connection<R: BufRead>(agent: Arc<AcpAgent>, lines: R) {
+    let inflight = Arc::new(AtomicUsize::new(0));
     for line in lines.lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
             continue;
         }
-        dispatch_frame(&agent, line);
+        dispatch_tracked(&agent, line, &inflight);
     }
+
+    // Wait for the requests still running on their own threads.
+    //
+    // Without this, a client that sends a request and closes stdin gets
+    // nothing: `session/load` replays on a spawned thread, and the loop used
+    // to return — ending the process — before that thread wrote a single
+    // update.
+    let deadline = Instant::now() + SHUTDOWN_GRACE;
+    while inflight.load(Ordering::Acquire) > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
     // The peer is gone. Fail every parked request so decision-card threads
     // unwind now instead of sitting until their timeout.
     agent.disconnect();
@@ -43,27 +66,48 @@ pub fn run_connection<R: BufRead>(agent: Arc<AcpAgent>, lines: R) {
 
 /// Route one frame: slow work off-thread, fast work inline.
 pub fn dispatch_frame(agent: &Arc<AcpAgent>, line: String) {
-    if is_blocking_request(&line) {
-        // The clones are what let the fallback below still run: a failed spawn
-        // consumes the closure, so the originals have to stay behind.
-        let owned_agent = agent.clone();
-        let owned_line = line.clone();
-        let spawned = std::thread::Builder::new().name("acp-request".into()).spawn(move || {
-            if let Some(reply) = handle_frame(owned_agent.as_ref(), &owned_line) {
-                owned_agent.send_frame(&reply);
-            }
-        });
-        // A failed spawn must not silently drop the request — answer inline
-        // instead. Slower, and it blocks the reader, but it never loses a frame.
-        if spawned.is_err() {
-            if let Some(reply) = handle_frame(agent.as_ref(), &line) {
-                agent.send_frame(&reply);
-            }
+    dispatch_inner(agent, line, None)
+}
+
+/// [`dispatch_frame`], counting the request so [`run_connection`] can wait for
+/// it before shutting down.
+fn dispatch_tracked(agent: &Arc<AcpAgent>, line: String, inflight: &Arc<AtomicUsize>) {
+    dispatch_inner(agent, line, Some(inflight))
+}
+
+fn dispatch_inner(agent: &Arc<AcpAgent>, line: String, inflight: Option<&Arc<AtomicUsize>>) {
+    if !is_blocking_request(&line) {
+        if let Some(reply) = handle_frame(agent.as_ref(), &line) {
+            agent.send_frame(&reply);
         }
         return;
     }
-    if let Some(reply) = handle_frame(agent.as_ref(), &line) {
-        agent.send_frame(&reply);
+
+    if let Some(c) = inflight {
+        c.fetch_add(1, Ordering::AcqRel);
+    }
+    // The clones are what let the fallback below still run: a failed spawn
+    // consumes the closure, so the originals have to stay behind.
+    let owned_agent = agent.clone();
+    let owned_line = line.clone();
+    let owned_count = inflight.cloned();
+    let spawned = std::thread::Builder::new().name("acp-request".into()).spawn(move || {
+        if let Some(reply) = handle_frame(owned_agent.as_ref(), &owned_line) {
+            owned_agent.send_frame(&reply);
+        }
+        if let Some(c) = owned_count {
+            c.fetch_sub(1, Ordering::AcqRel);
+        }
+    });
+    // A failed spawn must not silently drop the request — answer inline
+    // instead. Slower, and it blocks the reader, but it never loses a frame.
+    if spawned.is_err() {
+        if let Some(reply) = handle_frame(agent.as_ref(), &line) {
+            agent.send_frame(&reply);
+        }
+        if let Some(c) = inflight {
+            c.fetch_sub(1, Ordering::AcqRel);
+        }
     }
 }
 
@@ -133,6 +177,24 @@ mod tests {
         let second: Value = serde_json::from_str(&frames[1]).unwrap();
         assert_eq!(second["id"], 2);
         assert_eq!(second["error"]["code"], crate::acp::jsonrpc::codes::METHOD_NOT_FOUND);
+    }
+
+    #[test]
+    fn a_blocking_request_is_answered_before_the_loop_returns() {
+        // session/load runs on its own thread. Returning the moment stdin ends
+        // used to end the process before that thread wrote anything, so a
+        // client that sent a request and closed stdin got silence.
+        let (agent, log) = agent_with_log();
+        let input = concat!(
+            r#"{"jsonrpc":"2.0","id":1,"method":"session/load","params":{"sessionId":"nope","cwd":""}}"#,
+            "\n",
+        );
+        run_connection(agent, std::io::Cursor::new(input));
+
+        let frames = log.lock().unwrap();
+        assert_eq!(frames.len(), 1, "the reply must land before the loop returns");
+        let v: Value = serde_json::from_str(&frames[0]).unwrap();
+        assert_eq!(v["id"], 1);
     }
 
     #[test]

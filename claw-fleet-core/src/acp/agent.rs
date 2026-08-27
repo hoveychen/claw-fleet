@@ -430,22 +430,10 @@ impl AcpAgent {
         let Ok(messages) = src.get_messages(&path) else {
             return;
         };
-        for msg in &messages {
-            match msg.get("type").and_then(|t| t.as_str()) {
-                Some("user") => {
-                    if let Some(text) = user_message_text(msg) {
-                        self.notify_update(acp_session_id, SessionUpdate::user_text(text));
-                    }
-                }
-                _ => {
-                    let text = crate::hooks_server::responses::project_output_text(
-                        std::slice::from_ref(msg),
-                    );
-                    if !text.is_empty() {
-                        self.notify_update(acp_session_id, SessionUpdate::agent_text(text));
-                    }
-                }
-            }
+        // `include_user` is on here: a replay rebuilds both sides of the
+        // conversation, not a monologue.
+        for update in super::tools::project_updates(&messages, true) {
+            self.notify_update(acp_session_id, update);
         }
     }
 
@@ -461,6 +449,9 @@ impl AcpAgent {
         let deadline = Instant::now() + TURN_TIMEOUT;
         let mut offset = self.transcript_len(internal_id);
         let mut emitted = false;
+        // Last usage/title we told the client, so an unchanged tick stays
+        // silent instead of resending the same numbers every 300ms.
+        let mut last_metrics = SessionMetrics::default();
 
         loop {
             if self.take_cancelled(acp_session_id) {
@@ -473,19 +464,63 @@ impl AcpAgent {
             if let Some((path, src)) = self.resolve_source(internal_id) {
                 if let Ok((msgs, new_offset)) = src.tail_incremental(&path, offset) {
                     offset = new_offset;
-                    let delta =
-                        crate::hooks_server::responses::project_output_text(&msgs);
-                    if !delta.is_empty() {
-                        self.notify_update(acp_session_id, SessionUpdate::agent_text(delta));
-                        emitted = true;
+                    // The whole trace, not just the prose: tool calls, their
+                    // results and the agent's reasoning all reach the client.
+                    // `include_user` is off — the client sent that message and
+                    // does not need it echoed back.
+                    for update in super::tools::project_updates(&msgs, false) {
+                        // Only assistant prose counts as "the turn produced
+                        // output". A tool call alone does not end a turn, and
+                        // treating it as output would complete the turn the
+                        // moment the agent reached for its first tool.
+                        if matches!(update, SessionUpdate::AgentMessageChunk { .. }) {
+                            emitted = true;
+                        }
+                        self.notify_update(acp_session_id, update);
                     }
                 }
+                self.notify_session_metrics(acp_session_id, internal_id, &mut last_metrics);
+
                 if emitted && self.turn_is_idle(internal_id) {
                     return StopReason::EndTurn;
                 }
             }
             std::thread::sleep(TAIL_INTERVAL);
         }
+    }
+
+
+    /// Emit `usage_update` and `session_info_update` when they change.
+    ///
+    /// Both come free with ACP: the numbers were already on `SessionInfo` and
+    /// had nowhere to go on the Responses surface. Sent only on change, since
+    /// the turn loop ticks several times a second and a client redrawing a
+    /// token counter that has not moved is pure noise.
+    fn notify_session_metrics(
+        &self,
+        acp_session_id: &str,
+        internal_id: &str,
+        last: &mut SessionMetrics,
+    ) {
+        let sessions = crate::session::scan_all_sources(&self.sources);
+        let Some(s) = sessions.iter().find(|s| s.id == internal_id) else {
+            return;
+        };
+        let used = s.total_input_tokens.saturating_add(s.total_output_tokens);
+        // The window depends on the model — and on whether a `[1m]` suffix was
+        // asked for — so it comes from the existing helper rather than a
+        // constant that would quietly be wrong for half the models.
+        let size = s
+            .model
+            .as_deref()
+            .and_then(|m| crate::session::stats::context_window_for_model(m, s.total_input_tokens))
+            .unwrap_or(0);
+
+        let next = SessionMetrics { used, size, title: s.ai_title.clone() };
+        for update in metrics_updates(&next, last, iso8601_from_unix_ms(s.last_activity_ms)) {
+            self.notify_update(acp_session_id, update);
+        }
+        *last = next;
     }
 
     fn notify_update(&self, session_id: &str, update: SessionUpdate) {
@@ -561,23 +596,43 @@ fn iso8601_from_unix_ms(ms: u64) -> Option<String> {
     chrono::DateTime::from_timestamp_millis(ms as i64).map(|dt| dt.to_rfc3339())
 }
 
-/// Text of a transcript `user` record.
+
+/// The usage and title last reported, so only changes are sent.
+#[derive(Default, PartialEq, Clone)]
+struct SessionMetrics {
+    used: u64,
+    size: u64,
+    title: Option<String>,
+}
+
+
+/// Which metric updates a tick should emit. Pure, so the "only on change" rule
+/// is testable without a live session.
 ///
-/// Claude writes `message.content` as either a bare string or an array of
-/// blocks, so both shapes have to be read — a replay that only handled one
-/// would drop half the user's side of the conversation.
-fn user_message_text(msg: &Value) -> Option<String> {
-    let content = msg.get("message")?.get("content")?;
-    if let Some(s) = content.as_str() {
-        return (!s.is_empty()).then(|| s.to_string());
+/// A zero window means the model is unknown to `context_window_for_model`;
+/// reporting `size: 0` would have clients render a full or empty gauge, so the
+/// usage update is withheld instead of guessed at.
+fn metrics_updates(
+    next: &SessionMetrics,
+    last: &SessionMetrics,
+    updated_at: Option<String>,
+) -> Vec<SessionUpdate> {
+    let mut out = Vec::new();
+    if next == last {
+        return out;
     }
-    let joined: Vec<String> = content
-        .as_array()?
-        .iter()
-        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
-        .filter_map(|b| b.get("text").and_then(|t| t.as_str()).map(String::from))
-        .collect();
-    (!joined.is_empty()).then(|| joined.join("\n"))
+    if next.size > 0 && (next.used, next.size) != (last.used, last.size) {
+        out.push(SessionUpdate::UsageUpdate(UsageUpdate { used: next.used, size: next.size }));
+    }
+    if next.title != last.title {
+        if let Some(title) = next.title.clone() {
+            out.push(SessionUpdate::SessionInfoUpdate(SessionInfoUpdate {
+                title: Some(title),
+                updated_at,
+            }));
+        }
+    }
+    out
 }
 
 /// Handle one inbound frame against an agent. Returns the frame to write back,
@@ -887,26 +942,51 @@ mod tests {
         assert!(err.message.contains("effort"));
     }
 
+
     #[test]
-    fn user_message_text_reads_both_transcript_shapes() {
-        // Claude writes `message.content` as a bare string or as blocks;
-        // handling only one would drop half the replayed conversation.
-        assert_eq!(
-            user_message_text(&json!({"message": {"content": "plain"}})).as_deref(),
-            Some("plain")
-        );
-        assert_eq!(
-            user_message_text(&json!({"message": {"content": [
-                {"type": "text", "text": "a"},
-                {"type": "tool_result", "content": "ignored"},
-                {"type": "text", "text": "b"}
-            ]}}))
-            .as_deref(),
-            Some("a\nb")
-        );
-        assert_eq!(user_message_text(&json!({"message": {"content": []}})), None);
-        assert_eq!(user_message_text(&json!({"message": {"content": ""}})), None);
-        assert_eq!(user_message_text(&json!({"nothing": true})), None);
+    fn metrics_are_sent_only_when_they_change() {
+        let base = SessionMetrics { used: 100, size: 200_000, title: Some("T".into()) };
+        // An unchanged tick is silent — the loop runs several times a second.
+        assert!(metrics_updates(&base, &base.clone(), None).is_empty());
+
+        // Token movement alone sends usage, not the title.
+        let more = SessionMetrics { used: 150, ..base.clone() };
+        let ups = metrics_updates(&more, &base, None);
+        assert_eq!(ups.len(), 1);
+        assert!(matches!(ups[0], SessionUpdate::UsageUpdate(_)));
+
+        // A new title alone sends session_info, not usage.
+        let renamed = SessionMetrics { title: Some("T2".into()), ..base.clone() };
+        let ups = metrics_updates(&renamed, &base, Some("2026-01-01T00:00:00Z".into()));
+        assert_eq!(ups.len(), 1);
+        match &ups[0] {
+            SessionUpdate::SessionInfoUpdate(i) => {
+                assert_eq!(i.title.as_deref(), Some("T2"));
+                assert!(i.updated_at.is_some());
+            }
+            other => panic!("expected session_info_update, got {other:?}"),
+        }
+
+        // Both changing sends both.
+        let both = SessionMetrics { used: 150, size: 200_000, title: Some("T2".into()) };
+        assert_eq!(metrics_updates(&both, &base, None).len(), 2);
+    }
+
+    #[test]
+    fn an_unknown_context_window_withholds_usage_rather_than_reporting_zero() {
+        // size 0 means context_window_for_model did not recognise the model.
+        // Sending it would make a client draw a full or empty gauge.
+        let unknown = SessionMetrics { used: 500, size: 0, title: None };
+        let prev = SessionMetrics::default();
+        assert!(metrics_updates(&unknown, &prev, None).is_empty());
+    }
+
+    #[test]
+    fn a_session_with_no_title_yet_sends_no_title_update() {
+        let untitled = SessionMetrics { used: 10, size: 200_000, title: None };
+        let ups = metrics_updates(&untitled, &SessionMetrics::default(), None);
+        assert_eq!(ups.len(), 1, "usage only");
+        assert!(matches!(ups[0], SessionUpdate::UsageUpdate(_)));
     }
 
     #[test]
