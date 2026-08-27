@@ -32,21 +32,18 @@ Download, open, done. No server, no API key, no signup.
 
 ### <img src="docs/icon-linux.svg" width="20"> Linux — web UI
 
-Linux runs the same UI in your browser instead of a native bundle. Download the CLI and the UI bundle, then serve it:
+Linux runs the same UI in your browser instead of a native bundle. The UI is compiled into the Linux binary, so it's one download:
 
 ```bash
-# 1. the CLI (use fleet-linux-arm64 on ARM)
 curl -L -o fleet https://github.com/hoveychen/claw-fleet/releases/latest/download/fleet-linux-x64
 chmod +x fleet && sudo mv fleet /usr/local/bin/
 
-# 2. the UI bundle
-curl -L https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-webui.tar.gz | tar xz
-
-# 3. serve it
-fleet webui --web-root ./claw-fleet-webui
+fleet webui
 ```
 
-Open **http://127.0.0.1:4571**. A phone on the same machine's URL gets the mobile UI at `/m/`.
+Open **http://127.0.0.1:4571**. A phone on the same machine's URL gets the mobile UI at `/m/`. On ARM use `fleet-linux-arm64`.
+
+To serve your own bundle instead of the built-in one — iterating on the frontend, or pinning a version — pass `--web-root <dir>` (or set `FLEET_WEB_ROOT`); a directory always wins over the embedded copy. The bundle is published separately as `claw-fleet-webui.tar.gz`, which is also how you run the browser UI on macOS or Windows.
 
 > `fleet webui` has **no authentication of its own** — it binds loopback by default, and these routes can start agent sessions. If you pass `--host 0.0.0.0` to reach it from another machine, put your own auth gateway in front of it.
 
@@ -127,7 +124,7 @@ pnpm tauri:dev      # hot-reload development
 pnpm tauri:build    # production bundle → target/release/bundle/
 ```
 
-**Web UI only** (what Linux ships, and how the browser build is made):
+**Web UI only** — build the browser bundle and serve it from a directory:
 
 ```bash
 cargo build --release -p fleet-cli
@@ -137,6 +134,15 @@ cargo build --release -p fleet-cli
 mkdir -p webui && cp -R claw-fleet-desktop/dist/. webui/ && cp -R mobile-web/dist-webui webui/m
 ./target/release/fleet-cli webui --web-root ./webui
 ```
+
+To reproduce the Linux release binary, which has that bundle **compiled in**, build with the `embed-webui` feature and point it at the directory you just made:
+
+```bash
+FLEET_WEBUI_DIR=$PWD/webui cargo build --release -p fleet-cli --features embed-webui
+./target/release/fleet-cli webui        # no --web-root needed
+```
+
+The feature is off by default: the same crate produces the `fleet` probe that macOS/Windows bundles embed for remote SSH deployment, and that probe talks to an app which already has a UI. Embedding costs ~7 MB.
 
 ---
 

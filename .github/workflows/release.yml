@@ -296,15 +296,16 @@ jobs:
 
           ### Linux — web UI
 
-          Linux runs Claw Fleet in the browser instead of a native bundle. Grab the CLI for your architecture plus the UI bundle:
+          Linux runs Claw Fleet in the browser instead of a native bundle. The UI is compiled into the Linux binary, so it is one download:
 
           \`\`\`bash
           curl -L -o fleet ${DL}/fleet-linux-x64   # or fleet-linux-arm64
           chmod +x fleet
-          curl -L ${DL}/claw-fleet-webui.tar.gz | tar xz
-          ./fleet webui --web-root ./claw-fleet-webui
+          ./fleet webui
           # → http://127.0.0.1:4571
           \`\`\`
+
+          The UI bundle is also published on its own, for running the browser UI on macOS/Windows or self-hosting it (\`fleet webui --web-root <dir>\`):
 
           | Asset | Download |
           |---|---|
@@ -318,6 +319,8 @@ jobs:
           | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows x64 | [fleet-windows-x64.exe](${DL}/fleet-windows-x64.exe) |
           | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux x86_64 | [fleet-linux-x64](${DL}/fleet-linux-x64) |
           | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux ARM64 | [fleet-linux-arm64](${DL}/fleet-linux-arm64) |
+
+          The two Linux binaries are the same CLI as the table above — they carry the web UI, which is why they are larger than the macOS/Windows ones.
 
           ## What's Changed
 
