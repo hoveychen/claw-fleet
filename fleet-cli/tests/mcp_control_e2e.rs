@@ -187,3 +187,63 @@ fn fleet_session_handoff_register_persists_a_pending_record() {
     let rec: Value = serde_json::from_str(&std::fs::read_to_string(&pending).unwrap()).unwrap();
     assert_eq!(rec["note"], "P2 done, continue at P3");
 }
+
+/// `fleet__artifact` is the ONLY way a deliverable reaches the 产出 page — the
+/// desktop offers no "add" button — so an `add` that returns a cheerful string
+/// without writing anything would leave the whole feature silently dead. This
+/// drives the real MCP path and then checks the bytes are on disk.
+#[test]
+fn fleet_session_artifact_add_really_stores_the_file() {
+    let home = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let src = ws.path().join("deck.pptx");
+    std::fs::write(&src, b"PK\x03\x04 pretend deck").unwrap();
+
+    let resps = run_mcp(
+        home.path(),
+        ws.path(),
+        true,
+        &[
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+                "name":"fleet__artifact","arguments":{
+                    "action":"add",
+                    "path": src.to_str().unwrap(),
+                    "title":"Q3 deck",
+                    "note":"for the board"
+                }}}),
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+                "name":"fleet__artifact","arguments":{"action":"list"}}}),
+        ],
+    );
+
+    let added = resps[0]["result"]["content"][0]["text"].as_str().unwrap();
+    assert_ne!(resps[0]["result"]["isError"], true, "add failed: {added}");
+    assert!(added.contains("Q3 deck"), "add text: {added}");
+    // The kind drives the desktop's icon and preview choice, so it is part of
+    // the contract, not a detail of the message.
+    assert!(added.contains("slides"), "add text: {added}");
+
+    // On disk, under this test's own FLEET_HOME — the meta plus the blob.
+    let store = home.path().join(".fleet").join("artifacts");
+    let ids: Vec<_> = std::fs::read_dir(&store)
+        .expect("artifact store dir")
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    assert_eq!(ids.len(), 1, "exactly one artifact should exist: {ids:?}");
+    let meta: Value =
+        serde_json::from_str(&std::fs::read_to_string(ids[0].join("meta.json")).unwrap()).unwrap();
+    assert_eq!(meta["title"], "Q3 deck");
+    assert_eq!(meta["note"], "for the board");
+    assert_eq!(meta["kind"], "slides");
+    assert_eq!(meta["sessionId"], SID, "the producing session must be recorded");
+    assert_eq!(
+        std::fs::read(ids[0].join("blob").join("deck.pptx")).unwrap(),
+        b"PK\x03\x04 pretend deck",
+        "the stored blob must be the real bytes"
+    );
+
+    // And `list` sees it back through the same tool.
+    let listed = resps[1]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(listed.contains("Q3 deck"), "list text: {listed}");
+}

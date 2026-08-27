@@ -6,6 +6,7 @@
 
 pub(crate) mod account;
 pub(crate) mod agents;
+pub(crate) mod artifact;
 pub(crate) mod audit;
 pub(crate) mod bootstrap;
 pub(crate) mod dsh;
