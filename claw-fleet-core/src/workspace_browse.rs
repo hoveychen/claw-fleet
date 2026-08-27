@@ -68,6 +68,99 @@ pub fn browse_dir(path: Option<&str>, known_workspaces: &[String]) -> Result<Bro
     )
 }
 
+/// Create one new child directory under `parent` (`None`/empty = the home dir)
+/// and return the listing *of the new directory*, so the caller lands inside it
+/// and can pick it immediately.
+///
+/// A picker that can only walk an existing tree is unusable on a host where the
+/// tree is empty — a fresh Fleet Cloud container has nothing under `/home/fleet`,
+/// so "选择工作目录" offered no directory to select and no way to make one.
+///
+/// The boundary is [`browse_dir`]'s, unchanged: the parent must canonicalize to
+/// somewhere under the browsable roots. On top of that, `name` must be a single
+/// plain child name — this creates exactly one directory, one level down, never
+/// a path.
+pub fn create_dir(
+    parent: Option<&str>,
+    name: &str,
+    known_workspaces: &[String],
+) -> Result<BrowseDirResponse, String> {
+    let home = crate::session::real_home_dir().ok_or("home directory unknown")?;
+    create_dir_in(
+        parent,
+        name,
+        &home,
+        &browse_roots(&home, known_workspaces),
+        &|p| crate::tcc::is_tcc_protected(p),
+    )
+}
+
+/// Root-injectable core of [`create_dir`], mirroring [`browse_dir_in`].
+fn create_dir_in(
+    parent: Option<&str>,
+    name: &str,
+    home: &Path,
+    roots: &[PathBuf],
+    is_protected: &dyn Fn(&Path) -> bool,
+) -> Result<BrowseDirResponse, String> {
+    let name = validate_child_name(name)?;
+    let requested = match parent.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => expand(p, home),
+        None => home.to_path_buf(),
+    };
+    // Same order as browse_dir_in: canonicalize first, judge the result. A
+    // symlinked or `..`-laden parent must be resolved while we can still refuse.
+    let dir = fs::canonicalize(&requested).map_err(|e| format!("{}: {e}", requested.display()))?;
+    if !dir.is_dir() {
+        return Err(format!("{} is not a directory", dir.display()));
+    }
+    if enclosing_root(&dir, roots).is_none() {
+        return Err(format!("{} is outside the browsable roots", dir.display()));
+    }
+
+    let child = dir.join(name);
+    // `create_dir`, never `create_dir_all`: one level only, and an existing name
+    // must be an error rather than a silent no-op that looks like a creation.
+    fs::create_dir(&child).map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => format!("{name} already exists"),
+        _ => format!("{}: {e}", child.display()),
+    })?;
+
+    // Answer with the new directory's own listing (empty, with a parent link),
+    // so the client is standing in it without a second round trip.
+    browse_dir_in(Some(&child.to_string_lossy()), home, roots, is_protected)
+}
+
+/// A new directory's name: one plain path component, nothing that could reach
+/// out of the parent or hide from the listing.
+fn validate_child_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("directory name is empty".into());
+    }
+    if name.len() > 255 {
+        return Err("directory name is too long".into());
+    }
+    if name == "." || name == ".." {
+        return Err(format!("{name:?} is not a directory name"));
+    }
+    // Separators are the escape: `a/b` would create two levels, `../x` would
+    // create one outside the directory the user is looking at. Both are refused
+    // by name rather than being canonicalized away, so the error names the cause.
+    if name.contains('/') || name.contains('\\') {
+        return Err("directory name must not contain a path separator".into());
+    }
+    if name.contains('\0') {
+        return Err("directory name must not contain a NUL".into());
+    }
+    // The listing hides dotfiles (`.git`, `.cache`, …), so a `.foo` created here
+    // would vanish the moment it is created — refuse rather than confuse.
+    if name.starts_with('.') {
+        return Err("directory name must not start with a dot".into());
+    }
+    Ok(name)
+}
+
 /// The roots a client may browse: home, plus any known workspace that lives
 /// outside it (an external-volume repo would otherwise be unreachable).
 fn browse_roots(home: &Path, known_workspaces: &[String]) -> Vec<PathBuf> {
@@ -359,6 +452,85 @@ mod tests {
             names.contains(&"nlink"),
             "symlink to an ordinary dir must still be followed, got {names:?}"
         );
+    }
+
+    /// The whole point: a directory that has no children can still get one, and
+    /// the caller comes back standing *inside* it (empty listing, parent link
+    /// pointing at where it was created) so it can be picked in one more tap.
+    #[test]
+    fn creates_a_child_and_answers_with_its_listing() {
+        let (_tmp, home, _) = fixture();
+        let roots = vec![home.clone()];
+        let r = create_dir_in(Some("notes"), "sub", &home, &roots, &none_protected).unwrap();
+        assert_eq!(r.path, home.join("notes/sub").to_string_lossy());
+        assert_eq!(r.parent.as_deref(), Some(&*home.join("notes").to_string_lossy()));
+        assert!(r.entries.is_empty());
+        assert!(home.join("notes/sub").is_dir());
+        // ...and it shows up in the parent's listing afterwards.
+        let parent = browse_dir_in(Some("notes"), &home, &roots, &none_protected).unwrap();
+        assert_eq!(names(&parent), vec!["sub"]);
+    }
+
+    /// `None` parent means home, same as browsing.
+    #[test]
+    fn creates_under_home_by_default() {
+        let (_tmp, home, _) = fixture();
+        let roots = vec![home.clone()];
+        let r = create_dir_in(None, "  fresh  ", &home, &roots, &none_protected).unwrap();
+        assert_eq!(r.path, home.join("fresh").to_string_lossy());
+        assert!(home.join("fresh").is_dir());
+    }
+
+    /// A name is a name, never a path: separators and `..` must not let the
+    /// client create anything outside the directory it is looking at, and a
+    /// leading dot must not create something the listing then hides.
+    #[test]
+    fn refuses_names_that_are_not_a_single_visible_component() {
+        let (_tmp, home, _) = fixture();
+        let roots = vec![home.clone()];
+        for bad in ["", "   ", ".", "..", "a/b", "../escape", "a\\b", ".hidden"] {
+            let r = create_dir_in(None, bad, &home, &roots, &none_protected);
+            assert!(r.is_err(), "{bad:?} must be refused, got {r:?}");
+        }
+        assert!(!home.parent().unwrap().join("escape").exists());
+    }
+
+    /// The parent carries the same boundary as browsing — otherwise `create_dir`
+    /// would be a hole straight through `browse_dir`'s security model.
+    #[test]
+    fn refuses_to_create_outside_the_roots() {
+        let (_tmp, home, outside) = fixture();
+        let roots = vec![home.clone()];
+        for escape in [
+            outside.to_string_lossy().into_owned(),
+            "../outside".to_string(),
+            "proj/../../outside".to_string(),
+        ] {
+            let r = create_dir_in(Some(&escape), "x", &home, &roots, &none_protected);
+            assert!(r.is_err(), "{escape:?} must be refused, got {r:?}");
+        }
+        assert!(!outside.join("x").exists());
+    }
+
+    /// An existing name is an error, not a silent success: "created" must mean
+    /// created, or the user has no way to tell a fresh directory from someone
+    /// else's.
+    #[test]
+    fn refuses_an_existing_name() {
+        let (_tmp, home, _) = fixture();
+        let roots = vec![home.clone()];
+        assert!(create_dir_in(None, "notes", &home, &roots, &none_protected).is_err());
+        // A file with that name collides too — and is not clobbered.
+        assert!(create_dir_in(None, "file.txt", &home, &roots, &none_protected).is_err());
+        assert_eq!(fs::read_to_string(home.join("file.txt")).unwrap(), "x");
+    }
+
+    #[test]
+    fn missing_parent_errors_rather_than_creating_it() {
+        let (_tmp, home, _) = fixture();
+        let roots = vec![home.clone()];
+        assert!(create_dir_in(Some("~/nope"), "x", &home, &roots, &none_protected).is_err());
+        assert!(!home.join("nope").exists());
     }
 
     #[test]
