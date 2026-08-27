@@ -67,6 +67,9 @@ const ALL_KEYS = [
   // it stays in-memory only.
   "history-mark-filter",
   "history-workspace-filter",
+  // Chat mode — the pure-chat workspace filtered on its own, mutually exclusive
+  // with the directory filter above (see store.ts readHistoryWorkspaceFilters).
+  "history-chat-only",
   "history-active-only",
   "history-group-handoff",
   "onboarding-dismissed",
