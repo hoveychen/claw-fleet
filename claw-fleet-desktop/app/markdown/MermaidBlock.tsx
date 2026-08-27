@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./MermaidBlock.module.css";
 import { repairMermaidContrastInSvg } from "./mermaidContrast";
-import { fitDiagramWidth, naturalWidthFromViewBox } from "./mermaidFit";
+import { applyDiagramWidth } from "./mermaidFit";
 import { type MermaidMode, mermaidThemeConfig } from "./mermaidTheme";
 
 /** Distinct ids per render — mermaid mounts a scratch node keyed by this. */
@@ -78,17 +78,7 @@ export function MermaidBlock({ code }: { code: string }) {
     const apply = () => {
       const el = host.querySelector("svg");
       if (!el) return;
-      const natural = naturalWidthFromViewBox(el.getAttribute("viewBox"));
-      const pinned = fitDiagramWidth(natural, host.clientWidth);
-      if (pinned === null) {
-        el.style.removeProperty("width");
-        el.style.removeProperty("max-width");
-        return;
-      }
-      // max-width 必须一起写死：mermaid 把自然宽作为**内联** max-width 写在
-      // svg 上，样式表里的 .diagram svg{max-width:100%} 根本压不过它。
-      el.style.width = `${pinned}px`;
-      el.style.maxWidth = "none";
+      applyDiagramWidth(el, host.clientWidth);
     };
     apply();
     const ro = new ResizeObserver(apply);
