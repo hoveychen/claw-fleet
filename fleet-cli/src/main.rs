@@ -1,5 +1,6 @@
 mod commands;
 mod fmt;
+mod webui_embed;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
