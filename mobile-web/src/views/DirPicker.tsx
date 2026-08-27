@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronUp, Folder, FolderGit2, X } from "lucide-react";
+import { ChevronUp, Folder, FolderGit2, FolderPlus, X } from "lucide-react";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { BrowseDirResponse } from "../types";
@@ -54,6 +54,33 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
     void load(initialPath || undefined, true);
   }, [load, initialPath]);
 
+  // 新建子目录。只能往下走的选择器，在一台目录树是空的机器上没有任何可选项——
+  // 新开的云端容器 `/home/fleet` 底下什么都没有，列表只有一行「这里没有子目录」，
+  // 于是整个选择器无解。主机端 `create_dir` 建完直接回新目录的 listing，所以这里
+  // 一次往返就站进了新目录，再按「用这个目录」即可。
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submitNew = async () => {
+    const name = newName.trim();
+    if (!client || !data || !name || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      setData(
+        await client.request<BrowseDirResponse>("create_dir", { path: data.path, name }),
+      );
+      setNewName("");
+      setCreating(false);
+    } catch (e) {
+      // 名字重了、没权限——留在输入态，用户改个名就能重试。
+      setError(e instanceof Error ? e.message : t("新建目录失败"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // 路径比屏幕长时，有意义的是尾部（当前在哪个目录），不是 `/Users` 那一截。
   const crumbRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -76,6 +103,44 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
         </div>
 
         {error && <div className={styles.error}>{error}</div>}
+
+        {creating ? (
+          <div className={styles.newRow}>
+            <input
+              className={styles.newInput}
+              autoFocus
+              value={newName}
+              placeholder={t("新目录名")}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void submitNew();
+                if (e.key === "Escape") setCreating(false);
+              }}
+            />
+            <button
+              className={styles.newOk}
+              disabled={!newName.trim() || saving}
+              onClick={() => void submitNew()}
+            >
+              {saving ? t("创建中…") : t("创建")}
+            </button>
+            <button className={styles.newCancel} onClick={() => setCreating(false)}>
+              {t("取消")}
+            </button>
+          </div>
+        ) : (
+          <button
+            className={styles.newBtn}
+            disabled={!data}
+            onClick={() => {
+              setNewName("");
+              setCreating(true);
+            }}
+          >
+            <FolderPlus size={16} className={styles.icon} />
+            <span>{t("在这里新建子目录")}</span>
+          </button>
+        )}
 
         <div className={styles.list}>
           {data?.parent && (
