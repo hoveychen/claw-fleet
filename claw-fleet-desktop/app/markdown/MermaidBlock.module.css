@@ -10,8 +10,14 @@
   font-family: var(--font-sans);
 }
 
-/* Let a wide diagram scroll rather than shrink itself into unreadability. */
+/* 图窄就居中，图宽就横滚。必须是 block + margin:auto 而不是靠父级的
+   text-align：居中的 inline 元素一旦比容器宽，溢出的那半会跑到左边、
+   滚不回去；block 的 auto 外边距在装不下时自动塌成 0，左边缘还在。
+   缩到多小才改成滚动由 MermaidBlock 里的 fitDiagramWidth 决定 —— 这里的
+   max-width 压不过 mermaid 写在 svg 上的内联 max-width，只是个兜底。 */
 .diagram svg {
+  display: block;
+  margin: 0 auto;
   max-width: 100%;
   height: auto;
 }

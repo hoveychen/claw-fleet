@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./MermaidBlock.module.css";
 import { repairMermaidContrastInSvg } from "./mermaidContrast";
+import { fitDiagramWidth, naturalWidthFromViewBox } from "./mermaidFit";
 import { type MermaidMode, mermaidThemeConfig } from "./mermaidTheme";
 
 let seq = 0;
@@ -21,6 +22,7 @@ export function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState(currentTheme);
+  const hostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const obs = new MutationObserver(() => setTheme(currentTheme()));
@@ -66,6 +68,32 @@ export function MermaidBlock({ code }: { code: string }) {
     };
   }, [code, theme]);
 
+  // 宽图别缩到读不了：装不下时按下限钉宽，让 .diagram 的 overflow-x 接管。
+  // 挂 ResizeObserver 是因为转屏/侧栏折叠会改容器宽，一次性量完就过期了。
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || svg === null) return;
+    const apply = () => {
+      const el = host.querySelector("svg");
+      if (!el) return;
+      const natural = naturalWidthFromViewBox(el.getAttribute("viewBox"));
+      const pinned = fitDiagramWidth(natural, host.clientWidth);
+      if (pinned === null) {
+        el.style.removeProperty("width");
+        el.style.removeProperty("max-width");
+        return;
+      }
+      // max-width 必须一起写死：mermaid 把自然宽作为**内联** max-width 写在
+      // svg 上，样式表里的 .diagram svg{max-width:100%} 根本压不过它。
+      el.style.width = `${pinned}px`;
+      el.style.maxWidth = "none";
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [svg]);
+
   if (error !== null) {
     return (
       <div className={styles.failed}>
@@ -78,6 +106,7 @@ export function MermaidBlock({ code }: { code: string }) {
 
   return (
     <div
+      ref={hostRef}
       className={styles.diagram}
       // Trusted: mermaid's own strict-mode renderer sanitized this, not the model.
       dangerouslySetInnerHTML={svg ? { __html: svg } : undefined}
