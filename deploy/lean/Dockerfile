@@ -10,13 +10,14 @@
 #
 # The container serves two things off one port: `fleet serve`'s scoped-token
 # API (see docs/fleet-cloud-lean-public-api.md) and — for paths that match no
-# data route — the web UI bundle from FLEET_WEB_ROOT.
+# data route — the web UI, which is compiled into the `fleet` binary.
 # One-customer-per-container: isolation, credential and data boundaries are the
 # container boundary.
 #
 # Which one runs is decided by FLEET_WEB_ROOT (preset below): set → `fleet
 # webui` (no authentication — keep it behind your auth gateway), unset →
-# `fleet serve` (token-gated API only).
+# `fleet serve` (token-gated API only). Its *value* is only an override for
+# where the bundle comes from; see the ENV block at the bottom.
 
 # ── The cred store's own binary ─────────────────────────────────────────────
 # foxy-switcher ships as a CGO_ENABLED=0 static binary on distroless, so the
@@ -28,8 +29,9 @@ FROM ${FOXY_IMAGE} AS foxy
 
 # ── Build the web UI ────────────────────────────────────────────────────────
 # The desktop frontend is a plain web app; the same `vite build` output the
-# Tauri app bundles is what the browser loads here. `fleet serve` serves it out
-# of FLEET_WEB_ROOT, so the container answers both the API and the UI.
+# Tauri app bundles is what the browser loads here. This stage's output feeds
+# the `build` stage below, which compiles it into the binary, so the container
+# answers both the API and the UI off one artifact.
 # Same shape as fleet-relay's web stage.
 FROM node:22-bookworm-slim AS webui
 RUN corepack enable
@@ -55,14 +57,22 @@ RUN pnpm install --frozen-lockfile
 COPY mobile-web/ ./
 RUN pnpm run build:webui
 
-# ── Build the fleet CLI ─────────────────────────────────────────────────────
+# ── Build the fleet CLI, with the web UI compiled in ────────────────────────
+# The two frontend stages above feed this one: `embed-webui` gzips everything
+# under FLEET_WEBUI_DIR into the binary, so the runtime image ships ONE artifact
+# instead of a binary plus a 17 MB bundle on disk (net ~10 MB smaller, two fewer
+# COPY layers). Layout is the same as the release tarball — desktop UI at the
+# root, mobile UI under `m/`.
 FROM rust:1.90-slim-bookworm AS build
 WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY . .
-RUN cargo build --locked --release -p fleet-cli
+COPY --from=webui /src/claw-fleet-desktop/dist /webui
+COPY --from=mobileweb /src/mobile-web/dist-webui /webui/m
+RUN FLEET_WEBUI_DIR=/webui \
+    cargo build --locked --release -p fleet-cli --features embed-webui
 
 # ── Runtime: node (for the agent CLIs) + git/ssh ────────────────────────────
 FROM node:22-bookworm-slim
@@ -82,12 +92,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /workspace /home/fleet/.fleet \
     && chown -R fleet:fleet /workspace /home/fleet
 
+# 这一份二进制里就带着两套前端（见上面的 build 阶段），所以运行时不再往
+# /usr/share/fleet-web 放任何东西 —— 移动端 UI 在二进制内部同样落在 `m/`
+# 前缀下，于是 `/m/` 这个 URL 天然可达，服务端不需要任何新路由，桌面
+# index.html 里那段判定脚本照旧把手机送到这里。
+#
+# FLEET_WEB_ROOT（下面仍然预设）因此从「UI 在哪」变成了「可选覆盖」：把一个
+# bundle 挂到那个路径上就用你的，目录不存在就用内嵌的那份。entrypoint 只在
+# 目录真实存在时才传 --web-root。
 COPY --from=build /src/target/release/fleet-cli /usr/local/bin/fleet
-COPY --from=webui /src/claw-fleet-desktop/dist /usr/share/fleet-web
-# 移动端 UI 落在 web root 的 `m/` 子目录下，于是它就在 `/m/` 这个 URL 上 ——
-# web_assets 是按路径映射到文件的，子目录天然可达，服务端不需要任何新路由。
-# 桌面 index.html 里那段判定脚本把手机送到这里。
-COPY --from=mobileweb /src/mobile-web/dist-webui /usr/share/fleet-web/m
 COPY --from=foxy /usr/local/bin/foxy-switcher /usr/local/bin/foxy-switcher
 COPY deploy/lean/entrypoint.sh /usr/local/bin/fleet-entrypoint
 RUN chmod +x /usr/local/bin/fleet-entrypoint
@@ -131,11 +144,15 @@ ENV CODEX_HOME=/home/fleet/.codex \
 # FLEET_ADMIN_TOKEN  — first-party full-access token (required in API-only
 #                      mode, i.e. when FLEET_WEB_ROOT is unset)
 # FLEET_PUBLIC_TOKEN — per-customer scoped token for external integrators
-# FLEET_WEB_ROOT     — web UI bundle dir. Set (the image default) → the
-#                      entrypoint runs `fleet webui`, which has NO
-#                      authentication; only publish it behind your own auth
-#                      gateway. Unset it for an API-only container, which then
-#                      requires FLEET_ADMIN_TOKEN.
+# FLEET_WEB_ROOT     — the UI/API mode switch, plus an optional bundle
+#                      override. Set (the image default) → the entrypoint runs
+#                      `fleet webui`, which has NO authentication; only publish
+#                      it behind your own auth gateway. Unset it for an API-only
+#                      container, which then requires FLEET_ADMIN_TOKEN.
+#                      The UI is compiled into the binary, so nothing needs to
+#                      exist at this path — the entrypoint passes --web-root
+#                      only when the directory is really there. Mount a bundle
+#                      at /usr/share/fleet-web to serve that one instead.
 # FLEET_CLAUDE_MODEL — default Claude Code model for runs that name none.
 #                      Written to ~/.claude/settings.json by `fleet bootstrap`
 #                      on every start (that file is ephemeral). Defaults to
