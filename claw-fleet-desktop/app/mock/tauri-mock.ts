@@ -29,6 +29,8 @@ import {
   MOCK_ACCOUNT_INFO,
   MOCK_CODEX_USAGE,
   MOCK_MEMORIES,
+  MOCK_ARTIFACTS,
+  MOCK_ARTIFACT_USAGE,
   MOCK_WIKI_DOCS,
   MOCK_WIKI_BODIES,
   MOCK_EXPLORER_ROOTS,
@@ -331,6 +333,22 @@ function handleIPC(
     // Wiki / Plugins. These MUST return a list rather than falling through to
     // `default: return null` — both views do `setState(await invoke(...))` and
     // then filter the result, so a null blanks the whole app.
+    case "list_artifacts":
+      return MOCK_ARTIFACTS;
+    case "artifact_usage":
+      return MOCK_ARTIFACT_USAGE;
+    // Remote-only in production; in mock there is no host, so the two
+    // OS-level actions stay hidden rather than pointing at nothing.
+    case "artifact_local_path":
+      return null;
+    case "update_artifact": {
+      const a = MOCK_ARTIFACTS.find((x) => x.id === args.id);
+      if (!a) return null;
+      if (args.title !== undefined && args.title !== null) a.title = args.title as string;
+      if (args.note !== undefined && args.note !== null) a.note = args.note as string;
+      if (args.starred !== undefined && args.starred !== null) a.starred = args.starred as boolean;
+      return a;
+    }
     case "list_wiki_docs":
       return MOCK_WIKI_DOCS;
     case "search_wiki_docs":

@@ -735,6 +735,33 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/skills",
   }),
 
+  // ── Artifacts (产出) ──────────────────────────────────────────────────────
+  // Without these the browser build falls through to the fixtures and the page
+  // renders "no artifacts yet" against a server that holds five — caught by
+  // driving the real UI, which is exactly what ?mock would have hidden.
+  list_artifacts: () => ({
+    method: "GET",
+    path: "/artifacts",
+  }),
+
+  artifact_usage: () => ({
+    method: "GET",
+    path: "/artifact_usage",
+  }),
+
+  update_artifact: (a) => ({
+    method: "POST",
+    path: "/artifact_update",
+    body: { id: a.id, title: a.title, note: a.note, starred: a.starred },
+  }),
+
+  delete_artifact: (a) => ({
+    method: "POST",
+    path: "/artifact_delete",
+    empty: true,
+    body: { id: a.id },
+  }),
+
   list_wiki_docs: () => ({
     method: "GET",
     path: "/wiki_docs",
@@ -1358,6 +1385,19 @@ async function downloadFromProbe(
  * for a bundle included — so nothing about the artifact has to be rebuilt on
  * this side.
  */
+/**
+ * Download an artifact's blob — the browser build's replacement for the
+ * desktop's save-dialog + `export_artifact`.
+ *
+ * A tab has no destination to be handed, so `save()` answers null there and the
+ * export button would do nothing at all (the same trap `downloadWikiExport`
+ * exists for). `/artifact_blob` is already the route the page previews through,
+ * and with no `Range` header it answers the whole file.
+ */
+export async function downloadArtifact(id: string, filename: string): Promise<void> {
+  await downloadFromProbe("/artifact_blob", { id }, filename);
+}
+
 export async function downloadWikiExport(
   slug: string,
   version: string,
