@@ -292,7 +292,16 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-bg-hover: var(--color-bg-card-hover);
   --color-bg-tool: #ece9e2;
   --color-bg-tool-hover: #e5e1d8;
-  --color-bg-user: #f0e8dd;
+  /* The user bubble was #f0e8dd — 1.06:1 against the #f1efea canvas, which is
+     no boundary at all. A 500px-wide block whose only edge is a 3% hue shift
+     does not read as an object; it reads as a patch of tinted background, and
+     "a div with a background-color" is the cheapest thing a UI can look like.
+     Deepened to 1.20:1 and paired with a real border + shadow on `.user_text`
+     (MessageList.module.css) — the same raised-surface recipe every card in
+     this theme uses, since fill alone can't carry object-hood on a cream
+     canvas without going garish. Dark's #1f2534 already measured 1.24:1, so it
+     keeps its hex and just gains the border. */
+  --color-bg-user: #e9d7c9;
   --color-bg-modal: #fbfaf7;
   --color-bg-modal-overlay: rgba(32, 28, 18, 0.4);
 
