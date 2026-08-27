@@ -26,6 +26,7 @@ import {
   MOCK_MESSAGES,
   MOCK_CHAT_WORKSPACE,
   mockBrowseDir,
+  mockCreateDir,
   MOCK_ACCOUNT_INFO,
   MOCK_CODEX_USAGE,
   MOCK_MEMORIES,
@@ -274,6 +275,11 @@ function handleIPC(
     // for the probe host's filesystem.
     case "browse_dir":
       return mockBrowseDir((args as { path?: string | null })?.path);
+    case "create_dir":
+      return mockCreateDir(
+        (args as { path?: string | null })?.path,
+        String((args as { name?: string })?.name ?? ""),
+      );
 
     case "list_skill_files":
       return MOCK_SKILL_FILES;

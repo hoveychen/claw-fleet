@@ -3495,3 +3495,26 @@ export function mockBrowseDir(path?: string | null) {
   }
   return { path: p, parent, entries: [], truncated: false };
 }
+
+/** Mirrors the desktop's `create_dir`: create one child, then answer with that
+ *  child's own listing so the picker lands inside it. The fixture tree is
+ *  mutated, so the new directory is still there after walking back up. */
+export function mockCreateDir(path: string | null | undefined, name: string) {
+  const parent = mockBrowseDir(path); // throws for a parent outside the tree
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.startsWith(".") || trimmed.includes("/") || trimmed.includes("\\")) {
+    throw new Error(`invalid directory name: ${name}`);
+  }
+  if (parent.entries.some((e) => e.name === trimmed)) {
+    throw new Error(`${trimmed} already exists`);
+  }
+  const child = `${parent.path}/${trimmed}`;
+  MOCK_BROWSE_TREE[parent.path] = {
+    ...parent,
+    entries: [...parent.entries, { name: trimmed, path: child, isGitRepo: false }].sort((a, b) =>
+      a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
+    ),
+  };
+  MOCK_BROWSE_TREE[child] = { path: child, parent: parent.path, entries: [], truncated: false };
+  return MOCK_BROWSE_TREE[child];
+}
