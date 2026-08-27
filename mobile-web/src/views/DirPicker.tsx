@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronUp, Folder, FolderGit2, FolderPlus, X } from "lucide-react";
+import { ChevronUp, Folder, FolderGit2, FolderPlus, HardDrive, X } from "lucide-react";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { BrowseDirResponse } from "../types";
@@ -155,6 +155,18 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
         )}
 
         <div className={styles.list}>
+          {/* 站在一个根里时没有「上一级」可点——根不暴露自己的父目录。云端容器
+              的起点就是这样一个根（持久卷），home 在另一个根上，所以这里把其余
+              的根直接列成可点的行，否则用户只能靠手敲路径才能换根。 */}
+          {!data?.parent &&
+            (data?.roots ?? [])
+              .filter((r) => r !== data?.path)
+              .map((r) => (
+                <button key={r} className={styles.row} onClick={() => void load(r)}>
+                  <HardDrive size={16} className={styles.icon} />
+                  <span className={styles.name}>{r}</span>
+                </button>
+              ))}
           {data?.parent && (
             <button className={styles.row} onClick={() => void load(data.parent!)}>
               <ChevronUp size={16} className={styles.icon} />

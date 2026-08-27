@@ -3487,13 +3487,16 @@ export const MOCK_BROWSE_TREE: Record<
  *  entered); only a path outside it throws, as `canonicalize` would. */
 export function mockBrowseDir(path?: string | null) {
   const p = path?.trim() || MOCK_BROWSE_HOME;
+  // One root, like an ordinary host. A cloud host answers with two (home + the
+  // persistent volume), which is what makes the picker show root rows.
+  const roots = [MOCK_BROWSE_HOME];
   const hit = MOCK_BROWSE_TREE[p];
-  if (hit) return hit;
+  if (hit) return { ...hit, roots };
   const parent = p.slice(0, p.lastIndexOf("/"));
   if (!MOCK_BROWSE_TREE[parent]?.entries.some((e) => e.path === p)) {
     throw new Error(`${p}: No such file or directory`);
   }
-  return { path: p, parent, entries: [], truncated: false };
+  return { path: p, parent, entries: [], truncated: false, roots };
 }
 
 /** Mirrors the desktop's `create_dir`: create one child, then answer with that
