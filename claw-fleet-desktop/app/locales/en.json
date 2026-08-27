@@ -2336,7 +2336,12 @@
     "confirm": "Use this directory",
     "empty": "No subdirectories here",
     "truncated": "Too many subdirectories — showing the first 500",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "new": "New subdirectory here",
+    "new_name": "New directory name",
+    "create": "Create",
+    "creating": "Creating…",
+    "create_failed": "Could not create that directory"
   },
   "parked": {
     "badge": "Timed out — session paused",

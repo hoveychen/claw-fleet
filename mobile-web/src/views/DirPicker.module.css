@@ -59,6 +59,63 @@
   border-radius: 8px;
   padding: 7px 9px;
 }
+/* 新建子目录：常驻在列表**外**，因为列表会滚——而在一个空目录里（正是最需要
+ * 新建的那一刻）它必须一眼可见。 */
+.newBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--color-bg-input);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 10px;
+  padding: 10px;
+  color: var(--color-text);
+  font-size: var(--t-ui, 14px);
+  text-align: left;
+}
+.newBtn:active {
+  background: var(--color-bg-card-hover);
+}
+.newBtn:disabled {
+  opacity: 0.5;
+}
+.newRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.newInput {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  padding: 10px;
+  color: var(--color-text);
+  font-size: var(--t-ui, 14px);
+}
+.newOk,
+.newCancel {
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: var(--t-ui, 14px);
+  white-space: nowrap;
+}
+.newOk {
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  font-weight: 600;
+}
+.newOk:disabled {
+  opacity: 0.5;
+}
+.newCancel {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+}
 .list {
   flex: 1;
   overflow-y: auto;
@@ -100,6 +157,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 根切换行里跟在目录名后面的完整路径：次要信息，可以被截断。 */
+.rowPath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
 }
 .empty {
   padding: 14px 10px;

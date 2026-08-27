@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronUp, Folder, FolderGit2, X } from "lucide-react";
+import { ChevronUp, Folder, FolderGit2, FolderPlus, HardDrive, X } from "lucide-react";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { BrowseDirResponse } from "../types";
@@ -54,6 +54,33 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
     void load(initialPath || undefined, true);
   }, [load, initialPath]);
 
+  // 新建子目录。只能往下走的选择器，在一台目录树是空的机器上没有任何可选项——
+  // 新开的云端容器 `/home/fleet` 底下什么都没有，列表只有一行「这里没有子目录」，
+  // 于是整个选择器无解。主机端 `create_dir` 建完直接回新目录的 listing，所以这里
+  // 一次往返就站进了新目录，再按「用这个目录」即可。
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submitNew = async () => {
+    const name = newName.trim();
+    if (!client || !data || !name || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      setData(
+        await client.request<BrowseDirResponse>("create_dir", { path: data.path, name }),
+      );
+      setNewName("");
+      setCreating(false);
+    } catch (e) {
+      // 名字重了、没权限——留在输入态，用户改个名就能重试。
+      setError(e instanceof Error ? e.message : t("新建目录失败"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // 路径比屏幕长时，有意义的是尾部（当前在哪个目录），不是 `/Users` 那一截。
   const crumbRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -77,7 +104,73 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
 
         {error && <div className={styles.error}>{error}</div>}
 
+        {creating ? (
+          <div className={styles.newRow}>
+            <input
+              className={styles.newInput}
+              autoFocus
+              value={newName}
+              placeholder={t("新目录名")}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void submitNew();
+                if (e.key === "Escape") {
+                  setError(null);
+                  setCreating(false);
+                }
+              }}
+            />
+            <button
+              className={styles.newOk}
+              disabled={!newName.trim() || saving}
+              onClick={() => void submitNew()}
+            >
+              {saving ? t("创建中…") : t("创建")}
+            </button>
+            <button
+              className={styles.newCancel}
+              onClick={() => {
+                // 退出输入态时把错误一并清掉——「已存在」说的是刚才那次尝试，
+                // 留在屏上会像是当前目录本身有问题。
+                setError(null);
+                setCreating(false);
+              }}
+            >
+              {t("取消")}
+            </button>
+          </div>
+        ) : (
+          <button
+            className={styles.newBtn}
+            disabled={!data}
+            onClick={() => {
+              setNewName("");
+              setError(null);
+              setCreating(true);
+            }}
+          >
+            <FolderPlus size={16} className={styles.icon} />
+            <span>{t("在这里新建子目录")}</span>
+          </button>
+        )}
+
         <div className={styles.list}>
+          {/* 站在一个根里时没有「上一级」可点——根不暴露自己的父目录。云端容器
+              的起点就是这样一个根（持久卷），home 在另一个根上，所以这里把其余
+              的根直接列成可点的行，否则用户只能靠手敲路径才能换根。 */}
+          {!data?.parent &&
+            (data?.roots ?? [])
+              .filter((r) => r !== data?.path)
+              .map((r) => (
+                <button key={r} className={styles.row} onClick={() => void load(r)}>
+                  <HardDrive size={16} className={styles.icon} />
+                  {/* 目录名在前：整条路径塞进一行会被从尾部截断，而尾部恰恰是
+                      认出它的那一截（`/private/tmp/claude-501/-Users-…` 什么也
+                      没说明）。完整路径跟在后面，截断了也不影响识别。 */}
+                  <span className={styles.name}>{r.split("/").filter(Boolean).pop() ?? r}</span>
+                  <span className={styles.rowPath}>{r}</span>
+                </button>
+              ))}
           {data?.parent && (
             <button className={styles.row} onClick={() => void load(data.parent!)}>
               <ChevronUp size={16} className={styles.icon} />

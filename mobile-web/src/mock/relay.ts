@@ -17,6 +17,7 @@ import {
   MOCK_ATTACHMENT_STORE_DIR,
   MOCK_CHAT_WORKSPACE,
   mockBrowseDir,
+  mockCreateDir,
   MOCK_DECISION_HISTORY,
   MOCK_ELICITATION,
   MOCK_FLEET_ASK,
@@ -207,6 +208,8 @@ export class MockRelayClient extends RelayClient {
         );
       case "browse_dir":
         return mockBrowseDir(params?.path as string | undefined);
+      case "create_dir":
+        return mockCreateDir(params?.path as string | undefined, String(params?.name ?? ""));
       case "repo_list":
         return MOCK_REPOS;
       case "repo_detail": {

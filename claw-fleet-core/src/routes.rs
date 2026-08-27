@@ -54,6 +54,10 @@ pub const AUDIT_RULES_SAVE: &str = "/audit/rules/save";
 pub const AUDIT_RULES_SUGGEST: &str = "/audit/rules/suggest";
 pub const AUDIT_RULES_TOGGLE: &str = "/audit/rules/toggle";
 pub const BROWSE_DIR: &str = "/browse_dir";
+/// Create one directory under a browsed path (POST `{path, name}`). The picker
+/// is useless on a host whose tree is empty — a fresh cloud container has
+/// nothing under `$HOME` to select.
+pub const CREATE_DIR: &str = "/create_dir";
 /// Directories the user explicitly added to the 仓库 page: list / add / remove.
 /// These widen the explorer's `known_workspaces` beyond session-derived paths,
 /// so registration is a deliberate server-side act rather than a per-read flag.
@@ -279,5 +283,27 @@ pub const DECISION_ASSET_PREFIX: &str = "/decision_asset/";
 /// items, artifacts via `/v1/responses/{id}/files`, usage via the response
 /// `usage` field), so nothing external is lost.
 pub fn is_public(path: &str) -> bool {
-    path == HEALTH || path.starts_with("/v1/")
+    path == HEALTH
+        || path == ACP
+        || path.starts_with("/v1/")
+        // A card carrying `html`/`images` goes out as a URL-mode elicitation
+        // pointing at the existing `/decision_asset/` handler — ACP has no way
+        // to put HTML in a form. The card id in the path is a per-question
+        // UUID, so the URL is an unguessable capability: a client's browser can
+        // open it without a bearer token riding in the query string, where it
+        // would land in history and proxy logs. The handler already confines
+        // itself to `~/.fleet/decision-assets`.
+        || path.starts_with(DECISION_ASSET_PREFIX)
 }
+
+
+/// The Agent Client Protocol surface.
+///
+/// Not a path on this HTTP server: ACP listens on its own port (see
+/// [`crate::acp::ws`] for why it cannot share tiny_http's). It appears here so
+/// an ACP connection's token goes through the same [`is_public`] /
+/// `auth::authorize` decision as every HTTP route, rather than growing a second
+/// auth scheme to keep in sync. The confinement argument is the same: the
+/// workspace is bound server-side and the connection speaks only ACP methods,
+/// so there is no route through it to command exec, settings or credentials.
+pub const ACP: &str = "/acp";

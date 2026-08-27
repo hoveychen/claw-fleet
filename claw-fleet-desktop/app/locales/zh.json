@@ -2332,7 +2332,12 @@
     "confirm": "用这个目录",
     "empty": "这里没有子目录",
     "truncated": "子目录过多，仅显示前 500 个",
-    "loading": "读取中…"
+    "loading": "读取中…",
+    "new": "在这里新建子目录",
+    "new_name": "新目录名",
+    "create": "创建",
+    "creating": "创建中…",
+    "create_failed": "新建目录失败"
   },
   "parked": {
     "badge": "已超时 · 会话已暂停",

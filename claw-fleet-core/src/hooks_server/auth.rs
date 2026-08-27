@@ -139,6 +139,9 @@ mod tests {
             // Same read power as EXPLORER_FILE with no workspace gate at all.
             routes::EXPLORER_EXTERNAL_FILE,
             routes::BROWSE_DIR,
+            // Writes to the host filesystem (mkdir), so it belongs on the same
+            // side of the boundary as the listing it complements.
+            routes::CREATE_DIR,
             routes::LLM_CONFIG,
             routes::SOURCES_CONFIG,
             routes::MEMORIES,

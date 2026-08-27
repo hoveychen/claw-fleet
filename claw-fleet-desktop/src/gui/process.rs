@@ -138,6 +138,18 @@ pub(crate) fn browse_dir(
     state.backend.read().unwrap().browse_dir(path)
 }
 
+/// Make one directory under `path` on the *backend host* and answer with the new
+/// directory's listing. Through the backend for `browse_dir`'s reason: it must
+/// be created on the host the session will spawn on.
+#[tauri::command(async)]
+pub(crate) fn create_dir(
+    state: tauri::State<'_, AppState>,
+    path: Option<String>,
+    name: String,
+) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+    state.backend.read().unwrap().create_dir(path, name)
+}
+
 /// Remote-workspace registry (rca-routed workspaces) — list / upsert / remove.
 /// All three delegate through the backend: the registry lives on the host
 /// where sessions spawn (the probe host under a remote connection).
