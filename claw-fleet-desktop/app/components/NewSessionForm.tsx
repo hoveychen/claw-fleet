@@ -249,7 +249,7 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   // keyed "new" so navigating away from the new-session page and back no longer
   // wipes it. Headless `-p` sessions in the CLI's default mode can't approve
   // file edits, so the launcher seeds permissionMode to acceptEdits.
-  const { draft, patch, clear } = useComposerDraft("new", {
+  const { draft, exists: draftExists, patch, clear } = useComposerDraft("new", {
     permissionMode: "acceptEdits",
   });
   const { prompt, model, effort, permissionMode, attachments, workspace } = draft;
@@ -324,8 +324,16 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   // field the picker uses, and this remembers what to put back. Without it,
   // leaving chat mode would land on an empty picker and a disabled submit with
   // nothing on screen saying why.
+  //
+  // `chatPath` is required, not just compared against: it arrives one backend
+  // round-trip after the first render, and a draft that already holds the chat
+  // path (form reopened, tab restored) is *not yet* recognisable as chat during
+  // that window. Recording it then poisoned this ref with the chat directory,
+  // and the off-switch below handed chat straight back to itself — the pill
+  // could be turned on but never off again.
   const lastProjectWorkspace = useRef("");
   useEffect(() => {
+    if (!chatPath) return;
     if (workspace && workspace !== chatPath) lastProjectWorkspace.current = workspace;
   }, [workspace, chatPath]);
 
@@ -376,12 +384,17 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   // with no recents (fresh install, or a cloud container that has only ever run
   // chats) mount happens before either is known, and the picker would stay empty
   // for good, leaving submit disabled with nothing saying why. Re-running is safe
-  // because of the `draft.workspace` guard: once anything is selected — by this
-  // effect or by the user — no later poll can clobber it.
+  // because of the `chosenByUser` guard: once the user picks anything — a
+  // directory, chat mode, or explicitly no directory — no later poll can clobber
+  // it.
   useEffect(() => {
-    // An empty workspace means a fresh (or just-submitted, hence cleared) draft
-    // — nothing has been picked in it, so seeding owns the field again.
-    if (!draft.workspace) chosenByUser.current = false;
+    // No draft slot means a fresh (or just-submitted, hence cleared) form —
+    // nothing has been picked in it, so seeding owns the field again. The test
+    // is the slot's existence, not an empty workspace *value*: leaving chat mode
+    // on a host with no other directory legitimately empties the picker, and
+    // re-seeding that emptiness put chat straight back — another way the toggle
+    // refused to switch off.
+    if (!draftExists) chosenByUser.current = false;
     else if (chosenByUser.current) return;
     const seed = defaultWorkspace(recentWorkspaces, chatPath, loadLastWorkspace());
     if (!seed) return;
