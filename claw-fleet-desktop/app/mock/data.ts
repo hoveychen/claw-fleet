@@ -1214,6 +1214,36 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         ],
       },
     },
+    // A typed prompt carrying a pasted screenshot — the single most common way
+    // a real user turn gets an image, and the shape that had no mock coverage
+    // at all until the bubble restyle needed to be looked at. Prose wide enough
+    // to set the bubble width, so the thumbnail's fit against the content box
+    // is actually exercised (a natural-width image under wider text used to
+    // leave a ragged strip of empty fill down the bubble's right side).
+    {
+      type: "user",
+      uuid: "msg-5a3",
+      timestamp: new Date(NOW - 14 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "现在应用里展示 mermaid 的视图，看起来有点太素了，像回到互联网刚开始的感觉。\n有办法现代化它么？",
+          },
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              // 480×280 flat-color stand-in for a pasted app screenshot; kept
+              // synthetic so the fixture stays ~1KB.
+              data: "iVBORw0KGgoAAAANSUhEUgAAAeAAAAEYCAIAAAALd7K2AAAE2ElEQVR42u3dsQmAQBBFwatEMDEyMLT/XowUQREEI2tYEN3Dgalg+bx0Sz+MACRUnABAoAEQaACBBkCgAQQaAIEGQKABBBoAgQYQaAAEGgCBBhBoAAQaQKABEGgAgQZAoAEQaACBBuDBQDdtB0BCAg0g0ACEAr3OEy84tgUgRKAFGhBogQYQaIEGBBqBBgRaoAGBRqABgRZoAIEWaECgEWhAoAUaEGgEGhBogQYQaIEGBBqBBgRaoAGBRqABgRZoQKARaECgBRpAoOsP9HXuQL0EWqABgUagAYEWaIEGgUagAYEWaIEGgRZogQYEGoEGBFqgAYFGoAGBFmiBBoEWaIEGBBqBBgRaoAGBRqABgRZogQaBFmiBBgRaoAUaBFqgBRoQaAQaEGiBBgQagQYEWqAFGgRaoAUaEGgEGhBogQYEGoEGBFqgBRoEWqAFGhBoBBoEWqAFGhBoBBoQaIE2cRBoBBoQaIEWaBBogRZoQKARaECgBRoQaAQaEGiBFmgQaIEWaECgEWgQaIEWaECgEWhAoAVaoEGgEWhAoAVaoEGgBVqgAYFGoAGBFmhAoBFoQKAFWqBBoAVaoAGBRqABgRZoQKARaECgBVqgQaClU6ABgRZogQaBFmiBBgQagQYEWqABgUagAYEWaIEGgRZogQYEGoEGBFqgAYFGoAGBFmiBBoEWaIEGBBqBBoEWaIEGBBqBBgRaoE0cBBqBBgRaoAUaBFqgBRoQaAQaEGiBBgQagQYEWqAFGgRaoAUaEGgEGgRaoAUaEGgEGhBogRZoEGgSBxr4J4EWaECgBRpAoAUaEGgEGhBogQYEGoEGBFqgAQRaoAGBRqABgRZoQKARaECgBRpAoAUaEGgEGhBogQYEGoEGBFqgAYFGoAGBFugAL93AT0IEGhBogRZoEGiBFmhAoBFoQKAFGhBoBBoQaIEWaBBogRZoQKARaECgBRoQaAQaEGiBFmgQaAQaEGiBFmgQaIEWaECgEWhAoAUaEGgEGhBogRZoEGiBFmhAoBFoQKAFGhBoBBoQaIEWaBBogRZoQKAFWqBBoAVaoAGBRqABgRZoQKARaECgBVqgQaAFWqABgUagAYEWaECgEWhAoAVaoEGgBVqgAYFGoEGgBVqgAYFGoAGBFmgTB4FGoAGBFmiBBoEWaIEGBBqBBgRaoAGBRqABgRZogQaBFmiBBgQagQaBFmiBBgQagQYEWqAFGgQagQYEWqAFGgRaoAUaEGgEGhBogQYEGoEGBFqgBRoEWqAFGhBoBBoQaIEGBBqBBgRaoAUaBFo6BRoQaIEWaBBogRZoQKARaECgBRoQaAQaEGiBFmgQaIEWaECgEWhAoAUaEGgEGhBogRZoEGiBFmhAoBFoEGiBFmhAoBFoQKAF2sRBoBFoQKAFWqBBoAVaoAGBRqABgRZoQKARaECgBVqgQaAFWqABgUagQaAFWqABgUagAYEWaIEGgUagAYEWaIEGgRZogQYEGoEGBFqgAYFGoAGBFmgAgRZoQKARaECgBRoQaAQaEGiBBgRaPQUaEGiBBhBogQYEGoEGBFqgAYFGoAGBFmgAgRZoQKARaECgBRoQaAQaEGiBBhBogQYEGlMDBFqgAYFGoAGBFmhAoBFoQKAFGkCgBRoQaAQaEGiBBgQagQY+cQPdHJerieA2dgAAAABJRU5ErkJggg==",
+            },
+          },
+        ],
+      },
+    },
     // A background-shell notice with no <result> and a paragraph-long <summary>
     // — the shape Claude Code emits when it can't tell whether a background
     // shell from the previous session finished. Kept in the mock because it is
