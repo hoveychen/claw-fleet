@@ -32,4 +32,9 @@
 //!   Transports" — any bidirectional channel is conformant so long as the
 //!   JSON-RPC format and lifecycle are preserved.
 
+//! - [`types`] — the v1 wire types, spelled from the published schema.
+//! - [`agent`] — method dispatch onto Fleet's spawn/resume machinery.
+
+pub mod agent;
 pub mod jsonrpc;
+pub mod types;
