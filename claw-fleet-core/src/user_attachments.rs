@@ -66,7 +66,7 @@ pub fn stored_path(key: &str, name: &str) -> Option<PathBuf> {
 }
 
 /// Reject anything that isn't a bare filename (path separators, `..`, absolute).
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains('/')
         && !name.contains('\\')
@@ -79,6 +79,13 @@ fn valid_name(name: &str) -> bool {
 /// Falls back to a generic name when the input has nothing usable — an
 /// attachment whose name we can't represent is still worth storing.
 fn sanitize_name(name: &str) -> String {
+    sanitize_name_with(name, "attachment.bin")
+}
+
+/// [`sanitize_name`] with a caller-chosen fallback, so the artifact store
+/// (which has the same "a file we can't name is still worth storing" rule but
+/// a different generic name) reuses the sanitizing instead of copying it.
+pub(crate) fn sanitize_name_with(name: &str, fallback: &str) -> String {
     let base = Path::new(name)
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
@@ -86,7 +93,7 @@ fn sanitize_name(name: &str) -> String {
     if valid_name(&base) {
         base
     } else {
-        "attachment.bin".to_string()
+        fallback.to_string()
     }
 }
 
