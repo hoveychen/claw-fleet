@@ -1284,13 +1284,16 @@ export const MOCK_DIR_TREE: Record<string, BrowseDirResponse> = {
  *  does for a nonexistent path — that's the picker's error row. */
 export function mockBrowseDir(path?: string): BrowseDirResponse {
   const p = path?.trim() || MOCK_HOME;
+  // One root, like a desktop host: the fixture home. A cloud host answers with
+  // two (home + the persistent volume) and the picker then shows root rows.
+  const roots = [MOCK_HOME];
   const hit = MOCK_DIR_TREE[p];
-  if (hit) return hit;
+  if (hit) return { ...hit, roots };
   const parent = p.slice(0, p.lastIndexOf("/"));
   if (!MOCK_DIR_TREE[parent]?.entries.some((e) => e.path === p)) {
     throw new Error(`${p}: No such file or directory`);
   }
-  return { path: p, parent, entries: [], truncated: false };
+  return { path: p, parent, entries: [], truncated: false, roots };
 }
 
 /** Mirrors the desktop's `create_dir`: one new child, then the listing of that

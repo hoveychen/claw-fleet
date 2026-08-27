@@ -522,4 +522,7 @@ export interface BrowseDirResponse {
   parent: string | null;
   entries: BrowseEntry[];
   truncated: boolean;
+  /** 全部可浏览根。根没有 parent，所以站在一个根里就没有回到其他根的路——
+   *  云端容器的起点恰恰是一个不是 home 的根。旧主机不发这个字段。 */
+  roots?: string[];
 }
