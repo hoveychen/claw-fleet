@@ -240,6 +240,12 @@ fn serve_ignores_web_ui_env_and_still_demands_a_token() {
 
 /// `fleet webui` with nothing to serve is a misconfiguration, not a port that
 /// answers 404 for every page.
+///
+/// Only meaningful without `embed-webui`: a build that carries the UI always has
+/// something to serve, so it starts and blocks on accept — which made this test
+/// hang rather than fail when run against such a build. The embedded shape is
+/// covered by `webui_falls_back_to_the_builtin_ui_when_the_env_path_holds_no_bundle`.
+#[cfg(not(feature = "embed-webui"))]
 #[test]
 fn webui_without_a_bundle_refuses_to_start() {
     let home = tempfile::TempDir::new().unwrap();
@@ -252,6 +258,76 @@ fn webui_without_a_bundle_refuses_to_start() {
     assert!(!out.status.success(), "must exit non-zero");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("--web-root"), "should say how to fix it: {err}");
+}
+
+/// An explicit `--web-root` is a demand: a path that holds no bundle is a typo
+/// worth failing on, not something to quietly paper over with the built-in UI.
+#[test]
+fn explicit_web_root_without_a_bundle_still_refuses_to_start() {
+    let home = tempfile::TempDir::new().unwrap();
+    let missing = home.path().join("nope");
+    let out = Command::new(env!("CARGO_BIN_EXE_fleet-cli"))
+        .args(["webui", "--port", "0", "--web-root", missing.to_str().unwrap()])
+        .env("FLEET_HOME", home.path())
+        .env_remove("FLEET_WEB_ROOT")
+        .output()
+        .expect("run fleet-cli webui");
+    assert!(
+        !out.status.success(),
+        "an explicit --web-root at a bundle-less path must exit non-zero"
+    );
+}
+
+/// `FLEET_WEB_ROOT` is ambient deployment config, not a per-invocation demand —
+/// so a value that holds no bundle must fall back to the built-in UI rather than
+/// refuse to start.
+///
+/// This is the exact shape the cloud container comes up in: the image presets
+/// `FLEET_WEB_ROOT=/usr/share/fleet-web` as the UI/API mode switch, and since
+/// the UI moved into the binary nothing is written to that path any more. The
+/// first cut of that change only stopped the *entrypoint* from passing
+/// `--web-root`; `cmd_webui` read the very same env var itself and exited 2, so
+/// the container crash-looped in production with:
+///
+/// ```text
+/// fleet-entrypoint: no bundle at /usr/share/fleet-web/index.html — serving the web UI built into the fleet binary
+/// fleet webui: /usr/share/fleet-web is not a directory
+/// ```
+///
+/// Gated on the feature because "fall back to the built-in UI" needs a built-in
+/// UI to fall back to; with the feature off there is nothing to serve and the
+/// hard error is still correct.
+#[cfg(feature = "embed-webui")]
+#[test]
+fn webui_falls_back_to_the_builtin_ui_when_the_env_path_holds_no_bundle() {
+    let home = tempfile::TempDir::new().unwrap();
+    let port_file = home.path().join("port");
+    let missing = home.path().join("usr-share-fleet-web");
+
+    let mut serve = spawn(
+        home.path(),
+        &["webui", "--port", "0", "--port-file", port_file.to_str().unwrap()],
+        &[("FLEET_WEB_ROOT", missing.to_str().unwrap())],
+    );
+    let port = wait_for_port(&port_file, &mut serve);
+
+    let (status, body) = get(port, "/", None);
+    assert_eq!(status, 200, "/ must serve the built-in UI, logs:\n{}", serve.logs());
+    assert!(
+        body.contains("<title>Claw Fleet</title>"),
+        "expected the real embedded index.html, got: {}",
+        &body[..body.len().min(200)]
+    );
+
+    // The mobile UI ships inside the same embedded bundle under `m/`.
+    let (status, _) = get(port, "/m/", None);
+    assert_eq!(status, 200, "/m/ must serve too, logs:\n{}", serve.logs());
+
+    assert!(
+        serve.logs().contains("built into this binary"),
+        "startup line should say which bundle won, logs:\n{}",
+        serve.logs()
+    );
 }
 
 /// The env is `fleet webui`'s own fallback — that is how the container passes

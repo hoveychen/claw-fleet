@@ -64,6 +64,25 @@ fn resolve_webui_port(flag: Option<u16>, env: Option<String>) -> Result<u16, Str
     }
 }
 
+/// Why a path can't serve as a bundle, or `Ok(())` if it can.
+///
+/// Checks for `index.html` rather than just the directory because an empty
+/// directory is not a bundle: a volume mounted before it was populated would
+/// pass an `is_dir` test and then 404 every page, which reads as "the UI is
+/// broken" instead of "there is no UI here".
+fn bundle_problem(root: &std::path::Path) -> Result<(), String> {
+    if !root.is_dir() {
+        return Err(format!("{} is not a directory", root.display()));
+    }
+    if !root.join("index.html").is_file() {
+        return Err(format!(
+            "{} has no index.html — is that a built bundle?",
+            root.display()
+        ));
+    }
+    Ok(())
+}
+
 /// `fleet webui` — the browser build.
 pub(crate) fn cmd_webui(
     port: Option<u16>,
@@ -79,25 +98,51 @@ pub(crate) fn cmd_webui(
             std::process::exit(2);
         }
     };
-    // `--web-root` wins, then the env (how the container is configured), then
+    // Where the bundle comes from: `--web-root`, then `FLEET_WEB_ROOT`, then
     // whatever this build compiled in. A directory beats the embedded copy on
     // purpose: that is how you iterate on the frontend without rebuilding the
-    // binary, and how the cloud image keeps shipping its own bundle.
+    // binary, and how a deployment pins its own bundle.
     //
-    // Nothing at all → a UI-less "web UI" is a misconfiguration worth failing
-    // on rather than starting a port that answers 404 for every page.
-    let root = web_root.or_else(|| {
-        std::env::var("FLEET_WEB_ROOT")
+    // The two disk sources are NOT interchangeable when the path holds no
+    // bundle, and conflating them crash-looped the cloud container:
+    //
+    // - `--web-root` is a demand someone typed for this one invocation. An
+    //   unusable path is a typo worth failing on.
+    // - `FLEET_WEB_ROOT` is ambient deployment config — the cloud image presets
+    //   it as the UI/API mode switch, and since the UI moved into the binary
+    //   nothing is written to that path any more. Exiting on it meant the
+    //   container refused to start even though it was carrying a perfectly good
+    //   UI: `fleet webui: /usr/share/fleet-web is not a directory`, forever.
+    //   So an unusable env value warns and falls through to the built-in copy.
+    //
+    // Nothing usable anywhere → a UI-less "web UI" is a misconfiguration worth
+    // failing on rather than a port that answers 404 for every page.
+    let from_disk = match web_root {
+        Some(flag) => {
+            if let Err(why) = bundle_problem(&flag) {
+                eprintln!("fleet webui: {}", why);
+                std::process::exit(2);
+            }
+            Some(flag)
+        }
+        None => match std::env::var("FLEET_WEB_ROOT")
             .ok()
             .filter(|s| !s.is_empty())
             .map(std::path::PathBuf::from)
-    });
-    let assets = match root {
+        {
+            Some(env_root) => match bundle_problem(&env_root) {
+                Ok(()) => Some(env_root),
+                Err(why) => {
+                    eprintln!("[fleet webui] ignoring FLEET_WEB_ROOT: {why}");
+                    None
+                }
+            },
+            None => None,
+        },
+    };
+
+    let assets = match from_disk {
         Some(root) => {
-            if !root.is_dir() {
-                eprintln!("fleet webui: {} is not a directory", root.display());
-                std::process::exit(2);
-            }
             eprintln!("[fleet webui] serving web UI from {}", root.display());
             claw_fleet_core::web_assets::from_dir(root)
         }
@@ -171,6 +216,22 @@ mod tests {
         // being mistaken for "unset" and replaced by the default.
         assert_eq!(resolve_webui_port(Some(0), None), Ok(0));
         assert_eq!(resolve_webui_port(None, Some("0".into())), Ok(0));
+    }
+
+    #[test]
+    fn bundle_problem_names_what_is_wrong() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let missing = dir.path().join("nope");
+        assert!(bundle_problem(&missing).unwrap_err().contains("not a directory"));
+
+        // A directory is not enough — an empty one would 404 every page.
+        let empty = dir.path().join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        assert!(bundle_problem(&empty).unwrap_err().contains("no index.html"));
+
+        std::fs::write(empty.join("index.html"), b"<html></html>").unwrap();
+        assert_eq!(bundle_problem(&empty), Ok(()));
     }
 
     #[test]
