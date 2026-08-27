@@ -564,12 +564,12 @@ data-pipeline  <span class="b">delegating</span>  84 tok/s  $6.40<br>
       <div class="dl-row">
         <img src="icon-linux.svg" alt=""><span class="dl-name">Linux</span>
         <span class="dl-arch">web UI — x86_64 / ARM64</span>
-        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/fleet-linux-x64">fleet CLI</a>
-        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-webui.tar.gz">webui.tar.gz</a>
+        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/fleet-linux-x64">fleet-linux-x64</a>
+        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/fleet-linux-arm64">fleet-linux-arm64</a>
       </div>
     </div>
-    <p class="dl-note">Linux runs the same UI in your browser: download both, then
-      <code>fleet webui --web-root ./claw-fleet-webui</code> and open
+    <p class="dl-note">Linux runs the same UI in your browser — the UI is compiled into the binary, so it's one download:
+      <code>chmod +x fleet-linux-x64 &amp;&amp; ./fleet-linux-x64 webui</code>, then open
       <code>http://127.0.0.1:4571</code>. <a href="https://github.com/hoveychen/claw-fleet/blob/main/README.md">Full steps →</a></p>
     <p class="dl-note">The mobile app needs no install — enable <b>Mobile</b> in the desktop app and scan the QR code.</p>
   </section>
