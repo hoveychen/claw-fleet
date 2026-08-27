@@ -1293,6 +1293,30 @@ export function mockBrowseDir(path?: string): BrowseDirResponse {
   return { path: p, parent, entries: [], truncated: false };
 }
 
+/** Mirrors the desktop's `create_dir`: one new child, then the listing of that
+ *  child (empty, with a parent link) — so `?mock` exercises the same
+ *  land-inside-the-new-directory flow the real host serves. The fixture tree is
+ *  mutated, so the new directory stays visible when the user walks back up. */
+export function mockCreateDir(path: string | undefined, name: string): BrowseDirResponse {
+  const parent = mockBrowseDir(path); // throws for a parent outside the tree
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.startsWith(".") || trimmed.includes("/") || trimmed.includes("\\")) {
+    throw new Error(`invalid directory name: ${name}`);
+  }
+  if (parent.entries.some((e) => e.name === trimmed)) {
+    throw new Error(`${trimmed} already exists`);
+  }
+  const child = `${parent.path}/${trimmed}`;
+  MOCK_DIR_TREE[parent.path] = {
+    ...parent,
+    entries: [...parent.entries, { name: trimmed, path: child, isGitRepo: false }].sort((a, b) =>
+      a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
+    ),
+  };
+  MOCK_DIR_TREE[child] = { path: child, parent: parent.path, entries: [], truncated: false };
+  return MOCK_DIR_TREE[child];
+}
+
 /** The relay chain behind `sess-billing-*` — three legs, so the handoff tab has
  *  something to collapse/expand. Long notes with bare newlines also exercise the
  *  markdown line-break rendering. Keyed lookup lives in the mock relay. */
