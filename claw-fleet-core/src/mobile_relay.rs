@@ -624,6 +624,25 @@ fn live_devices() -> Vec<MobileClientInfo> {
 // ── Outbound publishing ──────────────────────────────────────────────────────
 
 static WS_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Set by the desktop app before [`ensure_ws_client`]. Everything else — `fleet
+/// serve`, `fleet webui` — is a headless host and yields the relay agent role to
+/// a running desktop (see [`crate::relay_role`]).
+static DESKTOP_AGENT: AtomicBool = AtomicBool::new(false);
+
+/// Declare this process the desktop app for relay-role arbitration. Idempotent;
+/// call it before `ensure_ws_client`.
+pub fn set_desktop_agent() {
+    DESKTOP_AGENT.store(true, Ordering::SeqCst);
+}
+
+fn agent_kind() -> crate::relay_role::AgentKind {
+    if DESKTOP_AGENT.load(Ordering::SeqCst) {
+        crate::relay_role::AgentKind::Desktop
+    } else {
+        crate::relay_role::AgentKind::Headless
+    }
+}
 static CONNECTED: AtomicBool = AtomicBool::new(false);
 static CLIENTS: AtomicUsize = AtomicUsize::new(0);
 /// Bumped on every config save; the connect loop drops the current socket
@@ -3076,11 +3095,32 @@ pub fn ensure_ws_client() {
 }
 
 async fn ws_run_loop() {
+    // Logged once per yield/resume transition, not per retry — this loop wakes
+    // every 15s while yielding.
+    let mut yielding = false;
     loop {
         let cfg = load_config();
         if !cfg.enabled || cfg.secret.is_empty() {
             WS_STARTED.store(false, Ordering::SeqCst);
             return;
+        }
+        // Only one process per machine may hold the agent role. The relay hands
+        // every client frame to *all* agents in the channel, so a second local
+        // agent runs every phone-side write a second time — see `relay_role`.
+        if !crate::relay_role::claim(agent_kind()) {
+            if !yielding {
+                yielding = true;
+                crate::log_debug(
+                    "[mobile-relay] another local Fleet process holds the agent role; \
+                     staying out of the channel",
+                );
+            }
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            continue;
+        }
+        if yielding {
+            yielding = false;
+            crate::log_debug("[mobile-relay] agent role is ours; joining the channel");
         }
         let gen = CONFIG_GEN.load(Ordering::SeqCst);
         match ws_connect_once(&cfg, gen).await {
@@ -3452,6 +3492,12 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
             _ = config_check.tick() => {
                 if CONFIG_GEN.load(Ordering::SeqCst) != gen {
                     return Err("config changed; reconnecting".into());
+                }
+                // The desktop app just claimed the agent role out from under us
+                // (see `relay_role`): drop the socket now rather than doubling
+                // every phone write until the next reconnect.
+                if crate::relay_role::is_preempted() {
+                    return Err("relay role taken over by another local Fleet process".into());
                 }
             }
         }
