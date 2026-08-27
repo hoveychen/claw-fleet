@@ -44,6 +44,13 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// tick is lost.
 const HEARTBEAT: Duration = Duration::from_secs(25);
 
+/// Longest silence tolerated while draining answers after stdin closes.
+///
+/// Only a backstop: the drain normally ends the moment every request that was
+/// sent has been answered. It exists so a remote that goes quiet mid-turn — or
+/// asks a question nobody is left to answer — cannot hang the process.
+const DRAIN_MAX_IDLE: Duration = Duration::from_secs(30);
+
 /// Writes frames to stdout, one per line.
 ///
 /// The mutex is load-bearing, not defensive: the turn thread emits
@@ -86,6 +93,20 @@ pub fn serve_proxy(url: &str, token: Option<&str>) -> Result<(), String> {
     rt.block_on(proxy_loop(url, token))
 }
 
+/// Trace proxy traffic to stderr when `FLEET_ACP_DEBUG` is set.
+///
+/// stderr is the right channel: ACP's stdio transport reserves stdout for the
+/// protocol ("the agent MUST NOT write anything to its stdout that is not a
+/// valid ACP message") and explicitly allows stderr for logging, which clients
+/// may capture, forward or ignore. This is the first thing to reach for when an
+/// editor integration is silent.
+fn trace(dir: &str, what: &str) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("FLEET_ACP_DEBUG").is_some()) {
+        eprintln!("[acp {dir}] {what}");
+    }
+}
+
 async fn proxy_loop(url: &str, token: Option<&str>) -> Result<(), String> {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
@@ -99,6 +120,7 @@ async fn proxy_loop(url: &str, token: Option<&str>) -> Result<(), String> {
             return Err(format!("connect {url}: timed out after {}s", CONNECT_TIMEOUT.as_secs()))
         }
     };
+    trace("conn", &format!("connected to {url}"));
     let (mut ws_tx, mut ws_rx) = ws.split();
 
     // stdin is blocking, so it gets a real thread and hands lines over a
@@ -126,24 +148,47 @@ async fn proxy_loop(url: &str, token: Option<&str>) -> Result<(), String> {
     // client has said anything.
     heartbeat.tick().await;
 
+    // JSON-RPC ids sent but not yet answered.
+    //
+    // Counting these is what lets the drain below finish exactly when the
+    // conversation is done instead of guessing at a timeout. It reads only the
+    // JSON-RPC envelope — request vs response — so the proxy still knows
+    // nothing about ACP itself.
+    let mut pending: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let mut stdin_closed = false;
     loop {
         tokio::select! {
             // Editor → cloud.
             line = stdin_rx.recv() => match line {
                 Some(line) => {
+                    trace("->", &line);
+                    if let Ok(super::jsonrpc::Incoming::Request { id, .. }) =
+                        super::jsonrpc::parse(&line)
+                    {
+                        pending.insert(id.to_string());
+                    }
                     if ws_tx.send(Message::Text(line.into())).await.is_err() {
                         return Err("remote closed while sending".to_string());
                     }
                 }
-                // The editor closed stdin: shut the socket down cleanly.
+                // The editor closed stdin. Do NOT return here: requests already
+                // in flight still have answers coming, and dropping the socket
+                // now would swallow them. Break out and drain instead.
                 None => {
-                    let _ = ws_tx.send(Message::Close(None)).await;
-                    return Ok(());
+                    trace("conn", "stdin closed; draining");
+                    stdin_closed = true;
                 }
             },
             // Cloud → editor.
             msg = ws_rx.next() => match msg {
                 Some(Ok(Message::Text(text))) => {
+                    trace("<-", &text);
+                    if let Ok(super::jsonrpc::Incoming::Response { id, .. }) =
+                        super::jsonrpc::parse(&text)
+                    {
+                        pending.remove(&id.to_string());
+                    }
                     // One frame per line, matching what the editor expects.
                     if writeln!(stdout, "{text}").and_then(|_| stdout.flush()).is_err() {
                         return Ok(()); // editor went away
@@ -165,7 +210,42 @@ async fn proxy_loop(url: &str, token: Option<&str>) -> Result<(), String> {
                 }
             }
         }
+        if stdin_closed {
+            break;
+        }
     }
+
+    // stdin is done, but requests already sent still have answers coming.
+    //
+    // Drain *before* closing, not after: sending Close first puts the socket
+    // into its closing handshake, and replies arriving during it are not
+    // reliably delivered. That ordering is what made a client which sends its
+    // requests and immediately closes stdin see nothing at all.
+    //
+    // The exit condition is "every request has been answered", not a timer, so
+    // a slow call still lands while a finished conversation exits immediately.
+    while !pending.is_empty() {
+        match tokio::time::timeout(DRAIN_MAX_IDLE, ws_rx.next()).await {
+            Ok(Some(Ok(Message::Text(text)))) => {
+                trace("<-", &text);
+                if let Ok(super::jsonrpc::Incoming::Response { id, .. }) =
+                    super::jsonrpc::parse(&text)
+                {
+                    pending.remove(&id.to_string());
+                }
+                if writeln!(stdout, "{text}").and_then(|_| stdout.flush()).is_err() {
+                    break;
+                }
+            }
+            Ok(Some(Ok(Message::Close(_)))) | Ok(None) => break,
+            Ok(Some(Ok(_))) => {}
+            // A frame error, or the remote going silent: nothing more coming.
+            Ok(Some(Err(_))) | Err(_) => break,
+        }
+    }
+    trace("conn", "drain complete; closing");
+    let _ = ws_tx.send(Message::Close(None)).await;
+    Ok(())
 }
 
 /// Build the WebSocket handshake request, carrying the ACP subprotocol and, if
