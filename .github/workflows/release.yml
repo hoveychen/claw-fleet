@@ -260,10 +260,12 @@ jobs:
           run-id: ${{ needs.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download Linux desktop artifact (from CI run)
+      # Linux has no desktop bundle — it gets the CLI (above) plus this browser
+      # build of the UI, which `fleet webui --web-root` serves.
+      - name: Download web UI bundle (from CI run)
         uses: actions/download-artifact@v8
         with:
-          name: desktop-linux-x64
+          name: webui-bundle
           path: all-artifacts
           run-id: ${{ needs.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -285,13 +287,28 @@ jobs:
           cat >> release_notes.md << EOF
           ## Downloads
 
-          ### App Installers
+          ### Desktop app — macOS & Windows
 
           | | Platform | Architecture | Download |
           |---|---|---|---|
           | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Universal (Intel + Apple Silicon) | [claw-fleet-macos.pkg](${DL}/claw-fleet-macos.pkg) |
           | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 / ARM64 | [claw-fleet-windows-x64-setup.exe](${DL}/claw-fleet-windows-x64-setup.exe) |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | [claw-fleet-linux-x64.deb](${DL}/claw-fleet-linux-x64.deb) / [claw-fleet-linux-x64.AppImage](${DL}/claw-fleet-linux-x64.AppImage) |
+
+          ### Linux — web UI
+
+          Linux runs Claw Fleet in the browser instead of a native bundle. Grab the CLI for your architecture plus the UI bundle:
+
+          \`\`\`bash
+          curl -L -o fleet ${DL}/fleet-linux-x64   # or fleet-linux-arm64
+          chmod +x fleet
+          curl -L ${DL}/claw-fleet-webui.tar.gz | tar xz
+          ./fleet webui --web-root ./claw-fleet-webui
+          # → http://127.0.0.1:4571
+          \`\`\`
+
+          | Asset | Download |
+          |---|---|
+          | Web UI bundle (all platforms) | [claw-fleet-webui.tar.gz](${DL}/claw-fleet-webui.tar.gz) |
 
           ### Standalone CLI
 

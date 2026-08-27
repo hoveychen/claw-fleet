@@ -124,12 +124,13 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   # Tag push only — Linux CLI binaries.
   #
-  # These two artifacts serve double duty: they are the standalone Linux CLI
-  # release downloads AND the `fleet` probes that every desktop bundle (macOS,
-  # Windows, Linux) embeds as resources for remote SSH deployment. They are the
-  # only cross-platform binaries the desktop jobs cannot produce on their own
-  # runner, so they live in this small, fast (zigbuild, no tests) job that the
-  # desktop matrix depends on.
+  # These two artifacts serve triple duty: they are the standalone Linux CLI
+  # release downloads (the half of the Linux story that runs `fleet webui`),
+  # AND the `fleet` probes that every desktop bundle (macOS, Windows) embeds as
+  # resources for remote SSH deployment. They are the only cross-platform
+  # binaries the desktop jobs cannot produce on their own runner, so they live
+  # in this small, fast (zigbuild, no tests) job that the desktop matrix
+  # depends on.
   # ═══════════════════════════════════════════════════════════════════════════
   cli-linux:
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
@@ -210,15 +211,77 @@ jobs:
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # Tag push only — the browser build of the UI, shipped as a release tarball.
+  #
+  # This is what Linux users get instead of a desktop bundle: the same `vite
+  # build` output the Tauri app embeds, served by `fleet webui --web-root`.
+  # There is no Tauri/GTK/WebKitGTK build on Linux at all any more — one Node
+  # job produces a platform-independent bundle that pairs with the fleet-linux-*
+  # CLI binaries from `cli-linux` above.
+  #
+  # Two frontends go in: the desktop UI at the root (what a browser loads) and
+  # the mobile UI under `m/`, exactly the layout deploy/lean/Dockerfile builds —
+  # the desktop index.html redirects phones to `/m/`, and web_assets maps that
+  # subdirectory with no extra route.
+  # ═══════════════════════════════════════════════════════════════════════════
+  webui-bundle:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    name: Web UI bundle
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Build desktop frontend (browser build)
+        working-directory: claw-fleet-desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build mobile frontend (same-origin webui mode)
+        working-directory: mobile-web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build:webui
+
+      - name: Assemble bundle
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          cp -R claw-fleet-desktop/dist claw-fleet-webui
+          cp -R mobile-web/dist-webui claw-fleet-webui/m
+          tar -czf dist-artifacts/claw-fleet-webui.tar.gz claw-fleet-webui
+
+      - name: Upload web UI bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: webui-bundle
+          path: dist-artifacts/
+          if-no-files-found: error
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Tag push only — per-platform desktop bundle (unsigned).
   #
   # Each job builds its OWN-platform `fleet` sidecar CLI and the Tauri app in a
   # single runner, so the shared `target/` directory lets cargo reuse the
   # compiled `claw-fleet-core` and dependency tree between the two builds
-  # instead of recompiling the whole workspace in a separate CLI job. The macOS
-  # and Windows jobs also upload their sidecar as the standalone CLI release
-  # artifact (fleet-macos / fleet-windows-x64). The Linux job reuses the
-  # cli-linux x64 probe as its sidecar, so it never compiles fleet-cli twice.
+  # instead of recompiling the whole workspace in a separate CLI job. Both jobs
+  # also upload their sidecar as the standalone CLI release artifact
+  # (fleet-macos / fleet-windows-x64).
+  #
+  # macOS and Windows only — Linux ships the CLI plus the webui-bundle above.
+  # The cli-linux dependency stays: every desktop bundle embeds the Linux CLI
+  # binaries as resources for remote SSH deployment.
   #
   # Tag-time signing (macOS) and publishing happen in release.yml, which
   # downloads these artifacts.
@@ -238,7 +301,6 @@ jobs:
             sidecar_name: fleet-universal-apple-darwin
             cli_artifact: fleet-macos
             fixed_suffix: macos
-            build_sidecar: true
             cache_key: desktop-macos
 
           - name: Windows (x64)
@@ -248,18 +310,7 @@ jobs:
             sidecar_name: fleet-x86_64-pc-windows-msvc.exe
             cli_artifact: fleet-windows-x64
             fixed_suffix: windows-x64
-            build_sidecar: true
             cache_key: desktop-windows-x64
-
-          - name: Linux (x86_64)
-            runner: ubuntu-22.04
-            rust_target: x86_64-unknown-linux-gnu
-            tauri_args: --target x86_64-unknown-linux-gnu
-            sidecar_name: fleet-x86_64-unknown-linux-gnu
-            cli_artifact: ''
-            fixed_suffix: linux-x64
-            build_sidecar: false
-            cache_key: desktop-linux-x64
 
     runs-on: ${{ matrix.runner }}
 
@@ -310,26 +361,11 @@ jobs:
           # can restore. See the cache-warm job below.
           shared-key: ${{ matrix.cache_key }}
 
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
-            libglib2.0-dev \
-            libgtk-3-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            libasound2-dev \
-            xdg-utils
-
       # ── Build own-platform sidecar CLI (macOS / Windows) ──────────────────
       # Runs before the Tauri build so the shared target/ dir warms core for it.
 
       - name: Build sidecar CLI (macOS universal)
-        if: matrix.build_sidecar && runner.os == 'macOS'
+        if: runner.os == 'macOS'
         shell: bash
         run: |
           mkdir -p claw-fleet-desktop/binaries dist
@@ -347,7 +383,7 @@ jobs:
           cp "claw-fleet-desktop/binaries/${{ matrix.sidecar_name }}" "dist/${{ matrix.cli_artifact }}"
 
       - name: Build sidecar CLI (Windows)
-        if: matrix.build_sidecar && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           mkdir -p claw-fleet-desktop/binaries dist
@@ -358,7 +394,6 @@ jobs:
              "dist/${{ matrix.cli_artifact }}.exe"
 
       - name: Upload standalone CLI artifact
-        if: matrix.build_sidecar
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.cli_artifact }}
@@ -379,29 +414,11 @@ jobs:
           name: fleet-linux-arm64
           path: claw-fleet-desktop/resources
 
-      - name: Download Linux sidecar
-        if: '!matrix.build_sidecar'
-        uses: actions/download-artifact@v8
-        with:
-          name: fleet-linux-x64
-          path: claw-fleet-desktop/binaries
-
       - name: Prepare sidecar and probes
         shell: bash
         run: |
           cd claw-fleet-desktop/binaries
-          # Linux job downloads its sidecar (named fleet-linux-x64) and renames
-          # it; macOS/Windows already placed the sidecar in the build step above.
-          if [ "${{ matrix.build_sidecar }}" != "true" ]; then
-            mv fleet-linux-x64* "${{ matrix.sidecar_name }}"
-            chmod +x "${{ matrix.sidecar_name }}"
-          fi
           chmod +x "${{ matrix.sidecar_name }}" 2>/dev/null || true
-
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            cp "${{ matrix.sidecar_name }}" fleet-linux
-          fi
-
           cd ../resources
           chmod +x fleet-linux-x64 fleet-linux-arm64
 
@@ -440,16 +457,6 @@ jobs:
           mkdir -p dist-artifacts
           find target/${{ matrix.rust_target }}/release/bundle/nsis \
             -name "*.exe" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}-setup.exe
-
-      - name: Collect Linux bundles
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          mkdir -p dist-artifacts
-          find target/${{ matrix.rust_target }}/release/bundle/deb \
-            -name "*.deb" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}.deb 2>/dev/null || true
-          find target/${{ matrix.rust_target }}/release/bundle/appimage \
-            -name "*.AppImage" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}.AppImage 2>/dev/null || true
 
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v7
@@ -504,13 +511,6 @@ jobs:
               cargo build --release -p fleet-cli --target x86_64-pc-windows-msvc
               cargo build --release -p claw-fleet-desktop --target x86_64-pc-windows-msvc
 
-          - name: Linux (x86_64)
-            runner: ubuntu-22.04
-            cache_key: desktop-linux-x64
-            targets: x86_64-unknown-linux-gnu
-            build: |
-              cargo build --release -p claw-fleet-desktop --target x86_64-unknown-linux-gnu
-
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -563,21 +563,6 @@ jobs:
           # Save on main even though cargo exits "successful with nothing to do"
           # on a warm cache — this also refreshes the cache's 7-day TTL.
           save-if: true
-
-      - name: Install Linux dependencies
-        if: (github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true') && runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
-            libglib2.0-dev \
-            libgtk-3-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            libasound2-dev \
-            xdg-utils
 
       # claw-fleet-desktop's tauri build script requires the frontend dist to
       # exist (frontendDist: ./dist), so build it before compiling the crate.
