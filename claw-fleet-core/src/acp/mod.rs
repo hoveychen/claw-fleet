@@ -36,5 +36,7 @@
 //! - [`agent`] — method dispatch onto Fleet's spawn/resume machinery.
 
 pub mod agent;
+pub mod conn;
 pub mod jsonrpc;
+pub mod stdio;
 pub mod types;

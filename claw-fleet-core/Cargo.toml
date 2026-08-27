@@ -51,8 +51,14 @@ conch-parser = "0.1.1"
 shell-words = "1.1.1"
 ctrlc = { version = "3", features = ["termination"] }
 git2 = { version = "0.18", default-features = false }
-# Outbound WebSocket long-connection for the mobile relay channel.
+# Outbound WebSocket long-connection for the mobile relay channel, and the
+# `fleet acp --remote` stdio→cloud proxy.
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+# tokio-tungstenite's WebSocketStream *is* a futures Stream/Sink — `.split()`,
+# `.next()` and `.send()` come from StreamExt/SinkExt, which neither std nor
+# tokio provides. Same crate and version fleet-relay already builds against, so
+# this adds nothing new to the lockfile.
+futures-util = { version = "0.3", default-features = false }
 # dsh stores its provider config (including which env var holds the OpenRouter
 # key) as YAML. Already a production dependency of fleet-cli and already in the
 # lockfile, so promoting it here from dev-dependencies adds no new crate — and
