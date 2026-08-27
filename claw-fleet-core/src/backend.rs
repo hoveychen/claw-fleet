@@ -467,9 +467,10 @@ pub trait Backend: Send + Sync {
     fn today_usage_breakdown(&self) -> crate::today_usage::TodayUsageBreakdown;
     /// Per-model receipt + per-day trend over an arbitrary inclusive
     /// `[from_ms, to_ms]` window (epoch ms). The longer-range generalisation of
-    /// [`Self::today_usage_breakdown`] for the Settings usage view: Claude turns
-    /// bucket per-turn by their own timestamp; Codex sessions attribute whole to
-    /// their creation day. See [`crate::today_usage::usage_range_breakdown`].
+    /// [`Self::today_usage_breakdown`] for the Settings usage view: both Claude
+    /// and Codex turns bucket by their own timestamp (Codex's recovered by
+    /// differencing its cumulative snapshots). See
+    /// [`crate::today_usage::usage_range_breakdown`].
     fn usage_range_breakdown(
         &self,
         from_ms: i64,

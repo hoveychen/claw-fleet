@@ -477,17 +477,16 @@ fn build_lines(
 // the cent. The Settings "usage" view adds the longer presets (7d / 30d / all)
 // and the per-day trend line.
 //
-// Attribution differs by source, and this asymmetry is deliberate:
-//   • **Claude** sessions are folded **per turn**: each finalized turn is
-//     placed on the trend by its own `timestamp`, so a session spanning several
-//     days spreads across those days' points — accurate.
-//   • **Codex** rollouts expose only a single cumulative `total_token_usage`
-//     snapshot per session (no per-turn deltas), so a Codex session is
-//     attributed **whole to its creation day**. `has_codex_approximation` flags
-//     this so the UI can footnote that Codex trend placement is approximate.
-//     That also means a Codex session outliving midnight still under-reports on
-//     the later days — the Claude-side bug this fold fixed has no Codex cure
-//     until codex logs per-turn deltas.
+// Both sources are folded **per turn**, each turn placed on the trend by its own
+// timestamp, so a session spanning several days spreads across those days:
+//   • **Claude** reads each finalized assistant turn's `usage` directly.
+//   • **Codex** has no per-turn `usage` record, but every `token_count` event
+//     carries the *running* `total_token_usage` plus a timestamp, so consecutive
+//     snapshots differ by exactly that turn's usage
+//     (`codex_source::codex_token_timeline`). A rollout whose events predate the
+//     `timestamp` field falls back to whole-session attribution and sets
+//     `has_codex_approximation` so the UI can footnote it; no rollout measured on
+//     this host is like that.
 
 /// One day's totals in a range breakdown — a point on the trend chart.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -522,8 +521,10 @@ pub struct UsageRangeBreakdown {
     pub total_cost_usd: f64,
     pub agent_cost_usd: f64,
     pub fleet_cost_usd: f64,
-    /// True if any Codex session contributed (whole-session-to-one-day
-    /// attribution — its trend placement is approximate). Drives a UI footnote.
+    /// True if a contributing Codex rollout had `token_count` events with no
+    /// timestamp, so those turns were placed on the session's attribution day
+    /// rather than their own. Drives a UI footnote. False for a fully timestamped
+    /// rollout, which is every real one measured on this host.
     pub has_codex_approximation: bool,
 }
 
@@ -826,19 +827,77 @@ fn fold_claude_session_cells(jsonl: &str) -> SessionCells {
 /// figure attributes to `attribute_ms`'s local day — same as
 /// [`fold_codex_session_range`]. Returns empty cells on error / zero usage.
 fn fold_codex_session_cells(uri: &str, attribute_ms: i64) -> SessionCells {
+    use crate::model_cost::{turn_cost_usd, TurnUsage};
+
     let mut cells = SessionCells::new();
-    let Ok(bd) = crate::codex_source::codex_token_breakdown(uri) else {
+    let Ok(timeline) = crate::codex_source::codex_token_timeline(uri) else {
         return cells;
     };
-    if bd.total_tokens == 0 {
+    if timeline.deltas.is_empty() {
         return cells;
     }
-    let model = bd.model.clone().unwrap_or_else(|| "gpt".to_string());
+    let model = timeline.model.clone().unwrap_or_else(|| "gpt".to_string());
+
+    let mut had_undated = false;
+    for d in &timeline.deltas {
+        // A turn whose `token_count` event carries no timestamp falls back to the
+        // session's attribution instant — the pre-timeline behaviour for the
+        // whole rollout. Unlike Claude, where an undated turn is dropped, codex
+        // keeps it: this is the metering basis for a paid quota, and mis-dating
+        // a turn is a smaller lie than deleting it. `had_undated` records the
+        // fallback so the UI can still footnote the session as approximate.
+        // No real rollout hits this — all 7124 `token_count` events across this
+        // host's 276 rollouts carry a timestamp — it exists for a legacy format.
+        let date = match d.timestamp_ms {
+            Some(ms) => local_date_str(ms),
+            None => {
+                had_undated = true;
+                local_date_str(attribute_ms)
+            }
+        };
+        let turn = TurnUsage {
+            input_tokens: d.input_tokens,
+            output_tokens: d.output_tokens,
+            cache_read_tokens: d.cached_input_tokens,
+            // Codex reports no billable cache writes: the newer rollout format
+            // does carry `cache_write_input_tokens`, but it was 0 in all 55
+            // rollouts on this host that have the field, so there is no TTL
+            // split to bill.
+            cache_creation_tokens: 0,
+            cache_creation_1h_tokens: 0,
+            web_search_requests: 0,
+        };
+        cells
+            .entry((date, model.clone()))
+            .or_default()
+            .add(
+                d.input_tokens,
+                0,
+                0,
+                d.cached_input_tokens,
+                d.output_tokens,
+                turn_cost_usd(&model, &turn),
+            );
+    }
+    if had_undated {
+        // An all-zero cell under the `""` date: invisible to every sum (the
+        // window fold skips empty dates, and the values are zero anyway) but it
+        // survives the cache round-trip, which is what lets
+        // `codex_cells_are_approximate` still answer after a cache hit — the
+        // cells map is the only thing cached.
+        cells.entry((String::new(), model)).or_default();
+    }
     cells
-        .entry((local_date_str(attribute_ms), model))
-        .or_default()
-        .add(bd.input_tokens, 0, 0, bd.cached_input_tokens, bd.output_tokens, bd.cost_usd);
-    cells
+}
+
+/// True when a rollout contributed at least one **undated** turn. Those turns
+/// were placed on the session's attribution day rather than their own, so this
+/// session's trend placement is approximate and the UI should footnote it. The
+/// signal is the zero-valued `""` cell that [`fold_codex_session_cells`] leaves
+/// behind. A fully timestamped rollout (every real one measured on this host) is
+/// exact and needs no footnote.
+fn codex_cells_are_approximate(cells: &SessionCells) -> bool {
+    cells.keys().any(|(d, _)| d.is_empty())
 }
 
 /// Sum cells whose non-empty date is within `[from_date, to_date]` (undated
@@ -979,7 +1038,12 @@ fn live_ids(sessions: &[SessionInfo]) -> std::collections::HashSet<&str> {
 // fold semantics change so stale files are discarded rather than mis-read.
 
 /// Bump when the cell shape or the projection semantics change.
-const CACHE_SCHEMA_VERSION: u32 = 2;
+///
+/// v3: codex sessions project per turn (one cell per event date) instead of one
+/// cell at the creation day, so a v2 file's codex cells would keep reporting the
+/// old whole-session attribution until each rollout's fingerprint happened to
+/// change.
+const CACHE_SCHEMA_VERSION: u32 = 3;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PersistedCell {
@@ -1370,34 +1434,19 @@ fn build_range_breakdown_cached(
     };
 
     for s in sessions {
-        if s.agent_source == "codex" {
-            // Whole-session attribution to the creation day; include only if
-            // that instant falls in the window.
-            let created = s.created_at_ms as i64;
-            if created < from_ms || created > to_ms {
-                continue;
-            }
-            let cells = cache.cells(s);
-            if !cells.is_empty() {
-                has_codex_approximation = true;
-            }
-            sum_cells_window(
-                cells,
-                &s.agent_source,
-                &live_from_date,
-                &to_date,
-                &mut by_model,
-                &mut by_day,
-            );
-            continue;
-        }
-        // Claude: prune sessions that cannot overlap the window before the
+        // Prune sessions that cannot overlap the window before the
         // (cache-miss-only) projection — a session with no activity at/after
-        // `from_ms`, or created after `to_ms`, has no in-window turns.
+        // `from_ms`, or created after `to_ms`, has no in-window turns. Codex gets
+        // the same overlap test as Claude now that its turns carry their own
+        // dates: pruning on the creation instant dropped a codex session that
+        // started before the window and kept spending inside it.
         if (s.last_activity_ms as i64) < from_ms || (s.created_at_ms as i64) > to_ms {
             continue;
         }
         let cells = cache.cells(s);
+        if s.agent_source == "codex" && codex_cells_are_approximate(cells) {
+            has_codex_approximation = true;
+        }
         sum_cells_window(
             cells,
             &s.agent_source,
@@ -2276,21 +2325,48 @@ mod range_breakdown_tests {
         s
     }
 
+    /// A rollout whose `token_count` events carry **no** timestamp (a legacy
+    /// format — no rollout on this host is like this) keeps the old behaviour:
+    /// its usage is placed on the session's attribution day rather than dropped,
+    /// and `has_codex_approximation` flags the trend as approximate.
+    ///
+    /// Dropping it would be the Claude rule, but codex usage is the metering
+    /// basis for a paid quota: mis-dating a turn is a smaller lie than deleting
+    /// it, and the flag makes the mis-dating visible.
     #[test]
-    fn codex_session_attributed_whole_to_creation_day_and_flagged() {
+    fn undated_codex_rollout_falls_back_to_creation_day_and_is_flagged() {
         let created = ts("2026-07-15T12:00:00Z");
         let s = codex_session("codexin", created, "gpt-5.6-sol", 100_000, 60_000, 4_000);
         let from = ts("2026-07-14T00:00:00Z");
         let to = ts("2026-07-16T00:00:00Z");
         let b = build_range_breakdown(&[s], from, to);
 
-        assert!(b.has_codex_approximation, "codex contributed → flag set");
+        assert!(b.has_codex_approximation, "undated turns → flag set");
         assert_eq!(b.lines.len(), 1);
         assert_eq!(b.lines[0].source, "codex");
         assert_eq!(b.lines[0].input_tokens, 40_000, "full-price = raw − cached");
         assert_eq!(b.lines[0].cache_read_tokens, 60_000);
         assert_eq!(b.daily.len(), 1);
         assert_eq!(b.daily[0].date, local_date_str(created), "trend at creation day");
+    }
+
+    /// A fully timestamped rollout needs no footnote — the flag is about undated
+    /// turns, not about codex as a source.
+    #[test]
+    fn timestamped_codex_rollout_is_not_flagged_as_approximate() {
+        let s = codex_session_snapshots(
+            "codexexact",
+            ts("2026-07-15T12:00:00Z"),
+            ts("2026-07-15T18:00:00Z"),
+            "gpt-5.6-sol",
+            &[("2026-07-15T13:00:00Z", 100_000, 60_000, 4_000)],
+        );
+        let b = build_range_breakdown(&[s], ts("2026-07-14T00:00:00Z"), ts("2026-07-16T00:00:00Z"));
+
+        assert!(!b.has_codex_approximation, "every turn was placeable");
+        assert_eq!(b.lines.len(), 1);
+        assert_eq!(b.lines[0].input_tokens, 40_000);
+        assert_eq!(b.lines[0].cache_read_tokens, 60_000);
     }
 
     #[test]
