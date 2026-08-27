@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, ListChecks, Coffee, ListTree } from "lucide-react";
+import { Menu, Shield, ListChecks, Coffee, ListTree, Package } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
@@ -16,6 +16,7 @@ import { MascotEyes } from "./MascotEyes";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { MemoryView } from "./MemoryView";
 import { WikiView } from "./WikiView";
+import { ArtifactsView } from "./ArtifactsView";
 import { AuditView } from "./AuditView";
 import { ScheduleView } from "./ScheduleView";
 import { PlansView } from "./PlansView";
@@ -357,6 +358,13 @@ export function SessionList() {
         <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3.5C6.8 2.4 5.2 2 3.5 2c-.6 0-1 .4-1 1v8.5c0 .6.4 1 1 1 1.7 0 3.3.4 4.5 1.5 1.2-1.1 2.8-1.5 4.5-1.5.6 0 1-.4 1-1V3c0-.6-.4-1-1-1-1.7 0-3.3.4-4.5 1.5Z"/><path d="M8 3.5V14"/></svg></span>
         <span className={styles.nav_label}>{t("view_wiki", "知识库")}</span>
       </button>
+      <button
+        className={`${styles.nav_item} ${viewMode === "artifacts" ? styles.nav_active : ""}`}
+        onClick={() => navTo("artifacts")}
+      >
+        <span className={styles.nav_icon}><Package size={14} strokeWidth={1.5} /></span>
+        <span className={styles.nav_label}>{t("view_artifacts", "产出")}</span>
+      </button>
 
       <div className={styles.nav_divider} />
 
@@ -630,6 +638,8 @@ export function SessionList() {
         <PlansView />
       ) : viewMode === "wiki" ? (
         <WikiView />
+      ) : viewMode === "artifacts" ? (
+        <ArtifactsView />
       ) : viewMode === "skills" ? (
         <SkillsView />
       ) : viewMode === "files" ? (

@@ -20,6 +20,7 @@ export const ALL_VIEW_MODES = [
   "report",
   "memory",
   "wiki",
+  "artifacts",
   "skills",
   "plugins",
   "files",

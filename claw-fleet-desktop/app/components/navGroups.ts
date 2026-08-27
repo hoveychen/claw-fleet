@@ -4,7 +4,7 @@ import type { ViewMode } from "../viewModes";
  *  - `fleet` (舰队): watching and administering the fleet — sessions, audit,
  *    the daily report, memory rules, skills, phone pairing.
  *  - `work` (工作): what you reach for while an agent is actually working —
- *    tasks, repos, the wiki, schedules, plan trees. */
+ *    tasks, repos, the wiki, deliverables, schedules, plan trees. */
 export type NavGroup = "fleet" | "work";
 
 /** Tab order in the strip. */
@@ -17,7 +17,7 @@ export const NAV_GROUPS: readonly NavGroup[] = ["fleet", "work"];
  *  navGroups.test.ts asserts the partition. */
 export const NAV_GROUP_VIEWS: Record<NavGroup, readonly ViewMode[]> = {
   fleet: ["list", "gallery", "audit", "report", "memory", "skills", "plugins", "mobile"],
-  work: ["history", "files", "wiki", "schedule", "plans"],
+  work: ["history", "files", "wiki", "artifacts", "schedule", "plans"],
 };
 
 /** Where a tab lands when it has no remembered last page (first click ever, or
