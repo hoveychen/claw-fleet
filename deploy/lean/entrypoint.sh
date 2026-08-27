@@ -18,6 +18,10 @@
 #    default-on) and runs the headless control-plane ticker (auto-resume /
 #    drain / codex-stall). The image presets FLEET_WEB_ROOT, so the default is
 #    the UI; unset it for an API-only container.
+#
+#    The UI itself is compiled into the `fleet` binary (feature `embed-webui`),
+#    so FLEET_WEB_ROOT's value is only an override: point it at a directory that
+#    exists to serve that bundle instead of the built-in one.
 set -euo pipefail
 
 : "${FLEET_SERVE_HOST:=0.0.0.0}"
@@ -229,11 +233,26 @@ fleet bootstrap --locale "${FLEET_LOCALE:-en}" --model "${FLEET_CLAUDE_MODEL-opu
 
 export FLEET_SERVE_HOST
 if [[ -n "${FLEET_WEB_ROOT:-}" ]]; then
+    # FLEET_WEB_ROOT is the mode switch it always was — set → web UI, unset →
+    # API only. What changed is that the image no longer ships a bundle on disk:
+    # the UI is compiled into the `fleet` binary. So this variable's *value* is
+    # now an optional override rather than the only place a UI can come from. A
+    # real directory is served from disk (mount one there to pin a different UI
+    # build); otherwise the built-in copy is used.
+    #
+    # The -d test is load-bearing, not defensive: `fleet webui --web-root` at a
+    # path that does not exist exits 2, so passing the image's preset value
+    # unconditionally would refuse to start the moment the bundle stopped being
+    # on disk.
+    webui_args=(--port "${FLEET_SERVE_PORT}" --host "${FLEET_SERVE_HOST}")
+    if [[ -d "${FLEET_WEB_ROOT}" ]]; then
+        echo "fleet-entrypoint: serving the web UI from ${FLEET_WEB_ROOT}" >&2
+        webui_args+=(--web-root "${FLEET_WEB_ROOT}")
+    else
+        echo "fleet-entrypoint: no bundle at ${FLEET_WEB_ROOT} — serving the web UI built into the fleet binary (mount a bundle there to override)" >&2
+    fi
     # --host explicitly: `fleet webui` binds loopback by default, which inside a
     # container means nothing outside it could ever connect.
-    exec fleet webui \
-        --port "${FLEET_SERVE_PORT}" \
-        --host "${FLEET_SERVE_HOST}" \
-        --web-root "${FLEET_WEB_ROOT}"
+    exec fleet webui "${webui_args[@]}"
 fi
 exec fleet serve --port "${FLEET_SERVE_PORT}" --token "${FLEET_ADMIN_TOKEN}"
