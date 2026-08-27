@@ -65,6 +65,7 @@ import { parseSkillInjection } from "../skillInjection";
 import { groupMetaRuns } from "./metaGrouping";
 import { countSteps, groupWorkRuns, isDecisionTool, workRunTitle } from "./workRuns";
 import { friendlyToolName, toolSummary } from "./toolSummary";
+import { userDisplayText } from "./slashCommand";
 import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { ToolDigest } from "../types";
@@ -836,15 +837,24 @@ const MessageRow = memo(function MessageRow({
         </div>
       );
     }
+    // What the person typed stays plain and whitespace-preserved — deliberately
+    // *not* markdown, matching the desktop's UserContent.tsx (and claude.ai /
+    // ChatGPT): measuring this repo's transcripts there said only ~6% of user
+    // messages carry markdown structure while ~10% contain single newlines a
+    // markdown renderer silently collapses into one paragraph. It also drops the
+    // CJK first-line indent the markdown chain applied to Chinese prose, which
+    // made a two-character message like 「进度」 sit two characters off its own
+    // bubble's left edge.
+    const display = userDisplayText(text);
     return (
       <div className={styles.userRow}>
         <div className={styles.userBubble}>
           {thumbs.length > 0 && <ThumbRow srcs={thumbs} />}
-          {text && <LazyMarkdown text={text} bare />}
+          {display && <div className={styles.userText}>{display}</div>}
           <AttachmentThumbs paths={attachments} client={client ?? null} />
         </div>
         <div className={styles.rowTime}>
-          {text && <CopyButton text={text} />}
+          {display && <CopyButton text={display} />}
           {fmtTime(msg.timestamp)}
         </div>
       </div>
