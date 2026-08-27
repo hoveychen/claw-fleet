@@ -43,6 +43,10 @@ pub const AUDIT_RULES_SAVE: &str = "/audit/rules/save";
 pub const AUDIT_RULES_SUGGEST: &str = "/audit/rules/suggest";
 pub const AUDIT_RULES_TOGGLE: &str = "/audit/rules/toggle";
 pub const BROWSE_DIR: &str = "/browse_dir";
+/// Create one directory under a browsed path (POST `{path, name}`). The picker
+/// is useless on a host whose tree is empty — a fresh cloud container has
+/// nothing under `$HOME` to select.
+pub const CREATE_DIR: &str = "/create_dir";
 /// Directories the user explicitly added to the 仓库 page: list / add / remove.
 /// These widen the explorer's `known_workspaces` beyond session-derived paths,
 /// so registration is a deliberate server-side act rather than a per-read flag.
