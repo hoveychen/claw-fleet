@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import "./fonts";
 import "./App.css";
 import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "./markdown/safeLinks";
 import { normalizeSvgBlankLines, markdownUrlTransform } from "./markdown/plugins";
-import { resolveTheme, useUIStore } from "./store";
+import { applyWindowTheme, useUIStore } from "./store";
 import styles from "./PreviewApp.module.css";
 
 type PreviewPayload = {
@@ -28,11 +27,7 @@ function PreviewApp() {
   // Apply theme to the subwindow so it matches the main window.
   useEffect(() => {
     const apply = () => {
-      const resolved = resolveTheme(theme);
-      document.documentElement.setAttribute("data-theme", resolved);
-      getCurrentWindow()
-        .setTheme(resolved === "dark" ? "dark" : "light")
-        .catch(() => {});
+      applyWindowTheme(theme).catch(() => {});
     };
     apply();
 
