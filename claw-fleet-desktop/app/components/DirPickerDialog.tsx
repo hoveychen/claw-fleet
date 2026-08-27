@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronUp, Folder, FolderGit2, FolderPlus } from "lucide-react";
+import { ChevronUp, Folder, FolderGit2, FolderPlus, HardDrive } from "lucide-react";
 import styles from "./DirPickerDialog.module.css";
 
 /** Mirrors `claw_fleet_core::workspace_browse::BrowseDirResponse`. */
@@ -15,6 +15,10 @@ interface BrowseDirResponse {
   parent: string | null;
   entries: BrowseEntry[];
   truncated: boolean;
+  /** Every browsable root. A root has no parent, so this is the only way back
+   *  out of one — and the listing can start in a root that is not home. An
+   *  older backend host omits it. */
+  roots?: string[];
 }
 
 interface Props {
@@ -117,6 +121,23 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
         {error && <div className={styles.error}>{error}</div>}
 
         <div className={styles.list}>
+          {/* Standing in a root there is no "up" — a root does not expose its
+              parent. On a cloud host the listing *starts* in such a root (the
+              persistent volume) with home on another one, so the other roots are
+              listed as rows; otherwise the only way across is typing a path. */}
+          {!data?.parent &&
+            (data?.roots ?? [])
+              .filter((r) => r !== data?.path)
+              .map((r) => (
+                <button key={r} className={styles.row} onClick={() => void load(r)}>
+                  <HardDrive size={13} strokeWidth={1.7} className={styles.icon} />
+                  {/* Name first: a whole path on one row gets ellipsized at the
+                      tail, and the tail is the part that identifies it. The full
+                      path trails behind, where truncation costs nothing. */}
+                  <span className={styles.name}>{r.split("/").filter(Boolean).pop() ?? r}</span>
+                  <span className={styles.rowPath}>{r}</span>
+                </button>
+              ))}
           {data?.parent && (
             <button className={styles.row} onClick={() => void load(data.parent!)}>
               <ChevronUp size={13} strokeWidth={1.7} className={styles.icon} />
