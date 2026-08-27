@@ -666,6 +666,16 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_use", id: "fp6", name: "mcp__fleet__fleet__handoff", input: { action: "list" } },
           { type: "tool_use", id: "fp7", name: "mcp__fleet__fleet__loop", input: { action: "list" } },
           { type: "tool_use", id: "fp8", name: "mcp__fleet__fleet__schedule", input: { action: "list" } },
+          // A decision card as the relay ships it: the card body (`questions`)
+          // is stripped by the input whitelist and survives only as `_ask`,
+          // which is what the collapsed line reads. Expanding fetches the full
+          // input through `tool_detail` (see MOCK_TOOL_DETAILS.fa1).
+          {
+            type: "tool_use",
+            id: "fa1",
+            name: "mcp__fleet__fleet__ask",
+            _ask: { q: "双 issuer 补丁跑通了，旧 issuer 什么时候下线？", n: 1 },
+          },
         ],
         stop_reason: "tool_use",
         usage: { input_tokens: 9000, output_tokens: 60 },
@@ -686,6 +696,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           { type: "tool_result", tool_use_id: "fp6" },
           { type: "tool_result", tool_use_id: "fp7" },
           { type: "tool_result", tool_use_id: "fp8" },
+          { type: "tool_result", tool_use_id: "fa1", _digest: { answer: "等 max TTL 过完再下线" } },
         ],
       },
     },
@@ -932,6 +943,35 @@ export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
       null,
       2,
     ),
+  },
+  // A decision card expanded in the 消息 tab: the full `questions` input plus
+  // the JSON-string `toolUseResult` an MCP `fleet__ask` returns. Renders through
+  // DecisionQa — the same component the 决策 tab uses.
+  fa1: {
+    name: "mcp__fleet__fleet__ask",
+    input: {
+      questions: [
+        {
+          question:
+            "双 issuer 补丁跑通了，旧 issuer 什么时候下线？\n\n---\n\n补丁已合，两种 issuer 都能验签，`npm test -- auth` 全绿。\n\n- 旧 token 的最大 TTL 是 **30 天**\n- 提前下线会让还没换发的客户端 401\n\n什么时候摘掉 legacy issuer？",
+          header: "下线时机",
+          multiSelect: false,
+          html: "<p>preview</p>",
+          options: [
+            { label: "等 max TTL 过完再下线", description: "最保守：30 天后没有存量旧 token，零 401 风险。" },
+            { label: "两周后下线", description: "更快收尾，但要先统计还在用旧 issuer 的客户端。" },
+          ],
+          formFields: [{ name: "owner", kind: "text", label: "谁来盯", required: false }],
+        },
+      ],
+    },
+    toolUseResult: JSON.stringify({
+      answers: {
+        "双 issuer 补丁跑通了，旧 issuer 什么时候下线？\n\n---\n\n补丁已合，两种 issuer 都能验签，`npm test -- auth` 全绿。\n\n- 旧 token 的最大 TTL 是 **30 天**\n- 提前下线会让还没换发的客户端 401\n\n什么时候摘掉 legacy issuer？":
+          "等 max TTL 过完再下线",
+        owner: "认证组",
+      },
+    }),
   },
   // WebSearch as the relay ships it: the untouched `toolUseResult`, whose
   // `results[]` interleaves narration strings with `{content:[{title,url}]}`

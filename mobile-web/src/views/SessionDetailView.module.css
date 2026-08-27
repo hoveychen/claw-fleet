@@ -462,6 +462,18 @@
 .chipAdd { color: var(--color-success); }
 .chipDel { color: var(--color-error); }
 
+/* The answer picked on a decision card. Free text can be a whole paragraph, so
+   the chip clamps to a phone-friendly width and the expanded body carries the
+   content; the accent tint marks it as the user's own choice, not a stat. */
+.chipAnswer {
+  font-family: inherit;
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+}
+
 /* ── Inline thumbnails (server-side re-encoded screenshots) ───────────────── */
 .thumbRow {
   display: flex;
