@@ -1766,18 +1766,27 @@ mod tests {
     #[test]
     fn search_meta_content_and_miss() {
         let root = tmp();
-        let ws = tmp();
-        let md = ws.path().join("perf-report.md");
+        let ws_parent = tmp();
+        // A named subdirectory, not the tempdir itself: `workspace_name` is part
+        // of the searchable meta (see `search_docs_in`), and `TempDir::new()`
+        // picks a random name — one that happened to contain "perf" made the
+        // "perf" query match BOTH docs and this test fail at random. Verified by
+        // isolation: publishing a doc from a dir literally named
+        // `superperf-project` reproduces the extra hit on demand.
+        let ws = ws_parent.path().join("wiki-search-fixture");
+        fs::create_dir_all(&ws).unwrap();
+        let ws = ws.as_path();
+        let md = ws.join("perf-report.md");
         fs::write(&md, "# Perf Report\n\n压测显示 tokenizer 吞吐率下降 40%。\n").unwrap();
-        publish_in(root.path(), &md, None, None, ws.path()).unwrap();
-        let html = ws.path().join("demo.html");
+        publish_in(root.path(), &md, None, None, ws).unwrap();
+        let html = ws.join("demo.html");
         fs::write(
             &html,
             "<html><head><title>Demo</title><script>var secret=1;</script></head>\
              <body><p>latency budget exceeded</p></body></html>",
         )
         .unwrap();
-        publish_in(root.path(), &html, None, None, ws.path()).unwrap();
+        publish_in(root.path(), &html, None, None, ws).unwrap();
 
         // Title match → meta hit, no snippet.
         let hits = search_docs_in(root.path(), "perf");
