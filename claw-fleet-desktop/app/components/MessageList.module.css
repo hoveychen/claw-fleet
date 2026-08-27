@@ -314,10 +314,20 @@
 }
 
 /* The user bubble already hugs the right edge; put its control on the free
-   side instead of on top of the bubble's corner. */
+   side instead of on top of the bubble's corner.
+
+   `left: 0` used to mean the far left of the *row*, which on a wide pane parks
+   the pair hundreds of pixels away from the bubble they act on — two buttons
+   floating in blank space with nothing to attach them to. Dropping out of
+   absolute positioning makes them an ordinary flex item ahead of the content,
+   so `justify-content: flex-end` lands them exactly against the bubble's left
+   edge at any width. They keep their slot while hidden, so revealing them
+   still costs no reflow — the reason the base rule went absolute. */
 .message.user .row_actions {
-  right: auto;
-  left: 0;
+  position: static;
+  align-self: flex-start;
+  margin-top: 2px;
+  margin-right: 6px;
 }
 
 .message:hover .row_actions,
@@ -355,12 +365,33 @@
    markup whitespace must not be preserved. */
 .user_text {
   background: var(--color-bg-user);
+  /* Edge definition. The fill alone was carrying the whole boundary and it
+     could not — see the note on --color-bg-user. A border plus the card shadow
+     is what every other raised surface in this theme uses, and it is what makes
+     the bubble read as a thing rather than as a wash. */
+  border: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-card);
   /* Tail on the bottom-right: the bubble now sits against the right edge.
      Radius and padding scale with the body type — a 15px line inside 8px of
      padding on a 8px radius reads cramped, which is half of why the pane felt
      like a log view. */
   border-radius: 12px 12px 4px 12px;
-  padding: 10px 14px;
+  padding: 10px 14px 8px;
+  /* Attachment thumbnails inside a bubble drop their own chrome and stretch to
+     the content box. Two reasons, both visible in the "why does this look
+     cheap" screenshot that prompted this: an outlined child inside an
+     edgeless parent inverts the hierarchy (the eye reads the screenshot as the
+     object and the bubble as backdrop), and a natural-width image left-aligned
+     under wider text leaves a ragged strip of empty fill down the right side.
+     Passed as custom properties rather than a prop so ImageThumb stays shared
+     with tool results, which still want the outlined chip treatment — the vars
+     inherit through the DOM, CSS-module scoping notwithstanding. */
+  --thumb-border: 0;
+  --thumb-radius: 7px;
+  --thumb-width: 100%;
+  --thumb-img-width: 100%;
+  --thumb-max-h: 340px;
+  --thumb-hover-ring: 0 0 0 2px var(--color-accent);
   font-size: var(--t-body, 13px);
   line-height: 1.6;
   color: var(--color-text);
@@ -383,10 +414,16 @@
   padding-left: 2px;
 }
 
-/* Trails the user bubble, landing under its right edge. */
-.message.user .usage {
-  padding-left: 0;
-  padding-right: 2px;
+/* The user turn's timestamp, now a footer inside the bubble (see MessageList's
+   note at the call site). The hairline rule is what turns "small grey text that
+   happens to be last" into a footer — without it the time just reads as a
+   dangling line of the message body. */
+.bubble_time {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border-soft);
+  font-size: var(--t-meta, 10px);
+  color: var(--color-text-dim);
   text-align: right;
 }
 

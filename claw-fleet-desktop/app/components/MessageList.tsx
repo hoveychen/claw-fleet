@@ -249,6 +249,17 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
                 )
               }
             />
+            {/* Inside the bubble, not under it. Loose in `.content` it was an
+                orphan — a 10px grey run belonging to no container, sitting in
+                the gap between two turns. As a footer it belongs to the thing
+                it timestamps. */}
+            {time && (
+              <div className={styles.bubble_time}>
+                <span className={styles.msg_time} title={time.full}>
+                  {time.short}
+                </span>
+              </div>
+            )}
           </div>
         )}
         {isAssistant && turnUsage && (
@@ -264,13 +275,6 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
                 {time.short}
               </span>
             )}
-          </div>
-        )}
-        {isUser && time && (
-          <div className={styles.usage}>
-            <span className={styles.msg_time} title={time.full}>
-              {time.short}
-            </span>
           </div>
         )}
       </div>
