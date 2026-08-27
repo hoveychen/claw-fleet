@@ -28,6 +28,7 @@ mod setup;
 mod process;
 mod proc_runner;
 mod sessions;
+mod artifacts;
 mod audit;
 mod hooks;
 mod guard;
@@ -66,6 +67,7 @@ use self::plan_approval::*;
 use self::cli_installer::*;
 use self::memory::*;
 use self::schedule::*;
+use self::artifacts::*;
 use self::wiki::*;
 use self::explorer::*;
 use self::scratchpad::*;
@@ -1516,6 +1518,45 @@ pub fn run() {
                 responder.respond(response);
             });
         })
+        // Serves artifact blobs into the webview: fleet-artifact://localhost/
+        // <id>/<name> (http://fleet-artifact.localhost/… on Windows). The
+        // trailing <name> is cosmetic — the id alone identifies the blob — but
+        // it gives the viewer a real filename and the right extension, which is
+        // what makes a <video> pick a decoder and a PDF frame render.
+        //
+        // Unlike the three protocols below it, this one honours `Range` and can
+        // answer 206. That is the entire reason the artifact store is not just
+        // more wiki: a deliverable can be a 400 MB render, and a <video> seeks
+        // by asking for byte ranges. Answer those with the whole file every
+        // time and the viewer must buffer it all before it can jump.
+        //
+        // Verified in P0 that WKWebView asks for ranges here even for embedded
+        // PDFs (`Range: bytes=0-16383`), so this is not a video-only path.
+        .register_asynchronous_uri_scheme_protocol("fleet-artifact", move |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            std::thread::spawn(move || {
+                let dec = |s: &str| {
+                    percent_encoding::percent_decode_str(s)
+                        .decode_utf8_lossy()
+                        .to_string()
+                };
+                let path = request.uri().path().trim_start_matches('/').to_string();
+                let id = dec(path.split('/').next().unwrap_or(""));
+                let range = request
+                    .headers()
+                    .get("Range")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(claw_fleet_core::artifacts::parse_range_header);
+
+                let result = {
+                    let state = app.state::<AppState>();
+                    let backend = state.backend.read().unwrap();
+                    backend.read_artifact_bytes(&id, range)
+                };
+                let response = artifact_response(result, range.is_some());
+                responder.respond(response);
+            });
+        })
         // Serves fleet__ask decision-card assets into the webview:
         // fleet-decision://localhost/<id>/q<idx>/<relpath…>
         // (http://fleet-decision.localhost/… on Windows). Same Backend-routed,
@@ -2051,6 +2092,14 @@ pub fn run() {
             get_memory_history,
             get_claude_md_content,
             promote_memory,
+            list_artifacts,
+            get_artifact,
+            add_artifact,
+            update_artifact,
+            delete_artifact,
+            artifact_usage,
+            export_artifact,
+            artifact_local_path,
             list_wiki_docs,
             get_wiki_doc,
             get_handoff_chain,

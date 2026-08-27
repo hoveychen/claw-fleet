@@ -538,6 +538,38 @@ pub fn usage_in(root: &Path) -> StoreUsage {
     usage
 }
 
+// ── Range header ─────────────────────────────────────────────────────────────
+
+/// Parse the single-range forms a media element actually sends:
+/// `bytes=<start>-<end>` and the open-ended `bytes=<start>-`.
+///
+/// Lives here rather than beside either caller because there are two — the
+/// `fleet serve` route and the desktop's `fleet-artifact://` protocol handler —
+/// and two parsers with two opinions about what a range means is exactly how
+/// a seek starts returning the wrong bytes on one surface only.
+///
+/// Multi-range (`bytes=0-99,200-299`) and suffix (`bytes=-500`) are refused
+/// rather than approximated: returning the wrong bytes under a confident
+/// `Content-Range` is worse than ignoring the header and answering `200`,
+/// which is always a legal response to a range request. No client Fleet serves
+/// uses either form; one that did would degrade to a full download.
+pub fn parse_range_header(value: &str) -> Option<(u64, u64)> {
+    let spec = value.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None;
+    }
+    let (start, end) = spec.split_once('-')?;
+    let start: u64 = start.trim().parse().ok()?;
+    let end = match end.trim() {
+        "" => u64::MAX, // open-ended; read_bytes_in clamps to the last byte
+        e => e.parse().ok()?,
+    };
+    if end < start {
+        return None;
+    }
+    Some((start, end))
+}
+
 // ── meta.json io ─────────────────────────────────────────────────────────────
 
 fn read_meta(dir: &Path) -> Result<Artifact, String> {
@@ -688,6 +720,26 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_artifact_reads_whole_but_refuses_every_range() {
+        // Pins the contract `export_artifact` depends on. An agent can produce
+        // a zero-byte deliverable, and for one there is no satisfiable range at
+        // all — `start >= total` holds even at 0 — so a chunked reader has to
+        // check the size first rather than treat the first read as the loop
+        // condition. Getting this wrong made exporting an empty file an error.
+        let root = store();
+        let src_dir = store();
+        let src = write_file(src_dir.path(), "empty.pdf", b"");
+        let a = add_in(root.path(), &src, None, None, src_dir.path(), None).unwrap();
+        assert_eq!(a.size_bytes, 0, "an empty file is still a storable artifact");
+
+        let whole = read_bytes_in(root.path(), &a.id, None).unwrap();
+        assert!(whole.bytes.is_empty());
+        assert_eq!(whole.total_size, 0);
+
+        assert!(read_bytes_in(root.path(), &a.id, Some((0, 100))).is_err());
+    }
+
+    #[test]
     fn ranged_read_caps_one_response_at_the_chunk_limit() {
         let root = store();
         let src_dir = store();
@@ -781,6 +833,45 @@ mod tests {
         assert!(!root.path().join(&a.id).exists());
         assert!(get_in(root.path(), &a.id).is_err());
         assert!(delete_in(root.path(), &a.id).is_err(), "second delete must not succeed");
+    }
+
+    #[test]
+    fn parses_the_range_forms_a_media_element_sends() {
+        assert_eq!(parse_range_header("bytes=0-1023"), Some((0, 1023)));
+        assert_eq!(parse_range_header(" bytes=100-200 "), Some((100, 200)));
+        // The open-ended form a <video> uses to stream on from a seek point.
+        assert_eq!(parse_range_header("bytes=4096-"), Some((4096, u64::MAX)));
+    }
+
+    #[test]
+    fn refuses_range_forms_it_would_only_be_guessing_at() {
+        for bad in [
+            "bytes=-500",         // suffix range: last 500 bytes, unsupported
+            "bytes=0-99,200-299", // multi-range
+            "bytes=200-100",      // inverted
+            "items=0-10",         // not a byte range
+            "0-10",               // no unit
+            "bytes=",
+            "",
+        ] {
+            assert_eq!(parse_range_header(bad), None, "must refuse {bad:?}");
+        }
+    }
+
+    #[test]
+    fn an_open_ended_header_reads_through_to_the_end_of_the_blob() {
+        // The two halves of seeking — parsing and clamping — only work if they
+        // agree that u64::MAX means "to the end".
+        let root = store();
+        let src_dir = store();
+        let body: Vec<u8> = (0u8..=255).collect();
+        let src = write_file(src_dir.path(), "clip.mp4", &body);
+        let a = add_in(root.path(), &src, None, None, src_dir.path(), None).unwrap();
+
+        let range = parse_range_header("bytes=250-").unwrap();
+        let got = read_bytes_in(root.path(), &a.id, Some(range)).unwrap();
+        assert_eq!(got.range, Some((250, 255)));
+        assert_eq!(got.bytes, (250u8..=255).collect::<Vec<u8>>());
     }
 
     #[test]

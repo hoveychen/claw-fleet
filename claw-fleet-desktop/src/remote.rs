@@ -905,6 +905,10 @@ impl crate::backend::Backend for RemoteBackend {
         Ok(crate::wiki::WikiFileBytes { bytes, mime })
     }
 
+    fn is_remote(&self) -> bool {
+        true
+    }
+
     fn list_artifacts(&self) -> Vec<crate::artifacts::Artifact> {
         self.probe.get(claw_fleet_core::routes::ARTIFACTS).unwrap_or_default()
     }
