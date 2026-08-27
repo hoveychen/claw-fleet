@@ -233,6 +233,102 @@ pub struct PromptResponse {
     pub stop_reason: StopReason,
 }
 
+// ────────── session/load · resume · close · delete · list ───────────
+
+/// `session/load` — reattach **and replay** the prior conversation.
+///
+/// The replay is what separates it from [`ResumeSessionRequest`]; the schema
+/// says resume "resumes an existing session without returning previous
+/// messages". Fleet can serve both because the transcript on disk is the
+/// source of truth — most ACP agents keep the session in the connection and
+/// can only offer resume.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadSessionRequest {
+    pub session_id: String,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default)]
+    pub mcp_servers: Vec<Value>,
+}
+
+/// `session/resume` — reattach **without** replaying.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeSessionRequest {
+    pub session_id: String,
+    #[serde(default)]
+    pub cwd: String,
+}
+
+/// Shared shape of `session/close` and `session/delete`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionIdRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSessionsRequest {
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// One entry in `session/list`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfo {
+    pub session_id: String,
+    pub cwd: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// ISO 8601, per the schema.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSessionsResponse {
+    pub sessions: Vec<SessionInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSessionModeRequest {
+    pub session_id: String,
+    pub mode_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSessionConfigOptionRequest {
+    pub session_id: String,
+    pub config_id: String,
+}
+
+/// `$/cancel_request` params.
+///
+/// Note this carries **`requestId`**, not `sessionId` — it cancels one in-flight
+/// JSON-RPC request. `session/cancel` is the session-scoped one.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelRequestNotification {
+    pub request_id: Value,
+}
+
+/// `session/cancel` params.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelNotification {
+    pub session_id: String,
+}
+
 // ─────────────────────────── session/update ─────────────────────────
 
 /// `session/update` params.
@@ -256,11 +352,18 @@ pub struct SessionNotification {
 pub enum SessionUpdate {
     /// A chunk of the agent's reply.
     AgentMessageChunk { content: ContentBlock },
+    /// A chunk of the *user's* message. Only emitted while replaying history
+    /// for `session/load`, so the client can rebuild both sides of the
+    /// conversation rather than a monologue.
+    UserMessageChunk { content: ContentBlock },
 }
 
 impl SessionUpdate {
     pub fn agent_text(text: impl Into<String>) -> Self {
         SessionUpdate::AgentMessageChunk { content: ContentBlock::text(text) }
+    }
+    pub fn user_text(text: impl Into<String>) -> Self {
+        SessionUpdate::UserMessageChunk { content: ContentBlock::text(text) }
     }
 }
 
