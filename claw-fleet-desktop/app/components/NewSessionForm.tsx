@@ -260,7 +260,13 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   const setModel = (v: string) => patch({ model: v });
   const setEffort = (v: string) => patch({ effort: v });
   const setPermissionMode = (v: string) => patch({ permissionMode: v });
-  const setWorkspace = (v: string) => patch({ workspace: v });
+  // `chosenByUser` freezes the seeding effect below — see it for why an
+  // auto-seeded chat fallback is provisional and a picked one never is.
+  const chosenByUser = useRef(false);
+  const setWorkspace = (v: string) => {
+    chosenByUser.current = true;
+    patch({ workspace: v });
+  };
   // Switching tool clears model/effort: Claude and Codex model ids are
   // disjoint, so a leftover Claude model would reach `codex exec -m` (and vice
   // versa) as an invalid value.
@@ -373,9 +379,25 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
   // because of the `draft.workspace` guard: once anything is selected — by this
   // effect or by the user — no later poll can clobber it.
   useEffect(() => {
-    if (draft.workspace) return;
+    // An empty workspace means a fresh (or just-submitted, hence cleared) draft
+    // — nothing has been picked in it, so seeding owns the field again.
+    if (!draft.workspace) chosenByUser.current = false;
+    else if (chosenByUser.current) return;
     const seed = defaultWorkspace(recentWorkspaces, chatPath, loadLastWorkspace());
-    if (seed) patch({ workspace: seed });
+    if (!seed) return;
+    if (!draft.workspace) {
+      patch({ workspace: seed });
+      return;
+    }
+    // The chat fallback is provisional while the two inputs are still landing:
+    // `chatPath` is one backend round-trip while the session list is polled, so
+    // it routinely wins the race and seeds chat on a host that has plenty of
+    // recents. Left alone that opened the composer in chat mode — with the
+    // directory picker hidden — on every launch. Replace it once a real recent
+    // shows up; anything the user picked is off limits (`chosenByUser`).
+    if (chatPath && draft.workspace === chatPath && seed !== chatPath) {
+      patch({ workspace: seed });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.workspace, recentWorkspaces, chatPath]);
 

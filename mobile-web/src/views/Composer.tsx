@@ -551,6 +551,7 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
     loadDraft(LAST_WORKSPACE_KEY, ""),
   );
 
+  const isChat = Boolean(chatPath) && workspace === chatPath;
   const effectiveWorkspace = workspace === "__custom__" ? customWorkspace.trim() : workspace;
   const canSubmit = Boolean(client && effectiveWorkspace && prompt.trim() && !busy && !uploading);
 
@@ -627,21 +628,36 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
             <X size={18} />
           </button>
         </div>
-        <select
-          className={styles.workspaceSelect}
-          value={workspace}
-          onChange={(e) => patch({ workspace: e.target.value })}
-        >
-          {chatPath && (
-            <option value={chatPath}>{t("💬 纯聊天 — 不绑定任何项目目录")}</option>
-          )}
-          {recents.map(([path, name]) => (
-            <option key={path} value={path}>
-              {name} — {path}
-            </option>
-          ))}
-          <option value="__custom__">{t("自定义路径…")}</option>
-        </select>
+        {/* 纯聊天是一个模式，不是下拉里的一个特殊目录：给它自己的开关，打开时
+            目录选择器整个消失（聊天本来就没有目录可选）。relay 没报出聊天目录
+            时不显示——那时它没法生效。*/}
+        {chatPath && (
+          <button
+            className={styles.chatToggle}
+            data-active={isChat}
+            aria-pressed={isChat}
+            onClick={() =>
+              patch({ workspace: isChat ? (recents[0]?.[0] ?? "__custom__") : chatPath })
+            }
+          >
+            💬 {t("纯聊天")}
+            <span className={styles.chatToggleSub}>{t("不绑定任何项目目录")}</span>
+          </button>
+        )}
+        {!isChat && (
+          <select
+            className={styles.workspaceSelect}
+            value={workspace}
+            onChange={(e) => patch({ workspace: e.target.value })}
+          >
+            {recents.map(([path, name]) => (
+              <option key={path} value={path}>
+                {name} — {path}
+              </option>
+            ))}
+            <option value="__custom__">{t("自定义路径…")}</option>
+          </select>
+        )}
         {workspace === "__custom__" && (
           // 手输仍然保留（粘贴路径最快），但主路径是「浏览…」——手机用户看不见
           // 桌面上有什么目录，靠盲敲绝对路径本来就是这个入口坏掉的根因之一。
