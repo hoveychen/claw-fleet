@@ -131,7 +131,11 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
               .map((r) => (
                 <button key={r} className={styles.row} onClick={() => void load(r)}>
                   <HardDrive size={13} strokeWidth={1.7} className={styles.icon} />
-                  <span className={styles.name}>{r}</span>
+                  {/* Name first: a whole path on one row gets ellipsized at the
+                      tail, and the tail is the part that identifies it. The full
+                      path trails behind, where truncation costs nothing. */}
+                  <span className={styles.name}>{r.split("/").filter(Boolean).pop() ?? r}</span>
+                  <span className={styles.rowPath}>{r}</span>
                 </button>
               ))}
           {data?.parent && (

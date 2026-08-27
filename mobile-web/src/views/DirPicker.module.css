@@ -158,6 +158,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 根切换行里跟在目录名后面的完整路径：次要信息，可以被截断。 */
+.rowPath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+}
 .empty {
   padding: 14px 10px;
   font-size: var(--t-aux, 12px);
