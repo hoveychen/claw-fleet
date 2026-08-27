@@ -55,9 +55,14 @@ pub struct BrowseDirResponse {
     pub entries: Vec<BrowseEntry>,
     /// `entries` was cut at [`MAX_ENTRIES`].
     pub truncated: bool,
-    /// Every browsable root, canonical. A root has no parent, so without this
-    /// the client standing in one has no way back to the others — and on a
-    /// cloud container the listing *starts* in a root that is not home.
+    /// The roots worth offering as a destination, canonical — home, plus the
+    /// host's declared workspace directory. A root has no parent, so without
+    /// this a client standing in one has no way back to the other, and on a
+    /// cloud container the listing *starts* in the one that is not home.
+    ///
+    /// Deliberately NOT every browsable root: each known session workspace
+    /// outside home is also one, and on a long-lived machine that is dozens of
+    /// stale paths — the composer's recents list already offers those.
     #[serde(default)]
     pub roots: Vec<String>,
 }
@@ -73,6 +78,7 @@ pub fn browse_dir(path: Option<&str>, known_workspaces: &[String]) -> Result<Bro
         &home,
         &default_start(&home),
         &roots,
+        &nav_roots(&home),
         &|p| crate::tcc::is_tcc_protected(p),
     )
 }
@@ -89,6 +95,22 @@ pub fn browse_dir(path: Option<&str>, known_workspaces: &[String]) -> Result<Bro
 /// opens. Unset (every desktop, every laptop) → home, exactly as before.
 fn default_start(home: &Path) -> PathBuf {
     workspace_root().unwrap_or_else(|| home.to_path_buf())
+}
+
+/// The roots a client should be able to jump between: home and the declared
+/// workspace directory. The full boundary ([`browse_roots`]) also contains every
+/// off-home session workspace, which is the wrong thing to render as a jump
+/// list — a machine with months of sessions has dozens of them, most long dead,
+/// and the composer already lists recents.
+fn nav_roots(home: &Path) -> Vec<PathBuf> {
+    let home = fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    let mut roots = vec![home.clone()];
+    if let Some(ws) = workspace_root() {
+        if !ws.starts_with(&home) {
+            roots.push(ws);
+        }
+    }
+    roots
 }
 
 /// The host's declared workspace directory, canonicalized, if it is set and
@@ -129,6 +151,7 @@ pub fn create_dir(
         &home,
         &default_start(&home),
         &roots,
+        &nav_roots(&home),
         &|p| crate::tcc::is_tcc_protected(p),
     )
 }
@@ -140,6 +163,7 @@ fn create_dir_in(
     home: &Path,
     start: &Path,
     roots: &[PathBuf],
+    nav_roots: &[PathBuf],
     is_protected: &dyn Fn(&Path) -> bool,
 ) -> Result<BrowseDirResponse, String> {
     let name = validate_child_name(name)?;
@@ -167,7 +191,7 @@ fn create_dir_in(
 
     // Answer with the new directory's own listing (empty, with a parent link),
     // so the client is standing in it without a second round trip.
-    browse_dir_in(Some(&child.to_string_lossy()), home, start, roots, is_protected)
+    browse_dir_in(Some(&child.to_string_lossy()), home, start, roots, nav_roots, is_protected)
 }
 
 /// A new directory's name: one plain path component, nothing that could reach
@@ -231,6 +255,7 @@ fn browse_dir_in(
     home: &Path,
     start: &Path,
     roots: &[PathBuf],
+    nav_roots: &[PathBuf],
     is_protected: &dyn Fn(&Path) -> bool,
 ) -> Result<BrowseDirResponse, String> {
     let requested = match path.map(str::trim).filter(|p| !p.is_empty()) {
@@ -303,7 +328,7 @@ fn browse_dir_in(
         parent,
         entries,
         truncated,
-        roots: roots.iter().map(|r| r.to_string_lossy().into_owned()).collect(),
+        roots: nav_roots.iter().map(|r| r.to_string_lossy().into_owned()).collect(),
     })
 }
 
@@ -369,7 +394,7 @@ mod tests {
     fn lists_only_visible_directories_and_flags_repos() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        let r = browse_dir_in(None, &home, &home, &roots, &none_protected).unwrap();
+        let r = browse_dir_in(None, &home, &home, &roots, &roots, &none_protected).unwrap();
         // Files and dotfiles are gone; the repo is badged; order is stable.
         assert_eq!(names(&r), vec!["notes", "proj"]);
         assert!(r.entries.iter().find(|e| e.name == "proj").unwrap().is_git_repo);
@@ -381,8 +406,8 @@ mod tests {
     fn home_is_a_root_so_it_has_no_parent_but_a_child_does() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert_eq!(browse_dir_in(None, &home, &home, &roots, &none_protected).unwrap().parent, None);
-        let proj = browse_dir_in(Some("proj"), &home, &home, &roots, &none_protected).unwrap();
+        assert_eq!(browse_dir_in(None, &home, &home, &roots, &roots, &none_protected).unwrap().parent, None);
+        let proj = browse_dir_in(Some("proj"), &home, &home, &roots, &roots, &none_protected).unwrap();
         assert_eq!(proj.path, home.join("proj").to_string_lossy());
         assert_eq!(proj.parent.as_deref(), Some(&*home.to_string_lossy()));
         assert_eq!(names(&proj), vec!["src"]);
@@ -394,7 +419,7 @@ mod tests {
         let roots = vec![home.clone()];
         let want = home.join("proj").to_string_lossy().into_owned();
         for input in ["~/proj", "proj", "  ~/proj  "] {
-            assert_eq!(browse_dir_in(Some(input), &home, &home, &roots, &none_protected).unwrap().path, want, "{input}");
+            assert_eq!(browse_dir_in(Some(input), &home, &home, &roots, &roots, &none_protected).unwrap().path, want, "{input}");
         }
     }
 
@@ -411,7 +436,7 @@ mod tests {
             "proj/../../outside".to_string(),
             "/etc".to_string(),
         ] {
-            let r = browse_dir_in(Some(&escape), &home, &home, &roots, &none_protected);
+            let r = browse_dir_in(Some(&escape), &home, &home, &roots, &roots, &none_protected);
             assert!(r.is_err(), "{escape:?} must be refused, got {r:?}");
         }
     }
@@ -430,12 +455,12 @@ mod tests {
         });
         assert_eq!(roots.len(), 2);
 
-        let r = browse_dir_in(Some(&ext.to_string_lossy()), &home, &home, &roots, &none_protected).unwrap();
+        let r = browse_dir_in(Some(&ext.to_string_lossy()), &home, &home, &roots, &roots, &none_protected).unwrap();
         assert_eq!(r.path, ext.to_string_lossy());
         assert_eq!(r.parent, None, "a root must not expose its parent");
 
         // ...but its parent `outside/` is still not browsable.
-        assert!(browse_dir_in(Some(&outside.to_string_lossy()), &home, &home, &roots, &none_protected).is_err());
+        assert!(browse_dir_in(Some(&outside.to_string_lossy()), &home, &home, &roots, &roots, &none_protected).is_err());
     }
 
     /// A known workspace already under home must not become a second root —
@@ -452,9 +477,9 @@ mod tests {
     fn missing_directory_errors_rather_than_silently_listing_home() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert!(browse_dir_in(Some("~/nope"), &home, &home, &roots, &none_protected).is_err());
+        assert!(browse_dir_in(Some("~/nope"), &home, &home, &roots, &roots, &none_protected).is_err());
         // A file is not a directory: the picker must not "descend" into it.
-        assert!(browse_dir_in(Some("file.txt"), &home, &home, &roots, &none_protected).is_err());
+        assert!(browse_dir_in(Some("file.txt"), &home, &home, &roots, &roots, &none_protected).is_err());
     }
 
     /// TCC guard: a protected top-level dir (e.g. `~/Documents`) is still listed
@@ -470,7 +495,7 @@ mod tests {
         let roots = vec![home.clone()];
         let is_protected = |p: &Path| p.file_name().map_or(false, |n| n == "Documents");
 
-        let r = browse_dir_in(None, &home, &home, &roots, &is_protected).unwrap();
+        let r = browse_dir_in(None, &home, &home, &roots, &roots, &is_protected).unwrap();
         // Still offered as a pickable directory...
         let doc = r.entries.iter().find(|e| e.name == "Documents").expect("Documents must be listed");
         // ...but never git-probed, so no stat lands inside ~/Documents.
@@ -497,7 +522,7 @@ mod tests {
         let prot = protected.clone();
         let is_protected = move |p: &Path| p == prot;
 
-        let r = browse_dir_in(None, &home, &home, &roots, &is_protected).unwrap();
+        let r = browse_dir_in(None, &home, &home, &roots, &roots, &is_protected).unwrap();
         let names: Vec<&str> = r.entries.iter().map(|e| e.name.as_str()).collect();
         assert!(
             !names.contains(&"plink"),
@@ -516,13 +541,13 @@ mod tests {
     fn creates_a_child_and_answers_with_its_listing() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        let r = create_dir_in(Some("notes"), "sub", &home, &home, &roots, &none_protected).unwrap();
+        let r = create_dir_in(Some("notes"), "sub", &home, &home, &roots, &roots, &none_protected).unwrap();
         assert_eq!(r.path, home.join("notes/sub").to_string_lossy());
         assert_eq!(r.parent.as_deref(), Some(&*home.join("notes").to_string_lossy()));
         assert!(r.entries.is_empty());
         assert!(home.join("notes/sub").is_dir());
         // ...and it shows up in the parent's listing afterwards.
-        let parent = browse_dir_in(Some("notes"), &home, &home, &roots, &none_protected).unwrap();
+        let parent = browse_dir_in(Some("notes"), &home, &home, &roots, &roots, &none_protected).unwrap();
         assert_eq!(names(&parent), vec!["sub"]);
     }
 
@@ -531,7 +556,7 @@ mod tests {
     fn creates_under_home_by_default() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        let r = create_dir_in(None, "  fresh  ", &home, &home, &roots, &none_protected).unwrap();
+        let r = create_dir_in(None, "  fresh  ", &home, &home, &roots, &roots, &none_protected).unwrap();
         assert_eq!(r.path, home.join("fresh").to_string_lossy());
         assert!(home.join("fresh").is_dir());
     }
@@ -544,7 +569,7 @@ mod tests {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
         for bad in ["", "   ", ".", "..", "a/b", "../escape", "a\\b", ".hidden"] {
-            let r = create_dir_in(None, bad, &home, &home, &roots, &none_protected);
+            let r = create_dir_in(None, bad, &home, &home, &roots, &roots, &none_protected);
             assert!(r.is_err(), "{bad:?} must be refused, got {r:?}");
         }
         assert!(!home.parent().unwrap().join("escape").exists());
@@ -561,7 +586,7 @@ mod tests {
             "../outside".to_string(),
             "proj/../../outside".to_string(),
         ] {
-            let r = create_dir_in(Some(&escape), "x", &home, &home, &roots, &none_protected);
+            let r = create_dir_in(Some(&escape), "x", &home, &home, &roots, &roots, &none_protected);
             assert!(r.is_err(), "{escape:?} must be refused, got {r:?}");
         }
         assert!(!outside.join("x").exists());
@@ -574,9 +599,9 @@ mod tests {
     fn refuses_an_existing_name() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert!(create_dir_in(None, "notes", &home, &home, &roots, &none_protected).is_err());
+        assert!(create_dir_in(None, "notes", &home, &home, &roots, &roots, &none_protected).is_err());
         // A file with that name collides too — and is not clobbered.
-        assert!(create_dir_in(None, "file.txt", &home, &home, &roots, &none_protected).is_err());
+        assert!(create_dir_in(None, "file.txt", &home, &home, &roots, &roots, &none_protected).is_err());
         assert_eq!(fs::read_to_string(home.join("file.txt")).unwrap(), "x");
     }
 
@@ -584,7 +609,7 @@ mod tests {
     fn missing_parent_errors_rather_than_creating_it() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert!(create_dir_in(Some("~/nope"), "x", &home, &home, &roots, &none_protected).is_err());
+        assert!(create_dir_in(Some("~/nope"), "x", &home, &home, &roots, &roots, &none_protected).is_err());
         assert!(!home.join("nope").exists());
     }
 
@@ -626,7 +651,7 @@ mod tests {
             let start = default_start(&home);
             assert_eq!(start, volume);
 
-            let r = browse_dir_in(None, &home, &start, &roots, &none_protected).unwrap();
+            let r = browse_dir_in(None, &home, &start, &roots, &roots, &none_protected).unwrap();
             assert_eq!(r.path, volume.to_string_lossy());
             assert_eq!(r.parent, None, "a root must not expose its parent");
             // The client needs the root list to get back to home from here —
@@ -635,9 +660,29 @@ mod tests {
 
             // A name the fixture's home does not already have, so "not in home"
             // means the call put it elsewhere rather than the fixture being noisy.
-            create_dir_in(None, "fresh-proj", &home, &start, &roots, &none_protected).unwrap();
+            create_dir_in(None, "fresh-proj", &home, &start, &roots, &roots, &none_protected).unwrap();
             assert!(volume.join("fresh-proj").is_dir(), "must land on the persistent volume");
             assert!(!home.join("fresh-proj").exists(), "must NOT land in the ephemeral home");
+        });
+    }
+
+    /// The jump list is home + the declared workspace, and nothing else. Every
+    /// off-home session workspace is *also* a browsable root, and on a machine
+    /// with months of sessions that is dozens of mostly-dead paths — rendering
+    /// them as jump rows would bury the two that matter (observed: a local host
+    /// answered with 90 of them).
+    #[test]
+    fn nav_roots_are_home_and_the_declared_workspace_only() {
+        let (_tmp, home, outside) = fixture();
+        let volume = outside.join("repo");
+        fs::create_dir_all(&volume).unwrap();
+        let ext = outside.join("external-repo").to_string_lossy().into_owned();
+        with_workspace_env(Some(&volume.to_string_lossy()), || {
+            // The known workspace stays *browsable*…
+            let boundary = browse_roots(&home, &[ext.clone()]);
+            assert!(boundary.iter().any(|r| r.to_string_lossy() == ext));
+            // …it is just not offered as a place to jump to.
+            assert_eq!(nav_roots(&home), vec![home.clone(), volume.clone()]);
         });
     }
 
@@ -651,8 +696,8 @@ mod tests {
         with_workspace_env(Some(&volume.to_string_lossy()), || {
             let roots = browse_roots(&home, &[]);
             let up = outside.to_string_lossy().into_owned();
-            assert!(browse_dir_in(Some(&up), &home, &volume, &roots, &none_protected).is_err());
-            assert!(create_dir_in(Some(&up), "x", &home, &volume, &roots, &none_protected).is_err());
+            assert!(browse_dir_in(Some(&up), &home, &volume, &roots, &roots, &none_protected).is_err());
+            assert!(create_dir_in(Some(&up), "x", &home, &volume, &roots, &roots, &none_protected).is_err());
         });
     }
 
@@ -677,7 +722,7 @@ mod tests {
         for i in 0..(MAX_ENTRIES + 10) {
             fs::create_dir_all(many.join(format!("d{i:04}"))).unwrap();
         }
-        let r = browse_dir_in(Some("many"), &home, &home, &vec![home.clone()], &none_protected).unwrap();
+        let r = browse_dir_in(Some("many"), &home, &home, &vec![home.clone()], &vec![home.clone()], &none_protected).unwrap();
         assert!(r.truncated);
         assert_eq!(r.entries.len(), MAX_ENTRIES);
     }

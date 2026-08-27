@@ -164,7 +164,11 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
               .map((r) => (
                 <button key={r} className={styles.row} onClick={() => void load(r)}>
                   <HardDrive size={16} className={styles.icon} />
-                  <span className={styles.name}>{r}</span>
+                  {/* 目录名在前：整条路径塞进一行会被从尾部截断，而尾部恰恰是
+                      认出它的那一截（`/private/tmp/claude-501/-Users-…` 什么也
+                      没说明）。完整路径跟在后面，截断了也不影响识别。 */}
+                  <span className={styles.name}>{r.split("/").filter(Boolean).pop() ?? r}</span>
+                  <span className={styles.rowPath}>{r}</span>
                 </button>
               ))}
           {data?.parent && (

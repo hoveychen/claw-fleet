@@ -105,6 +105,17 @@
   white-space: nowrap;
 }
 
+/* The full path trailing a root row's name: secondary, safe to ellipsize. */
+.rowPath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
 .empty {
   padding: 12px 10px;
   font-size: 11.5px;
