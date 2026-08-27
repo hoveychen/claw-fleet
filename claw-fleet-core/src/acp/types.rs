@@ -329,6 +329,129 @@ pub struct CancelNotification {
     pub session_id: String,
 }
 
+// ─────────────────────────── Tool calls ─────────────────────────────
+
+/// What a tool does, so clients can pick an icon and a progress treatment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKind {
+    Read,
+    Edit,
+    Delete,
+    Move,
+    Search,
+    Execute,
+    Think,
+    Fetch,
+    SwitchMode,
+    Other,
+}
+
+/// Where a tool call is in its lifecycle.
+///
+/// The schema defines `pending` as "the input is either streaming or we're
+/// awaiting approval" — which is exactly the state a Fleet guard card puts a
+/// command in, and why a decision card and a tool call can share one lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+/// A file edit, rendered by the client as a diff rather than as raw text.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Diff {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_text: Option<String>,
+    pub new_text: String,
+}
+
+/// Output attached to a tool call.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolCallContent {
+    Content { content: ContentBlock },
+    Diff(Diff),
+    Terminal { terminal_id: String },
+}
+
+impl ToolCallContent {
+    pub fn text(s: impl Into<String>) -> Self {
+        ToolCallContent::Content { content: ContentBlock::text(s) }
+    }
+}
+
+/// A file the call touched. Lets a client follow along in its own editor.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallLocation {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+}
+
+/// A tool call as first reported.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCall {
+    pub tool_call_id: String,
+    pub title: String,
+    pub kind: ToolKind,
+    pub status: ToolCallStatus,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub content: Vec<ToolCallContent>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<ToolCallLocation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_input: Option<Value>,
+}
+
+/// A change to an already-reported call.
+///
+/// Every field but the id is optional, and absent fields mean "unchanged" —
+/// the schema is explicit that only what changed needs sending.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallUpdate {
+    pub tool_call_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<ToolCallStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<Vec<ToolCallContent>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_output: Option<Value>,
+}
+
+impl ToolCallUpdate {
+    pub fn status(id: impl Into<String>, status: ToolCallStatus) -> Self {
+        Self { tool_call_id: id.into(), status: Some(status), ..Default::default() }
+    }
+}
+
+/// Cumulative token usage for the session's context window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct UsageUpdate {
+    /// Tokens consumed so far.
+    pub used: u64,
+    /// Total context window.
+    pub size: u64,
+}
+
+/// A change to the session's own metadata.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfoUpdate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
 // ─────────────────────────── session/update ─────────────────────────
 
 /// `session/update` params.
@@ -356,6 +479,16 @@ pub enum SessionUpdate {
     /// for `session/load`, so the client can rebuild both sides of the
     /// conversation rather than a monologue.
     UserMessageChunk { content: ContentBlock },
+    /// A chunk of the agent's reasoning. Clients usually render it collapsed.
+    AgentThoughtChunk { content: ContentBlock },
+    /// A tool call has started.
+    ToolCall(ToolCall),
+    /// A tool call changed — status, output, or both.
+    ToolCallUpdate(ToolCallUpdate),
+    /// Cumulative token usage.
+    UsageUpdate(UsageUpdate),
+    /// The session's title or timestamp changed.
+    SessionInfoUpdate(SessionInfoUpdate),
 }
 
 impl SessionUpdate {
@@ -364,6 +497,9 @@ impl SessionUpdate {
     }
     pub fn user_text(text: impl Into<String>) -> Self {
         SessionUpdate::UserMessageChunk { content: ContentBlock::text(text) }
+    }
+    pub fn thought(text: impl Into<String>) -> Self {
+        SessionUpdate::AgentThoughtChunk { content: ContentBlock::text(text) }
     }
 }
 
