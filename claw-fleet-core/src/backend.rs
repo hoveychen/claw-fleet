@@ -591,6 +591,19 @@ pub trait Backend: Send + Sync {
         mode: crate::wiki::TextPublishMode,
     ) -> Result<crate::wiki::WikiDoc, String>;
 
+    /// True when this backend talks to another host over the probe API.
+    ///
+    /// Almost nothing should branch on this — the whole point of the trait is
+    /// that callers don't. It exists for the narrow class of actions that are
+    /// meaningless off-host: handing a path to "reveal in Finder" or "open with
+    /// the system app" when the file lives on the probe's machine would either
+    /// fail or, because artifact ids are timestamps and two machines can mint
+    /// the same one, open an unrelated local file. Those actions ask here and
+    /// offer 导出 instead.
+    fn is_remote(&self) -> bool {
+        false
+    }
+
     // ── Artifact store (产出) ────────────────────────────────────────────────
     /// Every artifact under `~/.fleet/artifacts`, newest first.
     fn list_artifacts(&self) -> Vec<crate::artifacts::Artifact>;

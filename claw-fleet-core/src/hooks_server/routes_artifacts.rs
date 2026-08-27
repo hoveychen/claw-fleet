@@ -184,7 +184,7 @@ pub(crate) fn route_artifact_blob(
         .headers()
         .iter()
         .find(|h| h.field.equiv("Range"))
-        .and_then(|h| parse_range_header(h.value.as_str()));
+        .and_then(|h| crate::artifacts::parse_range_header(h.value.as_str()));
 
     match crate::artifacts::read_bytes(&id, range) {
         Ok(blob) => {
@@ -253,59 +253,6 @@ fn respond_json_result<T: serde::Serialize>(
                     .with_status_code(400)
                     .with_header(json_header),
             );
-        }
-    }
-}
-
-/// Parse the single-range forms a media element actually sends:
-/// `bytes=<start>-<end>` and the open-ended `bytes=<start>-`.
-///
-/// Multi-range (`bytes=0-99,200-299`) and suffix (`bytes=-500`) are refused
-/// rather than approximated — returning the wrong bytes with a confident
-/// `Content-Range` is worse than ignoring the header and sending a `200`,
-/// which is always a legal answer to a range request. No client Fleet serves
-/// uses either form; if one ever does, it degrades to a full download.
-fn parse_range_header(value: &str) -> Option<(u64, u64)> {
-    let spec = value.trim().strip_prefix("bytes=")?;
-    if spec.contains(',') {
-        return None;
-    }
-    let (start, end) = spec.split_once('-')?;
-    let start: u64 = start.trim().parse().ok()?;
-    let end = match end.trim() {
-        "" => u64::MAX, // open-ended; the store clamps to the last byte
-        e => e.parse().ok()?,
-    };
-    if end < start {
-        return None;
-    }
-    Some((start, end))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_range_header;
-
-    #[test]
-    fn parses_the_range_forms_a_media_element_sends() {
-        assert_eq!(parse_range_header("bytes=0-1023"), Some((0, 1023)));
-        assert_eq!(parse_range_header(" bytes=100-200 "), Some((100, 200)));
-        // The open-ended form WKWebView and every <video> use to stream on.
-        assert_eq!(parse_range_header("bytes=4096-"), Some((4096, u64::MAX)));
-    }
-
-    #[test]
-    fn refuses_forms_it_would_only_be_guessing_at() {
-        for bad in [
-            "bytes=-500",        // suffix range: last 500 bytes, not supported
-            "bytes=0-99,200-299", // multi-range
-            "bytes=200-100",     // inverted
-            "items=0-10",        // not a byte range
-            "0-10",              // no unit
-            "bytes=",
-            "",
-        ] {
-            assert_eq!(parse_range_header(bad), None, "must refuse {bad:?}");
         }
     }
 }
