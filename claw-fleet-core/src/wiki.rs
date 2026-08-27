@@ -170,6 +170,10 @@ pub fn slug_basename(slug: &str) -> &str {
 
 /// Extension → mime map for serving wiki files. Hand-rolled (repo has no
 /// mime-guessing dep); unknown extensions fall back to octet-stream.
+///
+/// Also the artifact store's mime source ([`crate::artifacts`]), which is why
+/// the table carries Office/archive types the wiki itself never serves: one
+/// table beats two that drift.
 pub fn mime_for_path(path: &Path) -> &'static str {
     let ext = path
         .extension()
@@ -196,11 +200,37 @@ pub fn mime_for_path(path: &Path) -> &'static str {
         "ttf" => "font/ttf",
         "otf" => "font/otf",
         "wasm" => "application/wasm",
-        "mp4" => "video/mp4",
+        "mp4" | "m4v" => "video/mp4",
         "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "flac" => "audio/flac",
+        "ogg" | "oga" => "audio/ogg",
         "pdf" => "application/pdf",
+        // Office — the formats that motivated the artifact store. The webview
+        // renders none of them; they are here so downloads/`open` get the right
+        // handler and the UI can pick an icon.
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "doc" => "application/msword",
+        "xls" => "application/vnd.ms-excel",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+        "odp" => "application/vnd.oasis.opendocument.presentation",
+        "rtf" => "application/rtf",
+        "epub" => "application/epub+zip",
+        // Archives.
+        "zip" => "application/zip",
+        "gz" | "tgz" => "application/gzip",
+        "tar" => "application/x-tar",
+        "7z" => "application/x-7z-compressed",
+        "rar" => "application/vnd.rar",
         _ => "application/octet-stream",
     }
 }
