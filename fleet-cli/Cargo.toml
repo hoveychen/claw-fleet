@@ -4,8 +4,19 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
+[features]
+# Compile the web UI bundle into the binary — see build.rs for why this is a
+# feature rather than the default. Requires FLEET_WEBUI_DIR at build time.
+embed-webui = []
+
+[build-dependencies]
+# Already in the tree via claw-fleet-core; used here to gzip the embedded
+# bundle at build time.
+flate2 = "1"
+
 [dependencies]
 claw-fleet-core = { path = "../claw-fleet-core" }
+flate2 = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

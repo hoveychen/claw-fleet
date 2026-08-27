@@ -122,18 +122,31 @@ jobs:
         run: git ls-files '*.sh' | xargs -r shellcheck
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Tag push only — Linux CLI binaries.
+  # Tag push only — Linux CLI binaries, built TWICE per architecture.
   #
-  # These two artifacts serve triple duty: they are the standalone Linux CLI
-  # release downloads (the half of the Linux story that runs `fleet webui`),
-  # AND the `fleet` probes that every desktop bundle (macOS, Windows) embeds as
-  # resources for remote SSH deployment. They are the only cross-platform
-  # binaries the desktop jobs cannot produce on their own runner, so they live
-  # in this small, fast (zigbuild, no tests) job that the desktop matrix
-  # depends on.
+  # The two builds differ only in the `embed-webui` feature, and they exist
+  # because the same binary serves two audiences with opposite needs:
+  #
+  #   dist/       (artifact `fleet-linux-*`)  the public Linux download. Linux
+  #               has no desktop bundle, so this binary IS the app: the web UI
+  #               is compiled in (+~7 MB) and `fleet webui` needs no second
+  #               file and no --web-root.
+  #   dist-probe/ (artifact `probe-linux-*`)  the `fleet` probe every
+  #               macOS/Windows desktop bundle embeds — twice, x64 + arm64 —
+  #               as a resource for remote SSH deployment. It serves the HTTP
+  #               API to a desktop app that already has its own UI, so
+  #               embedding the bundle there would add ~14 MB to every
+  #               installer to ship a UI nothing loads. Stays lean.
+  #
+  # The artifact names differ but the FILE inside each keeps the name the
+  # desktop resources dir expects (`fleet-linux-x64` / `fleet-linux-arm64`), so
+  # nothing on the Rust side has to know this split exists. `probe-*` also
+  # falls outside release.yml's `fleet-*` download pattern, which is what keeps
+  # the lean copies out of the published release.
   # ═══════════════════════════════════════════════════════════════════════════
   cli-linux:
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: webui-bundle
     name: CLI — ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -143,11 +156,13 @@ jobs:
             runner: ubuntu-22.04
             rust_target: x86_64-unknown-linux-gnu
             artifact: fleet-linux-x64
+            probe_artifact: probe-linux-x64
 
           - name: Linux ARM64
             runner: ubuntu-22.04-arm
             rust_target: aarch64-unknown-linux-gnu
             artifact: fleet-linux-arm64
+            probe_artifact: probe-linux-arm64
 
     runs-on: ${{ matrix.runner }}
 
@@ -196,28 +211,61 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
-      - name: Build fleet-cli
+      # The bundle is built once, by webui-bundle, and reused by both
+      # architectures — a second vite build here would produce the same bytes.
+      - name: Download web UI bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: webui-bundle
+          path: webui-tar
+
+      - name: Unpack web UI bundle
+        shell: bash
+        run: tar -xzf webui-tar/claw-fleet-webui.tar.gz
+
+      - name: Build fleet-cli (lean probe + embedded release)
         shell: bash
         run: |
-          mkdir -p dist
-          cargo zigbuild --release -p fleet-cli --target ${{ matrix.rust_target }}.2.17
-          cp target/${{ matrix.rust_target }}/release/fleet-cli dist/${{ matrix.artifact }}
+          mkdir -p dist dist-probe
+          BUILT="target/${{ matrix.rust_target }}/release/fleet-cli"
 
-      - name: Upload CLI artifact
+          # Lean first, and copied out before the second build overwrites it.
+          cargo zigbuild --release -p fleet-cli --target ${{ matrix.rust_target }}.2.17
+          cp "$BUILT" "dist-probe/${{ matrix.artifact }}"
+
+          FLEET_WEBUI_DIR="$PWD/claw-fleet-webui" \
+            cargo zigbuild --release -p fleet-cli --features embed-webui \
+              --target ${{ matrix.rust_target }}.2.17
+          cp "$BUILT" "dist/${{ matrix.artifact }}"
+
+          ls -lh dist-probe dist
+
+      - name: Upload CLI artifact (public download, web UI embedded)
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: dist/
           if-no-files-found: error
 
+      - name: Upload probe artifact (desktop resource, lean)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.probe_artifact }}
+          path: dist-probe/
+          if-no-files-found: error
+
   # ═══════════════════════════════════════════════════════════════════════════
-  # Tag push only — the browser build of the UI, shipped as a release tarball.
+  # Tag push only — the browser build of the UI. Consumed twice:
   #
-  # This is what Linux users get instead of a desktop bundle: the same `vite
-  # build` output the Tauri app embeds, served by `fleet webui --web-root`.
+  #   1. `cli-linux` compiles it INTO the public Linux binaries, so a Linux
+  #      user downloads one file and runs `fleet webui` with no flags. This is
+  #      why cli-linux depends on this job.
+  #   2. It is also published as a release tarball, for macOS/Windows users who
+  #      want the browser UI and for anyone self-hosting it behind a gateway
+  #      (`fleet webui --web-root <dir>`).
+  #
   # There is no Tauri/GTK/WebKitGTK build on Linux at all any more — one Node
-  # job produces a platform-independent bundle that pairs with the fleet-linux-*
-  # CLI binaries from `cli-linux` above.
+  # job replaces the whole Linux desktop bundle.
   #
   # Two frontends go in: the desktop UI at the root (what a browser loads) and
   # the mobile UI under `m/`, exactly the layout deploy/lean/Dockerfile builds —
@@ -401,17 +449,20 @@ jobs:
           if-no-files-found: error
 
       # ── Download cross-platform binaries from cli-linux ───────────────────
+      # The `probe-*` artifacts, not `fleet-linux-*`: those carry the embedded
+      # web UI for the public Linux download, which this bundle has no use for.
+      # The files inside keep the names the resources dir expects.
 
       - name: Download Linux x64 probe
         uses: actions/download-artifact@v8
         with:
-          name: fleet-linux-x64
+          name: probe-linux-x64
           path: claw-fleet-desktop/resources
 
       - name: Download Linux arm64 probe
         uses: actions/download-artifact@v8
         with:
-          name: fleet-linux-arm64
+          name: probe-linux-arm64
           path: claw-fleet-desktop/resources
 
       - name: Prepare sidecar and probes
