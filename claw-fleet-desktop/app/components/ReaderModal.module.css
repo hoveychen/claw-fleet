@@ -134,6 +134,18 @@
   font-size: 14px;
 }
 
+/* 阅读排版到 svg 边界为止。
+   mermaid 的节点标签不是画出来的 <text>，是 foreignObject 里的真 <p>（htmlLabels），
+   所以上面那条 `.paper .body p` 会直接命中它：字号从 mermaid 排版时用的 14px 变成
+   15px、行高变成 1.9（实测 15px / 28.5px），而方框的几何早在渲染那一刻就按 14px
+   量死了 —— 于是标签横竖都溢出方框被切掉。图有自己的排版，别让正文规则伸进去。
+   mermaid 自己的 `#<id> p { margin: 0 }` 是 ID 选择器，margin 不用管。 */
+.paper .body :global(svg p),
+.paper .body :global(svg li) {
+  font-size: inherit;
+  line-height: normal;
+}
+
 /* ── Print / export-PDF ─────────────────────────────────────────────────────
    `print_webview` hands the whole webview to the OS print pipeline, so what
    lands on the page is decided here: the reader becomes the document and

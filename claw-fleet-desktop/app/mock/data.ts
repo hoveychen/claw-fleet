@@ -2157,6 +2157,10 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
               '一个是**“一年一两次、口径每年变”这个特征本身**。所有 SaaS 的商业模式都建立在“你会持续用我”上。\n\n' +
               "鉴权失败的时序是这样的：\n\n" +
               "```mermaid\nsequenceDiagram\n    participant C as Client\n    participant G as Gateway\n    participant A as Auth\n    C->>G: 带旧 issuer 的 token\n    G->>A: 校验 issuer\n    A-->>G: 拒绝 (api-server ≠ api-server-v2)\n    G-->>C: 401\n```\n\n" +
+              // 窄图。宽图（上面那张时序图）永远比正文列宽，看不出缩放有没有失控；
+              // 只有自然宽装得进容器的图，才会暴露「svg 被拉满整列、字跟着放大」。
+              "换发路径本身很短：\n\n" +
+              "```mermaid\nflowchart TD\n  A[token ids] --> B[hash]\n  B --> C[bucket]\n```\n\n" +
               "重试退避是指数的：$t_n = t_0 \\cdot 2^{n}$，所以第 5 次已经等到\n\n$$t_5 = 100\\text{ms} \\cdot 2^5 = 3.2\\text{s}$$\n\n" +
               "| 方案 | 迁移成本 | 风险 |\n|:---|:---:|---:|\n| 双 issuer 并存 | 低 | 低 |\n| 强制换发 token | 高 | 中 |\n\n" +
               "- [x] 定位根因\n- [ ] 灰度发布\n\n" +
