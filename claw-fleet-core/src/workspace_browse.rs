@@ -55,17 +55,53 @@ pub struct BrowseDirResponse {
     pub entries: Vec<BrowseEntry>,
     /// `entries` was cut at [`MAX_ENTRIES`].
     pub truncated: bool,
+    /// Every browsable root, canonical. A root has no parent, so without this
+    /// the client standing in one has no way back to the others — and on a
+    /// cloud container the listing *starts* in a root that is not home.
+    #[serde(default)]
+    pub roots: Vec<String>,
 }
 
-/// List the directories one level under `path` (`None`/empty = the home dir).
+/// List the directories one level under `path`. `None`/empty means the default
+/// start: the designated workspace root when the host declares one, else home
+/// (see [`default_start`]).
 pub fn browse_dir(path: Option<&str>, known_workspaces: &[String]) -> Result<BrowseDirResponse, String> {
     let home = crate::session::real_home_dir().ok_or("home directory unknown")?;
+    let roots = browse_roots(&home, known_workspaces);
     browse_dir_in(
         path,
         &home,
-        &browse_roots(&home, known_workspaces),
+        &default_start(&home),
+        &roots,
         &|p| crate::tcc::is_tcc_protected(p),
     )
+}
+
+/// The directory a client with no path of its own should land in.
+///
+/// On a Fleet Cloud container `$HOME` is the image's **ephemeral writable
+/// layer**: the one persistent volume is mounted elsewhere (muvee mounts
+/// `/workspace`, and the entrypoint symlinks `~/.fleet` and the transcript dirs
+/// into it). A workspace created under `$HOME` therefore disappears on the next
+/// deploy, along with whatever the agent built in it. `FLEET_PUBLIC_WORKSPACE`
+/// is the host's own declaration of where customer work belongs — the same path
+/// the `/v1` API is confined to — so when it is set, that is where the picker
+/// opens. Unset (every desktop, every laptop) → home, exactly as before.
+fn default_start(home: &Path) -> PathBuf {
+    workspace_root().unwrap_or_else(|| home.to_path_buf())
+}
+
+/// The host's declared workspace directory, canonicalized, if it is set and
+/// really is a directory. A value naming something that does not exist is
+/// ignored rather than fatal: the picker still has to work.
+fn workspace_root() -> Option<PathBuf> {
+    let raw = std::env::var("FLEET_PUBLIC_WORKSPACE").ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let canonical = fs::canonicalize(trimmed).ok()?;
+    canonical.is_dir().then_some(canonical)
 }
 
 /// Create one new child directory under `parent` (`None`/empty = the home dir)
@@ -86,11 +122,13 @@ pub fn create_dir(
     known_workspaces: &[String],
 ) -> Result<BrowseDirResponse, String> {
     let home = crate::session::real_home_dir().ok_or("home directory unknown")?;
+    let roots = browse_roots(&home, known_workspaces);
     create_dir_in(
         parent,
         name,
         &home,
-        &browse_roots(&home, known_workspaces),
+        &default_start(&home),
+        &roots,
         &|p| crate::tcc::is_tcc_protected(p),
     )
 }
@@ -100,13 +138,14 @@ fn create_dir_in(
     parent: Option<&str>,
     name: &str,
     home: &Path,
+    start: &Path,
     roots: &[PathBuf],
     is_protected: &dyn Fn(&Path) -> bool,
 ) -> Result<BrowseDirResponse, String> {
     let name = validate_child_name(name)?;
     let requested = match parent.map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) => expand(p, home),
-        None => home.to_path_buf(),
+        None => start.to_path_buf(),
     };
     // Same order as browse_dir_in: canonicalize first, judge the result. A
     // symlinked or `..`-laden parent must be resolved while we can still refuse.
@@ -128,7 +167,7 @@ fn create_dir_in(
 
     // Answer with the new directory's own listing (empty, with a parent link),
     // so the client is standing in it without a second round trip.
-    browse_dir_in(Some(&child.to_string_lossy()), home, roots, is_protected)
+    browse_dir_in(Some(&child.to_string_lossy()), home, start, roots, is_protected)
 }
 
 /// A new directory's name: one plain path component, nothing that could reach
@@ -161,11 +200,21 @@ fn validate_child_name(name: &str) -> Result<&str, String> {
     Ok(name)
 }
 
-/// The roots a client may browse: home, plus any known workspace that lives
-/// outside it (an external-volume repo would otherwise be unreachable).
+/// The roots a client may browse: home, the host's declared workspace directory
+/// (see [`default_start`] — on a cloud container that is the persistent volume,
+/// and home is not), plus any known workspace that lives outside home (an
+/// external-volume repo would otherwise be unreachable).
 fn browse_roots(home: &Path, known_workspaces: &[String]) -> Vec<PathBuf> {
     let home = fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
     let mut roots = vec![home.clone()];
+    // Its parent stays unbrowsable: on the cloud volume that parent also holds
+    // `.fleet-state` and the cred-store dir, and a root never exposes its own
+    // parent. Under home it needs no root of its own — home already reaches it.
+    if let Some(ws) = workspace_root() {
+        if !ws.starts_with(&home) {
+            roots.push(ws);
+        }
+    }
     for ws in known_workspaces {
         let Ok(c) = fs::canonicalize(ws) else { continue };
         if !c.starts_with(&home) && !roots.contains(&c) {
@@ -180,12 +229,13 @@ fn browse_roots(home: &Path, known_workspaces: &[String]) -> Vec<PathBuf> {
 fn browse_dir_in(
     path: Option<&str>,
     home: &Path,
+    start: &Path,
     roots: &[PathBuf],
     is_protected: &dyn Fn(&Path) -> bool,
 ) -> Result<BrowseDirResponse, String> {
     let requested = match path.map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) => expand(p, home),
-        None => home.to_path_buf(),
+        None => start.to_path_buf(),
     };
     // Canonicalize before the boundary check, never after: `..` components and
     // symlinks must be resolved while we still get to reject the result.
@@ -253,6 +303,7 @@ fn browse_dir_in(
         parent,
         entries,
         truncated,
+        roots: roots.iter().map(|r| r.to_string_lossy().into_owned()).collect(),
     })
 }
 
@@ -318,7 +369,7 @@ mod tests {
     fn lists_only_visible_directories_and_flags_repos() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        let r = browse_dir_in(None, &home, &roots, &none_protected).unwrap();
+        let r = browse_dir_in(None, &home, &home, &roots, &none_protected).unwrap();
         // Files and dotfiles are gone; the repo is badged; order is stable.
         assert_eq!(names(&r), vec!["notes", "proj"]);
         assert!(r.entries.iter().find(|e| e.name == "proj").unwrap().is_git_repo);
@@ -330,8 +381,8 @@ mod tests {
     fn home_is_a_root_so_it_has_no_parent_but_a_child_does() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert_eq!(browse_dir_in(None, &home, &roots, &none_protected).unwrap().parent, None);
-        let proj = browse_dir_in(Some("proj"), &home, &roots, &none_protected).unwrap();
+        assert_eq!(browse_dir_in(None, &home, &home, &roots, &none_protected).unwrap().parent, None);
+        let proj = browse_dir_in(Some("proj"), &home, &home, &roots, &none_protected).unwrap();
         assert_eq!(proj.path, home.join("proj").to_string_lossy());
         assert_eq!(proj.parent.as_deref(), Some(&*home.to_string_lossy()));
         assert_eq!(names(&proj), vec!["src"]);
@@ -343,7 +394,7 @@ mod tests {
         let roots = vec![home.clone()];
         let want = home.join("proj").to_string_lossy().into_owned();
         for input in ["~/proj", "proj", "  ~/proj  "] {
-            assert_eq!(browse_dir_in(Some(input), &home, &roots, &none_protected).unwrap().path, want, "{input}");
+            assert_eq!(browse_dir_in(Some(input), &home, &home, &roots, &none_protected).unwrap().path, want, "{input}");
         }
     }
 
@@ -360,7 +411,7 @@ mod tests {
             "proj/../../outside".to_string(),
             "/etc".to_string(),
         ] {
-            let r = browse_dir_in(Some(&escape), &home, &roots, &none_protected);
+            let r = browse_dir_in(Some(&escape), &home, &home, &roots, &none_protected);
             assert!(r.is_err(), "{escape:?} must be refused, got {r:?}");
         }
     }
@@ -372,15 +423,19 @@ mod tests {
     fn known_workspace_outside_home_becomes_its_own_root() {
         let (_tmp, home, outside) = fixture();
         let ext = outside.join("external-repo");
-        let roots = browse_roots(&home, &[ext.to_string_lossy().into_owned()]);
+        // `browse_roots` reads FLEET_PUBLIC_WORKSPACE, so pin it off — otherwise
+        // a concurrently-running env test decides how many roots there are.
+        let roots = with_workspace_env(None, || {
+            browse_roots(&home, &[ext.to_string_lossy().into_owned()])
+        });
         assert_eq!(roots.len(), 2);
 
-        let r = browse_dir_in(Some(&ext.to_string_lossy()), &home, &roots, &none_protected).unwrap();
+        let r = browse_dir_in(Some(&ext.to_string_lossy()), &home, &home, &roots, &none_protected).unwrap();
         assert_eq!(r.path, ext.to_string_lossy());
         assert_eq!(r.parent, None, "a root must not expose its parent");
 
         // ...but its parent `outside/` is still not browsable.
-        assert!(browse_dir_in(Some(&outside.to_string_lossy()), &home, &roots, &none_protected).is_err());
+        assert!(browse_dir_in(Some(&outside.to_string_lossy()), &home, &home, &roots, &none_protected).is_err());
     }
 
     /// A known workspace already under home must not become a second root —
@@ -390,16 +445,16 @@ mod tests {
     fn known_workspace_inside_home_adds_no_root() {
         let (_tmp, home, _) = fixture();
         let inside = home.join("proj").to_string_lossy().into_owned();
-        assert_eq!(browse_roots(&home, &[inside]), vec![home]);
+        with_workspace_env(None, || assert_eq!(browse_roots(&home, &[inside]), vec![home.clone()]));
     }
 
     #[test]
     fn missing_directory_errors_rather_than_silently_listing_home() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert!(browse_dir_in(Some("~/nope"), &home, &roots, &none_protected).is_err());
+        assert!(browse_dir_in(Some("~/nope"), &home, &home, &roots, &none_protected).is_err());
         // A file is not a directory: the picker must not "descend" into it.
-        assert!(browse_dir_in(Some("file.txt"), &home, &roots, &none_protected).is_err());
+        assert!(browse_dir_in(Some("file.txt"), &home, &home, &roots, &none_protected).is_err());
     }
 
     /// TCC guard: a protected top-level dir (e.g. `~/Documents`) is still listed
@@ -415,7 +470,7 @@ mod tests {
         let roots = vec![home.clone()];
         let is_protected = |p: &Path| p.file_name().map_or(false, |n| n == "Documents");
 
-        let r = browse_dir_in(None, &home, &roots, &is_protected).unwrap();
+        let r = browse_dir_in(None, &home, &home, &roots, &is_protected).unwrap();
         // Still offered as a pickable directory...
         let doc = r.entries.iter().find(|e| e.name == "Documents").expect("Documents must be listed");
         // ...but never git-probed, so no stat lands inside ~/Documents.
@@ -442,7 +497,7 @@ mod tests {
         let prot = protected.clone();
         let is_protected = move |p: &Path| p == prot;
 
-        let r = browse_dir_in(None, &home, &roots, &is_protected).unwrap();
+        let r = browse_dir_in(None, &home, &home, &roots, &is_protected).unwrap();
         let names: Vec<&str> = r.entries.iter().map(|e| e.name.as_str()).collect();
         assert!(
             !names.contains(&"plink"),
@@ -461,13 +516,13 @@ mod tests {
     fn creates_a_child_and_answers_with_its_listing() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        let r = create_dir_in(Some("notes"), "sub", &home, &roots, &none_protected).unwrap();
+        let r = create_dir_in(Some("notes"), "sub", &home, &home, &roots, &none_protected).unwrap();
         assert_eq!(r.path, home.join("notes/sub").to_string_lossy());
         assert_eq!(r.parent.as_deref(), Some(&*home.join("notes").to_string_lossy()));
         assert!(r.entries.is_empty());
         assert!(home.join("notes/sub").is_dir());
         // ...and it shows up in the parent's listing afterwards.
-        let parent = browse_dir_in(Some("notes"), &home, &roots, &none_protected).unwrap();
+        let parent = browse_dir_in(Some("notes"), &home, &home, &roots, &none_protected).unwrap();
         assert_eq!(names(&parent), vec!["sub"]);
     }
 
@@ -476,7 +531,7 @@ mod tests {
     fn creates_under_home_by_default() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        let r = create_dir_in(None, "  fresh  ", &home, &roots, &none_protected).unwrap();
+        let r = create_dir_in(None, "  fresh  ", &home, &home, &roots, &none_protected).unwrap();
         assert_eq!(r.path, home.join("fresh").to_string_lossy());
         assert!(home.join("fresh").is_dir());
     }
@@ -489,7 +544,7 @@ mod tests {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
         for bad in ["", "   ", ".", "..", "a/b", "../escape", "a\\b", ".hidden"] {
-            let r = create_dir_in(None, bad, &home, &roots, &none_protected);
+            let r = create_dir_in(None, bad, &home, &home, &roots, &none_protected);
             assert!(r.is_err(), "{bad:?} must be refused, got {r:?}");
         }
         assert!(!home.parent().unwrap().join("escape").exists());
@@ -506,7 +561,7 @@ mod tests {
             "../outside".to_string(),
             "proj/../../outside".to_string(),
         ] {
-            let r = create_dir_in(Some(&escape), "x", &home, &roots, &none_protected);
+            let r = create_dir_in(Some(&escape), "x", &home, &home, &roots, &none_protected);
             assert!(r.is_err(), "{escape:?} must be refused, got {r:?}");
         }
         assert!(!outside.join("x").exists());
@@ -519,9 +574,9 @@ mod tests {
     fn refuses_an_existing_name() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert!(create_dir_in(None, "notes", &home, &roots, &none_protected).is_err());
+        assert!(create_dir_in(None, "notes", &home, &home, &roots, &none_protected).is_err());
         // A file with that name collides too — and is not clobbered.
-        assert!(create_dir_in(None, "file.txt", &home, &roots, &none_protected).is_err());
+        assert!(create_dir_in(None, "file.txt", &home, &home, &roots, &none_protected).is_err());
         assert_eq!(fs::read_to_string(home.join("file.txt")).unwrap(), "x");
     }
 
@@ -529,8 +584,90 @@ mod tests {
     fn missing_parent_errors_rather_than_creating_it() {
         let (_tmp, home, _) = fixture();
         let roots = vec![home.clone()];
-        assert!(create_dir_in(Some("~/nope"), "x", &home, &roots, &none_protected).is_err());
+        assert!(create_dir_in(Some("~/nope"), "x", &home, &home, &roots, &none_protected).is_err());
         assert!(!home.join("nope").exists());
+    }
+
+    /// Serializes the tests that mutate `FLEET_PUBLIC_WORKSPACE`; cargo runs
+    /// test fns concurrently inside one process, and the env is process-global.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Runs `f` with `FLEET_PUBLIC_WORKSPACE` set to `value` (or unset for
+    /// `None`), restoring whatever was there before.
+    fn with_workspace_env<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("FLEET_PUBLIC_WORKSPACE").ok();
+        match value {
+            Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
+            None => std::env::remove_var("FLEET_PUBLIC_WORKSPACE"),
+        }
+        let out = f();
+        match prev {
+            Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
+            None => std::env::remove_var("FLEET_PUBLIC_WORKSPACE"),
+        }
+        out
+    }
+
+    /// The cloud shape: `$HOME` is the container's ephemeral layer and the
+    /// persistent volume is mounted elsewhere, so a workspace created under home
+    /// dies on the next deploy. When the host declares its workspace directory,
+    /// that is where the picker opens and where a nameless `create_dir` lands.
+    #[test]
+    fn declared_workspace_is_the_default_start_and_a_root() {
+        let (_tmp, home, outside) = fixture();
+        let volume = outside.join("repo");
+        fs::create_dir_all(&volume).unwrap();
+        with_workspace_env(Some(&volume.to_string_lossy()), || {
+            let roots = browse_roots(&home, &[]);
+            assert!(roots.contains(&volume), "declared workspace must be a root: {roots:?}");
+            assert!(roots.contains(&home), "home must stay browsable");
+
+            let start = default_start(&home);
+            assert_eq!(start, volume);
+
+            let r = browse_dir_in(None, &home, &start, &roots, &none_protected).unwrap();
+            assert_eq!(r.path, volume.to_string_lossy());
+            assert_eq!(r.parent, None, "a root must not expose its parent");
+            // The client needs the root list to get back to home from here —
+            // there is no ".." to climb.
+            assert!(r.roots.contains(&home.to_string_lossy().into_owned()));
+
+            // A name the fixture's home does not already have, so "not in home"
+            // means the call put it elsewhere rather than the fixture being noisy.
+            create_dir_in(None, "fresh-proj", &home, &start, &roots, &none_protected).unwrap();
+            assert!(volume.join("fresh-proj").is_dir(), "must land on the persistent volume");
+            assert!(!home.join("fresh-proj").exists(), "must NOT land in the ephemeral home");
+        });
+    }
+
+    /// Its parent stays out of bounds: on the real volume that parent also holds
+    /// the Fleet state dir and the cred-store dir.
+    #[test]
+    fn declared_workspace_does_not_open_up_its_parent() {
+        let (_tmp, home, outside) = fixture();
+        let volume = outside.join("repo");
+        fs::create_dir_all(&volume).unwrap();
+        with_workspace_env(Some(&volume.to_string_lossy()), || {
+            let roots = browse_roots(&home, &[]);
+            let up = outside.to_string_lossy().into_owned();
+            assert!(browse_dir_in(Some(&up), &home, &volume, &roots, &none_protected).is_err());
+            assert!(create_dir_in(Some(&up), "x", &home, &volume, &roots, &none_protected).is_err());
+        });
+    }
+
+    /// Every desktop: nothing declared, so home is still the start and the only
+    /// root that isn't a known workspace. A value naming a missing directory is
+    /// ignored the same way — the picker must still work.
+    #[test]
+    fn without_the_env_home_stays_the_start() {
+        let (_tmp, home, _) = fixture();
+        for value in [None, Some("/definitely/not/here")] {
+            with_workspace_env(value, || {
+                assert_eq!(default_start(&home), home);
+                assert_eq!(browse_roots(&home, &[]), vec![home.clone()]);
+            });
+        }
     }
 
     #[test]
@@ -540,7 +677,7 @@ mod tests {
         for i in 0..(MAX_ENTRIES + 10) {
             fs::create_dir_all(many.join(format!("d{i:04}"))).unwrap();
         }
-        let r = browse_dir_in(Some("many"), &home, &vec![home.clone()], &none_protected).unwrap();
+        let r = browse_dir_in(Some("many"), &home, &home, &vec![home.clone()], &none_protected).unwrap();
         assert!(r.truncated);
         assert_eq!(r.entries.len(), MAX_ENTRIES);
     }
