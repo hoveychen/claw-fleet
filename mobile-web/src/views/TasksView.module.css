@@ -60,6 +60,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 聊天开关从下拉里拆出来后这一行多了一个控件；窄屏上让它换行，
+     而不是把目录下拉挤成一条缝。 */
+  flex-wrap: wrap;
 }
 
 .workspaceSelect {
@@ -71,6 +74,11 @@
   padding: 6px 8px;
   color: var(--color-text);
   font-size: var(--t-aux, 12px);
+}
+
+/* 聊天模式下失效——置灰而非隐藏：目录选择还在，关掉开关就回来。 */
+.workspaceSelect:disabled {
+  opacity: 0.45;
 }
 
 .filterToggle {
