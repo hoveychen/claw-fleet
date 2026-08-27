@@ -6285,14 +6285,34 @@ mod tests {
     #[test]
     fn today_usage_projects_the_provided_session_list_without_scanning() {
         let _guard = fleet_home_lock();
-        // A cost/token figure no real scan of this machine could produce, and a
-        // creation stamp inside today's window so it counts at all.
+        // Today's usage is folded from the session's transcript, so the sentinel
+        // needs a real one: a single today-stamped turn whose token figures no
+        // scan of this machine could plausibly produce.
+        let dir = std::env::temp_dir().join("fleet-relay-today-usage-sentinel");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("warm-sentinel.jsonl");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "type": "assistant",
+                "timestamp": chrono::Local::now().to_rfc3339(),
+                "message": {
+                    "id": "sentinel-turn",
+                    "model": "claude-sonnet-4-5",
+                    "stop_reason": "end_turn",
+                    "usage": { "input_tokens": 4_242, "output_tokens": 777 }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let now_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
         let sentinel = crate::session::SessionInfo {
             id: "warm-sentinel".to_string(),
-            created_at_ms: chrono::Local::now().timestamp_millis().max(0) as u64,
-            total_input_tokens: 4_242,
-            total_output_tokens: 777,
-            total_cost_usd: 12.5,
+            created_at_ms: now_ms,
+            last_activity_ms: now_ms,
+            jsonl_path: path.to_string_lossy().to_string(),
+            agent_source: "claude-code".to_string(),
             ..Default::default()
         };
         set_sessions_provider(move || Some(vec![sentinel.clone()]));
