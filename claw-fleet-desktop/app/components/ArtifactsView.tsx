@@ -553,7 +553,7 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
   if (artifact.kind === "pdf") {
     return (
       <div className={styles.stage}>
-        <iframe className={styles.pdf_frame} src={url} title={artifact.title} />
+        <iframe className={styles.doc_frame} src={url} title={artifact.title} />
       </div>
     );
   }
@@ -564,7 +564,7 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
     return (
       <div className={styles.stage}>
         <iframe
-          className={styles.html_frame}
+          className={styles.doc_frame}
           sandbox="allow-scripts"
           src={url}
           title={artifact.title}

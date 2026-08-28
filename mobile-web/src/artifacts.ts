@@ -34,13 +34,31 @@ export function isFetchable(a: Artifact): boolean {
  * video and frame a PDF, the phone is fetching whole bytes into memory. Video
  * and audio are listed but not played here — a playable clip would have to be
  * under 16 MiB, which is not the case for anything worth calling a deliverable.
+ *
+ * The store's single `text` kind is split three ways here for the same reason
+ * the desktop splits it: a markdown spec and an html report are ordinary
+ * deliverables (the wiki/artifact rule is audience, not format), and showing
+ * either as raw source is not a preview. The split reads the mime the store
+ * already derived rather than re-sniffing the extension.
  */
-export function previewKind(a: Artifact): "image" | "pdf" | "text" | "none" {
+export function previewKind(
+  a: Artifact,
+): "image" | "pdf" | "markdown" | "html" | "text" | "none" {
   if (!isFetchable(a)) return "none";
   if (a.kind === "image") return "image";
   if (a.kind === "pdf") return "pdf";
-  if (a.kind === "text") return "text";
+  if (a.kind === "text") {
+    const base = a.mime.split(";")[0].trim().toLowerCase();
+    if (base === "text/markdown") return "markdown";
+    if (base === "text/html") return "html";
+    return "text";
+  }
   return "none";
+}
+
+/** Whether this preview renders from decoded text rather than a blob URL. */
+export function isTextPreview(kind: ReturnType<typeof previewKind>): boolean {
+  return kind === "markdown" || kind === "html" || kind === "text";
 }
 
 /** Human-readable size. Mirrors the desktop's `formatBytes`. */
