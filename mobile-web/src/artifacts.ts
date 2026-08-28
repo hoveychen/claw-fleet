@@ -40,25 +40,51 @@ export function isFetchable(a: Artifact): boolean {
  * deliverables (the wiki/artifact rule is audience, not format), and showing
  * either as raw source is not a preview. The split reads the mime the store
  * already derived rather than re-sniffing the extension.
+ *
+ * The Office three are matched on mime for the same reason and with the same
+ * strictness as the desktop's `officeMode`: the renderers read OOXML only, so a
+ * legacy .doc (binary CFB) or an .odt (a differently-shaped zip) stays on the
+ * placeholder rather than being handed to a parser that will throw. The 16 MiB
+ * relay ceiling applies first — `isFetchable` runs before any of this.
  */
-export function previewKind(
-  a: Artifact,
-): "image" | "pdf" | "markdown" | "html" | "text" | "none" {
+export type PreviewKind =
+  | "image"
+  | "pdf"
+  | "markdown"
+  | "html"
+  | "text"
+  | "docx"
+  | "xlsx"
+  | "pptx"
+  | "none";
+
+const OOXML_MIME: Record<string, PreviewKind> = {
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+};
+
+export function previewKind(a: Artifact): PreviewKind {
   if (!isFetchable(a)) return "none";
   if (a.kind === "image") return "image";
   if (a.kind === "pdf") return "pdf";
+  const base = a.mime.split(";")[0].trim().toLowerCase();
   if (a.kind === "text") {
-    const base = a.mime.split(";")[0].trim().toLowerCase();
     if (base === "text/markdown") return "markdown";
     if (base === "text/html") return "html";
     return "text";
   }
-  return "none";
+  return OOXML_MIME[base] ?? "none";
 }
 
 /** Whether this preview renders from decoded text rather than a blob URL. */
-export function isTextPreview(kind: ReturnType<typeof previewKind>): boolean {
+export function isTextPreview(kind: PreviewKind): boolean {
   return kind === "markdown" || kind === "html" || kind === "text";
+}
+
+/** Whether this preview needs the raw bytes as a Blob for a JS renderer. */
+export function isOfficePreview(kind: PreviewKind): kind is "docx" | "xlsx" | "pptx" {
+  return kind === "docx" || kind === "xlsx" || kind === "pptx";
 }
 
 /** Human-readable size. Mirrors the desktop's `formatBytes`. */

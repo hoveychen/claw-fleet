@@ -1,0 +1,63 @@
+/* Office thumbnails in the 产出 grid.
+ *
+ * The document is rendered at its own scale and then shrunk with a transform,
+ * so what the card shows is the page's real shape rather than a reflow. */
+
+.frame {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--canvas-fixed-light);
+  /* Fade in once there is something to see; an empty white box mid-parse reads
+     as a broken card. */
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.frame[data-ready="1"] {
+  opacity: 1;
+}
+
+/* 0.28 ≈ a 190px card well over the 820px render width. Top-left origin so the
+   thumbnail shows the head of the document, which is where its title is. */
+.canvas {
+  transform: scale(0.28);
+  transform-origin: top left;
+  pointer-events: none;
+}
+
+/* Strip the chrome each library wraps around a document. At full size it is
+   navigation; in a 190px card it is noise sitting on top of the one thing the
+   thumbnail is for. docx-preview's gray desk and 30px margin would eat most of
+   the well; pptx-preview's arrows and "1/2" counter would be the biggest thing
+   on the card. */
+.canvas :global(.docx-wrapper) {
+  background: transparent;
+  padding: 0;
+  gap: 0;
+}
+
+/* Both arrows really do carry the same class — the library's renderPreButton
+   adds `-next` too and only differs by its `right` offset. */
+.canvas :global(.pptx-preview-wrapper-next),
+.canvas :global(.pptx-preview-wrapper-pagination) {
+  display: none;
+}
+
+/* Literal colours, not tokens: this table sits on --canvas-fixed-light next to
+   docx/pptx pages that are themselves fixed-light documents. A themed ink would
+   go pale-on-white the moment the app switches to the dark theme, while the
+   pages beside it stayed readable. */
+.sheet {
+  border-collapse: collapse;
+  font-size: 16px;
+  color: #2b2723;
+}
+
+.sheet td {
+  border: 1px solid #d8d2c8;
+  padding: 2px 6px;
+  white-space: pre;
+  max-width: 220px;
+  overflow: hidden;
+}

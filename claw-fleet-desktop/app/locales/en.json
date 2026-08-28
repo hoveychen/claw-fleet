@@ -2386,8 +2386,10 @@
     "usage_hardlinked": "{{size}} of that is hard-linked, sharing disk blocks with the source",
     "from_session": "From session",
     "no_preview_title": "This format cannot be previewed here",
-    "no_preview_hint": "Office documents open in the system app, or export them first.",
-    "preview_failed": "Preview failed to load",
+    "no_preview_hint": "This one can only be exported, or opened in the system app.",
+    "preview_failed": "Could not parse this file: {{error}}",
+    "sheet_unnamed": "Sheet {{n}}",
+    "sheet_truncated": "Showing the first {{shown}} of {{total}} rows — export it to see the whole sheet.",
     "kind": {
       "image": "Image",
       "video": "Video",

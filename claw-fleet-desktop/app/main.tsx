@@ -49,6 +49,17 @@ async function boot() {
       // so destroys the evidence `isTauriHost()` just read.
       markWebBuild();
       await installWebTransport();
+      // Cache the hash-named /assets/ chunks so a redeploy only re-downloads
+      // what actually changed — the Office preview alone is ~1.6 MB of lazily
+      // loaded code. Browser build only: the desktop webview loads the same
+      // files off disk, and `?mock` must keep reading as the desktop. Not
+      // awaited — registration is not on the critical path to first paint.
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {
+          // No SW (insecure origin, private window, disabled) just means every
+          // asset comes off the network. Nothing else depends on it.
+        });
+      }
     }
   }
 
