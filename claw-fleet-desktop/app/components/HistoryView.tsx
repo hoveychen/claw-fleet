@@ -101,6 +101,7 @@ import { ContextMenu, type ContextMenuItem, type ContextMenuAnchor } from "./Con
 import { RenameSessionDialog } from "./RenameSessionDialog";
 import { buildRenderItems, dwellReadTargets } from "./sessionGroups";
 import styles from "./HistoryView.module.css";
+import { canRevealPath } from "../canReveal";
 
 /** A session spawned but not yet discovered by the scanner. We poll the session
  *  list for the matching `SessionInfo` and swap the detail column over to it. */
@@ -800,7 +801,7 @@ export function HistoryView() {
         icon: <Folder size={13} />,
         onSelect: () => copyText(s.workspacePath),
       });
-      if (isLocal) {
+      if (canRevealPath(isLocal)) {
         items.push({
           id: "reveal",
           label: t(revealKey),

@@ -13,6 +13,7 @@ import { PageShell } from "./PageShell";
 import { SkillsSourceTabs } from "./SkillsSourceTabs";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
+import { canRevealPath } from "../canReveal";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -279,7 +280,7 @@ export function SkillsView() {
       sub: skill.path,
       onSelect: () => void writeText(skill.path).catch(() => {}),
     });
-    if (isLocal) {
+    if (canRevealPath(isLocal)) {
       const revealKey =
         document.documentElement.getAttribute("data-platform") === "windows"
           ? "paths.reveal_in_explorer"

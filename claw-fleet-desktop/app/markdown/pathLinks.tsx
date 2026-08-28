@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { ContextMenu, type ContextMenuAnchor } from "../components/ContextMenu";
+import { canRevealPath } from "../canReveal";
 import { resolvePathRef, type PathRef } from "./pathRef";
 import styles from "./markdown.module.css";
 
@@ -111,7 +112,12 @@ export function PathChip({
               label: t("paths.open_in_files"),
               onSelect: () => ctx.openInFiles(absPath, pathRef.line),
             },
-            { id: "reveal", label: t(revealKey()), onSelect: reveal },
+            // Reveal only where a file manager can actually open — see
+            // canReveal.ts; in a tab the invoke resolves to null and the click
+            // produces nothing at all, not even the failed-path flash.
+            ...(canRevealPath(ctx.isLocal)
+              ? [{ id: "reveal", label: t(revealKey()), onSelect: reveal }]
+              : []),
           ]}
         />
       )}
