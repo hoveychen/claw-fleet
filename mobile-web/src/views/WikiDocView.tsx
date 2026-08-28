@@ -16,6 +16,7 @@ import { buildWikiHtml, exportWikiDoc, fetchWikiText, listWikiDocs } from "../wi
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
 import styles from "./WikiDocView.module.css";
+import mdStyles from "./markdownBody.module.css";
 
 interface Props {
   doc: WikiDoc;
@@ -234,7 +235,7 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
           !error && markdown === null ? (
             <div className={styles.hint}>{t("加载中…")}</div>
           ) : (
-            <div className={styles.markdown}>
+            <div className={mdStyles.markdown}>
               <ReactMarkdown
                 remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}
                 components={mdComponents}
