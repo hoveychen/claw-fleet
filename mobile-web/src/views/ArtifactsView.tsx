@@ -5,7 +5,7 @@
 // 还要多占三分之一——一段成片没有诚实的办法推过来。所以超过 MAX_RELAY_BYTES
 // 的产出这里只列卡片、显示元信息，并明说去桌面端导出，而不是假装能取。
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
   ChevronLeft,
@@ -30,12 +30,18 @@ import {
   fetchArtifact,
   formatBytes,
   isFetchable,
+  isOfficePreview,
   isTextPreview,
   listArtifacts,
   previewKind,
 } from "../artifacts";
 import styles from "./ArtifactsView.module.css";
 import mdStyles from "./markdownBody.module.css";
+
+// 三个 Office 渲染器合计约 1.6 MB（pptx-preview 自带 echarts 占 1.25 MB）。
+// 手机网络下这必须推迟到真的要看某份文档时——模块内部还会对每个库再动态
+// import 一次，所以看 .docx 不会碰 pptx 那份。
+const OfficePreview = lazy(() => import("./OfficePreview"));
 
 interface Props {
   client: FleetTransport | null;
@@ -150,6 +156,9 @@ function ArtifactDetail({
   onBack: () => void;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  // Office 预览要的是 Blob 本身（三个库都从 zip 里读 XML），不是一个能塞进
+  // <iframe> 的 URL —— 所以这一路和 blobUrl 分开存。
+  const [blob, setBlob] = useState<Blob | null>(null);
   const [text, setText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -164,6 +173,10 @@ function ArtifactDetail({
         if (!alive) return;
         if (isTextPreview(kind)) {
           setText(new TextDecoder().decode(bytes));
+          return;
+        }
+        if (isOfficePreview(kind)) {
+          setBlob(new Blob([bytes as BlobPart], { type: mime }));
           return;
         }
         url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
@@ -257,6 +270,10 @@ function ArtifactDetail({
           />
         ) : kind === "text" && text !== null ? (
           <pre className={styles.textPre}>{text}</pre>
+        ) : isOfficePreview(kind) && blob !== null ? (
+          <Suspense fallback={<div className={styles.noPreviewHint}>{t("加载中…")}</div>}>
+            <OfficePreview kind={kind} blob={blob} />
+          </Suspense>
         ) : kind !== "none" ? (
           <div className={styles.noPreview}>
             <div className={styles.noPreviewHint}>{t("加载中…")}</div>
