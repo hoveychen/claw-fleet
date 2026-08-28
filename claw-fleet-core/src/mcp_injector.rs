@@ -353,11 +353,19 @@ pub fn release(pid: u32) -> std::io::Result<()> {
 }
 
 /// Watchdog hook: if the lock still has at least one live holder but
-/// `~/.claude.json` no longer carries our `mcpServers.fleet` entry (e.g.
-/// Claude Code upgraded and rewrote the file from scratch), re-write
-/// it. The snapshot already stored in the lock is preserved — we are
-/// not re-acquiring, just restoring our injection on top of whatever
-/// drift happened.
+/// `~/.claude.json` no longer carries a *usable* `mcpServers.fleet` entry —
+/// the key is gone (e.g. Claude Code upgraded and rewrote the file from
+/// scratch), or its `command` no longer resolves — re-write it. The snapshot
+/// already stored in the lock is preserved — we are not re-acquiring, just
+/// restoring our injection on top of whatever drift happened.
+///
+/// **Drift means broken, not "not mine".** An entry naming a different but
+/// still-launchable binary is left alone: two Fleet processes with different
+/// paths (the packaged app plus a `fleet-cli` built in a worktree) used to flip
+/// this key back and forth every 30s, and a spawn reading it mid-flip inherited
+/// whichever value happened to be there. Once the worktree was deleted by its
+/// own merge, those sessions were left naming a binary that no longer existed
+/// — which is exactly the case this function now repairs instead of causing.
 ///
 /// Returns `Ok(true)` if a re-injection actually wrote the file,
 /// `Ok(false)` if nothing was off. Used by [`crate::injector_watchdog`].
@@ -370,10 +378,10 @@ pub fn verify_and_reinject(fleet_path: &str) -> std::io::Result<bool> {
     }
     let (claude_json, existed) = read_claude_json()?;
     let (current_fleet, _, _) = extract_fleet_entry(&claude_json);
-    let expected = build_fleet_entry(fleet_path);
-    if current_fleet.as_ref() == Some(&expected) {
+    if current_fleet.as_ref().is_some_and(entry_command_is_live) {
         return Ok(false);
     }
+    let expected = build_fleet_entry(fleet_path);
     let mut new_json = if existed {
         claude_json
     } else {
@@ -844,6 +852,60 @@ mod tests {
             seed_registration(&me.to_string_lossy());
             assert!(fleet_server_registered(), "a live executable must register");
             assert!(registered_fleet_entry().is_some());
+        });
+    }
+
+    fn registered_command() -> String {
+        let raw = fs::read_to_string(claude_json_path().unwrap()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        v["mcpServers"][FLEET_SERVER_KEY]["command"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// Regression (2026-08-27): the watchdog re-injected whenever the entry
+    /// differed from *its own* `current_exe()`, so two Fleet processes with
+    /// different paths (the packaged app plus a `fleet-cli` built in a
+    /// worktree) flipped `mcpServers.fleet.command` back and forth every 30s.
+    /// Whichever value a spawn happened to read is what that session got — and
+    /// once the worktree was deleted by its merge, the sessions that read it
+    /// were left with a server they couldn't start. A live entry belongs to
+    /// whoever published it; the watchdog repairs breakage, it doesn't claim
+    /// ownership.
+    #[test]
+    fn verify_leaves_a_live_entry_from_another_fleet_build_alone() {
+        with_temp_home(|| {
+            let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            acquire(std::process::id(), &live).unwrap();
+
+            let injected = verify_and_reinject("/some/other/build/fleet").unwrap();
+            assert!(
+                !injected,
+                "a live entry must not be rewritten just because the path isn't mine"
+            );
+            assert_eq!(registered_command(), live, "the published command must stand");
+
+            let _ = release(std::process::id());
+        });
+    }
+
+    /// The other half of the same rule: an entry whose command has gone away
+    /// *is* drift, so the watchdog must take it over rather than leave every
+    /// subsequent spawn pointing at nothing. This is what heals the machine
+    /// within one tick after a worktree build disappears.
+    #[test]
+    fn verify_reinjects_when_the_registered_command_is_dead() {
+        with_temp_home(|| {
+            let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            acquire(std::process::id(), &live).unwrap();
+            seed_registration("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
+
+            let injected = verify_and_reinject(&live).unwrap();
+            assert!(injected, "a dead command is drift and must be repaired");
+            assert_eq!(registered_command(), live);
+
+            let _ = release(std::process::id());
         });
     }
 

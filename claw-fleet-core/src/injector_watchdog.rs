@@ -144,9 +144,13 @@ mod tests {
     #[test]
     fn mcp_verify_no_op_when_entry_already_correct() {
         with_temp_home(|| {
-            mcp_injector::acquire(std::process::id(), "/bin/fleet").unwrap();
+            // Must be a binary that actually exists: "already correct" now
+            // includes "its command still resolves", so a placeholder path
+            // like /bin/fleet would (rightly) read as drift.
+            let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            mcp_injector::acquire(std::process::id(), &live).unwrap();
             let before = fs::read_to_string(claude_json_path()).unwrap();
-            let injected = mcp_injector::verify_and_reinject("/bin/fleet").unwrap();
+            let injected = mcp_injector::verify_and_reinject(&live).unwrap();
             assert!(!injected, "no drift → no re-write");
             let after = fs::read_to_string(claude_json_path()).unwrap();
             assert_eq!(before, after, "file must be untouched when correct");
