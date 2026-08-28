@@ -20,7 +20,7 @@ import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
 import { isWebBuild } from "../hostEnv";
-import { officeMode } from "../officePreview";
+import { officeMode, thumbMode } from "../officePreview";
 import { downloadArtifact } from "../mock/liveProxy";
 import { PageShell } from "./PageShell";
 import { EmptyState } from "./EmptyState";
@@ -75,6 +75,9 @@ const KIND_ICON: Record<string, typeof FileText> = {
  * see OfficePreview's own docs.
  */
 const OfficePreview = lazy(() => import("./OfficePreview"));
+
+/** Same libraries, same reason to defer them — see `ArtifactThumb`. */
+const ArtifactThumb = lazy(() => import("./ArtifactThumb"));
 
 /**
  * Which renderer a `text`-kind artifact wants.
@@ -312,6 +315,11 @@ function ArtifactCard({
 }) {
   const { t } = useTranslation();
   const Icon = KIND_ICON[artifact.kind] ?? FileText;
+  // A thumbnail that fails to render leaves the icon in place rather than a
+  // blank well — decoration must never make the grid worse than it was.
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const thumb = thumbFailed ? null : thumbMode(artifact.mime, artifact.sizeBytes);
+  const onThumbFail = useCallback(() => setThumbFailed(true), []);
   return (
     <div className={styles.card} onClick={onOpen} role="button" tabIndex={0}
       onKeyDown={(e) => {
@@ -325,7 +333,21 @@ function ArtifactCard({
         {artifact.kind === "image" ? (
           <img src={artifactBlobUrl(artifact.id, artifact.name)} alt={artifact.title} />
         ) : (
-          <Icon size={32} strokeWidth={1.2} className={styles.thumb_icon} />
+          <>
+            {/* The icon stays mounted underneath: it is what shows while the
+                document parses, and what remains if it never does. */}
+            <Icon size={32} strokeWidth={1.2} className={styles.thumb_icon} />
+            {thumb && (
+              <Suspense fallback={null}>
+                <ArtifactThumb
+                  id={artifact.id}
+                  url={artifactBlobUrl(artifact.id, artifact.name)}
+                  mode={thumb}
+                  onFail={onThumbFail}
+                />
+              </Suspense>
+            )}
+          </>
         )}
         <span className={styles.kind_tag}>
           {t(`artifacts.kind.${artifact.kind}`, artifact.kind)}

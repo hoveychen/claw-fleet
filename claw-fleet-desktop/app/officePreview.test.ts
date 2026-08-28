@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { officeMode } from "./officePreview";
+import { MAX_THUMB_BYTES, officeMode, thumbMode } from "./officePreview";
+
+const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 describe("officeMode", () => {
   it("routes the three OOXML formats to their renderers", () => {
@@ -44,5 +46,20 @@ describe("officeMode", () => {
         " APPLICATION/VND.OPENXMLFORMATS-OFFICEDOCUMENT.WORDPROCESSINGML.DOCUMENT; charset=binary ",
       ),
     ).toBe("docx");
+  });
+});
+
+describe("thumbMode", () => {
+  it("stops at the size ceiling so a card never pulls a huge file", () => {
+    // A grid card is 190px wide; an 11 MB deck downloaded to fill it is the
+    // whole reason this ceiling exists. The detail view has no such cap — it
+    // is what the user explicitly asked for.
+    expect(thumbMode(DOCX, MAX_THUMB_BYTES)).toBe("docx");
+    expect(thumbMode(DOCX, MAX_THUMB_BYTES + 1)).toBeNull();
+  });
+
+  it("never offers a thumbnail for a format that has no renderer", () => {
+    expect(thumbMode("application/msword", 1000)).toBeNull();
+    expect(thumbMode("application/zip", 1000)).toBeNull();
   });
 });
