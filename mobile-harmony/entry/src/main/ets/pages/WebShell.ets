@@ -512,6 +512,34 @@ struct WebShell {
             });
             return true;
           })
+          // 外链交给系统浏览器，别让它顶掉整个 app。
+          //
+          // multiWindowAccess 默认 false，此时 ArkWeb 把 target="_blank" 当
+          // 「打开本地窗口」处理 —— 知识库文档里点一个外链，这唯一的 WebView
+          // 就从 fleet.local 导航走了，Fleet 的界面连同 relay 连接一起被冲掉，
+          // 只能靠返回键退回来。开 multiWindowAccess 要配 onWindowNew 再养一个
+          // WebView，为几个外链不值当；把非本站的主框架导航整个交给系统才是对的。
+          //
+          // 只拦主框架的 http/https：知识库的 HTML 文档跑在 data: URI 的沙箱
+          // iframe 里（web 侧刻意为之），blob: 则是导出预览在用，两者都必须
+          // 原样放行。
+          .onLoadIntercept((event) => {
+            if (!event) return false;
+            const req = event.data;
+            if (!req.isMainFrame()) return false;
+            const url: string = req.getRequestUrl();
+            if (url.startsWith(ORIGIN)) return false;
+            if (!url.startsWith('http://') && !url.startsWith('https://')) return false;
+            try {
+              const ctx = getContext(this) as common.UIAbilityContext;
+              ctx.openLink(url, { appLinkingOnly: false }).catch((e: Error) => {
+                hilog.warn(DOMAIN_W, TAG_W, 'openLink failed %{public}s', e.message);
+              });
+            } catch (e) {
+              hilog.warn(DOMAIN_W, TAG_W, 'openLink threw: %{public}s', (e as Error).message);
+            }
+            return true;
+          })
           .runJavaScriptOnDocumentStart([{ script: this.bootScript(), scriptRules: ['*'] }])
           .javaScriptProxy({
             object: this.bridge,
