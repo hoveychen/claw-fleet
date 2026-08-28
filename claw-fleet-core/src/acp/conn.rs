@@ -45,6 +45,7 @@ pub fn run_connection<R: BufRead>(agent: Arc<AcpAgent>, lines: R) {
         if line.trim().is_empty() {
             continue;
         }
+        super::stdio::trace("->", &line);
         dispatch_tracked(&agent, line, &inflight);
     }
 

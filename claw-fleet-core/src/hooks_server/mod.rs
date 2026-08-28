@@ -6,7 +6,7 @@
 
 pub mod auth;
 pub mod multipart;
-pub mod responses;
+pub mod public_files;
 pub mod sse;
 
 pub use sse::{handle_sse_upgrade, SseBroadcaster, SseClient};
@@ -995,7 +995,7 @@ fn handle_request(
             // ── OpenAI Responses-compatible public API (Fleet Cloud v2) ──
             // The external customer surface. Internally calls spawn/tail/
             // decision and projects to clean `response` objects.
-            _ if path.starts_with("/v1/") => responses::dispatch(ctx, request, &query, json_header, path),
+            _ if path.starts_with("/v1/") => public_files::dispatch(ctx, request, &query, json_header, path),
 
             // ── Unified /sources/{name}/account and /sources/{name}/usage ──
             _ if path.starts_with(crate::routes::SOURCES_PREFIX) => route_sources_prefix(ctx, request, &query, json_header, path),

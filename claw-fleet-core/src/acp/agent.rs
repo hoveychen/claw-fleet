@@ -173,6 +173,7 @@ impl AcpAgent {
 
     /// Write one already-serialized frame to the peer.
     pub fn send_frame(&self, frame: &str) -> bool {
+        super::stdio::trace("<-", frame);
         self.peer.send_raw(frame)
     }
 
@@ -231,13 +232,7 @@ impl AcpAgent {
         // exactly the confinement hole the public surface exists to close. A
         // mismatch is reported rather than silently ignored, so a client cannot
         // believe it is running against its own checkout.
-        let workspace = crate::hooks_server::responses::public_workspace();
-        if !req.cwd.is_empty() && req.cwd != workspace {
-            return Err(RpcError::invalid_params(format!(
-                "this agent is bound to {workspace}; it cannot run in {}",
-                req.cwd
-            )));
-        }
+        self.check_cwd(&req.cwd)?;
 
         let session_id = uuid::Uuid::new_v4().to_string();
         self.sessions.lock().unwrap().insert(
@@ -270,7 +265,7 @@ impl AcpAgent {
             (st.internal_id.clone(), st.tool, st.model.clone())
         };
 
-        let workspace = crate::hooks_server::responses::public_workspace();
+        let workspace = crate::hooks_server::public_files::public_workspace();
 
         // ACP carries files inline in the prompt, so they are materialised into
         // the workspace here — Fleet's agents read attachments off disk. A bad
@@ -385,7 +380,7 @@ impl AcpAgent {
         if let Some(cwd) = req.cwd.as_deref().filter(|c| !c.is_empty()) {
             self.check_cwd(cwd)?;
         }
-        let workspace = crate::hooks_server::responses::public_workspace();
+        let workspace = crate::hooks_server::public_files::public_workspace();
         let deleted = self.deleted.lock().unwrap().clone();
 
         let sessions = crate::session::scan_all_sources(&self.sources)
@@ -433,19 +428,19 @@ impl AcpAgent {
 
     /// Reject a client-supplied cwd that is not the bound workspace.
     fn check_cwd(&self, cwd: &str) -> Result<(), RpcError> {
-        let workspace = crate::hooks_server::responses::public_workspace();
-        if !cwd.is_empty() && cwd != workspace {
-            return Err(RpcError::invalid_params(format!(
-                "this agent is bound to {workspace}; it cannot run in {cwd}"
-            )));
+        let workspace = crate::hooks_server::public_files::public_workspace();
+        if cwd.is_empty() || same_path(cwd, &workspace) {
+            return Ok(());
         }
-        Ok(())
+        Err(RpcError::invalid_params(format!(
+            "this agent is bound to {workspace}; it cannot run in {cwd}"
+        )))
     }
 
     /// Register an existing on-disk session under its own id so this connection
     /// can drive it. Errors when no such session exists in the workspace.
     fn adopt(&self, session_id: &str) -> Result<String, RpcError> {
-        let workspace = crate::hooks_server::responses::public_workspace();
+        let workspace = crate::hooks_server::public_files::public_workspace();
         let found = crate::session::scan_all_sources(&self.sources)
             .into_iter()
             .find(|s| s.id == session_id && s.workspace_path == workspace)
@@ -575,6 +570,7 @@ impl AcpAgent {
     fn notify_update(&self, session_id: &str, update: SessionUpdate) {
         let params = SessionNotification { session_id: session_id.to_string(), update };
         if let Ok(v) = serde_json::to_value(params) {
+            super::stdio::trace("<-", &format!("session/update {}", v));
             self.peer.notify("session/update", v);
         }
     }
@@ -634,6 +630,26 @@ impl AcpAgent {
             .and_then(|v| v.as_str().map(String::from))
             .unwrap_or_default();
         matches!(status.as_str(), "waitingInput" | "done" | "idle" | "completed" | "succeeded")
+    }
+}
+
+
+/// Whether two paths name the same directory.
+///
+/// Compares resolved paths, not strings: on macOS `/tmp` is a symlink to
+/// `/private/tmp`, so a client that passes the path it was given verbatim gets
+/// refused by a string comparison. Caught the first time a real ACP client
+/// (`acpx`) tried to open a session.
+///
+/// Falls back to a string comparison when a path cannot be resolved — a
+/// workspace that does not exist yet should not become un-openable.
+fn same_path(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
     }
 }
 
@@ -773,13 +789,31 @@ mod tests {
     #[test]
     fn session_new_mints_an_id_and_defers_the_spawn() {
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws, "mcpServers": []})).unwrap();
         let sid = v["sessionId"].as_str().expect("a session id");
         assert!(!sid.is_empty());
         // Deferred: no process exists yet, so no internal id.
         let sessions = a.sessions.lock().unwrap();
         assert!(sessions.get(sid).unwrap().internal_id.is_none());
+    }
+
+    #[test]
+    fn a_symlinked_cwd_is_the_same_workspace() {
+        // On macOS /tmp is a symlink to /private/tmp, so a client passing back
+        // the path it was handed was refused by a string comparison. A real
+        // ACP client hit this on its very first session/new.
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("ws");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        #[cfg(unix)]
+        assert!(same_path(link.to_str().unwrap(), real.to_str().unwrap()));
+        assert!(same_path("/a/b", "/a/b"), "identical strings need no filesystem");
+        assert!(!same_path("/does/not/exist/a", "/does/not/exist/b"));
     }
 
     #[test]
@@ -832,7 +866,7 @@ mod tests {
     #[test]
     fn a_cancel_notification_marks_the_session_and_is_consumed_once() {
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
@@ -868,7 +902,7 @@ mod tests {
         // `$/cancel_request` carries `requestId`; `session/cancel` carries
         // `sessionId`. Reading the wrong field would make the cancel a no-op.
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
@@ -908,7 +942,7 @@ mod tests {
     #[test]
     fn load_and_resume_of_an_unknown_session_are_invalid_params() {
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         for method in ["session/load", "session/resume"] {
             let err = a
                 .dispatch(&json!(1), method, &json!({"sessionId": "nope", "cwd": ws}))
@@ -920,7 +954,7 @@ mod tests {
     #[test]
     fn close_cancels_the_turn_and_drops_the_session() {
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
@@ -939,7 +973,7 @@ mod tests {
         // A transcript is the user's data; destroying it is not something a
         // client gets to trigger.
         let a = agent();
-        let ws = crate::hooks_server::responses::public_workspace();
+        let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
 
