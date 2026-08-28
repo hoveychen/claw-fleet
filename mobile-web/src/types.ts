@@ -356,6 +356,35 @@ export interface WikiFilePayload {
   base64: string;
 }
 
+/** One stored deliverable (claw_fleet_core::artifacts::Artifact). */
+export interface Artifact {
+  id: string;
+  name: string;
+  title: string;
+  note: string;
+  mime: string;
+  /** doc|slides|sheet|pdf|image|video|audio|archive|text|other — the desktop
+   *  derives it once so no client sniffs extensions. */
+  kind: string;
+  sizeBytes: number;
+  createdMs: number;
+  workspacePath: string;
+  workspaceName: string;
+  sessionId: string | null;
+  sourcePath: string;
+  starred: boolean;
+  hardlinked: boolean;
+  /** Hard-linked and the source was rewritten in place since ingest. */
+  drifted: boolean;
+}
+
+/** Payload of `artifact_blob` — one artifact's bytes, base64-framed. */
+export interface ArtifactBlobPayload {
+  filename: string;
+  mime: string;
+  base64: string;
+}
+
 /** One full-text search hit from `wiki_search`. */
 export interface WikiSearchHit {
   slug: string;
