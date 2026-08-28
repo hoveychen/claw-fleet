@@ -13,6 +13,7 @@
 import { RelayClient, type RelayHandlers } from "../relay";
 import type { DecisionKind } from "../types";
 import {
+  MOCK_ARTIFACTS,
   MOCK_ATTACHMENT_BYTES,
   MOCK_ATTACHMENT_STORE_DIR,
   MOCK_CHAT_WORKSPACE,
@@ -164,6 +165,17 @@ export class MockRelayClient extends RelayClient {
         return String(params?.sessionId ?? "").startsWith("sess-billing-")
           ? MOCK_HANDOFF_CHAIN
           : null;
+      case "artifact_list":
+        return MOCK_ARTIFACTS;
+      // A 1x1 red PNG, so the image preview path renders something real rather
+      // than an empty <img> that looks the same as a broken blob URL.
+      case "artifact_blob":
+        return {
+          filename: "封面.png",
+          mime: "image/png",
+          base64:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        };
       case "wiki_list":
         return MOCK_WIKI_DOCS;
       // The doc reader's body. Version-agnostic on purpose: the fixture has two

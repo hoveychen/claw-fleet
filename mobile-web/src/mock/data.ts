@@ -7,6 +7,7 @@
 // scenario — the promo pipeline records the phone against these fixtures, so
 // they must read like the same fleet the desktop footage shows.
 import type {
+  Artifact,
   BrowseDirResponse,
   DecisionHistoryRecord,
   ElicitationRequest,
@@ -1083,6 +1084,62 @@ export const MOCK_TOOL_DETAILS: Record<string, unknown> = {
  *  call — the doc page then failed to decode a body at all. Filled in so the
  *  reader page has something real to render. */
 export const MOCK_WIKI_VERSION = "v2026-08-20T12-00-00";
+
+export const MOCK_ARTIFACTS: Artifact[] = [
+  {
+    id: "20260827-142530",
+    name: "Q3-财务分析.xlsx",
+    title: "Q3 财务分析",
+    note: "按季度拆分的收入明细，发给财务的版本",
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    kind: "sheet",
+    sizeBytes: 184_320,
+    createdMs: Date.now() - 2 * 3600_000,
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
+    sessionId: null,
+    sourcePath: "/Users/demo/workspace/claw-fleet/.worktrees/q3/out.xlsx",
+    starred: true,
+    hardlinked: true,
+    drifted: false,
+  },
+  {
+    id: "20260827-101204",
+    name: "封面.png",
+    title: "封面图",
+    note: "",
+    mime: "image/png",
+    kind: "image",
+    sizeBytes: 73,
+    createdMs: Date.now() - 5 * 3600_000,
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
+    sessionId: null,
+    sourcePath: "/Users/demo/workspace/claw-fleet/promo/cover.png",
+    starred: false,
+    hardlinked: true,
+    drifted: false,
+  },
+  {
+    // Over the relay's 16 MiB frame limit — the one row that must render the
+    // 「仅桌面」 badge rather than pretending it can be fetched.
+    id: "20260826-173311",
+    name: "产品发布片.mp4",
+    title: "产品发布片 v3",
+    note: "给市场部的最终版",
+    mime: "video/mp4",
+    kind: "video",
+    sizeBytes: 412_663_296,
+    createdMs: Date.now() - 26 * 3600_000,
+    workspacePath: "/Users/demo/workspace/netferry",
+    workspaceName: "netferry",
+    sessionId: null,
+    sourcePath: "/Users/demo/workspace/netferry/out/launch.mp4",
+    starred: false,
+    hardlinked: true,
+    drifted: true,
+  },
+];
 
 export const MOCK_WIKI_DOCS: WikiDoc[] = [
   {

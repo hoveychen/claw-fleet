@@ -62,6 +62,7 @@ import { DecisionsView } from "./views/DecisionsView";
 import { DecisionDrawer } from "./views/DecisionDrawer";
 import { MoreView } from "./views/MoreView";
 import { PlansView } from "./views/PlansView";
+import { ArtifactsView } from "./views/ArtifactsView";
 import { RepoView } from "./views/RepoView";
 import { RepoDetailView } from "./views/RepoDetailView";
 import { SessionDetailView } from "./views/SessionDetailView";
@@ -223,6 +224,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [repoDetail, setRepoDetail] = useState<RepoSummary | null>(null);
   const [showUsage, setShowUsage] = useState(false);
   const [showPlans, setShowPlans] = useState(false);
+  const [showArtifacts, setShowArtifacts] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
   // Files handed over by another app's share, pending upload once the
   // new-session sheet mounts (that's where the attachment state lives).
@@ -616,6 +618,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     repoDetail !== null ||
     showUsage ||
     showPlans ||
+    showArtifacts ||
     showNewSession;
   // Float the decision drawer over whatever the boss is looking at — EXCEPT the
   // plain 决策 tab, which already renders the cards inline (no overlay covering
@@ -773,6 +776,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onDisablePush={handleDisablePush}
             onOpenRepo={() => setShowRepo(true)}
             onOpenPlans={() => setShowPlans(true)}
+            onOpenArtifacts={() => setShowArtifacts(true)}
             onOpenUsage={() => setShowUsage(true)}
           />
         )}
@@ -839,6 +843,16 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             sessions={mergedSessions}
             client={clientRef.current}
             onBack={() => setShowPlans(false)}
+          />
+        </>
+      )}
+
+      {showArtifacts && (
+        <>
+          <HistoryLayer onBack={() => setShowArtifacts(false)} />
+          <ArtifactsView
+            client={clientRef.current}
+            onBack={() => setShowArtifacts(false)}
           />
         </>
       )}

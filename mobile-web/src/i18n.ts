@@ -525,6 +525,26 @@ const DICT: Record<string, string> = {
   "已完成 {0} 个": "{0} completed",
   "已完成 {0} 条": "{0} done",
 
+  // ── 产出（桌面端产出库的手机版）──
+  产出: "Artifacts",
+  "agent 交付的 PDF、幻灯片、表格与图片": "PDFs, decks, spreadsheets and images agents delivered",
+  "还没有产出": "No artifacts yet",
+  "Agent 把交付物存进产出库后会出现在这里。":
+    "Deliverables an agent stores in the library show up here.",
+  仅桌面: "Desktop only",
+  "源文件已被改写": "Source rewritten",
+  "入库时是硬链接，之后源文件被就地重写过。":
+    "Hard-linked at ingest, and the source has been rewritten in place since.",
+  "这个格式手机上看不了": "This format has no viewer on a phone",
+  "可以分享出去，或到桌面端用系统应用打开。":
+    "Share it out, or open it with a system app on the desktop.",
+  "这份产出太大，手机拿不动": "Too large for the phone",
+  "手机与桌面之间只能整块传，几百 MB 的文件过不来。到桌面端的产出页导出它。":
+    "Phone and desktop only exchange whole files, so a few hundred MB cannot cross. Export it from the desktop's Artifacts page.",
+  "分享 / 保存": "Share / Save",
+  "准备中…": "Preparing…",
+  // 「加载失败」已在别处定义，复用即可。
+
   // ── 仓库 tab ──
   工具: "Tools",
   仓库: "Repositories",

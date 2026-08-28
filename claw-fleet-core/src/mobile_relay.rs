@@ -2051,6 +2051,8 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "wiki_file" => serve_wiki_file(params),
         "wiki_search" => serve_wiki_search(params),
         "wiki_export" => serve_wiki_export(params),
+        "artifact_list" => serve_artifact_list(params),
+        "artifact_blob" => serve_artifact_blob(params),
         "chat_workspace" => serve_chat_workspace(params),
         "sources_config" => serve_sources_config(params),
         "codex_profiles" => serve_codex_profiles(params),
@@ -2594,6 +2596,54 @@ fn serve_session_search(params: &Value) -> Result<Value, String> {
 
 // Wiki knowledge base: every published doc, newest-updated first
 // (mirrors the desktop's `list_wiki_docs` Tauri command).
+/// Ceiling on an artifact the phone may fetch through the relay.
+///
+/// Matches `serve_wiki_file`'s per-file cap rather than `wiki_export`'s 64 MiB:
+/// both are "one file in one frame", and 16 MiB of base64 is already ~21 MiB on
+/// the wire. Images, PDFs and decks sit well under it; renders do not, which is
+/// the intended split.
+pub const MAX_ARTIFACT_FRAME_BYTES: u64 = 16 * 1024 * 1024;
+
+// Every artifact's metadata. Small enough to send whole: the list carries no
+// bytes, only the cards the phone renders (and `sizeBytes`, which is what lets
+// the client decide *before* asking whether a blob is fetchable at all).
+fn serve_artifact_list(_params: &Value) -> Result<Value, String> {
+    serde_json::to_value(crate::artifacts::list()).map_err(|e| e.to_string())
+}
+
+/// One artifact's bytes, base64-framed — but only for artifacts small enough
+/// to cross the relay in a single frame.
+///
+/// The relay has exactly one shape for bytes: a base64 payload inside one JSON
+/// frame. A rendered video is hundreds of megabytes, and base64 adds a third on
+/// top, so there is no honest way to hand a phone a big deliverable over this
+/// transport. Rather than invent a chunked reassembly protocol for a case the
+/// user asked us not to solve, the cap is explicit: under it the phone can
+/// preview and download; over it the phone shows the card and says to export
+/// from the desktop.
+///
+/// The client already knows `sizeBytes` from `artifact_list`, so it can render
+/// that state without asking. This check is the backstop for a client that asks
+/// anyway — and the error names the size so the message can stay specific.
+fn serve_artifact_blob(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    let artifact = crate::artifacts::get(id)?;
+    if artifact.size_bytes > MAX_ARTIFACT_FRAME_BYTES {
+        return Err(format!(
+            "artifact is {} bytes, over the {MAX_ARTIFACT_FRAME_BYTES}-byte relay limit — \
+             export it from the desktop instead",
+            artifact.size_bytes
+        ));
+    }
+    let blob = crate::artifacts::read_bytes(id, None)?;
+    Ok(json!({
+        "filename": artifact.name,
+        "mime": blob.mime,
+        "base64": base64::engine::general_purpose::STANDARD.encode(&blob.bytes),
+    }))
+}
+
 fn serve_wiki_list(_params: &Value) -> Result<Value, String> {
     serde_json::to_value(crate::wiki::list_docs()).map_err(|e| e.to_string())
 }
