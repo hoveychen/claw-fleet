@@ -36,6 +36,13 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(60 * 30);
 /// How often the turn loop re-reads the transcript.
 const TAIL_INTERVAL: Duration = Duration::from_millis(300);
 
+/// Tail ticks between the scan-backed checks (idle status, usage, title).
+///
+/// `scan_all_sources` reads every transcript on the machine — seconds on a
+/// machine with real history. Streaming the answer must not wait on it, so the
+/// cheap transcript tail runs every tick and the expensive checks run rarely.
+const SCAN_EVERY: u32 = 20;
+
 /// Per-session bookkeeping.
 struct SessionState {
     /// The session id the agent source actually uses. `None` until the first
@@ -490,6 +497,7 @@ impl AcpAgent {
         // Last usage/title we told the client, so an unchanged tick stays
         // silent instead of resending the same numbers every 300ms.
         let mut last_metrics = SessionMetrics::default();
+        let mut ticks: u32 = 0;
 
         loop {
             if self.take_cancelled(acp_session_id) {
@@ -517,10 +525,14 @@ impl AcpAgent {
                         self.notify_update(acp_session_id, update);
                     }
                 }
-                self.notify_session_metrics(acp_session_id, internal_id, &mut last_metrics);
-
-                if emitted && self.turn_is_idle(internal_id) {
-                    return StopReason::EndTurn;
+                // Both of these need a full scan, so they are rate-limited
+                // while the tail above keeps streaming every tick.
+                ticks = ticks.wrapping_add(1);
+                if ticks % SCAN_EVERY == 0 {
+                    self.notify_session_metrics(acp_session_id, internal_id, &mut last_metrics);
+                    if emitted && self.turn_is_idle(internal_id) {
+                        return StopReason::EndTurn;
+                    }
                 }
             }
             std::thread::sleep(TAIL_INTERVAL);
@@ -612,14 +624,45 @@ impl AcpAgent {
             .unwrap_or(0)
     }
 
-    fn resolve_source(&self, internal_id: &str) -> Option<(String, &dyn AgentSource)> {
+    /// The transcript path for a session, without a full scan.
+    ///
+    /// `scan_all_sources` reads every transcript on the machine to build
+    /// `SessionInfo`s — 31s here, with 1310 of them. The turn loop ticks every
+    /// 300ms, so calling it per tick meant the agent could finish answering
+    /// before a single update went out. Claude names its transcript
+    /// `<session id>.jsonl`, so a stat per project directory finds it in
+    /// milliseconds; the scan stays as the fallback for sources that do not
+    /// (Codex keys on its own thread ids).
+    fn find_transcript(&self, internal_id: &str) -> Option<String> {
+        if let Some(dir) = crate::session::get_claude_dir() {
+            let projects = dir.join("projects");
+            if let Ok(entries) = std::fs::read_dir(&projects) {
+                let name = format!("{internal_id}.jsonl");
+                for e in entries.flatten() {
+                    let candidate = e.path().join(&name);
+                    if candidate.is_file() {
+                        return Some(candidate.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
         let sessions = crate::session::scan_all_sources(&self.sources);
-        let s = sessions.iter().find(|s| s.id == internal_id)?;
-        let src = crate::agent_source::find_source_for_path(&self.sources, &s.jsonl_path)?;
-        Some((s.jsonl_path.clone(), src))
+        sessions.iter().find(|s| s.id == internal_id).map(|s| s.jsonl_path.clone())
     }
 
-    /// True once the source reports the session is parked awaiting input.
+    fn resolve_source(&self, internal_id: &str) -> Option<(String, &dyn AgentSource)> {
+        let path = self.find_transcript(internal_id)?;
+        let src = crate::agent_source::find_source_for_path(&self.sources, &path)?;
+        Some((path, src))
+    }
+
+    /// True once the session is parked awaiting input.
+    ///
+    /// Reads the source's own status, which needs a scan — so the turn loop
+    /// only asks once it has seen assistant text, and then at most once per
+    /// [`IDLE_CHECK_EVERY`] ticks. A scan costs seconds on a machine with a
+    /// lot of history; doing it per tick is what kept updates from going out
+    /// at all.
     fn turn_is_idle(&self, internal_id: &str) -> bool {
         let sessions = crate::session::scan_all_sources(&self.sources);
         let Some(s) = sessions.iter().find(|s| s.id == internal_id) else {
@@ -633,16 +676,20 @@ impl AcpAgent {
     }
 }
 
+/// Unix millis → ISO 8601, the format `SessionInfo.updatedAt` requires.
+fn iso8601_from_unix_ms(ms: u64) -> Option<String> {
+    if ms == 0 {
+        return None;
+    }
+    chrono::DateTime::from_timestamp_millis(ms as i64).map(|dt| dt.to_rfc3339())
+}
 
 /// Whether two paths name the same directory.
 ///
 /// Compares resolved paths, not strings: on macOS `/tmp` is a symlink to
-/// `/private/tmp`, so a client that passes the path it was given verbatim gets
-/// refused by a string comparison. Caught the first time a real ACP client
-/// (`acpx`) tried to open a session.
-///
-/// Falls back to a string comparison when a path cannot be resolved — a
-/// workspace that does not exist yet should not become un-openable.
+/// `/private/tmp`, so a client passing back the path it was given gets refused
+/// by a string comparison. Caught the first time a real ACP client tried to
+/// open a session.
 fn same_path(a: &str, b: &str) -> bool {
     if a == b {
         return true;
@@ -653,15 +700,6 @@ fn same_path(a: &str, b: &str) -> bool {
     }
 }
 
-/// Unix millis → ISO 8601, the format `SessionInfo.updatedAt` requires.
-fn iso8601_from_unix_ms(ms: u64) -> Option<String> {
-    if ms == 0 {
-        return None;
-    }
-    chrono::DateTime::from_timestamp_millis(ms as i64).map(|dt| dt.to_rfc3339())
-}
-
-
 /// The usage and title last reported, so only changes are sent.
 #[derive(Default, PartialEq, Clone)]
 struct SessionMetrics {
@@ -669,7 +707,6 @@ struct SessionMetrics {
     size: u64,
     title: Option<String>,
 }
-
 
 /// Which metric updates a tick should emit. Pure, so the "only on change" rule
 /// is testable without a live session.
