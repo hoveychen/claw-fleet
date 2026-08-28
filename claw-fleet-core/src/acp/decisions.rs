@@ -28,6 +28,21 @@ use super::types::{
 pub const OPT_ALLOW: &str = "allow";
 pub const OPT_REJECT: &str = "reject";
 
+/// The escape-hatch choice appended to every multiple-choice question.
+///
+/// Fleet's own panel always offers it, so a client driving the same card must
+/// too — otherwise the agent's guesses become the only sayable answers.
+pub const OPT_OTHER: &str = "Other";
+
+/// The sibling text property that makes [`OPT_OTHER`] answerable.
+///
+/// ACP elicitation properties are primitives, so a single "pick one or type
+/// your own" control does not exist; the question's `enum` and this string
+/// travel as two properties and are collapsed back into one answer.
+pub fn other_field_name(question: &str) -> String {
+    format!("{question}__other")
+}
+
 /// The choices Fleet offers on a permission card.
 ///
 /// Allow or reject, and nothing else. Both of Fleet's permission channels
@@ -209,7 +224,22 @@ pub fn fleet_ask_to_form(
         p.insert("type".into(), json!("string"));
         p.insert("title".into(), json!(q.header.clone()));
         if !q.options.is_empty() {
-            p.insert("enum".into(), json!(q.options.iter().map(|o| o.label.clone()).collect::<Vec<_>>()));
+            // Fleet always offers an escape hatch, so the enum gets one too —
+            // and a sibling string, because an ACP property is a primitive and
+            // cannot be "pick one or type your own" on its own.
+            let mut labels: Vec<String> = q.options.iter().map(|o| o.label.clone()).collect();
+            labels.push(OPT_OTHER.to_string());
+            p.insert("enum".into(), json!(labels));
+
+            let other = other_field_name(&key);
+            props.insert(
+                other,
+                json!({
+                    "type": "string",
+                    "title": format!("{} — {}", q.header, OPT_OTHER),
+                    "description": "Fill this in if none of the choices fit.",
+                }),
+            );
         }
         props.insert(key.clone(), Value::Object(p));
         required.push(key);
@@ -439,7 +469,7 @@ pub fn form_answer_to_plan(
 /// A checkbox arrives as a JSON boolean and a number as a JSON number; taking
 /// `as_str()` alone would drop both and record an empty answer.
 fn stringify_map(content: &Map<String, Value>) -> std::collections::HashMap<String, String> {
-    content
+    let mut out: std::collections::HashMap<String, String> = content
         .iter()
         .filter_map(|(k, v)| {
             let s = match v {
@@ -449,7 +479,38 @@ fn stringify_map(content: &Map<String, Value>) -> std::collections::HashMap<Stri
             };
             Some((k.clone(), s))
         })
-        .collect()
+        .collect();
+
+    collapse_other_fields(&mut out);
+    out
+}
+
+/// Fold each `…__other` sibling back into the question it belongs to.
+///
+/// Fleet hands the agent exactly one answer per question, so the two
+/// properties that carried a free-text choice have to become one again. The
+/// text wins when the user chose [`OPT_OTHER`]; a bare `Other` with nothing
+/// typed is dropped rather than reported, because answering with the literal
+/// word would tell the agent a choice was made when none was.
+fn collapse_other_fields(answers: &mut std::collections::HashMap<String, String>) {
+    let siblings: Vec<String> =
+        answers.keys().filter(|k| k.ends_with("__other")).cloned().collect();
+
+    for sib in siblings {
+        let text = answers.remove(&sib).unwrap_or_default();
+        let question = sib.trim_end_matches("__other").to_string();
+        // Only touch the question this sibling belongs to, and only when the
+        // user actually took the Other branch.
+        if answers.get(&question).map(String::as_str) != Some(OPT_OTHER) {
+            continue;
+        }
+        let text = text.trim();
+        if text.is_empty() {
+            answers.remove(&question);
+        } else {
+            answers.insert(question, text.to_string());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -690,7 +751,9 @@ mod tests {
         assert_eq!(e.session_id, "sess");
         assert_eq!(e.message, "Which approach?");
         let schema = e.requested_schema.unwrap();
-        assert_eq!(schema.properties["Which approach?"]["enum"], json!(["A", "B"]));
+        // The options, plus the escape hatch every Fleet question carries —
+        // see `a_question_keeps_its_other_escape_hatch`.
+        assert_eq!(schema.properties["Which approach?"]["enum"], json!(["A", "B", OPT_OTHER]));
         // Form fields sit alongside the question.
         assert_eq!(schema.properties["note"]["type"], "string");
         // The question is required; an optional field is not.
@@ -810,6 +873,68 @@ mod tests {
         assert!(!r.cancelled);
         assert_eq!(r.answers["Which approach?"], "A");
         assert_eq!(r.answers["note"], "because");
+    }
+
+    /// Every Fleet question carries a free-text escape hatch.
+    ///
+    /// Fleet's own panel always appends "Other" so the user is never boxed
+    /// into the options the agent happened to think of. A bare `enum` is a
+    /// closed set, so mapping the options straight across silently removed
+    /// that — on Zed the form rendered three radio buttons and no way to say
+    /// anything else (observed 2026-08-27).
+    ///
+    /// ACP's property types are primitives only, so there is no native
+    /// "combo box with free text"; the faithful encoding is an extra enum
+    /// member plus a sibling optional string. The sibling must not leak into
+    /// the answers map — Fleet hands the agent one answer per question, and
+    /// a stray `…__other` key would read as a second question.
+    #[test]
+    fn a_question_keeps_its_other_escape_hatch() {
+        let e = fleet_ask_to_form("sess", &ask_req());
+        let schema = e.requested_schema.unwrap();
+        assert_eq!(
+            schema.properties["Which approach?"]["enum"],
+            json!(["A", "B", OPT_OTHER]),
+            "the options a client can pick must include the escape hatch"
+        );
+
+        let other_key = other_field_name("Which approach?");
+        assert_eq!(
+            schema.properties[&other_key]["type"], "string",
+            "a sibling text field is what makes Other answerable"
+        );
+        assert!(
+            !schema.required.contains(&other_key),
+            "the text field is only for the Other branch, so it cannot be required"
+        );
+
+        // Picking a listed option: the text field is ignored entirely.
+        let a = accept(json!({"Which approach?": "A", other_key.clone(): ""}));
+        let r = form_answer_to_fleet_ask("a1", &a);
+        assert_eq!(r.answers["Which approach?"], "A");
+        assert!(!r.answers.contains_key(&other_key), "the sibling never reaches the agent");
+
+        // Choosing Other: the typed text *is* the answer, exactly as Fleet's
+        // own panel would have reported it.
+        let a = accept(json!({"Which approach?": OPT_OTHER, other_key.clone(): "C, actually"}));
+        let r = form_answer_to_fleet_ask("a1", &a);
+        assert_eq!(r.answers["Which approach?"], "C, actually");
+        assert!(!r.answers.contains_key(&other_key));
+
+        // Other with nothing typed is not an answer of the literal word
+        // "Other" — that would tell the agent a choice was made when none was.
+        let a = accept(json!({"Which approach?": OPT_OTHER, other_key.clone(): "   "}));
+        let r = form_answer_to_fleet_ask("a1", &a);
+        assert!(
+            !r.answers.contains_key("Which approach?"),
+            "an empty Other is no answer, not the word Other"
+        );
+
+        // The same collapsing applies to plain elicitations.
+        let a = accept(json!({"Which approach?": OPT_OTHER, other_key.clone(): "C, actually"}));
+        let r = form_answer_to_elicitation("e1", &a);
+        assert_eq!(r.answers["Which approach?"], "C, actually");
+        assert!(!r.answers.contains_key(&other_key));
     }
 
     #[test]
