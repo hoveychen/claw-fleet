@@ -23,6 +23,7 @@ import { isWebBuild } from "../hostEnv";
 import { downloadArtifact } from "../mock/liveProxy";
 import { PageShell } from "./PageShell";
 import { EmptyState } from "./EmptyState";
+import { TextBlock } from "./blocks/TextBlock";
 import styles from "./ArtifactsView.module.css";
 
 /** Mirrors `claw_fleet_core::artifacts::Artifact`. */
@@ -63,6 +64,23 @@ const KIND_ICON: Record<string, typeof FileText> = {
   archive: Archive,
   text: FileText,
 };
+
+/**
+ * Which renderer a `text`-kind artifact wants.
+ *
+ * The store buckets every `text/*` file into one `text` kind, which is right
+ * for icons but wrong for the stage: a markdown spec and an html report are
+ * both deliverables people hand over (the routing rule is audience, not
+ * format), and showing either as raw source is the same failure as an .xlsx
+ * opening blank in the wiki. Sniffing happens here, on the mime the store
+ * already derived, so no component re-parses an extension.
+ */
+export function textPreviewMode(mime: string): "markdown" | "html" | "plain" {
+  const base = mime.split(";")[0].trim().toLowerCase();
+  if (base === "text/markdown") return "markdown";
+  if (base === "text/html") return "html";
+  return "plain";
+}
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -472,8 +490,10 @@ function ArtifactDetail({
 }
 
 /**
- * The preview surface. Which element renders is decided by `kind` alone —
- * the store derives it once so three components don't each sniff extensions.
+ * The preview surface. Which element renders is decided by `kind`, plus one
+ * sub-split inside the `text` bucket (see `textPreviewMode`) so a markdown or
+ * html deliverable is shown rendered instead of as source. Both come off the
+ * mime the store already derived, so no component sniffs extensions itself.
  *
  * `<video>` and the PDF `<iframe>` both point at `fleet-artifact://`, which is
  * the protocol that honours `Range`; that is what makes seeking work rather
@@ -485,9 +505,13 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
   const { t } = useTranslation();
   const [text, setText] = useState<string | null>(null);
   const url = artifactBlobUrl(artifact.id, artifact.name);
+  // html goes to the frame by URL, so only the two rendered-from-source modes
+  // pull the bytes into React.
+  const textMode = artifact.kind === "text" ? textPreviewMode(artifact.mime) : null;
+  const needsBody = textMode === "markdown" || textMode === "plain";
 
   useEffect(() => {
-    if (artifact.kind !== "text") {
+    if (!needsBody) {
       setText(null);
       return;
     }
@@ -503,7 +527,7 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
     return () => {
       alive = false;
     };
-  }, [artifact.id, artifact.kind, url]);
+  }, [artifact.id, needsBody, url]);
 
   if (artifact.kind === "image") {
     return (
@@ -529,11 +553,35 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
   if (artifact.kind === "pdf") {
     return (
       <div className={styles.stage}>
-        <iframe className={styles.pdf_frame} src={url} title={artifact.title} />
+        <iframe className={styles.doc_frame} src={url} title={artifact.title} />
       </div>
     );
   }
-  if (artifact.kind === "text") {
+  if (textMode === "html") {
+    // allow-scripts but NOT allow-same-origin: an agent-produced page may run
+    // its own JS while staying a cross-origin document with no reach into
+    // Tauri IPC. Same policy as the wiki's html frame.
+    return (
+      <div className={styles.stage}>
+        <iframe
+          className={styles.doc_frame}
+          sandbox="allow-scripts"
+          src={url}
+          title={artifact.title}
+        />
+      </div>
+    );
+  }
+  if (textMode === "markdown") {
+    return (
+      <div className={styles.stage}>
+        <div className={styles.markdown_body}>
+          {text === null ? t("artifacts.loading", "加载中…") : <TextBlock text={text} />}
+        </div>
+      </div>
+    );
+  }
+  if (textMode === "plain") {
     return (
       <div className={styles.stage}>
         <pre className={styles.text_pre}>{text ?? t("artifacts.loading", "加载中…")}</pre>

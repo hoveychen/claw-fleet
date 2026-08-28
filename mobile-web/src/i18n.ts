@@ -527,7 +527,7 @@ const DICT: Record<string, string> = {
 
   // ── 产出（桌面端产出库的手机版）──
   产出: "Artifacts",
-  "agent 交付的 PDF、幻灯片、表格与图片": "PDFs, decks, spreadsheets and images agents delivered",
+  "agent 要交给人的东西，任何格式": "Anything agents produced to hand to a person, any format",
   "还没有产出": "No artifacts yet",
   "Agent 把交付物存进产出库后会出现在这里。":
     "Deliverables an agent stores in the library show up here.",

@@ -2352,7 +2352,7 @@
     "all_workspaces": "全部工作区",
     "refresh": "刷新",
     "empty_title": "还没有产出",
-    "empty_subtitle": "Agent 用 `fleet artifact add <path>` 把交付物存进来 —— PDF、幻灯片、表格、图片、视频都行。",
+    "empty_subtitle": "Agent 用 `fleet artifact add <path>` 把要交给人的东西存进来 —— 格式不限，PDF、幻灯片、表格、图片、视频，以及对外的 html / markdown。",
     "select_hint": "选一份产出预览",
     "filter_all": "全部",
     "filter_starred": "已收藏",

@@ -61,6 +61,30 @@ describe("previewKind", () => {
     expect(previewKind(make({ kind: "pdf", sizeBytes: MAX_RELAY_BYTES + 1 }))).toBe("none");
   });
 
+  /**
+   * The store lumps every `text/*` file into one `text` kind, so before this
+   * split a markdown spec previewed as `##` and an html report as its own
+   * source. Both are ordinary deliverables — the wiki/artifact routing rule is
+   * audience, not file format — so the phone has to tell the three apart.
+   */
+  it("splits the text kind into markdown, html and plain", () => {
+    const text = (mime: string) => previewKind(make({ kind: "text", mime, sizeBytes: 5000 }));
+    expect(text("text/markdown; charset=utf-8")).toBe("markdown");
+    expect(text("text/html; charset=utf-8")).toBe("html");
+    expect(text("text/plain; charset=utf-8")).toBe("text");
+    expect(text("text/csv; charset=utf-8")).toBe("text");
+    // Parameter and case noise off the wire must not push a real markdown doc
+    // back onto the raw-source path.
+    expect(text("TEXT/MARKDOWN")).toBe("markdown");
+    expect(text(" text/html ")).toBe("html");
+  });
+
+  it("still applies the size gate to markup", () => {
+    expect(
+      previewKind(make({ kind: "text", mime: "text/html", sizeBytes: MAX_RELAY_BYTES + 1 })),
+    ).toBe("none");
+  });
+
   /** Video and audio are listed but never played here — see the module docs. */
   it("does not offer playback for media", () => {
     expect(previewKind(make({ kind: "video", sizeBytes: 1000 }))).toBe("none");

@@ -84,11 +84,16 @@ workspace。\n\
 `--all` 放宽),它会搜标题、slug 和正文并给出片段。\n\
 - 想看某篇的版本历史和 entry 文件名就 `fleet wiki show <slug>`。\n\
 \n\
-## 交付物走产出库,不是 wiki\n\
+## 什么进 wiki、什么进产出库——按去向,不按格式\n\
 \n\
-当你产出的是**要交给人的文件**——PDF、幻灯片(pptx)、表格(xlsx)、Word \
-文档、渲染好的视频或图片、导出的数据集——用产出库,不要试图 publish 进 \
-wiki:\n\
+两个库的分野是**这份东西给谁**,不是它的扩展名:\n\
+\n\
+- **沉淀给自己和后续 session**(调研报告、架构说明、性能分析、踩坑记录)\
+→ **wiki**。只有 wiki 的文档能被后续 session 用 `fleet wiki cat` 读回正文、\
+用 `[[slug]]` 交叉引用、按 workspace 筛选和全文搜索。\n\
+- **要递到人手上**(交给老板/客户/同事,或要发出去的东西)→ **产出库**。\
+PDF 报告、幻灯片(pptx)、表格(xlsx)、Word 文档、渲染好的视频或图片、\
+导出的数据集——**也包括**一份对外的 html 提案、一份要交出去的 md 规格书。\n\
 \n\
 ```\nfleet artifact add <path> [--title \"<标题>\"] [--note \"<一句话说明>\"]\n```\n\
 \n\
@@ -97,36 +102,37 @@ wiki:\n\
 ——理由与 `fleet__wiki` 相同:远端(rca)会话里 Bash 跑 `fleet` 会被路由到\
 没有 fleet 的远端而失败。**\n\
 \n\
-- **wiki 装不下这些格式,不是风格问题而是硬限制。**知识库的 kind 只有 \
+- **同一种格式两边都可能,所以别拿扩展名当判据。**一份 html 调研报告是给\
+后续 session 读的 → wiki;一份 html 对外提案是要发出去的 → 产出库。markdown \
+同理。产出库**不挑格式**:`add` 没有任何白名单,任何单文件都收。\n\
+- **格式只在一个方向上收窄选择:wiki 挑格式。**知识库的 kind 只有 \
 `html`/`htmlDir`/`markdown`,entry 必须是可渲染的文本文件;一份 `.xlsx` \
-publish 进去,列表能列出来、点开是白板。\n\
+publish 进去,列表能列出来、点开是白板。所以二进制交付物**只能**走产出库\
+——那是硬限制替你排除了一个选项,不是判据本身。\n\
 - **产出一旦生成就立刻入库,别等到最后。**交付物通常写在 \
 `.worktrees/<task-id>` 里,而那个目录会在计划合并时被删掉——到那时文件就\
 没了。这跟「合并前抢救 gitignored 产物」是同一条命,只是这里有现成的地方放。\n\
 - **`--title` 和 `--note` 值得认真写。**它们就是用户在卡片上读到的全部\
 内容;缺省标题是文件名,而「out.xlsx」对人没有任何意义。\n\
-- 一次一个文件,不接受目录——要存一整个文件夹先打包成 zip。\n\
+- 产出库一次一个文件,不接受目录——要存一整个文件夹先打包成 zip;反过来,\
+带 `assets/` 的多文件目录只有 wiki 收得下。\n\
 - 入库后出现在 Fleet 桌面端的「产出」板块:可按 workspace 筛选、收藏、\
-预览(图片/视频/音频/PDF/文本直接看,Office 给类型占位符并提供导出与\
-系统应用打开)、导出到任意位置。\n\
+预览(图片/视频/音频/PDF/markdown/html 直接看,Office 给类型占位符并提供\
+导出与系统应用打开)、导出到任意位置。\n\
 \n\
-## 什么时候不该用 wiki\n\
+## 什么时候两个都不用\n\
 \n\
-渲染一份东西给人看,有三个近亲手段,别混用:\n\
+还有两个近亲手段,别混进来:\n\
 \n\
 - **一次性看一眼**(过目一张图、一段 diff,看完即弃)→ 用 `fleet__ask` 的 \
-`html` 或 `fleet__render_a2ui` 渲染成决策卡,不要 publish。\n\
+`html` 或 `fleet__render_a2ui` 渲染成决策卡。既不 publish 也不入库。\n\
 - **要把链接发给别人**→ 用 Claude Code 的 Artifact 工具(如果本 session \
 有)。它托管在 claude.ai 上、可分享,代价是内容会上传到外部服务,且必须单\
 文件自包含(CSS/JS 内联、图片转 data URI)。私有项目的产物别走这条。\n\
-- **要交给人的二进制文件**(PDF / pptx / xlsx / 视频 / 图片)→ 产出库,\
-见上一节。wiki 根本渲染不了它们。\n\
-- **要沉淀、之后还要读回来**→ wiki。只有 wiki 的文档能被后续 session 用 \
-`fleet wiki cat` 读到正文、用 `[[slug]]` 交叉引用、按 workspace 筛选和全文\
-搜索,也只有 wiki 收得下带 `assets/` 的多文件目录。\n\
 \n\
-判据不是「哪个能渲染」——三个都能;而是「这份产物之后还会不会被读第二次」。\
-会 → wiki。\n"
+拿不准时问自己一句:**这份东西是留给我和后面接手的 session 的,还是要递到\
+人手上的?**留 → wiki,递 → 产出库。「之后会不会被读第二次」**不是**判据\
+——一份交给客户的 PDF 会被读十次,它照样不属于知识库。\n"
             .to_string();
     }
     "# Fleet Wiki knowledge base (managed by Claw Fleet — do not edit)\n\
@@ -191,12 +197,19 @@ by default, `--all` to widen), matching titles, slugs and body text.\n\
 - `fleet wiki show <slug>` shows a doc's version history and entry \
 filename.\n\
 \n\
-## Deliverables go to the artifact store, not the wiki\n\
+## Wiki or artifact store — decided by audience, not by format\n\
 \n\
-When what you produced is a **file meant to be handed to a person** — a PDF, a \
-slide deck (pptx), a spreadsheet (xlsx), a Word document, a rendered video or \
-image, an exported dataset — store it as an artifact instead of trying to \
-publish it to the wiki:\n\
+The two stores split on **who the thing is for**, not on its extension:\n\
+\n\
+- **Knowledge you're banking for yourself and later sessions** (research \
+reports, architecture notes, performance analyses, gotchas) → the **wiki**. \
+Only wiki docs can be read back by a later session with `fleet wiki cat`, \
+cross-linked with `[[slug]]`, filtered by workspace, and full-text searched.\n\
+- **Something you are handing to a person** (to the user, a client, a \
+colleague — anything meant to leave your hands) → the **artifact store**. A \
+PDF report, a slide deck (pptx), a spreadsheet (xlsx), a Word document, a \
+rendered video or image, an exported dataset — **and equally** an outward-facing \
+html proposal or a markdown spec you're delivering.\n\
 \n\
 ```\nfleet artifact add <path> [--title \"<title>\"] [--note \"<one line>\"]\n```\n\
 \n\
@@ -206,9 +219,15 @@ Fleet-launched session has it), prefer it (`action=\"add\"/\"list\"/\"get\"/\
 an rca remote session a Bash `fleet` is routed to a remote executor with no \
 `fleet` and fails.**\n\
 \n\
-- **The wiki cannot hold these formats — a hard limit, not a preference.** Its \
-kinds are `html`/`htmlDir`/`markdown` and the entry must be a renderable text \
-file; an `.xlsx` published there lists fine and opens blank.\n\
+- **The same format lands on either side, so the extension decides nothing.** \
+An html research report written for later sessions → wiki; an html proposal \
+you're sending out → artifact store. Markdown likewise. The artifact store has \
+**no format filter at all** — `add` takes any single file.\n\
+- **Format narrows the choice in one direction only: the wiki is the picky \
+one.** Its kinds are `html`/`htmlDir`/`markdown` and the entry must be a \
+renderable text file; an `.xlsx` published there lists fine and opens blank. So \
+a binary deliverable can *only* go to the artifact store — that is a hard limit \
+removing an option for you, not the criterion itself.\n\
 - **Store it the moment you produce it, not at the end.** Deliverables are \
 usually written inside `.worktrees/<task-id>`, and that directory is deleted \
 when the plan merges — after which the file is gone. Same hazard as rescuing \
@@ -217,35 +236,31 @@ built to put it.\n\
 - **`--title` and `--note` are worth writing properly.** They are the entire \
 content the user reads on the card; the default title is the filename, and \
 \"out.xlsx\" tells a person nothing.\n\
-- One file per call, not a directory — zip a folder first.\n\
+- One artifact per call, not a directory — zip a folder first. Conversely, a \
+multi-file directory with an `assets/` folder is something only the wiki takes.\n\
 - Stored artifacts appear on the desktop's 产出 board: filter by workspace, \
-star them, preview them (images / video / audio / PDF / text render inline; \
-Office formats get a typed placeholder plus export and open-with-system-app), \
-and export anywhere.\n\
+star them, preview them (images / video / audio / PDF / markdown / html render \
+inline; Office formats get a typed placeholder plus export and \
+open-with-system-app), and export anywhere.\n\
 \n\
-## When NOT to use the wiki\n\
+## When neither store is the answer\n\
 \n\
-Three close cousins render something for a human to look at. Don't confuse \
-them:\n\
+Two close cousins; don't let them blur into these two:\n\
 \n\
 - **A one-time glance** (show a chart or a diff, then throw it away) → render \
 it into a decision card with `fleet__ask`'s `html` or `fleet__render_a2ui`. \
-Don't publish it.\n\
+Neither publish nor store it.\n\
 - **A link to send someone else** → use Claude Code's Artifact tool, if this \
 session has one. It's hosted on claude.ai and shareable; the cost is that the \
 content is uploaded to an external service, and it must be a single \
 self-contained file (inlined CSS/JS, images as data URIs). Keep private \
 project output off it.\n\
-- **A binary file meant for a person** (PDF / pptx / xlsx / video / image) \
-→ the artifact store, see the section above. The wiki cannot render any of \
-them.\n\
-- **Something that will be read again later** → the wiki. Only wiki docs can \
-be read back by a later session with `fleet wiki cat`, cross-linked with \
-`[[slug]]`, filtered by workspace, and full-text searched — and only the wiki \
-accepts a multi-file directory with an `assets/` folder.\n\
 \n\
-The test is not \"which one can render this\" — all three can. It's \"will this \
-output be read a second time?\" If yes → wiki.\n"
+When unsure, ask one question: **is this for me and whoever picks the work up \
+next, or is it going into someone's hands?** Keeping it → wiki. Handing it over \
+→ artifact store. \"Will it be read a second time?\" is **not** the test — a PDF \
+delivered to a client gets read ten times and still isn't knowledge-base \
+material.\n"
         .to_string()
 }
 
@@ -395,6 +410,36 @@ mod tests {
             assert!(
                 g.contains("worktree") || g.contains(".worktrees"),
                 "{locale}: guidance must say why storing it late loses the file"
+            );
+        }
+    }
+
+    /// The routing rule must be stated as an audience question, never as a
+    /// format list. Two earlier phrasings both sent agents the wrong way:
+    /// "the wiki cannot hold these formats" framed the whole choice as a
+    /// format problem, and "will this be read a second time? → wiki" is simply
+    /// false — a PDF delivered to a client is read many times and still is not
+    /// knowledge-base material. The artifact store has no format filter
+    /// (`artifacts::add_in` takes any single file), so an html report or a
+    /// markdown spec belongs there whenever it is a deliverable.
+    #[test]
+    fn render_both_locales_route_by_audience_not_by_file_format() {
+        for (locale, axis, no_filter, both_sides) in [
+            ("zh", "按去向,不按格式", "不挑格式", "markdown"),
+            ("en", "audience, not by format", "no format filter", "markdown"),
+        ] {
+            let g = render_guidance(locale);
+            assert!(
+                g.contains(axis),
+                "{locale}: the routing criterion must be audience, not extension"
+            );
+            assert!(
+                g.contains(no_filter),
+                "{locale}: must say the artifact store accepts any format"
+            );
+            assert!(
+                g.contains(both_sides),
+                "{locale}: must show a text format landing on the artifact side too"
             );
         }
     }
