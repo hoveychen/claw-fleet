@@ -751,6 +751,64 @@ mod tests {
         });
     }
 
+    /// Write `~/.claude.json` with a `mcpServers.fleet` entry naming `command`.
+    fn seed_registration(command: &str) {
+        let p = claude_json_path().unwrap();
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let v = serde_json::json!({
+            "mcpServers": { FLEET_SERVER_KEY: build_fleet_entry(command) },
+        });
+        fs::write(&p, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    }
+
+    /// Regression (2026-08-27): a debug `fleet-cli` running out of a git
+    /// worktree published its own path as `mcpServers.fleet.command`; the
+    /// worktree was then deleted by its own merge, so the registration pointed
+    /// at a binary that no longer existed. `fleet_server_registered` only ever
+    /// asked "is the key there?", so it still answered yes, and every spawn
+    /// kept passing `--permission-prompt-tool
+    /// mcp__fleet__fleet__permission_prompt`. The CLI could not start the
+    /// server, so every tool call that needed a permission decision died with
+    /// `MCP tool ... not found. Available MCP tools: none` instead of falling
+    /// back to no bridge at all.
+    #[test]
+    fn registered_is_false_when_command_binary_is_missing() {
+        with_temp_home(|| {
+            seed_registration("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
+            assert!(
+                !fleet_server_registered(),
+                "a registration whose command is gone must not count as registered"
+            );
+        });
+    }
+
+    /// Same defect, other consumer: `chat_workspace::write_chat_mcp_config`
+    /// copies this entry verbatim into `~/.fleet/chat-mcp.json` and hands it to
+    /// `claude --mcp-config`, so a dead command has to be withheld here too.
+    #[test]
+    fn registered_entry_is_none_when_command_binary_is_missing() {
+        with_temp_home(|| {
+            seed_registration("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
+            assert!(
+                registered_fleet_entry().is_none(),
+                "a registration whose command is gone must not be handed to --mcp-config"
+            );
+        });
+    }
+
+    /// The happy path must keep working: a command that exists and is
+    /// executable still registers. `current_exe` is the test binary itself —
+    /// present and executable on every platform the suite runs on.
+    #[test]
+    fn registered_is_true_for_a_live_executable() {
+        with_temp_home(|| {
+            let me = std::env::current_exe().unwrap();
+            seed_registration(&me.to_string_lossy());
+            assert!(fleet_server_registered(), "a live executable must register");
+            assert!(registered_fleet_entry().is_some());
+        });
+    }
+
     #[test]
     fn build_fleet_entry_shape() {
         let v = build_fleet_entry("/path/to/fleet");
