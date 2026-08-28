@@ -1,0 +1,108 @@
+/* Office preview surfaces (docx / xlsx / pptx) on the 产出 stage.
+ *
+ * The two host-based renderers paint documents that assume a white page, so
+ * their canvas is pinned to --canvas-fixed-light rather than a themed surface —
+ * the same reasoning as .doc_frame in ArtifactsView.module.css. The spreadsheet
+ * is our own DOM, so it themes normally. */
+
+.wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.status {
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-dim);
+  font-size: var(--font-size-xs);
+  text-align: center;
+}
+
+/* docx-preview emits its own page boxes with their own margins and shadow; the
+   host only has to scroll them and supply the surrounding desk. */
+.docx_host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-sunken);
+}
+
+/* The library ships a hardcoded mid-gray desk around the pages, which reads as
+   a foreign panel in either theme. The pages themselves stay white — they are
+   the document — but the desk they sit on follows ours. */
+.docx_host :global(.docx-wrapper) {
+  background: transparent;
+  padding: var(--space-5);
+  gap: var(--space-5);
+}
+
+.pptx_host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--canvas-fixed-light);
+}
+
+/* The library hardcodes a black stage around the slide; that letterboxing is
+   the one part of its look worth overriding, since a deck narrower than the
+   stage would otherwise sit in a black band. */
+.pptx_host :global(.pptx-preview-wrapper) {
+  background: var(--canvas-fixed-light);
+}
+
+.sheet_tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+}
+
+.sheet_tab {
+  padding: 2px var(--space-3);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+/* Matches the filter chips on the same page rather than inventing a second
+   selected-state look. */
+.sheet_tab_on {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.sheet_scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+}
+
+.sheet_table {
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+}
+
+/* A spreadsheet's own column widths are lost in a values-only parse, so cells
+   size to their content and the table scrolls sideways instead of squeezing
+   every column into the stage. */
+.sheet_table td {
+  border: 1px solid var(--color-border-soft);
+  padding: 2px var(--space-2);
+  white-space: pre;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

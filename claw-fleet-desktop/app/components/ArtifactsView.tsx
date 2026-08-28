@@ -15,11 +15,12 @@ import {
   Star,
   TriangleAlert,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
 import { isWebBuild } from "../hostEnv";
+import { officeMode } from "../officePreview";
 import { downloadArtifact } from "../mock/liveProxy";
 import { PageShell } from "./PageShell";
 import { EmptyState } from "./EmptyState";
@@ -64,6 +65,16 @@ const KIND_ICON: Record<string, typeof FileText> = {
   archive: Archive,
   text: FileText,
 };
+
+/**
+ * The three Office renderers, kept out of the main bundle.
+ *
+ * Together they are ~1.6 MB of JavaScript (pptx-preview bundles echarts for a
+ * deck's native charts), which no session should download to look at a session
+ * list. `lazy` defers the module, and the module defers each library again —
+ * see OfficePreview's own docs.
+ */
+const OfficePreview = lazy(() => import("./OfficePreview"));
 
 /**
  * Which renderer a `text`-kind artifact wants.
@@ -497,9 +508,11 @@ function ArtifactDetail({
  *
  * `<video>` and the PDF `<iframe>` both point at `fleet-artifact://`, which is
  * the protocol that honours `Range`; that is what makes seeking work rather
- * than re-downloading. Office formats get no viewer because the webview has
- * none — a `<iframe>` at a .docx renders a blank frame, so the honest answer
- * is a typed placeholder with 导出 / 打开 one click away in the bar above.
+ * than re-downloading. The webview has no Office viewer of its own — an
+ * `<iframe>` at a .docx renders a blank frame — so the OOXML three get one in
+ * JavaScript, lazily (see `OfficePreview`). Everything left over (legacy .doc /
+ * .xls / .ppt, ODF, archives) still gets the typed placeholder with 导出 / 打开
+ * one click away in the bar above.
  */
 function ArtifactStage({ artifact }: { artifact: Artifact }) {
   const { t } = useTranslation();
@@ -588,6 +601,16 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
       </div>
     );
   }
+  const office = officeMode(artifact.mime);
+  if (office) {
+    return (
+      <div className={`${styles.stage} ${styles.stage_office}`}>
+        <Suspense fallback={<div className={styles.no_preview_hint}>{t("artifacts.loading", "加载中…")}</div>}>
+          <OfficePreview mode={office} url={url} title={artifact.title} />
+        </Suspense>
+      </div>
+    );
+  }
   const Icon = KIND_ICON[artifact.kind] ?? FileText;
   return (
     <div className={styles.stage}>
@@ -597,7 +620,9 @@ function ArtifactStage({ artifact }: { artifact: Artifact }) {
           {t("artifacts.no_preview_title", "这个格式没法在这里预览")}
         </div>
         <div className={styles.no_preview_hint}>
-          {t("artifacts.no_preview_hint", "Office 文档要用系统应用打开，或者先导出。")}
+          {/* docx/xlsx/pptx now render above; what lands here is the legacy
+              binary Office formats, ODF, archives and unknown blobs. */}
+          {t("artifacts.no_preview_hint", "这个格式只能导出，或者用系统应用打开。")}
         </div>
       </div>
     </div>

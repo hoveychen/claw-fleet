@@ -236,6 +236,14 @@
   overflow: auto;
 }
 
+/* An Office preview brings its own page boxes and scrolling, so it wants the
+   whole stage rather than being centred inside it like an image. */
+.stage_office {
+  align-items: stretch;
+  justify-content: stretch;
+  padding: var(--space-4);
+}
+
 .stage img,
 .stage video {
   max-width: 100%;
