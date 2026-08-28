@@ -27,7 +27,7 @@
 //! `~/.fleet/mcp-config.json` (mirror of `permissions-config.json`).
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -178,34 +178,118 @@ pub fn build_fleet_entry(fleet_path: &str) -> serde_json::Value {
 }
 
 /// True when `mcpServers.fleet` is currently registered in `~/.claude.json`
-/// — i.e. a spawned `claude` child will see the `fleet` MCP server and its
-/// tools. Spawn sites use this to decide whether they can safely pass
-/// `--permission-prompt-tool mcp__fleet__fleet__permission_prompt`: naming a
-/// tool that doesn't resolve makes the CLI abort at startup, so the flag must
-/// only be added when the server is actually injected.
+/// **and its `command` can actually be launched** — i.e. a spawned `claude`
+/// child will see the `fleet` MCP server and its tools. Spawn sites use this
+/// to decide whether they can safely pass `--permission-prompt-tool
+/// mcp__fleet__fleet__permission_prompt`: naming a tool that doesn't resolve
+/// makes the CLI abort at startup, so the flag must only be added when the
+/// server is actually usable.
 pub fn fleet_server_registered() -> bool {
-    let Some(path) = claude_json_path() else {
-        return false;
-    };
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return false;
-    };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return false;
-    };
-    extract_fleet_entry(&v).0.is_some()
+    registered_fleet_entry().is_some()
 }
 
 /// The `mcpServers.fleet` entry as currently registered in `~/.claude.json`,
-/// or `None` when the injection isn't live. Chat sessions exclude the user
-/// setting source (which is where the CLI would otherwise find this server),
-/// so they need to hand the same entry back through `--mcp-config` — see
-/// `crate::chat_workspace::chat_session_args`.
+/// or `None` when the injection isn't live *or* its `command` no longer
+/// resolves. Chat sessions exclude the user setting source (which is where the
+/// CLI would otherwise find this server), so they need to hand the same entry
+/// back through `--mcp-config` — see `crate::chat_workspace::chat_session_args`.
 pub fn registered_fleet_entry() -> Option<serde_json::Value> {
     let path = claude_json_path()?;
     let content = std::fs::read_to_string(&path).ok()?;
     let v = serde_json::from_str::<serde_json::Value>(&content).ok()?;
-    extract_fleet_entry(&v).0
+    let entry = extract_fleet_entry(&v).0?;
+    entry_command_is_live(&entry).then_some(entry)
+}
+
+/// Whether `entry`'s `command` names something a spawned `claude` can still
+/// execute.
+///
+/// The presence of the key is not enough. A dev `fleet-cli` running out of a
+/// git worktree publishes its own absolute path here, and Rule 3 deletes that
+/// worktree the moment its plan merges — leaving a registration that points at
+/// nothing. Every consumer of this entry (the `--permission-prompt-tool` flag,
+/// the chat workspace's `--mcp-config`) then hands `claude` a server it cannot
+/// start, which is a hard error per tool call rather than a missing feature.
+///
+/// A bare name with no path separator (the watchdog's `"fleet"` fallback) is
+/// resolved from `PATH` at launch, which we can't check cheaply and which isn't
+/// the failure mode this guards — accept it.
+fn entry_command_is_live(entry: &serde_json::Value) -> bool {
+    let Some(cmd) = entry.get("command").and_then(|c| c.as_str()) else {
+        return false;
+    };
+    if cmd.is_empty() {
+        return false;
+    }
+    let path = Path::new(cmd);
+    let bare_name = path.parent().map(|p| p.as_os_str().is_empty()).unwrap_or(true);
+    bare_name || is_executable_file(path)
+}
+
+/// Directory Fleet's worktree workflow checks plans out under, matched as a
+/// whole path segment. Same literal `session::workspace_name` folds on.
+const WORKTREE_DIR: &str = ".worktrees";
+
+/// True when `fleet_path` is ephemeral by construction: it lives inside
+/// `<repo>/.worktrees/<task-id>/`, which the worktree workflow deletes the
+/// moment that plan merges. Publishing such a path as the machine-wide MCP
+/// command guarantees a dangling registration a few hours later.
+///
+/// The main checkout's `target/debug/fleet-cli` is deliberately *not* covered:
+/// it survives merges, and blocking it would strip `fleet__ask` from every
+/// ordinary `cargo tauri dev` run.
+fn is_ephemeral_worktree_binary(fleet_path: &str) -> bool {
+    fleet_path.split(['/', '\\']).any(|seg| seg == WORKTREE_DIR)
+}
+
+/// Whether a fleet binary at `fleet_path` may write its own path into the
+/// `~/.claude.json` this process resolves. `isolated_config` says that config
+/// is a throwaway (see [`config_is_isolated`]), in which case anything goes.
+fn may_publish(fleet_path: &str, isolated_config: bool) -> bool {
+    isolated_config || !is_ephemeral_worktree_binary(fleet_path)
+}
+
+/// True when the config we resolve is a throwaway rather than the real user's.
+///
+/// `FLEET_HOME` is the one isolation lever — the test suite and every local
+/// `fleet serve` verification run set it, and production code never does.
+/// `CLAUDE_CONFIG_DIR` deliberately does **not** count: a user who relocates
+/// their Claude config permanently still has exactly one real config to protect.
+fn config_is_isolated() -> bool {
+    std::env::var_os("FLEET_HOME").is_some_and(|v| !v.is_empty())
+}
+
+/// The error both write paths return when [`may_publish`] says no.
+fn ephemeral_publish_refused(fleet_path: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!(
+            "refusing to register {fleet_path} as mcpServers.{FLEET_SERVER_KEY}: it lives under \
+             {WORKTREE_DIR}/ and will be deleted when its plan merges, leaving every spawned \
+             session naming a binary that no longer exists. Run this build with FLEET_HOME set \
+             to a temp dir to verify it in isolation."
+        ),
+    )
+}
+
+/// `path` exists (following symlinks) and is a file with an execute bit.
+/// Windows has no execute bit, so existence as a file is the whole test there.
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(meta) = fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn extract_fleet_entry(v: &serde_json::Value) -> (Option<serde_json::Value>, bool, bool) {
@@ -268,6 +352,9 @@ pub fn prune_dead_holders(lock: &mut McpLock) {
 /// is a no-op after the first call (the existing entry is overwritten with
 /// the same value, which Claude Code re-reads on next launch).
 pub fn acquire(pid: u32, fleet_path: &str) -> std::io::Result<()> {
+    if !may_publish(fleet_path, config_is_isolated()) {
+        return Err(ephemeral_publish_refused(fleet_path));
+    }
     let mut lock = read_lock().unwrap_or_default();
     prune_dead_holders(&mut lock);
     let was_empty = lock.holders.is_empty();
@@ -315,15 +402,26 @@ pub fn release(pid: u32) -> std::io::Result<()> {
 }
 
 /// Watchdog hook: if the lock still has at least one live holder but
-/// `~/.claude.json` no longer carries our `mcpServers.fleet` entry (e.g.
-/// Claude Code upgraded and rewrote the file from scratch), re-write
-/// it. The snapshot already stored in the lock is preserved — we are
-/// not re-acquiring, just restoring our injection on top of whatever
-/// drift happened.
+/// `~/.claude.json` no longer carries a *usable* `mcpServers.fleet` entry —
+/// the key is gone (e.g. Claude Code upgraded and rewrote the file from
+/// scratch), or its `command` no longer resolves — re-write it. The snapshot
+/// already stored in the lock is preserved — we are not re-acquiring, just
+/// restoring our injection on top of whatever drift happened.
+///
+/// **Drift means broken, not "not mine".** An entry naming a different but
+/// still-launchable binary is left alone: two Fleet processes with different
+/// paths (the packaged app plus a `fleet-cli` built in a worktree) used to flip
+/// this key back and forth every 30s, and a spawn reading it mid-flip inherited
+/// whichever value happened to be there. Once the worktree was deleted by its
+/// own merge, those sessions were left naming a binary that no longer existed
+/// — which is exactly the case this function now repairs instead of causing.
 ///
 /// Returns `Ok(true)` if a re-injection actually wrote the file,
 /// `Ok(false)` if nothing was off. Used by [`crate::injector_watchdog`].
 pub fn verify_and_reinject(fleet_path: &str) -> std::io::Result<bool> {
+    if !may_publish(fleet_path, config_is_isolated()) {
+        return Err(ephemeral_publish_refused(fleet_path));
+    }
     let Some(mut lock) = read_lock() else { return Ok(false) };
     prune_dead_holders(&mut lock);
     if lock.holders.is_empty() {
@@ -332,10 +430,10 @@ pub fn verify_and_reinject(fleet_path: &str) -> std::io::Result<bool> {
     }
     let (claude_json, existed) = read_claude_json()?;
     let (current_fleet, _, _) = extract_fleet_entry(&claude_json);
-    let expected = build_fleet_entry(fleet_path);
-    if current_fleet.as_ref() == Some(&expected) {
+    if current_fleet.as_ref().is_some_and(entry_command_is_live) {
         return Ok(false);
     }
+    let expected = build_fleet_entry(fleet_path);
     let mut new_json = if existed {
         claude_json
     } else {
@@ -749,6 +847,164 @@ mod tests {
             assert!(restored["mcpServers"].get(FLEET_SERVER_KEY).is_none());
             assert_eq!(restored["mcpServers"]["filesystem"]["command"], "fs-mcp");
         });
+    }
+
+    /// Write `~/.claude.json` with a `mcpServers.fleet` entry naming `command`.
+    fn seed_registration(command: &str) {
+        let p = claude_json_path().unwrap();
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let v = serde_json::json!({
+            "mcpServers": { FLEET_SERVER_KEY: build_fleet_entry(command) },
+        });
+        fs::write(&p, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    }
+
+    /// Regression (2026-08-27): a debug `fleet-cli` running out of a git
+    /// worktree published its own path as `mcpServers.fleet.command`; the
+    /// worktree was then deleted by its own merge, so the registration pointed
+    /// at a binary that no longer existed. `fleet_server_registered` only ever
+    /// asked "is the key there?", so it still answered yes, and every spawn
+    /// kept passing `--permission-prompt-tool
+    /// mcp__fleet__fleet__permission_prompt`. The CLI could not start the
+    /// server, so every tool call that needed a permission decision died with
+    /// `MCP tool ... not found. Available MCP tools: none` instead of falling
+    /// back to no bridge at all.
+    #[test]
+    fn registered_is_false_when_command_binary_is_missing() {
+        with_temp_home(|| {
+            seed_registration("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
+            assert!(
+                !fleet_server_registered(),
+                "a registration whose command is gone must not count as registered"
+            );
+        });
+    }
+
+    /// Same defect, other consumer: `chat_workspace::write_chat_mcp_config`
+    /// copies this entry verbatim into `~/.fleet/chat-mcp.json` and hands it to
+    /// `claude --mcp-config`, so a dead command has to be withheld here too.
+    #[test]
+    fn registered_entry_is_none_when_command_binary_is_missing() {
+        with_temp_home(|| {
+            seed_registration("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
+            assert!(
+                registered_fleet_entry().is_none(),
+                "a registration whose command is gone must not be handed to --mcp-config"
+            );
+        });
+    }
+
+    /// The happy path must keep working: a command that exists and is
+    /// executable still registers. `current_exe` is the test binary itself —
+    /// present and executable on every platform the suite runs on.
+    #[test]
+    fn registered_is_true_for_a_live_executable() {
+        with_temp_home(|| {
+            let me = std::env::current_exe().unwrap();
+            seed_registration(&me.to_string_lossy());
+            assert!(fleet_server_registered(), "a live executable must register");
+            assert!(registered_fleet_entry().is_some());
+        });
+    }
+
+    fn registered_command() -> String {
+        let raw = fs::read_to_string(claude_json_path().unwrap()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        v["mcpServers"][FLEET_SERVER_KEY]["command"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// Regression (2026-08-27): the watchdog re-injected whenever the entry
+    /// differed from *its own* `current_exe()`, so two Fleet processes with
+    /// different paths (the packaged app plus a `fleet-cli` built in a
+    /// worktree) flipped `mcpServers.fleet.command` back and forth every 30s.
+    /// Whichever value a spawn happened to read is what that session got — and
+    /// once the worktree was deleted by its merge, the sessions that read it
+    /// were left with a server they couldn't start. A live entry belongs to
+    /// whoever published it; the watchdog repairs breakage, it doesn't claim
+    /// ownership.
+    #[test]
+    fn verify_leaves_a_live_entry_from_another_fleet_build_alone() {
+        with_temp_home(|| {
+            let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            acquire(std::process::id(), &live).unwrap();
+
+            let injected = verify_and_reinject("/some/other/build/fleet").unwrap();
+            assert!(
+                !injected,
+                "a live entry must not be rewritten just because the path isn't mine"
+            );
+            assert_eq!(registered_command(), live, "the published command must stand");
+
+            let _ = release(std::process::id());
+        });
+    }
+
+    /// The other half of the same rule: an entry whose command has gone away
+    /// *is* drift, so the watchdog must take it over rather than leave every
+    /// subsequent spawn pointing at nothing. This is what heals the machine
+    /// within one tick after a worktree build disappears.
+    #[test]
+    fn verify_reinjects_when_the_registered_command_is_dead() {
+        with_temp_home(|| {
+            let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            acquire(std::process::id(), &live).unwrap();
+            seed_registration("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
+
+            let injected = verify_and_reinject(&live).unwrap();
+            assert!(injected, "a dead command is drift and must be repaired");
+            assert_eq!(registered_command(), live);
+
+            let _ = release(std::process::id());
+        });
+    }
+
+    const WORKTREE_BIN: &str =
+        "/Users/foo/workspace/claude-fleet/.worktrees/acp-consumer-heartbeat/target/debug/fleet-cli";
+
+    #[test]
+    fn ephemeral_worktree_binaries_are_recognised() {
+        assert!(is_ephemeral_worktree_binary(WORKTREE_BIN));
+        assert!(
+            is_ephemeral_worktree_binary(
+                r"C:\src\claude-fleet\.worktrees\foo\target\debug\fleet-cli.exe"
+            ),
+            "windows separators count too"
+        );
+        assert!(!is_ephemeral_worktree_binary(
+            "/Applications/Claw Fleet.app/Contents/MacOS/fleet"
+        ));
+        assert!(
+            !is_ephemeral_worktree_binary("/Users/foo/workspace/claude-fleet/target/debug/fleet-cli"),
+            "the main checkout's dev build is stable — don't block it"
+        );
+        assert!(!is_ephemeral_worktree_binary("fleet"));
+    }
+
+    /// Root cause of 2026-08-27: a `fleet-cli` built inside
+    /// `.worktrees/acp-consumer-heartbeat` published its own absolute path into
+    /// the real `~/.claude.json`. Rule 3 deleted that worktree the moment the
+    /// plan merged, so every session spawned afterwards named a binary that no
+    /// longer existed. A binary that ephemeral must never publish itself into
+    /// the user's real config — but a `FLEET_HOME`-isolated run (how local
+    /// verification and the test suite are supposed to work) still may, because
+    /// nothing it writes reaches the real config.
+    #[test]
+    fn a_worktree_binary_may_only_publish_when_the_config_is_isolated() {
+        assert!(
+            !may_publish(WORKTREE_BIN, false),
+            "a worktree build must not write the user's real ~/.claude.json"
+        );
+        assert!(
+            may_publish(WORKTREE_BIN, true),
+            "an isolated run writes a throwaway config — allow it"
+        );
+        assert!(
+            may_publish("/Applications/Claw Fleet.app/Contents/MacOS/fleet", false),
+            "a stable install publishes as before"
+        );
     }
 
     #[test]

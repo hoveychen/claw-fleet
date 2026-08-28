@@ -399,6 +399,39 @@ mod tests {
         });
     }
 
+    /// Regression (2026-08-27): `~/.claude.json` carried a `fleet` entry whose
+    /// `command` pointed into a merged-and-deleted worktree. This function
+    /// copied it verbatim into `~/.fleet/chat-mcp.json`, so the chat session
+    /// launched with a `--mcp-config` naming a binary that no longer existed —
+    /// "Available MCP tools: none", and the `--permission-prompt-tool` that
+    /// shipped alongside it turned every permission-gated tool call into a hard
+    /// error. A dead command must produce no flag at all.
+    #[test]
+    fn chat_session_args_omit_mcp_config_when_the_registered_binary_is_gone() {
+        let tmp = tempfile::tempdir().unwrap();
+        with_home(tmp.path(), || {
+            let claude_json = tmp.path().join(".claude.json");
+            std::fs::write(
+                &claude_json,
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "mcpServers": {
+                        "fleet": {
+                            "command": "/nonexistent/.worktrees/gone/target/debug/fleet-cli",
+                            "args": ["mcp"],
+                        }
+                    }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let args = chat_session_args();
+            assert!(
+                !args.iter().any(|a| a == "--mcp-config"),
+                "a dead fleet binary must not be handed to --mcp-config, got {args:?}",
+            );
+        });
+    }
+
     #[test]
     fn chat_session_args_hand_back_settings_when_present() {
         let tmp = tempfile::tempdir().unwrap();
