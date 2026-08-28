@@ -253,6 +253,30 @@
   background: var(--canvas-fixed-light);
 }
 
+/* Markdown and html deliverables are stored as `text`-kind artifacts, so the
+   stage renders them properly rather than dumping their source. The frame
+   hosts an agent-produced page: give it a fixed light canvas (not
+   var(--color-bg-card), which goes dark) so a doc assuming a white background
+   stays readable in dark mode — same reasoning as the wiki's html frame. */
+.markdown_body {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.html_frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--canvas-fixed-light);
+}
+
 .text_pre {
   width: 100%;
   height: 100%;
