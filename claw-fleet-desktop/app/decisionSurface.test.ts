@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decisionSurface } from "./decisionSurface";
+import { decisionSurfaces } from "./decisionSurface";
 
 const DESKTOP = {
   webBuild: false,
@@ -8,50 +8,67 @@ const DESKTOP = {
   mainMinimized: false,
 };
 
-describe("decisionSurface — desktop", () => {
-  it("renders inline by default", () => {
-    expect(decisionSurface(DESKTOP)).toBe("inline");
+describe("decisionSurfaces — desktop", () => {
+  it("renders inline and pops nothing by default", () => {
+    expect(decisionSurfaces(DESKTOP)).toEqual({ inline: true, float: false });
   });
 
-  it("floats when the user asked for the standalone window", () => {
-    expect(decisionSurface({ ...DESKTOP, floatingPreferred: true })).toBe("float");
+  it("hands the card to the standalone window when the user asked for it", () => {
+    expect(decisionSurfaces({ ...DESKTOP, floatingPreferred: true })).toEqual({
+      inline: false,
+      float: true,
+    });
   });
 
-  it("floats in Lite mode, which draws no in-window card", () => {
-    expect(decisionSurface({ ...DESKTOP, liteMode: true })).toBe("float");
+  it("pops the float in Lite mode, which draws no in-window card", () => {
+    expect(decisionSurfaces({ ...DESKTOP, liteMode: true })).toEqual({
+      inline: false,
+      float: true,
+    });
   });
 
-  it("floats while the main window is minimized", () => {
-    expect(decisionSurface({ ...DESKTOP, mainMinimized: true })).toBe("float");
+  // Both at once: the float is what the user can see, and the inline panel
+  // stays mounted underneath so restoring the window does not lose its state.
+  it("keeps the inline panel mounted while the main window is minimized", () => {
+    expect(decisionSurfaces({ ...DESKTOP, mainMinimized: true })).toEqual({
+      inline: true,
+      float: true,
+    });
   });
 });
 
-describe("decisionSurface — browser build", () => {
+describe("decisionSurfaces — browser build", () => {
   const WEB = { ...DESKTOP, webBuild: true };
 
   // A tab has no second window: `show_decision_float` answers null and swallows
-  // the card. Every one of these used to resolve to "float", which is why a
+  // the card. Each of these used to resolve to float-only, which is why a
   // pending fleet__ask on fleet-cloud rendered nowhere at all.
   it("renders inline even when the standalone window is preferred", () => {
-    expect(decisionSurface({ ...WEB, floatingPreferred: true })).toBe("inline");
+    expect(decisionSurfaces({ ...WEB, floatingPreferred: true })).toEqual({
+      inline: true,
+      float: false,
+    });
   });
 
   it("renders inline in Lite mode", () => {
-    expect(decisionSurface({ ...WEB, liteMode: true })).toBe("inline");
+    expect(decisionSurfaces({ ...WEB, liteMode: true })).toEqual({
+      inline: true,
+      float: false,
+    });
   });
 
-  it("renders inline when the host reports a minimized main window", () => {
-    expect(decisionSurface({ ...WEB, mainMinimized: true })).toBe("inline");
+  it("never asks for a float window, whatever the host reports", () => {
+    expect(decisionSurfaces({ ...WEB, mainMinimized: true }).float).toBe(false);
   });
 
   it("renders inline with every float trigger set at once", () => {
     expect(
-      decisionSurface({
+      decisionSurfaces({
         webBuild: true,
         floatingPreferred: true,
         liteMode: true,
         mainMinimized: true,
       }),
-    ).toBe("inline");
+    ).toEqual({ inline: true, float: false });
   });
 });
