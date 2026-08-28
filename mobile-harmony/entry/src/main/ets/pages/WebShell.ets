@@ -472,6 +472,46 @@ struct WebShell {
           .databaseAccess(true)
           .mixedMode(MixedMode.All)
           .darkMode(WebDarkMode.Auto)
+          // JS 弹窗必须原生接管。ArkWeb 自己不画 alert/confirm 的弹窗：回调返回
+          // false 时「弹窗的处理结果视为取消」，不注册回调等同于此。于是页面里
+          // `window.confirm(...)` 恒为 false、`window.alert(...)` 无声消失——
+          // 任务页的「停止」按下去没反应，正是因为它的确认框走的这条路。
+          //
+          // 注册后必须调到 handleConfirm / handleCancel 之一，漏掉会阻塞 render
+          // 进程，所以三条出口（确认、取消、点外部/返回键关闭）都要落到 result 上。
+          //
+          // window.prompt 不接：mobile-web 一处都没用（grep 过），而它需要带
+          // 输入框的自定义弹窗，不是 AlertDialog 能顺手覆盖的。真要用时再补。
+          .onAlert((event) => {
+            if (!event) return false;
+            this.getUIContext().showAlertDialog({
+              message: event.message,
+              autoCancel: false,
+              confirm: {
+                value: '知道了',
+                action: () => { event.result.handleConfirm(); },
+              },
+              cancel: () => { event.result.handleCancel(); },
+            });
+            return true;
+          })
+          .onConfirm((event) => {
+            if (!event) return false;
+            this.getUIContext().showAlertDialog({
+              message: event.message,
+              autoCancel: false,
+              primaryButton: {
+                value: '取消',
+                action: () => { event.result.handleCancel(); },
+              },
+              secondaryButton: {
+                value: '确定',
+                action: () => { event.result.handleConfirm(); },
+              },
+              cancel: () => { event.result.handleCancel(); },
+            });
+            return true;
+          })
           .runJavaScriptOnDocumentStart([{ script: this.bootScript(), scriptRules: ['*'] }])
           .javaScriptProxy({
             object: this.bridge,
