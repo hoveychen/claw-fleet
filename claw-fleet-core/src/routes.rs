@@ -259,29 +259,35 @@ pub const WIKI_ASSET_PREFIX: &str = "/wiki_asset/";
 pub const DECISION_ASSET_PREFIX: &str = "/decision_asset/";
 
 /// Public API surface exposed to per-customer **scoped** tokens in the Fleet
-/// Cloud lean deployment (one-customer-per-container).
+/// Cloud deployment (one customer per container).
 ///
-/// **Fleet Cloud v2 — /v1/* only.** A scoped token reaches ONLY the OpenAI
-/// Responses-compatible `/v1/*` tree (plus the container [`HEALTH`] check).
-/// Everything else — the raw internal routes, settings, guidance injectors,
-/// command exec, filesystem browse, source/credential surfaces — requires the
-/// full **admin** token (which bypasses this whitelist entirely).
+/// A scoped token reaches four things and nothing else:
 ///
-/// This collapse replaces v1's broad whitelist (spawn/tail/sessions/messages/
-/// the six decision `*/respond` pairs/usage/attachments/`/events`) and closes
-/// its two audit holes *by construction*:
+/// - [`HEALTH`], the container check.
+/// - [`ACP`] — the Agent Client Protocol surface. Not a path on this HTTP
+///   server (ACP listens on its own port; see [`crate::acp::ws`]), but routed
+///   through the same `authorize` decision so the socket does not grow a second
+///   auth scheme.
+/// - `/v1/files/*` — uploads and artifacts. ACP carries files inline and has no
+///   REST file API, so this exists to give `resource_link` something to point
+///   at and to take uploads too large for a JSON-RPC frame.
+/// - [`DECISION_ASSET_PREFIX`] — the rendered preview behind a URL-mode
+///   elicitation.
 ///
-/// - The v1 `SPAWN_SESSION` took a client-supplied `workspacePath`, so a scoped
-///   caller could point an agent at the credential directory. The `/v1`
-///   create handler takes **no** workspace_path — it is bound server-side to
-///   [`crate::hooks_server::responses::public_workspace`].
-/// - The v1 `SESSIONS` returned raw `SessionInfo` (leaking `pid`, `jsonlPath`,
-///   host paths). `/v1` responses are projected from clean OpenAI types only.
+/// Everything else — internal routes, settings, guidance injectors, command
+/// exec, filesystem browse, source and credential surfaces — needs the full
+/// **admin** token, which bypasses this whitelist entirely.
 ///
-/// Decision cards, artifacts and usage that v1 exposed as separate routes are
-/// all reachable through `/v1/*` now (decision cards as `function_call`
-/// items, artifacts via `/v1/responses/{id}/files`, usage via the response
-/// `usage` field), so nothing external is lost.
+/// The confinement properties that motivated the original collapse still hold,
+/// and now hold on the ACP side too:
+///
+/// - No route takes a client-supplied workspace path. ACP's `session/new`
+///   *does* carry a `cwd`, and the agent rejects any value that is not the
+///   server-bound [`crate::hooks_server::public_files::public_workspace`] —
+///   honouring it would be exactly the hole this whitelist exists to close.
+/// - Nothing leaks raw `SessionInfo`. `session/list` projects to ACP's own
+///   `SessionInfo` (id, cwd, title, updatedAt) with no `pid` or `jsonlPath`,
+///   and filters to the bound workspace.
 pub fn is_public(path: &str) -> bool {
     path == HEALTH
         || path == ACP

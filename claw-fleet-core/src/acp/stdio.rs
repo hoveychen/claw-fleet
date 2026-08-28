@@ -71,6 +71,7 @@ impl Sink for StdoutSink {
 
 /// Serve ACP on stdin/stdout against the local workspace. Returns at EOF.
 pub fn serve_local() -> std::io::Result<()> {
+    trace("conn", "serving ACP on stdio");
     let peer = Arc::new(Peer::new(Box::new(StdoutSink(Mutex::new(std::io::stdout())))));
     let sources = Arc::new(crate::agent_source::build_sources());
     let agent = Arc::new(AcpAgent::new(peer, sources));
@@ -102,7 +103,7 @@ pub fn serve_proxy(url: &str, token: Option<&str>) -> Result<(), String> {
 /// valid ACP message") and explicitly allows stderr for logging, which clients
 /// may capture, forward or ignore. This is the first thing to reach for when an
 /// editor integration is silent.
-fn trace(dir: &str, what: &str) {
+pub(super) fn trace(dir: &str, what: &str) {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *ON.get_or_init(|| std::env::var_os("FLEET_ACP_DEBUG").is_some()) {
         eprintln!("[acp {dir}] {what}");
