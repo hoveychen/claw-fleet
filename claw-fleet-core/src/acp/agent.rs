@@ -617,9 +617,19 @@ impl AcpAgent {
         }
     }
 
+    /// Where to start tailing this turn.
+    ///
+    /// Deliberately the *fast* lookup only. A brand-new session has no
+    /// transcript yet, and falling back to `scan_all_sources` here blocks for
+    /// as long as the scan takes — 31s on a machine with real history. By the
+    /// time it returned the agent had already finished writing, so the offset
+    /// was set to the end of its answer and the tail never saw a thing.
+    ///
+    /// No file yet means offset 0, which is exactly right: read it from the
+    /// top once it appears.
     fn transcript_len(&self, internal_id: &str) -> u64 {
-        self.resolve_source(internal_id)
-            .and_then(|(path, _)| std::fs::metadata(path).ok())
+        self.find_transcript_fast(internal_id)
+            .and_then(|path| std::fs::metadata(path).ok())
             .map(|m| m.len())
             .unwrap_or(0)
     }
@@ -634,20 +644,23 @@ impl AcpAgent {
     /// milliseconds; the scan stays as the fallback for sources that do not
     /// (Codex keys on its own thread ids).
     fn find_transcript(&self, internal_id: &str) -> Option<String> {
-        if let Some(dir) = crate::session::get_claude_dir() {
-            let projects = dir.join("projects");
-            if let Ok(entries) = std::fs::read_dir(&projects) {
-                let name = format!("{internal_id}.jsonl");
-                for e in entries.flatten() {
-                    let candidate = e.path().join(&name);
-                    if candidate.is_file() {
-                        return Some(candidate.to_string_lossy().into_owned());
-                    }
-                }
+        self.find_transcript_fast(internal_id).or_else(|| {
+            let sessions = crate::session::scan_all_sources(&self.sources);
+            sessions.iter().find(|s| s.id == internal_id).map(|s| s.jsonl_path.clone())
+        })
+    }
+
+    /// The stat-per-project-directory lookup, with no scan fallback.
+    fn find_transcript_fast(&self, internal_id: &str) -> Option<String> {
+        let projects = crate::session::get_claude_dir()?.join("projects");
+        let name = format!("{internal_id}.jsonl");
+        for e in std::fs::read_dir(&projects).ok()?.flatten() {
+            let candidate = e.path().join(&name);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().into_owned());
             }
         }
-        let sessions = crate::session::scan_all_sources(&self.sources);
-        sessions.iter().find(|s| s.id == internal_id).map(|s| s.jsonl_path.clone())
+        None
     }
 
     fn resolve_source(&self, internal_id: &str) -> Option<(String, &dyn AgentSource)> {
