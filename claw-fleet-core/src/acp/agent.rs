@@ -809,6 +809,19 @@ mod tests {
         AcpAgent::new(Arc::new(Peer::new(Box::new(NullSink))), Arc::new(Vec::new()))
     }
 
+    /// Serialises every test that reads *or* writes `FLEET_PUBLIC_WORKSPACE`.
+    ///
+    /// `public_workspace()` re-reads the env on every call, so a test that
+    /// repoints it is visible to every other test on cargo's thread pool. The
+    /// readers below are the subtler half: each samples the workspace once and
+    /// then calls a method that samples it again, so without the lock a single
+    /// test can see two different values and reject its own cwd. That failure
+    /// names an innocent test and reproduces about one run in four.
+    fn ws_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static L: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        L.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// A source that reports one session at a fixed workspace path.
     struct OneSession(SessionInfoRow);
 
@@ -866,6 +879,7 @@ mod tests {
         // ...while the container is bound to the symlinked one.
         let bound = link.to_string_lossy().into_owned();
 
+        let _ws_guard = ws_env_lock();
         let prev = std::env::var("FLEET_PUBLIC_WORKSPACE").ok();
         std::env::set_var("FLEET_PUBLIC_WORKSPACE", &bound);
 
@@ -933,6 +947,7 @@ mod tests {
     #[test]
     fn session_new_mints_an_id_and_defers_the_spawn() {
         let a = agent();
+        let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws, "mcpServers": []})).unwrap();
         let sid = v["sessionId"].as_str().expect("a session id");
@@ -1010,6 +1025,7 @@ mod tests {
     #[test]
     fn a_cancel_notification_marks_the_session_and_is_consumed_once() {
         let a = agent();
+        let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
@@ -1046,6 +1062,7 @@ mod tests {
         // `$/cancel_request` carries `requestId`; `session/cancel` carries
         // `sessionId`. Reading the wrong field would make the cancel a no-op.
         let a = agent();
+        let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
@@ -1086,6 +1103,7 @@ mod tests {
     #[test]
     fn load_and_resume_of_an_unknown_session_are_invalid_params() {
         let a = agent();
+        let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
         for method in ["session/load", "session/resume"] {
             let err = a
@@ -1098,6 +1116,7 @@ mod tests {
     #[test]
     fn close_cancels_the_turn_and_drops_the_session() {
         let a = agent();
+        let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
@@ -1117,6 +1136,7 @@ mod tests {
         // A transcript is the user's data; destroying it is not something a
         // client gets to trigger.
         let a = agent();
+        let _ws_guard = ws_env_lock();
         let ws = crate::hooks_server::public_files::public_workspace();
         let v = a.dispatch(&json!(1), "session/new", &json!({"cwd": ws})).unwrap();
         let sid = v["sessionId"].as_str().unwrap().to_string();
