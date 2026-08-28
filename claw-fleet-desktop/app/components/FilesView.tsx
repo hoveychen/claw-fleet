@@ -25,6 +25,7 @@ import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./Con
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DirPickerDialog } from "./DirPickerDialog";
 import { isWebBuild } from "../hostEnv";
+import { canRevealPath } from "../canReveal";
 import { CloneRepoDialog } from "./CloneRepoDialog";
 import { isTempWorkspacePath, repoRootPath } from "./NewSessionForm";
 import {
@@ -181,8 +182,8 @@ export function FilesView() {
     const items: ContextMenuItem[] = [];
     // Opening a file manager needs the host shell. A remote workspace lives on
     // the probe, and in the browser build `reveal_path` is a no-op — a menu item
-    // that silently does nothing is worse than an absent one.
-    if (!isRemote && !isWebBuild()) {
+    // that silently does nothing is worse than an absent one. (canReveal.ts)
+    if (canRevealPath(!isRemote)) {
       const revealKey =
         document.documentElement.getAttribute("data-platform") === "windows"
           ? "paths.reveal_in_explorer"
@@ -862,7 +863,7 @@ export function ExternalFilePreview({
   const { connection } = useConnectionStore();
   const isRemote = connection?.type === "remote";
   // Same reason as the workspace menu above: no host shell to reveal into.
-  const canReveal = !isRemote && !isWebBuild();
+  const canReveal = canRevealPath(!isRemote);
 
   // FilePreview keys its read off `relativePath`; for an out-of-tree file the
   // absolute path IS the key, and the rest of the entry is only display data.

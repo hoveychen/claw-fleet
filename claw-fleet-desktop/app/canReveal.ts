@@ -22,8 +22,5 @@ import { isWebBuild } from "./hostEnv";
  * grown the `isWebBuild()` half and four had not.
  */
 export function canRevealPath(isLocal: boolean): boolean {
-  // RED-LIGHT STAGE: the four ungated surfaces' current judgement, verbatim.
-  return isLocal;
+  return isLocal && !isWebBuild();
 }
-// Referenced once the guard lands; keeps the import honest at the red-light stage.
-void isWebBuild;

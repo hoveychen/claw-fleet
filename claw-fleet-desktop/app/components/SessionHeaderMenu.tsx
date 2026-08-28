@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionHeaderMenu.module.css";
+import { canRevealPath } from "../canReveal";
 
 /**
  * The detail header's overflow menu: everything about a session that is a
@@ -95,7 +96,8 @@ export function SessionHeaderMenu({
   );
 
   // A remote workspace's files are not on this machine — nothing to reveal.
-  if (isLocal) {
+  // Nor can a browser tab open a file manager; see canReveal.ts.
+  if (canRevealPath(isLocal)) {
     items.push({
       id: "reveal",
       label: t(revealKey),
