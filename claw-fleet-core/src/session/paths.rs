@@ -21,6 +21,50 @@ pub fn real_home_dir() -> Option<PathBuf> {
             return Some(path);
         }
     }
+    user_home_dir()
+}
+
+/// Where the *agent's* own files live — its credentials (`~/.claude.json`),
+/// its config dir, and the transcripts it writes.
+///
+/// Defaults to [`real_home_dir`], so nothing changes unless you ask it to.
+/// `FLEET_AGENT_HOME` overrides it, and is the answer to a specific bind:
+/// `FLEET_HOME` means "put *Fleet's* state elsewhere", but it also relocates
+/// the agent's home, and `claude` then looks for `$FLEET_HOME/.claude.json`,
+/// finds nothing, and replies "Not logged in · Please run /login".
+///
+/// That is not hypothetical — it blocked the ACP mobile acceptance run, where
+/// isolating Fleet's state was mandatory (an un-isolated `fleet serve`
+/// competes for the relay-agent role) and cost the agent its login.
+///
+/// The one rule: **spawning and scanning must agree**. Pointing only the
+/// child's `HOME` at the real home would let it log in and then write its
+/// transcript somewhere the scanner never looks, so every agent-file lookup
+/// goes through here.
+pub fn agent_home_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("FLEET_AGENT_HOME") {
+        let path = PathBuf::from(dir);
+        if !path.as_os_str().is_empty() {
+            return Some(path);
+        }
+    }
+    real_home_dir()
+}
+
+/// The user's home, ignoring `FLEET_HOME`.
+///
+/// Same detection as [`real_home_dir`] minus the test override: `getpwuid`
+/// first, so it survives a polluted or overridden `$HOME`.
+///
+/// This exists because `FLEET_HOME` means "put *Fleet's own state* somewhere
+/// else" — the fifty-odd `~/.fleet/…` lookups — and an agent's credentials are
+/// not Fleet's state. Pinning a spawned agent's `HOME` to `FLEET_HOME` sends
+/// `claude` looking for `$FLEET_HOME/.claude.json`, finds nothing, and the
+/// agent answers "Not logged in · Please run /login". That surfaced during the
+/// ACP acceptance run, where isolating Fleet's state was mandatory (an
+/// un-isolated `fleet serve` competes for the relay-agent role) and cost the
+/// agent its login.
+pub fn user_home_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         use std::ffi::CStr;
@@ -48,7 +92,7 @@ pub fn get_claude_dir() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    real_home_dir().map(|h| h.join(".claude"))
+    agent_home_dir().map(|h| h.join(".claude"))
 }
 
 /// Path to Claude Code's `.claude.json` (MCP server config + project history).
@@ -69,7 +113,7 @@ pub fn get_claude_config_json() -> Option<PathBuf> {
             return Some(path.join(".claude.json"));
         }
     }
-    real_home_dir().map(|h| h.join(".claude.json"))
+    agent_home_dir().map(|h| h.join(".claude.json"))
 }
 
 /// Fleet's own data directory: `~/.fleet/`.
@@ -91,7 +135,7 @@ pub fn get_codex_dir() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    real_home_dir().map(|h| h.join(".codex"))
+    agent_home_dir().map(|h| h.join(".codex"))
 }
 
 /// dsh's config home: `$DSH_HOME` if set (dsh honours it), else `~/.dsh`.

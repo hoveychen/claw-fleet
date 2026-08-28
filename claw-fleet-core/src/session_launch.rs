@@ -315,6 +315,16 @@ fn strip_inherited_agent_env(cmd: &mut std::process::Command) {
     cmd.env_remove(crate::codex_launch::FLEET_CODEX_LAUNCH_TOKEN_ENV);
 }
 
+/// The `HOME` to pin on a spawned agent.
+///
+/// Deliberately [`agent_home_dir`](crate::session::agent_home_dir) rather than
+/// `real_home_dir()`: the agent's credentials are not Fleet's state, so
+/// `FLEET_HOME` alone must not relocate them. Defaults to the same value, so
+/// this changes nothing until `FLEET_AGENT_HOME` is set.
+fn spawn_home_dir() -> Option<std::path::PathBuf> {
+    crate::session::agent_home_dir()
+}
+
 pub fn spawn_claude_detached_with_envs(
     claude_path: &str,
     args: &[String],
@@ -413,7 +423,7 @@ pub fn spawn_claude_detached_with_envs(
     // invisible to the scanner, which reads the real ~/.claude/projects.
     // The sandbox is gone (entitlements.plist, 2026-07); the pin stays as
     // a cheap defence against any polluted/overridden $HOME.
-    if let Some(home) = crate::session::real_home_dir() {
+    if let Some(home) = spawn_home_dir() {
         cmd.env("HOME", home);
     }
     // A GUI app launched by launchd carries a minimal PATH
@@ -896,6 +906,67 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn agent_home_keeps_spawning_and_scanning_in_agreement() {
+        // FLEET_HOME means "put Fleet's state elsewhere". On its own it also
+        // relocates the agent's home, so `claude` looks for
+        // $FLEET_HOME/.claude.json, finds nothing, and answers "Not logged in"
+        // — which is exactly what blocked the ACP mobile acceptance run, where
+        // isolating Fleet's state was not optional.
+        //
+        // FLEET_AGENT_HOME separates the two. The invariant that matters is
+        // that it moves the spawn target and the scan target *together*:
+        // moving only one would let the agent log in and then write its
+        // transcript somewhere the scanner never looks.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir()
+            .join(format!("fleet_test_agent_home_{}", std::process::id()));
+        let fleet_state = tmp.join("fleet-state");
+        let agent_home = tmp.join("agent-home");
+        std::fs::create_dir_all(&fleet_state).unwrap();
+        std::fs::create_dir_all(&agent_home).unwrap();
+
+        let prev_fleet = std::env::var_os("FLEET_HOME");
+        let prev_agent = std::env::var_os("FLEET_AGENT_HOME");
+
+        // Default: unset FLEET_AGENT_HOME changes nothing — the agent's home
+        // still follows FLEET_HOME, exactly as before.
+        std::env::set_var("FLEET_HOME", &fleet_state);
+        std::env::remove_var("FLEET_AGENT_HOME");
+        let default_spawn = super::spawn_home_dir();
+        let default_claude = crate::session::get_claude_dir();
+        assert_eq!(default_spawn.as_deref(), Some(fleet_state.as_path()));
+        assert_eq!(default_claude, Some(fleet_state.join(".claude")));
+
+        // Set: both the spawn target and the scan target move together.
+        std::env::set_var("FLEET_AGENT_HOME", &agent_home);
+        let spawn = super::spawn_home_dir();
+        let claude_dir = crate::session::get_claude_dir();
+        let fleet_dir = crate::session::real_home_dir();
+
+        match prev_fleet {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        match prev_agent {
+            Some(v) => std::env::set_var("FLEET_AGENT_HOME", v),
+            None => std::env::remove_var("FLEET_AGENT_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert_eq!(spawn.as_deref(), Some(agent_home.as_path()), "spawn target moves");
+        assert_eq!(
+            claude_dir,
+            Some(agent_home.join(".claude")),
+            "scan target moves with it, or the transcript lands where nobody looks"
+        );
+        assert_eq!(
+            fleet_dir.as_deref(),
+            Some(fleet_state.as_path()),
+            "Fleet's own state stays isolated"
+        );
+    }
+
+    #[test]
     fn spawn_claude_detached_overrides_polluted_home() {
         // A spawned claude must NOT inherit a polluted $HOME (historically:
         // the App-Sandbox container path ~/Library/Containers/.../Data,
@@ -903,12 +974,12 @@ mod tests {
         // and write session JSONLs there, invisible to the scanner. The
         // child has to see real_home_dir() instead.
         //
-        // FLEET_HOME stands in for the real home here: it is
-        // real_home_dir()'s first-priority source on every platform. Without
-        // it the assertion would depend on how real_home_dir() resolves the
-        // fallback — getpwuid on macOS (immune to a polluted $HOME) vs
-        // dirs::home_dir() on Linux (which reads the polluted $HOME and made
-        // this test fail on CI).
+        // FLEET_AGENT_HOME stands in for the real home here. It is the
+        // override the agent-home lookup checks first; without it the assertion
+        // would depend on how the fallback resolves — getpwuid on macOS
+        // (immune to a polluted $HOME) vs dirs::home_dir() on Linux (which
+        // reads the polluted $HOME and made this test fail on CI). It used to
+        // use FLEET_HOME, which no longer reaches the spawned child's HOME.
         let _guard = crate::session::fleet_home_lock();
         let tmp = std::env::temp_dir().join(format!(
             "fleet_test_spawn_home_{}",
@@ -923,9 +994,9 @@ mod tests {
         let log = tmp.join("stderr.log");
 
         let prev_home = std::env::var_os("HOME");
-        let prev_fleet_home = std::env::var_os("FLEET_HOME");
+        let prev_fleet_home = std::env::var_os("FLEET_AGENT_HOME");
         std::env::set_var("HOME", &fake_home);
-        std::env::set_var("FLEET_HOME", &real_home);
+        std::env::set_var("FLEET_AGENT_HOME", &real_home);
         let (tx, rx) = std::sync::mpsc::channel();
         let spawn_result = super::spawn_claude_detached(
             "/bin/sh",
@@ -946,8 +1017,8 @@ mod tests {
             None => std::env::remove_var("HOME"),
         }
         match prev_fleet_home {
-            Some(v) => std::env::set_var("FLEET_HOME", v),
-            None => std::env::remove_var("FLEET_HOME"),
+            Some(v) => std::env::set_var("FLEET_AGENT_HOME", v),
+            None => std::env::remove_var("FLEET_AGENT_HOME"),
         }
         spawn_result.unwrap();
         let exited_ok = rx
