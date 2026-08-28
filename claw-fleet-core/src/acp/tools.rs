@@ -178,11 +178,13 @@ pub fn tool_call_update_from_result(block: &Value) -> Option<ToolCallUpdate> {
     let text = result_text(block.get("content"));
     let content = text.map(|t| vec![ToolCallContent::text(clip(&t))]);
 
+    // A result update rides on a tool call the client has already been told
+    // about, so it carries no title/kind of its own.
     Some(ToolCallUpdate {
         tool_call_id: id,
         status: Some(if failed { ToolCallStatus::Failed } else { ToolCallStatus::Completed }),
         content,
-        raw_output: None,
+        ..Default::default()
     })
 }
 
@@ -359,7 +361,7 @@ fn codex_tool_result(p: &Value) -> Option<ToolCallUpdate> {
         tool_call_id: id,
         status: Some(ToolCallStatus::Completed),
         content: text.map(|t| vec![ToolCallContent::text(clip(t))]),
-        raw_output: None,
+        ..Default::default()
     })
 }
 
