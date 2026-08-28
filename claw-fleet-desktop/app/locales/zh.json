@@ -1877,6 +1877,7 @@
     "notification_granted": "已开启",
     "notification_denied": "已关闭 — 通知将不会显示",
     "notification_open_settings": "打开通知设置",
+    "notification_web_unavailable": "系统通知由 Fleet 桌面端发出，弹在它所在的那台机器上。浏览器标签页没有自己的发送端，所以这里的开关改了也不会有任何效果。",
     "auto_update_check": "自动检查更新",
     "auto_update_check_desc": "每天自动检查一次新版本，有更新时显示通知",
     "group_handoff": "接力会话分组",
