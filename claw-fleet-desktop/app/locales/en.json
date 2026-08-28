@@ -2356,7 +2356,7 @@
     "all_workspaces": "All workspaces",
     "refresh": "Refresh",
     "empty_title": "No artifacts yet",
-    "empty_subtitle": "Agents put deliverables here with `fleet artifact add <path>` — PDFs, decks, spreadsheets, images, video.",
+    "empty_subtitle": "Agents put anything meant to be handed to a person here with `fleet artifact add <path>` — any format: PDFs, decks, spreadsheets, images, video, and outward-facing html / markdown.",
     "select_hint": "Select an artifact to preview",
     "filter_all": "All",
     "filter_starred": "Starred",
