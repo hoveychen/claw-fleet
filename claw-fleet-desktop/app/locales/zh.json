@@ -2382,8 +2382,10 @@
     "usage_hardlinked": "其中 {{size}} 是硬链接，与源文件共用磁盘块",
     "from_session": "来自会话",
     "no_preview_title": "这个格式没法在这里预览",
-    "no_preview_hint": "Office 文档要用系统应用打开，或者先导出。",
-    "preview_failed": "预览加载失败",
+    "no_preview_hint": "这个格式只能导出，或者用系统应用打开。",
+    "preview_failed": "这份文件没能解析：{{error}}",
+    "sheet_unnamed": "工作表 {{n}}",
+    "sheet_truncated": "只显示前 {{shown}} 行，共 {{total}} 行 — 导出后查看完整表格。",
     "kind": {
       "image": "图片",
       "video": "视频",

@@ -1,0 +1,138 @@
+/**
+ * The three Office renderers behind one narrow interface, so the full-size
+ * stage (`OfficePreview`) and the grid thumbnail (`ArtifactThumb`) call the
+ * same code instead of each keeping its own copy of "which library, which
+ * options, which quirks".
+ *
+ * Every function here does its own `await import()`, which is what keeps the
+ * ~1.6 MB of renderers out of the main bundle: a caller that only ever opens
+ * a .docx never pulls the pptx chunk. Importing this module is cheap — it is
+ * the libraries that are not.
+ */
+
+/** 16:9 — the modern deck default. pptx-preview wants explicit pixels. */
+export const SLIDE_RATIO = 9 / 16;
+
+export type CellValue = string | number | boolean | Date | null;
+export interface ParsedSheet {
+  sheet: string;
+  data: CellValue[][];
+}
+
+export async function fetchBlob(url: string): Promise<Blob> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.blob();
+}
+
+/**
+ * Render a .docx into `host` as real page boxes.
+ *
+ * `inWrapper` is what produces those pages; without it the document becomes one
+ * long unstyled flow, which is the thing a .docx viewer exists to avoid.
+ */
+export async function renderDocxInto(blob: Blob, host: HTMLElement): Promise<void> {
+  const { renderAsync } = await import("docx-preview");
+  await renderAsync(blob, host, undefined, {
+    inWrapper: true,
+    breakPages: true,
+    ignoreLastRenderedPageBreak: false,
+  });
+  fixSymbolBullets(host);
+}
+
+/**
+ * Render a deck into `host` at `width` px, showing its first slide.
+ *
+ * Always "slide" mode, never "list": in list mode the library lays every slide
+ * at the same offset, so a two-page deck paints both pages on top of each
+ * other (verified against a real pandoc-produced .pptx). It also paints its
+ * pagination before the first slide exists, so a freshly opened deck reads
+ * "0/2" until clicked — hence the explicit restate.
+ */
+export async function renderPptxInto(
+  blob: Blob,
+  host: HTMLElement,
+  width: number,
+): Promise<void> {
+  const { init } = await import("pptx-preview");
+  const previewer = init(host, {
+    width,
+    height: Math.round(width * SLIDE_RATIO),
+    mode: "slide",
+  });
+  await previewer.preview(await blob.arrayBuffer());
+  previewer.updatePagination();
+}
+
+/**
+ * Parse every sheet of an .xlsx to values.
+ *
+ * `read-excel-file/browser` rather than the package root: it ships one build
+ * per environment and has no root export at all. Deliberately not SheetJS —
+ * the copy on npm is frozen at 0.18.5 with two known CVEs and the maintained
+ * build lives outside the registry.
+ */
+export async function readSheets(blob: Blob): Promise<ParsedSheet[]> {
+  const readXlsxFile = (await import("read-excel-file/browser")).default;
+  return (await readXlsxFile(blob)) as ParsedSheet[];
+}
+
+/** Cells arrive as parsed values; a Date must not render as its ISO string. */
+export function formatCell(cell: CellValue): string {
+  if (cell === null || cell === undefined) return "";
+  if (cell instanceof Date) return cell.toLocaleDateString();
+  return String(cell);
+}
+
+/**
+ * Replace the private-use bullet code points Word documents carry.
+ *
+ * Word writes list markers as a character from a symbol font's private use
+ * area — a "•" is U+F0B7 in `Symbol`, and Wingdings does the same at other
+ * offsets — and docx-preview faithfully reproduces that as
+ * `content: "\9 "; font-family: Symbol`. On any machine without those
+ * fonts installed (every Mac, most Linux) the browser has nothing to draw and
+ * every bullet renders as a tofu box. Verified in the real web build against a
+ * pandoc-produced .docx: the CSS rule really is `p.docx-num-1001-0::before`
+ * with U+F0B7 inside it.
+ *
+ * So after rendering, walk the stylesheets the library injected and rewrite
+ * those code points to their ordinary Unicode equivalents. Unmapped private-use
+ * characters fall back to "•": a list marker is decoration, and the wrong
+ * bullet is strictly better than a box.
+ */
+export function fixSymbolBullets(host: HTMLElement): void {
+  for (const styleEl of host.querySelectorAll("style")) {
+    const sheet = styleEl.sheet;
+    if (!sheet) continue;
+    for (const rule of Array.from(sheet.cssRules)) {
+      const style = (rule as CSSStyleRule).style as CSSStyleDeclaration | undefined;
+      const content = style?.content;
+      if (!style || !content) continue;
+      // One pass, then compare — rather than testing for a private-use
+      // character and replacing it in a second scan.
+      const replaced = content.replace(PRIVATE_USE, BULLET);
+      if (replaced === content) continue;
+      style.content = replaced;
+      // The symbol font has to go with it: it is the font that isn't there, and
+      // leaving it would ask the browser to draw the *replacement* out of it.
+      style.fontFamily = "inherit";
+    }
+  }
+}
+
+/** The Unicode private use area, where every symbol-font glyph Word emits lands. */
+const PRIVATE_USE = /[\ue000-\uf8ff]/g;
+
+/**
+ * Every private-use marker becomes the same bullet, deliberately.
+ *
+ * A symbol font puts its glyph at `0xF000 + the byte`, so a faithful table
+ * would need one entry per marker Word can emit — a checkmark here, a diamond
+ * there — and only U+F0B7 ("\u2022" in `Symbol`) has actually been observed in
+ * a real document. The rest would be written from memory, and a
+ * plausible-but-wrong glyph is worse than an honest one: this is a list marker,
+ * and any marker beats a box.
+ */
+const BULLET = "\u2022";
