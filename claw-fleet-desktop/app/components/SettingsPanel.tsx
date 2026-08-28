@@ -2334,7 +2334,37 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </>
                 )}
 
-                {/* System notifications */}
+                {/* System notifications.
+                    Every part of this is desktop-only, and the browser build
+                    used to render all of it anyway:
+                      - the mode radios are pushed to the host with
+                        `set_notification_mode`, a no-op in a tab, and nothing
+                        on this side reads the stored value;
+                      - the permission row asks the Tauri notification plugin,
+                        whose browser stand-ins answer "not granted" then
+                        "denied", so it permanently read 「已关闭」 behind a
+                        button that could only reach another no-op
+                        (`open_notification_settings`).
+                    And there is no sender to enable in the first place: OS
+                    notifications come from Rust (`send_os_notification`), which
+                    fires on the machine the desktop app runs on — for a tab
+                    pointed at fleet-cloud that is a container, not the user's
+                    Mac. Wiring the browser's own `Notification` API would be a
+                    feature, not a gate; until it exists, say so. */}
+                {isWebBuild() ? (
+                  <>
+                    <div className={styles.section_title} style={{ marginTop: 18 }}>
+                      {t("settings.notification_mode")}
+                    </div>
+                    <span
+                      className={styles.row_label}
+                      style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}
+                    >
+                      {t("settings.notification_web_unavailable")}
+                    </span>
+                  </>
+                ) : (
+                <>
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.notification_mode")}</div>
                 {(["all", "user_action", "none"] as const).map((mode) => (
                   <label className={styles.radio_row} key={mode}>
@@ -2401,6 +2431,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     </span>
                   )}
                 </div>
+                </>
+                )}
               </div>
             )}
 
