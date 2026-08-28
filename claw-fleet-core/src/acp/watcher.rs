@@ -52,6 +52,16 @@ pub fn spawn(agent: Arc<AcpAgent>) {
             if agent.is_closed() {
                 return;
             }
+            // Say out loud that someone is watching the stores. `fleet guard`,
+            // `fleet elicitation` and the `fleet__ask` MCP tool all check this
+            // heartbeat before parking a card and refuse outright when it is
+            // missing — so without it, an ACP-only head (a cloud container, a
+            // phone over the websocket) never receives a single card: they are
+            // rejected at the asking end, before this loop could route them.
+            // `fleet serve` writes the same heartbeat for SSE and mobile-relay
+            // clients; an ACP connection is a third surface with equal claim.
+            crate::consumer_heartbeat::write_heartbeat();
+
             for card in pending_cards() {
                 if seen.contains(&card.id) {
                     continue;
@@ -313,6 +323,61 @@ fn create_elicitation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `fleet guard` / `fleet elicitation` / the `fleet__ask` MCP tool all
+    /// refuse to park a card unless a consumer is heartbeating — otherwise
+    /// they would block an agent on a question nobody will ever see.
+    ///
+    /// `fleet serve` writes that heartbeat only while an SSE client or the
+    /// mobile relay is attached. An ACP connection is neither, so on a head
+    /// whose only surface is ACP every card was rejected at the source:
+    /// `fleet__ask` came back "Fleet consumer not running (status:
+    /// file-unreadable)" and the agent fell back to plain text. Observed on a
+    /// real phone-driven turn on 2026-08-27.
+    ///
+    /// This watcher genuinely polls every store, so while it runs it *is* a
+    /// consumer and has to say so.
+    #[test]
+    fn a_running_watcher_announces_itself_as_a_decision_consumer() {
+        let _guard = crate::session::fleet_home_lock();
+        let home = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", home.path());
+
+        // Nothing has beaten yet.
+        assert!(
+            !crate::consumer_heartbeat::consumer_status(Duration::from_secs(30)).is_alive(),
+            "precondition: an isolated home starts with no consumer"
+        );
+
+        let agent = AcpAgent::new(
+            Arc::new(crate::acp::jsonrpc::Peer::new(Box::new(SilentSink))),
+            Arc::new(Vec::new()),
+        );
+        spawn(Arc::new(agent));
+
+        let mut alive = false;
+        for _ in 0..40 {
+            if crate::consumer_heartbeat::consumer_status(Duration::from_secs(30)).is_alive() {
+                alive = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(alive, "a live ACP connection must count as a decision-card consumer");
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+    }
+
+    struct SilentSink;
+    impl crate::acp::jsonrpc::Sink for SilentSink {
+        fn send(&self, _frame: &str) -> bool {
+            true
+        }
+    }
 
     #[test]
     fn cards_without_a_session_are_not_routed() {
