@@ -173,6 +173,7 @@ impl AcpAgent {
 
     /// Write one already-serialized frame to the peer.
     pub fn send_frame(&self, frame: &str) -> bool {
+        super::stdio::trace("<-", frame);
         self.peer.send_raw(frame)
     }
 
@@ -231,13 +232,7 @@ impl AcpAgent {
         // exactly the confinement hole the public surface exists to close. A
         // mismatch is reported rather than silently ignored, so a client cannot
         // believe it is running against its own checkout.
-        let workspace = crate::hooks_server::public_files::public_workspace();
-        if !req.cwd.is_empty() && req.cwd != workspace {
-            return Err(RpcError::invalid_params(format!(
-                "this agent is bound to {workspace}; it cannot run in {}",
-                req.cwd
-            )));
-        }
+        self.check_cwd(&req.cwd)?;
 
         let session_id = uuid::Uuid::new_v4().to_string();
         self.sessions.lock().unwrap().insert(
@@ -434,12 +429,12 @@ impl AcpAgent {
     /// Reject a client-supplied cwd that is not the bound workspace.
     fn check_cwd(&self, cwd: &str) -> Result<(), RpcError> {
         let workspace = crate::hooks_server::public_files::public_workspace();
-        if !cwd.is_empty() && cwd != workspace {
-            return Err(RpcError::invalid_params(format!(
-                "this agent is bound to {workspace}; it cannot run in {cwd}"
-            )));
+        if cwd.is_empty() || same_path(cwd, &workspace) {
+            return Ok(());
         }
-        Ok(())
+        Err(RpcError::invalid_params(format!(
+            "this agent is bound to {workspace}; it cannot run in {cwd}"
+        )))
     }
 
     /// Register an existing on-disk session under its own id so this connection
@@ -575,6 +570,7 @@ impl AcpAgent {
     fn notify_update(&self, session_id: &str, update: SessionUpdate) {
         let params = SessionNotification { session_id: session_id.to_string(), update };
         if let Ok(v) = serde_json::to_value(params) {
+            super::stdio::trace("<-", &format!("session/update {}", v));
             self.peer.notify("session/update", v);
         }
     }
@@ -634,6 +630,26 @@ impl AcpAgent {
             .and_then(|v| v.as_str().map(String::from))
             .unwrap_or_default();
         matches!(status.as_str(), "waitingInput" | "done" | "idle" | "completed" | "succeeded")
+    }
+}
+
+
+/// Whether two paths name the same directory.
+///
+/// Compares resolved paths, not strings: on macOS `/tmp` is a symlink to
+/// `/private/tmp`, so a client that passes the path it was given verbatim gets
+/// refused by a string comparison. Caught the first time a real ACP client
+/// (`acpx`) tried to open a session.
+///
+/// Falls back to a string comparison when a path cannot be resolved — a
+/// workspace that does not exist yet should not become un-openable.
+fn same_path(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
     }
 }
 
@@ -780,6 +796,24 @@ mod tests {
         // Deferred: no process exists yet, so no internal id.
         let sessions = a.sessions.lock().unwrap();
         assert!(sessions.get(sid).unwrap().internal_id.is_none());
+    }
+
+    #[test]
+    fn a_symlinked_cwd_is_the_same_workspace() {
+        // On macOS /tmp is a symlink to /private/tmp, so a client passing back
+        // the path it was handed was refused by a string comparison. A real
+        // ACP client hit this on its very first session/new.
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("ws");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        #[cfg(unix)]
+        assert!(same_path(link.to_str().unwrap(), real.to_str().unwrap()));
+        assert!(same_path("/a/b", "/a/b"), "identical strings need no filesystem");
+        assert!(!same_path("/does/not/exist/a", "/does/not/exist/b"));
     }
 
     #[test]
