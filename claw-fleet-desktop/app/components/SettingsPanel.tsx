@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useConnectionStore, useDetailStore, useUIStore } from "../store";
 import { useKeepAwake } from "../hooks/useKeepAwake";
+import { isWebBuild } from "../hostEnv";
 import {
   getItem,
   setItem,
@@ -2308,21 +2309,30 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   />
                 </div>
 
-                {/* Visual — floating decision panel */}
-                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.alerts_visual")}</div>
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.floating_decision_panel")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.floating_decision_panel_desc")}
-                    </span>
-                  </div>
-                  <TriStateToggle
-                    value={floatingDecisionPanelState}
-                    defaultOn={featureDefault("floating-decision-panel")}
-                    onChange={handleToggleFloatingDecisionPanel}
-                  />
-                </div>
+                {/* Visual — floating decision panel. The standalone window is a
+                    desktop-host feature: a tab cannot open one, and
+                    `show_decision_float` answers null in the browser build. The
+                    toggle used to still be here and still be persisted, so
+                    flipping it on in a tab silently sent every card to a window
+                    that does not exist (see decisionSurface.ts). */}
+                {!isWebBuild() && (
+                  <>
+                    <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.alerts_visual")}</div>
+                    <div className={styles.row}>
+                      <div>
+                        <span className={styles.row_label}>{t("settings.floating_decision_panel")}</span>
+                        <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                          {t("settings.floating_decision_panel_desc")}
+                        </span>
+                      </div>
+                      <TriStateToggle
+                        value={floatingDecisionPanelState}
+                        defaultOn={featureDefault("floating-decision-panel")}
+                        onChange={handleToggleFloatingDecisionPanel}
+                      />
+                    </div>
+                  </>
+                )}
 
                 {/* System notifications */}
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.notification_mode")}</div>
