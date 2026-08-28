@@ -1880,6 +1880,7 @@
     "notification_granted": "Enabled",
     "notification_denied": "Disabled — notifications will not be shown",
     "notification_open_settings": "Open Notification Settings",
+    "notification_web_unavailable": "System notifications are sent by the Fleet desktop app, on the machine it runs on. A browser tab has no sender of its own, so these settings would not change anything here.",
     "auto_update_check": "Automatic update check",
     "auto_update_check_desc": "Check for new versions once a day and show a notification when an update is available",
     "group_handoff": "Group handoff sessions",
