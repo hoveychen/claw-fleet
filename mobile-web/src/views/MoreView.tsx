@@ -134,7 +134,7 @@ export function MoreView({
             </span>
             <span className={styles.navText}>
               <span className={styles.navLabel}>{t("产出")}</span>
-              <span className={styles.navSub}>{t("agent 交付的 PDF、幻灯片、表格与图片")}</span>
+              <span className={styles.navSub}>{t("agent 要交给人的东西，任何格式")}</span>
             </span>
             <ChevronRight size={18} className={styles.navChevron} />
           </button>
