@@ -19,6 +19,8 @@ import { Wizard } from "./components/Wizard";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
+import { decisionSurfaces } from "./decisionSurface";
+import { isWebBuild } from "./hostEnv";
 import { type Connection, applyWindowTheme, navigateToSessionDetail, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
@@ -83,17 +85,26 @@ function App() {
     };
   }, []);
 
+  // Which surfaces can actually draw a card in this host. In the browser build
+  // that is inline-only — see decisionSurface.ts for why the three float
+  // triggers must not be honoured in a tab.
+  const surfaces = decisionSurfaces({
+    webBuild: isWebBuild(),
+    floatingPreferred: floatingDecisionPanel,
+    liteMode,
+    mainMinimized,
+  });
+  const { inline: inlineDecisionPanel, float: floatDecisionWindow } = surfaces;
+
   useEffect(() => {
-    const shouldShow =
-      (mainMinimized || floatingDecisionPanel || liteMode) &&
-      decisions.length > 0;
+    const shouldShow = floatDecisionWindow && decisions.length > 0;
     if (shouldShow && !prevShouldShow.current) {
       invoke("show_decision_float", { snapshot: decisions }).catch(() => {});
     } else if (!shouldShow && prevShouldShow.current) {
       invoke("hide_decision_float").catch(() => {});
     }
     prevShouldShow.current = shouldShow;
-  }, [mainMinimized, floatingDecisionPanel, liteMode, decisions]);
+  }, [floatDecisionWindow, decisions]);
 
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {
     const dismissed = !!getItem(ONBOARDING_DISMISSED_KEY);
@@ -304,6 +315,11 @@ function App() {
       <div className="app">
         <WindowsFrameOverlay />
         <LiteApp />
+        {/* Lite draws no in-window card on the desktop — decisions pop out as
+            the standalone float, so this is false there. A tab has no float to
+            pop, so the panel has to ride along here or the card has nowhere to
+            render at all. */}
+        {inlineDecisionPanel && <DecisionPanel />}
         <WaitingAlerts />
         <FindBar controller={find} />
       </div>
@@ -323,7 +339,7 @@ function App() {
         <SessionList />
         {isSessionView && <SessionDetail />}
       </div>
-      {!floatingDecisionPanel && <DecisionPanel />}
+      {inlineDecisionPanel && <DecisionPanel />}
       <WaitingAlerts />
       <UpdateNotice />
       <FindBar controller={find} />
