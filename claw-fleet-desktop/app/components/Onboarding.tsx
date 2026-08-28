@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
+import { isWebBuild } from "../hostEnv";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -468,9 +469,17 @@ function NotificationSettingsCard({
       </div>
       <p className={styles.card_description}>{t("onboarding.settings_notif.description")}</p>
 
-      {/* Notification mode */}
+      {/* Notification mode. Desktop-only, same as the Settings panel's copy of
+          this group: the mode is pushed to the host with a command that no-ops
+          in a tab, and the sender it configures (`send_os_notification`) only
+          exists in the desktop app. The alert-sound group below stays — chimes
+          are Web Audio and work here. */}
       <div className={styles.settings_group}>
         <span className={styles.settings_label}>{t("settings.notification_mode")}</span>
+        {isWebBuild() ? (
+          <span className={styles.hint}>{t("settings.notification_web_unavailable")}</span>
+        ) : (
+        <>
         {(["all", "user_action", "none"] as const).map((mode) => (
           <label className={styles.radio_item} key={mode}>
             <input
@@ -501,6 +510,8 @@ function NotificationSettingsCard({
             </span>
           </div>
         </label>
+        </>
+        )}
       </div>
 
       {/* Alert sound */}
