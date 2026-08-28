@@ -61,6 +61,7 @@ function HostPreview({ kind, blob }: { kind: "docx" | "pptx"; blob: Blob }) {
           breakPages: true,
           ignoreLastRenderedPageBreak: false,
         });
+        fixSymbolBullets(host);
       } else {
         const { init } = await import("pptx-preview");
         if (!alive) return;
@@ -165,4 +166,31 @@ function formatCell(cell: CellValue): string {
   if (cell === null || cell === undefined) return "";
   if (cell instanceof Date) return cell.toLocaleDateString();
   return String(cell);
+}
+
+/**
+ * Word 的列表符号是符号字体私有区里的一个码位（`Symbol` 里的「\u2022」是
+ * U+F0B7），docx-preview 会照搬成 `content: "\uF0B7\\9 "; font-family: Symbol`。
+ * 手机上没有这些字体，于是每个项目符号都渲染成豆腐块。渲染完把这些码位换成
+ * 普通字符即可。
+ *
+ * 与桌面端 claw-fleet-desktop/app/officeRender.ts 的同名函数是同一份逻辑 ——
+ * 两个包没有共享代码路径，改一处时另一处也要改。
+ */
+function fixSymbolBullets(host: HTMLElement): void {
+  const PRIVATE_USE = /[\ue000-\uf8ff]/g;
+  for (const styleEl of host.querySelectorAll("style")) {
+    const sheet = styleEl.sheet;
+    if (!sheet) continue;
+    for (const rule of Array.from(sheet.cssRules)) {
+      const style = (rule as CSSStyleRule).style as CSSStyleDeclaration | undefined;
+      const content = style?.content;
+      if (!style || !content) continue;
+      const replaced = content.replace(PRIVATE_USE, "\u2022");
+      if (replaced === content) continue;
+      style.content = replaced;
+      // 符号字体本身也要去掉：它正是「装不上」的那个字体。
+      style.fontFamily = "inherit";
+    }
+  }
 }

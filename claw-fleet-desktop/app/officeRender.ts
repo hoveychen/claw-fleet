@@ -38,6 +38,7 @@ export async function renderDocxInto(blob: Blob, host: HTMLElement): Promise<voi
     breakPages: true,
     ignoreLastRenderedPageBreak: false,
   });
+  fixSymbolBullets(host);
 }
 
 /**
@@ -83,3 +84,55 @@ export function formatCell(cell: CellValue): string {
   if (cell instanceof Date) return cell.toLocaleDateString();
   return String(cell);
 }
+
+/**
+ * Replace the private-use bullet code points Word documents carry.
+ *
+ * Word writes list markers as a character from a symbol font's private use
+ * area — a "•" is U+F0B7 in `Symbol`, and Wingdings does the same at other
+ * offsets — and docx-preview faithfully reproduces that as
+ * `content: "\9 "; font-family: Symbol`. On any machine without those
+ * fonts installed (every Mac, most Linux) the browser has nothing to draw and
+ * every bullet renders as a tofu box. Verified in the real web build against a
+ * pandoc-produced .docx: the CSS rule really is `p.docx-num-1001-0::before`
+ * with U+F0B7 inside it.
+ *
+ * So after rendering, walk the stylesheets the library injected and rewrite
+ * those code points to their ordinary Unicode equivalents. Unmapped private-use
+ * characters fall back to "•": a list marker is decoration, and the wrong
+ * bullet is strictly better than a box.
+ */
+export function fixSymbolBullets(host: HTMLElement): void {
+  for (const styleEl of host.querySelectorAll("style")) {
+    const sheet = styleEl.sheet;
+    if (!sheet) continue;
+    for (const rule of Array.from(sheet.cssRules)) {
+      const style = (rule as CSSStyleRule).style as CSSStyleDeclaration | undefined;
+      const content = style?.content;
+      if (!style || !content) continue;
+      // One pass, then compare — rather than testing for a private-use
+      // character and replacing it in a second scan.
+      const replaced = content.replace(PRIVATE_USE, BULLET);
+      if (replaced === content) continue;
+      style.content = replaced;
+      // The symbol font has to go with it: it is the font that isn't there, and
+      // leaving it would ask the browser to draw the *replacement* out of it.
+      style.fontFamily = "inherit";
+    }
+  }
+}
+
+/** The Unicode private use area, where every symbol-font glyph Word emits lands. */
+const PRIVATE_USE = /[\ue000-\uf8ff]/g;
+
+/**
+ * Every private-use marker becomes the same bullet, deliberately.
+ *
+ * A symbol font puts its glyph at `0xF000 + the byte`, so a faithful table
+ * would need one entry per marker Word can emit — a checkmark here, a diamond
+ * there — and only U+F0B7 ("\u2022" in `Symbol`) has actually been observed in
+ * a real document. The rest would be written from memory, and a
+ * plausible-but-wrong glyph is worse than an honest one: this is a list marker,
+ * and any marker beats a box.
+ */
+const BULLET = "\u2022";
