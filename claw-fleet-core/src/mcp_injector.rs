@@ -27,7 +27,7 @@
 //! `~/.fleet/mcp-config.json` (mirror of `permissions-config.json`).
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -178,34 +178,72 @@ pub fn build_fleet_entry(fleet_path: &str) -> serde_json::Value {
 }
 
 /// True when `mcpServers.fleet` is currently registered in `~/.claude.json`
-/// — i.e. a spawned `claude` child will see the `fleet` MCP server and its
-/// tools. Spawn sites use this to decide whether they can safely pass
-/// `--permission-prompt-tool mcp__fleet__fleet__permission_prompt`: naming a
-/// tool that doesn't resolve makes the CLI abort at startup, so the flag must
-/// only be added when the server is actually injected.
+/// **and its `command` can actually be launched** — i.e. a spawned `claude`
+/// child will see the `fleet` MCP server and its tools. Spawn sites use this
+/// to decide whether they can safely pass `--permission-prompt-tool
+/// mcp__fleet__fleet__permission_prompt`: naming a tool that doesn't resolve
+/// makes the CLI abort at startup, so the flag must only be added when the
+/// server is actually usable.
 pub fn fleet_server_registered() -> bool {
-    let Some(path) = claude_json_path() else {
-        return false;
-    };
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return false;
-    };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return false;
-    };
-    extract_fleet_entry(&v).0.is_some()
+    registered_fleet_entry().is_some()
 }
 
 /// The `mcpServers.fleet` entry as currently registered in `~/.claude.json`,
-/// or `None` when the injection isn't live. Chat sessions exclude the user
-/// setting source (which is where the CLI would otherwise find this server),
-/// so they need to hand the same entry back through `--mcp-config` — see
-/// `crate::chat_workspace::chat_session_args`.
+/// or `None` when the injection isn't live *or* its `command` no longer
+/// resolves. Chat sessions exclude the user setting source (which is where the
+/// CLI would otherwise find this server), so they need to hand the same entry
+/// back through `--mcp-config` — see `crate::chat_workspace::chat_session_args`.
 pub fn registered_fleet_entry() -> Option<serde_json::Value> {
     let path = claude_json_path()?;
     let content = std::fs::read_to_string(&path).ok()?;
     let v = serde_json::from_str::<serde_json::Value>(&content).ok()?;
-    extract_fleet_entry(&v).0
+    let entry = extract_fleet_entry(&v).0?;
+    entry_command_is_live(&entry).then_some(entry)
+}
+
+/// Whether `entry`'s `command` names something a spawned `claude` can still
+/// execute.
+///
+/// The presence of the key is not enough. A dev `fleet-cli` running out of a
+/// git worktree publishes its own absolute path here, and Rule 3 deletes that
+/// worktree the moment its plan merges — leaving a registration that points at
+/// nothing. Every consumer of this entry (the `--permission-prompt-tool` flag,
+/// the chat workspace's `--mcp-config`) then hands `claude` a server it cannot
+/// start, which is a hard error per tool call rather than a missing feature.
+///
+/// A bare name with no path separator (the watchdog's `"fleet"` fallback) is
+/// resolved from `PATH` at launch, which we can't check cheaply and which isn't
+/// the failure mode this guards — accept it.
+fn entry_command_is_live(entry: &serde_json::Value) -> bool {
+    let Some(cmd) = entry.get("command").and_then(|c| c.as_str()) else {
+        return false;
+    };
+    if cmd.is_empty() {
+        return false;
+    }
+    let path = Path::new(cmd);
+    let bare_name = path.parent().map(|p| p.as_os_str().is_empty()).unwrap_or(true);
+    bare_name || is_executable_file(path)
+}
+
+/// `path` exists (following symlinks) and is a file with an execute bit.
+/// Windows has no execute bit, so existence as a file is the whole test there.
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(meta) = fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn extract_fleet_entry(v: &serde_json::Value) -> (Option<serde_json::Value>, bool, bool) {
