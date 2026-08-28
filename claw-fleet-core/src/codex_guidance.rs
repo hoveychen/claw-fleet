@@ -510,17 +510,42 @@ fleet wiki cat <slug> --file assets/app.js    # 目录型文档里的其他文�
 - `fleet wiki search <关键词>`——搜标题/slug/正文并给片段(默认限当前 workspace)。\n\
 - `fleet wiki show <slug>`——看版本历史和 entry 文件名。\n\
 \n\
-## 什么时候不该用 wiki\n\
+## 交付物走产出库,不是 wiki\n\
+\n\
+两个库的分野是**这份东西给谁**,不是它的扩展名。沉淀给自己和后续 session \
+(调研报告、架构说明)→ wiki;**要递到人手上**(交给老板/客户/同事,或要\
+发出去的东西)→ **产出库**:\n\
+\n\
+```\nfleet artifact add <path> [--title \"<标题>\"] [--note \"<一句话说明>\"]\n```\n\
+\n\
+> **若工具列表里有 `fleet__artifact` MCP 工具(codex 下显示为 \
+`mcp__fleet__fleet__artifact`),优先用它(`action=\"add\"/\"list\"/\"get\"/\
+\"delete\"`)而不是 CLI——理由与 `fleet__wiki` 相同:rca 远端会话里 shell 跑 \
+`fleet` 会失败。**\n\
+\n\
+- PDF 报告、幻灯片(pptx)、表格(xlsx)、Word 文档、渲染好的视频或图片、\
+导出的数据集,**也包括**一份对外的 html 提案、一份要交出去的 markdown 规格书。\
+产出库**不挑格式**,`add` 没有任何白名单。\n\
+- 格式只在一个方向上收窄选择:wiki 的 kind 只有 `html`/`htmlDir`/`markdown`,\
+一份 `.xlsx` publish 进去点开是白板——所以二进制交付物只能走产出库,那是硬\
+限制排除了一个选项,不是判据本身。\n\
+- **产出一旦生成就立刻入库,别等到最后。**交付物通常写在 \
+`.worktrees/<task-id>` 里,那个目录会在计划合并时被删掉,到那时文件就没了。\n\
+- `--title` / `--note` 认真写——它们就是用户在卡片上读到的全部内容。\n\
+- 产出库一次一个文件,不接受目录(整个文件夹先打包成 zip);反过来,带 \
+`assets/` 的多文件目录只有 wiki 收得下。\n\
+\n\
+## 什么时候两个都不用\n\
 \n\
 - **一次性看一眼**(过目一张图/一段 diff)→ 用 `fleet__ask` 的 `html` 或 \
-`fleet__render_a2ui` 渲染成决策卡,不要 publish。\n\
+`fleet__render_a2ui` 渲染成决策卡,既不 publish 也不入库。\n\
 - **要把链接发给别人**→ 若你的运行环境有外部分享工具(如托管在外部服务上的\
 制品)才用;私有项目产物别外传。\n\
-- **要沉淀、之后还要读回来**→ wiki。只有 wiki 的文档能被后续 session `fleet wiki cat` \
-读回、`[[slug]]` 交叉引用、按 workspace 筛选与全文搜索,也只有 wiki 收得下带 \
-`assets/` 的多文件目录。\n\
 \n\
-判据不是「哪个能渲染」——而是「这份产物之后还会不会被读第二次」。会 → wiki。\n"
+拿不准时问一句:**这东西是留给我和后面接手的 session 的,还是要递到人手上的?**\
+留 → wiki(只有 wiki 的文档能被后续 session `fleet wiki cat` 读回、`[[slug]]` \
+交叉引用、按 workspace 筛选与全文搜索),递 → 产出库。「会不会被读第二次」\
+**不是**判据——交给客户的 PDF 会被读十次,照样不属于知识库。\n"
             .to_string();
     }
     "# Fleet Wiki knowledge base for Codex (managed by Claw Fleet — do not edit this block)\n\
@@ -569,20 +594,51 @@ workspace.\n\
 - `fleet wiki search <term>` finds docs by title / slug / body; \
 `fleet wiki show <slug>` shows version history and the entry filename.\n\
 \n\
-## When NOT to use the wiki\n\
+## Deliverables go to the artifact store, not the wiki\n\
+\n\
+The two stores split on **who the thing is for**, not on its extension. \
+Knowledge banked for yourself and later sessions → the wiki. Something you are \
+**handing to a person** (the user, a client, a colleague — anything meant to \
+leave your hands) → the **artifact store**:\n\
+\n\
+```\nfleet artifact add <path> [--title \"<title>\"] [--note \"<one line>\"]\n```\n\
+\n\
+> **If your tool list includes the `fleet__artifact` MCP tool (under codex it \
+appears as `mcp__fleet__fleet__artifact`), prefer it \
+(`action=\"add\"/\"list\"/\"get\"/\"delete\"`) over the CLI — same reason as \
+`fleet__wiki`: in an rca remote session a shell `fleet` fails.**\n\
+\n\
+- A PDF report, a slide deck (pptx), a spreadsheet (xlsx), a Word document, a \
+rendered video or image, an exported dataset — **and equally** an \
+outward-facing html report or a markdown spec you are delivering. The artifact \
+store has **no format filter**; `add` takes any single file.\n\
+- Format narrows the choice in one direction only: the wiki's kinds are \
+`html`/`htmlDir`/`markdown` and an `.xlsx` published there opens blank — so a \
+binary deliverable can only go to the artifact store. That is a hard limit \
+removing an option, not the criterion.\n\
+- **Store it the moment you produce it, not at the end.** Deliverables are \
+usually written inside `.worktrees/<task-id>`, and that directory is deleted \
+when the plan merges — after which the file is gone.\n\
+- `--title` / `--note` are worth writing properly: they are the entire content \
+the user reads on the card.\n\
+- One artifact per call, not a directory (zip a folder first); conversely a \
+multi-file directory with an `assets/` folder is something only the wiki takes.\n\
+\n\
+## When neither store is the answer\n\
 \n\
 - **A one-time glance** (show a chart or a diff, then discard) → render it \
-into a decision card with `fleet__ask`'s `html` or `fleet__render_a2ui`. Don't \
-publish it.\n\
+into a decision card with `fleet__ask`'s `html` or `fleet__render_a2ui`. \
+Neither publish nor store it.\n\
 - **A link to send someone else** → use an external share tool only if your \
 harness has one; keep private project output off external services.\n\
-- **Something read again later** → the wiki. Only wiki docs can be read back \
-by a later session with `fleet wiki cat`, cross-linked with `[[slug]]`, \
-filtered by workspace, and full-text searched — and only the wiki accepts a \
-multi-file directory with an `assets/` folder.\n\
 \n\
-The test is not \"which one can render this\" — it's \"will this output be read \
-a second time?\" If yes → wiki.\n"
+When unsure, ask one question: **is this for me and whoever picks the work up \
+next, or is it going into someone's hands?** Keeping it → the wiki (only wiki \
+docs can be read back by a later session with `fleet wiki cat`, cross-linked \
+with `[[slug]]`, filtered by workspace, and full-text searched). Handing it \
+over → the artifact store. \"Will it be read a second time?\" is **not** the \
+test — a PDF delivered to a client gets read ten times and still isn't \
+knowledge-base material.\n"
         .to_string()
 }
 
@@ -1062,6 +1118,31 @@ mod tests {
         assert!(model.contains("gpt-5.6-sol") && model.contains("claude-opus-5"),
             "model block must cover both families");
         assert!(model.contains("inherit"), "model block must teach the inherit default");
+    }
+
+    /// A codex session used to be told only about the wiki, so an agent that
+    /// produced a deck had nowhere to put it and the 产出 page stayed empty
+    /// for every non-Claude agent. The block must name the store, and it must
+    /// route by audience rather than by extension — the artifact store takes
+    /// any format, so an html report or a markdown spec belongs there whenever
+    /// it is a deliverable.
+    #[test]
+    fn wiki_block_also_routes_deliverables_to_the_artifact_store() {
+        for (locale, no_filter) in [("zh", "不挑格式"), ("en", "no format filter")] {
+            let wiki = render_codex_wiki_block(locale);
+            assert!(
+                wiki.contains("fleet artifact add"),
+                "{locale}: codex must learn the artifact CLI"
+            );
+            assert!(
+                wiki.contains("fleet__artifact"),
+                "{locale}: codex must learn the artifact MCP tool"
+            );
+            assert!(
+                wiki.contains(no_filter),
+                "{locale}: must say the artifact store accepts any format"
+            );
+        }
     }
 
     #[test]

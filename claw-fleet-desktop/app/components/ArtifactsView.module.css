@@ -245,12 +245,29 @@
 }
 
 /* A PDF has no intrinsic size to shrink-wrap; give the frame the whole stage. */
-.pdf_frame {
+/* Shared by the PDF viewer and the html preview. The canvas must stay a fixed
+   light value (not var(--color-bg-card), which goes dark in dark mode) so a
+   document that assumes a white page stays readable — same reasoning as the
+   wiki's html frame. */
+.doc_frame {
   width: 100%;
   height: 100%;
   border: none;
   border-radius: var(--radius-md);
   background: var(--canvas-fixed-light);
+}
+
+/* Markdown deliverables are stored as `text`-kind artifacts, so the stage
+   renders them properly rather than dumping their source. */
+.markdown_body {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text);
+  word-break: break-word;
 }
 
 .text_pre {

@@ -19,12 +19,23 @@ import {
   Presentation,
   TriangleAlert,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
+import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import type { FleetTransport } from "../transport";
 import type { Artifact } from "../types";
-import { fetchArtifact, formatBytes, isFetchable, listArtifacts, previewKind } from "../artifacts";
+import {
+  fetchArtifact,
+  formatBytes,
+  isFetchable,
+  isTextPreview,
+  listArtifacts,
+  previewKind,
+} from "../artifacts";
 import styles from "./ArtifactsView.module.css";
+import mdStyles from "./markdownBody.module.css";
 
 interface Props {
   client: FleetTransport | null;
@@ -151,7 +162,7 @@ function ArtifactDetail({
     fetchArtifact(client, artifact.id)
       .then(({ mime, bytes }) => {
         if (!alive) return;
-        if (kind === "text") {
+        if (isTextPreview(kind)) {
           setText(new TextDecoder().decode(bytes));
           return;
         }
@@ -221,7 +232,29 @@ function ArtifactDetail({
         ) : kind === "image" && blobUrl ? (
           <img src={blobUrl} alt={artifact.title} />
         ) : kind === "pdf" && blobUrl ? (
-          <iframe className={styles.pdfFrame} src={blobUrl} title={artifact.title} />
+          <iframe className={styles.docFrame} src={blobUrl} title={artifact.title} />
+        ) : kind === "markdown" && text !== null ? (
+          <div className={`${styles.markdownWrap} ${mdStyles.markdown}`}>
+            <ReactMarkdown
+              remarkPlugins={mdRemarkPlugins}
+              rehypePlugins={mdRehypePlugins}
+              // Shared so a ```mermaid fence renders as a diagram here too —
+              // see mermaidComponents for why every surface spreads this one.
+              components={mermaidMarkdownComponents}
+            >
+              {text}
+            </ReactMarkdown>
+          </div>
+        ) : kind === "html" && text !== null ? (
+          // Same policy as the wiki reader: an opaque-origin sandbox, so an
+          // agent-produced page can run its own JS without reaching the PWA's
+          // origin (where the pairing secret lives).
+          <iframe
+            className={styles.docFrame}
+            title={artifact.title}
+            sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+            srcDoc={text}
+          />
         ) : kind === "text" && text !== null ? (
           <pre className={styles.textPre}>{text}</pre>
         ) : kind !== "none" ? (

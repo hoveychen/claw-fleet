@@ -149,12 +149,21 @@
   border-radius: 8px;
 }
 
-.pdfFrame {
+/* PDF 和 html 预览共用同一个框：都是把一份完整文档塞进 iframe。 */
+.docFrame {
   width: 100%;
   height: 100%;
   border: none;
   border-radius: 8px;
   background: #fff;
+}
+
+/* markdown 交付物：排版复用 markdownBody.module.css，这里只负责让它在
+   居中对齐的 .stage 里靠上撑满——否则 align-items: center 会把长文顶部
+   推出滚动区看不到。 */
+.markdownWrap {
+  align-self: stretch;
+  width: 100%;
 }
 
 .textPre {
