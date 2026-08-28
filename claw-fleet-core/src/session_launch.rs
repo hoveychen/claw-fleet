@@ -904,6 +904,68 @@ mod tests {
         assert!(err.contains("invalid session_id"), "unexpected error: {err}");
     }
 
+    /// Regression (2026-08-27, the reported symptom): `~/.claude.json` carried
+    /// a `fleet` entry whose command pointed into a merged-and-deleted
+    /// worktree. This function only asked "is the key there?", so it kept
+    /// emitting `--permission-prompt-tool mcp__fleet__fleet__permission_prompt`
+    /// — and every tool call needing a permission decision died with
+    /// `MCP tool ... not found. Available MCP tools: none` instead of just
+    /// going without the bridge.
+    #[test]
+    fn permission_prompt_flag_is_dropped_when_the_registered_binary_is_gone() {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet_test_pp_flag_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let write_command = |command: &str| {
+            std::fs::write(
+                tmp.join(".claude.json"),
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "mcpServers": { "fleet": { "command": command, "args": ["mcp"] } }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+
+        write_command("/nonexistent/.worktrees/gone/target/debug/fleet-cli");
+        let dead = super::permission_prompt_tool_args();
+
+        let live = std::env::current_exe().unwrap().to_string_lossy().to_string();
+        write_command(&live);
+        let alive = super::permission_prompt_tool_args();
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert!(
+            dead.is_empty(),
+            "a dead fleet binary must not be named by --permission-prompt-tool, got {dead:?}",
+        );
+        assert_eq!(
+            alive,
+            vec![
+                "--permission-prompt-tool".to_string(),
+                super::PERMISSION_PROMPT_TOOL.to_string(),
+            ],
+            "a live registration must still get the bridge",
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn agent_home_keeps_spawning_and_scanning_in_agreement() {
