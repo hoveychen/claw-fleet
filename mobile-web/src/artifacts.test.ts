@@ -46,9 +46,50 @@ describe("previewKind", () => {
     expect(previewKind(make({ kind: "image", sizeBytes: 5000 }))).toBe("image");
     expect(previewKind(make({ kind: "pdf", sizeBytes: 5000 }))).toBe("pdf");
     expect(previewKind(make({ kind: "text", sizeBytes: 5000 }))).toBe("text");
-    // Office and archives have no viewer on either host.
-    expect(previewKind(make({ kind: "sheet", sizeBytes: 5000 }))).toBe("none");
+    // Archives never get a viewer.
     expect(previewKind(make({ kind: "archive", sizeBytes: 5000 }))).toBe("none");
+  });
+
+  /**
+   * The three OOXML formats render through the same JS libraries the desktop
+   * uses. The match is on mime, not the store's coarse `kind`, because that
+   * bucket is wider than what the renderers read: a legacy .doc is a binary
+   * CFB container and an .odt is a differently-shaped zip, and handing either
+   * to docx-preview throws rather than degrading.
+   */
+  it("previews OOXML but not the legacy or ODF formats sharing its kind", () => {
+    const office = (kind: string, mime: string) =>
+      previewKind(make({ kind, mime, sizeBytes: 5000 }));
+    expect(
+      office("doc", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    ).toBe("docx");
+    expect(
+      office("sheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    ).toBe("xlsx");
+    expect(
+      office(
+        "slides",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      ),
+    ).toBe("pptx");
+
+    expect(office("doc", "application/msword")).toBe("none");
+    expect(office("sheet", "application/vnd.ms-excel")).toBe("none");
+    expect(office("slides", "application/vnd.ms-powerpoint")).toBe("none");
+    expect(office("doc", "application/vnd.oasis.opendocument.text")).toBe("none");
+  });
+
+  /** Size still beats format: an OOXML file over the relay ceiling is unreachable. */
+  it("refuses an OOXML file too big for one relay frame", () => {
+    expect(
+      previewKind(
+        make({
+          kind: "slides",
+          mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          sizeBytes: MAX_RELAY_BYTES + 1,
+        }),
+      ),
+    ).toBe("none");
   });
 
   /**
