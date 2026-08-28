@@ -20,7 +20,7 @@ use serde_json::{json, Map, Value};
 use super::types::{
     CreateElicitationRequest, ElicitationAction, ElicitationSchema, PermissionOption,
     PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest, ToolCallStatus,
-    ToolCallUpdate,
+    ToolCallUpdate, ToolKind,
 };
 
 /// The option ids Fleet answers on. Stable strings, not indexes, so a client
@@ -78,6 +78,10 @@ pub fn guard_to_permission(
         session_id: session_id.to_string(),
         tool_call: ToolCallUpdate {
             tool_call_id: req.id.clone(),
+            // Without these the dialog has no label: a client falls back to a
+            // placeholder and the user approves an unnamed command.
+            title: Some(guard_title(req)),
+            kind: Some(ToolKind::Execute),
             status: Some(ToolCallStatus::Pending),
             content: None,
             raw_output: None,
@@ -113,6 +117,11 @@ pub fn permission_prompt_to_permission(
             // tool call the client is already showing, rather than on a
             // synthetic one it has never seen.
             tool_call_id: req.tool_use_id.clone().unwrap_or_else(|| req.id.clone()),
+            // Same labels the tool call itself carries, so the dialog and the
+            // row it belongs to read the same. `title_for` falls back to the
+            // bare tool name, which is still a name.
+            title: Some(super::tools::title_for(&req.tool_name, &req.tool_input)),
+            kind: Some(super::tools::kind_for_tool(&req.tool_name)),
             status: Some(ToolCallStatus::Pending),
             content: None,
             raw_output: None,
@@ -475,6 +484,61 @@ mod tests {
         assert!(r.options.iter().all(|o| o.kind != PermissionOptionKind::AllowAlways));
         assert_eq!(r.options[0].option_id, OPT_ALLOW);
         assert_eq!(r.options[1].option_id, OPT_REJECT);
+    }
+
+    /// A permission dialog has to name what it is approving.
+    ///
+    /// `ToolCallUpdate` requires only `toolCallId`, and this code read that as
+    /// "there is nowhere to put a title" — but the v1 schema gives it optional
+    /// `title` and `kind` alongside `status`/`content`. Sending neither leaves
+    /// a real client with nothing to label the dialog with: acp-ui rendered a
+    /// bare "Other" above Allow/Reject, so the user was asked to approve an
+    /// unnamed command. Observed on an Android client on 2026-08-27 for a
+    /// `chmod 777` the guard had flagged.
+    #[test]
+    fn a_permission_request_names_what_it_is_asking_to_approve() {
+        let r = guard_to_permission("sess", &guard_req());
+        assert_eq!(
+            r.tool_call.title.as_deref(),
+            Some(guard_title(&guard_req()).as_str()),
+            "the guard dialog must carry the command it is gating"
+        );
+        assert_eq!(
+            r.tool_call.kind,
+            Some(ToolKind::Execute),
+            "a guard card always gates a shell command"
+        );
+
+        let mut req = crate::permission_prompt_ipc::PermissionPromptRequest {
+            id: "p1".into(),
+            session_id: "s1".into(),
+            workspace_name: "w".into(),
+            ai_title: None,
+            timestamp: "t".into(),
+            tool_name: "Write".into(),
+            tool_input: json!({"file_path": "/w/a.rs"}),
+            tool_use_id: Some("toolu_XYZ".into()),
+        };
+        let p = permission_prompt_to_permission("s", &req);
+        let title = p.tool_call.title.unwrap_or_default();
+        assert!(
+            title.contains("Write") && title.contains("/w/a.rs"),
+            "a tool permission names the tool and its target, got {title:?}"
+        );
+        assert_eq!(
+            p.tool_call.kind,
+            Some(ToolKind::Edit),
+            "Write edits a file, and the client draws its icon from kind"
+        );
+
+        // A tool Fleet has no mapping for still gets a name, not a blank.
+        req.tool_name = "SomeFutureTool".into();
+        req.tool_input = json!({});
+        let p = permission_prompt_to_permission("s", &req);
+        assert!(
+            p.tool_call.title.unwrap_or_default().contains("SomeFutureTool"),
+            "an unmapped tool is still named rather than left to render as \"Other\""
+        );
     }
 
     #[test]

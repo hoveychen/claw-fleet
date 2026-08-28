@@ -167,11 +167,9 @@ fn ask(agent: &AcpAgent, acp_session: &str, card: Card) {
 
 fn ask_guard(agent: &AcpAgent, acp_session: &str, id: &str) {
     let Some(req) = crate::guard::read_request(id) else { return };
-    let mut ask = decisions::guard_to_permission(acp_session, &req);
-    // The title has nowhere to live on ToolCallUpdate's required fields, so it
-    // rides in the content the client renders above the choices.
-    ask.tool_call.content =
-        Some(vec![super::types::ToolCallContent::text(decisions::guard_title(&req))]);
+    // The command and its risk tags ride in `tool_call.title`, which is what a
+    // client labels the dialog with.
+    let ask = decisions::guard_to_permission(acp_session, &req);
 
     let Some(outcome) = request_permission(agent, ask) else { return };
     // Allow or Block; see `decisions::guard_to_permission` for why no
