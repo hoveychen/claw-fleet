@@ -227,6 +227,12 @@ fn clip(s: &str) -> String {
 pub fn project_updates(messages: &[Value], include_user: bool) -> Vec<super::types::SessionUpdate> {
     use super::types::SessionUpdate as U;
     let mut out = Vec::new();
+    // The diff each edit announced, kept so its completion can re-send it.
+    // An update's `content` *replaces* the collection (schema: "Replace the
+    // content collection"), so letting the bland success text through would
+    // erase the diff at the moment the edit lands.
+    let mut diffs: std::collections::HashMap<String, ToolCallContent> =
+        std::collections::HashMap::new();
 
     for msg in messages {
         match msg.get("type").and_then(|t| t.as_str()) {
@@ -239,6 +245,13 @@ pub fn project_updates(messages: &[Value], include_user: bool) -> Vec<super::typ
                         Some("thinking") => push_text(&mut out, b.get("thinking"), U::thought),
                         Some("tool_use") => {
                             if let Some(call) = tool_call_from_use(b) {
+                                if let Some(d) = call
+                                    .content
+                                    .iter()
+                                    .find(|c| matches!(c, ToolCallContent::Diff(_)))
+                                {
+                                    diffs.insert(call.tool_call_id.clone(), d.clone());
+                                }
                                 out.push(U::ToolCall(call));
                             }
                         }
@@ -250,7 +263,16 @@ pub fn project_updates(messages: &[Value], include_user: bool) -> Vec<super::typ
                 for b in blocks(msg.get("message")) {
                     match b.get("type").and_then(|t| t.as_str()) {
                         Some("tool_result") => {
-                            if let Some(up) = tool_call_update_from_result(b) {
+                            if let Some(mut up) = tool_call_update_from_result(b) {
+                                // A succeeded edit: the diff says everything
+                                // "the file has been updated successfully"
+                                // says, and says it better. A failed one has
+                                // no diff worth showing, so its error stands.
+                                if up.status != Some(ToolCallStatus::Failed) {
+                                    if let Some(d) = diffs.get(&up.tool_call_id) {
+                                        up.content = Some(vec![d.clone()]);
+                                    }
+                                }
                                 out.push(U::ToolCallUpdate(up));
                             }
                         }
@@ -478,6 +500,78 @@ mod tests {
         assert!(diff_for("Read", &json!({"file_path": "/w/a.rs"})).is_none());
         // An Edit missing its replacement cannot be rendered as a diff.
         assert!(diff_for("Edit", &json!({"file_path": "/w/a.rs"})).is_none());
+    }
+
+    /// A finished edit must still be a diff.
+    ///
+    /// The schema says a `tool_call_update`'s content field "Replace[s] the
+    /// content collection" — so sending the tool_result text as content wipes
+    /// out the diff the `tool_call` carried, the instant the edit succeeds.
+    /// The whole point of an editor client is that it renders that diff, and
+    /// Zed showed "The file … has been updated successfully." where the diff
+    /// should have been (observed 2026-08-27).
+    ///
+    /// Claude's success text for an edit says nothing a diff does not say
+    /// better, so the diff wins. A *failed* edit is the opposite case: there
+    /// is no diff worth showing and the error is the only useful content.
+    #[test]
+    fn a_completed_edit_keeps_its_diff_instead_of_the_result_text() {
+        let messages = vec![
+            json!({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "t1", "name": "Edit", "input": {
+                    "file_path": "/w/a.rs", "old_string": "one", "new_string": "two"
+                }}
+            ]}}),
+            json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1",
+                 "content": "The file /w/a.rs has been updated successfully."}
+            ]}}),
+        ];
+
+        let ups = project_updates(&messages, false);
+        let update = ups
+            .iter()
+            .find_map(|u| match u {
+                super::super::types::SessionUpdate::ToolCallUpdate(t) if t.tool_call_id == "t1" => {
+                    Some(t)
+                }
+                _ => None,
+            })
+            .expect("the edit reports a completion");
+
+        assert_eq!(update.status, Some(ToolCallStatus::Completed));
+        let content = update.content.as_ref().expect(
+            "an update that replaces content must still carry the diff, or the client loses it",
+        );
+        assert!(
+            content.iter().any(|c| matches!(c, ToolCallContent::Diff(_))),
+            "the completed edit still renders as a diff, got {content:?}"
+        );
+
+        // A failed edit keeps the error instead — there is nothing to show.
+        let failed = vec![
+            messages[0].clone(),
+            json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "is_error": true,
+                 "content": "String to replace not found in file."}
+            ]}}),
+        ];
+        let ups = project_updates(&failed, false);
+        let update = ups
+            .iter()
+            .find_map(|u| match u {
+                super::super::types::SessionUpdate::ToolCallUpdate(t) if t.tool_call_id == "t1" => {
+                    Some(t)
+                }
+                _ => None,
+            })
+            .expect("the failed edit reports too");
+        assert_eq!(update.status, Some(ToolCallStatus::Failed));
+        let text = format!("{:?}", update.content);
+        assert!(
+            text.contains("not found"),
+            "a failed edit surfaces why it failed, got {text}"
+        );
     }
 
     #[test]
