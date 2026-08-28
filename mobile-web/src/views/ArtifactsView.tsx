@@ -23,6 +23,7 @@ import ReactMarkdown from "react-markdown";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import type { FleetTransport } from "../transport";
 import type { Artifact } from "../types";
 import {
@@ -234,7 +235,13 @@ function ArtifactDetail({
           <iframe className={styles.docFrame} src={blobUrl} title={artifact.title} />
         ) : kind === "markdown" && text !== null ? (
           <div className={`${styles.markdownWrap} ${mdStyles.markdown}`}>
-            <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>
+            <ReactMarkdown
+              remarkPlugins={mdRemarkPlugins}
+              rehypePlugins={mdRehypePlugins}
+              // Shared so a ```mermaid fence renders as a diagram here too —
+              // see mermaidComponents for why every surface spreads this one.
+              components={mermaidMarkdownComponents}
+            >
               {text}
             </ReactMarkdown>
           </div>
