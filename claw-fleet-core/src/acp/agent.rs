@@ -392,7 +392,7 @@ impl AcpAgent {
 
         let sessions = crate::session::scan_all_sources(&self.sources)
             .into_iter()
-            .filter(|s| s.workspace_path == workspace)
+            .filter(|s| same_path(&s.workspace_path, &workspace))
             .filter(|s| !s.is_subagent)
             .filter(|s| !deleted.contains(&s.id))
             .map(|s| SessionInfo {
@@ -450,7 +450,7 @@ impl AcpAgent {
         let workspace = crate::hooks_server::public_files::public_workspace();
         let found = crate::session::scan_all_sources(&self.sources)
             .into_iter()
-            .find(|s| s.id == session_id && s.workspace_path == workspace)
+            .find(|s| s.id == session_id && same_path(&s.workspace_path, &workspace))
             .ok_or_else(|| RpcError::invalid_params("unknown sessionId"))?;
 
         let tool = if found.agent_type.as_deref() == Some("codex") { "codex" } else { "claude" };
@@ -807,6 +807,100 @@ mod tests {
 
     fn agent() -> AcpAgent {
         AcpAgent::new(Arc::new(Peer::new(Box::new(NullSink))), Arc::new(Vec::new()))
+    }
+
+    /// A source that reports one session at a fixed workspace path.
+    struct OneSession(SessionInfoRow);
+
+    #[derive(Clone)]
+    struct SessionInfoRow {
+        id: String,
+        workspace_path: String,
+    }
+
+    impl crate::agent_source::AgentSource for OneSession {
+        fn name(&self) -> &'static str {
+            "claude-code"
+        }
+        fn uri_prefix(&self) -> &'static str {
+            ""
+        }
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn scan_sessions(&self) -> Vec<crate::session::SessionInfo> {
+            let mut s = crate::session::SessionInfo::default();
+            s.id = self.0.id.clone();
+            s.workspace_path = self.0.workspace_path.clone();
+            vec![s]
+        }
+        fn get_messages(&self, _path: &str) -> Result<Vec<Value>, String> {
+            Ok(Vec::new())
+        }
+        fn watch_strategy(&self) -> crate::agent_source::WatchStrategy {
+            crate::agent_source::WatchStrategy::Filesystem
+        }
+    }
+
+    /// A scan reports the *canonical* path (`/private/tmp/...` on macOS, or
+    /// whatever a symlinked mount resolves to), while the client and the
+    /// container env speak the path the user typed. Comparing the two with
+    /// `==` makes every session in the workspace invisible: `session/list`
+    /// comes back empty and `session/load` answers "unknown sessionId" for a
+    /// session that plainly exists. `check_cwd` already resolves before
+    /// comparing; these two must agree with it.
+    #[test]
+    fn list_and_load_see_a_session_reached_through_a_symlinked_workspace() {
+        let real = std::env::temp_dir().join(format!("acp-ws-real-{}", std::process::id()));
+        let link = std::env::temp_dir().join(format!("acp-ws-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&real);
+        let _ = std::fs::remove_file(&link);
+        std::fs::create_dir_all(&real).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(not(unix))]
+        return;
+
+        // The scan sees the resolved directory...
+        let scanned = std::fs::canonicalize(&real).unwrap().to_string_lossy().into_owned();
+        // ...while the container is bound to the symlinked one.
+        let bound = link.to_string_lossy().into_owned();
+
+        let prev = std::env::var("FLEET_PUBLIC_WORKSPACE").ok();
+        std::env::set_var("FLEET_PUBLIC_WORKSPACE", &bound);
+
+        let sources: Vec<Box<dyn crate::agent_source::AgentSource>> =
+            vec![Box::new(OneSession(SessionInfoRow {
+                id: "sess-1".into(),
+                workspace_path: scanned.clone(),
+            }))];
+        let a = AcpAgent::new(Arc::new(Peer::new(Box::new(NullSink))), Arc::new(sources));
+
+        let listed = a.dispatch(&json!(1), "session/list", &json!({})).unwrap();
+        let ids: Vec<&str> = listed["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|s| s["sessionId"].as_str())
+            .collect();
+        assert!(
+            ids.contains(&"sess-1"),
+            "a session in the bound workspace must be listed even when the scan \
+             reports the resolved path ({scanned}) and the container the symlink ({bound})"
+        );
+
+        // The same comparison gates adoption, so load must not reject it.
+        let loaded = a.dispatch(&json!(2), "session/load", &json!({
+            "sessionId": "sess-1", "cwd": bound, "mcpServers": []
+        }));
+        assert!(loaded.is_ok(), "session/load rejected a session it should have adopted");
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_PUBLIC_WORKSPACE", v),
+            None => std::env::remove_var("FLEET_PUBLIC_WORKSPACE"),
+        }
+        let _ = std::fs::remove_dir_all(&real);
+        let _ = std::fs::remove_file(&link);
     }
 
     #[test]
