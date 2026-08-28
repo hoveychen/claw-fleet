@@ -32,5 +32,9 @@ export interface DecisionSurfaceInput {
 }
 
 export function decisionSurface(i: DecisionSurfaceInput): DecisionSurface {
+  // Checked first, and unconditionally: a tab cannot float, so none of the
+  // three preferences below can mean anything there. Honouring them would
+  // route the card to a window that does not exist.
+  if (i.webBuild) return "inline";
   return i.mainMinimized || i.floatingPreferred || i.liteMode ? "float" : "inline";
 }
