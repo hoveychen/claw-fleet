@@ -419,6 +419,17 @@ pub struct ToolCall {
 #[serde(rename_all = "camelCase")]
 pub struct ToolCallUpdate {
     pub tool_call_id: String,
+    /// What this tool call is, in words a person can act on.
+    ///
+    /// Optional in the schema but not optional in practice: a client rendering
+    /// a permission dialog has nothing else to label it with, and one that
+    /// falls back to a placeholder ("Other") asks the user to approve an
+    /// unnamed command.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Drives the icon a client draws next to the call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ToolKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<ToolCallStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
