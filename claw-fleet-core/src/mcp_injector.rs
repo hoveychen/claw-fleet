@@ -226,6 +226,52 @@ fn entry_command_is_live(entry: &serde_json::Value) -> bool {
     bare_name || is_executable_file(path)
 }
 
+/// Directory Fleet's worktree workflow checks plans out under, matched as a
+/// whole path segment. Same literal `session::workspace_name` folds on.
+const WORKTREE_DIR: &str = ".worktrees";
+
+/// True when `fleet_path` is ephemeral by construction: it lives inside
+/// `<repo>/.worktrees/<task-id>/`, which the worktree workflow deletes the
+/// moment that plan merges. Publishing such a path as the machine-wide MCP
+/// command guarantees a dangling registration a few hours later.
+///
+/// The main checkout's `target/debug/fleet-cli` is deliberately *not* covered:
+/// it survives merges, and blocking it would strip `fleet__ask` from every
+/// ordinary `cargo tauri dev` run.
+fn is_ephemeral_worktree_binary(fleet_path: &str) -> bool {
+    fleet_path.split(['/', '\\']).any(|seg| seg == WORKTREE_DIR)
+}
+
+/// Whether a fleet binary at `fleet_path` may write its own path into the
+/// `~/.claude.json` this process resolves. `isolated_config` says that config
+/// is a throwaway (see [`config_is_isolated`]), in which case anything goes.
+fn may_publish(fleet_path: &str, isolated_config: bool) -> bool {
+    isolated_config || !is_ephemeral_worktree_binary(fleet_path)
+}
+
+/// True when the config we resolve is a throwaway rather than the real user's.
+///
+/// `FLEET_HOME` is the one isolation lever — the test suite and every local
+/// `fleet serve` verification run set it, and production code never does.
+/// `CLAUDE_CONFIG_DIR` deliberately does **not** count: a user who relocates
+/// their Claude config permanently still has exactly one real config to protect.
+fn config_is_isolated() -> bool {
+    std::env::var_os("FLEET_HOME").is_some_and(|v| !v.is_empty())
+}
+
+/// The error both write paths return when [`may_publish`] says no.
+fn ephemeral_publish_refused(fleet_path: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!(
+            "refusing to register {fleet_path} as mcpServers.{FLEET_SERVER_KEY}: it lives under \
+             {WORKTREE_DIR}/ and will be deleted when its plan merges, leaving every spawned \
+             session naming a binary that no longer exists. Run this build with FLEET_HOME set \
+             to a temp dir to verify it in isolation."
+        ),
+    )
+}
+
 /// `path` exists (following symlinks) and is a file with an execute bit.
 /// Windows has no execute bit, so existence as a file is the whole test there.
 fn is_executable_file(path: &Path) -> bool {
@@ -306,6 +352,9 @@ pub fn prune_dead_holders(lock: &mut McpLock) {
 /// is a no-op after the first call (the existing entry is overwritten with
 /// the same value, which Claude Code re-reads on next launch).
 pub fn acquire(pid: u32, fleet_path: &str) -> std::io::Result<()> {
+    if !may_publish(fleet_path, config_is_isolated()) {
+        return Err(ephemeral_publish_refused(fleet_path));
+    }
     let mut lock = read_lock().unwrap_or_default();
     prune_dead_holders(&mut lock);
     let was_empty = lock.holders.is_empty();
@@ -370,6 +419,9 @@ pub fn release(pid: u32) -> std::io::Result<()> {
 /// Returns `Ok(true)` if a re-injection actually wrote the file,
 /// `Ok(false)` if nothing was off. Used by [`crate::injector_watchdog`].
 pub fn verify_and_reinject(fleet_path: &str) -> std::io::Result<bool> {
+    if !may_publish(fleet_path, config_is_isolated()) {
+        return Err(ephemeral_publish_refused(fleet_path));
+    }
     let Some(mut lock) = read_lock() else { return Ok(false) };
     prune_dead_holders(&mut lock);
     if lock.holders.is_empty() {
@@ -907,6 +959,52 @@ mod tests {
 
             let _ = release(std::process::id());
         });
+    }
+
+    const WORKTREE_BIN: &str =
+        "/Users/foo/workspace/claude-fleet/.worktrees/acp-consumer-heartbeat/target/debug/fleet-cli";
+
+    #[test]
+    fn ephemeral_worktree_binaries_are_recognised() {
+        assert!(is_ephemeral_worktree_binary(WORKTREE_BIN));
+        assert!(
+            is_ephemeral_worktree_binary(
+                r"C:\src\claude-fleet\.worktrees\foo\target\debug\fleet-cli.exe"
+            ),
+            "windows separators count too"
+        );
+        assert!(!is_ephemeral_worktree_binary(
+            "/Applications/Claw Fleet.app/Contents/MacOS/fleet"
+        ));
+        assert!(
+            !is_ephemeral_worktree_binary("/Users/foo/workspace/claude-fleet/target/debug/fleet-cli"),
+            "the main checkout's dev build is stable — don't block it"
+        );
+        assert!(!is_ephemeral_worktree_binary("fleet"));
+    }
+
+    /// Root cause of 2026-08-27: a `fleet-cli` built inside
+    /// `.worktrees/acp-consumer-heartbeat` published its own absolute path into
+    /// the real `~/.claude.json`. Rule 3 deleted that worktree the moment the
+    /// plan merged, so every session spawned afterwards named a binary that no
+    /// longer existed. A binary that ephemeral must never publish itself into
+    /// the user's real config — but a `FLEET_HOME`-isolated run (how local
+    /// verification and the test suite are supposed to work) still may, because
+    /// nothing it writes reaches the real config.
+    #[test]
+    fn a_worktree_binary_may_only_publish_when_the_config_is_isolated() {
+        assert!(
+            !may_publish(WORKTREE_BIN, false),
+            "a worktree build must not write the user's real ~/.claude.json"
+        );
+        assert!(
+            may_publish(WORKTREE_BIN, true),
+            "an isolated run writes a throwaway config — allow it"
+        );
+        assert!(
+            may_publish("/Applications/Claw Fleet.app/Contents/MacOS/fleet", false),
+            "a stable install publishes as before"
+        );
     }
 
     #[test]
