@@ -27,6 +27,14 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { OfficeMode } from "../officePreview";
+import {
+  fetchBlob,
+  formatCell,
+  readSheets,
+  renderDocxInto,
+  renderPptxInto,
+  type ParsedSheet,
+} from "../officeRender";
 import styles from "./OfficePreview.module.css";
 
 /**
@@ -37,21 +45,6 @@ import styles from "./OfficePreview.module.css";
  * file *is*, so it stops here and says so rather than pretending to be Excel.
  */
 const MAX_SHEET_ROWS = 2000;
-
-/** 16:9 is the modern deck default; pptx-preview wants explicit pixels. */
-const SLIDE_RATIO = 9 / 16;
-
-type CellValue = string | number | boolean | Date | null;
-interface ParsedSheet {
-  sheet: string;
-  data: CellValue[][];
-}
-
-async function fetchBlob(url: string): Promise<Blob> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.blob();
-}
 
 export default function OfficePreview({
   mode,
@@ -89,35 +82,11 @@ function HostPreview({ mode, url, title }: { mode: OfficeMode; url: string; titl
       const blob = await fetchBlob(url);
       if (!alive) return;
       if (mode === "docx") {
-        const { renderAsync } = await import("docx-preview");
-        if (!alive) return;
-        await renderAsync(blob, host, undefined, {
-          // The document's own page boxes, which is the whole point of showing
-          // a .docx instead of its text.
-          inWrapper: true,
-          breakPages: true,
-          ignoreLastRenderedPageBreak: false,
-        });
+        await renderDocxInto(blob, host);
       } else {
-        const { init } = await import("pptx-preview");
-        if (!alive) return;
         // clientWidth is 0 if the stage hasn't laid out yet; 960 keeps a deck
         // readable rather than collapsing it to nothing.
-        const width = host.clientWidth || 960;
-        const previewer = init(host, {
-          width,
-          height: Math.round(width * SLIDE_RATIO),
-          // "slide" (one deck-sized page plus the library's own pagination)
-          // rather than "list": in list mode every slide is laid out at the
-          // same offset, so a two-page deck renders both pages on top of each
-          // other. Verified against a real pandoc-produced .pptx.
-          mode: "slide",
-        });
-        await previewer.preview(await blob.arrayBuffer());
-        // The library paints its pagination before rendering the first slide,
-        // so a freshly opened deck reads "0/2" until you click through. Ask it
-        // to restate the count once the deck is up.
-        previewer.updatePagination();
+        await renderPptxInto(blob, host, host.clientWidth || 960);
       }
     })()
       .then(() => {
@@ -163,11 +132,7 @@ function SheetPreview({ url }: { url: string }) {
     setError(null);
     setActive(0);
     (async () => {
-      const blob = await fetchBlob(url);
-      // `/browser` rather than the package root: read-excel-file ships one
-      // build per environment and has no root export at all.
-      const readXlsxFile = (await import("read-excel-file/browser")).default;
-      const parsed = (await readXlsxFile(blob)) as ParsedSheet[];
+      const parsed = await readSheets(await fetchBlob(url));
       if (alive) setSheets(parsed);
     })().catch((e) => {
       if (alive) setError(String(e));
@@ -236,11 +201,4 @@ function SheetPreview({ url }: { url: string }) {
       </div>
     </div>
   );
-}
-
-/** Cells arrive as parsed values; a Date must not render as its ISO string. */
-export function formatCell(cell: CellValue): string {
-  if (cell === null || cell === undefined) return "";
-  if (cell instanceof Date) return cell.toLocaleDateString();
-  return String(cell);
 }
