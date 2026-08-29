@@ -28,7 +28,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 
-import type { OfficeMode } from "../officePreview";
+import type { ThumbMode } from "../officePreview";
 import { fetchBlob, formatCell, readSheets, renderDocxInto, renderPptxInto } from "../officeRender";
 import styles from "./ArtifactThumb.module.css";
 
@@ -92,7 +92,7 @@ export default function ArtifactThumb({
 }: {
   id: string;
   url: string;
-  mode: OfficeMode;
+  mode: ThumbMode;
   onFail: () => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -121,8 +121,12 @@ export default function ArtifactThumb({
           host.replaceChildren(sheetTable(sheets[0]?.data ?? []));
         } else if (mode === "docx") {
           await renderDocxInto(blob, host);
-        } else {
+        } else if (mode === "pptx") {
           await renderPptxInto(blob, host, RENDER_WIDTH);
+        } else {
+          // pdf / video land here until their renderers exist; throwing routes
+          // them to onFail, which is the icon they already had.
+          throw new Error(`no thumbnail renderer for ${mode}`);
         }
         if (!alive) return;
         remember(id, host.innerHTML);
