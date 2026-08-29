@@ -26,6 +26,29 @@
   pointer-events: none;
 }
 
+/* A poster — a video's frame or a PDF's first page — is already a bitmap at the
+   right aspect ratio, so it fills the well instead of being laid out at page
+   scale and shrunk like the Office three. */
+.poster {
+  width: 100%;
+  height: 100%;
+}
+
+.poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* A page is taller than the well, and the top of a document is where its title
+   is — the same reason the Office thumbnails anchor to their top-left. A video
+   frame instead keeps its centre, which is where a subject usually is. */
+.poster[data-mode="pdf"] img {
+  object-position: top center;
+  background: #ffffff;
+}
+
 /* Strip the chrome each library wraps around a document. At full size it is
    navigation; in a 190px card it is noise sitting on top of the one thing the
    thumbnail is for. docx-preview's gray desk and 30px margin would eat most of

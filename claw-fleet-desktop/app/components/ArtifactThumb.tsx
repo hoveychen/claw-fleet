@@ -28,7 +28,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 
-import type { ThumbMode } from "../officePreview";
+import { MAX_THUMB_BYTES, type ThumbMode } from "../officePreview";
+import { renderVideoPosterInto } from "../mediaThumb";
 import { fetchBlob, formatCell, readSheets, renderDocxInto, renderPptxInto } from "../officeRender";
 import styles from "./ArtifactThumb.module.css";
 
@@ -84,19 +85,34 @@ function remember(id: string, html: string): void {
   htmlCache.set(id, html);
 }
 
+/**
+ * A poster (video frame, PDF page) fills the well as a bitmap; an Office
+ * document is laid out at page scale and shrunk. Two different geometries, so
+ * the host element is styled differently rather than one being forced through
+ * the other's transform.
+ */
+export function isPoster(mode: ThumbMode): boolean {
+  return mode === "video" || mode === "pdf";
+}
+
 export default function ArtifactThumb({
   id,
   url,
   mode,
+  title,
+  sizeBytes,
   onFail,
 }: {
   id: string;
   url: string;
   mode: ThumbMode;
+  title: string;
+  sizeBytes: number;
   onFail: () => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(() => htmlCache.has(id));
+  const poster = isPoster(mode);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -113,20 +129,26 @@ export default function ArtifactThumb({
     const start = () =>
       withSlot(async () => {
         if (!alive) return;
-        const blob = await fetchBlob(url);
-        if (!alive) return;
-        if (mode === "xlsx") {
-          const sheets = await readSheets(blob);
-          if (!alive) return;
-          host.replaceChildren(sheetTable(sheets[0]?.data ?? []));
-        } else if (mode === "docx") {
-          await renderDocxInto(blob, host);
-        } else if (mode === "pptx") {
-          await renderPptxInto(blob, host, RENDER_WIDTH);
+        if (mode === "video") {
+          // Deliberately not `fetchBlob` first: the whole point of the ranged
+          // path is that a poster frame costs a fragment, not the render.
+          await renderVideoPosterInto(url, host, title, MAX_THUMB_BYTES, sizeBytes);
+        } else if (mode === "pdf") {
+          // Renderer lands in P3; throwing routes the card to the icon it
+          // already had.
+          throw new Error("no thumbnail renderer for pdf");
         } else {
-          // pdf / video land here until their renderers exist; throwing routes
-          // them to onFail, which is the icon they already had.
-          throw new Error(`no thumbnail renderer for ${mode}`);
+          const blob = await fetchBlob(url);
+          if (!alive) return;
+          if (mode === "xlsx") {
+            const sheets = await readSheets(blob);
+            if (!alive) return;
+            host.replaceChildren(sheetTable(sheets[0]?.data ?? []));
+          } else if (mode === "docx") {
+            await renderDocxInto(blob, host);
+          } else {
+            await renderPptxInto(blob, host, RENDER_WIDTH);
+          }
         }
         if (!alive) return;
         remember(id, host.innerHTML);
@@ -153,14 +175,15 @@ export default function ArtifactThumb({
       alive = false;
       observer.disconnect();
     };
-  }, [id, url, mode, onFail]);
+  }, [id, url, mode, title, sizeBytes, onFail]);
 
   return (
     <div className={styles.frame} data-ready={ready ? "1" : "0"}>
       <div
         ref={hostRef}
-        className={styles.canvas}
-        style={{ width: RENDER_WIDTH }}
+        className={poster ? styles.poster : styles.canvas}
+        style={poster ? undefined : { width: RENDER_WIDTH }}
+        data-mode={mode}
         aria-hidden="true"
       />
     </div>
