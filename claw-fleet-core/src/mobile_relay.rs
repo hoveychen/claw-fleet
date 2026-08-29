@@ -1326,8 +1326,18 @@ fn base64_image_source(block: &Value) -> Option<(&str, &str)> {
 /// The only `tool_use.input` keys the UI reads — `toolSummary` shows exactly one
 /// of these on the tool chip; everything else in `input` is dead weight (a Write
 /// tool's whole file body lives there).
-const TAIL_TOOL_INPUT_FIELDS: [&str; 7] =
-    ["command", "file_path", "pattern", "path", "query", "url", "skill"];
+///
+/// `description` is listed first because it is the one key `toolSummary` prefers
+/// over the fallback loop rather than finding inside it: `Bash`/`PowerShell`/
+/// `Agent` all carry a model-written summary line, and it reads far better on a
+/// phone-width chip than the alternatives (Bash's raw command is often a long
+/// escaped grep; `Agent` has no compact field at all, so without this every
+/// subagent call in a session renders as the same bare "Agent" and the reader
+/// cannot tell them apart). Same reasoning — and same shape — as the desktop's
+/// `ToolUseBlock`. The bulky siblings (`Agent.prompt`, `AskUserQuestion.
+/// questions`) stay stripped; only the label rides along.
+const TAIL_TOOL_INPUT_FIELDS: [&str; 8] =
+    ["description", "command", "file_path", "pattern", "path", "query", "url", "skill"];
 
 /// Chars kept of a decision card's summary line / chosen answer. Long enough to
 /// tell two cards apart on a phone-width chip, short enough that the skeleton
@@ -4623,6 +4633,61 @@ mod tests {
             let raw = fat_record().to_string().len();
             let slim = m.to_string().len();
             assert!(slim * 20 < raw, "slim ({slim}B) must be far smaller than raw ({raw}B)");
+        });
+    }
+
+    /// The collapsed tool chip labels `Bash` / `Agent` from the model-written
+    /// `description` (mobile `toolSummary`, mirroring the desktop's
+    /// `ToolUseBlock`: "Bash's raw command is often a long escaped grep, and
+    /// Agent has no compact field"). `description` is not one of the
+    /// `TOOL_SUMMARY_FIELDS` the loop falls back on, so it has to ride the input
+    /// whitelist explicitly — without it every Agent chip in a session reads the
+    /// same bare "Agent" and the reader cannot tell the subagents apart.
+    ///
+    /// The Agent tool's bulky siblings (`prompt`, and any other unlisted key)
+    /// must still be stripped: the point is a chip label, not the task brief.
+    #[test]
+    fn request_tail_keeps_the_description_that_labels_the_chip() {
+        with_temp_home(|| {
+            let path = write_jsonl(
+                "agentcall.jsonl",
+                &[json!({
+                    "type": "assistant",
+                    "uuid": "u-agent",
+                    "timestamp": "2026-08-28T00:00:00Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "tool_use", "id": "t1", "name": "Agent",
+                             "input": {"description": "审计 issuer 读取点",
+                                       "subagent_type": "Explore",
+                                       "prompt": "x".repeat(50_000)}},
+                            {"type": "tool_use", "id": "t2", "name": "Bash",
+                             "input": {"description": "Show working tree status",
+                                       "command": "git status --short"}}
+                        ]
+                    }
+                })],
+            );
+            let data = request_ok("tail", json!({"path": path, "n": 10}));
+            let blocks = data[0]["message"]["content"].as_array().expect("blocks");
+
+            assert_eq!(
+                blocks[0]["input"]["description"], "审计 issuer 读取点",
+                "the Agent chip's label must survive slimming"
+            );
+            assert!(
+                blocks[0]["input"].get("prompt").is_none(),
+                "the task brief must stay stripped — it is what made tail replies megabytes"
+            );
+            assert_eq!(
+                blocks[1]["input"]["description"], "Show working tree status",
+                "Bash labels from description too (desktop ToolUseBlock parity)"
+            );
+            assert_eq!(
+                blocks[1]["input"]["command"], "git status --short",
+                "command still ships: it is the fallback for transcripts with no description"
+            );
         });
     }
 

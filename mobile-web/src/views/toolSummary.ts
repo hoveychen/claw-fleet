@@ -91,7 +91,13 @@ export function toolSummary(block: ContentBlock): string {
   const input = block.input;
   if (input === undefined) return "";
 
-  if (block.name === "Bash" || block.name === "Agent") {
+  // Bash / PowerShell / Agent all carry a model-written `description`: a
+  // one-line summary for the shells, a 3-5 word task name for Agent. Prefer it
+  // over the fallback loop below — a raw shell command is often a long escaped
+  // grep, and Agent has no compact field at all. Mirrors the desktop
+  // `ToolUseBlock`, including PowerShell (the Windows shell tool, same
+  // `description`/`command` shape as Bash).
+  if (block.name === "Bash" || block.name === "PowerShell" || block.name === "Agent") {
     const description = input.description;
     if (typeof description === "string" && description.trim()) return description.trim();
   }

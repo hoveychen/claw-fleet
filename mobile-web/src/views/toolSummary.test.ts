@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { decisionSummary, friendlyToolName, patchToolSummary } from "./toolSummary";
+import type { ContentBlock } from "../types";
+import { decisionSummary, friendlyToolName, patchToolSummary, toolSummary } from "./toolSummary";
 
 const tr = (key: string, ...args: Array<string | number>) => {
   let out = key;
@@ -71,5 +72,44 @@ describe("patchToolSummary", () => {
 
   it("returns null for a non-patch command", () => {
     expect(patchToolSummary("const result = 1", tr)).toBeNull();
+  });
+});
+
+describe("toolSummary", () => {
+  const toolUse = (name: string, input: Record<string, unknown>) =>
+    ({ type: "tool_use", id: "t1", name, input }) as ContentBlock;
+
+  // An Agent call has no compact input field, so without `description` the chip
+  // falls through to "" and every subagent in a session renders as the same
+  // bare "Agent". Requires the relay to ship `description`
+  // (TAIL_TOOL_INPUT_FIELDS in mobile_relay.rs).
+  it("labels an Agent call with its task description", () => {
+    expect(toolSummary(toolUse("Agent", { description: "审计 issuer 读取点" }))).toBe(
+      "审计 issuer 读取点",
+    );
+  });
+
+  it("prefers the description over the raw command for shells", () => {
+    const input = { description: "Show working tree status", command: "git status --short" };
+    expect(toolSummary(toolUse("Bash", input))).toBe("Show working tree status");
+    // PowerShell is the Windows shell tool, same shape — the desktop
+    // ToolUseBlock treats it identically and so must the phone.
+    expect(toolSummary(toolUse("PowerShell", input))).toBe("Show working tree status");
+  });
+
+  it("falls back to the command when a transcript recorded no description", () => {
+    expect(toolSummary(toolUse("Bash", { command: "git status --short" }))).toBe(
+      "git status --short",
+    );
+    expect(toolSummary(toolUse("PowerShell", { command: "Get-ChildItem" }))).toBe("Get-ChildItem");
+  });
+
+  it("ignores a blank description rather than showing an empty chip", () => {
+    expect(toolSummary(toolUse("Agent", { description: "   " }))).toBe("");
+    expect(toolSummary(toolUse("Bash", { description: "  ", command: "ls" }))).toBe("ls");
+  });
+
+  it("still labels non-shell tools from their own fields", () => {
+    expect(toolSummary(toolUse("Read", { file_path: "/a/b.rs" }))).toBe("/a/b.rs");
   });
 });
