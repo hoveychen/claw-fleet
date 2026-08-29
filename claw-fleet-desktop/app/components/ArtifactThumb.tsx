@@ -28,7 +28,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 
-import { MAX_THUMB_BYTES, type ThumbMode } from "../officePreview";
+import { MAX_VIDEO_DOWNLOAD_BYTES, type ThumbMode } from "../officePreview";
 import { renderPdfPosterInto, renderVideoPosterInto } from "../mediaThumb";
 import { fetchBlob, formatCell, readSheets, renderDocxInto, renderPptxInto } from "../officeRender";
 import styles from "./ArtifactThumb.module.css";
@@ -132,7 +132,7 @@ export default function ArtifactThumb({
         if (mode === "video") {
           // Deliberately not `fetchBlob` first: the whole point of the ranged
           // path is that a poster frame costs a fragment, not the render.
-          await renderVideoPosterInto(url, host, title, MAX_THUMB_BYTES, sizeBytes);
+          await renderVideoPosterInto(url, host, title, MAX_VIDEO_DOWNLOAD_BYTES, sizeBytes);
         } else if (mode === "pdf") {
           await renderPdfPosterInto(url, host, title);
         } else {

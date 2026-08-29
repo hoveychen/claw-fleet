@@ -73,6 +73,19 @@ export const MAX_PDF_THUMB_BYTES = 32 * 1024 * 1024;
 export const MAX_VIDEO_THUMB_BYTES = 256 * 1024 * 1024;
 
 /**
+ * How big a video may be before its *fallback* path is given up on.
+ *
+ * The ranged grab above costs a fragment; the fallback (used when the webview
+ * taints the canvas rather than honouring CORS on a custom scheme) costs the
+ * whole file, which is the same trade a PDF thumbnail already makes — so it
+ * gets the same ceiling rather than the Office one. Sizing this at
+ * `MAX_THUMB_BYTES` instead would have been quietly wrong for exactly the clips
+ * that motivated this: a 5.7 MB idle-animation render is over the 4 MB Office
+ * cap and would have kept its icon on every host that needed the fallback.
+ */
+export const MAX_VIDEO_DOWNLOAD_BYTES = MAX_PDF_THUMB_BYTES;
+
+/**
  * Which renderer this artifact's *card* should use, if any.
  *
  * Lives beside `officeMode` rather than in ArtifactThumb so the grid can ask
