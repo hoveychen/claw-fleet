@@ -13,3 +13,34 @@ resolver = "2"
 [profile.release]
 strip = true
 lto = true
+
+# A dev/debug build of the desktop app is a supported way to run Fleet, so the
+# dev profile has to stay fast enough to serve the mobile relay — `tail` runs on
+# the phone's 15s request timeout.
+#
+# At the default `opt-level = 0` it isn't. The transcript-thumbnail path
+# (`mobile_relay::downscale_image`) is a per-pixel loop over ~1.3M pixels, and
+# unoptimized it emits real calls for `f32::mul`, `Iter::next`, `u8::to_u8` and
+# the `debug_assertions` bounds checks — they show up as stack *tops* in
+# `~/.fleet/diagnostics/stall-1787969331067-tail.txt`, a live sample of a `tail`
+# that took 44s on the phone and timed it out.
+#
+# Measured on that same transcript's 4 screenshots (780x1688), varying only the
+# optimization level:
+#
+#   release (opt=3 + lto) ...................   848 ms
+#   dev, own=2, deps=3 ...................... 1,791 ms
+#   dev, own=1, deps=3 ...................... 2,685 ms   <- this profile
+#   dev, own=0, deps=3 ..................... 14,354 ms
+#   dev, all opt=0 (the old default) ....... 31,437 ms
+#
+# `opt-level = 1` buys an 11.7x speedup while keeping everything a debug build is
+# *for*: `debug_assertions`, unstripped symbols, and panic backtraces all stay on.
+# Both sections are needed — `image`'s generic code is monomorphized into
+# claw-fleet-core, so it compiles at *our* opt-level, which is why raising only
+# the dependency profile lands at 14s instead of 2.7s.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
