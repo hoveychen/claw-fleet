@@ -343,6 +343,8 @@ function ArtifactCard({
                   id={artifact.id}
                   url={artifactBlobUrl(artifact.id, artifact.name)}
                   mode={thumb}
+                  title={artifact.title}
+                  sizeBytes={artifact.sizeBytes}
                   onFail={onThumbFail}
                 />
               </Suspense>
