@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_PDF_THUMB_BYTES,
   MAX_THUMB_BYTES,
+  MAX_VIDEO_DOWNLOAD_BYTES,
   MAX_VIDEO_THUMB_BYTES,
   officeMode,
   thumbMode,
@@ -91,6 +92,20 @@ describe("thumbMode", () => {
     expect(thumbMode("video/mp4", 5_700_000)).toBe("video");
     expect(thumbMode("video/quicktime", MAX_VIDEO_THUMB_BYTES)).toBe("video");
     expect(thumbMode("video/mp4", MAX_VIDEO_THUMB_BYTES + 1)).toBeNull();
+  });
+
+  /**
+   * Regression: the fallback ceiling was first wired to `MAX_THUMB_BYTES`, and
+   * the 5.7 MB render that motivated this feature is over that — so on any host
+   * where the ranged grab taints the canvas, the one clip we were trying to fix
+   * would have kept its icon. The fallback costs a whole download, which is the
+   * PDF trade, so it takes the PDF ceiling.
+   */
+  it("lets the video fallback download the clips this feature exists for", () => {
+    expect(MAX_VIDEO_DOWNLOAD_BYTES).toBeGreaterThan(MAX_THUMB_BYTES);
+    expect(MAX_VIDEO_DOWNLOAD_BYTES).toBeGreaterThanOrEqual(6_016_675);
+    // Still bounded — it is a download, not a ranged read.
+    expect(MAX_VIDEO_DOWNLOAD_BYTES).toBeLessThan(MAX_VIDEO_THUMB_BYTES);
   });
 
   it("tolerates the codec parameters a media mime arrives with", () => {
