@@ -169,3 +169,55 @@ export async function renderVideoPosterInto(
   }
   showPoster(host, poster, alt);
 }
+
+/**
+ * Draw a PDF's first page into `host`.
+ *
+ * The bytes are fetched here rather than handed to pdf.js as a URL: its own
+ * transport only uses `fetch` for http(s) and falls back to XHR for anything
+ * else, and `fleet-artifact://` is very much anything else. `fetchBlob` is the
+ * same call the Office thumbnails already make on this protocol, so this reuses
+ * a path that is known to work instead of betting on the library's fallback.
+ *
+ * One download plus a parse, then — a PDF's cross-reference table lives at the
+ * end of the file, so there is no ranged shortcut to page 1 the way there is to
+ * a video frame. That is what `MAX_PDF_THUMB_BYTES` is sized against.
+ */
+export async function renderPdfPosterInto(
+  url: string,
+  host: HTMLElement,
+  alt: string,
+): Promise<void> {
+  const [pdfjs, workerUrl, bytes] = await Promise.all([
+    import("pdfjs-dist"),
+    // `?url` so Vite fingerprints the worker and serves it from our own origin.
+    // Left to itself pdf.js resolves a path relative to the document, which in
+    // a Tauri webview is not where the asset ended up.
+    import("pdfjs-dist/build/pdf.worker.min.mjs?url").then((m) => m.default),
+    fetchBlob(url).then((b) => b.arrayBuffer()),
+  ]);
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
+  // Keep the loading task, not just the document: tearing down the worker is
+  // `task.destroy()`, and a document proxy only exposes `cleanup()`.
+  const task = pdfjs.getDocument({ data: bytes });
+  const doc = await task.promise;
+  try {
+    const page = await doc.getPage(1);
+    // Lay the page out at poster width and render at that scale — rendering at
+    // scale 1 and shrinking afterwards would resample text pdf.js could have
+    // rasterised sharp.
+    const unscaled = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: POSTER_WIDTH / unscaled.width });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    // A PDF page paints nothing where it is blank, and a JPEG has no alpha, so
+    // without an explicit background the empty margins encode as black.
+    await page.render({ canvas, viewport, background: "#ffffff" }).promise;
+    showPoster(host, canvas.toDataURL("image/jpeg", POSTER_QUALITY), alt);
+  } finally {
+    // pdf.js holds the parsed document and its worker until told to let go.
+    await task.destroy();
+  }
+}
