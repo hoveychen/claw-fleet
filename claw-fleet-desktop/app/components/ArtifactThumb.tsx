@@ -29,7 +29,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { MAX_THUMB_BYTES, type ThumbMode } from "../officePreview";
-import { renderVideoPosterInto } from "../mediaThumb";
+import { renderPdfPosterInto, renderVideoPosterInto } from "../mediaThumb";
 import { fetchBlob, formatCell, readSheets, renderDocxInto, renderPptxInto } from "../officeRender";
 import styles from "./ArtifactThumb.module.css";
 
@@ -134,9 +134,7 @@ export default function ArtifactThumb({
           // path is that a poster frame costs a fragment, not the render.
           await renderVideoPosterInto(url, host, title, MAX_THUMB_BYTES, sizeBytes);
         } else if (mode === "pdf") {
-          // Renderer lands in P3; throwing routes the card to the icon it
-          // already had.
-          throw new Error("no thumbnail renderer for pdf");
+          await renderPdfPosterInto(url, host, title);
         } else {
           const blob = await fetchBlob(url);
           if (!alive) return;
