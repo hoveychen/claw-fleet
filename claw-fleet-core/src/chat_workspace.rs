@@ -125,7 +125,22 @@ const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — 
 
 工具都在，该用就用：搜网、读文件、跑命令都行。老板聊着聊着让你顺手干点活是完全正常的，别因为
 「这是聊天工作区」就推辞。只是别把聊天变成工程仪式——能直接回答的就直接回答，不用动辄先开一
-堆调查子任务。真有值得长期留存的产出，再用 `fleet wiki publish` 归档。
+堆调查子任务。
+
+## 做出来的东西别留在临时目录
+
+聊着聊着真做出了一份东西——一篇译稿、一份报告、一张图表、一段视频、一个数据集——它就不该只躺在
+`/tmp` 里等着被清掉。**判据是这份东西给谁**，而不是它是什么格式：
+
+- **递到老板手上的成品**（要读、要转发、要存档的：PDF、幻灯片、表格、图片、视频，也包括一份对外的
+  md 或 html）→ 用 `fleet__artifact` 的 `action="add"`（CLI 等价 `fleet artifact add`）存进**产出库**。
+  它不挑格式，二进制照收。`--title` 和 `--note` 认真写，那两行就是老板在卡片上读到的全部。
+- **留给你和后面接手的会话的文字**（调研笔记、架构梳理、踩坑记录这类要被再读一遍的）→ 用
+  `fleet__wiki` 的 `action="publish"`（CLI 等价 `fleet wiki publish`）存进**知识库**。它只认
+  html/htmlDir/markdown，所以 PDF、xlsx 这类二进制**只能**走产出库。
+
+拿不准就问一句：这份东西是递给人的，还是留给自己的？递 → 产出库，留 → 知识库。真是过目即弃的
+中间产物，两个都不用，留在临时目录就行。
 "#;
 
 /// Where the chat workspace is *created*: straight under the fleet dir, whose
