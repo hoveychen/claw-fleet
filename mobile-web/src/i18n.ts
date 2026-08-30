@@ -609,11 +609,9 @@ const DICT: Record<string, string> = {
   "纵轴 0–100%": "y: 0–100%",
   // ── 会话详情 header：展开面板 + 汉堡菜单 ──
   模型: "Model",
-  工作区路径: "Workspace path",
+  工作区: "Workspace",
+  花费: "Cost",
   "会话 ID": "Session ID",
-  会话记录: "Transcript",
-  创建于: "Created",
-  最后活动: "Last activity",
   会话操作: "Session actions",
   收起会话详情: "Hide session details",
   "复制会话 ID": "Copy session ID",
