@@ -123,7 +123,7 @@ export function buildInfoRows(s: SessionInfo, now = Date.now()): InfoRow[] {
     push("handoff", t("接力"), `${s.handoff.hop}/${s.handoff.chainLen}`);
   }
   if (s.watches && s.watches.length > 0) {
-    push("watches", t("守望"), t("{0} 个", s.watches.length));
+    push("watches", t("守望"), String(s.watches.length));
   }
   return rows;
 }
