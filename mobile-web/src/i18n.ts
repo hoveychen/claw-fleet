@@ -607,4 +607,17 @@ const DICT: Record<string, string> = {
   "还没有攒够采样点，桌面端跑一阵子再看。":
     "Not enough samples yet — leave the desktop running for a while.",
   "纵轴 0–100%": "y: 0–100%",
+  // ── 会话详情 header：展开面板 + 汉堡菜单 ──
+  模型: "Model",
+  工作区: "Workspace",
+  花费: "Cost",
+  "会话 ID": "Session ID",
+  会话操作: "Session actions",
+  收起会话详情: "Hide session details",
+  "复制会话 ID": "Copy session ID",
+  复制标题: "Copy title",
+  复制工作区路径: "Copy workspace path",
+  复制会话记录路径: "Copy transcript path",
+  复制恢复命令: "Copy resume command",
+  "复制失败（需要 HTTPS 或用户手势）": "Copy failed (needs HTTPS or a user gesture)",
 };
