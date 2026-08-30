@@ -814,13 +814,13 @@
    session title down to "Fi…", and past ~40 characters pushing the status dot
    clean off a 390px screen (header scrollWidth measured 566px). It now shrinks
    and is capped; the label inside ellipsizes. */
+/* The trigger is glyph-only now (see AgentScopeSwitcher), so it is a fixed
+   ~28px chip instead of the up-to-40%-of-the-row label it used to be — that
+   label cost 83px of a 390px header while naming the scope you were already
+   looking at. The cap stays as a backstop; nothing should reach it. */
 .scopeWrap {
   position: relative;
   display: inline-flex;
-  /* Still flex-shrink:0 — the identity label is useless half-rendered — but now
-     bounded: at most 40% of the title row, past which the label inside
-     ellipsizes. The bug was the missing cap, not the shrink. The title (which
-     keeps only a 4em floor) absorbs the rest, so the row can't overflow. */
   flex: 0 0 auto;
   min-width: 0;
   max-width: 40%;

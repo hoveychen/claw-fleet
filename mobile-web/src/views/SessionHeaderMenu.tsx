@@ -1,5 +1,7 @@
 // 会话详情页 header 右上角的汉堡菜单 —— 那些「需要时才拿一次」的东西：会话
-// id、两条路径、恢复命令，外加把详情面板叫出来的入口。
+// id、两条路径、恢复命令，外加把详情面板叫出来的入口，以及在主进程与各子代理
+// 之间切作用域。作用域在 header 上还有一个收成图标的下拉（◈/⎇），那个是一眼
+// 认身份 + 快切；这里是带全名和状态点的完整清单。
 //
 // 桌面端的对应物是 SessionHeaderMenu.tsx（同一批条目，用 ContextMenu 吊在按钮
 // 下方）。手机上改成底部 sheet：拇指够得着，且不必为一个浮层算 viewport 夹取。
@@ -13,7 +15,9 @@ import { createPortal } from "react-dom";
 import { Check, Copy, FileJson2, Folder, Info, Menu, Terminal, X } from "lucide-react";
 import { t } from "../i18n";
 import type { SessionInfo } from "../types";
+import { agentIdTail, agentLabel } from "./AgentScopeSwitcher";
 import { resumeCommand } from "./sessionInfoRows";
+import detailStyles from "./SessionDetailView.module.css";
 import styles from "./SessionHeaderMenu.module.css";
 
 interface MenuItem {
@@ -29,10 +33,16 @@ interface MenuItem {
 
 export function SessionHeaderMenu({
   session,
+  family,
+  onOpenSession,
   infoOpen,
   onToggleInfo,
 }: {
   session: SessionInfo;
+  /** 主进程 + 各子代理（调用方按桌面端同一套规则组装、排序、封顶）。为空表示
+   *  这是个没有子代理的独会话，这一节整段不出现。 */
+  family: SessionInfo[];
+  onOpenSession: (s: SessionInfo) => void;
   /** 详情面板当前是否展开 —— 决定菜单里那条是「查看」还是「收起」。 */
   infoOpen: boolean;
   onToggleInfo: () => void;
@@ -158,6 +168,41 @@ export function SessionHeaderMenu({
                 <X size={18} />
               </button>
             </div>
+            {family.length > 0 && (
+              <>
+                <div className={styles.sectionLabel}>{t("切换代理")}</div>
+                {family.map((s) => {
+                  const isCurrent = s.id === session.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      role="menuitem"
+                      className={styles.item}
+                      data-current={isCurrent ? "" : undefined}
+                      onClick={() => {
+                        close();
+                        if (!isCurrent) onOpenSession(s);
+                      }}
+                    >
+                      {/* 状态点复用详情页那套 data-status 配色，免得同一个概念
+                          在两处长得不一样。 */}
+                      <span className={detailStyles.scopeDot} data-status={s.status} />
+                      <span className={styles.itemText}>
+                        <span className={styles.itemLabel}>
+                          {agentLabel(s)}
+                          {isCurrent && ` · ${t("当前")}`}
+                        </span>
+                        {s.isSubagent && (
+                          <span className={styles.itemSub}>{agentIdTail(s.id)}</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+                <div className={styles.sectionLabel}>{t("会话")}</div>
+              </>
+            )}
             {items.map((item) => {
               const r = result?.id === item.id ? result : null;
               return (

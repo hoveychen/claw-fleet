@@ -1383,6 +1383,8 @@ export function SessionDetailView({
         <span className={styles.statusDot} data-working={working} />
         <SessionHeaderMenu
           session={session}
+          family={family}
+          onOpenSession={(s) => onOpenSessionId(s.id)}
           infoOpen={infoOpen}
           onToggleInfo={() => setInfoOpen((v) => !v)}
         />

@@ -6,15 +6,22 @@ import styles from "./SessionDetailView.module.css";
 
 /** Header identity label for one family member: ◈ main, or ⎇ its agent type
  *  (falling back to the generic "subagent" word when untyped). Mirrors the
- *  desktop AgentScopeSwitcher. */
-function agentLabel(s: SessionInfo): string {
+ *  desktop AgentScopeSwitcher. Exported for the ☰ menu's scope section, which
+ *  lists the same family with the same wording. */
+export function agentLabel(s: SessionInfo): string {
   return s.isSubagent ? `⎇ ${s.agentType || t("子代理")}` : `◈ ${t("主进程")}`;
+}
+
+/** Just the glyph — what the header trigger shows now that the words moved to
+ *  the menu. ⎇ vs ◈ still tells you which scope you're in at a glance. */
+export function agentGlyph(s: SessionInfo): string {
+  return s.isSubagent ? "⎇" : "◈";
 }
 
 /** Distinguishing tail of a subagent id, so two same-type subagents (e.g. both
  *  `general-purpose`) don't read as one indistinct row. Uses the end of the id:
  *  real ids (`agent-<uuid>`) share the `agent-` prefix but diverge at the tail. */
-function agentIdTail(id: string): string {
+export function agentIdTail(id: string): string {
   const raw = id.replace(/^agent-/, "");
   return `#${raw.slice(-6)}`;
 }
@@ -51,15 +58,19 @@ export function AgentScopeSwitcher({
         data-open={open}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={t("切换代理")}
+        title={`${t("切换代理")} · ${agentLabel(current)}`}
+        aria-label={`${t("切换代理")} · ${agentLabel(current)}`}
         onClick={(e) => {
           e.stopPropagation();
           setOpen((o) => !o);
         }}
       >
-        {/* The label owns the ellipsis: a long agentType shortens here instead of
-            widening the trigger until the session title has no room left. */}
-        <span className={styles.scopeTriggerLabel}>{agentLabel(current)}</span>
+        {/* Glyph only. The words used to live here and cost 83px of a 390px
+            header — measured, with the title down to "Fix JWT to…" — while
+            saying "主进程" about the scope you are already looking at. The full
+            names are one tap away, both in this dropdown and in the ☰ menu's
+            scope section. */}
+        <span className={styles.scopeTriggerLabel}>{agentGlyph(current)}</span>
         <ChevronDown size={11} className={styles.scopeChevron} />
       </button>
       {open && (
