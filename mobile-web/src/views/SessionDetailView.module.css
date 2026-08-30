@@ -49,6 +49,35 @@
   /* overflow stays visible so the scope dropdown isn't clipped; the title text
      itself ellipsizes via .headerTitleText. */
 }
+/* Title + workspace suffix + chevron as one tap target (unfolds .infoPanel).
+   A bare <button> reset: it must lay out exactly like the row of spans it
+   replaced, or the careful flex weights below stop meaning anything. */
+.titleTap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 2px 0;
+  margin: -2px 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.titleChevron {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  transition: transform 140ms ease;
+}
+
+.titleChevron[data-open="true"] {
+  transform: rotate(180deg);
+  color: var(--color-accent);
+}
+
 /* The title outranks both of its neighbours: it keeps a readable floor while the
    scope switcher and the workspace suffix ellipsize away around it. Without the
    floor a long `⎇ general-purpose-deep-research` squeezed it down to "Fi…". */
@@ -718,6 +747,63 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── Header detail panel (tap the title) ──────────────────────────────────── */
+
+/* Capped and scrollable: a long-running session with a handoff chain, watches
+   and a queue can run past a dozen rows, and a panel that pushes the transcript
+   off the screen would be a worse deal than the ellipsis it replaces. */
+.infoPanel {
+  flex-shrink: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  -webkit-overflow-scrolling: touch;
+}
+
+/* The whole title, wrapped — this is the first thing the folded header hides. */
+.infoFullTitle {
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.infoRow {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: var(--t-aux, 12px);
+  border-top: 1px solid var(--color-border);
+}
+
+.infoLabel {
+  flex: 0 0 5.5em;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+/* Values wrap rather than ellipsize: a truncated path or id here would defeat
+   the entire point of unfolding the header. */
+.infoValue {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+  /* Long ids/paths are meant to be selected and pasted straight out of here. */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.infoValue[data-mono] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-secondary);
 }
 
 /* "↑ 来自 <父会话>" breadcrumb bar under the header of a subagent detail. */

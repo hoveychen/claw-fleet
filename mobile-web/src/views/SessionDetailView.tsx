@@ -70,6 +70,8 @@ import { fmtTokens, shortModelName, turnUsageByIndex } from "./turnUsage";
 import { ToolDetailPanel } from "./ToolDetailPanel";
 import type { ToolDigest } from "../types";
 import { AgentNavProvider, useAgentNav } from "./AgentNavContext";
+import { SessionHeaderMenu } from "./SessionHeaderMenu";
+import { buildInfoRows } from "./sessionInfoRows";
 import styles from "./SessionDetailView.module.css";
 
 const TAIL_POLL_MS = 2500;
@@ -916,6 +918,33 @@ const MessageRow = memo(function MessageRow({
   toolMetaEqual(prev.toolMeta, next.toolMeta) &&
   JSON.stringify(prev.turnUsage ?? null) === JSON.stringify(next.turnUsage ?? null));
 
+/**
+ * The header's unfolded form: the full title (the one-line header ellipsizes
+ * it), then every identifying field the phone had nowhere to put — ids, both
+ * paths, model, times, pid. Absent fields don't take a row (see buildInfoRows),
+ * so a freshly-spawned session shows five lines, not a screen of dashes.
+ *
+ * Read-only on purpose — copying lives one tap away in the ☰ menu, where the
+ * clipboard write can report success or failure on the item you tapped.
+ */
+function SessionInfoPanel({ session }: { session: SessionInfo }) {
+  const rows = useMemo(() => buildInfoRows(session), [session]);
+  const fullTitle = session.titleOverride || session.aiTitle || session.slug;
+  return (
+    <div className={styles.infoPanel}>
+      {fullTitle && <div className={styles.infoFullTitle}>{fullTitle}</div>}
+      {rows.map((r) => (
+        <div key={r.key} className={styles.infoRow}>
+          <span className={styles.infoLabel}>{r.label}</span>
+          <span className={styles.infoValue} data-mono={r.mono || undefined}>
+            {r.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SessionDetailView({
   session,
   sessions,
@@ -925,6 +954,9 @@ export function SessionDetailView({
   onDwellRead,
 }: Props) {
   const [tab, setTab] = useState<DetailTab>("messages");
+  /** Header detail panel (tap the title, or the ☰ menu's first item). Folded by
+   *  default — it costs transcript height, and most visits don't need the ids. */
+  const [infoOpen, setInfoOpen] = useState(false);
   const dwellFired = useRef(false);
   // Subagent drill-down nav (same table-lookup model as the desktop): resolve
   // `agent-<id>` in the live session array; `open` pushes it as a new layer.
@@ -981,6 +1013,9 @@ export function SessionDetailView({
 
   useEffect(() => {
     dwellFired.current = false;
+    // A drill-down into a subagent starts folded again: the panel that was open
+    // described the session you just left.
+    setInfoOpen(false);
     // Never carry one session's pending echo (or a stuck in-flight flag) over.
     setOptimisticSends([]);
     submitInFlightRef.current = false;
@@ -1321,16 +1356,37 @@ export function SessionDetailView({
             ) : session.isSubagent ? (
               <span className={styles.subagentBadge}>⎇ {session.agentType || t("子代理")}</span>
             ) : null}
-            <span className={styles.headerTitleText}>
-              {session.titleOverride || session.aiTitle || session.slug || t("会话")}
-            </span>
-            {/* Workspace rides inline after the title as a dim "· name" suffix —
-                a second header row costs ~19px of transcript on every phone. */}
-            <span className={styles.headerSub}>{session.workspaceName}</span>
+            {/* The title + workspace suffix are one tap target that unfolds the
+                detail panel below — everything this row ellipsizes away (the
+                full title, the workspace path, the model, the ids) lives there.
+                Kept as a sibling of the scope switcher rather than wrapping it:
+                a <button> inside a <button> is invalid HTML and the switcher
+                would stop opening. */}
+            <button
+              type="button"
+              className={styles.titleTap}
+              aria-expanded={infoOpen}
+              onClick={() => setInfoOpen((v) => !v)}
+            >
+              <span className={styles.headerTitleText}>
+                {session.titleOverride || session.aiTitle || session.slug || t("会话")}
+              </span>
+              {/* Workspace rides inline after the title as a dim "· name" suffix —
+                  a second header row costs ~19px of transcript on every phone. */}
+              <span className={styles.headerSub}>{session.workspaceName}</span>
+              <ChevronDown size={13} className={styles.titleChevron} data-open={infoOpen} />
+            </button>
           </div>
         </div>
         <span className={styles.statusDot} data-working={working} />
+        <SessionHeaderMenu
+          session={session}
+          infoOpen={infoOpen}
+          onToggleInfo={() => setInfoOpen((v) => !v)}
+        />
       </header>
+
+      {infoOpen && <SessionInfoPanel session={session} />}
 
       {session.isSubagent && (
         <button
