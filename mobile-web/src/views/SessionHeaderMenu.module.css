@@ -97,6 +97,32 @@
   color: var(--color-accent);
 }
 
+/* 作用域行的状态点。配色沿用详情页 header 那颗点的口径（同一套语义色），
+   只是住在自己的模块里，免得为一个 8px 的圆点跨模块 import 样式。 */
+.statusDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-dim);
+}
+.statusDot[data-status="thinking"],
+.statusDot[data-status="executing"],
+.statusDot[data-status="streaming"],
+.statusDot[data-status="processing"],
+.statusDot[data-status="delegating"],
+.statusDot[data-status="active"] {
+  background: var(--color-success);
+}
+.statusDot[data-status="waitingInput"] {
+  background: var(--color-warning);
+}
+.statusDot[data-status="rateLimited"],
+.statusDot[data-status="serverErrored"],
+.statusDot[data-status="stuck"] {
+  background: var(--color-error);
+}
+
 .itemIcon {
   display: inline-flex;
   align-items: center;
