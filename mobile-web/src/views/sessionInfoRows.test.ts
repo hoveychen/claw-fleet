@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildInfoRows, resumeCommand, sourceLabel } from "./sessionInfoRows";
+import { buildInfoRows, resumeCommand } from "./sessionInfoRows";
 import type { SessionInfo } from "../types";
 
 // label 随语言变，所以断言一律走 key / value。
@@ -25,53 +25,35 @@ describe("buildInfoRows", () => {
     expect(valueOf(base, "jsonlPath")).toBe(base.jsonlPath);
   });
 
+  it("只放身份字段 —— 状态/用量/接力这些在别处已有更好的呈现", () => {
+    const rich: SessionInfo = {
+      ...base,
+      contextPercent: 0.72,
+      totalCostUsd: 4.33,
+      pid: 42,
+      entrypoint: "claw-fleet-newsession",
+      slug: "fix/auth",
+      agentSource: "codex",
+      runningSubagentCount: 3,
+      handoff: { chainId: "c1", hop: 2, chainLen: 3 },
+      watches: [
+        { id: "w1", created: 0, pollSecs: 30, deadlineAt: 0, pollCount: 1 },
+      ],
+    };
+    expect(keys(rich).sort()).toEqual(
+      ["created", "jsonlPath", "lastActivity", "sessionId", "workspacePath"].sort(),
+    );
+  });
+
   it("缺席的字段不占行（不显示成空值）", () => {
-    const k = keys(base);
-    expect(k).not.toContain("model");
-    expect(k).not.toContain("context");
-    expect(k).not.toContain("cost");
-    expect(k).not.toContain("pid");
-    expect(k).not.toContain("handoff");
-    expect(k).not.toContain("watches");
-    expect(k).not.toContain("agentType");
+    expect(keys(base)).not.toContain("model");
+    expect(valueOf({ ...base, model: "claude-opus-5" }, "model")).toBe("claude-opus-5");
   });
 
-  it("contextPercent 按 0–1 比值换算成百分比", () => {
-    expect(valueOf({ ...base, contextPercent: 0.72 }, "context")).toBe("72%");
-  });
-
-  it("半分钱以下的花费不成行", () => {
-    expect(valueOf({ ...base, totalCostUsd: 0.001 }, "cost")).toBeUndefined();
-    expect(valueOf({ ...base, totalCostUsd: 4.331 }, "cost")).toBe("$4.33");
-  });
-
-  it("pid 不精确时在值上标出来", () => {
-    expect(valueOf({ ...base, pid: 42, pidPrecise: true }, "pid")).toBe("42");
-    expect(valueOf({ ...base, pid: 42, pidPrecise: false }, "pid")).toContain("42");
-    expect(valueOf({ ...base, pid: 42, pidPrecise: false }, "pid")).not.toBe("42");
-  });
-
-  it("接力棒次直接用 1 起的 hop", () => {
-    const s = { ...base, handoff: { chainId: "c1", hop: 2, chainLen: 3 } };
-    expect(valueOf(s, "handoff")).toBe("2/3");
-  });
-
-  it("子代理会话多出类型行", () => {
-    const s = { ...base, isSubagent: true, agentType: "Explore" };
-    expect(valueOf(s, "agentType")).toBe("Explore");
-  });
-});
-
-describe("sourceLabel", () => {
-  it("认识的源给展示名，缺席按 Claude", () => {
-    expect(sourceLabel(undefined)).toBe("Claude");
-    expect(sourceLabel("claude-code")).toBe("Claude");
-    expect(sourceLabel("codex")).toBe("Codex");
-    expect(sourceLabel("dsh")).toBe("dsh");
-  });
-
-  it("认不出的源原样显示，不静默兜底成 Claude", () => {
-    expect(sourceLabel("kimi")).toBe("kimi");
+  it("最后活动同时给相对与绝对时刻", () => {
+    const v = valueOf(base, "lastActivity") ?? "";
+    expect(v).toContain("·");
+    expect(v.length).toBeGreaterThan(6);
   });
 });
 
