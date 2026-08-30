@@ -25,7 +25,6 @@ import {
   Waypoints,
   Wrench,
 } from "lucide-react";
-import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
 import { EmptyState } from "./EmptyState";
 import { isFleetTool } from "./fleetTools";
 import { fleetSummary } from "./FleetBody";
@@ -1344,24 +1343,20 @@ export function SessionDetailView({
         </button>
         <div className={styles.headerText}>
           <div className={styles.headerTitle}>
-            {/* Scope switcher sits inline before the title (no extra row — the
-                phone is tight on vertical space); it carries the ⎇/◈ identity,
-                so the static badge only appears when there's no family. */}
-            {family.length > 0 ? (
-              <AgentScopeSwitcher
-                family={family}
-                current={session}
-                onOpen={(s) => onOpenSessionId(s.id)}
-              />
-            ) : session.isSubagent ? (
+            {/* Subagent identity only. The scope *switcher* that used to sit
+                here is gone — its full family list lives in the ☰ menu, and on a
+                390px header the trigger cost 83px to say "主进程" about the scope
+                you were already looking at. A subagent still says so here (the
+                ↑来自 breadcrumb below names the parent); a main session shows
+                nothing, which is where the title needs the width. */}
+            {session.isSubagent && (
               <span className={styles.subagentBadge}>⎇ {session.agentType || t("子代理")}</span>
-            ) : null}
-            {/* The title + workspace suffix are one tap target that unfolds the
-                detail panel below — everything this row ellipsizes away (the
-                full title, the workspace path, the model, the ids) lives there.
-                Kept as a sibling of the scope switcher rather than wrapping it:
-                a <button> inside a <button> is invalid HTML and the switcher
-                would stop opening. */}
+            )}
+            {/* The title is a tap target that unfolds the detail panel below —
+                everything this row ellipsizes away (the full title, the
+                workspace, the model, the ids) lives there. Kept as a sibling of
+                the badge, not wrapping it, so the row's flex weights still
+                describe what they did before. */}
             <button
               type="button"
               className={styles.titleTap}

@@ -1,7 +1,7 @@
 // 会话详情页 header 右上角的汉堡菜单 —— 那些「需要时才拿一次」的东西：会话
 // id、两条路径、恢复命令，外加把详情面板叫出来的入口，以及在主进程与各子代理
-// 之间切作用域。作用域在 header 上还有一个收成图标的下拉（◈/⎇），那个是一眼
-// 认身份 + 快切；这里是带全名和状态点的完整清单。
+// 之间切作用域 —— header 上原先那个作用域下拉已经整个搬到这里，那 83px 现在
+// 归标题。这里是带状态点、全名、子代理 id 尾巴的完整清单。
 //
 // 桌面端的对应物是 SessionHeaderMenu.tsx（同一批条目，用 ContextMenu 吊在按钮
 // 下方）。手机上改成底部 sheet：拇指够得着，且不必为一个浮层算 viewport 夹取。
@@ -15,9 +15,8 @@ import { createPortal } from "react-dom";
 import { Check, Copy, FileJson2, Folder, Info, Menu, Terminal, X } from "lucide-react";
 import { t } from "../i18n";
 import type { SessionInfo } from "../types";
-import { agentIdTail, agentLabel } from "./AgentScopeSwitcher";
+import { agentIdTail, agentLabel } from "./agentScope";
 import { resumeCommand } from "./sessionInfoRows";
-import detailStyles from "./SessionDetailView.module.css";
 import styles from "./SessionHeaderMenu.module.css";
 
 interface MenuItem {
@@ -185,9 +184,7 @@ export function SessionHeaderMenu({
                         if (!isCurrent) onOpenSession(s);
                       }}
                     >
-                      {/* 状态点复用详情页那套 data-status 配色，免得同一个概念
-                          在两处长得不一样。 */}
-                      <span className={detailStyles.scopeDot} data-status={s.status} />
+                      <span className={styles.statusDot} data-status={s.status} />
                       <span className={styles.itemText}>
                         <span className={styles.itemLabel}>
                           {agentLabel(s)}

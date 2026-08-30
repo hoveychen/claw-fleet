@@ -46,10 +46,9 @@
   min-width: 0;
   font-size: var(--t-ui, 14px);
   font-weight: 600;
-  /* overflow stays visible so the scope dropdown isn't clipped; the title text
-     itself ellipsizes via .headerTitleText. */
+  /* The title text ellipsizes via .headerTitleText. */
 }
-/* Title + workspace suffix + chevron as one tap target (unfolds .infoPanel).
+/* Title + chevron as one tap target (unfolds .infoPanel).
    A bare <button> reset: it must lay out exactly like the row of spans it
    replaced, or the careful flex weights below stop meaning anything. */
 .titleTap {
@@ -78,10 +77,11 @@
   color: var(--color-accent);
 }
 
-/* The title keeps a readable floor while the scope switcher ellipsizes away
+/* The title keeps a readable floor while the subagent badge ellipsizes away
    beside it. Without the floor a long `⎇ general-purpose-deep-research`
-   squeezed it down to "Fi…". The workspace suffix that used to sit after it
-   moved into the detail panel — the row was too crowded to carry both. */
+   squeezed it down to "Fi…". Both the workspace suffix and the scope switcher
+   that used to share this row are gone (panel / ☰ menu) — the row was never
+   wide enough to carry them. */
 .headerTitleText {
   flex: 1 1 auto;
   min-width: 4em;
@@ -706,10 +706,10 @@
   opacity: 0.6;
 }
 
-/* Inline "⎇ <type>" badge before a subagent session's title. */
-/* Same shrink contract as .scopeTrigger — an untyped-family subagent shows this
-   static badge instead of the switcher, and a long agentType must ellipsize
-   here too rather than push the title off the row. */
+/* Inline "⎇ <type>" badge before a subagent session's title — the only scope
+   marker left in the header now that the switcher moved into the ☰ menu. Capped
+   and ellipsizing: a long agentType (`general-purpose-deep-research`) must
+   shorten here rather than push the title off the row. */
 .subagentBadge {
   flex: 0 0 auto;
   min-width: 0;
@@ -806,144 +806,3 @@
   opacity: 0.6;
 }
 
-/* ── Agent scope switcher (main ⇄ subagents), ported from desktop ─────────── */
-
-/* Positioning context for the drop-down menu; sits inline in the title row.
-   It used to be flex-shrink:0 with no cap, so an agentType like
-   `general-purpose-deep-research` grew the trigger to 244px — squeezing the
-   session title down to "Fi…", and past ~40 characters pushing the status dot
-   clean off a 390px screen (header scrollWidth measured 566px). It now shrinks
-   and is capped; the label inside ellipsizes. */
-/* The trigger is glyph-only now (see AgentScopeSwitcher), so it is a fixed
-   ~28px chip instead of the up-to-40%-of-the-row label it used to be — that
-   label cost 83px of a 390px header while naming the scope you were already
-   looking at. The cap stays as a backstop; nothing should reach it. */
-.scopeWrap {
-  position: relative;
-  display: inline-flex;
-  flex: 0 0 auto;
-  min-width: 0;
-  max-width: 40%;
-}
-
-.scopeTrigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 3px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-bg-card);
-  color: var(--color-text);
-  font-size: var(--t-aux, 12px);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.scopeTriggerLabel {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.scopeTrigger[data-subagent="true"] {
-  color: var(--color-accent);
-}
-.scopeTrigger[data-open="true"] {
-  border-color: var(--color-border-strong);
-}
-.scopeChevron {
-  opacity: 0.6;
-  flex-shrink: 0;
-}
-
-/* Full-screen tap catcher that dismisses the menu. */
-.scopeBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-}
-
-.scopeMenu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 41;
-  min-width: 180px;
-  max-width: 80vw;
-  max-height: 60vh;
-  overflow-y: auto;
-  padding: 4px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-bg-card);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-}
-
-.scopeItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 8px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--color-text);
-  font-size: var(--t-aux, 12px);
-  text-align: left;
-  cursor: pointer;
-}
-.scopeItem:active {
-  background: var(--color-bg-secondary);
-}
-.scopeItem[data-current="true"] {
-  background: var(--color-bg-secondary);
-}
-
-.scopeItemLabel {
-  flex: 1;
-  min-width: 0;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.scopeCurrent {
-  color: var(--color-text-dim);
-  font-weight: 400;
-}
-.scopeItemTail {
-  flex-shrink: 0;
-  color: var(--color-text-dim);
-  font-size: var(--t-meta, 11px);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Status dot: green = live, amber = waiting on input, red = errored/stuck,
-   dim = finished/idle. */
-.scopeDot {
-  flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-text-dim);
-}
-.scopeDot[data-status="thinking"],
-.scopeDot[data-status="executing"],
-.scopeDot[data-status="streaming"],
-.scopeDot[data-status="processing"],
-.scopeDot[data-status="delegating"],
-.scopeDot[data-status="active"] {
-  background: var(--color-success);
-}
-.scopeDot[data-status="waitingInput"] {
-  background: var(--color-warning);
-}
-.scopeDot[data-status="rateLimited"],
-.scopeDot[data-status="serverErrored"],
-.scopeDot[data-status="stuck"] {
-  background: var(--color-error);
-}
