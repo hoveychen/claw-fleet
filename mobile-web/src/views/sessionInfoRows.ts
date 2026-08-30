@@ -6,14 +6,15 @@
 // 为了能被单测钉住「哪些字段在缺席时不出现」——面板上一行「模型 —」比没有这行
 // 更糟。
 //
-// 刻意只放**身份**字段：模型、两条路径、会话 id、两个时刻。状态有 header 上的
-// 状态点，用量/花费有 Token 页签，接力棒次有 接力 页签 —— 那些在别处已经有更
-// 好的呈现，搬一份到这里只会把「我要找那条路径」变成一屏要扫的东西。
+// 刻意只放这几行：模型、工作区、会话 id、上下文占用、花费。两条路径不在这里
+// ——它们在 ☰ 菜单的复制条目副行上原样摆着，那才是路径真正被用到的地方（复制
+// 走）；时间戳也不在这里，每条消息旁边就有，会话列表上还有「几分钟前」。状态
+// 有 header 上那个点，接力棒次有 接力 页签。
 //
 // 桌面端的对应物是 SessionDetail.tsx 的 meta_row（那里字段更多，因为桌面横向
 // 排得下一整行 chip）。
 
-import { dateLocale, t } from "../i18n";
+import { t } from "../i18n";
 import { toolForAgentSource } from "../agentSource";
 import type { SessionInfo } from "../types";
 
@@ -26,33 +27,11 @@ export interface InfoRow {
   mono?: boolean;
 }
 
-/** "2026-08-30 12:57" —— 绝对时刻，跟随 UI 语言。 */
-export function fmtAbsTime(ms: number): string {
-  const d = new Date(ms);
-  if (!ms || Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString(dateLocale(), {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-/** 相对时刻（"3 分钟前"）。与 TasksView 的 timeAgo 同口径。 */
-export function fmtRelTime(ms: number, now = Date.now()): string {
-  const diff = now - ms;
-  if (diff < 60_000) return t("刚刚");
-  if (diff < 3_600_000) return t("{0} 分钟前", Math.floor(diff / 60_000));
-  if (diff < 86_400_000) return t("{0} 小时前", Math.floor(diff / 3_600_000));
-  return t("{0} 天前", Math.floor(diff / 86_400_000));
-}
-
 /**
  * 面板要显示的行。缺席的字段不占行（不是显示成空值）—— 一个还没记到模型的
  * 会话少一行，而不是多一行「模型 —」。
  */
-export function buildInfoRows(s: SessionInfo, now = Date.now()): InfoRow[] {
+export function buildInfoRows(s: SessionInfo): InfoRow[] {
   const rows: InfoRow[] = [];
   const push = (key: string, label: string, value: string | undefined | null, mono?: boolean) => {
     const v = (value ?? "").trim();
@@ -60,16 +39,16 @@ export function buildInfoRows(s: SessionInfo, now = Date.now()): InfoRow[] {
   };
 
   push("model", t("模型"), s.model);
-  push("workspacePath", t("工作区路径"), s.workspacePath, true);
+  push("workspace", t("工作区"), s.workspaceName);
   push("sessionId", t("会话 ID"), s.id, true);
-  push("jsonlPath", t("会话记录"), s.jsonlPath, true);
-  push("created", t("创建于"), fmtAbsTime(s.createdAtMs));
-  if (s.lastActivityMs) {
-    push(
-      "lastActivity",
-      t("最后活动"),
-      `${fmtRelTime(s.lastActivityMs, now)} · ${fmtAbsTime(s.lastActivityMs)}`,
-    );
+  // contextPercent 是 0–1 的比值（对齐桌面端 SessionDetail 的 `* 100` 用法），
+  // 不是百分数。
+  if (s.contextPercent != null) {
+    push("context", t("上下文占用"), `${Math.round(s.contextPercent * 100)}%`);
+  }
+  // 半分钱以下的花费显示成 $0.00，等于没说；与桌面端同一道门槛。
+  if (s.totalCostUsd != null && s.totalCostUsd >= 0.005) {
+    push("cost", t("花费"), `$${s.totalCostUsd.toFixed(2)}`);
   }
   return rows;
 }
