@@ -1368,12 +1368,14 @@ export function SessionDetailView({
               aria-expanded={infoOpen}
               onClick={() => setInfoOpen((v) => !v)}
             >
+              {/* Title only. The workspace used to ride here as a dim "· name"
+                  suffix capped at 34% of the row; between it, the scope switcher
+                  and the ☰ button the title was down to "Fix JWT to…". It now
+                  lives in the detail panel one tap away, and the title gets the
+                  width back. */}
               <span className={styles.headerTitleText}>
                 {session.titleOverride || session.aiTitle || session.slug || t("会话")}
               </span>
-              {/* Workspace rides inline after the title as a dim "· name" suffix —
-                  a second header row costs ~19px of transcript on every phone. */}
-              <span className={styles.headerSub}>{session.workspaceName}</span>
               <ChevronDown size={13} className={styles.titleChevron} data-open={infoOpen} />
             </button>
           </div>

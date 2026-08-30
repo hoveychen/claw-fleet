@@ -78,40 +78,16 @@
   color: var(--color-accent);
 }
 
-/* The title outranks both of its neighbours: it keeps a readable floor while the
-   scope switcher and the workspace suffix ellipsize away around it. Without the
-   floor a long `⎇ general-purpose-deep-research` squeezed it down to "Fi…". */
+/* The title keeps a readable floor while the scope switcher ellipsizes away
+   beside it. Without the floor a long `⎇ general-purpose-deep-research`
+   squeezed it down to "Fi…". The workspace suffix that used to sit after it
+   moved into the detail panel — the row was too crowded to carry both. */
 .headerTitleText {
   flex: 1 1 auto;
   min-width: 4em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* Workspace name, inline after the title (see .header). Shrinks first and is
-   capped, so it can never be the reason the row overflows. */
-/* The title is the item with an expendable tail, so it absorbs the row's
-   deficit; the workspace gives up almost nothing (a tiny shrink factor rather
-   than none, so it degrades gracefully on a very narrow screen) and is capped
-   so it can never be the reason the row overflows. */
-.headerSub {
-  flex: 0 1 auto;
-  flex-shrink: 0.1;
-  min-width: 0;
-  max-width: 34%;
-  font-size: var(--t-meta, 11px);
-  font-weight: 500;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.headerSub::before {
-  content: "·";
-  margin-right: 4px;
-  opacity: 0.55;
 }
 
 .statusDot {
