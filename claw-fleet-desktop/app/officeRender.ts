@@ -123,30 +123,31 @@ export async function renderMarkdownInto(text: string, host: HTMLElement): Promi
 }
 
 /**
- * Turn `<img src="https://…">` into an inert placeholder.
+ * Replace every `<img>` a card cannot honestly draw with an inert placeholder.
+ * Only `data:` URIs survive, because only they carry their own bytes.
  *
- * A card renders as soon as it scrolls into view, so without this, opening the
- * artifacts page fans out requests to whatever hosts the stored documents
- * happen to reference — a README's shields.io badges were the case that made
- * this visible. The stage does load them, but only when someone opens that one
- * document on purpose; a grid that reaches out on scroll is a different bargain
- * and not one the user agreed to.
+ * Two separate reasons converge on the same rule:
  *
- * Relative paths and `data:` URIs are left alone: the first resolves against
- * the artifact's own blob URL (same reads the page already makes, usually a
- * 404) and the second carries its bytes inline.
+ *   - **Remote** (`https://…`, or protocol-relative `//host/x`) must not be
+ *     fetched. A card renders as soon as it scrolls into view, so without this,
+ *     opening the artifacts page fans out requests to whatever hosts the stored
+ *     documents happen to reference — a README's shields.io badges were the
+ *     case that made this visible. The stage does load them, but only when
+ *     someone opens that one document on purpose; a grid that reaches out on
+ *     scroll is a different bargain, and not one the user agreed to.
+ *   - **Relative** (`docs/hero.png`) *cannot* resolve. An artifact is a single
+ *     file — `fleet artifact add` takes one path and the store lays it down as
+ *     `artifacts/<id>/<name>` — so the document has no siblings to point at.
+ *     The request goes out, 404s, and the well shows a broken-image glyph.
+ *
+ * An empty src lands here too: `rehype-sanitize` drops a src it dislikes (an
+ * uppercase `HTTPS://` scheme is one), and what it leaves is a srcless `<img>`
+ * — no request, but the same broken glyph.
  */
 function defuseRemoteImages(doc: Document): void {
   for (const img of Array.from(doc.querySelectorAll("img"))) {
     const src = img.getAttribute("src") ?? "";
-    // Empty counts. `rehype-sanitize` drops a src it doesn't like — an
-    // uppercase `HTTPS://` scheme is one — and what it leaves behind is a
-    // srcless <img>: no request, but a broken-image glyph in the well. Same
-    // origin story, same placeholder.
-    //
-    // Protocol-relative `//host/x` is a remote fetch too, and is easy to miss
-    // by testing for "https:" alone.
-    if (src !== "" && !/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(src)) continue;
+    if (/^data:/i.test(src)) continue;
     const box = doc.createElement("span");
     box.setAttribute("data-remote-image", "");
     box.textContent = img.getAttribute("alt") || "";

@@ -153,17 +153,23 @@ describe("renderMarkdownInto — remote images", () => {
     expect(host.innerHTML).not.toContain("evil.example");
   });
 
-  /** A relative path resolves against the artifact's own blob URL — same origin
-   *  as the page's other reads, and usually a 404. Nothing to defuse. */
-  it("leaves local and data images alone", async () => {
+  /**
+   * A relative path can never resolve: `fleet artifact add` stores one file as
+   * `artifacts/<id>/<name>`, so the document has no siblings. Left alone it
+   * would fire a request that 404s and leave a broken-image glyph in the well —
+   * the four `docs/…` refs in this repo's own README did exactly that. Only a
+   * `data:` URI carries its own bytes, so only it survives.
+   */
+  it("placeholders relative images too, and keeps data: URIs", async () => {
     const host = document.createElement("div");
 
     await renderMarkdownInto(
-      "![local](./chart.png)\n\n![inline](data:image/gif;base64,R0lGODlhAQABAAAAACw=)\n",
+      "![chart](docs/chart.png)\n\n![inline](data:image/gif;base64,R0lGODlhAQABAAAAACw=)\n",
       host,
     );
 
     const srcs = [...host.querySelectorAll("img")].map((i) => i.getAttribute("src"));
-    expect(srcs).toEqual(["./chart.png", "data:image/gif;base64,R0lGODlhAQABAAAAACw="]);
+    expect(srcs).toEqual(["data:image/gif;base64,R0lGODlhAQABAAAAACw="]);
+    expect(host.querySelector("[data-remote-image]")?.textContent).toBe("chart");
   });
 });
