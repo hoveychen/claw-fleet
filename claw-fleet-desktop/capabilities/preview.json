@@ -9,8 +9,6 @@
     "core:window:allow-set-title",
     "core:window:allow-set-theme",
     "core:window:allow-close",
-    "core:event:allow-listen",
-    "core:event:allow-unlisten",
     "opener:default",
     "store:default"
   ]
