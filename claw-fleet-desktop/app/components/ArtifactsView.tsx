@@ -473,7 +473,17 @@ function ArtifactDetail({
               </button>
               <button
                 className={styles.action}
-                onClick={() => void revealItemInDir(localPath)}
+                onClick={async () => {
+                  // The blob can be gone by now — the drift banner below exists
+                  // precisely because the source file moves under us. Without
+                  // this the click is indistinguishable from a no-op.
+                  try {
+                    await revealItemInDir(localPath);
+                    onError(null);
+                  } catch (e) {
+                    onError(t("artifacts.reveal_failed", "显示失败：{{error}}", { error: String(e) }));
+                  }
+                }}
               >
                 {t("artifacts.reveal", "在访达中显示")}
               </button>
