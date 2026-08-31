@@ -116,3 +116,54 @@ describe("renderMarkdownInto", () => {
     expect(host.innerHTML).not.toContain("onerror");
   });
 });
+
+describe("renderMarkdownInto — remote images", () => {
+  /**
+   * A card renders as soon as it scrolls into view, so a deliverable carrying a
+   * `<img src="https://…">` would make the artifacts page fan out requests to
+   * whatever hosts its documents happen to reference, just from scrolling. The
+   * stage does the same on an explicit open, which is a different bargain.
+   * Nothing remote may reach the document — that is what the assertion checks,
+   * because an src that never lands cannot be fetched.
+   */
+  it("replaces http(s) images with a placeholder instead of loading them", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    await renderMarkdownInto(
+      "![release badge](https://img.shields.io/badge/release-v2.4.2-blue)\n",
+      host,
+    );
+
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.innerHTML).not.toContain("img.shields.io");
+    const ph = host.querySelector("[data-remote-image]");
+    expect(ph?.textContent).toBe("release badge");
+  });
+
+  it("covers protocol-relative and uppercase-scheme urls too", async () => {
+    const host = document.createElement("div");
+
+    await renderMarkdownInto(
+      '<img src="//evil.example/px.gif" alt="a">\n\n<img src="HTTPS://evil.example/b.png" alt="b">\n',
+      host,
+    );
+
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.innerHTML).not.toContain("evil.example");
+  });
+
+  /** A relative path resolves against the artifact's own blob URL — same origin
+   *  as the page's other reads, and usually a 404. Nothing to defuse. */
+  it("leaves local and data images alone", async () => {
+    const host = document.createElement("div");
+
+    await renderMarkdownInto(
+      "![local](./chart.png)\n\n![inline](data:image/gif;base64,R0lGODlhAQABAAAAACw=)\n",
+      host,
+    );
+
+    const srcs = [...host.querySelectorAll("img")].map((i) => i.getAttribute("src"));
+    expect(srcs).toEqual(["./chart.png", "data:image/gif;base64,R0lGODlhAQABAAAAACw="]);
+  });
+});
