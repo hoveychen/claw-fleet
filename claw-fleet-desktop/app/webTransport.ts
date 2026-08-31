@@ -228,7 +228,6 @@ export function localCommand(cmd: string, args: Record<string, unknown>): { hand
     case "show_decision_float":
     case "hide_decision_float":
     case "resize_decision_float":
-    case "toggle_tray_panel":
     case "set_lite_mode":
     case "quit_app":
     case "nudge_traffic_lights":

@@ -34,7 +34,6 @@ export default defineConfig(async () => ({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        tray: resolve(__dirname, "tray.html"),
         settings: resolve(__dirname, "settings.html"),
         preview: resolve(__dirname, "preview.html"),
         "decision-float": resolve(__dirname, "decision-float.html"),

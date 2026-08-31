@@ -306,11 +306,6 @@ fn set_lite_mode(app: tauri::AppHandle, enabled: bool) {
 }
 
 #[tauri::command]
-fn toggle_tray_panel(_app: tauri::AppHandle, _visible: bool) {
-    // No-op: custom tray panel removed; kept for frontend compat.
-}
-
-#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -2222,7 +2217,6 @@ pub fn run() {
             show_main_window,
             set_lite_mode,
             crate::traffic_lights::nudge_traffic_lights,
-            toggle_tray_panel,
             quit_app,
             open_settings_window,
             open_preview_window,
