@@ -192,6 +192,45 @@ pub(crate) fn artifact_local_path(
     Ok(Some(path.display().to_string()))
 }
 
+/// Hand an artifact's blob to whatever application the OS opens it with.
+///
+/// Deliberately a backend command instead of the frontend's
+/// `@tauri-apps/plugin-opener` `openPath`: that plugin command is scope-checked,
+/// `opener:default` does not include `allow-open-path`, and even granting it
+/// needs a non-empty path scope (`scope.rs` ANDs the fs scope with
+/// `allowed.iter().any(..)`). Without that the command answers `ForbiddenPath`,
+/// and a frontend that does not await the promise shows nothing — which is how
+/// 「用系统应用打开」shipped as a dead button next to a working 「在访达中显示」
+/// (`reveal_item_in_dir` has no scope check). `OpenerExt::open_path` on this
+/// side is not scope-checked, and resolving the path here means the frontend
+/// hands over an artifact id rather than an arbitrary path.
+///
+/// Like `artifact_local_path` this is a shell action, not a data-fetching
+/// capability, so it stays off the Backend trait (same reasoning as
+/// `reveal_path`) — and it is local-only, because a remote workspace's blob
+/// lives on the probe's machine.
+#[tauri::command(async)]
+pub(crate) fn open_artifact_external(
+    app: tauri::AppHandle,
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if state.backend.read().unwrap().is_remote() {
+        return Err("artifact lives on the remote host".to_string());
+    }
+    let artifact = state.backend.read().unwrap().get_artifact(&id)?;
+    let root = claw_fleet_core::artifacts::artifacts_dir()
+        .ok_or_else(|| "cannot determine home dir".to_string())?;
+    let path = claw_fleet_core::artifacts::blob_path(&root, &artifact);
+    if !path.exists() {
+        return Err(format!("file no longer exists: {}", path.display()));
+    }
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::artifact_response;
