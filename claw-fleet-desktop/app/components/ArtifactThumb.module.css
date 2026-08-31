@@ -67,6 +67,19 @@
   display: none;
 }
 
+/* An html deliverable brings its own page, so the card only has to give the
+ * frame a viewport to lay it out in and let the shared 0.28 transform shrink
+ * it. 620px is chosen against that scale: 620 × 0.28 ≈ 174px, which covers the
+ * 4:3 well's height, so a short page never leaves a strip of empty well below
+ * it. Overflow is clipped by .frame. */
+.html_frame {
+  display: block;
+  width: 100%;
+  height: 620px;
+  border: 0;
+  background: #ffffff;
+}
+
 /* A markdown deliverable arrives as unstyled html — the pipeline emits tags, not
  * a page — so the card has to supply the page itself. Sized at the same 820px
  * render width as the Office three, then shrunk by the shared 0.28 transform,
