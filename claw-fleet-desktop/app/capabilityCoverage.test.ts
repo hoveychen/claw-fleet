@@ -25,15 +25,22 @@ import { describe, expect, it } from "vitest";
  *  - entry → files:    the import graph, static and dynamic.
  *  - API → command:    each plugin's shipped `dist-js/index.js`, which spells
  *                      `invoke('plugin:opener|open_path')` inside the exported
- *                      function.
+ *                      function; `@tauri-apps/api/{window,webview}.js` for the
+ *                      core surface, where the same string sits inside a class
+ *                      method.
  *  - permission → command: `gen/schemas/acl-manifests.json`, which tauri-build
  *                      generates from the actual crates — including how each
  *                      `default` set expands.
  *
- * Deliberately *not* covered: `@tauri-apps/api/window` and friends. Their APIs
- * are class methods rather than the flat exported functions the dist-js scan
- * reads, and `core:default` already grants the bulk of them. Adding a new
- * `core:window:*` call still needs a manual capability check.
+ * Reading the command out of the shipped bundle rather than guessing it from
+ * the API name is load-bearing: dialog's `ask()` and `confirm()` both invoke
+ * `plugin:dialog|message`, so `dialog:default` — which has no `allow-ask` —
+ * covers them. A name-based table would have reported a bug that isn't there.
+ *
+ * Known limits, both of which under-report rather than over-grant: core modules
+ * other than window/webview (`app`, `path`, `menu`, `tray`) are not scanned, and
+ * a method reached through a handle this scan cannot trace back to
+ * `getCurrentWindow()` is invisible to it.
  */
 
 const ROOT = resolve(__dirname, "..");
@@ -133,6 +140,16 @@ function pluginApisIn(src: string): Map<string, Set<string>> {
 
 // ── plugin API → the command it invokes ──────────────────────────────────────
 
+/**
+ * The `plugin:` token in an `invoke` string is not always the manifest key: the
+ * core plugins invoke `plugin:window|…` but are listed as `core:window`.
+ */
+function manifestKeyFor(token: string): string {
+  if (MANIFESTS[token]) return token;
+  if (MANIFESTS[`core:${token}`]) return `core:${token}`;
+  return token;
+}
+
 /** Scan a plugin's shipped bundle for `async function api() { invoke('plugin:p|cmd') }`. */
 function apiCommands(plugin: string): Map<string, Set<string>> {
   const dist = join(ROOT, "node_modules", "@tauri-apps", `plugin-${plugin}`, "dist-js", "index.js");
@@ -145,9 +162,81 @@ function apiCommands(plugin: string): Map<string, Set<string>> {
     const inv = /invoke\(\s*["']plugin:([\w-]+)\|([\w]+)["']/.exec(line);
     if (inv && current) {
       const set = out.get(current) ?? new Set<string>();
-      set.add(`${inv[1]}:${inv[2]}`);
+      set.add(`${manifestKeyFor(inv[1])}:${inv[2]}`);
       out.set(current, set);
     }
+  }
+  return out;
+}
+
+// ── core API (`@tauri-apps/api/*`) → the command it invokes ──────────────────
+
+/** The factory each core module hands the frontend to reach the current one. */
+const CORE_FACTORIES: Record<string, string> = {
+  window: "getCurrentWindow",
+  webview: "getCurrentWebview",
+};
+
+/** Line starts that look like a method definition but are control flow. */
+const NOT_METHODS = new Set([
+  "if", "for", "while", "switch", "catch", "return", "function", "new", "typeof", "await", "else",
+]);
+
+/**
+ * `@tauri-apps/api`'s window/webview surface is class *methods* rather than the
+ * flat exported functions the plugin bundles use, so the scan keys on
+ * `async startDragging() {` instead of `async function startDragging(`.
+ *
+ * Listener methods (`onResized`, `onDragDropEvent`, …) do not invoke anything
+ * directly — they bottom out in `this.listen(…)`, which is `plugin:event|listen`
+ * — so those are mapped explicitly.
+ */
+function coreApiCommands(module: string): Map<string, Set<string>> {
+  const src = readFileSync(join(ROOT, "node_modules", "@tauri-apps", "api", `${module}.js`), "utf8");
+  const out = new Map<string, Set<string>>();
+  let current: string | null = null;
+  const record = (command: string) => {
+    if (!current) return;
+    const set = out.get(current) ?? new Set<string>();
+    set.add(command);
+    out.set(current, set);
+  };
+
+  for (const line of src.split("\n")) {
+    const def = /^\s*(?:async\s+)?(?:function\s+)?([A-Za-z0-9_$]+)\s*\([^()]*\)\s*\{\s*$/.exec(line);
+    if (def && !NOT_METHODS.has(def[1])) current = def[1];
+    const inv = /invoke\(\s*["']plugin:([\w-]+)\|([\w]+)["']/.exec(line);
+    if (inv) record(`${manifestKeyFor(inv[1])}:${inv[2]}`);
+    const listener = /\bthis\.(listen|once)\(/.exec(line);
+    if (listener) record(`core:event:${listener[1]}`);
+  }
+  return out;
+}
+
+/**
+ * Which methods of a window/webview handle a file calls. Two shapes appear in
+ * this app: `getCurrentWindow().minimize()` and `const w = getCurrentWindow()`
+ * followed by `w.isMaximized()`. Keying on the factory rather than on bare
+ * `.close(`-style method names is what keeps an unrelated object's `close()`
+ * from demanding `core:window:allow-close`.
+ */
+function coreApisIn(src: string): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const [module, factory] of Object.entries(CORE_FACTORIES)) {
+    if (!new RegExp(`["']@tauri-apps/api/${module}["']`).test(src)) continue;
+    const methods = new Set<string>();
+    // The chain may wrap onto the next line — `applyWindowTheme` does.
+    for (const m of src.matchAll(new RegExp(`${factory}\\(\\)\\s*\\.\\s*([A-Za-z0-9_$]+)\\s*\\(`, "g"))) {
+      methods.add(m[1]);
+    }
+    for (const bind of src.matchAll(
+      new RegExp(`(?:const|let|var)\\s+([A-Za-z0-9_$]+)\\s*=\\s*(?:await\\s+)?${factory}\\(\\)`, "g"),
+    )) {
+      for (const m of src.matchAll(new RegExp(`\\b${bind[1]}\\s*\\.\\s*([A-Za-z0-9_$]+)\\s*\\(`, "g"))) {
+        methods.add(m[1]);
+      }
+    }
+    if (methods.size) out.set(module, methods);
   }
   return out;
 }
@@ -164,7 +253,22 @@ const MANIFESTS: Record<string, Manifest> = JSON.parse(
   readFileSync(join(ROOT, "gen", "schemas", "acl-manifests.json"), "utf8"),
 );
 
-/** Expand one `plugin:identifier` entry into the commands it allows. */
+/**
+ * Split a capability entry like `core:window:allow-start-dragging` into the
+ * manifest it belongs to and the identifier inside it. Longest-prefix, because
+ * the manifest keys themselves contain colons (`core`, `core:window`, `opener`)
+ * — `lastIndexOf(":")` would read `core:default` as plugin `core:` and find
+ * nothing.
+ */
+function splitIdentifier(id: string): [string, string] {
+  let best = "";
+  for (const key of Object.keys(MANIFESTS)) {
+    if (id.startsWith(key + ":") && key.length > best.length) best = key;
+  }
+  return best ? [best, id.slice(best.length + 1)] : ["core", id];
+}
+
+/** Expand one capability entry into the commands it allows. */
 function commandsFor(plugin: string, id: string, seen = new Set<string>()): Set<string> {
   const out = new Set<string>();
   const key = `${plugin}:${id}`;
@@ -182,7 +286,12 @@ function commandsFor(plugin: string, id: string, seen = new Set<string>()): Set<
   const set =
     id === "default" ? manifest.default_permission : manifest.permission_sets?.[id];
   for (const child of set?.permissions ?? []) {
-    for (const c of commandsFor(plugin, child, seen)) out.add(c);
+    // `core:default` lists its children fully qualified (`core:window:default`),
+    // so a child can name a different manifest than its parent.
+    const [childPlugin, childId] = child.includes(":")
+      ? splitIdentifier(child)
+      : [plugin, child];
+    for (const c of commandsFor(childPlugin, childId, seen)) out.add(c);
   }
   return out;
 }
@@ -207,9 +316,7 @@ function grantsForWindow(label: string): { allowed: Set<string>; scoped: Set<str
     if (!cap.windows?.includes(label)) continue;
     for (const entry of cap.permissions) {
       const id = typeof entry === "string" ? entry : entry.identifier;
-      const [plugin, rest] = id.includes(":")
-        ? [id.slice(0, id.lastIndexOf(":")), id.slice(id.lastIndexOf(":") + 1)]
-        : ["core", id];
+      const [plugin, rest] = splitIdentifier(id);
       const cmds = commandsFor(plugin, rest);
       for (const c of cmds) {
         allowed.add(c);
@@ -241,17 +348,31 @@ interface Use {
 }
 
 function uses(): Use[] {
-  const commandCache = new Map<string, Map<string, Set<string>>>();
+  const pluginCache = new Map<string, Map<string, Set<string>>>();
+  const coreCache = new Map<string, Map<string, Set<string>>>();
   const out: Use[] = [];
   for (const [label, entry] of windowEntries()) {
     for (const file of reachableFrom(entry)) {
       if (/\.test\.tsx?$/.test(file)) continue;
-      for (const [plugin, apis] of pluginApisIn(readFileSync(file, "utf8"))) {
-        if (!commandCache.has(plugin)) commandCache.set(plugin, apiCommands(plugin));
-        const table = commandCache.get(plugin)!;
+      const src = readFileSync(file, "utf8");
+      const rel = file.slice(APP.length + 1);
+
+      for (const [plugin, apis] of pluginApisIn(src)) {
+        if (!pluginCache.has(plugin)) pluginCache.set(plugin, apiCommands(plugin));
+        const table = pluginCache.get(plugin)!;
         for (const api of apis) {
           for (const command of table.get(api) ?? []) {
-            out.push({ window: label, file: file.slice(APP.length + 1), plugin, api, command });
+            out.push({ window: label, file: rel, plugin, api, command });
+          }
+        }
+      }
+
+      for (const [module, apis] of coreApisIn(src)) {
+        if (!coreCache.has(module)) coreCache.set(module, coreApiCommands(module));
+        const table = coreCache.get(module)!;
+        for (const api of apis) {
+          for (const command of table.get(api) ?? []) {
+            out.push({ window: label, file: rel, plugin: `core:${module}`, api, command });
           }
         }
       }
@@ -270,7 +391,17 @@ describe("capability coverage", () => {
       "preview",
       "settings",
     ]);
-    expect(uses().length).toBeGreaterThan(10);
+    // Both halves must actually find something. A regex that silently stops
+    // matching would leave the real assertion below passing over an empty list,
+    // which is the one way this guard could rot without anyone noticing.
+    const found = uses();
+    expect(found.filter((u) => !u.plugin.startsWith("core:")).length).toBeGreaterThan(10);
+    expect(found.filter((u) => u.plugin.startsWith("core:")).length).toBeGreaterThan(5);
+    // The window handle only reachable from the main window's chrome, and the
+    // one the whole audit started from.
+    expect(
+      found.some((u) => u.window === "main" && u.command === "core:window:start_dragging"),
+    ).toBe(true);
   });
 
   it("grants every plugin command each window can reach", () => {
