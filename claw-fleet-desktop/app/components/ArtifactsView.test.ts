@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  filterArtifacts,
-  formatBytes,
-  sortArtifacts,
-  textPreviewMode,
-} from "./ArtifactsView";
+import { filterArtifacts, formatBytes, sortArtifacts } from "./ArtifactsView";
 import type { Artifact } from "./ArtifactsView";
 
 function make(over: Partial<Artifact>): Artifact {
@@ -38,31 +33,6 @@ describe("formatBytes", () => {
     // Above 10 the extra digit is noise.
     expect(formatBytes(412_663_296)).toBe("394 MB");
     expect(formatBytes(0)).toBe("0 B");
-  });
-});
-
-describe("textPreviewMode", () => {
-  /**
-   * The store lumps every `text/*` file into one `text` kind, so before this
-   * split a markdown spec rendered as `##` and an html report rendered as its
-   * own source. Both are ordinary deliverables — the wiki/artifact routing rule
-   * is audience, not file format — so the stage has to tell the three apart.
-   */
-  it("separates markdown and html from plain text", () => {
-    expect(textPreviewMode("text/markdown; charset=utf-8")).toBe("markdown");
-    expect(textPreviewMode("text/html; charset=utf-8")).toBe("html");
-    expect(textPreviewMode("text/plain; charset=utf-8")).toBe("plain");
-    expect(textPreviewMode("text/csv; charset=utf-8")).toBe("plain");
-    // application/json is bucketed `text` by the store but is not markup.
-    expect(textPreviewMode("application/json")).toBe("plain");
-  });
-
-  it("ignores parameter and case noise in the mime", () => {
-    // The value comes off the wire; a stricter equality check would silently
-    // send a real markdown doc back to the <pre> path.
-    expect(textPreviewMode("TEXT/MARKDOWN")).toBe("markdown");
-    expect(textPreviewMode(" text/html ")).toBe("html");
-    expect(textPreviewMode("")).toBe("plain");
   });
 });
 

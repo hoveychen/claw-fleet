@@ -19,7 +19,7 @@ import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
 import { isWebBuild } from "../hostEnv";
-import { officeMode, thumbMode } from "../officePreview";
+import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
 import { downloadArtifact } from "../mock/liveProxy";
 import { PageShell } from "./PageShell";
 import { EmptyState } from "./EmptyState";
@@ -77,23 +77,6 @@ const OfficePreview = lazy(() => import("./OfficePreview"));
 
 /** Same libraries, same reason to defer them — see `ArtifactThumb`. */
 const ArtifactThumb = lazy(() => import("./ArtifactThumb"));
-
-/**
- * Which renderer a `text`-kind artifact wants.
- *
- * The store buckets every `text/*` file into one `text` kind, which is right
- * for icons but wrong for the stage: a markdown spec and an html report are
- * both deliverables people hand over (the routing rule is audience, not
- * format), and showing either as raw source is the same failure as an .xlsx
- * opening blank in the wiki. Sniffing happens here, on the mime the store
- * already derived, so no component re-parses an extension.
- */
-export function textPreviewMode(mime: string): "markdown" | "html" | "plain" {
-  const base = mime.split(";")[0].trim().toLowerCase();
-  if (base === "text/markdown") return "markdown";
-  if (base === "text/html") return "html";
-  return "plain";
-}
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
