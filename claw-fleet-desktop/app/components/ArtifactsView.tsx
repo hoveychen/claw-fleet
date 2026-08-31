@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { openPath } from "@tauri-apps/plugin-opener";
 import {
   Archive,
   FileSpreadsheet,
@@ -454,12 +453,37 @@ function ArtifactDetail({
           </button>
           {localPath && (
             <>
-              <button className={styles.action} onClick={() => void openPath(localPath)}>
+              <button
+                className={styles.action}
+                onClick={async () => {
+                  // Not the opener plugin's `openPath`: that command is
+                  // scope-checked and `opener:default` does not grant
+                  // `allow-open-path`, so it rejected and — unawaited — did
+                  // nothing at all. The backend command resolves the path host-
+                  // side and opens it from Rust, which is not scope-checked.
+                  try {
+                    await invoke("open_artifact_external", { id: artifact.id });
+                    onError(null);
+                  } catch (e) {
+                    onError(t("artifacts.open_failed", "打开失败：{{error}}", { error: String(e) }));
+                  }
+                }}
+              >
                 {t("artifacts.open_with", "用系统应用打开")}
               </button>
               <button
                 className={styles.action}
-                onClick={() => void revealItemInDir(localPath)}
+                onClick={async () => {
+                  // The blob can be gone by now — the drift banner below exists
+                  // precisely because the source file moves under us. Without
+                  // this the click is indistinguishable from a no-op.
+                  try {
+                    await revealItemInDir(localPath);
+                    onError(null);
+                  } catch (e) {
+                    onError(t("artifacts.reveal_failed", "显示失败：{{error}}", { error: String(e) }));
+                  }
+                }}
               >
                 {t("artifacts.reveal", "在访达中显示")}
               </button>

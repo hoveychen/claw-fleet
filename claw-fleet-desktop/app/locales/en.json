@@ -2371,6 +2371,8 @@
     "export_short": "Export",
     "exported": "Exported",
     "export_failed": "Export failed: {{error}}",
+    "open_failed": "Open failed: {{error}}",
+    "reveal_failed": "Reveal failed: {{error}}",
     "reveal": "Reveal in Finder",
     "open_with": "Open with system app",
     "remote_no_local": "This artifact lives on the remote host — export it to this machine instead",
