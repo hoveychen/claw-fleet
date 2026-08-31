@@ -101,7 +101,7 @@ export async function renderMarkdownInto(text: string, host: HTMLElement): Promi
     import("rehype-stringify"),
     import("./markdown/plugins"),
   ]);
-  host.innerHTML = String(
+  const html = String(
     unified()
       .use(remarkParse.default)
       .use(plugins.safeRemarkPlugins)
@@ -112,6 +112,46 @@ export async function renderMarkdownInto(text: string, host: HTMLElement): Promi
       .use(rehypeStringify.default, { allowDangerousHtml: true })
       .processSync(text),
   );
+  // Via DOMParser rather than straight into `host.innerHTML`: the parsed
+  // document has no browsing context, so nothing in it fetches. Assigning the
+  // string first and scrubbing after would be too late — the browser starts
+  // loading an <img> the moment it lands in a live document, which is the
+  // request this is here to prevent.
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  defuseRemoteImages(parsed);
+  host.innerHTML = parsed.body.innerHTML;
+}
+
+/**
+ * Turn `<img src="https://…">` into an inert placeholder.
+ *
+ * A card renders as soon as it scrolls into view, so without this, opening the
+ * artifacts page fans out requests to whatever hosts the stored documents
+ * happen to reference — a README's shields.io badges were the case that made
+ * this visible. The stage does load them, but only when someone opens that one
+ * document on purpose; a grid that reaches out on scroll is a different bargain
+ * and not one the user agreed to.
+ *
+ * Relative paths and `data:` URIs are left alone: the first resolves against
+ * the artifact's own blob URL (same reads the page already makes, usually a
+ * 404) and the second carries its bytes inline.
+ */
+function defuseRemoteImages(doc: Document): void {
+  for (const img of Array.from(doc.querySelectorAll("img"))) {
+    const src = img.getAttribute("src") ?? "";
+    // Empty counts. `rehype-sanitize` drops a src it doesn't like — an
+    // uppercase `HTTPS://` scheme is one — and what it leaves behind is a
+    // srcless <img>: no request, but a broken-image glyph in the well. Same
+    // origin story, same placeholder.
+    //
+    // Protocol-relative `//host/x` is a remote fetch too, and is easy to miss
+    // by testing for "https:" alone.
+    if (src !== "" && !/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(src)) continue;
+    const box = doc.createElement("span");
+    box.setAttribute("data-remote-image", "");
+    box.textContent = img.getAttribute("alt") || "";
+    img.replaceWith(box);
+  }
 }
 
 /** Cells arrive as parsed values; a Date must not render as its ISO string. */

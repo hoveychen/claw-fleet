@@ -170,6 +170,18 @@
   max-width: 100%;
 }
 
+/* Stands in for an image the card refuses to fetch (see `defuseRemoteImages`).
+   A dashed box rather than nothing: a README whose head is three badges would
+   otherwise thumbnail as a blank strip, which reads as a failed render. */
+.canvas[data-mode="markdown"] [data-remote-image] {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px dashed #cfc7bb;
+  border-radius: 4px;
+  color: #8a7f74;
+  font-size: 0.85em;
+}
+
 /* Literal colours, not tokens: this table sits on --canvas-fixed-light next to
    docx/pptx pages that are themselves fixed-light documents. A themed ink would
    go pale-on-white the moment the app switches to the dark theme, while the
