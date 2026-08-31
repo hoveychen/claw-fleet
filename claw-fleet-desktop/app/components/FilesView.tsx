@@ -890,6 +890,12 @@ export function ExternalFilePreview({
       ? "paths.reveal_in_explorer"
       : "paths.reveal_in_finder";
 
+  // Same failure the path chips already surface (`markdown/pathLinks`): the
+  // file can be gone by the time this is clicked. Unlike a context-menu item,
+  // this button is still on screen when the promise settles, so a swallowed
+  // rejection would be indistinguishable from a dead button.
+  const [revealFailed, setRevealFailed] = useState(false);
+
   return (
     <div className={fileStyles.external_wrap}>
       <div className={fileStyles.external_bar}>
@@ -905,9 +911,17 @@ export function ExternalFilePreview({
           {canReveal && (
             <button
               className={fileStyles.external_btn}
-              onClick={() => void invoke("reveal_path", { path }).catch(() => {})}
+              onClick={async () => {
+                try {
+                  await invoke("reveal_path", { path });
+                  setRevealFailed(false);
+                } catch {
+                  setRevealFailed(true);
+                  setTimeout(() => setRevealFailed(false), 2000);
+                }
+              }}
             >
-              {t(revealKey)}
+              {revealFailed ? t("paths.not_found") : t(revealKey)}
             </button>
           )}
           <button className={fileStyles.external_btn} onClick={onClose}>

@@ -2101,6 +2101,7 @@ pub fn run() {
             artifact_usage,
             export_artifact,
             artifact_local_path,
+            open_artifact_external,
             list_wiki_docs,
             get_wiki_doc,
             get_handoff_chain,

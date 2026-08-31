@@ -2367,6 +2367,8 @@
     "export_short": "导出",
     "exported": "已导出",
     "export_failed": "导出失败：{{error}}",
+    "open_failed": "打开失败：{{error}}",
+    "reveal_failed": "显示失败：{{error}}",
     "reveal": "在访达中显示",
     "open_with": "用系统应用打开",
     "remote_no_local": "这份产出在远端主机上，只能导出到本机",
