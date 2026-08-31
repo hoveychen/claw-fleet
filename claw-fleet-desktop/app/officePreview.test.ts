@@ -6,6 +6,7 @@ import {
   MAX_VIDEO_DOWNLOAD_BYTES,
   MAX_VIDEO_THUMB_BYTES,
   officeMode,
+  textPreviewMode,
   thumbMode,
 } from "./officePreview";
 
@@ -53,6 +54,31 @@ describe("officeMode", () => {
         " APPLICATION/VND.OPENXMLFORMATS-OFFICEDOCUMENT.WORDPROCESSINGML.DOCUMENT; charset=binary ",
       ),
     ).toBe("docx");
+  });
+});
+
+describe("textPreviewMode", () => {
+  /**
+   * The store lumps every `text/*` file into one `text` kind, so before this
+   * split a markdown spec rendered as `##` and an html report rendered as its
+   * own source. Both are ordinary deliverables — the wiki/artifact routing rule
+   * is audience, not file format — so the stage has to tell the three apart.
+   */
+  it("separates markdown and html from plain text", () => {
+    expect(textPreviewMode("text/markdown; charset=utf-8")).toBe("markdown");
+    expect(textPreviewMode("text/html; charset=utf-8")).toBe("html");
+    expect(textPreviewMode("text/plain; charset=utf-8")).toBe("plain");
+    expect(textPreviewMode("text/csv; charset=utf-8")).toBe("plain");
+    // application/json is bucketed `text` by the store but is not markup.
+    expect(textPreviewMode("application/json")).toBe("plain");
+  });
+
+  it("ignores parameter and case noise in the mime", () => {
+    // The value comes off the wire; a stricter equality check would silently
+    // send a real markdown doc back to the <pre> path.
+    expect(textPreviewMode("TEXT/MARKDOWN")).toBe("markdown");
+    expect(textPreviewMode(" text/html ")).toBe("html");
+    expect(textPreviewMode("")).toBe("plain");
   });
 });
 
@@ -106,6 +132,32 @@ describe("thumbMode", () => {
     expect(MAX_VIDEO_DOWNLOAD_BYTES).toBeGreaterThanOrEqual(6_016_675);
     // Still bounded — it is a download, not a ranged read.
     expect(MAX_VIDEO_DOWNLOAD_BYTES).toBeLessThan(MAX_VIDEO_THUMB_BYTES);
+  });
+
+  /**
+   * The grid's remaining icon wall is markdown and html — a `fleet artifact add
+   * report.md` lands in the same `text` bucket as a log dump and got the same
+   * gray placeholder, even though the stage has rendered both properly since
+   * v2.4.0. Both are cheap: no zip to unpack, no page to rasterise.
+   */
+  it("draws markdown and html cards rather than the generic text icon", () => {
+    expect(thumbMode("text/markdown; charset=utf-8", 57_000)).toBe("markdown");
+    expect(thumbMode("text/html; charset=utf-8", 12_000)).toBe("html");
+    expect(thumbMode(" TEXT/MARKDOWN ", 1000)).toBe("markdown");
+  });
+
+  it("leaves the rest of text/* on its icon", () => {
+    // A log or a csv has no shape worth shrinking into 190px — rendering one
+    // would be a wall of gray lines, which is what the icon already says.
+    expect(thumbMode("text/plain; charset=utf-8", 1000)).toBeNull();
+    expect(thumbMode("text/csv; charset=utf-8", 1000)).toBeNull();
+    expect(thumbMode("application/json", 1000)).toBeNull();
+  });
+
+  it("holds text to the same whole-download ceiling as the OOXML three", () => {
+    expect(thumbMode("text/markdown", MAX_THUMB_BYTES)).toBe("markdown");
+    expect(thumbMode("text/markdown", MAX_THUMB_BYTES + 1)).toBeNull();
+    expect(thumbMode("text/html", MAX_THUMB_BYTES + 1)).toBeNull();
   });
 
   it("tolerates the codec parameters a media mime arrives with", () => {
