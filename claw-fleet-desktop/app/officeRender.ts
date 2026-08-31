@@ -78,6 +78,42 @@ export async function readSheets(blob: Blob): Promise<ParsedSheet[]> {
   return (await readXlsxFile(blob)) as ParsedSheet[];
 }
 
+/**
+ * Render markdown into `host` as sanitized HTML.
+ *
+ * Deliberately the string pipeline rather than the `TextBlock` component the
+ * stage uses. `ArtifactThumb` is imperative DOM that caches `host.innerHTML`
+ * once the render settles, and TextBlock's Prism / KaTeX / Mermaid passes are
+ * asynchronous — reading innerHTML after mounting it would cache a half-painted
+ * card. None of those three passes is worth anything at 0.28 scale anyway. What
+ * *is* shared is the plugin chain (`safeRemarkPlugins` / `safeRehypePlugins`),
+ * so a heading, a table and a CJK bold run come out looking like the stage's.
+ *
+ * That chain includes `rehype-sanitize`, which is load-bearing here and not
+ * merely tidy: an artifact is an agent-produced file, and this is the one path
+ * in the app that puts its markup into `innerHTML` on the main origin.
+ */
+export async function renderMarkdownInto(text: string, host: HTMLElement): Promise<void> {
+  const [{ unified }, remarkParse, remarkRehype, rehypeStringify, plugins] = await Promise.all([
+    import("unified"),
+    import("remark-parse"),
+    import("remark-rehype"),
+    import("rehype-stringify"),
+    import("./markdown/plugins"),
+  ]);
+  host.innerHTML = String(
+    unified()
+      .use(remarkParse.default)
+      .use(plugins.safeRemarkPlugins)
+      // What react-markdown does internally: rehype-raw (first in the safe
+      // chain) needs the raw html nodes to still be in the tree when it runs.
+      .use(remarkRehype.default, { allowDangerousHtml: true })
+      .use(plugins.safeRehypePlugins)
+      .use(rehypeStringify.default, { allowDangerousHtml: true })
+      .processSync(text),
+  );
+}
+
 /** Cells arrive as parsed values; a Date must not render as its ISO string. */
 export function formatCell(cell: CellValue): string {
   if (cell === null || cell === undefined) return "";

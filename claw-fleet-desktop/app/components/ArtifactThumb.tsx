@@ -30,7 +30,14 @@ import { useEffect, useRef, useState } from "react";
 
 import { MAX_VIDEO_DOWNLOAD_BYTES, type ThumbMode } from "../officePreview";
 import { renderPdfPosterInto, renderVideoPosterInto } from "../mediaThumb";
-import { fetchBlob, formatCell, readSheets, renderDocxInto, renderPptxInto } from "../officeRender";
+import {
+  fetchBlob,
+  formatCell,
+  readSheets,
+  renderDocxInto,
+  renderMarkdownInto,
+  renderPptxInto,
+} from "../officeRender";
 import styles from "./ArtifactThumb.module.css";
 
 /** How many documents may be parsed at once across the whole grid. */
@@ -38,6 +45,23 @@ const MAX_PARALLEL = 2;
 
 /** Rows worth showing in a card-sized table. */
 const THUMB_SHEET_ROWS = 12;
+
+/**
+ * How much of a markdown deliverable is laid out for the card.
+ *
+ * The well shows the first screen and nothing else, so parsing a whole spec to
+ * throw all but its head away is pure cost. Cut on a line boundary: mid-line
+ * would leave a half word as the last thing visible, and a heading sliced in
+ * two reads as a rendering bug rather than a truncation.
+ */
+const THUMB_MD_CHARS = 4000;
+
+function markdownHead(text: string): string {
+  if (text.length <= THUMB_MD_CHARS) return text;
+  const cut = text.slice(0, THUMB_MD_CHARS);
+  const nl = cut.lastIndexOf("\n");
+  return nl > 0 ? cut.slice(0, nl) : cut;
+}
 
 /**
  * Width the document is rendered at before being scaled into the card.
@@ -138,7 +162,11 @@ export default function ArtifactThumb({
         } else {
           const blob = await fetchBlob(url);
           if (!alive) return;
-          if (mode === "xlsx") {
+          if (mode === "markdown") {
+            const body = await blob.text();
+            if (!alive) return;
+            await renderMarkdownInto(markdownHead(body), host);
+          } else if (mode === "xlsx") {
             const sheets = await readSheets(blob);
             if (!alive) return;
             host.replaceChildren(sheetTable(sheets[0]?.data ?? []));
