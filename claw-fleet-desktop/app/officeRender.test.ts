@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 
-import { fixSymbolBullets } from "./officeRender";
+import { fixSymbolBullets, renderMarkdownInto } from "./officeRender";
 
 /**
  * Reproduces what docx-preview emits for a Word bulleted list, taken verbatim
@@ -71,5 +71,105 @@ describe("fixSymbolBullets across multiple rules", () => {
     const rules = [...host.querySelector("style")!.sheet!.cssRules] as CSSStyleRule[];
     expect(rules).toHaveLength(2);
     for (const r of rules) expect(r.style.content).toContain("\u2022");
+  });
+});
+
+describe("renderMarkdownInto", () => {
+  it("renders markdown as html rather than dropping the source in", async () => {
+    const host = document.createElement("div");
+
+    await renderMarkdownInto("# 部署备料清单\n\n- 第一项\n- 第二项\n", host);
+
+    expect(host.querySelector("h1")?.textContent).toBe("部署备料清单");
+    expect(host.querySelectorAll("li")).toHaveLength(2);
+    // The failure this replaces: the card showed the literal "#".
+    expect(host.textContent).not.toContain("#");
+  });
+
+  it("keeps the CJK-friendly emphasis the stage gets", async () => {
+    // Plain CommonMark refuses to open emphasis when ** sits between a CJK
+    // character and punctuation, so a thumbnail on its own chain would show
+    // raw asterisks where the stage shows bold. Same plugin list, same result.
+    const host = document.createElement("div");
+
+    await renderMarkdownInto("一个是**“口径每年变”这个特征**。所有 SaaS", host);
+
+    expect(host.querySelector("strong")?.textContent).toBe("“口径每年变”这个特征");
+    expect(host.textContent).not.toContain("**");
+  });
+
+  /**
+   * An artifact is an agent-produced file and this is the one path that puts
+   * its markup into `innerHTML` on the app's own origin — the stage's html mode
+   * gets a cross-origin sandboxed frame instead. So the sanitize pass in the
+   * shared chain is load-bearing, not tidiness.
+   */
+  it("scrubs script and event handlers out of embedded html", async () => {
+    const host = document.createElement("div");
+
+    await renderMarkdownInto(
+      'ok\n\n<script>window.pwned = 1</script>\n\n<img src="x" onerror="window.pwned = 2">\n',
+      host,
+    );
+
+    expect(host.querySelector("script")).toBeNull();
+    expect(host.innerHTML).not.toContain("onerror");
+  });
+});
+
+describe("renderMarkdownInto — remote images", () => {
+  /**
+   * A card renders as soon as it scrolls into view, so a deliverable carrying a
+   * `<img src="https://…">` would make the artifacts page fan out requests to
+   * whatever hosts its documents happen to reference, just from scrolling. The
+   * stage does the same on an explicit open, which is a different bargain.
+   * Nothing remote may reach the document — that is what the assertion checks,
+   * because an src that never lands cannot be fetched.
+   */
+  it("replaces http(s) images with a placeholder instead of loading them", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    await renderMarkdownInto(
+      "![release badge](https://img.shields.io/badge/release-v2.4.2-blue)\n",
+      host,
+    );
+
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.innerHTML).not.toContain("img.shields.io");
+    const ph = host.querySelector("[data-remote-image]");
+    expect(ph?.textContent).toBe("release badge");
+  });
+
+  it("covers protocol-relative and uppercase-scheme urls too", async () => {
+    const host = document.createElement("div");
+
+    await renderMarkdownInto(
+      '<img src="//evil.example/px.gif" alt="a">\n\n<img src="HTTPS://evil.example/b.png" alt="b">\n',
+      host,
+    );
+
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.innerHTML).not.toContain("evil.example");
+  });
+
+  /**
+   * A relative path can never resolve: `fleet artifact add` stores one file as
+   * `artifacts/<id>/<name>`, so the document has no siblings. Left alone it
+   * would fire a request that 404s and leave a broken-image glyph in the well —
+   * the four `docs/…` refs in this repo's own README did exactly that. Only a
+   * `data:` URI carries its own bytes, so only it survives.
+   */
+  it("placeholders relative images too, and keeps data: URIs", async () => {
+    const host = document.createElement("div");
+
+    await renderMarkdownInto(
+      "![chart](docs/chart.png)\n\n![inline](data:image/gif;base64,R0lGODlhAQABAAAAACw=)\n",
+      host,
+    );
+
+    const srcs = [...host.querySelectorAll("img")].map((i) => i.getAttribute("src"));
+    expect(srcs).toEqual(["data:image/gif;base64,R0lGODlhAQABAAAAACw="]);
+    expect(host.querySelector("[data-remote-image]")?.textContent).toBe("chart");
   });
 });

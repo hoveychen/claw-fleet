@@ -29,13 +29,35 @@ export function officeMode(mime: string): OfficeMode | null {
 }
 
 /**
+ * Which renderer a `text`-kind artifact wants.
+ *
+ * The store buckets every `text/*` file into one `text` kind, which is right
+ * for icons but wrong for showing the thing: a markdown spec and an html report
+ * are both deliverables people hand over (the routing rule is audience, not
+ * format), and showing either as raw source is the same failure as an .xlsx
+ * opening blank in the wiki. Sniffing happens here, on the mime the store
+ * already derived, so no component re-parses an extension.
+ *
+ * Lives beside `officeMode` rather than in ArtifactsView because the card's
+ * `thumbMode` needs the same split — asking the page for it would make the
+ * lazily-loaded thumbnail pull the whole view back into its chunk.
+ */
+export function textPreviewMode(mime: string): "markdown" | "html" | "plain" {
+  const base = mime.split(";")[0].trim().toLowerCase();
+  if (base === "text/markdown") return "markdown";
+  if (base === "text/html") return "html";
+  return "plain";
+}
+
+/**
  * What a *card* can draw, which is a wider set than what the stage calls an
  * Office document: a PDF's first page and a video's first frame are both
  * cheaply reachable and are the two formats a deliverables grid is most made
- * of. Kept a superset of `OfficeMode` so the three existing branches keep
- * type-checking unchanged.
+ * of, and markdown / html are cheaper still — text the stage already knows how
+ * to render. Kept a superset of `OfficeMode` so the three existing branches
+ * keep type-checking unchanged.
  */
-export type ThumbMode = OfficeMode | "pdf" | "video";
+export type ThumbMode = OfficeMode | "pdf" | "video" | "markdown" | "html";
 
 /**
  * Ceiling on the file size worth rendering into a grid card.
@@ -107,5 +129,12 @@ export function thumbMode(mime: string, sizeBytes: number): ThumbMode | null {
     return sizeBytes > MAX_VIDEO_THUMB_BYTES ? null : "video";
   }
   if (sizeBytes > MAX_THUMB_BYTES) return null;
+  // Markdown and html reuse the OOXML ceiling rather than getting one of their
+  // own: the cost shape is the same — the whole file has to arrive before there
+  // is anything to lay out. Only the two *rendered* text modes get a card; a log
+  // or a csv shrunk to 190px is a wall of gray lines, which is what the icon
+  // already says, so `plain` stays on it.
+  const text = textPreviewMode(mime);
+  if (text !== "plain") return text;
   return officeMode(mime);
 }

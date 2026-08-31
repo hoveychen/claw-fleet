@@ -78,6 +78,83 @@ export async function readSheets(blob: Blob): Promise<ParsedSheet[]> {
   return (await readXlsxFile(blob)) as ParsedSheet[];
 }
 
+/**
+ * Render markdown into `host` as sanitized HTML.
+ *
+ * Deliberately the string pipeline rather than the `TextBlock` component the
+ * stage uses. `ArtifactThumb` is imperative DOM that caches `host.innerHTML`
+ * once the render settles, and TextBlock's Prism / KaTeX / Mermaid passes are
+ * asynchronous — reading innerHTML after mounting it would cache a half-painted
+ * card. None of those three passes is worth anything at 0.28 scale anyway. What
+ * *is* shared is the plugin chain (`safeRemarkPlugins` / `safeRehypePlugins`),
+ * so a heading, a table and a CJK bold run come out looking like the stage's.
+ *
+ * That chain includes `rehype-sanitize`, which is load-bearing here and not
+ * merely tidy: an artifact is an agent-produced file, and this is the one path
+ * in the app that puts its markup into `innerHTML` on the main origin.
+ */
+export async function renderMarkdownInto(text: string, host: HTMLElement): Promise<void> {
+  const [{ unified }, remarkParse, remarkRehype, rehypeStringify, plugins] = await Promise.all([
+    import("unified"),
+    import("remark-parse"),
+    import("remark-rehype"),
+    import("rehype-stringify"),
+    import("./markdown/plugins"),
+  ]);
+  const html = String(
+    unified()
+      .use(remarkParse.default)
+      .use(plugins.safeRemarkPlugins)
+      // What react-markdown does internally: rehype-raw (first in the safe
+      // chain) needs the raw html nodes to still be in the tree when it runs.
+      .use(remarkRehype.default, { allowDangerousHtml: true })
+      .use(plugins.safeRehypePlugins)
+      .use(rehypeStringify.default, { allowDangerousHtml: true })
+      .processSync(text),
+  );
+  // Via DOMParser rather than straight into `host.innerHTML`: the parsed
+  // document has no browsing context, so nothing in it fetches. Assigning the
+  // string first and scrubbing after would be too late — the browser starts
+  // loading an <img> the moment it lands in a live document, which is the
+  // request this is here to prevent.
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  defuseRemoteImages(parsed);
+  host.innerHTML = parsed.body.innerHTML;
+}
+
+/**
+ * Replace every `<img>` a card cannot honestly draw with an inert placeholder.
+ * Only `data:` URIs survive, because only they carry their own bytes.
+ *
+ * Two separate reasons converge on the same rule:
+ *
+ *   - **Remote** (`https://…`, or protocol-relative `//host/x`) must not be
+ *     fetched. A card renders as soon as it scrolls into view, so without this,
+ *     opening the artifacts page fans out requests to whatever hosts the stored
+ *     documents happen to reference — a README's shields.io badges were the
+ *     case that made this visible. The stage does load them, but only when
+ *     someone opens that one document on purpose; a grid that reaches out on
+ *     scroll is a different bargain, and not one the user agreed to.
+ *   - **Relative** (`docs/hero.png`) *cannot* resolve. An artifact is a single
+ *     file — `fleet artifact add` takes one path and the store lays it down as
+ *     `artifacts/<id>/<name>` — so the document has no siblings to point at.
+ *     The request goes out, 404s, and the well shows a broken-image glyph.
+ *
+ * An empty src lands here too: `rehype-sanitize` drops a src it dislikes (an
+ * uppercase `HTTPS://` scheme is one), and what it leaves is a srcless `<img>`
+ * — no request, but the same broken glyph.
+ */
+function defuseRemoteImages(doc: Document): void {
+  for (const img of Array.from(doc.querySelectorAll("img"))) {
+    const src = img.getAttribute("src") ?? "";
+    if (/^data:/i.test(src)) continue;
+    const box = doc.createElement("span");
+    box.setAttribute("data-remote-image", "");
+    box.textContent = img.getAttribute("alt") || "";
+    img.replaceWith(box);
+  }
+}
+
 /** Cells arrive as parsed values; a Date must not render as its ISO string. */
 export function formatCell(cell: CellValue): string {
   if (cell === null || cell === undefined) return "";
