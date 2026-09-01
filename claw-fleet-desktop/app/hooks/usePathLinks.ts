@@ -30,9 +30,18 @@ function isFloatWindow(): boolean {
  *
  * Returns undefined when the session isn't known yet, which leaves paths inert
  * rather than resolving them against the wrong root.
+ *
+ * Subscribes to the *resolved workspace path*, not to `sessions`: the backend
+ * rescans every 2s while any session is alive and `setSessions` always installs
+ * a fresh array, so depending on the array itself handed out a new context —
+ * and with it a new `components` object for ReactMarkdown, which re-parses its
+ * whole body on every render — about 30 times a minute. On a 1.5 MB review doc
+ * that pinned a core for as long as the card stayed open.
  */
 export function usePathLinks(sessionId: string | null | undefined): PathLinkContext | undefined {
-  const sessions = useSessionsStore((s) => s.sessions);
+  const workspacePath = useSessionsStore(
+    (s) => s.sessions.find((x) => x.id === sessionId)?.workspacePath,
+  );
   const connection = useConnectionStore((s) => s.connection);
   const requestFileNav = useUIStore((s) => s.requestFileNav);
   const unresolvedPaths = useUIStore((s) => s.unresolvedPaths);
@@ -40,7 +49,6 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
 
   return useMemo(() => {
     if (!sessionId) return undefined;
-    const workspacePath = sessions.find((s) => s.id === sessionId)?.workspacePath;
     if (!workspacePath) return undefined;
     return {
       workspaceRoot: workspacePath,
@@ -59,7 +67,7 @@ export function usePathLinks(sessionId: string | null | undefined): PathLinkCont
         }
       },
     };
-  }, [sessionId, sessions, connection?.type, requestFileNav, float, unresolvedPaths]);
+  }, [sessionId, workspacePath, connection?.type, requestFileNav, float, unresolvedPaths]);
 }
 
 /**
