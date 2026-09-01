@@ -95,23 +95,6 @@ pub struct ReviewDocContent {
     pub body: String,
     /// Resolved tab label (the doc's own title / slug / file name).
     pub title: String,
-    /// Set when `body` holds only the head of a larger markdown document, so
-    /// the card can say so instead of silently presenting a partial doc.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub truncated: Option<ReviewDocTruncation>,
-}
-
-/// How much of an oversized markdown doc was dropped, for the card's banner.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct ReviewDocTruncation {
-    /// Lines of the original that `body` carries.
-    pub shown_lines: usize,
-    /// Lines the original had in full.
-    pub total_lines: usize,
-    /// Size of the original document in bytes.
-    pub total_bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,80 +107,6 @@ pub enum ReviewDocFormat {
 
 /// Max review-doc size fetched into the card — a design doc, not a data dump.
 const REVIEW_DOC_MAX_BYTES: u64 = 2 * 1024 * 1024;
-
-/// Rendering budget for a *markdown* review doc, far below the byte cap above.
-///
-/// The byte cap only guards the wire; what actually melts is the card, which
-/// runs the body through the remark/rehype chain and builds a React tree from
-/// it — and `react-markdown` re-parses on **every** render, with no memo. A
-/// 1.5 MB `TASKS.md` (16,635 lines, 410 accumulated plan blocks) measured
-/// ~2.5 s per parse and 111,335 hast nodes in Node alone, so every re-render of
-/// the panel pinned a core for seconds at a time. These budgets keep a full
-/// parse in the tens of milliseconds; anything past them is a data dump the
-/// user should open in the file view, not read inside a decision card.
-///
-/// The two budgets are sized to bind at roughly the same point on real CJK
-/// prose — measured on that same `TASKS.md`, 384 KiB is where the 2000-line cap
-/// takes over, and a 2000-line head parses in ~185 ms (vs ~1810 ms for the
-/// whole file). A tighter byte budget would clip CJK docs far earlier than
-/// their line count warrants: at 128 KiB this one stopped after 447 lines.
-const MARKDOWN_MAX_BYTES: usize = 384 * 1024;
-const MARKDOWN_MAX_LINES: usize = 2000;
-
-/// Clip an oversized markdown body to [`MARKDOWN_MAX_LINES`] /
-/// [`MARKDOWN_MAX_BYTES`], recording what was dropped. Html is left alone: it
-/// renders inside a sandboxed iframe, so its cost stays out of the app's React
-/// tree and out of the re-parse-per-render path this guards.
-fn clip_oversized_markdown(content: &mut ReviewDocContent, total_bytes: u64) {
-    if content.format != ReviewDocFormat::Markdown {
-        return;
-    }
-    // Either budget alone is enough to clip: a 200 KB / 5000-line changelog is
-    // under the byte cap but still 5000 lines of React nodes. The line probe
-    // short-circuits at the cap, so a doc that is comfortably within budget
-    // costs one bounded scan, not a full count.
-    let over_lines = content
-        .body
-        .bytes()
-        .filter(|b| *b == b'\n')
-        .take(MARKDOWN_MAX_LINES + 1)
-        .count()
-        > MARKDOWN_MAX_LINES;
-    if content.body.len() <= MARKDOWN_MAX_BYTES && !over_lines {
-        return;
-    }
-    let total_lines = content.body.lines().count();
-    let mut kept = String::with_capacity(MARKDOWN_MAX_BYTES + 64);
-    let mut shown_lines = 0usize;
-    for line in content.body.lines() {
-        if shown_lines >= MARKDOWN_MAX_LINES || kept.len() + line.len() + 1 > MARKDOWN_MAX_BYTES {
-            break;
-        }
-        kept.push_str(line);
-        kept.push('\n');
-        shown_lines += 1;
-    }
-    // Cutting mid-fence would swallow the rest of the kept text into one code
-    // block; close it so the head still renders as itself.
-    if kept
-        .lines()
-        .filter(|l| {
-            let t = l.trim_start();
-            t.starts_with("```") || t.starts_with("~~~")
-        })
-        .count()
-        % 2
-        == 1
-    {
-        kept.push_str("```\n");
-    }
-    content.body = kept;
-    content.truncated = Some(ReviewDocTruncation {
-        shown_lines,
-        total_lines,
-        total_bytes,
-    });
-}
 
 /// Resolve a [`ReviewDoc`] to its current body. The single source of truth for
 /// both `LocalBackend::read_review_doc` (desktop) and the `fleet serve`
@@ -221,15 +130,7 @@ pub fn read_review_doc(doc: &ReviewDoc) -> Result<ReviewDocContent, String> {
                 .clone()
                 .filter(|s| !s.is_empty())
                 .unwrap_or(wdoc.title);
-            let total_bytes = body.len() as u64;
-            let mut content = ReviewDocContent {
-                format,
-                body,
-                title,
-                truncated: None,
-            };
-            clip_oversized_markdown(&mut content, total_bytes);
-            content
+            ReviewDocContent { format, body, title }
         }
     };
     autoheight_review_content(&mut content);
@@ -287,15 +188,11 @@ pub fn read_review_file(path: &str, title: Option<&str>) -> Result<ReviewDocCont
         Some("html") | Some("htm") => ReviewDocFormat::Html,
         _ => ReviewDocFormat::Markdown,
     };
-    let total_bytes = body.len() as u64;
-    let mut content = ReviewDocContent {
+    Ok(ReviewDocContent {
         format,
         body,
         title,
-        truncated: None,
-    };
-    clip_oversized_markdown(&mut content, total_bytes);
-    Ok(content)
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1246,7 +1143,6 @@ mod tests {
             format: ReviewDocFormat::Html,
             body: "<div style=\"height:900px\">tall</div>".into(),
             title: "plan".into(),
-            truncated: None,
         };
         autoheight_review_content(&mut content);
         assert!(
@@ -1264,7 +1160,6 @@ mod tests {
             format: ReviewDocFormat::Markdown,
             body: "# Title\n\nbody".into(),
             title: "notes".into(),
-            truncated: None,
         };
         autoheight_review_content(&mut content);
         assert_eq!(content.body, "# Title\n\nbody");
@@ -1771,67 +1666,6 @@ mod tests {
         let out = img.questions[0].html.clone().expect("markup must survive");
         assert!(out.starts_with("<!-- chart --><img src=\"c.png\">"));
         assert!(out.contains(AUTOHEIGHT_MARKER));
-    }
-
-    /// A `TASKS.md` that has been accumulating plan blocks for months is a data
-    /// dump, not a design doc — the byte cap alone let a 1.5 MB / 16k-line file
-    /// through, and the card's ReactMarkdown chain then re-parsed all of it
-    /// (111k hast nodes) on every render. Only the head may cross the wire.
-    #[test]
-    fn review_file_truncates_oversized_markdown() {
-        let tmp = fresh_tmp_dir("review-doc-big");
-        std::fs::create_dir_all(&tmp).unwrap();
-        let path = tmp.join("TASKS.md");
-        let mut body = String::new();
-        for i in 0..5000 {
-            body.push_str(&format!("- [ ] **P{i}** — 任务 {i}\n"));
-        }
-        std::fs::write(&path, &body).unwrap();
-
-        let content = read_review_file(path.to_str().unwrap(), None).unwrap();
-        let kept = content.body.lines().count();
-        assert!(
-            kept <= 2100,
-            "oversized markdown must be truncated, kept {kept} lines"
-        );
-        let trunc = content
-            .truncated
-            .as_ref()
-            .expect("truncation must be reported so the card can say so");
-        assert_eq!(trunc.total_lines, 5000);
-        assert!(trunc.shown_lines < trunc.total_lines);
-        assert_eq!(trunc.shown_lines, kept);
-
-        // A doc within budget is passed through whole, with no marker.
-        let small = tmp.join("small.md");
-        std::fs::write(&small, "# hi\n\nbody\n").unwrap();
-        let ok = read_review_file(small.to_str().unwrap(), None).unwrap();
-        assert_eq!(ok.body, "# hi\n\nbody\n");
-        assert!(ok.truncated.is_none());
-
-        // Cutting mid-fence must not swallow the kept head into a code block.
-        let fenced = tmp.join("fenced.md");
-        let mut f = String::from("```\n");
-        while f.len() <= MARKDOWN_MAX_BYTES {
-            f.push_str("x".repeat(80).as_str());
-            f.push('\n');
-        }
-        std::fs::write(&fenced, &f).unwrap();
-        let cut = read_review_file(fenced.to_str().unwrap(), None).unwrap();
-        assert!(cut.truncated.is_some());
-        assert!(
-            cut.body.trim_end().ends_with("```"),
-            "an unbalanced fence must be closed"
-        );
-
-        // Html is framed in an iframe, not put through the markdown chain — it
-        // is left whole regardless of size.
-        let big_html = tmp.join("big.html");
-        std::fs::write(&big_html, "<p>x</p>\n".repeat(40_000)).unwrap();
-        let html = read_review_file(big_html.to_str().unwrap(), None).unwrap();
-        assert!(html.truncated.is_none());
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

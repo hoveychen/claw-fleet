@@ -7,7 +7,6 @@ import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
 import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { AutoHeightFrame } from "./AutoHeightFrame";
-import { formatBytes } from "../formatBytes";
 import styles from "./ReviewDocsColumn.module.css";
 
 type Loaded =
@@ -106,7 +105,6 @@ function ReviewDocsColumnInner({
   }, [activeIdx, loaded, fetchDoc]);
 
   const active = loaded[activeIdx];
-  const truncated = active?.state === "ok" ? active.content.truncated : null;
 
   if (docs.length === 0) return null;
 
@@ -153,17 +151,6 @@ function ReviewDocsColumnInner({
           />
         ) : (
           <div className={styles.markdown}>
-            {truncated && (
-              <div className={styles.truncated}>
-                {t("review_docs.truncated", {
-                  shown: truncated.shownLines,
-                  total: truncated.totalLines,
-                  size: formatBytes(truncated.totalBytes),
-                  defaultValue:
-                    "文档过大，只显示前 {{shown}} 行（共 {{total}} 行 / {{size}}）。完整内容请到仓库页打开。",
-                })}
-              </div>
-            )}
             <MarkdownBody body={active.content.body} components={mdComponents} />
           </div>
         )}

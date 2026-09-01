@@ -2321,11 +2321,6 @@
       "op_failed": "Operation failed."
     }
   },
-  "review_docs": {
-    "loading": "Loading…",
-    "error": "Couldn't load this document",
-    "truncated": "Document too large — showing the first {{shown}} of {{total}} lines ({{size}}). Open it in the files view to read it all."
-  },
   "paths": {
     "open_in_files": "Open in Repos",
     "reveal_in_finder": "Reveal in Finder",

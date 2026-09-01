@@ -164,7 +164,6 @@ fn build_bundle() -> String {
         claw_fleet_core::mcp_ipc::ReviewDoc,
         claw_fleet_core::mcp_ipc::ReviewDocKind,
         claw_fleet_core::mcp_ipc::ReviewDocContent,
-        claw_fleet_core::mcp_ipc::ReviewDocTruncation,
         claw_fleet_core::mcp_ipc::ReviewDocFormat,
         claw_fleet_core::plan_approval::PlanApprovalRequest,
         claw_fleet_core::mcp_a2ui_ipc::A2uiRenderRequest,

@@ -319,13 +319,7 @@ export type ReviewDocKind = "wiki" | "file";
 export type ReviewDocContent = { 
 format: ReviewDocFormat, 
 body: string, 
-title: string, 
-truncated?: ReviewDocTruncation | null, };
-
-export type ReviewDocTruncation = { 
-shownLines: number, 
-totalLines: number, 
-totalBytes: number, };
+title: string, };
 
 export type ReviewDocFormat = "markdown" | "html";
 
