@@ -95,3 +95,16 @@
   color: var(--color-text-dim, #999);
   word-break: break-all;
 }
+
+/* Banner over a markdown body the backend clipped: an accumulated TASKS.md can
+ * run to megabytes, and the card re-parses its body on every render. */
+.truncated {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid rgba(var(--color-warning-rgb), 0.35);
+  background: var(--color-warning-bg);
+  color: var(--color-text-muted, #888);
+  font-size: 12px;
+  line-height: 1.5;
+}

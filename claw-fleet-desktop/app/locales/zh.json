@@ -2317,6 +2317,11 @@
       "op_failed": "操作失败。"
     }
   },
+  "review_docs": {
+    "loading": "加载中…",
+    "error": "无法加载这份文档",
+    "truncated": "文档过大，只显示前 {{shown}} 行（共 {{total}} 行 / {{size}}）。完整内容请到仓库页打开。"
+  },
   "paths": {
     "open_in_files": "在仓库页中打开",
     "reveal_in_finder": "在访达中显示",

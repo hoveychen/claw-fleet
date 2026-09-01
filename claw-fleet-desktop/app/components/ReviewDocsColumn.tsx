@@ -7,6 +7,7 @@ import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
 import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { AutoHeightFrame } from "./AutoHeightFrame";
+import { formatBytes } from "./ArtifactsView";
 import styles from "./ReviewDocsColumn.module.css";
 
 type Loaded =
@@ -121,6 +122,17 @@ export function ReviewDocsColumn({
           />
         ) : (
           <div className={styles.markdown}>
+            {active.content.truncated && (
+              <div className={styles.truncated}>
+                {t("review_docs.truncated", {
+                  shown: active.content.truncated.shownLines,
+                  total: active.content.truncated.totalLines,
+                  size: formatBytes(active.content.truncated.totalBytes),
+                  defaultValue:
+                    "文档过大，只显示前 {{shown}} 行（共 {{total}} 行 / {{size}}）。完整内容请到仓库页打开。",
+                })}
+              </div>
+            )}
             <ReactMarkdown
               urlTransform={markdownUrlTransform}
               remarkPlugins={safeRemarkPlugins}
