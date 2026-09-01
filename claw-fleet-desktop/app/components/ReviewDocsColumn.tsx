@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
 import type { ReviewDoc, ReviewDocContent } from "../types";
 import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
@@ -26,12 +26,42 @@ function fallbackLabel(doc: ReviewDoc): string {
   return ref;
 }
 
+/** The rendered document body, kept behind its own `memo` so switching tabs or
+ *  a fetch settling doesn't drag the *current* body through the remark/rehype
+ *  chain again — `react-markdown` has no memo of its own, so every render of it
+ *  is a full re-parse. */
+const MarkdownBody = memo(function MarkdownBody({
+  body,
+  components,
+}: {
+  body: string;
+  components: Components;
+}) {
+  const normalized = useMemo(() => normalizeSvgBlankLines(body), [body]);
+  return (
+    <ReactMarkdown
+      urlTransform={markdownUrlTransform}
+      remarkPlugins={safeRemarkPlugins}
+      rehypePlugins={safeRehypePlugins}
+      components={components}
+    >
+      {normalized}
+    </ReactMarkdown>
+  );
+});
+
 /** Side column shown next to a fleet__ask card: one tab per review doc the
  *  agent attached, so the user reads the `.md` files / wiki entries in place
  *  instead of hunting down the path. Bodies are fetched live through the
  *  backend (`read_review_doc`) — never snapshotted — so they always show the
- *  current on-disk content. */
-export function ReviewDocsColumn({
+ *  current on-disk content.
+ *
+ *  Memoised, and its body memoised again inside: `react-markdown` re-runs the
+ *  whole remark/rehype chain on every render (no memo of its own), and the
+ *  panel around this column re-renders on every 2s backend rescan. Without
+ *  both layers a review doc is re-parsed ~30×/min for as long as the card is
+ *  open — which is what pinned a core on a 1.5 MB TASKS.md. */
+function ReviewDocsColumnInner({
   docs,
   sessionId,
 }: {
@@ -74,9 +104,9 @@ export function ReviewDocsColumn({
     if (!loaded[activeIdx]) fetchDoc(activeIdx);
   }, [activeIdx, loaded, fetchDoc]);
 
-  if (docs.length === 0) return null;
-
   const active = loaded[activeIdx];
+
+  if (docs.length === 0) return null;
 
   return (
     <div className={styles.column}>
@@ -121,17 +151,15 @@ export function ReviewDocsColumn({
           />
         ) : (
           <div className={styles.markdown}>
-            <ReactMarkdown
-              urlTransform={markdownUrlTransform}
-              remarkPlugins={safeRemarkPlugins}
-              rehypePlugins={safeRehypePlugins}
-              components={mdComponents}
-            >
-              {normalizeSvgBlankLines(active.content.body)}
-            </ReactMarkdown>
+            <MarkdownBody body={active.content.body} components={mdComponents} />
           </div>
         )}
       </div>
     </div>
   );
 }
+
+/** Memoised at the boundary: DecisionPanel subscribes to the sessions store, so
+ *  it re-renders on every 2s backend rescan, and without this the whole column
+ *  — including a full markdown re-parse — went with it. */
+export const ReviewDocsColumn = memo(ReviewDocsColumnInner);

@@ -2030,8 +2030,12 @@ export function DecisionPanel({
   );
 
   // Review docs attached to the active fleet__ask card (empty for other kinds).
-  const reviewDocs =
-    active?.kind === "fleet-ask" ? active.request.reviewDocs ?? [] : [];
+  // Memoised so the `?? []` fallback can't hand `ReviewDocsColumn` a fresh
+  // array on every one of this panel's (2s-cadence) re-renders, which would
+  // defeat its `memo` and re-parse the whole document each time.
+  const reviewDocsRaw =
+    active?.kind === "fleet-ask" ? active.request.reviewDocs ?? null : null;
+  const reviewDocs = useMemo(() => reviewDocsRaw ?? [], [reviewDocsRaw]);
   const hasReviewDocs = reviewDocs.length > 0;
 
   // Reset the side column to "docs open" whenever a card with docs becomes
