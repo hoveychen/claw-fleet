@@ -18,7 +18,6 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { useTranslation } from "react-i18next";
 
 import { artifactBlobUrl } from "../artifactAssets";
-import { formatBytes } from "../formatBytes";
 import { isWebBuild } from "../hostEnv";
 import { officeMode, textPreviewMode, thumbMode } from "../officePreview";
 import { downloadArtifact } from "../mock/liveProxy";
@@ -79,10 +78,19 @@ const OfficePreview = lazy(() => import("./OfficePreview"));
 /** Same libraries, same reason to defer them — see `ArtifactThumb`. */
 const ArtifactThumb = lazy(() => import("./ArtifactThumb"));
 
-// Lives in `app/formatBytes.ts` so a card can use it without importing this
-// whole view; re-exported here because callers (and the tests) import it from
-// this module.
-export { formatBytes };
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  // One decimal below 10 so "1.4 MB" doesn't round to a useless "1 MB", none
+  // above it where the extra digit is noise.
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+}
 
 /**
  * Order artifacts for the grid.
