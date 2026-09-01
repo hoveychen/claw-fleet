@@ -135,7 +135,13 @@ const REVIEW_DOC_MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// the panel pinned a core for seconds at a time. These budgets keep a full
 /// parse in the tens of milliseconds; anything past them is a data dump the
 /// user should open in the file view, not read inside a decision card.
-const MARKDOWN_MAX_BYTES: usize = 128 * 1024;
+///
+/// The two budgets are sized to bind at roughly the same point on real CJK
+/// prose — measured on that same `TASKS.md`, 384 KiB is where the 2000-line cap
+/// takes over, and a 2000-line head parses in ~185 ms (vs ~1810 ms for the
+/// whole file). A tighter byte budget would clip CJK docs far earlier than
+/// their line count warrants: at 128 KiB this one stopped after 447 lines.
+const MARKDOWN_MAX_BYTES: usize = 384 * 1024;
 const MARKDOWN_MAX_LINES: usize = 2000;
 
 /// Clip an oversized markdown body to [`MARKDOWN_MAX_LINES`] /
@@ -146,9 +152,18 @@ fn clip_oversized_markdown(content: &mut ReviewDocContent, total_bytes: u64) {
     if content.format != ReviewDocFormat::Markdown {
         return;
     }
-    if content.body.len() <= MARKDOWN_MAX_BYTES {
-        // Under the byte budget, the line budget cannot be the binding one for
-        // any realistic doc — skip the O(n) line count.
+    // Either budget alone is enough to clip: a 200 KB / 5000-line changelog is
+    // under the byte cap but still 5000 lines of React nodes. The line probe
+    // short-circuits at the cap, so a doc that is comfortably within budget
+    // costs one bounded scan, not a full count.
+    let over_lines = content
+        .body
+        .bytes()
+        .filter(|b| *b == b'\n')
+        .take(MARKDOWN_MAX_LINES + 1)
+        .count()
+        > MARKDOWN_MAX_LINES;
+    if content.body.len() <= MARKDOWN_MAX_BYTES && !over_lines {
         return;
     }
     let total_lines = content.body.lines().count();
