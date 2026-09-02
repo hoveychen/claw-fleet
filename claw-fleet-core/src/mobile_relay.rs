@@ -2884,6 +2884,9 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
     // A "done" task resumed from mobile is active again — drop the done mark so
     // it re-surfaces as needs-review (next snapshot re-enriches user_mark).
     crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
+    // Same as the desktop resume: drop a stale remote-disconnect verdict so the
+    // row isn't pinned red after the user has asked for a retry.
+    crate::remote_disconnect::clear(&req.session_id);
     // Route by source (blank → claude); manual resume is untracked → no-op box.
     crate::agent_source::resume_session(
         &req.agent_source,

@@ -175,7 +175,8 @@
     "badge_not_stopped": "Remote lost · not stopped",
     "tip": "The link to {{host}} dropped, so Fleet stopped this session. Left running, the agent would be looking at the empty local mirror directory and could conclude the repository was deleted. rca reported: {{detail}}",
     "tip_not_stopped": "The link to {{host}} dropped and Fleet could not stop the agent. It is probably working against the empty local mirror directory right now — check this session's process by hand. rca reported: {{detail}}",
-    "host_fallback": "the remote host"
+    "host_fallback": "the remote host",
+    "reopen_tip": "Reopen this session (dials {{host}} again). Nothing reconnects on its own: `rca serve` is per-run, so reconnecting starts a NEW remote run rather than restoring the interrupted one — which makes it your call, not a scheduler's."
   },
   "rateLimit": {
     "resetsIn": "resets in {{time}}",

@@ -11,7 +11,10 @@
 // the user is left with a session that quietly ended for no visible reason.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const invoke = vi.fn(async () => undefined);
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...(a as [])) }));
 
 import i18n from "../i18n";
 import { SessionCard } from "./SessionCard";
@@ -36,9 +39,14 @@ const DISCONNECT: RemoteDisconnect = {
 /** A complete session, borrowed from the mock fixtures rather than hand-built:
  *  SessionCard reads a lot of fields, and a partial literal only proves the
  *  test author guessed the shape. */
+const DISCONNECT_SESSION_ID = "disconnected-session";
+
 function session(remoteDisconnect: RemoteDisconnect | null): SessionInfo {
   return {
     ...MOCK_SESSIONS[0],
+    id: DISCONNECT_SESSION_ID,
+    isSubagent: false,
+    ideName: null,
     workspacePath: "/srv/remote-repo",
     workspaceName: "remote-repo",
     status: remoteDisconnect ? "remoteDisconnected" : "idle",
@@ -55,6 +63,7 @@ function render(node: React.ReactNode) {
 }
 
 beforeEach(() => {
+  invoke.mockClear();
   useRemoteWorkspacesStore.setState({
     workspaces: [{ path: "/srv/remote-repo", hostId: "gpu-box", label: "gpu-box" }],
     loaded: true,
@@ -104,6 +113,34 @@ describe("SessionCard remote-disconnect notice", () => {
       />,
     );
     expect(el.textContent).toContain(i18n.t("remoteDisconnect.badge_not_stopped"));
+  });
+
+  /** The decided policy: nothing reconnects on its own (`rca serve` is per-run,
+   *  so a reconnect is a new remote run, not the interrupted one resumed), but
+   *  the retry must still be one click — not a trip through the composer. It
+   *  rides the same resume command the rate-limit control uses, so there is no
+   *  new Tauri command and no liveProxy route to keep in sync. */
+  it("offers a one-click reopen on both render paths", async () => {
+    for (const variant of [undefined, "group-main" as const]) {
+      const el = render(
+        <SessionCard session={session(DISCONNECT)} isSelected={false} variant={variant} />,
+      );
+      const btn = el.querySelector("button");
+      expect(btn, `no reopen button on variant=${variant}`).toBeTruthy();
+      await act(async () => {
+        btn!.click();
+      });
+      expect(invoke).toHaveBeenCalledWith("resume_rate_limited_session", {
+        sessionId: DISCONNECT_SESSION_ID,
+        workspacePath: "/srv/remote-repo",
+        agentSource: MOCK_SESSIONS[0].agentSource,
+      });
+      invoke.mockClear();
+      act(() => root!.unmount());
+      root = null;
+      container?.remove();
+      container = null;
+    }
   });
 
   it("shows nothing for a healthy session", () => {
