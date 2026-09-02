@@ -374,6 +374,30 @@ pub(crate) fn route_spawn_session(
             }
 
 /// GET the remote-workspace registry (`~/.fleet/remote-workspaces.json`).
+/// POST `/remote_create_dir` `{target, path, name}` — mkdir one level on an
+/// rca executor host and answer with the new directory's listing.
+pub(crate) fn route_remote_create_dir(
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let body: serde_json::Value = serde_json::from_str(&buf).unwrap_or_default();
+    let str_of = |k: &str| body.get(k).and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+    let (out, code) = match (str_of("target"), str_of("name")) {
+        (Some(target), Some(name)) => {
+            match crate::remote_host::create_remote_dir(target, str_of("path"), name) {
+                Ok(resp) => (serde_json::to_string(&resp).unwrap_or_default(), 200),
+                Err(e) => (serde_json::json!({ "error": e }).to_string(), 400),
+            }
+        }
+        _ => (serde_json::json!({ "error": "target and name are required" }).to_string(), 400),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(out).with_status_code(code).with_header(json_header),
+    );
+}
+
 /// GET `/ssh_hosts` — the backend host's ssh host book.
 pub(crate) fn route_ssh_hosts(request: tiny_http::Request, json_header: tiny_http::Header) {
     let body =
