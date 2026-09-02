@@ -439,6 +439,7 @@ function SearchResultsCard({ links }: { links: Array<{ title: string; url: strin
 /** `WebSearch`: the query as a headline over the search-results card. Narration
  *  strings in the payload are dropped; the links are the substance. */
 function WebSearchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: unknown; rail?: boolean }) {
+  const { t } = useTranslation();
   const search = asWebSearchResult(meta);
   if (!search) return null;
   // In rail mode the collapsed summary line (the query) stays visible above
@@ -452,7 +453,7 @@ function WebSearchBody({ block, meta, rail }: { block: ToolUseBlockType; meta: u
       {search.links.length > 0 ? (
         <SearchResultsCard links={search.links} />
       ) : (
-        <div className={styles.note}>No results.</div>
+        <div className={styles.note}>{t("detail.no_results", "没有结果。")}</div>
       )}
     </>
   );
@@ -498,6 +499,7 @@ function FetchSource({ url }: { url: string }) {
  *  model's markdown summary. The collapsed header already carries the status /
  *  size / duration chips, so the source line stays to the URL itself. */
 function WebFetchBody({ block, meta }: { block: ToolUseBlockType; meta: unknown; rail?: boolean }) {
+  const { t } = useTranslation();
   const fetch = asWebFetchResult(meta);
   if (!fetch) return null;
   const url = fetch.url || (typeof block.input.url === "string" ? block.input.url : "");
@@ -509,7 +511,7 @@ function WebFetchBody({ block, meta }: { block: ToolUseBlockType; meta: unknown;
           <TextBlock text={fetch.result} />
         </div>
       ) : (
-        <div className={styles.note}>No summary recorded.</div>
+        <div className={styles.note}>{t("detail.no_summary", "没有记录摘要。")}</div>
       )}
     </>
   );

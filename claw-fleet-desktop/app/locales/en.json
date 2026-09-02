@@ -350,7 +350,8 @@
     "ai_skill_installed_btn": "Skill Installed",
     "ai_skill_save_btn": "Save skill file…",
     "ai_modal_close": "Done",
-    "codex_limit": "Rate Limit"
+    "codex_limit": "Rate Limit",
+    "no_usage_data": "No usage data"
   },
   "skills": {
     "panel_title": "Skills",
@@ -765,7 +766,19 @@
     "agentRunning": "running",
     "agentDone": "done",
     "resultChars": "{{n}} chars",
-    "noAgents": "No agent activity recorded yet."
+    "noAgents": "No agent activity recorded yet.",
+    "dag_approx": "heuristic binding",
+    "dag_approx_tip": "Heuristic binding (approximate)",
+    "dag_click_collapse": "Click to collapse",
+    "dag_click_expand": "Click to expand",
+    "dag_collapse": "Collapse",
+    "dag_no_result_text": "(no result text)",
+    "dag_no_runtime_agent": "No runtime agent yet (not started)",
+    "dag_open_agent_session": "Open this agent's session in Fleet",
+    "dag_open_session": "Open session",
+    "dag_resolved_prompt_tip": "The prompt resolved at run time (… marks an interpolation point)",
+    "dag_running_no_result": "Running — no result yet",
+    "dag_unparsed": "Could not parse the orchestration structure — showing the agent list instead:"
   },
   "token_spend": {
     "loading": "Loading token breakdown…",
@@ -857,8 +870,16 @@
   "save": "Save",
   "edit": "Edit",
   "search_matches": "matched",
+  "window": {
+    "maximize": "Maximize",
+    "minimize": "Minimize",
+    "restore": "Restore"
+  },
   "common": {
-    "close": "Close"
+    "close": "Close",
+    "actions": "Actions",
+    "copied": "Copied",
+    "dismiss": "Dismiss"
   },
   "find": {
     "close": "Close",
@@ -1746,7 +1767,14 @@
     "switch_agent": "Switch agent",
     "agent_current": "current",
     "load_stalled": "Loading the conversation timed out — the backend never answered. It may be busy or wedged; it recovers on its own, or retry now.",
-    "load_retry": "Retry"
+    "load_retry": "Retry",
+    "diff_no_changes": "No textual changes.",
+    "diff_too_large": "Diff too large to render inline.",
+    "loading_full_output": "Loading full output…",
+    "no_parameters": "No parameters",
+    "no_results": "No results.",
+    "no_summary": "No summary recorded.",
+    "tool_running": "Running…"
   },
   "settings": {
     "title": "Settings",

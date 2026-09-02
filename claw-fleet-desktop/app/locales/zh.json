@@ -350,7 +350,8 @@
     "ai_skill_installed_btn": "已安装",
     "ai_skill_save_btn": "保存 skill 文件…",
     "ai_modal_close": "完成",
-    "codex_limit": "速率限制"
+    "codex_limit": "速率限制",
+    "no_usage_data": "暂无用量数据"
   },
   "skills": {
     "panel_title": "Skills",
@@ -762,7 +763,19 @@
     "agentRunning": "运行中",
     "agentDone": "已完成",
     "resultChars": "{{n}} 字符",
-    "noAgents": "暂无代理活动记录。"
+    "noAgents": "暂无代理活动记录。",
+    "dag_approx": "启发式绑定",
+    "dag_approx_tip": "启发式绑定（近似）",
+    "dag_click_collapse": "点击收起",
+    "dag_click_expand": "点击展开",
+    "dag_collapse": "收起",
+    "dag_no_result_text": "（无结果文本）",
+    "dag_no_runtime_agent": "尚无运行时 agent（未启动）",
+    "dag_open_agent_session": "在 Fleet 里打开该 agent 的 session",
+    "dag_open_session": "打开 session",
+    "dag_resolved_prompt_tip": "执行时解析出的 prompt（… 为插值点）",
+    "dag_running_no_result": "运行中，暂无结果",
+    "dag_unparsed": "无法解析编排结构，按 agent 列表展示："
   },
   "token_spend": {
     "loading": "正在分析 token 花销…",
@@ -854,8 +867,16 @@
   "save": "保存",
   "edit": "编辑",
   "search_matches": "条匹配",
+  "window": {
+    "maximize": "最大化",
+    "minimize": "最小化",
+    "restore": "还原"
+  },
   "common": {
-    "close": "关闭"
+    "close": "关闭",
+    "actions": "操作",
+    "copied": "已复制",
+    "dismiss": "忽略"
   },
   "find": {
     "close": "关闭",
@@ -1743,7 +1764,14 @@
     "switch_agent": "切换查看的 agent",
     "agent_current": "当前",
     "load_stalled": "加载对话超时——后端一直没有响应。它可能正忙,也可能挂了;稍后会自动恢复,也可以立刻重试。",
-    "load_retry": "重试"
+    "load_retry": "重试",
+    "diff_no_changes": "没有文本改动。",
+    "diff_too_large": "改动太大，无法在这里内联渲染。",
+    "loading_full_output": "正在加载完整输出…",
+    "no_parameters": "无参数",
+    "no_results": "没有结果。",
+    "no_summary": "没有记录摘要。",
+    "tool_running": "运行中…"
   },
   "settings": {
     "title": "设置",
