@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, Server, ServerOff } from "lucide-react";
+import { FileWarning, Play, Server, ServerOff } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
@@ -256,6 +256,37 @@ export function RemoteDisconnectNotice({ session }: { session: SessionInfo }) {
         </button>
       )}
     </>
+  );
+}
+
+// ── Misrouted-write notice ──────────────────────────────────────────────────
+
+/**
+ * Files found in a remote workspace's LOCAL mirror after the session ended —
+ * output that was meant for the remote host. rca routes only absolute paths, so
+ * a relative *read* fails loudly with "not found" while a relative *write*
+ * succeeds and lands here instead. Nothing else on screen would ever say so:
+ * the session looks like it finished fine, because it did.
+ *
+ * Deliberately not a status: the session's own outcome is unaffected. This is a
+ * "your output is on the wrong machine" warning, and the file names are the
+ * actionable part, so they go in the tooltip verbatim.
+ */
+export function MirrorWriteNotice({ session }: { session: SessionInfo }) {
+  const { t } = useTranslation();
+  const info = session.mirrorWrite;
+  if (!info) return null;
+  const files =
+    info.files.join(", ") +
+    (info.truncated ? ` ${t("mirrorWrite.tip_more", { shown: info.files.length })}` : "");
+  return (
+    <span
+      className={styles.mirror_write}
+      title={t("mirrorWrite.tip", { path: info.workspacePath, files })}
+    >
+      <FileWarning size={10} strokeWidth={1.9} />
+      {t("mirrorWrite.badge", { count: info.total })}
+    </span>
   );
 }
 
@@ -606,6 +637,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           )}
           <span className={styles.gm_spacer} />
           <RemoteDisconnectNotice session={session} />
+          <MirrorWriteNotice session={session} />
           <RateLimitControls session={session} />
           <ServerErrorControls session={session} />
         </div>
@@ -626,6 +658,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             )}
             {!hideHeader && <StatusBadge status={session.status} />}
             {!hideHeader && <RemoteDisconnectNotice session={session} />}
+            {!hideHeader && <MirrorWriteNotice session={session} />}
             {!hideHeader && <RateLimitControls session={session} />}
             {!hideHeader && <ServerErrorControls session={session} />}
           </div>

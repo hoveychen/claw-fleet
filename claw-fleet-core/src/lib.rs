@@ -73,6 +73,7 @@ pub mod mcp_server;
 pub mod lessons_store;
 pub mod memory;
 pub mod message_trim;
+pub mod mirror_guard;
 pub mod mobile_relay;
 pub mod relay_crypto;
 pub mod relay_region;

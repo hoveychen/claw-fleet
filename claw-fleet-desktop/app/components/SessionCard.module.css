@@ -187,6 +187,25 @@
   text-overflow: ellipsis;
 }
 
+/* Output on the wrong machine. Amber, not the disconnect red: the session
+   itself is fine — this is "check where your files went", not "it died". */
+.mirror_write {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid #b45309;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #b45309;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The kill failed: the agent may still be running against the empty mirror.
    Filled rather than outlined — this is the one state that needs the human. */
 .remote_disconnect_unstopped {
