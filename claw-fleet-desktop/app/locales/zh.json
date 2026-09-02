@@ -2489,5 +2489,20 @@
     "pairing_no_actions": "配对码通道,暂不支持环境操作(需 ssh 通道)",
     "login_unknown": "登录状态未知",
     "remote_codex_device_hint": "在任意设备打开下方链接并输入代码完成授权;远端主机会自动轮询直到通过。"
-  }
+  },
+  "mobile_direct_title": "直连（不经中转）",
+  "mobile_direct_ready": "可出码",
+  "mobile_direct_not_ready": "未就绪",
+  "mobile_direct_hint": "手机扫这张码就把「地址 + token」一起加成一台直连设备。地址要填手机能访问到的那个（https，隧道或反代都行；明文 http 会被手机浏览器拦掉），token 默认取本机 ~/.fleet/token，也可以手填云端或反代那套。",
+  "mobile_direct_url": "对外地址",
+  "mobile_direct_token": "token",
+  "mobile_direct_token_local": "留空 = 用本机 ~/.fleet/token",
+  "mobile_direct_token_needed": "这台还没有 token，填一个",
+  "mobile_direct_plain_http": "手机上那个页面是 https 的，浏览器不允许它连明文 http —— 换成 https（隧道或反代），否则扫了也连不上。",
+  "mobile_direct_loopback": "这是本机回环地址，手机访问不到 —— 只在同机调试时有意义。",
+  "mobile_direct_bad_url": "地址要写成完整的 https://… 形式。",
+  "mobile_direct_no_token": "这台机器上没有带 token 的 serve 跑过（~/.fleet/token 为空）。直连必须过 token 门 —— 跨源本来也只对带 token 的端点开放。跑一个 `fleet serve --token <值>`，或在上面手填云端/反代那套 token。",
+  "mobile_direct_qr_hint": "这张码带着 token，请勿截图外传。",
+  "mobile_direct_copy": "复制直连链接",
+  "mobile_direct_copy_hint": "扫码进不来时改用它：在手机上粘贴。"
 }
