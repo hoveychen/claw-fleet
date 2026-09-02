@@ -844,6 +844,15 @@ impl crate::backend::Backend for RemoteBackend {
             })
     }
 
+    fn harness_statuses(&self) -> Vec<claw_fleet_core::harness_status::HarnessStatus> {
+        self.probe
+            .get(claw_fleet_core::routes::HARNESS_STATUSES)
+            .unwrap_or_else(|e| {
+                crate::log_debug(&format!("remote harness_statuses failed: {e}"));
+                Vec::new()
+            })
+    }
+
     fn usage_summaries(&self) -> Vec<crate::backend::SourceUsageSummary> {
         self.probe
             .get(claw_fleet_core::routes::USAGE_SUMMARIES)
