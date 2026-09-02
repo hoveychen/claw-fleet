@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { classifyPush, type PushEnv } from "./push-classify";
-import { isPushOptedOut, setPushOptedOut } from "./push";
+import { isPushMuted, isPushOptedOut, setPushMuted, setPushOptedOut } from "./push";
 
 // HarmonyOS NEXT (鸿蒙5) 内置浏览器 / ArkWeb Web 组件的真实 UA 形态：
 // Chromium 114 定制内核，含 `OpenHarmony` 系统标识 + `ArkWeb/` 内核标识。
@@ -95,5 +95,52 @@ describe("push opt-out persistence", () => {
     setPushOptedOut(false);
     expect(isPushOptedOut()).toBe(false);
     expect(localStorage.getItem("fleet:push-opt-out")).toBe("0");
+  });
+});
+
+// 多设备之后「关掉通知」必须能只关一台:家里那台在跑长任务、公司那台半夜发卡,
+// 这两件事应该能分开处置。
+describe("per-device mute", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("mutes one device without touching the other", () => {
+    setPushMuted("d1", true);
+    expect(isPushMuted("d1")).toBe(true);
+    expect(isPushMuted("d2")).toBe(false);
+  });
+
+  // 单设备时代只有一个全局位。升级前把通知关掉的用户,升级后不该突然又开始收到
+  // 推送 —— 没有本设备记录时回落到那个全局位。
+  it("falls back to the single-device era global flag", () => {
+    localStorage.setItem("fleet:push-opt-out", "1");
+    expect(isPushMuted("d1")).toBe(true);
+    // 一旦这台有了自己的记录,就由它说话。
+    setPushMuted("d1", false);
+    expect(isPushMuted("d1")).toBe(false);
+    expect(isPushMuted("d2")).toBe(true);
+  });
+
+  it("the phone counts as opted out only when every device is muted", () => {
+    setPushMuted("d1", true);
+    expect(isPushOptedOut(["d1", "d2"])).toBe(false);
+    setPushMuted("d2", true);
+    expect(isPushOptedOut(["d1", "d2"])).toBe(true);
+  });
+
+  it("the master switch fans out to every device", () => {
+    setPushOptedOut(true, ["d1", "d2"]);
+    expect(isPushMuted("d1")).toBe(true);
+    expect(isPushMuted("d2")).toBe(true);
+    // 全局位也写上 —— 它是**新配对设备**的默认值,否则刚扫进来那台会违背用户
+    // 刚表达的意愿开始推送。
+    expect(localStorage.getItem("fleet:push-opt-out")).toBe("1");
+    expect(isPushMuted("d3-just-paired")).toBe(true);
+  });
+
+  it("the master switch back on unmutes everything", () => {
+    setPushOptedOut(true, ["d1", "d2"]);
+    setPushOptedOut(false, ["d1", "d2"]);
+    expect(isPushOptedOut(["d1", "d2"])).toBe(false);
+    expect(isPushMuted("d3-just-paired")).toBe(false);
   });
 });

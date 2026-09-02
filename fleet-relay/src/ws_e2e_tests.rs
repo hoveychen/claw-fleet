@@ -208,6 +208,45 @@ async fn auth_then_forward_between_roles() {
     assert_eq!(got["title"], "t");
 }
 
+/// 通知的点击目标必须带上「这条来自哪个 channel」。一部手机可以同时配对多台
+/// 桌面端,而桌面端产出的 url 只带卡 id —— 卡 id 只在单机内唯一,所以两台同时有
+/// 卡时,点开落到哪一张全靠运气。盖标记的只能是 relay:它是唯一在扇出时确切知道
+/// channel 的一方。
+#[tokio::test]
+async fn notify_target_is_stamped_with_the_channel() {
+    let url = spawn_server().await;
+
+    let (mut agent_a, _) = connect(&url, "agent", SECRET).await;
+    let (mut client_a, _) = connect(&url, "client", SECRET).await;
+    let _ = recv_json(&mut agent_a).await; // presence bump
+
+    // 另一个 channel(另一台桌面端),两边故意用**同一个卡 id**。
+    const OTHER: &str = "fedcba9876543210fedcba9876543210";
+    let (mut agent_b, _) = connect(&url, "agent", OTHER).await;
+    let (mut client_b, _) = connect(&url, "client", OTHER).await;
+    let _ = recv_json(&mut agent_b).await;
+
+    for agent in [&mut agent_a, &mut agent_b] {
+        agent
+            .send(Message::Text(
+                json!({"type": "notify", "title": "t", "body": "b", "url": "/#d=guard:g1"})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    let a = recv_json(&mut client_a).await;
+    let b = recv_json(&mut client_b).await;
+    let url_a = a["url"].as_str().unwrap();
+    let url_b = b["url"].as_str().unwrap();
+
+    assert!(url_a.starts_with("/#d=guard:g1&ch="), "got {url_a}");
+    assert!(url_b.starts_with("/#d=guard:g1&ch="), "got {url_b}");
+    assert_ne!(url_a, url_b, "two channels must stamp differently");
+}
+
 /// A binary WebSocket frame is forwarded verbatim to the opposite role — the
 /// transport path compressed `msg` payloads ride on top of.
 #[tokio::test]

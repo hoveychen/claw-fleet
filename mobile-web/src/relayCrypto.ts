@@ -133,3 +133,15 @@ export async function openBytes(encKey: CryptoKey, sealed: SealedBox): Promise<A
 export async function open(encKey: CryptoKey, sealed: SealedBox): Promise<string> {
   return dec.decode(await openBytes(encKey, sealed));
 }
+
+/** relay 用来路由这条 channel 的 id —— `hex(sha256(channelToken))`,与
+ *  `fleet-relay/src/registry.rs::channel_id` 逐字节一致(它哈希的是 token 的
+ *  **十六进制字符串**的字节,不是解码后的字节)。
+ *
+ *  手机端要它是为了反查「这条通知来自哪一台设备」:relay 在通知的点击目标上盖
+ *  的是这个 id 的前缀(见 notify_target.rs),而手机手里只有配对 secret。 */
+export async function channelIdOf(secret: string): Promise<string> {
+  const { channelToken } = await deriveKeys(secret);
+  const digest = await crypto.subtle.digest("SHA-256", enc.encode(channelToken));
+  return toHex(new Uint8Array(digest));
+}

@@ -2,13 +2,24 @@
 // 语言 / 主题、桌面端连接状态、通知开关、重新配对、关于/版本。
 
 import { useState } from "react";
-import { Check, ChevronRight, FolderGit2, Gauge, ListTree, Package } from "lucide-react";
+import {
+  Bell,
+  BellOff,
+  Check,
+  ChevronRight,
+  FolderGit2,
+  Gauge,
+  ListTree,
+  Package,
+  QrCode,
+} from "lucide-react";
 import { useDraft } from "../draft";
 import { dateLocale, useI18n, type Lang } from "../i18n";
 import type { RttSplit } from "../connQuality";
 import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
 import type { PairedDevice } from "../devices";
+import { canScanPairing, scanPairing } from "../nativeScan";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
 import styles from "./MoreView.module.css";
@@ -53,6 +64,10 @@ interface Props {
   onSwitchDevice: (id: string) => void;
   onRenameDevice: (id: string, label: string) => void;
   onRemoveDevice: (device: PairedDevice) => void;
+  /** 这台设备的通知是不是被关掉了。 */
+  deviceMuted: (deviceId: string) => boolean;
+  /** 只开/只关某一台的通知。整部手机的总开关在上面「连接与通知」那一块。 */
+  onMuteDevice: (device: PairedDevice, muted: boolean) => void;
   /** 清除全部配对并重载。 */
   onUnpairAll: () => void;
 }
@@ -78,6 +93,8 @@ export function MoreView({
   onSwitchDevice,
   onRenameDevice,
   onRemoveDevice,
+  deviceMuted,
+  onMuteDevice,
   onUnpairAll,
 }: Props) {
   const { lang, setLang, t } = useI18n();
@@ -481,6 +498,17 @@ export function MoreView({
                       </span>
                       <span className={styles.deviceLabel}>{d.label}</span>
                     </button>
+                    {/* 只关这一台的通知。家里那台在跑长任务、公司那台半夜发卡,
+                        这两件事应该能分开处置 —— 而不是只有一个「全关」。 */}
+                    {supportsPush && (
+                      <button
+                        className={styles.deviceBtn}
+                        onClick={() => onMuteDevice(d, !deviceMuted(d.id))}
+                        aria-label={deviceMuted(d.id) ? t("开启通知") : t("静音")}
+                      >
+                        {deviceMuted(d.id) ? <BellOff size={15} /> : <Bell size={15} />}
+                      </button>
+                    )}
                     <button
                       className={styles.deviceBtn}
                       onClick={() => {
@@ -509,8 +537,29 @@ export function MoreView({
               </div>
             ))}
           </div>
+          {/* 原生壳里没有「打开一个带密钥的网址」这条路(它从 rawfile 启动,
+              地址栏不存在),而壳自己的配对页只在尚未配对时可达 —— 于是装了 app
+              的用户加不了第二台机器。这一行把壳的扫码能力接出来。 */}
+          {canScanPairing() && (
+            <div className={styles.card} style={{ marginTop: 8 }}>
+              <button className={styles.navRow} onClick={scanPairing}>
+                <span className={styles.navIcon}>
+                  <QrCode size={18} />
+                </span>
+                <span className={styles.navText}>
+                  <span className={styles.navLabel}>{t("扫码添加设备")}</span>
+                  <span className={styles.navSub}>
+                    {t("扫另一台桌面端「移动端」面板里的二维码")}
+                  </span>
+                </span>
+                <ChevronRight size={16} className={styles.navChevron} />
+              </button>
+            </div>
+          )}
           <div className={styles.rowNote}>
-            {t("在另一台桌面端 Fleet 的「移动端」板块扫码，即可把它一并加进这个列表。")}
+            {canScanPairing()
+              ? t("每台桌面端各出一张码;扫过的会留在上面这个列表里。")
+              : t("在另一台桌面端 Fleet 的「移动端」板块扫码，即可把它一并加进这个列表。")}
           </div>
         </div>
       )}

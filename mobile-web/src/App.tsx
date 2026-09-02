@@ -4,7 +4,9 @@ import styles from "./App.module.css";
 import {
   disablePush,
   enablePush,
-  isPushOptedOut,
+  isPushMuted,
+  setPushMuted as setPushMutedStored,
+  setPushOptedOut,
   pushState,
   unsubscribeChannel,
   type PushState,
@@ -146,8 +148,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     // PWA 是被一个带 `#k=…` 的 URL 打开的 —— 那就是一次配对。
     const scanned = consumeHashSecret();
     if (!scanned) return stored;
-    return adoptScannedDevice(stored, scanned.secret, newDeviceMint(stored), scanned.relayBase)
-      .book;
+    return adoptScannedDevice(stored, scanned.secret, newDeviceMint(stored), scanned.relayBase, {
+      // 壳的启动重注不抢焦点:用户切过去的那一台不该每次重开 app 就被打回原形。
+      focus: !scanned.boot,
+    }).book;
   });
   // 当前作用域设备的密钥。`?mock` stands in for a pairing secret so the gate
   // below opens and the effect that builds the client runs — it just builds a
@@ -367,8 +371,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, []);
 
   const [tab, setTab] = useState<Tab>("decisions");
-  /// 通知点击要聚焦的决策卡。nonce 让「同一张卡被连点两次」也能触发。
-  const [focusDecision, setFocusDecision] = useState<{ id: string; nonce: number } | null>(null);
+  /// 通知点击要聚焦的决策卡。nonce 让「同一张卡被连点两次」也能触发;deviceId
+  /// 是从通知里的来源标记反查出来的(老 relay 不盖标记时为 undefined)。
+  const [focusDecision, setFocusDecision] = useState<{
+    id: string;
+    deviceId?: string;
+    nonce: number;
+  } | null>(null);
 
   // ── 每台设备的运行时 ─────────────────────────────────────────────────────
   //
@@ -439,7 +448,24 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [push, setPush] = useState<PushState>(pushState);
   // Sub-state below "granted": the user can turn notifications off even while
   // the browser permission stays granted. Persisted so it survives reloads.
-  const [pushOptedOut, setPushOptedOut] = useState<boolean>(isPushOptedOut);
+  // 静音按设备各一份。总开关看的是「是不是每一台都被关掉」——只关了一台时
+  // 横幅不该说「通知已关闭」,那会让人以为另一台也不响了。
+  const [pushMuted, setPushMuted] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setPushMuted((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const d of runtimeDevices) {
+        if (!(d.id in next)) {
+          next[d.id] = isPushMuted(d.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [runtimeDevices]);
+  const pushOptedOut =
+    runtimeDevices.length > 0 && runtimeDevices.every((d) => pushMuted[d.id] === true);
   // 会话详情是一条下钻链而不是单页：从 Agent 卡「打开子代理」往上叠一层子代理会话，
   // 返回逐层退回（和知识库 wikiStack 同一套栈式浮层模型）。栈顶 id 解析出当前详情。
   // 每一层都带上归属设备:会话 id 只在单机内唯一,而下钻要用**那一台**的
@@ -547,30 +573,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     };
   }, []);
 
-  // When permission lands on "granted" (fresh grant, or re-allowed in settings
-  // after a denial), make sure a live subscription actually exists on the
-  // relay — otherwise the banner just vanishes while no push is wired.
-  // enablePush is idempotent: it reuses an existing subscription and only
-  // creates one when missing, and requestPermission() no-ops once granted.
-  // Skip the auto-(re)subscribe when the user has explicitly opted out —
-  // otherwise a mount/focus would immediately resurrect the subscription they
-  // just turned off (browser permission stays "granted" after disabling).
-  //
-  // `connected` is a dependency, not a convenience: `pushSubscribe` writes
-  // straight to the socket and returns false when it isn't OPEN, with no queue
-  // and no retry. This effect used to run only on `[push, pushOptedOut]`, and
-  // the reconnect path was a lone `resyncPush(client)` fired immediately after
-  // `client.connect()` — i.e. before the socket could possibly be open. So the
-  // very first registration raced the handshake, and every later reconnect
-  // (relay redeploy, network flap, waking from the background freeze) re-sent
-  // nothing at all. Observed on-device: the phone held a valid push token,
-  // reported itself subscribed, and the relay's subscription store never
-  // gained the entry.
-  useEffect(() => {
-    if (connected && push === "granted" && !pushOptedOut && client) {
-      void enablePush(client, relayBase);
-    }
-  }, [connected, push, pushOptedOut]);
+  // 订阅本身不在这里了:它按**设备**登记(relay 的订阅是每个 channel 一份文件),
+  // 所以那段逻辑住在 DeviceConnection —— 每台设备各自在自己连上之后注册一次。
 
   // 原生壳交来厂商推送 token。到达时机不定（壳要先过系统通知授权），所以只
   // 重算一次 push 状态 —— classifyPush 见到 token 就返回 granted，随后那个
@@ -589,20 +593,64 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     return onDecisionDeepLink((target) => {
       setTab("decisions");
       setFocusDecision({ id: target.id, nonce: Date.now() });
+      // relay 盖的来源标记是 channel id 的前缀;手机手里只有配对 secret,所以要
+      // 现算一遍每台设备的 channel id 去比对。异步(SubtleCrypto),所以先按 id
+      // 聚焦、拿到设备后再精确到那一台 —— 点击不必等一次哈希。
+      //
+      // 动态 import + 直接写 define 的原表达式:relayCrypto 属于 relay 侧,而
+      // 同源(webui)产物里不许有它。经 const 中转 Rollup 就不折叠了(见
+      // main.tsx 与 hostMode.test.ts 记的那两次实测)。
+      const mark = target.channelMark;
+      if (!mark || import.meta.env.VITE_FLEET_HOST === "webui") return;
+      void (async () => {
+        const { channelIdOf } = await import("./relayCrypto");
+        for (const d of bookRef.current.devices) {
+          const id = await channelIdOf(d.secret);
+          if (!id.startsWith(mark)) continue;
+          setFocusDecision({ id: target.id, deviceId: d.id, nonce: Date.now() });
+          return;
+        }
+      })();
     });
   }, []);
 
+  /** 总开关「开」:先用当前设备那条连接把系统权限问下来并注册,再把其余设备的
+   *  静音位一起清掉 —— 它们各自的 effect 会接着注册自己那份。 */
   const handleEnablePush = useCallback(async () => {
-    if (!client) return;
-    setPush(await enablePush(client, relayBase));
-    setPushOptedOut(false);
-  }, []);
+    const ids = runtimeDevices.map((d) => d.id);
+    if (client) setPush(await enablePush(client, relayBase, activeDeviceId));
+    setPushOptedOut(false, ids);
+    setPushMuted(Object.fromEntries(ids.map((id) => [id, false])));
+  }, [client, relayBase, activeDeviceId, runtimeDevices]);
 
+  /** 总开关「关」:每一台都要退订。只退当前那台的话,其余几台会继续推 —— 而
+   *  用户刚刚明确表示「别再响了」。 */
   const handleDisablePush = useCallback(async () => {
-    if (!client) return;
-    await disablePush(client);
-    setPushOptedOut(true);
-  }, []);
+    const ids = runtimeDevices.map((d) => d.id);
+    setPushOptedOut(true, ids);
+    setPushMuted(Object.fromEntries(ids.map((id) => [id, true])));
+    for (const id of ids) {
+      const t = handlesRef.current[id]?.transport;
+      if (!t) continue;
+      // 当前那台走 disablePush(它还会撤掉浏览器订阅本体);其余只发退订帧 ——
+      // 浏览器订阅是所有设备共用的一份,撤了就等于把还没关的那些也一起掐掉。
+      if (id === activeDeviceId) await disablePush(t, id);
+      else await unsubscribeChannel(t);
+    }
+  }, [runtimeDevices, activeDeviceId]);
+
+  /** 只关/只开某一台(设备列表里的那个开关)。这里绝不碰浏览器订阅本体。 */
+  const handleMuteDevice = useCallback(
+    async (device: PairedDevice, muted: boolean) => {
+      setPushMuted((prev) => ({ ...prev, [device.id]: muted }));
+      setPushMutedStored(device.id, muted);
+      const t = handlesRef.current[device.id]?.transport;
+      if (!t) return;
+      if (muted) await unsubscribeChannel(t);
+      else await enablePush(t, device.relayBase, device.id);
+    },
+    [],
+  );
 
   // Optimistic read stamps: the server re-derives lastReadMs on its next scan,
   // so until that push arrives we overlay the local click/dwell time.
@@ -778,6 +826,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         isActive={d.id === activeDeviceId}
         index={i}
         visibility={visibility}
+        connected={states[d.id]?.connected ?? false}
+        pushGranted={push === "granted"}
+        pushMuted={pushMuted[d.id] ?? true}
       />
     ))}
     <div className={styles.app}>
@@ -892,6 +943,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onSwitchDevice={switchDevice}
             onRenameDevice={renameDeviceLabel}
             onRemoveDevice={(d) => void removeDeviceEntry(d)}
+            deviceMuted={(id) => pushMuted[id] ?? true}
+            onMuteDevice={(d, muted) => void handleMuteDevice(d, muted)}
             onUnpairAll={unpairAll}
             supportsPush={SUPPORTS_PUSH}
             connected={connected}

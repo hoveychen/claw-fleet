@@ -19,12 +19,20 @@ const NATIVE_DEEPLINK_HOOK = "__fleetDeepLink";
 /** 壳在 hook 注册前把早到的 url 堆在这里。 */
 const NATIVE_DEEPLINK_PENDING = "__fleetDeepLinkPending";
 
-/** fragment 前缀,与 mobile_relay::notify_url 的 `/#d=` 一致。 */
-const FRAGMENT_PREFIX = "d=";
+/** 决策标识的 fragment 参数名,与 mobile_relay::notify_url 的 `/#d=` 一致。 */
+const DECISION_PARAM = "d";
+/** 来源 channel 的标记,由 relay 在扇出时盖上(fleet-relay/src/notify_target.rs)。 */
+const CHANNEL_PARAM = "ch";
 
 export interface DecisionTarget {
   kind: string;
   id: string;
+  /** 这条通知来自哪个 channel(channel id 的前缀)。多设备之后必须有它:卡 id
+   *  只在单机内唯一,两台同时有卡时,光靠 id 说不出该展开哪一张。
+   *
+   *  老 relay 不盖这个标记,所以是可选的 —— 缺席时调用方按 id 找第一张匹配的卡
+   *  (跳错一张也好过点了没反应)。 */
+  channelMark?: string;
 }
 
 /**
@@ -40,15 +48,25 @@ export interface DecisionTarget {
 export function parseDecisionDeepLink(url: string): DecisionTarget | null {
   const hash = url.indexOf("#");
   if (hash < 0) return null;
-  const frag = url.slice(hash + 1);
-  if (!frag.startsWith(FRAGMENT_PREFIX)) return null;
-  const value = frag.slice(FRAGMENT_PREFIX.length);
+  // fragment 是 `&` 分隔的参数(`d=guard:g1&ch=105e300f`)。按参数解而不是
+  // 「前缀 + 剩下全是 id」:relay 会在后面追加来源标记,那样解会把 `&ch=…`
+  // 一起当成卡 id 的一部分。
+  const params = new Map<string, string>();
+  for (const part of url.slice(hash + 1).split("&")) {
+    const eq = part.indexOf("=");
+    if (eq <= 0) continue;
+    params.set(part.slice(0, eq), part.slice(eq + 1));
+  }
+  const value = params.get(DECISION_PARAM);
+  if (!value) return null;
+  // 只按**第一个**冒号切分:kind 不含冒号,而 id 是外部给的,不保证不含。
   const colon = value.indexOf(":");
   if (colon <= 0) return null;
   const kind = value.slice(0, colon);
   const id = value.slice(colon + 1);
   if (!id) return null;
-  return { kind, id };
+  const channelMark = params.get(CHANNEL_PARAM);
+  return channelMark ? { kind, id, channelMark } : { kind, id };
 }
 
 /**
