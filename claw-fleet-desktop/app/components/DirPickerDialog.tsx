@@ -22,8 +22,12 @@ interface BrowseDirResponse {
 }
 
 interface Props {
-  /** Where to open; empty starts at the backend host's home. */
+  /** Where to open; empty starts at the host's home. */
   initialPath: string;
+  /** When set, browse THAT machine over ssh instead of the backend host's own
+   *  disk — the rca executor a workspace will run on. Everything else about the
+   *  dialog is identical because both sides answer the same shape. */
+  sshTarget?: string;
   onPick: (path: string) => void;
   onCancel: () => void;
 }
@@ -36,7 +40,7 @@ interface Props {
  *  and leave remote users unable to choose any directory that had never had a
  *  session. This dialog goes through `browse_dir` on the Backend trait instead,
  *  so it lists whichever host the backend is bound to. */
-export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
+export function DirPickerDialog({ initialPath, sshTarget, onPick, onCancel }: Props) {
   const { t } = useTranslation();
   const [data, setData] = useState<BrowseDirResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +50,14 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
     setLoading(true);
     setError(null);
     try {
-      setData(await invoke<BrowseDirResponse>("browse_dir", { path: path ?? null }));
+      setData(
+        sshTarget
+          ? await invoke<BrowseDirResponse>("remote_browse_dir", {
+              sshTarget,
+              path: path ?? null,
+            })
+          : await invoke<BrowseDirResponse>("browse_dir", { path: path ?? null }),
+      );
     } catch (e) {
       setError(String(e));
       // A dead starting point (a workspace that has since been deleted, or —
@@ -56,7 +67,11 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
       // picker is always navigable; the error stays on screen to explain why.
       if (fallbackToHome && path) {
         try {
-          setData(await invoke<BrowseDirResponse>("browse_dir", { path: null }));
+          setData(
+            sshTarget
+              ? await invoke<BrowseDirResponse>("remote_browse_dir", { sshTarget, path: null })
+              : await invoke<BrowseDirResponse>("browse_dir", { path: null }),
+          );
         } catch {
           // Home itself is unreachable — nothing left to fall back to.
         }
@@ -64,7 +79,7 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [sshTarget]);
 
   useEffect(() => {
     void load(initialPath.trim() || undefined, true);
@@ -84,7 +99,15 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
     setSaving(true);
     setError(null);
     try {
-      setData(await invoke<BrowseDirResponse>("create_dir", { path: data.path, name }));
+      setData(
+        sshTarget
+          ? await invoke<BrowseDirResponse>("remote_create_dir", {
+              sshTarget,
+              path: data.path,
+              name,
+            })
+          : await invoke<BrowseDirResponse>("create_dir", { path: data.path, name }),
+      );
       setNewName("");
       setCreating(false);
     } catch (e) {

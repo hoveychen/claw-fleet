@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Folder, FolderOpen, MessageCircle } from "lucide-react";
+import { FileText, Folder, FolderOpen, MessageCircle, Server } from "lucide-react";
 import { openSettingsWindow, useConnectionStore, useSessionsStore } from "../store";
 import { classifyHarnessError, requestSettingsTab } from "../harnessErrors";
 import {
@@ -21,6 +21,7 @@ import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
 import { isWebBuild } from "../hostEnv";
 import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
+import { sshTargetOf, type RemoteConnection } from "./ConnectionDialog";
 import styles from "./NewSessionForm.module.css";
 
 export interface NewSessionCreated {
@@ -225,6 +226,27 @@ export function defaultWorkspace(
  *  session's live SessionDetail. Styled in the composer design language: ghost
  *  pills and custom popovers instead of labeled form rows and native
  *  <select>s. */
+/** Unwrap the `HTTP 500: {"error":"…"}` envelope a probe error arrives in.
+ *
+ *  The message underneath is written for a person ("the workspace must live at
+ *  a path creatable on this machine"); the status code and JSON around it are
+ *  not, and pasting them into a dialog buries the sentence that tells the user
+ *  what to do. Anything that does not match the envelope is passed through
+ *  unchanged rather than guessed at. */
+function humanBackendError(e: unknown): string {
+  const raw = String(e);
+  const brace = raw.indexOf("{");
+  if (brace >= 0) {
+    try {
+      const parsed = JSON.parse(raw.slice(brace)) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error) return parsed.error;
+    } catch {
+      // Not JSON after all — fall through to the raw string.
+    }
+  }
+  return raw.replace(/^Error:\s*/, "");
+}
+
 export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
@@ -357,18 +379,51 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
     );
   };
 
-  // Registered rca-routed remote workspaces: badge them in the picker, and
-  // offer the ones with no sessions yet (they can't appear in recents).
+  // rca: registered remote workspaces (badged in the picker, and offered when
+  // they have no sessions yet so they are reachable at all), plus the hosts a
+  // workspace can be chosen ON. Still DEV-gated while the flow is finished.
   const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspace[]>([]);
+  const [rcaHosts, setRcaHosts] = useState<RemoteConnection[]>([]);
   useEffect(() => {
-    // rca re-gated debug-only: skipping the fetch leaves remoteWorkspaces empty
-    // so the remote badge / unseen-workspace entries never appear in release
-    // builds (import.meta.env.DEV is false in `vite build`).
     if (!import.meta.env.DEV) return;
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
       .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
       .catch(() => {});
+    // Only hosts that actually have rca can execute a workspace; one without it
+    // would fail at spawn, so it is not offered as a place to browse.
+    invoke<RemoteConnection[]>("list_ssh_hosts")
+      .then((hosts) => setRcaHosts((hosts ?? []).filter((h) => !!h.rcaPath)))
+      .catch(() => {});
   }, []);
+
+  // Which host the directory picker is browsing. `null` = the backend host's
+  // own disk (the pre-existing behaviour).
+  const [browsingHost, setBrowsingHost] = useState<RemoteConnection | null>(null);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+
+  // Picking a directory on a host IS the registration. The user never types the
+  // path, so it cannot disagree between the two machines — which was the whole
+  // failure mode of the settings-page form this replaces.
+  const registerRemoteWorkspace = async (host: RemoteConnection, path: string) => {
+    setRegisterError(null);
+    try {
+      const cfg = await invoke<RemoteWorkspacesConfig>("upsert_remote_workspace", {
+        entry: { path, hostId: host.id, label: host.label || undefined },
+      });
+      setRemoteWorkspaces(cfg.workspaces ?? []);
+      setWorkspace(path);
+      return true;
+    } catch (e) {
+      // The identity-path constraint bites here: the same absolute path must be
+      // creatable on THIS machine too, and macOS cannot make `/home/...`. Say
+      // which path and why, right where the choice was made — the alternative
+      // is a spawn that fails much later with no way back to this dialog.
+      setRegisterError(
+        t("new_session.remote_register_failed", { path, error: humanBackendError(e) }),
+      );
+      return false;
+    }
+  };
   const remotePaths = useMemo(
     () => new Set(remoteWorkspaces.map((w) => w.path)),
     [remoteWorkspaces],
@@ -607,6 +662,19 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
           icon: <FolderOpen size={13} strokeWidth={1.7} className={pillStyles.menu_icon} />,
           onSelect: browseWorkspace,
         },
+        // One row per rca host: browse THAT machine's tree. This is the entry
+        // point the settings page used to be — "I want to work on that box" is
+        // a thought you have while starting a session, not while in settings,
+        // and it never asks for a path to be typed.
+        ...rcaHosts.map((h) => ({
+          id: `rca-host:${h.id}`,
+          label: t("new_session.browse_on_host", { host: h.label || sshTargetOf(h) }),
+          icon: <Server size={13} strokeWidth={1.7} className={pillStyles.menu_icon} />,
+          onSelect: () => {
+            setBrowsingHost(h);
+            setPickingDir("workspace");
+          },
+        })),
       ]}
     />
   );
@@ -723,18 +791,36 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
 
       {pickingDir && (
         <DirPickerDialog
-          initialPath={workspace}
+          initialPath={browsingHost ? "" : workspace}
+          sshTarget={browsingHost ? sshTargetOf(browsingHost) : undefined}
           onPick={(path) => {
             if (pickingDir === "attachment") {
               addAttachmentEntry({ path, name: basename(path) });
-            } else {
-              setWorkspace(path);
+              setPickingDir(null);
+              return;
             }
+            if (browsingHost) {
+              // Keep the dialog open if registration fails — the error names a
+              // path the user can navigate away from, and closing would strand
+              // them with no way back.
+              void registerRemoteWorkspace(browsingHost, path).then((ok) => {
+                if (ok) {
+                  setPickingDir(null);
+                  setBrowsingHost(null);
+                }
+              });
+              return;
+            }
+            setWorkspace(path);
             setPickingDir(null);
           }}
-          onCancel={() => setPickingDir(null)}
+          onCancel={() => {
+            setPickingDir(null);
+            setBrowsingHost(null);
+          }}
         />
       )}
+      {registerError && <div className={styles.error}>{registerError}</div>}
     </div>
   );
 }

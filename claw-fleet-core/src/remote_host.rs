@@ -392,6 +392,53 @@ pub fn browse_remote_dir(
     parse_browse_reply(&reply)
 }
 
+/// Create one directory under `parent` on `ssh_target` and answer with the NEW
+/// directory's listing, so the picker lands inside it.
+///
+/// The remote twin of [`crate::workspace_browse::create_dir`], and it exists
+/// for the same reason: a picker that can only walk an existing tree has no
+/// answer at all on a host whose tree is empty, and a freshly provisioned box
+/// always is. Leaving it out would have made "browse the remote host" work only
+/// where somebody had already made the directory by hand.
+///
+/// `name` must be a single plain component — the same rule the local side
+/// enforces. Anything with a separator, a `..`, or a quote is refused rather
+/// than escaped, because a picker never legitimately needs one.
+pub fn create_remote_dir(
+    ssh_target: &str,
+    parent: Option<&str>,
+    name: &str,
+) -> Result<BrowseDirResponse, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("directory name must not be empty".to_string());
+    }
+    if name == "." || name == ".." || name.contains('/') || name.contains('\\') {
+        return Err("directory name must be a single plain component".to_string());
+    }
+    check_quotable(name)?;
+    let parent = parent.unwrap_or("").trim();
+    check_quotable(parent)?;
+
+    // One round trip: make it, then list it from inside. `cd` after `mkdir -p`
+    // also proves it is usable, which a bare exit code would not.
+    let script = format!(
+        "p='{parent}'; n='{name}'; \
+         cd \"${{p:-$HOME}}\" 2>/dev/null || {{ printf 'ERR\\t%s\\n' 'parent is not a directory'; exit 0; }}; \
+         mkdir -p \"$n\" 2>/dev/null || {{ printf 'ERR\\t%s\\n' 'cannot create it here'; exit 0; }}; \
+         cd \"$n\" 2>/dev/null || {{ printf 'ERR\\t%s\\n' 'created but not enterable'; exit 0; }}; \
+         printf 'HOME\\t%s\\n' \"$HOME\"; \
+         printf 'PWD\\t%s\\n' \"$(pwd -P)\"; \
+         ls -1ApL 2>/dev/null | grep '/$' | head -n {cap} | while IFS= read -r e; do \
+           b=${{e%/}}; \
+           if [ -e \"$b/.git\" ]; then printf 'D\\t1\\t%s\\n' \"$b\"; \
+           else printf 'D\\t0\\t%s\\n' \"$b\"; fi; \
+         done",
+        cap = MAX_ENTRIES + 1
+    );
+    parse_browse_reply(&ssh_exec(ssh_target, &script)?)
+}
+
 /// What a health probe learned about one host. Every field is optional-ish
 /// because a probe that fails early still reports what it got: `ssh_ok: false`
 /// with an `error` is a useful answer, not an exception.
@@ -752,6 +799,35 @@ mod tests {
             assert_eq!(child.path, first.path);
             assert_eq!(child.parent.as_deref(), Some(home.path.as_str()));
         }
+    }
+
+    /// A picker's "new directory" name is one component. Anything else would
+    /// either escape the parent or need quoting we deliberately do not do.
+    #[test]
+    fn create_remote_dir_refuses_a_name_that_is_not_one_plain_component() {
+        for bad in ["", "  ", ".", "..", "a/b", "a\\b", "o'brien"] {
+            assert!(
+                create_remote_dir("some-host", Some("/srv"), bad).is_err(),
+                "must refuse {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a reachable ssh host"]
+    fn live_create_remote_dir_makes_it_and_lands_inside() {
+        let t = live_target();
+        let parent = "/tmp";
+        let name = format!("fleet-picker-test-{}", std::process::id());
+        let made = create_remote_dir(&t, Some(parent), &name).expect("create");
+        assert_eq!(made.path, format!("{parent}/{name}"), "must land INSIDE the new directory");
+        assert_eq!(made.parent.as_deref(), Some(parent));
+        assert!(made.entries.is_empty(), "a fresh directory has no children");
+        // Idempotent (mkdir -p), and it now shows up in its parent's listing.
+        create_remote_dir(&t, Some(parent), &name).expect("second create is a no-op");
+        let listing = browse_remote_dir(&t, Some(parent)).unwrap();
+        assert!(listing.entries.iter().any(|e| e.name == name), "not listed under {parent}");
+        let _ = ssh_exec(&t, &format!("rmdir '{parent}/{name}'"));
     }
 
     #[test]

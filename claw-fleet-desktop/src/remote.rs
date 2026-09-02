@@ -670,6 +670,24 @@ impl crate::backend::Backend for RemoteBackend {
         })
     }
 
+    fn remote_create_dir(
+        &self,
+        ssh_target: String,
+        path: Option<String>,
+        name: String,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        // Created on the machine the probe host sshes into — same hop as the
+        // listing it complements.
+        let body = serde_json::json!({
+            "target": ssh_target,
+            "path": path.as_deref().map(str::trim).filter(|p| !p.is_empty()),
+            "name": name,
+        });
+        self.probe
+            .post_json(claw_fleet_core::routes::REMOTE_CREATE_DIR, &body)
+            .map_err(|e| format!("probe /remote_create_dir failed: {e}"))
+    }
+
     fn list_ssh_hosts(&self) -> Vec<claw_fleet_core::remote_host::SshHost> {
         // The probe host's book, not this desktop's — that is the one a session
         // spawned there resolves a workspace's `hostId` against.

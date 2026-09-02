@@ -29,27 +29,8 @@ import { AgentSourceIcon } from "./SessionCard";
 import { UsageTrendPanel } from "./UsageTrendPanel";
 import styles from "./SettingsPanel.module.css";
 import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
-import type { HostHealth, RemoteConnection } from "./ConnectionDialog";
+import { sshTargetOf, type HostHealth, type RemoteConnection } from "./ConnectionDialog";
 
-/** The ssh argument fragment for a host — mirrors
- *  `claw_fleet_core::remote_host::ssh_target_for`. Only used for display and
- *  for the health probe's `sshTarget` argument; the launch path resolves this
- *  on the backend, from the same fields. */
-function sshTargetOf(h: RemoteConnection): string {
-  const profile = h.sshProfile?.trim();
-  if (profile) return profile;
-  const host = h.host.trim();
-  const user = h.username.trim();
-  if (!host || !user) return "";
-  const parts: string[] = [];
-  if (h.port !== 22) parts.push(`-p ${h.port}`);
-  const key = h.identityFile?.trim();
-  if (key) parts.push(`-i ${key}`);
-  const jump = h.jumpHost?.trim();
-  if (jump) parts.push(`-J ${jump}`);
-  parts.push(`${user}@${host}`);
-  return parts.join(" ");
-}
 
 interface HookSetupPlan {
   toAdd: string[];
