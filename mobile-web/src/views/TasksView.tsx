@@ -22,6 +22,7 @@ import type { FleetTransport } from "../transport";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isFleetOwnedTask, isSessionUnread } from "../types";
 import { useDraft } from "../draft";
+import { useDeviceDraft } from "../deviceScope";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import styles from "./TasksView.module.css";
@@ -288,7 +289,10 @@ export function TasksView({
   // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/仅活跃/分段都保持不变，
   // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
   const [search, setSearch] = useDraft<string>("tasks:search", "");
-  const [workspace, setWorkspace] = useDraft<string>("tasks:workspace", "");
+  // 设备作用域:筛选值是一个 workspace 路径,它在另一台机器上根本不存在,不分家
+  // 切过去只会得到一个筛掉全部任务的空列表。搜索词与几个开关是纯 UI 偏好,属于
+  // 这台手机,仍然全局。
+  const [workspace, setWorkspace] = useDeviceDraft<string>("tasks:workspace", "");
   // 仅聊天模式 —— 打开时盖过上面的目录筛选；关闭时不按模式过滤，聊天会话照常
   // 混在列表里（见 matchesWorkspaceFilter）。
   const [chatOnly, setChatOnly] = useDraft<boolean>("tasks:chatOnly", false);
