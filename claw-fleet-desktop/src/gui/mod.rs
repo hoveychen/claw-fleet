@@ -2063,6 +2063,7 @@ pub fn run() {
             check_setup_status,
             harness_statuses,
             install_harness,
+            install_node_runtime,
             install_fleet_cli,
             detect_ai_tools,
             install_fleet_skill,

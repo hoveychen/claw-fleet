@@ -67,6 +67,11 @@ pub(crate) fn augmented_path_with_front(front: &[PathBuf]) -> String {
         dirs.push(home.join(".local/bin"));
         dirs.push(home.join(".npm-global/bin"));
         dirs.push(home.join(".cargo/bin"));
+        // Node.js bootstrapped by the environment wizard (dsh's runtime);
+        // Windows archives keep node.exe/npm.cmd at the dir root, unix under bin/.
+        dirs.push(home.join(".fleet/node/bin"));
+        #[cfg(windows)]
+        dirs.push(home.join(".fleet/node"));
     }
     // Append the existing PATH so we don't lose anything.
     if let Some(existing) = std::env::var_os("PATH") {

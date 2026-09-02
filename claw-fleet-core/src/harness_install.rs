@@ -291,6 +291,185 @@ fn run_streaming(
     Ok(())
 }
 
+// ── Node.js bootstrap (dsh prerequisite) ─────────────────────────────────────
+//
+// dsh's only install channel is npm, so a blank machine needs a Node runtime
+// first. Neither the official .pkg (sudo + GUI) nor Homebrew (may not exist)
+// fits an unattended wizard; the official **binary archives** from
+// nodejs.org/dist do — user-space unpack into `~/.fleet/node`, no admin
+// rights, identical strategy on macOS/Linux (tar.gz) and Windows (zip).
+// `augmented_path_with_front` exposes that bin dir to every spawned agent, so
+// dsh's `#!/usr/bin/env node` resolves at runtime too.
+
+/// Where the bootstrapped Node lives. Unix archives have a `bin/` inside;
+/// Windows zips put node.exe/npm.cmd at the archive root.
+pub fn fleet_node_dir() -> Option<PathBuf> {
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("node"))
+}
+
+pub fn fleet_node_bin_dir() -> Option<PathBuf> {
+    let dir = fleet_node_dir()?;
+    #[cfg(windows)]
+    return Some(dir);
+    #[cfg(not(windows))]
+    Some(dir.join("bin"))
+}
+
+/// nodejs.org release-archive platform slug for this machine.
+fn node_platform_slug() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => Some("darwin-arm64"),
+        ("macos", "x86_64") => Some("darwin-x64"),
+        ("linux", "x86_64") => Some("linux-x64"),
+        ("linux", "aarch64") => Some("linux-arm64"),
+        ("windows", "x86_64") => Some("win-x64"),
+        ("windows", "aarch64") => Some("win-arm64"),
+        _ => None,
+    }
+}
+
+/// Newest LTS version tag ("v24.x.y") from nodejs.org's release index.
+/// No hardcoded fallback: a guessed version that stops existing would turn
+/// into a mystery 404, while "cannot reach nodejs.org" is self-explanatory.
+///
+/// Blocking HTTP — callers must be on a plain/blocking thread (the Tauri
+/// command wraps everything in `spawn_blocking`), never inside an async task.
+fn latest_node_lts() -> Result<String, InstallError> {
+    let index: serde_json::Value = reqwest::blocking::Client::new()
+        .get("https://nodejs.org/dist/index.json")
+        .timeout(Duration::from_secs(30))
+        .send()
+        .and_then(|r| r.error_for_status())
+        .and_then(|r| r.json())
+        .map_err(|e| {
+            InstallError::new(
+                InstallErrorCode::InstallFailed,
+                format!("cannot fetch the Node.js release index: {e}"),
+            )
+        })?;
+    index
+        .as_array()
+        .into_iter()
+        .flatten()
+        // Entries are newest-first; LTS entries carry a codename, non-LTS `false`.
+        .find(|e| e.get("lts").map(|l| l.as_str().is_some()).unwrap_or(false))
+        .and_then(|e| e.get("version").and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+        .ok_or_else(|| {
+            InstallError::new(
+                InstallErrorCode::InstallFailed,
+                "Node.js release index has no LTS entry",
+            )
+        })
+}
+
+/// The unpack script per platform, pure for testing. Downloads into
+/// `<dest>.new` and swaps at the end, so a failed download never leaves a
+/// half-written `~/.fleet/node` that later probes mistake for an install.
+fn node_install_plan_for(version: &str, slug: &str, dest: &std::path::Path) -> InstallPlan {
+    let dest = dest.to_string_lossy();
+    #[cfg(unix)]
+    {
+        let url = format!("https://nodejs.org/dist/{version}/node-{version}-{slug}.tar.gz");
+        InstallPlan {
+            program: "sh".into(),
+            args: vec![
+                "-c".into(),
+                format!(
+                    "set -e; rm -rf '{dest}.new'; mkdir -p '{dest}.new'; \
+                     curl -fsSL '{url}' | tar xz -C '{dest}.new' --strip-components=1; \
+                     rm -rf '{dest}'; mv '{dest}.new' '{dest}'"
+                ),
+            ],
+            envs: vec![],
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let url = format!("https://nodejs.org/dist/{version}/node-{version}-{slug}.zip");
+        InstallPlan {
+            program: "powershell".into(),
+            args: vec![
+                "-NoProfile".into(),
+                "-ExecutionPolicy".into(),
+                "Bypass".into(),
+                "-Command".into(),
+                format!(
+                    "$ErrorActionPreference='Stop'; \
+                     Invoke-WebRequest -Uri '{url}' -OutFile '{dest}.zip'; \
+                     if (Test-Path '{dest}.new') {{ Remove-Item -Recurse -Force '{dest}.new' }}; \
+                     Expand-Archive -Path '{dest}.zip' -DestinationPath '{dest}.new'; \
+                     Remove-Item '{dest}.zip'; \
+                     if (Test-Path '{dest}') {{ Remove-Item -Recurse -Force '{dest}' }}; \
+                     Move-Item (Join-Path '{dest}.new' 'node-{version}-{slug}') '{dest}'; \
+                     Remove-Item -Recurse -Force '{dest}.new'"
+                ),
+            ],
+            envs: vec![],
+        }
+    }
+}
+
+/// Bootstrap Node.js into `~/.fleet/node` and return the npm path, streaming
+/// progress like [`install_harness`]. Success is defined by `npm --version`
+/// running from the fresh install.
+pub fn install_node(progress: &(dyn Fn(&str) + Sync)) -> Result<PathBuf, InstallError> {
+    let slug = node_platform_slug().ok_or_else(|| {
+        InstallError::new(
+            InstallErrorCode::InstallFailed,
+            format!(
+                "nodejs.org publishes no binary archive for this platform ({} {})",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            ),
+        )
+    })?;
+    let dest = fleet_node_dir().ok_or_else(|| {
+        InstallError::new(InstallErrorCode::InstallFailed, "cannot resolve home directory")
+    })?;
+
+    progress("resolving the current Node.js LTS release…");
+    let version = latest_node_lts()?;
+    progress(&format!("installing Node.js {version} ({slug}) into {}", dest.display()));
+    let plan = node_install_plan_for(&version, slug, &dest);
+    run_streaming(&plan, INSTALL_TIMEOUT, progress)?;
+
+    progress("verifying npm…");
+    let npm = fleet_node_bin_dir()
+        .map(|d| {
+            #[cfg(windows)]
+            return d.join("npm.cmd");
+            #[cfg(not(windows))]
+            d.join("npm")
+        })
+        .filter(|p| p.is_file())
+        .ok_or_else(|| {
+            InstallError::new(
+                InstallErrorCode::VerifyFailed,
+                "Node unpacked but npm is missing from the archive",
+            )
+        })?;
+    let out = crate::process_util::command(&npm)
+        .arg("--version")
+        .env(
+            "PATH",
+            crate::session_launch::augmented_path_with_front(&[]),
+        )
+        .output()
+        .map_err(|e| InstallError::new(InstallErrorCode::VerifyFailed, format!("npm: {e}")))?;
+    if !out.status.success() {
+        return Err(InstallError::new(
+            InstallErrorCode::VerifyFailed,
+            format!("npm --version failed: {}", String::from_utf8_lossy(&out.stderr).trim()),
+        ));
+    }
+    progress(&format!(
+        "npm {} ready",
+        String::from_utf8_lossy(&out.stdout).trim()
+    ));
+    Ok(npm)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,6 +564,36 @@ mod tests {
         let err = run_streaming(&plan, Duration::from_secs(1), &*progress).unwrap_err();
         assert_eq!(err.code, InstallErrorCode::Timeout);
         assert!(start.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn node_install_plan_downloads_official_archive_and_swaps_atomically() {
+        let dest = std::path::Path::new("/Users/u/.fleet/node");
+        let plan = node_install_plan_for("v24.7.0", "darwin-arm64", dest);
+        let script = &plan.args[1];
+        assert!(script.contains("https://nodejs.org/dist/v24.7.0/node-v24.7.0-darwin-arm64.tar.gz"));
+        // Unpack into .new first, swap last — no half-written ~/.fleet/node.
+        assert!(script.contains("/Users/u/.fleet/node.new"));
+        assert!(script.contains("mv '/Users/u/.fleet/node.new' '/Users/u/.fleet/node'"));
+        assert!(script.contains("--strip-components=1"));
+    }
+
+    #[test]
+    fn node_platform_slug_known_on_this_machine() {
+        // Every platform we build the desktop app for has an official archive.
+        assert!(node_platform_slug().is_some());
+    }
+
+    /// Manual smoke: real download of the current LTS into ~/.fleet/node.
+    /// `cargo test -p claw-fleet-core --lib node_bootstrap_smoke -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn node_bootstrap_smoke_real_download() {
+        let (progress, _lines) = collect();
+        let npm = install_node(&*progress).unwrap();
+        println!("npm at {}", npm.display());
+        assert!(npm.is_file());
     }
 
     #[test]

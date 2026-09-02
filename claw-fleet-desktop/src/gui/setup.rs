@@ -79,6 +79,31 @@ pub(crate) async fn install_harness(
     })?
 }
 
+/// Bootstrap Node.js into ~/.fleet/node (dsh's npm prerequisite on a blank
+/// machine). Streams progress on the same `harness-install-progress` channel
+/// with source "node".
+#[tauri::command]
+pub(crate) async fn install_node_runtime(
+    app: tauri::AppHandle,
+) -> Result<String, claw_fleet_core::harness_install::InstallError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let emitter = app.clone();
+        let progress = move |line: &str| {
+            let _ = emitter.emit(
+                "harness-install-progress",
+                HarnessInstallProgress { source: "node".to_string(), line: line.to_string() },
+            );
+        };
+        claw_fleet_core::harness_install::install_node(&progress)
+            .map(|npm| npm.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| claw_fleet_core::harness_install::InstallError {
+        code: claw_fleet_core::harness_install::InstallErrorCode::SpawnFailed,
+        message: format!("install task join failed: {e}"),
+    })?
+}
+
 #[tauri::command]
 pub(crate) async fn get_account_info(
     state: tauri::State<'_, AppState>,
