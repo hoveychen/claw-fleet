@@ -148,11 +148,44 @@ let mockRemoteWorkspaces: {
   { path: "/home/dev/train-rig", sshTarget: "dev@train-rig", label: "train-rig" },
 ];
 
-function handleIPC(
+// ── Environment wizard demo state (see the stateful cases in handleIPC) ──────
+const ENV_SOURCES = ["claude-code", "codex", "dsh"] as const;
+type EnvSource = (typeof ENV_SOURCES)[number];
+const ENV_REMOTE_SOURCES = ENV_SOURCES;
+interface MockHarness {
+  installed: boolean;
+  path: string | null;
+  version: string | null;
+  channel: string | null;
+  loggedIn: boolean | null;
+  authDetail: string | null;
+}
+const mockHarness: Record<EnvSource, MockHarness> = {
+  "claude-code": { installed: true, path: "/Users/mock/.local/bin/claude", version: "2.1.246", channel: "native-installer", loggedIn: false, authDetail: null },
+  codex: { installed: true, path: "/Users/mock/.codex/packages/standalone/current/bin/codex", version: "0.148.0", channel: "standalone", loggedIn: false, authDetail: null },
+  dsh: { installed: false, path: null, version: null, channel: null, loggedIn: null, authDetail: null },
+};
+const mockRemoteHarness: Record<EnvSource, MockHarness> = {
+  "claude-code": { installed: true, path: "/home/dev/.local/bin/claude", version: "2.1.246", channel: null, loggedIn: null, authDetail: null },
+  codex: { installed: true, path: "/home/dev/.local/bin/codex", version: "0.148.0", channel: null, loggedIn: false, authDetail: null },
+  dsh: { installed: false, path: null, version: null, channel: null, loggedIn: null, authDetail: null },
+};
+let mockClaudeLogin: { ticks: number; submitted: boolean } | null = null;
+let mockCodexLogin: { ticks: number } | null = null;
+let mockRemoteCodexLogin: { ticks: number } | null = null;
+const mockDshConfigured = new Set<string>();
+async function emitInstallLines(source: string, lines: string[]) {
+  for (const line of lines) {
+    emit("harness-install-progress", { source, line });
+    await delay(220);
+  }
+}
+
+async function handleIPC(
   cmd: string,
   args: Record<string, unknown> = {},
   qaMode = false,
-): unknown {
+): Promise<unknown> {
   switch (cmd) {
     case "list_sessions":
       return currentSessions;
@@ -247,50 +280,141 @@ function handleIPC(
       return null;
     }
 
-    // Environment panel: one harness per state so the card variants all render
-    // under ?mock (installed+logged-in / installed+logged-out / not installed).
+    // ── Environment wizard (stateful demo) ──────────────────────────────────
+    // Every wizard flow is walkable under ?mock: install streams progress
+    // lines, logins advance a tiny state machine, update bumps a version —
+    // so screenshots/demos can show real interaction states, not just badges.
     case "harness_statuses":
-      return [
-        {
-          source: "claude-code",
-          installed: true,
-          path: "/Users/mock/.local/bin/claude",
-          version: "2.1.246",
-          channel: "native-installer",
-          loggedIn: true,
-          authDetail: "max",
-        },
-        {
-          source: "codex",
-          installed: true,
-          path: "/Users/mock/.codex/packages/standalone/current/bin/codex",
-          version: "0.148.0",
-          channel: "standalone",
-          loggedIn: false,
-          authDetail: null,
-        },
-        {
-          source: "dsh",
-          installed: false,
-          path: null,
-          version: null,
-          channel: null,
-          loggedIn: null,
-          authDetail: null,
-        },
-      ];
-    case "remote_workspace_harness_statuses":
-      return [
-        { source: "claude-code", installed: true, path: "/home/dev/.local/bin/claude", version: "2.1.246", channel: null, loggedIn: null, authDetail: null },
-        { source: "codex", installed: true, path: "/home/dev/.local/bin/codex", version: "0.148.0", channel: null, loggedIn: false, authDetail: null },
-        { source: "dsh", installed: false, path: null, version: null, channel: null, loggedIn: null, authDetail: null },
-      ];
+      return ENV_SOURCES.map((src) => ({ source: src, ...mockHarness[src] }));
+    case "install_harness": {
+      const src = args.source as EnvSource;
+      await emitInstallLines(src, [
+        `$ curl -fsSL https://install.example/${src} | sh`,
+        "downloading…",
+        "unpacking…",
+        "linking binaries…",
+      ]);
+      const fresh: Record<EnvSource, Partial<MockHarness>> = {
+        "claude-code": { installed: true, version: "2.1.246", channel: "native-installer", path: "/Users/mock/.local/bin/claude" },
+        codex: { installed: true, version: "0.148.0", channel: "standalone", path: "/Users/mock/.codex/packages/standalone/current/bin/codex" },
+        dsh: { installed: true, version: "0.1.1-rc.2", channel: "npm-global", path: "/opt/homebrew/bin/dsh" },
+      };
+      Object.assign(mockHarness[src], fresh[src]);
+      await emitInstallLines(src, [`installed: ${src} ${mockHarness[src].version}`]);
+      return { source: src, ...mockHarness[src] };
+    }
+    case "install_node_runtime":
+      await emitInstallLines("node", [
+        "resolving the current Node.js LTS release…",
+        "installing Node.js v24.20.0 into ~/.fleet/node",
+        "npm 11.19.0 ready",
+      ]);
+      return "/Users/mock/.fleet/node/bin/npm";
+    case "update_harness": {
+      const src = args.source as EnvSource;
+      const before = mockHarness[src].version;
+      await emitInstallLines(src, [`$ ${src} update`, "checking for updates…"]);
+      if (src === "claude-code") mockHarness[src].version = "2.1.250";
+      const after = mockHarness[src].version;
+      await emitInstallLines(src, [before === after ? `already up to date (${after})` : `updated ${before} → ${after}`]);
+      return { source: src, before, after, status: { source: src, ...mockHarness[src] } };
+    }
     case "harness_login_context":
       return { alive: false, managesClaude: false, managesCodex: false };
+
+    // claude login: start → poll(url) → poll(awaiting code) → submit → saved.
+    case "claude_login_start":
+      mockClaudeLogin = { ticks: 0, submitted: false };
+      return "mock-claude-login";
+    case "claude_login_poll": {
+      const st = mockClaudeLogin ?? { ticks: 0, submitted: false };
+      st.ticks += 1;
+      mockClaudeLogin = st;
+      const tokenSaved = st.submitted;
+      if (tokenSaved) {
+        mockHarness["claude-code"].loggedIn = true;
+        mockHarness["claude-code"].authDetail = "fleet-token";
+      }
+      return {
+        parse: {
+          authUrl: "https://claude.com/cai/oauth/authorize?code=true&client_id=mock",
+          awaitingCode: st.ticks >= 2 && !tokenSaved,
+          token: tokenSaved ? "sk-ant-oat01-mock" : null,
+        },
+        running: !tokenSaved,
+        tokenSaved,
+      };
+    }
+    case "claude_login_submit_code":
+      if (mockClaudeLogin) mockClaudeLogin.submitted = true;
+      return null;
+    case "claude_login_cancel":
+    case "codex_login_cancel":
+      mockClaudeLogin = null;
+      mockCodexLogin = null;
+      return null;
+
+    // codex login: browser closes the loop by itself after a few polls.
+    case "codex_login_start":
+      mockCodexLogin = { ticks: 0 };
+      return "mock-codex-login";
+    case "codex_login_poll": {
+      const st = mockCodexLogin ?? { ticks: 0 };
+      st.ticks += 1;
+      mockCodexLogin = st;
+      const done = st.ticks >= 3;
+      if (done) {
+        mockHarness.codex.loggedIn = true;
+        mockHarness.codex.authDetail = "chatgpt";
+      }
+      return {
+        parse: {
+          authUrl: "https://auth.openai.com/oauth/authorize?client_id=mock&state=x",
+          success: done,
+          portBusy: false,
+        },
+        running: !done,
+        loggedIn: done,
+      };
+    }
+
+    // Remote host (rca workspace) flows.
+    case "remote_workspace_harness_statuses":
+      return ENV_REMOTE_SOURCES.map((src) => ({ source: src, ...mockRemoteHarness[src] }));
+    case "install_harness_remote": {
+      const src = args.source as EnvSource;
+      const key = `remote:${args.path as string}:${src}`;
+      await emitInstallLines(key, ["$ ssh dev@train-rig <official installer>", "downloading…", "remote install verified."]);
+      Object.assign(mockRemoteHarness[src], { installed: true, version: src === "dsh" ? "0.1.1-rc.2" : "0.148.0", path: `/home/dev/.local/bin/${src}` });
+      return ENV_REMOTE_SOURCES.map((s2) => ({ source: s2, ...mockRemoteHarness[s2] }));
+    }
+    case "remote_codex_login_start":
+      mockRemoteCodexLogin = { ticks: 0 };
+      return "mock-remote-codex-login";
+    case "remote_codex_login_poll": {
+      const st = mockRemoteCodexLogin ?? { ticks: 0 };
+      st.ticks += 1;
+      mockRemoteCodexLogin = st;
+      const done = st.ticks >= 4;
+      if (done) mockRemoteHarness.codex.loggedIn = true;
+      return {
+        parse: { verifyUrl: "https://chatgpt.com/device", userCode: "ABCD-1234", success: done },
+        running: !done,
+        loggedIn: done,
+      };
+    }
+
     case "dsh_credential_refs":
-      return ["OPENROUTER_API_KEY"];
+      return ["OPENROUTER_API_KEY", "DEEPSEEK_API_KEY"];
     case "dsh_credentials_describe":
-      return { credentials: { OPENROUTER_API_KEY: { configured: false, writable: true } } };
+      return {
+        credentials: Object.fromEntries(
+          (args.refs as string[]).map((r) => [r, { configured: mockDshConfigured.has(r), writable: true }]),
+        ),
+      };
+    case "dsh_credentials_set":
+      mockDshConfigured.add(args.reference as string);
+      return null;
 
     case "list_skills":
       return MOCK_SKILLS;
