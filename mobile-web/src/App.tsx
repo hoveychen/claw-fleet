@@ -19,11 +19,13 @@ import { DeviceConnection, type DeviceHandle } from "./DeviceConnection";
 import {
   anyAgentOnline,
   anyConnected,
+  itemKey,
   devicesReducer,
   emptyDeviceState,
   totalUsage,
   worstCongestion,
   type DeviceStates,
+  type WithDevice,
 } from "./deviceRuntime";
 // 只取零依赖的开关。`?mock` 那个假客户端 extends RelayClient，从这里 import
 // 会把整棵 relay 依赖树静态拖进同源构建 —— 造它的活儿归 transportRelay.ts。
@@ -377,6 +379,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const handlesRef = useRef(handles);
   handlesRef.current = handles;
 
+  /** 某一台设备的传输层。合并列表里点进去的东西属于**那一台**,不是当前作用域
+   *  那一台 —— 拿错了就是一次打错地方的请求。 */
+  const transportFor = useCallback(
+    (id: string): FleetTransport | null => handles[id]?.transport ?? null,
+    [handles],
+  );
+
   const activeState = states[activeDeviceId] ?? EMPTY_DEVICE_STATE;
   const client = handles[activeDeviceId]?.transport ?? null;
   const {
@@ -402,11 +411,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [pushOptedOut, setPushOptedOut] = useState<boolean>(isPushOptedOut);
   // 会话详情是一条下钻链而不是单页：从 Agent 卡「打开子代理」往上叠一层子代理会话，
   // 返回逐层退回（和知识库 wikiStack 同一套栈式浮层模型）。栈顶 id 解析出当前详情。
-  const [detailStack, setDetailStack] = useState<string[]>([]);
+  // 每一层都带上归属设备:会话 id 只在单机内唯一,而下钻要用**那一台**的
+  // transport 去拉 tail(见 itemKey 的说明)。
+  const [detailStack, setDetailStack] = useState<Array<{ deviceId: string; id: string }>>([]);
   // 知识库文档是一条链而不是单页：`[[slug]]` 站内跳转往上叠一篇，返回逐篇退回。
-  const [wikiStack, setWikiStack] = useState<WikiDoc[]>([]);
+  const [wikiStack, setWikiStack] = useState<Array<{ deviceId: string; doc: WikiDoc }>>([]);
   const [showRepo, setShowRepo] = useState(false);
-  const [repoDetail, setRepoDetail] = useState<RepoSummary | null>(null);
+  const [repoDetail, setRepoDetail] = useState<{ deviceId: string; repo: RepoSummary } | null>(
+    null,
+  );
   const [showUsage, setShowUsage] = useState(false);
   const [showPlans, setShowPlans] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(false);
@@ -535,49 +548,74 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // Optimistic read stamps: the server re-derives lastReadMs on its next scan,
   // so until that push arrives we overlay the local click/dwell time.
   const [localReadMs, setLocalReadMs] = useState<Record<string, number>>({});
-  const markRead = useCallback((items: SessionInfo[]) => {
-    if (items.length === 0) return;
-    client
-      ?.request("session_read", {
-        items: items.map((s) => ({ sessionId: s.id, workspacePath: s.workspacePath })),
-      })
-      .catch(() => {});
-    const now = Date.now();
-    setLocalReadMs((prev) => {
-      const next = { ...prev };
-      for (const s of items) next[s.id] = now;
-      return next;
-    });
-  }, []);
-
-  const mergedSessions = useMemo(
-    () =>
-      sessions.map((s) => {
-        const local = localReadMs[s.id];
-        return local && local > (s.lastReadMs ?? 0) ? { ...s, lastReadMs: local } : s;
-      }),
-    [sessions, localReadMs],
+  const markRead = useCallback(
+    (items: Array<WithDevice<SessionInfo>>) => {
+      if (items.length === 0) return;
+      // 一批里可能混着不同设备的会话(合并列表里「全部标记已读」),所以按设备
+      // 分组各发一次 —— 发错设备的话对方根本不认识这些 id。
+      const byDevice = new Map<string, Array<WithDevice<SessionInfo>>>();
+      for (const s of items) {
+        const list = byDevice.get(s.deviceId) ?? [];
+        list.push(s);
+        byDevice.set(s.deviceId, list);
+      }
+      for (const [id, list] of byDevice) {
+        handlesRef.current[id]?.transport
+          .request("session_read", {
+            items: list.map((s) => ({ sessionId: s.id, workspacePath: s.workspacePath })),
+          })
+          .catch(() => {});
+      }
+      const now = Date.now();
+      setLocalReadMs((prev) => {
+        const next = { ...prev };
+        for (const s of items) next[itemKey(s.deviceId, s.id)] = now;
+        return next;
+      });
+    },
+    [],
   );
 
+  // 会话一律带着归属设备往下走。这一条 P 只是把管子铺成设备感知的形状 ——
+  // 数据源仍是当前作用域那一台,合并成跨设备列表是下一条 P 的事。
+  const mergedSessions = useMemo<Array<WithDevice<SessionInfo>>>(
+    () =>
+      sessions.map((s) => {
+        const local = localReadMs[itemKey(activeDeviceId, s.id)];
+        const withRead =
+          local && local > (s.lastReadMs ?? 0) ? { ...s, lastReadMs: local } : s;
+        return { ...withRead, deviceId: activeDeviceId };
+      }),
+    [sessions, localReadMs, activeDeviceId],
+  );
+
+  // 决策卡上「这张卡属于哪个会话」的反查。键是复合键 —— 两台机器上同号的会话
+  // 是两条不同的会话。
   const workspaceOf = useMemo(() => {
-    const map = new Map<string, SessionInfo>();
-    for (const s of mergedSessions) map.set(s.id, s);
-    return (sessionId: string) => map.get(sessionId);
+    const map = new Map<string, WithDevice<SessionInfo>>();
+    for (const s of mergedSessions) map.set(itemKey(s.deviceId, s.id), s);
+    return (deviceId: string, sessionId: string) => map.get(itemKey(deviceId, sessionId));
   }, [mergedSessions]);
 
   // The detail page re-derives its session from the live snapshot so status /
   // plan chips stay fresh while it is open. Top of the drill-down stack wins.
   const detailSession = useMemo(() => {
-    const topId = detailStack[detailStack.length - 1];
-    return topId ? (mergedSessions.find((s) => s.id === topId) ?? null) : null;
+    const top = detailStack[detailStack.length - 1];
+    if (!top) return null;
+    return (
+      mergedSessions.find((s) => s.deviceId === top.deviceId && s.id === top.id) ?? null
+    );
   }, [mergedSessions, detailStack]);
 
   // Open a session as a fresh root detail (from the tasks / decisions lists).
-  const openSessionRoot = useCallback((id: string) => setDetailStack([id]), []);
+  const openSessionRoot = useCallback(
+    (deviceId: string, id: string) => setDetailStack([{ deviceId, id }]),
+    [],
+  );
   // Drill into a subagent from within a detail view — push another layer so the
   // back button returns to the opener. `AgentNav.open` prefixes `agent-`.
   const openSessionById = useCallback(
-    (id: string) => setDetailStack((s) => [...s, id]),
+    (deviceId: string, id: string) => setDetailStack((s) => [...s, { deviceId, id }]),
     [],
   );
 
@@ -737,9 +775,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             connected={connected}
             agentOnline={agentOnline}
             decisionsLoaded={decisionsLoaded}
-            workspaceOf={workspaceOf}
+            workspaceOf={(sessionId: string) => workspaceOf(activeDeviceId, sessionId)}
             onAnswered={(id) => markAnswered(activeDeviceId, id)}
-            onOpenSession={openSessionRoot}
+            onOpenSession={(id: string) => openSessionRoot(activeDeviceId, id)}
             focusDecision={focusDecision}
           />
         ) : tab === "tasks" ? (
@@ -749,11 +787,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             connected={connected}
             agentOnline={agentOnline}
             sessionsLoaded={sessionsLoaded}
-            onOpenSession={(s) => openSessionRoot(s.id)}
+            onOpenSession={(s: WithDevice<SessionInfo>) => openSessionRoot(s.deviceId, s.id)}
             onMarkRead={markRead}
           />
         ) : tab === "wiki" ? (
-          <WikiView client={client} onOpenDoc={(doc) => setWikiStack([doc])} />
+          <WikiView
+            client={client}
+            onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
+          />
         ) : (
           <MoreView
             endpointLabel={client?.endpointLabel ?? ""}
@@ -793,9 +834,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <SessionDetailView
           session={detailSession}
           sessions={mergedSessions}
-          client={client}
+          client={transportFor(detailSession.deviceId)}
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
-          onOpenSessionId={openSessionById}
+          onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
           onDwellRead={() => markRead([detailSession])}
         />
       )}
@@ -806,10 +847,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       ))}
       {wikiStack.length > 0 && (
         <WikiDocView
-          doc={wikiStack[wikiStack.length - 1]}
-          client={client}
+          doc={wikiStack[wikiStack.length - 1].doc}
+          client={transportFor(wikiStack[wikiStack.length - 1].deviceId)}
           onBack={() => setWikiStack((s) => s.slice(0, -1))}
-          onOpenDoc={(doc) => setWikiStack((s) => [...s, doc])}
+          onOpenDoc={(doc) =>
+            setWikiStack((s) => [...s, { deviceId: s[s.length - 1].deviceId, doc }])
+          }
         />
       )}
 
@@ -819,7 +862,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           <RepoView
             client={client}
             onBack={() => setShowRepo(false)}
-            onOpenRepo={setRepoDetail}
+            onOpenRepo={(repo) => setRepoDetail({ deviceId: activeDeviceId, repo })}
           />
         </>
       )}
@@ -828,8 +871,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <>
           <HistoryLayer onBack={() => setRepoDetail(null)} />
           <RepoDetailView
-            repo={repoDetail}
-            client={client}
+            repo={repoDetail.repo}
+            client={transportFor(repoDetail.deviceId)}
             onBack={() => setRepoDetail(null)}
           />
         </>
@@ -891,9 +934,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           connected={connected}
           agentOnline={agentOnline}
           decisionsLoaded={decisionsLoaded}
-          workspaceOf={workspaceOf}
+          workspaceOf={(sessionId: string) => workspaceOf(activeDeviceId, sessionId)}
           onAnswered={(id) => markAnswered(activeDeviceId, id)}
-          onOpenSession={openSessionRoot}
+          onOpenSession={(id: string) => openSessionRoot(activeDeviceId, id)}
         />
       )}
 
