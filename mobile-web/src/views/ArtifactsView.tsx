@@ -22,6 +22,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
+import { useHistoryLayer } from "../useNavStack";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
 import type { FleetTransport } from "../transport";
@@ -163,6 +164,10 @@ function ArtifactDetail({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const kind = previewKind(artifact);
+
+  // 预览是压在产出列表之上的第二层浮层，所以它要自己登记一层历史。少了这一层，
+  // 硬件返回键弹掉的是 App 里那层「产出页」，人从预览一步退回「更多」页。
+  useHistoryLayer(onBack);
 
   useEffect(() => {
     if (!client || kind === "none") return;
