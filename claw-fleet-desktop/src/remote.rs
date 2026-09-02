@@ -19,27 +19,19 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use claw_fleet_core::off_runtime::off_runtime;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::session::SessionInfo;
 
 // ── Saved-connection record ───────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoteConnection {
-    pub id: String,
-    pub label: String,
-    pub host: String,
-    pub port: u16,
-    pub username: String,
-    pub identity_file: Option<String>,
-    /// Optional jump/bastion host (SSH ProxyJump, e.g. "user@bastion:22").
-    pub jump_host: Option<String>,
-    /// If set, use this SSH config profile name instead of manual host/user/port/key.
-    pub ssh_profile: Option<String>,
-}
+/// One SSH host. Now a single record in core's host book rather than a
+/// desktop-private "saved connection": the same machine can serve as the Fleet
+/// backend *and* as an rca executor, and modelling those as two unrelated lists
+/// is what made the UI call two different things "远端". The alias keeps every
+/// existing Tauri signature and the frontend's `RemoteConnection` shape intact.
+pub use claw_fleet_core::remote_host::SshHost as RemoteConnection;
 
 // ── ProbeClient ──────────────────────────────────────────────────────────────
 
@@ -676,6 +668,30 @@ impl crate::backend::Backend for RemoteBackend {
             error: Some(format!("probe /remote_host_health failed: {e}")),
             ..Default::default()
         })
+    }
+
+    fn list_ssh_hosts(&self) -> Vec<claw_fleet_core::remote_host::SshHost> {
+        // The probe host's book, not this desktop's — that is the one a session
+        // spawned there resolves a workspace's `hostId` against.
+        self.probe.get(claw_fleet_core::routes::SSH_HOSTS).unwrap_or_default()
+    }
+
+    fn upsert_ssh_host(
+        &self,
+        host: claw_fleet_core::remote_host::SshHost,
+    ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+        self.probe
+            .post_json(claw_fleet_core::routes::SSH_HOSTS_UPSERT, &host)
+            .map_err(|e| format!("probe /ssh_hosts/upsert failed: {e}"))
+    }
+
+    fn remove_ssh_host(
+        &self,
+        id: String,
+    ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+        self.probe
+            .post_json(claw_fleet_core::routes::SSH_HOSTS_REMOVE, &serde_json::json!({ "id": id }))
+            .map_err(|e| format!("probe /ssh_hosts/remove failed: {e}"))
     }
 
     fn create_dir(
@@ -2038,26 +2054,12 @@ fn emit_progress(app: &AppHandle, step: &str, done: bool, error: Option<&str>) {
 
 // ── Saved connections persistence ────────────────────────────────────────────
 
-fn connections_path() -> Option<PathBuf> {
-    crate::session::real_home_dir().map(|h| h.join(".fleet").join("fleet-connections.json"))
-}
-
-pub fn load_saved_connections() -> Vec<RemoteConnection> {
-    let path = match connections_path() {
-        Some(p) => p,
-        None => return vec![],
-    };
-    let Ok(data) = std::fs::read_to_string(&path) else {
-        return vec![];
-    };
-    serde_json::from_str(&data).unwrap_or_default()
-}
-
-fn save_connections(conns: &[RemoteConnection]) -> Result<(), String> {
-    let path = connections_path().ok_or("cannot determine home dir")?;
-    let data = serde_json::to_string_pretty(conns).map_err(|e| e.to_string())?;
-    std::fs::write(&path, data).map_err(|e| e.to_string())
-}
+// The book itself lives in core (`remote_host`): `remote_workspace::transport`
+// has to resolve a workspace's `hostId` through it at spawn time, and core
+// cannot reach up into the desktop crate. These stay as thin aliases so the
+// call sites below read unchanged.
+pub use claw_fleet_core::remote_host::load_hosts as load_saved_connections;
+use claw_fleet_core::remote_host::save_hosts as save_connections;
 
 // ── Tauri commands — saved connections ───────────────────────────────────────
 
@@ -2084,28 +2086,6 @@ use claw_fleet_core::remote_workspace::{rca_release_slug, rca_release_url};
 /// `-i <key>`, `-J <jump>`, then `user@host` — which `sh -c` splits back into
 /// argv for ssh (D1 method A). The pieces are shell-token-validated by
 /// [`remote_workspace::upsert`]'s `validate_ssh_target` at registration.
-fn ssh_target_from_connection(conn: &RemoteConnection) -> Result<String, String> {
-    if let Some(profile) = conn.ssh_profile.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        return Ok(profile.to_string());
-    }
-    let host = conn.host.trim();
-    let user = conn.username.trim();
-    if host.is_empty() || user.is_empty() {
-        return Err("connection is missing a username or host".to_string());
-    }
-    let mut parts: Vec<String> = Vec::new();
-    if conn.port != 22 {
-        parts.push(format!("-p {}", conn.port));
-    }
-    if let Some(key) = conn.identity_file.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        parts.push(format!("-i {key}"));
-    }
-    if let Some(jump) = conn.jump_host.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        parts.push(format!("-J {jump}"));
-    }
-    parts.push(format!("{user}@{host}"));
-    Ok(parts.join(" "))
-}
 
 /// Emit an rca-install progress step to the wizard (mirrors [`emit_progress`]
 /// but on a dedicated `rca-install-progress` channel so it doesn't collide with
@@ -2202,6 +2182,40 @@ fn ensure_local_rca(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Install rca on `conn` and record it in the host book — no workspace.
+///
+/// Split out from [`install_rca_remote_impl`] because "make this host an rca
+/// executor" and "register a workspace path on it" are two decisions, and
+/// fusing them forced the user to name a path before they could set up a host
+/// at all — the path being the hardest field on the form, since it has to exist
+/// identically on both machines. Choosing a workspace is the composer's job now.
+fn install_rca_on_host_impl(
+    app: &AppHandle,
+    conn: RemoteConnection,
+) -> Result<Vec<RemoteConnection>, String> {
+    emit_install_progress(app, "Connecting via SSH…", false);
+    ssh_exec(&conn, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
+    let remote_rca = provision_rca(app, |cmd| ssh_exec(&conn, cmd))?;
+    ensure_local_rca(app)?;
+    let host_id = claw_fleet_core::remote_host::adopt_host(&conn)?;
+    claw_fleet_core::remote_host::set_host_rca_path(&host_id, &remote_rca)?;
+    emit_install_progress(app, "Host is ready to run workspaces.", true);
+    Ok(claw_fleet_core::remote_host::load_hosts())
+}
+
+/// Tauri command — provision `conn` as an rca executor. Desktop-layer local SSH
+/// op (like [`connect_remote`]); the ssh runs from here, which is also where a
+/// locally-backed session spawns.
+#[tauri::command]
+pub async fn install_rca_on_host(
+    conn: RemoteConnection,
+    app: AppHandle,
+) -> Result<Vec<RemoteConnection>, String> {
+    tauri::async_runtime::spawn_blocking(move || install_rca_on_host_impl(&app, conn))
+        .await
+        .map_err(|e| format!("install task join failed: {e}"))?
+}
+
 fn install_rca_remote_impl(
     app: &AppHandle,
     conn: RemoteConnection,
@@ -2239,16 +2253,19 @@ fn install_rca_remote_impl(
     //     the user's first spawn.
     ensure_local_rca(app)?;
 
-    // 4. ssh target fragment for the `--via` command.
-    let ssh_target = ssh_target_from_connection(&conn)?;
+    // 4. Put the host in the book (or find the record that already IS this
+    //    machine) and mark it as an rca executor. The workspace then references
+    //    it by id, so editing the host's address later carries its workspaces
+    //    along instead of silently orphaning them.
+    let host_id = claw_fleet_core::remote_host::adopt_host(&conn)?;
+    claw_fleet_core::remote_host::set_host_rca_path(&host_id, &remote_rca)?;
 
     // 5. Register the stdio-over-ssh workspace (validates transport + creates
     //    the local mirror directory at the identity-mapped path).
     emit_install_progress(app, "Registering workspace…", false);
     let cfg = remote_workspace::upsert(remote_workspace::RemoteWorkspace {
         path,
-        ssh_target: Some(ssh_target),
-        remote_rca_path: Some(remote_rca),
+        host_id: Some(host_id),
         label: label.filter(|l| !l.trim().is_empty()),
         ..Default::default()
     })?;
@@ -2282,10 +2299,10 @@ fn update_rca_remote_impl(
 
     let entry = remote_workspace::find_for_path(&path)
         .ok_or("no remote workspace is registered at this path")?;
+    // Resolves either form — a `hostId` through the host book, or the
+    // `sshTarget` baked into an entry written before the book existed.
     let ssh_target = entry
-        .ssh_target
-        .clone()
-        .filter(|s| !s.trim().is_empty())
+        .resolved_ssh_target()?
         .ok_or("this remote workspace is not a stdio-over-ssh entry — nothing to update")?;
 
     emit_install_progress(app, "Connecting via SSH…", false);
@@ -2295,13 +2312,25 @@ fn update_rca_remote_impl(
     ensure_local_rca(app)?;
 
     emit_install_progress(app, "Updating registry…", false);
-    let cfg = remote_workspace::upsert(remote_workspace::RemoteWorkspace {
+    // A book-backed entry keeps its `hostId` and the new rca path lands on the
+    // host record, so every workspace on that host sees the update at once. A
+    // legacy `sshTarget` entry is rewritten in place, unchanged in form.
+    let mut updated = remote_workspace::RemoteWorkspace {
         path: entry.path.clone(),
-        ssh_target: Some(ssh_target),
-        remote_rca_path: Some(remote_rca),
         label: entry.label.clone(),
         ..Default::default()
-    })?;
+    };
+    match entry.host_id.as_deref().filter(|s| !s.trim().is_empty()) {
+        Some(id) => {
+            claw_fleet_core::remote_host::set_host_rca_path(id, &remote_rca)?;
+            updated.host_id = Some(id.to_string());
+        }
+        None => {
+            updated.ssh_target = Some(ssh_target);
+            updated.remote_rca_path = Some(remote_rca);
+        }
+    }
+    let cfg = remote_workspace::upsert(updated)?;
     emit_install_progress(app, "rca updated.", true);
     Ok(cfg)
 }
@@ -3658,43 +3687,8 @@ mod tests {
     // `rca_release_slug` now lives in claw_fleet_core::remote_workspace (both
     // installer halves share one mapping table); its tests moved there too.
 
-    #[test]
-    fn ssh_target_from_connection_builds_full_arg_fragment() {
-        use super::{ssh_target_from_connection, RemoteConnection};
-        let base = RemoteConnection {
-            id: "x".into(),
-            label: "".into(),
-            host: "box".into(),
-            port: 22,
-            username: "dev".into(),
-            identity_file: None,
-            jump_host: None,
-            ssh_profile: None,
-        };
-        // Profile alias wins — resolves everything on its own.
-        let mut c = base.clone();
-        c.ssh_profile = Some("gpu-box".into());
-        assert_eq!(ssh_target_from_connection(&c).unwrap(), "gpu-box");
-        // Plain default-port host → bare user@host (no -p 22).
-        assert_eq!(ssh_target_from_connection(&base).unwrap(), "dev@box");
-        // D1: custom port / identity / jump are now expanded into option words.
-        let mut full = base.clone();
-        full.port = 2222;
-        full.identity_file = Some("/home/me/.ssh/id".into());
-        full.jump_host = Some("bastion".into());
-        assert_eq!(
-            ssh_target_from_connection(&full).unwrap(),
-            "-p 2222 -i /home/me/.ssh/id -J bastion dev@box"
-        );
-        // Just a custom port.
-        let mut p = base.clone();
-        p.port = 2222;
-        assert_eq!(ssh_target_from_connection(&p).unwrap(), "-p 2222 dev@box");
-        // Missing user/host is an error.
-        let mut bad = base.clone();
-        bad.host = "".into();
-        assert!(ssh_target_from_connection(&bad).is_err());
-    }
+    // `ssh_target_from_connection` is now core's `remote_host::ssh_target_for`
+    // (the host book lives there); its test moved with it.
 
     /// A booted server plus everything that must outlive it.
     struct Fixture {

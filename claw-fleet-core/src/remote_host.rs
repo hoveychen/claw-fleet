@@ -1,6 +1,22 @@
-//! Operations against an SSH host that can act as an rca executor.
+//! The SSH host book, and the operations Fleet runs against a host.
 //!
-//! Two capabilities, both a single ssh round trip:
+//! ## One host, two capabilities
+//!
+//! A machine reachable over ssh can serve Fleet in two unrelated ways:
+//!
+//! - **as the Fleet backend** — the whole app runs there and this desktop is a
+//!   shell over its HTTP probe ([`crate::backend`]'s remote implementation);
+//! - **as an rca executor** — the agent stays local and only the workspace's
+//!   file I/O is routed there ([`crate::remote_workspace`]).
+//!
+//! They used to be modelled as two unrelated lists, both labelled "远端" in the
+//! UI, so the same machine had to be configured twice and the word meant two
+//! different things on one screen. [`SshHost`] is the single record; the two
+//! capabilities are fields on it. The file is unchanged
+//! (`~/.fleet/fleet-connections.json`) and the added fields are all optional,
+//! so an existing book loads as-is.
+//!
+//! ## Two capabilities, both a single ssh round trip:
 //!
 //! - [`browse_remote_dir`] — list the directories one level under a remote
 //!   path, so the session composer can walk to a repo instead of asking the
@@ -29,7 +45,180 @@
 //! on BSD ls (macOS 15) and GNU coreutils ls (Linux) to append `/` to real
 //! directories AND symlinks-to-directories, and to nothing else.
 
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
 use crate::workspace_browse::{BrowseDirResponse, BrowseEntry};
+
+/// One SSH host Fleet knows about.
+///
+/// The serde shape is byte-compatible with the old desktop-only
+/// `RemoteConnection` record — same file, same field names — so an existing
+/// `fleet-connections.json` loads unchanged and a downgrade still reads it.
+/// Everything added for the rca capability is `Option` + `skip_serializing_if`,
+/// so a host that is only ever a Fleet backend serialises exactly as before.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SshHost {
+    pub id: String,
+    pub label: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub identity_file: Option<String>,
+    /// Optional jump/bastion host (SSH ProxyJump, e.g. "user@bastion:22").
+    pub jump_host: Option<String>,
+    /// If set, use this SSH config profile name instead of manual
+    /// host/user/port/key.
+    pub ssh_profile: Option<String>,
+    /// **rca capability.** Absolute path of the rca installed on this host.
+    /// Its presence is what makes the host usable as an rca executor; the
+    /// installer sets it. `None` = "this host is not (yet) an executor".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rca_path: Option<String>,
+}
+
+fn host_book_path() -> Option<PathBuf> {
+    crate::session::get_fleet_dir().map(|d| d.join("fleet-connections.json"))
+}
+
+/// Read the host book. A missing or corrupt file is an empty book, not an
+/// error — the app must still start.
+pub fn load_hosts() -> Vec<SshHost> {
+    let Some(path) = host_book_path() else {
+        return Vec::new();
+    };
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_hosts(hosts: &[SshHost]) -> Result<(), String> {
+    let path = host_book_path().ok_or("cannot determine home dir")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    let data = serde_json::to_string_pretty(hosts).map_err(|e| e.to_string())?;
+    std::fs::write(&path, data).map_err(|e| e.to_string())
+}
+
+/// Remove one host by id. Idempotent: removing an id that is not there is not
+/// an error, the book just comes back unchanged.
+pub fn remove_host(id: &str) -> Result<Vec<SshHost>, String> {
+    let mut hosts = load_hosts();
+    hosts.retain(|h| h.id != id);
+    save_hosts(&hosts)?;
+    Ok(hosts)
+}
+
+pub fn find_host(id: &str) -> Option<SshHost> {
+    load_hosts().into_iter().find(|h| h.id == id)
+}
+
+/// Insert or replace by `id`, preserving list order for an update.
+pub fn upsert_host(host: SshHost) -> Result<Vec<SshHost>, String> {
+    let mut hosts = load_hosts();
+    match hosts.iter_mut().find(|h| h.id == host.id) {
+        Some(slot) => *slot = host,
+        None => hosts.push(host),
+    }
+    save_hosts(&hosts)?;
+    Ok(hosts)
+}
+
+/// Record that this host now has an rca at `rca_path` — the one field the
+/// installer owns. Read-modify-write of the single host rather than the whole
+/// book, so it cannot clobber a concurrent edit to a different host's address.
+pub fn set_host_rca_path(id: &str, rca_path: &str) -> Result<(), String> {
+    let mut hosts = load_hosts();
+    let slot = hosts
+        .iter_mut()
+        .find(|h| h.id == id)
+        .ok_or_else(|| format!("no ssh host with id {id}"))?;
+    slot.rca_path = Some(rca_path.to_string());
+    save_hosts(&hosts)
+}
+
+/// A deterministic id for a host that arrived without one, derived from its ssh
+/// target so the same machine always lands on the same id.
+fn derive_host_id(ssh_target: &str) -> String {
+    let slug: String = ssh_target
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    format!("ssh-{}", slug.trim_matches('-'))
+}
+
+/// Make sure `candidate` is a record in the host book and return the id to
+/// reference it by.
+///
+/// The rca install wizard can hand us three kinds of candidate: a saved host
+/// (already in the book), a `~/.ssh/config` alias, or a hand-typed
+/// `user@host`. The latter two are synthesised client-side with placeholder ids
+/// — notably the literal `"manual"`, which every hand-typed host would share.
+/// Persisting those verbatim would either collide or scatter duplicates, so:
+///
+/// 1. an id already in the book is taken as-is;
+/// 2. otherwise a host whose ssh target resolves identically IS this machine —
+///    reuse that record, which is the whole point of one host list (setting up
+///    rca on a box you already saved as a Fleet backend must not create a
+///    second row for it);
+/// 3. otherwise it is genuinely new: store it under a target-derived id.
+pub fn adopt_host(candidate: &SshHost) -> Result<String, String> {
+    let target = ssh_target_for(candidate)?;
+    let hosts = load_hosts();
+    if let Some(h) = hosts.iter().find(|h| h.id == candidate.id) {
+        return Ok(h.id.clone());
+    }
+    if let Some(h) =
+        hosts.iter().find(|h| ssh_target_for(h).ok().as_deref() == Some(target.as_str()))
+    {
+        return Ok(h.id.clone());
+    }
+    let id = derive_host_id(&target);
+    if let Some(h) = hosts.iter().find(|h| h.id == id) {
+        return Ok(h.id.clone());
+    }
+    let mut host = candidate.clone();
+    host.id = id.clone();
+    if host.label.trim().is_empty() {
+        host.label = target;
+    }
+    upsert_host(host)?;
+    Ok(id)
+}
+
+/// Build the ssh argument fragment for `host` — what goes into
+/// `ssh <fragment> <remote-rca> serve --stdio`.
+///
+/// An ssh-config profile resolves host/user/port/key on its own, so it is just
+/// the alias. A manual host is expanded into its option words — `-p <port>`
+/// (when not 22), `-i <key>`, `-J <jump>`, then `user@host` — which `sh -c`
+/// splits back into argv for ssh.
+pub fn ssh_target_for(host: &SshHost) -> Result<String, String> {
+    if let Some(profile) = host.ssh_profile.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        return Ok(profile.to_string());
+    }
+    let h = host.host.trim();
+    let u = host.username.trim();
+    if h.is_empty() || u.is_empty() {
+        return Err("connection is missing a username or host".to_string());
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if host.port != 22 {
+        parts.push(format!("-p {}", host.port));
+    }
+    if let Some(key) = host.identity_file.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        parts.push(format!("-i {key}"));
+    }
+    if let Some(jump) = host.jump_host.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        parts.push(format!("-J {jump}"));
+    }
+    parts.push(format!("{u}@{h}"));
+    Ok(parts.join(" "))
+}
 
 /// Matches [`crate::workspace_browse`]'s cap — a picker is for walking a tree
 /// by hand, and the listing has to fit in one response frame.
@@ -292,6 +481,138 @@ pub fn host_health(ssh_target: &str) -> HostHealth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `FLEET_HOME`-redirected temp home so the host book under test is never
+    /// the developer's real `~/.fleet/fleet-connections.json`.
+    struct TmpHome {
+        dir: std::path::PathBuf,
+        prev: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TmpHome {
+        fn new(tag: &str) -> Self {
+            let lock = crate::session::fleet_home_lock();
+            let dir = std::env::temp_dir().join(format!(
+                "fleet-hostbook-{}-{}",
+                tag,
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let prev = std::env::var_os("FLEET_HOME");
+            // SAFETY: serialized on the process-wide FLEET_HOME lock.
+            unsafe { std::env::set_var("FLEET_HOME", &dir) };
+            Self { dir, prev, _lock: lock }
+        }
+    }
+
+    impl Drop for TmpHome {
+        fn drop(&mut self) {
+            unsafe {
+                match self.prev.take() {
+                    Some(p) => std::env::set_var("FLEET_HOME", p),
+                    None => std::env::remove_var("FLEET_HOME"),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn host(id: &str, user: &str, h: &str) -> SshHost {
+        SshHost {
+            id: id.into(),
+            label: String::new(),
+            host: h.into(),
+            port: 22,
+            username: user.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ssh_target_for_builds_a_full_arg_fragment() {
+        let base = host("x", "dev", "box");
+        // Profile alias wins — it resolves host/user/port/key on its own.
+        let mut c = base.clone();
+        c.ssh_profile = Some("gpu-box".into());
+        assert_eq!(ssh_target_for(&c).unwrap(), "gpu-box");
+        // Plain default-port host → bare user@host (no redundant -p 22).
+        assert_eq!(ssh_target_for(&base).unwrap(), "dev@box");
+        // Custom port / identity / jump expand into option words.
+        let mut full = base.clone();
+        full.port = 2222;
+        full.identity_file = Some("/home/me/.ssh/id".into());
+        full.jump_host = Some("bastion".into());
+        assert_eq!(
+            ssh_target_for(&full).unwrap(),
+            "-p 2222 -i /home/me/.ssh/id -J bastion dev@box"
+        );
+        let mut p = base.clone();
+        p.port = 2222;
+        assert_eq!(ssh_target_for(&p).unwrap(), "-p 2222 dev@box");
+        let mut bad = base.clone();
+        bad.host = String::new();
+        assert!(ssh_target_for(&bad).is_err());
+    }
+
+    /// The old desktop record had no rca fields. Loading one must not lose it,
+    /// and re-saving must not sprout nulls into a file an older Fleet reads.
+    #[test]
+    fn a_pre_rca_host_record_round_trips_unchanged() {
+        let json = r#"[{"id":"a","label":"box","host":"h","port":22,"username":"u",
+                        "identityFile":null,"jumpHost":null,"sshProfile":null}]"#;
+        let hosts: Vec<SshHost> = serde_json::from_str(json).unwrap();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].rca_path, None);
+        let back = serde_json::to_string(&hosts[0]).unwrap();
+        assert!(!back.contains("rcaPath"), "absent capability must not serialise: {back}");
+    }
+
+    #[test]
+    fn adopt_host_reuses_the_record_that_is_already_this_machine() {
+        let _h = TmpHome::new("adopt-reuse");
+        upsert_host(host("saved-1", "dev", "box")).unwrap();
+
+        // The wizard's hand-typed candidate carries the placeholder id
+        // "manual", but resolves to the same ssh target — it is the same box.
+        let id = adopt_host(&host("manual", "dev", "box")).unwrap();
+        assert_eq!(id, "saved-1", "must attach to the existing record, not add a row");
+        assert_eq!(load_hosts().len(), 1);
+    }
+
+    /// Every hand-typed host arrives as id "manual"; persisting that verbatim
+    /// would make the second one overwrite the first.
+    #[test]
+    fn adopt_host_gives_two_different_manual_hosts_two_records() {
+        let _h = TmpHome::new("adopt-manual");
+        let a = adopt_host(&host("manual", "dev", "box-a")).unwrap();
+        let b = adopt_host(&host("manual", "dev", "box-b")).unwrap();
+        assert_ne!(a, b);
+        assert_eq!(load_hosts().len(), 2);
+        assert!(a.starts_with("ssh-"), "{a}");
+        // Same input again is the same record — adoption is idempotent.
+        assert_eq!(adopt_host(&host("manual", "dev", "box-a")).unwrap(), a);
+        assert_eq!(load_hosts().len(), 2);
+    }
+
+    #[test]
+    fn adopt_host_labels_an_unlabelled_new_record_with_its_target() {
+        let _h = TmpHome::new("adopt-label");
+        let id = adopt_host(&host("manual", "dev", "box")).unwrap();
+        assert_eq!(find_host(&id).unwrap().label, "dev@box");
+    }
+
+    #[test]
+    fn set_host_rca_path_marks_only_that_host() {
+        let _h = TmpHome::new("set-rca");
+        upsert_host(host("a", "dev", "box-a")).unwrap();
+        upsert_host(host("b", "dev", "box-b")).unwrap();
+        set_host_rca_path("a", "/root/.fleet/bin/rca").unwrap();
+        assert_eq!(find_host("a").unwrap().rca_path.as_deref(), Some("/root/.fleet/bin/rca"));
+        assert_eq!(find_host("b").unwrap().rca_path, None);
+        assert!(set_host_rca_path("nope", "/x").is_err());
+    }
 
     #[test]
     fn ssh_target_rejects_shell_metacharacters_but_allows_arg_fragments() {

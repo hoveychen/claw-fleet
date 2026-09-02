@@ -229,6 +229,9 @@ const KNOWN_WEB_GAPS = [
   "disconnect_remote",
   "delete_connection",
   "install_rca_remote",
+  // Same shape: opens an ssh connection FROM the caller's machine to install
+  // rca there. A tab has no ssh client and no keys.
+  "install_rca_on_host",
   "update_rca_remote",
   // Environment wizard *actions*: run installers / drive a login pty on the
   // machine you are sitting at, which a tab cannot do (statuses themselves are

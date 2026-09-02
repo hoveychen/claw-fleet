@@ -374,6 +374,55 @@ pub(crate) fn route_spawn_session(
             }
 
 /// GET the remote-workspace registry (`~/.fleet/remote-workspaces.json`).
+/// GET `/ssh_hosts` — the backend host's ssh host book.
+pub(crate) fn route_ssh_hosts(request: tiny_http::Request, json_header: tiny_http::Header) {
+    let body =
+        serde_json::to_string(&crate::remote_host::load_hosts()).unwrap_or_else(|_| "[]".into());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
+/// POST a [`crate::remote_host::SshHost`]; responds with the updated book.
+pub(crate) fn route_ssh_hosts_upsert(
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let (body, code) = match serde_json::from_str::<crate::remote_host::SshHost>(&buf) {
+        Ok(host) => match crate::remote_host::upsert_host(host) {
+            Ok(book) => (serde_json::to_string(&book).unwrap_or_else(|_| "[]".into()), 200),
+            Err(e) => (serde_json::json!({ "error": e }).to_string(), 500),
+        },
+        Err(e) => (serde_json::json!({ "error": e.to_string() }).to_string(), 400),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body).with_status_code(code).with_header(json_header),
+    );
+}
+
+/// POST `{id}`; responds with the updated book.
+pub(crate) fn route_ssh_hosts_remove(
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut buf = String::new();
+    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+    let id = serde_json::from_str::<serde_json::Value>(&buf)
+        .ok()
+        .and_then(|v| v.get("id").and_then(|s| s.as_str()).map(str::to_string))
+        .filter(|s| !s.is_empty());
+    let (body, code) = match id {
+        Some(id) => match crate::remote_host::remove_host(&id) {
+            Ok(book) => (serde_json::to_string(&book).unwrap_or_else(|_| "[]".into()), 200),
+            Err(e) => (serde_json::json!({ "error": e }).to_string(), 500),
+        },
+        None => (serde_json::json!({ "error": "id is required" }).to_string(), 400),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body).with_status_code(code).with_header(json_header),
+    );
+}
+
 pub(crate) fn route_remote_workspaces(
     ctx: &ServeCtx,
     request: tiny_http::Request,
