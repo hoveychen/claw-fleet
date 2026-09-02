@@ -69,8 +69,21 @@ pub struct RemoteWorkspace {
     /// pairing-code entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_target: Option<String>,
+    /// stdio-over-ssh transport, **preferred form**: the id of an entry in the
+    /// ssh host book ([`crate::remote_host::SshHost`]).
+    ///
+    /// Why an id rather than the resolved `ssh_target`: a host's address is
+    /// editable. With the target baked in, changing a host's port or user
+    /// silently orphans every workspace registered against it — the entry keeps
+    /// dialling the old address and only fails at the next session spawn. An id
+    /// follows the edit. `ssh_target` stays supported for entries written
+    /// before the host book existed, and as the escape hatch for a target that
+    /// is not a book entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
     /// stdio-over-ssh transport: the rca binary path ON THE REMOTE host.
-    /// `None` = `rca` on the remote `$PATH`.
+    /// `None` = take it from the host book entry, else `rca` on the remote
+    /// `$PATH`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_rca_path: Option<String>,
     /// Display label for the UI (e.g. the remote host's name).
@@ -216,9 +229,49 @@ impl RemoteWorkspace {
     /// Resolve which transport this entry describes, validating that exactly
     /// one mode's fields are set and well-formed. The remote rca path defaults
     /// to `rca` (on the remote `$PATH`) for stdio entries.
+    /// Resolve this entry's ssh target, plus the rca path its host book entry
+    /// declares (if any).
+    ///
+    /// `host_id` wins over a stored `ssh_target`: an entry written by the
+    /// current installer carries both (the id for durability, the target so an
+    /// older Fleet can still read the file), and the id is the authoritative
+    /// one. A `host_id` naming a host that no longer exists is an error rather
+    /// than a silent fall-through to the stale target — the user deleted that
+    /// host, and quietly dialling its last known address is exactly the
+    /// surprise this field exists to prevent.
+    /// The ssh target this entry will actually dial, resolving `host_id`
+    /// through the host book. `None` for a pairing-code entry. Public so the
+    /// installer's update path can re-provision a host without caring which
+    /// form the entry was written in.
+    pub fn resolved_ssh_target(&self) -> Result<Option<String>, String> {
+        Ok(self.resolve_ssh_target()?.0)
+    }
+
+    fn resolve_ssh_target(&self) -> Result<(Option<String>, Option<String>), String> {
+        if let Some(id) = self.host_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            let host = crate::remote_host::find_host(id).ok_or_else(|| {
+                format!(
+                    "remote workspace {} points at ssh host {id}, which is no longer in the host \
+                     book — re-register the workspace against an existing host",
+                    self.path
+                )
+            })?;
+            let target = crate::remote_host::ssh_target_for(&host)?;
+            return Ok((Some(target), host.rca_path));
+        }
+        Ok((
+            self.ssh_target.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+            None,
+        ))
+    }
+
     fn transport(&self) -> Result<Transport, String> {
         let code = self.pairing_code.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let target = self.ssh_target.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        // A `host_id` resolves to an ssh target through the host book, so both
+        // forms collapse to the same thing before the exactly-one check — an
+        // entry carrying a host id and a pairing code is still a conflict.
+        let (target, book_rca) = self.resolve_ssh_target()?;
+        let target = target.as_deref();
         match (code, target) {
             (Some(code), None) => {
                 validate_pairing_code(code)?;
@@ -231,8 +284,9 @@ impl RemoteWorkspace {
                     .as_deref()
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
-                    .unwrap_or("rca")
-                    .to_string();
+                    .map(str::to_string)
+                    .or(book_rca)
+                    .unwrap_or_else(|| "rca".to_string());
                 validate_shell_token(&remote_rca, "remote rca path")?;
                 Ok(Transport::Stdio { ssh_target: target.to_string(), remote_rca })
             }
@@ -267,6 +321,7 @@ pub fn upsert(entry: RemoteWorkspace) -> Result<RemoteWorkspacesConfig, String> 
         path: path.clone(),
         pairing_code: entry.pairing_code.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()),
         ssh_target: entry.ssh_target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
+        host_id: entry.host_id.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()),
         remote_rca_path: entry
             .remote_rca_path
             .map(|p| p.trim().to_string())
@@ -819,6 +874,115 @@ mod tests {
             "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
              -p 2222 -i /home/me/.ssh/id_ed25519 -J bastion me@gpu-box /opt/rca serve --stdio"
         );
+    }
+
+    // ── host-book-backed entries ─────────────────────────────────────────
+
+    fn book_host(id: &str, user: &str, h: &str) -> crate::remote_host::SshHost {
+        crate::remote_host::SshHost {
+            id: id.into(),
+            label: String::new(),
+            host: h.into(),
+            port: 22,
+            username: user.into(),
+            ..Default::default()
+        }
+    }
+
+    /// The whole reason `host_id` exists: editing a host's address must carry
+    /// its workspaces along instead of leaving them dialling the old one.
+    #[test]
+    fn editing_a_hosts_address_follows_through_to_its_workspaces() {
+        let home = TmpHome::new("hostid-follow");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        crate::remote_host::upsert_host(book_host("h1", "dev", "box")).unwrap();
+        upsert(RemoteWorkspace {
+            path: ws.clone(),
+            host_id: Some("h1".into()),
+            rca_path: Some(fake_rca),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let before = wrap_launch(&ws, "claude", &[]).unwrap().unwrap();
+        assert!(before.args.last().unwrap().contains("dev@box"), "{:?}", before.args);
+
+        // The user edits the host: new port, new user.
+        let mut moved = book_host("h1", "ops", "box");
+        moved.port = 2222;
+        crate::remote_host::upsert_host(moved).unwrap();
+
+        let after = wrap_launch(&ws, "claude", &[]).unwrap().unwrap();
+        assert!(
+            after.args.last().unwrap().contains("-p 2222 ops@box"),
+            "the workspace must follow its host: {:?}",
+            after.args
+        );
+    }
+
+    /// Deleting the host must fail loudly at launch, not quietly dial whatever
+    /// address happened to be cached — that surprise is what `host_id` is for.
+    #[test]
+    fn a_workspace_whose_host_was_deleted_fails_with_a_pointed_message() {
+        let home = TmpHome::new("hostid-gone");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        crate::remote_host::upsert_host(book_host("h1", "dev", "box")).unwrap();
+        upsert(RemoteWorkspace {
+            path: ws.clone(),
+            host_id: Some("h1".into()),
+            rca_path: Some(fake_rca),
+            ..Default::default()
+        })
+        .unwrap();
+        crate::remote_host::save_hosts(&[]).unwrap();
+
+        let err = wrap_launch(&ws, "claude", &[]).unwrap_err();
+        assert!(err.contains("no longer in the host book"), "{err}");
+    }
+
+    /// The remote rca path now lives on the host record, so one install serves
+    /// every workspace on that host.
+    #[test]
+    fn the_remote_rca_path_comes_from_the_host_record() {
+        let home = TmpHome::new("hostid-rca");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        let mut h = book_host("h1", "dev", "box");
+        h.rca_path = Some("/root/.fleet/bin/rca".into());
+        crate::remote_host::upsert_host(h).unwrap();
+        upsert(RemoteWorkspace {
+            path: ws.clone(),
+            host_id: Some("h1".into()),
+            rca_path: Some(fake_rca),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let got = wrap_launch(&ws, "claude", &[]).unwrap().unwrap();
+        assert!(
+            got.args.last().unwrap().contains("/root/.fleet/bin/rca serve --stdio"),
+            "{:?}",
+            got.args
+        );
+    }
+
+    /// Entries written before the host book existed keep working verbatim.
+    #[test]
+    fn a_legacy_ssh_target_entry_still_launches() {
+        let home = TmpHome::new("hostid-legacy");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        let mut e = stdio_entry(&ws, "own-api-ko");
+        e.rca_path = Some(fake_rca);
+        upsert(e).unwrap();
+        let got = wrap_launch(&ws, "claude", &[]).unwrap().unwrap();
+        assert!(got.args.last().unwrap().contains("own-api-ko rca serve --stdio"), "{:?}", got.args);
     }
 
     // ── local installer ──────────────────────────────────────────────────

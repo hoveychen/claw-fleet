@@ -388,6 +388,22 @@ pub trait Backend: Send + Sync {
     /// [`crate::remote_workspace`]). Lives on the backend host — that is where
     /// sessions spawn, so that is whose `~/.fleet/remote-workspaces.json`
     /// governs the wrap.
+    /// The ssh host book — machines Fleet can reach, each carrying its
+    /// capabilities (Fleet backend / rca executor).
+    ///
+    /// Through the backend for the same reason the workspace registry is:
+    /// `remote_workspace::transport` resolves a workspace's `hostId` through
+    /// this book at spawn time, and sessions spawn on the backend host. A
+    /// settings page reading the desktop's own book under a remote connection
+    /// would be editing a file no session ever consults.
+    fn list_ssh_hosts(&self) -> Vec<crate::remote_host::SshHost>;
+    /// Insert or replace one host by id; returns the updated book.
+    fn upsert_ssh_host(
+        &self,
+        host: crate::remote_host::SshHost,
+    ) -> Result<Vec<crate::remote_host::SshHost>, String>;
+    /// Remove one host by id; returns the updated book.
+    fn remove_ssh_host(&self, id: String) -> Result<Vec<crate::remote_host::SshHost>, String>;
     fn list_remote_workspaces(&self) -> crate::remote_workspace::RemoteWorkspacesConfig;
     /// Register or update a remote workspace; returns the updated registry.
     fn upsert_remote_workspace(

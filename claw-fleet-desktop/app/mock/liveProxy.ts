@@ -254,13 +254,15 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/create_dir",
     body: { path: q(a.path) ?? null, name: a.name },
   }),
-  // NOTE: `remote_browse_dir` / `remote_host_health` exist on the Backend trait
-  // and answer at `/remote_browse_dir` + `/remote_host_health`, but have no
-  // entry here yet — this table's guard rejects a route no component invokes,
-  // and their UI lands in a later plan. Whoever wires that UI adds:
-  //   remote_browse_dir:  GET /remote_browse_dir  {target, path}
-  //   remote_host_health: GET /remote_host_health {target}
-  // in the same change, or the browser build silently rejects both calls.
+  remote_host_health: (a) => ({
+    method: "GET",
+    path: "/remote_host_health",
+    query: { target: q(a.sshTarget) },
+  }),
+  // NOTE: `remote_browse_dir` (GET /remote_browse_dir, {target, path}) still
+  // has no entry — nothing invokes it until the composer's browse flow lands,
+  // and this table's guard rejects a route no component calls. Whoever wires
+  // that UI adds it in the same change, or the browser build rejects the call.
 
   cancel_loop: (a) => ({
     method: "POST",
@@ -721,6 +723,19 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   list_remote_workspaces: () => ({
     method: "GET",
     path: "/remote_workspaces",
+  }),
+
+  // The ssh host book on the BACKEND host — the one a session resolves a
+  // workspace's `hostId` against when it spawns there.
+  list_ssh_hosts: () => ({
+    method: "GET",
+    path: "/ssh_hosts",
+  }),
+
+  remove_ssh_host: (a) => ({
+    method: "POST",
+    path: "/ssh_hosts/remove",
+    body: { id: a.id },
   }),
 
   list_schedules: () => ({
@@ -1202,11 +1217,11 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: a.update,
   }),
 
-  upsert_remote_workspace: (a) => ({
-    method: "POST",
-    path: "/remote_workspaces/upsert",
-    body: a.entry,
-  }),
+  // NOTE: `upsert_remote_workspace` (POST /remote_workspaces/upsert, body =
+  // the entry) has no route here because nothing invokes it right now — the
+  // pairing-code form that used to is gone, and the composer's
+  // browse-and-register flow lands in the next plan. This table's guard
+  // rejects a route no component calls, so it goes back in with that UI.
 
   usage_range_breakdown: (a) => ({
     method: "GET",

@@ -483,8 +483,13 @@ export interface RemoteWorkspace {
   path: string;
   /** Pairing-code (libp2p) transport: the `rca1.…` code printed by `rca serve`. */
   pairingCode?: string;
-  /** stdio-over-ssh transport: the ssh target (`host` alias or `user@host`). */
+  /** stdio-over-ssh transport: the ssh target (`host` alias or `user@host`).
+   *  Legacy form — entries written before the host book existed. */
   sshTarget?: string;
+  /** stdio-over-ssh transport, preferred: the id of an `SshHost` in the host
+   *  book. An id survives the host's address being edited; a baked-in
+   *  `sshTarget` does not. */
+  hostId?: string;
   /** stdio transport: rca binary path on the remote host (defaults to `rca` on PATH). */
   remoteRcaPath?: string;
   /** Display label (e.g. the remote host's name). */
