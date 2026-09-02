@@ -73,8 +73,8 @@ agent（claude / codex）**仍在本机跑**，rca 把 workspace 路径下的文
 `wrap_launch` 的错误原样冒到 spawn 失败里：`rca binary not found`、
 `workspace rcaPath points to X, which does not exist`。这些是给开发者读的。
 
-会话跑起来之后 ssh 隧道断了 = 会话直接死，**没有任何 UI 提示、没有重连**
-（serve 是 per-run 无状态的，断线就得重跑）。
+会话跑起来之后 ssh 隧道断了会怎样——**这条我原先写错了，2026-09-02 实测更正**，
+见第七节。
 
 ### G. 没有连通性自检
 
@@ -179,3 +179,48 @@ X4（条目「测试连接」）**四项全要**。X5（拆共享 state）是重
 
 - **门控什么时候解？** 设计做完随之解除，还是等真机全链 e2e 跑通再解。
   留到实现落地前再问。
+
+
+---
+
+## 七、ssh 断线时到底发生什么（2026-09-02 实测，两次复现）
+
+本节更正第三节 F 里那句「ssh 断了 = 会话直接死」。**不是。真实情况更糟。**
+
+### 实验
+
+本机 rca v0.2.0，`--via` 指向一个可被 kill 的 ssh 包装脚本，远端 own-api-ko。
+agent 每秒读一次只存在于远端的 `marker.txt`，跑到一半 `pkill` 掉那条 ssh。
+
+### 观察到的（原始日志）
+
+```
+15:07:58 rca serve [fs] PREAD handle=2 off=0 len=6 -> 6
+tick 1 ok
+00:08:00 rca remote recv failed: stream reset: connection closed: EOF
+tick 2 FAILED: FileNotFoundError: No such file or directory: '/private/tmp/ssh-kill-demo/marker.txt'
+```
+
+三件事，都与原先的假设不同：
+
+1. **agent 进程没有死。** 它继续跑，只是从下一次系统调用起，看到的是本机那个
+   **空的镜像目录**。
+2. **agent 收到的不是传输错误，是 `FileNotFoundError`。** 从它的视角，这与
+   「仓库被人删空了」完全无法区分。一个 agent 在这个状态下完全可能得出
+   「代码没了」的结论，然后开始从头写。
+3. **rca 自己是知道的。** 它在 stderr 上打了
+   `rca remote recv failed: stream reset: connection closed: EOF`。信号是现成的，
+   只是没有人把它接到界面上。
+
+### 这对设计意味着什么
+
+原先设想的「断线提示 + 可选重连」低估了严重性。真正的要求排序是：
+
+- **P0 · 止损。** 一旦检测到断开，必须让 agent **停下**，而不是继续对着空目录
+  工作。看到空仓库的 agent 会做出破坏性的错误决定。
+- **P1 · 告知。** 会话上明确标出「远端连接断开」，并说清它停在哪一步。
+- **P2 · 恢复。** serve 是 per-run 无状态的，重连不等于恢复现场——这是需要
+  老板拍板的取舍（自动重跑 ssh 继续 / 只给一个「重开会话」按钮）。
+
+信号来源已确定：rca 的 stderr。Fleet 本来就在收每个会话的 stderr
+（`session_launch` 的 `stderr_log`），所以接这条线不需要改 rca。
