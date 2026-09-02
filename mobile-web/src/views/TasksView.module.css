@@ -561,3 +561,17 @@
   color: var(--color-accent);
   animation: spin 0.7s linear infinite;
 }
+
+/* 合并列表里的归属设备。与 .project 同一档次的次要信息，用同样的字号与颜色，
+   只是换一个图标——它回答的是「哪台机器」，而 .project 回答「哪个项目」。 */
+.device {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
