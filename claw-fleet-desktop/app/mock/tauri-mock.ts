@@ -143,6 +143,9 @@ let mockRemoteWorkspaces: {
   label?: string;
 }[] = [
   { path: "/Users/dev/remote-api", pairingCode: "rca1.JgAkCAESIPuTmockmockmock", label: "gpu-box" },
+  // ssh-transport entry so the environment panel's remote-hosts section
+  // renders its probe/install/login affordances under ?mock.
+  { path: "/home/dev/train-rig", sshTarget: "dev@train-rig", label: "train-rig" },
 ];
 
 function handleIPC(
@@ -275,6 +278,12 @@ function handleIPC(
           loggedIn: null,
           authDetail: null,
         },
+      ];
+    case "remote_workspace_harness_statuses":
+      return [
+        { source: "claude-code", installed: true, path: "/home/dev/.local/bin/claude", version: "2.1.246", channel: null, loggedIn: null, authDetail: null },
+        { source: "codex", installed: true, path: "/home/dev/.local/bin/codex", version: "0.148.0", channel: null, loggedIn: false, authDetail: null },
+        { source: "dsh", installed: false, path: null, version: null, channel: null, loggedIn: null, authDetail: null },
       ];
     case "harness_login_context":
       return { alive: false, managesClaude: false, managesCodex: false };
