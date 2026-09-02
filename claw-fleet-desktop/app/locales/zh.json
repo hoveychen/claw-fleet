@@ -2401,5 +2401,8 @@
       "text": "文本",
       "other": "其它"
     }
+  },
+  "markdown": {
+    "render_rest": "展开剩余 {{n}} 段"
   }
 }
