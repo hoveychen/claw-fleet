@@ -535,6 +535,10 @@ const DICT: Record<string, string> = {
   新建目录失败: "Could not create that directory",
   "要让 agent 做什么？": "What should the agent do?",
   创建会话失败: "Failed to create session",
+  开在: "On",
+  开在哪台设备上: "Which device to create it on",
+  "这台设备当前离线，创建请求可能要等它连上才生效":
+    "This device is offline — the request may not take effect until it reconnects",
   "创建中…": "Creating…",
   创建会话: "Create session",
   默认权限: "Default permissions",

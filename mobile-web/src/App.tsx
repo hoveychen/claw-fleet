@@ -532,6 +532,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [showPlans, setShowPlans] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
+  // 新会话开在**哪一台**上。null = 跟着当前作用域那台(每次打开 sheet 都复位成
+  // 它),用户在 sheet 里另选一台时才落一个具体 id。不复用 activeDeviceId 是因为
+  // 这两件事不同:作用域是「我在看哪台」,这里是「这一次要开在哪台」——在云端开个
+  // 会话不该逼用户先把整个界面切过去。
+  const [newSessionDeviceId, setNewSessionDeviceId] = useState<string | null>(null);
   // Files handed over by another app's share, pending upload once the
   // new-session sheet mounts (that's where the attachment state lives).
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
@@ -820,6 +825,18 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const scopedSessions = useMemo(
     () => mergedSessions.filter((s) => s.deviceId === activeDeviceId),
     [mergedSessions, activeDeviceId],
+  );
+
+  /** 这一次新会话要开在哪台上(用户没另选就是当前作用域那台)。 */
+  const newSessionTargetId = newSessionDeviceId ?? activeDeviceId;
+  /** 目标设备的本地存储命名空间。与 `deviceId` 同口径 —— mock / 同源形态下只有
+   *  一个数据源,那时不加前缀(见 deviceScope.tsx)。 */
+  const newSessionScopeId = MOCK || !NEEDS_PAIRING ? null : newSessionTargetId || null;
+  /** 目标设备上的会话。新会话表单只拿它来算「最近 workspace」,那是目标那台
+   *  机器上的目录,别台的路径在它上面根本不存在。 */
+  const newSessionSessions = useMemo(
+    () => mergedSessions.filter((s) => s.deviceId === newSessionTargetId),
+    [mergedSessions, newSessionTargetId],
   );
 
   // 决策卡上「这张卡属于哪个会话」的反查。键是复合键 —— 两台机器上同号的会话
@@ -1196,18 +1213,31 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       {showNewSession && (
         <>
           <HistoryLayer onBack={() => setShowNewSession(false)} />
-          <NewSessionSheet
-            // 新会话开在**当前作用域**那一台上,所以最近 workspace 也只取它的。
-            sessions={scopedSessions}
-            client={client}
-            initialFiles={sharedFiles}
-            relayReady={connected}
-            onClose={() => {
-              setShowNewSession(false);
-              // Consumed by the sheet — don't re-upload them if it reopens.
-              setSharedFiles([]);
-            }}
-          />
+          {/* 表单整个跑在**目标设备**的作用域里,而不是当前作用域那台:里面的
+              草稿、附件、上次用的 repo 都是「某一台机器上的东西」。
+              `key` 是必需的而非优化 —— useDraft 只在挂载时读盘(见 draft.ts),
+              光换 provider 的话换设备后表单会顶着 A 的 workspace/附件,还会把
+              它们写进 B 的命名空间。重挂载让每台各自恢复自己的那份。 */}
+          <DeviceScopeProvider deviceId={newSessionScopeId}>
+            <NewSessionSheet
+              key={newSessionTargetId}
+              sessions={newSessionSessions}
+              client={transportFor(newSessionTargetId)}
+              devices={runtimeDevices.length > 1 ? runtimeDevices : undefined}
+              targetDeviceId={newSessionTargetId}
+              onTargetDevice={setNewSessionDeviceId}
+              initialFiles={sharedFiles}
+              relayReady={states[newSessionTargetId]?.connected ?? false}
+              onClose={() => {
+                setShowNewSession(false);
+                // 下次打开回到「当前作用域那台」,不记住上次挑的那台 —— 记住会
+                // 让人在 A 页面上打开表单却默默开去 B。
+                setNewSessionDeviceId(null);
+                // Consumed by the sheet — don't re-upload them if it reopens.
+                setSharedFiles([]);
+              }}
+            />
+          </DeviceScopeProvider>
         </>
       )}
 
