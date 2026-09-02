@@ -319,6 +319,86 @@ pub(crate) async fn codex_login_cancel(
         .map_err(|e| format!("join: {e}"))?
 }
 
+// ── Remote codex login (device-auth over ssh, wizard phase 2) ────────────────
+//
+// A remote workspace host has no browser/localhost callback, so remote codex
+// login is `codex login --device-auth` streamed over ssh through the Backend
+// proc surface. Copying a local auth.json is deliberately not offered (the
+// single-use refresh token would rotate under two hosts and 401 both).
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteCodexLoginPoll {
+    parse: claw_fleet_core::harness_login::CodexDeviceAuthParse,
+    running: bool,
+    /// Confirmed by the remote host probe once the flow finished.
+    logged_in: bool,
+}
+
+#[tauri::command]
+pub(crate) async fn remote_codex_login_start(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let ssh_target = crate::remote::ssh_target_for_workspace(&path)?;
+    let command =
+        claw_fleet_core::harness_login::codex_device_auth_ssh_command(&ssh_target)?;
+    let home = session::real_home_dir()
+        .map(|h| h.to_string_lossy().into_owned())
+        .ok_or("cannot resolve home directory")?;
+    let backend = state.backend.clone();
+    let record = tokio::task::spawn_blocking(move || {
+        backend.read().unwrap().spawn_proc(home, command, 100, 30)
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))??;
+    Ok(record.id)
+}
+
+#[tauri::command]
+pub(crate) async fn remote_codex_login_poll(
+    id: String,
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<RemoteCodexLoginPoll, String> {
+    use base64::Engine as _;
+    let backend = state.backend.clone();
+    let chunk = tokio::task::spawn_blocking(move || {
+        backend.read().unwrap().proc_output(id, Some(0))
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))??;
+
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(&chunk.data_b64)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+    let parse = claw_fleet_core::harness_login::parse_codex_device_auth_output(&raw);
+    let running = matches!(
+        chunk.record.status,
+        claw_fleet_core::proc_runner::ProcStatus::Starting
+            | claw_fleet_core::proc_runner::ProcStatus::Running
+    );
+    // Only pay the ssh probe once the flow looks finished; ground truth is the
+    // remote auth.json, not the banner.
+    let logged_in = if parse.success || !running {
+        tokio::task::spawn_blocking(move || {
+            crate::remote::ssh_target_for_workspace(&path)
+                .and_then(|t| claw_fleet_core::remote_host::remote_harness_statuses(&t))
+                .map(|s| {
+                    s.iter()
+                        .any(|h| h.source == "codex" && h.logged_in == Some(true))
+                })
+                .unwrap_or(false)
+        })
+        .await
+        .map_err(|e| format!("join: {e}"))?
+    } else {
+        false
+    };
+    Ok(RemoteCodexLoginPoll { parse, running, logged_in })
+}
+
 // ── dsh credential flow (wizard) ─────────────────────────────────────────────
 //
 // dsh has no login: "logging in" = storing provider API keys. Refs are
