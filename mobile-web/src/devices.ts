@@ -22,13 +22,14 @@ const BOOK_KEY = "fleet-devices";
 /** 单设备时代的键。只在迁移时读一次,之后不再写。 */
 const LEGACY_SECRET_KEY = "fleet-relay-secret";
 
-/** 一台设备用哪条路接:经中转配对,还是直连一个 HTTP 主机。
+/** 一台设备用哪条路接:经中转配对,还是直接问一个 HTTP 后端。
  *
- *  两条路本来就都在(mobile-web 有 RelayClient 与 HttpTransport 两个实现),区别
- *  只在「谁是后端」:relay 那条解决的是「手机不在桌面端同一张网里」,而 HTTP 那条
- *  是直接问一台自己能访问到的主机(`fleet webui` / 云容器)—— 省掉中转一跳,代价
- *  是没有推送通道,而且必须是 https 端点(手机上那个 PWA 是 https 发的,浏览器
- *  不允许它去 fetch 明文 http)。 */
+ *  `http` 这一种**没有对应的「添加设备」入口** —— 它是同源形态的承载:同源产物
+ *  (`fleet webui` / 云容器的 `/m/`)里簿子永远空着,App 用一台 baseUrl 为空的
+ *  合成 http 设备代表「就问发出这张页面的那个 origin」(App 的
+ *  `SAME_ORIGIN_DEVICE`),于是「按设备种类分派传输层」这条规则同时覆盖了同源
+ *  部署,不必为它留特例分支。簿子里若还留着 http 记录,那是手填直连那条路存在
+ *  时加的,反序列化仍然认它 —— 老用户已加的那台不该因为入口撤了就连不上。 */
 export type DeviceKind = "relay" | "http";
 
 interface DeviceCommon {
@@ -218,74 +219,6 @@ export function addDevice(book: DeviceBook, input: AddDeviceInput): AddDeviceRes
   };
 }
 
-export interface AddHttpDeviceInput {
-  /** 主机地址。绝对地址(跨源必需),末尾斜杠会被规范掉。 */
-  baseUrl: string;
-  token?: string | null;
-  label: string;
-  id: string;
-  now: number;
-}
-
-/** 新增一台 HTTP 直连主机(或认出它本来就在册)。
- *
- *  去重按 **baseUrl** —— 同一台主机再填一次不该多出一台。重填时更新 token
- *  (换 token 正是「再填一次」最常见的理由),但保留用户改过的 label。 */
-export function addHttpDevice(
-  book: DeviceBook,
-  input: AddHttpDeviceInput,
-): AddDeviceResult {
-  const baseUrl = input.baseUrl.trim().replace(/\/+$/, "");
-  const existing = book.devices.find(
-    (d): d is HttpDevice => d.kind === "http" && d.baseUrl === baseUrl,
-  );
-  if (existing) {
-    const updated: HttpDevice = { ...existing, token: input.token ?? existing.token };
-    return {
-      book: {
-        devices: book.devices.map((d) => (d.id === existing.id ? updated : d)),
-        activeId: existing.id,
-      },
-      device: updated,
-      deduped: true,
-    };
-  }
-  const device: HttpDevice = {
-    kind: "http",
-    id: input.id,
-    label: input.label,
-    baseUrl,
-    token: input.token ?? null,
-    addedAt: input.now,
-  };
-  return {
-    book: { devices: [...book.devices, device], activeId: device.id },
-    device,
-    deduped: false,
-  };
-}
-
-/** 一条用户粘贴/填写的主机地址是否可用,以及为什么不可用。
- *
- *  只认绝对的 http/https。**https 那条不是洁癖**:手机上那个 PWA 是 https 发的,
- *  浏览器不允许它去 fetch 明文 http(混合内容),所以一个 `http://` 的局域网地址
- *  填进来只会得到一次「连不上」而无从解释。唯一的例外是 localhost —— 浏览器把它
- *  当作可信来源,而同源部署下页面自己就在那儿。 */
-export function checkHostUrl(raw: string, pageProtocol: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return "empty";
-  let url: URL;
-  try {
-    url = new URL(trimmed);
-  } catch {
-    return "not-a-url";
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return "bad-scheme";
-  const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  if (pageProtocol === "https:" && url.protocol === "http:" && !isLocal) return "mixed-content";
-  return null;
-}
-
 /** 移除一台。删掉的正好是当前设备时,焦点落到剩下的第一台(没有剩下的就是
  *  `null`,回到未配对态)。 */
 export function removeDevice(book: DeviceBook, id: string): DeviceBook {
@@ -426,16 +359,17 @@ export function adoptScannedDevice(
   return { book: next, device, added: !deduped };
 }
 
-/** 地址栏 fragment 里带来的一次「加设备」。两种形状对应两种设备:
+/** 地址栏 fragment 里带来的一次「加设备」:`#k=<secret>&relay=<url>` —— 经中转
+ *  配对一台桌面端(桌面端二维码就是这个)。
  *
- *  - `#k=<secret>&relay=<url>` —— 经中转配对一台桌面端(桌面端二维码就是这个)。
- *  - `#h=<baseUrl>&t=<token>` —— 直连一台 HTTP 主机(桌面端「直连」那张码)。
- *
- *  两种都走同一条入口,是因为三种客户端都只有这一条路可走:系统相机打开中转托管
- *  的那份 PWA、已装的 PWA、原生壳内扫码把原文交回页面。 */
-export type HashPairing =
-  | { kind: "relay"; secret: string; relayBase: string | null; boot: boolean }
-  | { kind: "http"; baseUrl: string; token: string | null };
+ *  三种客户端都只有这一条路可走:系统相机打开中转托管的那份 PWA、已装的 PWA、
+ *  原生壳内扫码把原文交回页面。 */
+export type HashPairing = {
+  kind: "relay";
+  secret: string;
+  relayBase: string | null;
+  boot: boolean;
+};
 
 /** 取走 fragment 里的那次「加设备」,并**立刻把 fragment 从地址栏抹掉** —— 密钥
  *  与 token 不该留在那里被截图、被历史记录带走。
@@ -444,7 +378,7 @@ export type HashPairing =
  *  与 nativeScan.ts,最终也汇到这条路上。
  *
  *  一次读完是硬要求而不是顺手:抹掉之后任何模块都再读不到,所以 relay 的
- *  `&relay=`、直连的 `&t=`、以及壳的 `&boot=1` 必须在这里一并取走(relay.ts 从前
+ *  `&relay=` 与壳的 `&boot=1` 必须在这里一并取走(relay.ts 从前
  *  那个模块加载期 `RELAY_BASE` 常量就是为此存在的)。 */
 export function consumeHashPairing(): HashPairing | null {
   const hash = window.location.hash;
@@ -458,53 +392,7 @@ export function consumeHashPairing(): HashPairing | null {
     return { kind: "relay", secret, relayBase, boot };
   }
 
-  const host = parseHostParam(hash);
-  if (host) {
-    scrub();
-    return { kind: "http", ...host };
-  }
   return null;
-}
-
-/** 直连那张码的 fragment:`#h=<baseUrl>&t=<token>`。
- *
- *  纯函数(不碰 `window`),好让「桌面端拼出来的那串字符能不能被解回来」这件事被
- *  单测钉住 —— 两端的格式必须逐字对齐(core 的 direct_host::direct_url)。 */
-export function parseHostParam(
-  hash: string,
-): { baseUrl: string; token: string | null } | null {
-  const params = new Map<string, string>();
-  const frag = hash.startsWith("#") ? hash.slice(1) : hash;
-  for (const part of frag.split("&")) {
-    const eq = part.indexOf("=");
-    if (eq > 0) params.set(part.slice(0, eq), part.slice(eq + 1));
-  }
-  const raw = params.get("h");
-  if (!raw) return null;
-  let baseUrl: string;
-  try {
-    baseUrl = decodeURIComponent(raw);
-  } catch {
-    return null;
-  }
-  // 与手填那条路同一把尺子:只认绝对 http/https(是不是混合内容由调用方按页面
-  // 协议判断,那件事这里判断不了)。
-  try {
-    const u = new URL(baseUrl);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
-  } catch {
-    return null;
-  }
-  const rawToken = params.get("t");
-  let token: string | null = null;
-  if (rawToken) {
-    try {
-      token = decodeURIComponent(rawToken);
-    } catch {
-      token = null;
-    }
-  }
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), token };
 }
 
 // ── 待办退订 ─────────────────────────────────────────────────────────────────

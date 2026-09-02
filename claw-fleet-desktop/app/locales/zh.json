@@ -846,6 +846,7 @@
   "cancel": "取消",
   "confirm": "确认",
   "save": "保存",
+  "edit": "编辑",
   "loading": "加载中…",
   "update": {
     "available": "新版本 {{version}} 已发布！",
