@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
-# Build, install and pair the shell on a USB-connected Android device.
+# Install the shell on a USB-connected Android device (or a running emulator).
 #
-# Why pairing needs adb here: normally the phone scans the desktop's QR and the
-# App Link hands that URL to the app. That only works once the relay serves
-# /.well-known/assetlinks.json carrying the *release* signing fingerprint —
-# until then Android has no reason to believe this app owns the domain and the
-# scan just opens a browser. `am start` names the package directly, so it
-# bypasses domain verification and unblocks on-device testing today.
+# Install only — it does NOT pair. Pairing is done by scanning the QR in the
+# desktop's Mobile panel, either with the system camera (the two official relay
+# hosts are claimed by the App Link filter, so Android opens the app rather than
+# a browser) or with the app's own scanner on the pairing gate (the only path
+# that works for a self-hosted relay, whose host cannot be in the manifest).
 #
-# The pairing secret is read straight from the desktop's own config and passed
-# in the URL fragment. It is never echoed.
+# It used to pair over adb, because back then the relay served no
+# /.well-known/assetlinks.json carrying the release signing fingerprint, so a
+# scan just opened a browser and `am start` was the only way onto a device. That
+# is obsolete: both hosts now serve it with this keystore's SHA-256 (verified
+# 2026-09-01), and the in-app scanner covers self-hosted relays. Pairing over
+# adb also injected the *operator's own* secret, which quietly made this script
+# unusable for anything but one's own phone.
+#
+# The APK itself comes from build-android-apk.sh rather than a second gradle
+# invocation here — that keeps the signing preflight and the "refuse to ship an
+# unsigned APK" check in one place instead of two that can drift.
+#
+# Environment overrides: same as build-android-apk.sh (RELAY_URL,
+# FLEET_SIGNING_DIR, JAVA_HOME, ANDROID_HOME).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# The keystore lives in the MAIN checkout, not this worktree — --git-common-dir
-# points at the main .git even from inside a linked worktree. Absolutised for
-# the same reason as in build-android-apk.sh: the path is handed to gradle,
-# which runs from `android/`, and --git-common-dir is relative in a plain
-# checkout — a relative path there yields a silently UNSIGNED apk.
-SIGNING_DIR="${FLEET_SIGNING_DIR:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/.signing}"
-RELAY_URL="${RELAY_URL:-https://fleet-relay.muveeai.com}"
-
-export JAVA_HOME="${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 export PATH="$ANDROID_HOME/platform-tools:$PATH"
 
@@ -33,38 +35,21 @@ if [ -z "$(adb devices | awk 'NR>1 && $2=="device"')" ]; then
   exit 1
 fi
 
-SECRET="$(python3 -c "
-import json, pathlib, sys
-p = pathlib.Path.home() / '.fleet' / 'mobile-relay.json'
-try:
-    print(json.loads(p.read_text()).get('secret', ''))
-except Exception:
-    sys.exit(1)
-")"
-if [ -z "$SECRET" ]; then
-  echo "no pairing secret in ~/.fleet/mobile-relay.json — enable Mobile in the" >&2
-  echo "desktop Fleet app first (that's what generates it)." >&2
-  exit 1
-fi
+./scripts/build-android-apk.sh
 
-echo "==> building signed release APK"
-RELAY_URL="$RELAY_URL" ./scripts/build-shell.sh >/dev/null
-(
-  cd android
-  FLEET_KEYSTORE_PATH="$SIGNING_DIR/fleet-release.jks" \
-  FLEET_KEYSTORE_PASSWORD="$(cat "$SIGNING_DIR/keystore-password.txt")" \
-    ./gradlew --quiet assembleRelease
-)
-
-APK=android/app/build/outputs/apk/release/app-release.apk
-echo "==> installing $(du -h "$APK" | cut -f1) APK"
+APK="$(ls -t dist-apk/*.apk | head -1)"
+echo
+echo "==> installing $(basename "$APK") ($(du -h "$APK" | cut -f1))"
 # -r keeps app data across reinstalls; a signature change still needs a manual
 # uninstall, which is exactly the signal you want if the keystore ever changes.
 adb install -r "$APK"
 
-echo "==> pairing (secret not shown)"
-adb shell am force-stop com.hoveychen.clawfleet
-adb shell "am start -a android.intent.action.VIEW -c android.intent.category.BROWSABLE \
-  -d '$RELAY_URL/\#k=$SECRET' com.hoveychen.clawfleet" >/dev/null
+cat <<'NOTE'
 
-echo "==> done — the app should be open and paired against $RELAY_URL"
+==> installed. To pair, open Fleet on the phone and either:
+      - scan the QR in the desktop's Mobile panel with the app's scanner, or
+      - tap "paste a pairing link" and paste the link the desktop's
+        "copy pairing link" button puts on your clipboard.
+    For the official relay hosts the system camera works too — Android hands
+    the scanned link straight to the app.
+NOTE
