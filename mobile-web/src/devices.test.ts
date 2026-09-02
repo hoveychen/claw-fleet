@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  addHttpDevice,
-  parseHostParam,
-  checkHostUrl,
   addPendingUnsub,
   dropPendingUnsub,
   loadPendingUnsub,
@@ -327,73 +324,24 @@ describe("pending unsubscribe ledger", () => {
   });
 });
 
-// 设备簿现在有两种设备:经中转配对的桌面端,与直连的 HTTP 主机(`fleet webui`
-// 或云容器)。两种在收件箱里并列,但连的方式、有没有推送通道都不同。
-describe("http devices", () => {
+// 簿子里的 http 记录已经没有「添加设备」入口了(直连那条路撤了),但反序列化
+// 仍然认它:老用户手填加过的那台不该因为入口撤了就连不上。同源形态那一台不进
+// 簿子 —— 它是 App 里的模块常量 SAME_ORIGIN_DEVICE。
+describe("http device records in a stored book", () => {
   beforeEach(() => localStorage.clear());
 
-  it("adds a host and focuses it", () => {
-    const { book, device, deduped } = addHttpDevice(emptyBook(), {
-      baseUrl: "https://fleet.example.com/",
-      token: "t0",
-      label: "云端",
-      id: "h1",
-      now: 1,
+  it("still reads a stored http device back", () => {
+    const raw = JSON.stringify({
+      devices: [
+        { kind: "http", id: "h1", label: "云端", baseUrl: "https://fleet.example.com", token: "t0", addedAt: 1 },
+      ],
+      activeId: "h1",
     });
-    expect(deduped).toBe(false);
-    expect(device.kind).toBe("http");
-    // 末尾斜杠被规范掉 —— 否则同一台主机会因为多打一个 / 而变成两台。
-    if (device.kind !== "http") throw new Error("expected http");
-    expect(device.baseUrl).toBe("https://fleet.example.com");
-    expect(device.token).toBe("t0");
-    expect(book.activeId).toBe("h1");
-  });
-
-  it("dedupes by host and takes the fresh token but keeps the name", () => {
-    let book = addHttpDevice(emptyBook(), {
-      baseUrl: "https://fleet.example.com",
-      token: "old",
-      label: "云端",
-      id: "h1",
-      now: 1,
-    }).book;
-    book = renameDevice(book, "h1", "公司云");
-    const again = addHttpDevice(book, {
-      baseUrl: "https://fleet.example.com",
-      token: "new",
-      label: "云端",
-      id: "h9",
-      now: 2,
-    });
-    expect(again.deduped).toBe(true);
-    expect(again.book.devices).toHaveLength(1);
-    expect(again.device.label).toBe("公司云");
-    if (again.device.kind !== "http") throw new Error("expected http");
-    expect(again.device.token).toBe("new");
-  });
-
-  it("a relay device and an http device coexist", () => {
-    let book = addDevice(emptyBook(), { secret: A, label: "Mac", id: "d1", now: 1 }).book;
-    book = addHttpDevice(book, {
-      baseUrl: "https://fleet.example.com",
-      label: "云端",
-      id: "h1",
-      now: 2,
-    }).book;
-    expect(book.devices.map((d) => d.kind)).toEqual(["relay", "http"]);
-  });
-
-  it("round-trips both kinds through storage", () => {
-    let book = addDevice(emptyBook(), { secret: A, label: "Mac", id: "d1", now: 1 }).book;
-    book = addHttpDevice(book, {
-      baseUrl: "https://fleet.example.com",
-      token: "t0",
-      label: "云端",
-      id: "h1",
-      now: 2,
-    }).book;
-    persistBook(book);
-    expect(loadBookSync(mint("dX"))).toEqual(book);
+    const d = parseBook(raw)?.devices[0];
+    expect(d?.kind).toBe("http");
+    if (d?.kind !== "http") throw new Error("expected http");
+    expect(d.baseUrl).toBe("https://fleet.example.com");
+    expect(d.token).toBe("t0");
   });
 
   // 旧记录没有 kind 字段 —— 那个年代只有中转一条路。
@@ -417,74 +365,6 @@ describe("http devices", () => {
   });
 });
 
-// 手机上那个 PWA 是 https 发的,浏览器不允许它 fetch 明文 http(混合内容)。
-// 与其让用户填完之后只看到一句「连不上」,不如当场说清楚。
-describe("checkHostUrl", () => {
-  it("accepts an https host", () => {
-    expect(checkHostUrl("https://fleet.example.com", "https:")).toBeNull();
-  });
-
-  it("rejects a plain-http host from an https page", () => {
-    expect(checkHostUrl("http://192.168.1.5:8080", "https:")).toBe("mixed-content");
-  });
-
-  // localhost 是例外:浏览器把它当可信来源,而同源部署下页面自己就在那儿。
-  it("allows http on localhost", () => {
-    expect(checkHostUrl("http://localhost:8080", "https:")).toBeNull();
-    expect(checkHostUrl("http://127.0.0.1:8080", "https:")).toBeNull();
-  });
-
-  it("allows plain http when the page itself is http (dev server)", () => {
-    expect(checkHostUrl("http://192.168.1.5:8080", "http:")).toBeNull();
-  });
-
-  it("rejects junk and non-http schemes", () => {
-    expect(checkHostUrl("", "https:")).toBe("empty");
-    expect(checkHostUrl("not a url", "https:")).toBe("not-a-url");
-    expect(checkHostUrl("ws://fleet.example.com", "https:")).toBe("bad-scheme");
-    expect(checkHostUrl("javascript:alert(1)", "https:")).toBe("bad-scheme");
-  });
-});
 
 // 桌面端「直连」那张码编的就是这个 fragment(core 的 direct_host::direct_url)。
 // 两端的格式必须逐字对齐 —— 差一个参数名,扫码就只是打开一个什么都不做的页面。
-describe("parseHostParam", () => {
-  // 冻结向量:与 core 那侧 `direct_host::tests::builds_the_scan_url_...` 断言的
-  // 那一串逐字相同。两边各钉一次,格式就不可能单边漂移。
-  it("reads what the desktop QR encodes", () => {
-    expect(parseHostParam("#h=https%3A%2F%2Ffleet.example.com&t=abc123")).toEqual({
-      baseUrl: "https://fleet.example.com",
-      token: "abc123",
-    });
-  });
-
-  it("tolerates a host QR with no token (an endpoint behind someone else's gateway)", () => {
-    expect(parseHostParam("#h=https%3A%2F%2Ffleet.example.com")).toEqual({
-      baseUrl: "https://fleet.example.com",
-      token: null,
-    });
-  });
-
-  it("decodes a token with url-unsafe characters", () => {
-    expect(parseHostParam("#h=https%3A%2F%2Fh.example.com&t=a%26b%3Dc%20d%2Fe")?.token).toBe(
-      "a&b=c d/e",
-    );
-  });
-
-  it("normalises a trailing slash so the same host is never added twice", () => {
-    expect(parseHostParam("#h=https%3A%2F%2Fh.example.com%2F")?.baseUrl).toBe(
-      "https://h.example.com",
-    );
-  });
-
-  it("ignores a relay pairing fragment", () => {
-    expect(parseHostParam("#k=" + "a".repeat(64))).toBeNull();
-  });
-
-  it("refuses anything that is not an absolute http(s) address", () => {
-    expect(parseHostParam("#h=fleet.example.com")).toBeNull();
-    expect(parseHostParam("#h=javascript%3Aalert(1)")).toBeNull();
-    expect(parseHostParam("#h=")).toBeNull();
-    expect(parseHostParam("")).toBeNull();
-  });
-});

@@ -6,7 +6,7 @@ import { Menu, Shield, ListChecks, Coffee, ListTree, Package } from "lucide-reac
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
-import { isWebBuild } from "../hostEnv";
+import { isWebBuild, showsMobilePanel } from "../hostEnv";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
 import { isFleetOwnedEntrypoint, sessionUnread } from "../types";
@@ -314,11 +314,17 @@ export function SessionList() {
         <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
         <span className={styles.nav_label}>{t("view_skills")}</span>
       </button>
-      {/* Mobile pairing is a desktop-host feature: the relay channel is
-          opened by *this* machine's Fleet process and the QR code pairs a
-          phone to it. In the browser build you are already the remote
-          client, so the panel has nothing to offer. */}
-      {!isWebBuild() && (
+      {/* 配对码属于「开着中转那条通道的那个进程」。桌面端一直是它;而云部署
+          里跑的 `fleet webui` 走的是同一个 `hooks_server::serve`,那里就有
+          `mobile_relay::ensure_ws_client()` —— 所以那台容器也有一张属于自己的
+          码,手机扫了就在聚合设备簿里多一台云主机。本地 webui 则相反:它只监听
+          回环,背后没有手机能连到的主机,出码只会得到一台连不上的设备。判据见
+          hostEnv.ts 的 showsMobilePanel。 */}
+      {showsMobilePanel(
+        isWebBuild(),
+        window.location.protocol,
+        window.location.hostname,
+      ) && (
         <button
           className={`${styles.nav_item} ${viewMode === "mobile" ? styles.nav_active : ""}`}
           onClick={() => navTo("mobile")}
