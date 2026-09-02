@@ -109,6 +109,30 @@ fn wait_for_port(path: &Path, serve: &mut ServeGuard) -> u16 {
     }
 }
 
+/// Minimal HTTP/1.0 request with an arbitrary method and no body — for the CORS
+/// preflight, which is an `OPTIONS` carrying only headers.
+fn options(port: u16, path: &str) -> (u16, String) {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    // 预检长这样:浏览器**不带** Authorization —— 它正是在问「带这个头行不行」。
+    let req = format!(
+        "OPTIONS {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nOrigin: https://fleet-relay.example.com\r\nAccess-Control-Request-Method: POST\r\nAccess-Control-Request-Headers: authorization, content-type\r\n\r\n"
+    );
+    std::io::Write::write_all(&mut stream, req.as_bytes()).unwrap();
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).unwrap();
+    let text = String::from_utf8_lossy(&raw).to_string();
+    let status = text
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(0);
+    (status, text)
+}
+
 /// Minimal HTTP/1.0 POST — avoids pulling a client dependency into this
 /// crate's test deps just to send a JSON body.
 fn post(port: u16, path: &str, body: &str, bearer: Option<&str>) -> (u16, String) {
@@ -219,4 +243,65 @@ fn serve_keeps_mobile_rpc_behind_the_admin_token() {
     );
     assert_eq!(status, 200, "admin token ⇒ allowed\n{}", serve.logs());
     assert!(body.contains(r#""ok":true"#), "got: {body}");
+}
+
+/// 手机在设备簿里直连一台主机时,页面的 origin 是中转域名,`/mobile_rpc` 因此是
+/// 跨源请求。没有 CORS 头,浏览器会在页面读到响应之前把它拦掉 —— 服务端明明答了
+/// 200,前端只看到一个网络错误。
+///
+/// 预检这一段单独钉住,因为它有一个特别容易写错的顺序:浏览器发 OPTIONS 时**不带**
+/// Authorization,所以预检必须抢在认证之前答;放到之后会拿到 401,真正的请求永远
+/// 发不出去。
+#[test]
+fn token_gated_serve_allows_cross_origin_mobile_rpc() {
+    let home = tempfile::TempDir::new().unwrap();
+    let port_file = home.path().join("port");
+    let mut serve = spawn_serve(home.path(), &port_file);
+    let port = wait_for_port(&port_file, &mut serve);
+
+    let (status, headers) = options(port, "/mobile_rpc");
+    assert_eq!(status, 204, "preflight must be answered before auth\n{headers}");
+    let lower = headers.to_ascii_lowercase();
+    assert!(lower.contains("access-control-allow-origin: *"), "got: {headers}");
+    assert!(lower.contains("access-control-allow-headers"), "got: {headers}");
+    assert!(lower.contains("authorization"), "token must be an allowed header\n{headers}");
+
+    // 真正的请求(带 token)也要带上 ACAO,否则浏览器不让页面读这个响应。
+    let (status, body) = post(
+        port,
+        "/mobile_rpc",
+        r#"{"method":"wiki_list","params":{}}"#,
+        Some(TOKEN),
+    );
+    assert_eq!(status, 200, "{}", serve.logs());
+    assert!(
+        body.to_ascii_lowercase().contains("access-control-allow-origin: *"),
+        "got: {body}"
+    );
+}
+
+/// 反面:`fleet webui` 那个端口本身没有认证(它自己的启动日志就写着必须在前面放
+/// 网关)。在那种端口上发 CORS 头等于让用户浏览器里任何一个网页都能驱动这台
+/// Fleet,所以它**不**发 —— 那种部署要跨源就在自己的网关上配。
+#[test]
+fn no_auth_webui_does_not_open_cross_origin() {
+    let home = tempfile::TempDir::new().unwrap();
+    let bundle = home.path().join("dist");
+    write_bundle(&bundle);
+    let port_file = home.path().join("port");
+    let mut serve = spawn_webui(home.path(), &port_file, &bundle);
+    let port = wait_for_port(&port_file, &mut serve);
+
+    // 同源仍然照常工作 —— 同源本来就不需要 CORS 头。
+    let (status, body) = post(
+        port,
+        "/mobile_rpc",
+        r#"{"method":"wiki_list","params":{}}"#,
+        None,
+    );
+    assert_eq!(status, 200, "{}", serve.logs());
+    assert!(
+        !body.to_ascii_lowercase().contains("access-control-allow-origin"),
+        "an unauthenticated port must not advertise CORS\ngot: {body}"
+    );
 }

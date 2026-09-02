@@ -5,6 +5,7 @@
 //! same `serve()` function instead of trampolining through `execvp`.
 
 pub mod auth;
+pub mod cors;
 pub mod multipart;
 pub mod public_files;
 pub mod sse;
@@ -916,6 +917,16 @@ fn handle_request(
 
         let query = parse_query(query_str);
 
+        // CORS 预检必须抢在认证之前:浏览器发 OPTIONS 时**不带**
+        // `Authorization` 头(那正是它要问「带这个头行不行」的东西)。放到认证
+        // 之后,预检会拿到 401,真正的请求就永远发不出去 —— 而症状只是「跨源
+        // 请求失败」,看不出是预检死在门口。见 cors.rs 的理由:只对手机那两条
+        // 数据路开,且只在有 token 门时开。
+        if cors::is_preflight(request.method(), path, auth_disabled) {
+            let _ = request.respond(cors::preflight_response());
+            return;
+        }
+
         // Auth check — support both the `Authorization: Bearer <t>` header and
         // the `?token=<t>` query param (the latter for SSE EventSource, which
         // cannot set headers). The bare token is compared; see auth::authorize
@@ -948,7 +959,10 @@ fn handle_request(
         // Handle SSE endpoint — takes over the connection. Cheap: it upgrades
         // and hands the stream to the broadcaster, so it does not pin a worker.
         if path == "/events" {
-            handle_sse_upgrade(request, sse);
+            // ACAO 从前是无条件发的。多设备之后跨源是真实用法,但同一条口径要
+            // 贯彻到底:无认证的端口不该把用户的决策卡流给任意网页。所以这里
+            // 也按 token 门给头。
+            handle_sse_upgrade(request, sse, cors::headers(auth_disabled, path));
             return;
         }
 
@@ -1395,7 +1409,9 @@ fn handle_request(
             crate::routes::MOBILE_RELAY_QR => route_mobile_relay_qr(ctx, request, &query, json_header, path),
             crate::routes::MOBILE_RELAY_PAIRING_URL => route_mobile_relay_pairing_url(ctx, request, &query, json_header, path),
 
-            crate::routes::MOBILE_RPC if request.method() == &tiny_http::Method::Post => route_mobile_rpc(ctx, request, &query, json_header, path),
+            crate::routes::MOBILE_RPC if request.method() == &tiny_http::Method::Post => {
+                route_mobile_rpc(ctx, request, &query, json_header, path, cors::headers(auth_disabled, path))
+            }
 
             // No data route matched. When a web UI bundle is configured this
             // is a request for one of its files; otherwise it stays a 404.

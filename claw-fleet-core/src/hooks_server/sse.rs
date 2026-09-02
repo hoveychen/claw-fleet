@@ -66,20 +66,20 @@ impl Default for SseBroadcaster {
 
 /// Upgrade an incoming HTTP request to a long-lived SSE stream and register
 /// it with the broadcaster.
-pub fn handle_sse_upgrade(request: Request, sse: &SseBroadcaster) {
-    let response = Response::empty(200)
+/// `cors` 是这条部署该发的跨源头(见 hooks_server::cors)。空 vec = 不开放跨源,
+/// 那时这条流只有同源页面能读 —— 同源本来就不需要 CORS 头。
+pub fn handle_sse_upgrade(request: Request, sse: &SseBroadcaster, cors: Vec<Header>) {
+    let mut response = Response::empty(200)
         .with_header(
             "Content-Type: text/event-stream"
                 .parse::<Header>()
                 .unwrap(),
         )
         .with_header("Cache-Control: no-cache".parse::<Header>().unwrap())
-        .with_header("Connection: keep-alive".parse::<Header>().unwrap())
-        .with_header(
-            "Access-Control-Allow-Origin: *"
-                .parse::<Header>()
-                .unwrap(),
-        );
+        .with_header("Connection: keep-alive".parse::<Header>().unwrap());
+    for h in cors {
+        response.add_header(h);
+    }
 
     let mut stream = request.upgrade("sse", response);
     let _ = std::io::Write::write_all(&mut stream, b": connected\n\n");
