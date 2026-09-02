@@ -426,30 +426,85 @@ export function adoptScannedDevice(
   return { book: next, device, added: !deduped };
 }
 
-/** PWA 的配对入口:地址栏 fragment 里的 `#k=…` 就是一次配对(桌面端二维码编
- *  码的就是这个 URL)。取到后立刻把 fragment 从地址栏抹掉 —— 密钥不该留在那
- *  里被截图、被历史记录带走。
+/** 地址栏 fragment 里带来的一次「加设备」。两种形状对应两种设备:
  *
- *  只读一次:调用后 hash 已被清空,所以第二次调用返回 `null`。原生壳走的是
- *  deepLink.ts,不经这条路。
+ *  - `#k=<secret>&relay=<url>` —— 经中转配对一台桌面端(桌面端二维码就是这个)。
+ *  - `#h=<baseUrl>&t=<token>` —— 直连一台 HTTP 主机(桌面端「直连」那张码)。
  *
- *  一并取走同一个 fragment 里的 `&relay=` —— 它说的是**这次配对**挂在哪个
- *  relay 上,而 fragment 马上就要被抹掉,所以必须在这里一次读完,不能留给后面
- *  某个模块再去读一遍(那正是 relay.ts 从前那个模块加载期 `RELAY_BASE` 常量
- *  存在的理由)。 */
-export function consumeHashSecret(): {
-  secret: string;
-  relayBase: string | null;
-  /** 这次注入是原生壳的**启动重注**,不是用户刚扫的码(`&boot=1`)。 */
-  boot: boolean;
-} | null {
+ *  两种都走同一条入口,是因为三种客户端都只有这一条路可走:系统相机打开中转托管
+ *  的那份 PWA、已装的 PWA、原生壳内扫码把原文交回页面。 */
+export type HashPairing =
+  | { kind: "relay"; secret: string; relayBase: string | null; boot: boolean }
+  | { kind: "http"; baseUrl: string; token: string | null };
+
+/** 取走 fragment 里的那次「加设备」,并**立刻把 fragment 从地址栏抹掉** —— 密钥
+ *  与 token 不该留在那里被截图、被历史记录带走。
+ *
+ *  只读一次:调用后 hash 已清空,第二次调用返回 `null`。原生壳走的是 deepLink.ts
+ *  与 nativeScan.ts,最终也汇到这条路上。
+ *
+ *  一次读完是硬要求而不是顺手:抹掉之后任何模块都再读不到,所以 relay 的
+ *  `&relay=`、直连的 `&t=`、以及壳的 `&boot=1` 必须在这里一并取走(relay.ts 从前
+ *  那个模块加载期 `RELAY_BASE` 常量就是为此存在的)。 */
+export function consumeHashPairing(): HashPairing | null {
   const hash = window.location.hash;
+  const scrub = () => history.replaceState(null, "", window.location.pathname);
+
   const secret = extractSecretFromUrl(hash);
-  if (!secret) return null;
-  const relayBase = parseRelayParam(hash);
-  const boot = /[#&]boot=1\b/.test(hash);
-  history.replaceState(null, "", window.location.pathname);
-  return { secret, relayBase, boot };
+  if (secret) {
+    const relayBase = parseRelayParam(hash);
+    const boot = /[#&]boot=1\b/.test(hash);
+    scrub();
+    return { kind: "relay", secret, relayBase, boot };
+  }
+
+  const host = parseHostParam(hash);
+  if (host) {
+    scrub();
+    return { kind: "http", ...host };
+  }
+  return null;
+}
+
+/** 直连那张码的 fragment:`#h=<baseUrl>&t=<token>`。
+ *
+ *  纯函数(不碰 `window`),好让「桌面端拼出来的那串字符能不能被解回来」这件事被
+ *  单测钉住 —— 两端的格式必须逐字对齐(core 的 direct_host::direct_url)。 */
+export function parseHostParam(
+  hash: string,
+): { baseUrl: string; token: string | null } | null {
+  const params = new Map<string, string>();
+  const frag = hash.startsWith("#") ? hash.slice(1) : hash;
+  for (const part of frag.split("&")) {
+    const eq = part.indexOf("=");
+    if (eq > 0) params.set(part.slice(0, eq), part.slice(eq + 1));
+  }
+  const raw = params.get("h");
+  if (!raw) return null;
+  let baseUrl: string;
+  try {
+    baseUrl = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  // 与手填那条路同一把尺子:只认绝对 http/https(是不是混合内容由调用方按页面
+  // 协议判断,那件事这里判断不了)。
+  try {
+    const u = new URL(baseUrl);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  } catch {
+    return null;
+  }
+  const rawToken = params.get("t");
+  let token: string | null = null;
+  if (rawToken) {
+    try {
+      token = decodeURIComponent(rawToken);
+    } catch {
+      token = null;
+    }
+  }
+  return { baseUrl: baseUrl.replace(/\/+$/, ""), token };
 }
 
 // ── 待办退订 ─────────────────────────────────────────────────────────────────

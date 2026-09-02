@@ -6,7 +6,7 @@ import { setKeepScreenOn } from '../common/WakeLock';
 import { shareFile } from '../common/SystemShare';
 import { acquirePushToken } from '../common/PushRegister';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
-import { parsePairingUrl, RelayPairing as ParsedPairing } from '../common/RelayStore';
+import { parseScan, DirectHostScan } from '../common/RelayStore';
 import { themeTokens } from '../common/Theme';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
@@ -170,12 +170,22 @@ struct WebShell {
         enableAlbum: true,
       };
       const result = await scanBarcode.startScanForResult(ctx, options);
-      const pairing: ParsedPairing | null = parsePairingUrl(result.originalValue);
-      if (pairing === null) {
+      const scan = parseScan(result.originalValue);
+      // 直连码:壳不持久化它 —— 页面自己有一本设备簿,壳只把这次扫到的原文带进
+      // 页面一次(`#h=…&t=…`),页面先探再入册。已配对过就在当前那份页面上加,
+      // 没配对过就让页面只带这一台起来(那时它没有中转设备,但直连那台够用)。
+      if (scan.host !== null) {
+        const host: DirectHostScan = scan.host;
+        this.pairError = '';
+        this.src = ORIGIN + 'index.html#h=' + encodeURIComponent(host.baseUrl)
+          + '&t=' + encodeURIComponent(host.token);
+        return;
+      }
+      if (scan.pairing === null) {
         this.pairError = '这个二维码不是 Fleet 的配对码';
         return;
       }
-      await RelayStore.savePairing(ctx, pairing);
+      await RelayStore.savePairing(ctx, scan.pairing);
       this.pairError = '';
       this.loadPairing(true);
     } catch (e) {

@@ -320,6 +320,9 @@ mod tests {
         assert_eq!(url_problem("https://"), Some(UrlProblem::NoHost));
     }
 
+    /// 冻结向量:手机侧 `mobile-web/src/devices.test.ts` 的
+    /// `parseHostParam` 用同一串字符断言解析结果。两边各钉一次,格式就不可能
+    /// 单边漂移 —— 而漂移的症状只是「扫码打开一个什么都不做的页面」。
     #[test]
     fn builds_the_scan_url_with_both_parts_in_the_fragment() {
         let url = direct_url(
