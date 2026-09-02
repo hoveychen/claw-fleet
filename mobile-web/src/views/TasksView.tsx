@@ -6,6 +6,7 @@ import {
   Circle,
   Clock,
   Folder,
+  MonitorSmartphone,
   Inbox,
   Loader2,
   Radar,
@@ -23,6 +24,7 @@ import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isFleetOwnedTask, isSessionUnread } from "../types";
 import { useDraft } from "../draft";
 import { useDeviceDraft } from "../deviceScope";
+import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import styles from "./TasksView.module.css";
@@ -153,14 +155,27 @@ const LEGACY_CHAT_HIDDEN = "no-chat";
  *  answers (or if it never does) — the toggle cannot be honoured without it, so
  *  it goes inert rather than showing an empty list. */
 export function matchesWorkspaceFilter(
-  s: SessionInfo,
+  s: SessionInfo & { deviceId?: string },
   filter: string,
   chatPath: string | null,
   chatOnly: boolean,
 ): boolean {
   if (chatPath != null && chatOnly) return s.workspacePath === chatPath;
   if (!filter) return true;
-  return s.workspacePath === filter;
+  // 多设备时筛选值是 `<deviceId>::<workspacePath>`:两台机器上同路径的
+  // `/repos/foo` 是两个不同的仓库,合到一个选项里筛出来的列表是混的。
+  const sep = filter.indexOf("::");
+  if (sep < 0) return s.workspacePath === filter;
+  return s.deviceId === filter.slice(0, sep) && s.workspacePath === filter.slice(sep + 2);
+}
+
+/** 目录筛选项的值。单设备时就是路径本身(与从前一致,老的草稿值继续有效)。 */
+export function workspaceFilterValue(
+  deviceId: string | undefined,
+  workspacePath: string,
+  multiDevice: boolean,
+): string {
+  return multiDevice && deviceId ? `${deviceId}::${workspacePath}` : workspacePath;
 }
 
 /** FTS5 snippets arrive with literal `<mark>…</mark>` markers (see the desktop
@@ -182,21 +197,23 @@ const GROUP_VISIBLE = 3;
 const GROUP_LOAD_STEP = 10;
 
 /** Highest-hop (tip / latest relay) member — the chain's "current" session. */
-function chainTip(members: SessionInfo[]): SessionInfo {
+function chainTip<T extends SessionInfo>(members: T[]): T {
   return members.reduce((a, b) => ((b.handoff?.hop ?? 0) > (a.handoff?.hop ?? 0) ? b : a));
 }
 
 /** One entry in the rendered task list: either a standalone session or a
  *  collapsed handoff-relay chain. */
-type RenderItem =
-  | { kind: "single"; key: string; session: SessionInfo }
+// 泛型是为了让 deviceId 一路带到渲染:调用方传进来的是 WithDevice<SessionInfo>,
+// 折叠成接力组之后每一项仍然要知道自己属于哪一台设备。
+type RenderItem<T extends SessionInfo = SessionInfo> =
+  | { kind: "single"; key: string; session: T }
   | {
       kind: "group";
       key: string;
       chainId: string;
       chainLen: number;
-      tip: SessionInfo;
-      members: SessionInfo[];
+      tip: T;
+      members: T[];
     };
 
 /**
@@ -208,35 +225,49 @@ type RenderItem =
  * newest-hop-first so "show last N" reveals the recent relays first. Same shape
  * as the desktop launchpad's `buildRenderItems`.
  */
-export function buildRenderItems(rows: SessionInfo[], group: boolean): RenderItem[] {
-  if (!group) return rows.map((s) => ({ kind: "single", key: s.id, session: s }));
-  const items: RenderItem[] = [];
+export function buildRenderItems<T extends SessionInfo & { deviceId?: string }>(
+  rows: T[],
+  group: boolean,
+): Array<RenderItem<T>> {
+  // 合并列表里 id 只在单机内唯一,所以分组键与 React key 都带上归属设备。
+  // 不带的话两台机器上碰巧同 chainId 的接力链会被折进同一组,展开后是一串
+  // 属于不同机器的会话 —— 点进去就是拿错设备的 transport 去拉一条它不认识的
+  // 会话。
+  const scope = (s: T) => s.deviceId ?? "";
+  if (!group)
+    return rows.map((s) => ({ kind: "single", key: `${scope(s)}::${s.id}`, session: s }));
+  const items: Array<RenderItem<T>> = [];
   const groupAt = new Map<string, number>();
   for (const s of rows) {
     const cid = s.handoff && s.handoff.chainLen > 1 ? s.handoff.chainId : null;
     if (!cid) {
-      items.push({ kind: "single", key: s.id, session: s });
+      items.push({ kind: "single", key: `${scope(s)}::${s.id}`, session: s });
       continue;
     }
-    const at = groupAt.get(cid);
+    const groupKey = `${scope(s)}::${cid}`;
+    const at = groupAt.get(groupKey);
     if (at === undefined) {
-      groupAt.set(cid, items.length);
+      groupAt.set(groupKey, items.length);
       items.push({
         kind: "group",
-        key: `chain:${cid}`,
+        key: `chain:${groupKey}`,
         chainId: cid,
         chainLen: s.handoff!.chainLen,
         tip: s,
         members: [s],
       });
     } else {
-      (items[at] as Extract<RenderItem, { kind: "group" }>).members.push(s);
+      (items[at] as Extract<RenderItem<T>, { kind: "group" }>).members.push(s);
     }
   }
   return items.map((it) => {
     if (it.kind !== "group") return it;
     if (it.members.length < 2) {
-      return { kind: "single", key: it.members[0].id, session: it.members[0] };
+      return {
+        kind: "single",
+        key: `${scope(it.members[0])}::${it.members[0].id}`,
+        session: it.members[0],
+      };
     }
     const members = [...it.members].sort((a, b) => b.handoff!.hop - a.handoff!.hop);
     return { ...it, tip: chainTip(members), members };
@@ -254,15 +285,17 @@ export function buildRenderItems(rows: SessionInfo[], group: boolean): RenderIte
  * glance that backs out shouldn't clear the tip). Already-read members are
  * skipped so we don't re-stamp them.
  */
-export function groupOpenReadTargets(
+export function groupOpenReadTargets<T extends SessionInfo>(
   tip: SessionInfo,
-  markMembers: SessionInfo[],
-): SessionInfo[] {
+  markMembers: T[],
+): T[] {
   return markMembers.filter((m) => m.id !== tip.id && isSessionUnread(m));
 }
 
 interface Props {
-  sessions: SessionInfo[];
+  /** 合并列表:每条会话都带着它属于哪一台设备(deviceRuntime.ts 的 WithDevice)。
+   *  id 只在单机内唯一,所以 React key 与「打开这一条」都必须带上 deviceId。 */
+  sessions: Array<WithDevice<SessionInfo>>;
   client: FleetTransport | null;
   /** WS link phone↔relay. */
   connected: boolean;
@@ -271,14 +304,18 @@ interface Props {
   /** Whether at least one `sessions` snapshot has arrived since connecting.
    *  Distinguishes "still waiting for the first push" from "pushed, but empty". */
   sessionsLoaded: boolean;
-  onOpenSession: (session: SessionInfo) => void;
-  onMarkRead: (sessions: SessionInfo[]) => void;
+  onOpenSession: (session: WithDevice<SessionInfo>) => void;
+  onMarkRead: (sessions: Array<WithDevice<SessionInfo>>) => void;
+  /** 这台设备的显示名。整个 prop 缺席 = 只配了一台,徽标与「设备 · 目录」的
+   *  筛选项都不出现 —— 单设备用户不该为多设备付出任何一处视觉噪音。 */
+  deviceLabelOf?: (deviceId: string) => string | null;
 }
 
 // 新会话入口由 App 底部导航中间的凸起按钮统一持有，任务页内不再重复放置。
 export function TasksView({
   sessions,
   client,
+  deviceLabelOf,
   connected,
   agentOnline,
   sessionsLoaded,
@@ -331,14 +368,17 @@ export function TasksView({
 
   // Chat is filtered through its own pinned options, so it is kept out of the
   // project list — otherwise it would sit there a second time as plain "Chat".
+  const multiDevice = deviceLabelOf !== undefined;
   const workspaces = useMemo(() => {
     const names = new Map<string, string>();
     for (const s of all) {
       if (s.workspacePath === chatPath) continue;
-      names.set(s.workspacePath, s.workspaceName);
+      const value = workspaceFilterValue(s.deviceId, s.workspacePath, multiDevice);
+      const device = deviceLabelOf?.(s.deviceId);
+      names.set(value, device ? `${device} · ${s.workspaceName}` : s.workspaceName);
     }
     return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [all, chatPath]);
+  }, [all, chatPath, multiDevice, deviceLabelOf]);
 
   // 迁移：聊天还是下拉里一条选项时存下来的值。"chat" 交给 toggle，"no-chat"
   // 已经没有对应项了（「全部目录」现在也含聊天），直接归零。要抢在下面那个孤
@@ -435,7 +475,7 @@ export function TasksView({
   // aggregate done-state reflects the entire chain. `all` already folds in the
   // optimistic `markOverride`, so this reacts on tap.
   const chainMembersAll = useMemo(() => {
-    const m = new Map<string, SessionInfo[]>();
+    const m = new Map<string, Array<WithDevice<SessionInfo>>>();
     for (const s of all) {
       if (s.handoff && s.handoff.chainLen > 1) {
         const arr = m.get(s.handoff.chainId);
@@ -607,12 +647,12 @@ export function TasksView({
   // (with `group` set: adds an expand chevron + whole-chain mark), and the
   // members inside an expanded group, so all three stay identical.
   const renderCard = (
-    s: SessionInfo,
+    s: WithDevice<SessionInfo>,
     group?: {
       expanded: boolean;
       onToggleExpand: () => void;
       /** Whole-chain membership the mark toggle fans out across. */
-      markMembers: SessionInfo[];
+      markMembers: Array<WithDevice<SessionInfo>>;
     },
   ) => {
     // For a collapsed group the header card is the tip, but its dot and unread
@@ -631,7 +671,7 @@ export function TasksView({
     const live = LIVE.includes(s.status);
     return (
       <div
-        key={s.id}
+        key={itemKey(s.deviceId, s.id)}
         className={styles.card}
         onClick={() => {
           onOpenSession(s);
@@ -672,6 +712,14 @@ export function TasksView({
             <Folder size={11} />
             {s.workspaceName}
           </span>
+          {/* 合并列表里必须一眼看出这条会话在哪台机器上 —— 同名项目在两台机器
+              上很常见,而点进去拉的是那一台的 transcript。 */}
+          {deviceLabelOf?.(s.deviceId) && (
+            <span className={styles.device}>
+              <MonitorSmartphone size={11} />
+              {deviceLabelOf(s.deviceId)}
+            </span>
+          )}
           {s.handoff && (
             <span className={styles.handoff}>
               <Share2 size={11} />

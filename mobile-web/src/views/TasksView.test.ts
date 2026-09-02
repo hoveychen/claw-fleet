@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRenderItems,
+  workspaceFilterValue,
   groupOpenReadTargets,
   matchesWorkspaceFilter,
   statusTone,
@@ -171,5 +172,79 @@ describe("statusTone quiet-alive", () => {
   it("does not dim a genuinely working row down to quiet", () => {
     expect(statusTone(row({ status: "executing", procAlive: true }))).toBe("working");
     expect(statusTone(row({ status: "waitingInput", procAlive: true }))).toBe("waiting");
+  });
+});
+
+// 合并列表里的每一条都必须一路带着它属于哪一台设备：折叠成接力组、再从组里
+// 取出成员之后，deviceId 不能在中途掉队 —— 掉了就只能猜，而猜错就是拿另一台
+// 的 transport 去拉一条它根本不认识的会话。
+describe("device tag survives grouping", () => {
+  const hop = (id: string, deviceId: string, chainId: string, n: number) =>
+    ({
+      id,
+      deviceId,
+      workspacePath: "/w",
+      workspaceName: "n",
+      status: "idle",
+      handoff: { chainId, chainLen: 2, hop: n },
+    }) as unknown as SessionInfo & { deviceId: string };
+
+  it("carries deviceId through a collapsed relay group", () => {
+    const items = buildRenderItems(
+      [hop("s2", "dev-a", "c1", 2), hop("s1", "dev-a", "c1", 1)],
+      true,
+    );
+    expect(items).toHaveLength(1);
+    const group = items[0];
+    if (group.kind !== "group") throw new Error("expected a group");
+    expect(group.tip.deviceId).toBe("dev-a");
+    expect(group.members.map((m) => m.deviceId)).toEqual(["dev-a", "dev-a"]);
+  });
+
+  it("never folds two devices' same-id chains into one group", () => {
+    const items = buildRenderItems(
+      [
+        hop("s2", "dev-a", "c1", 2),
+        hop("s1", "dev-a", "c1", 1),
+        hop("s2", "dev-b", "c1", 2),
+        hop("s1", "dev-b", "c1", 1),
+      ],
+      true,
+    );
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      if (item.kind !== "group") throw new Error("expected two groups");
+      const devices = new Set(item.members.map((m) => m.deviceId));
+      expect(devices.size).toBe(1);
+    }
+    // React key 也必须分家,否则两组共用一个 key。
+    expect(items[0].key).not.toBe(items[1].key);
+  });
+});
+
+// 两台机器上同路径的 /repos/foo 是两个不同的仓库。目录筛选若只按路径匹配，
+// 选中一个就会把另一台同名目录的会话也筛进来 —— 列表看着对，点进去却是另一台
+// 的会话。
+describe("workspace filter across devices", () => {
+  const row = (deviceId: string, workspacePath: string) =>
+    ({ id: "s", deviceId, workspacePath, workspaceName: "foo", status: "idle" }) as unknown as
+      SessionInfo & { deviceId: string };
+
+  it("scopes the filter value by device when several are paired", () => {
+    expect(workspaceFilterValue("dev-a", "/repos/foo", true)).toBe("dev-a::/repos/foo");
+    // 单设备保持原样：老草稿里存的是裸路径，值一变筛选就会静默失效。
+    expect(workspaceFilterValue("dev-a", "/repos/foo", false)).toBe("/repos/foo");
+  });
+
+  it("does not let one device's folder pick in the other device's sessions", () => {
+    const filter = workspaceFilterValue("dev-a", "/repos/foo", true);
+    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), filter, null, false)).toBe(true);
+    expect(matchesWorkspaceFilter(row("dev-b", "/repos/foo"), filter, null, false)).toBe(false);
+  });
+
+  it("still matches by bare path for a single-device filter value", () => {
+    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), "/repos/foo", null, false)).toBe(
+      true,
+    );
   });
 });
