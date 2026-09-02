@@ -136,6 +136,28 @@ pub(crate) fn route_mobile_rpc(
     );
 }
 
+/// Text form of the pairing URL — what the desktop's 「复制配对链接」 button
+/// copies. Separate from the QR route because a self-hosted relay can only be
+/// paired by pasting (App Links need the host baked into the manifest).
+pub(crate) fn route_mobile_relay_pairing_url(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let lang = query.get("lang").map(String::as_str);
+    let (status, body) = match crate::mobile_relay::pairing_url_text(lang) {
+        Ok(url) => (200, serde_json::json!({ "url": url }).to_string()),
+        Err(e) => (404, serde_json::json!({ "error": e }).to_string()),
+    };
+    let _ = request.respond(
+        tiny_http::Response::from_string(body)
+            .with_status_code(status)
+            .with_header(json_header),
+    );
+}
+
 pub(crate) fn route_mobile_relay_qr(
     ctx: &ServeCtx,
     request: tiny_http::Request,

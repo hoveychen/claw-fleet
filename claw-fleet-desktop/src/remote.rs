@@ -1962,6 +1962,19 @@ impl crate::backend::Backend for RemoteBackend {
         let env: QrEnvelope = self.probe.get(&endpoint)?;
         Ok(env.svg)
     }
+
+    fn mobile_relay_pairing_url(&self, lang: Option<&str>) -> Result<String, String> {
+        #[derive(serde::Deserialize)]
+        struct UrlEnvelope {
+            url: String,
+        }
+        let endpoint = match lang {
+            Some(l) => format!("{}?lang={}", claw_fleet_core::routes::MOBILE_RELAY_PAIRING_URL, l),
+            None => claw_fleet_core::routes::MOBILE_RELAY_PAIRING_URL.to_string(),
+        };
+        let env: UrlEnvelope = self.probe.get(&endpoint)?;
+        Ok(env.url)
+    }
 }
 
 // ── Progress event emitted to the frontend during connect ────────────────────

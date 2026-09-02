@@ -1380,6 +1380,7 @@ fn handle_request(
             crate::routes::MOBILE_RELAY_STATUS => route_mobile_relay_status(ctx, request, &query, json_header, path),
 
             crate::routes::MOBILE_RELAY_QR => route_mobile_relay_qr(ctx, request, &query, json_header, path),
+            crate::routes::MOBILE_RELAY_PAIRING_URL => route_mobile_relay_pairing_url(ctx, request, &query, json_header, path),
 
             crate::routes::MOBILE_RPC if request.method() == &tiny_http::Method::Post => route_mobile_rpc(ctx, request, &query, json_header, path),
 
