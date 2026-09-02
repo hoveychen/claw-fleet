@@ -1638,13 +1638,10 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </div>
                 )}
 
-                {/* rca remote hosts: still debug-only until the flow is
-                    finished (import.meta.env.DEV is false in `vite build`).
-                    The composer-side "pick a host, browse it, register" flow
-                    lands next; until it does, this section can set a host up
-                    but not choose a directory on it. */}
-                {import.meta.env.DEV && (
-                  <>
+                {/* rca remote hosts. The DEV gate that used to wrap this
+                    section is gone: the composer-side "pick a host, browse it,
+                    register" flow it was waiting on has shipped (老板 2026-09-02,
+                    docs/rca-ux-review.md 6.6). */}
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.remote_hosts")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
@@ -1862,8 +1859,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 )}
                 {rwError && (
                   <p className={styles.hooks_error}>{rwError}</p>
-                )}
-                  </>
                 )}
               </div>
             )}

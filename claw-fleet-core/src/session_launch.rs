@@ -330,6 +330,20 @@ fn spawn_home_dir() -> Option<std::path::PathBuf> {
     crate::session::agent_home_dir()
 }
 
+/// The session id a launch names in its own argv: `--session-id <uuid>` on a
+/// first run, `--resume <uuid>` on a follow-up. `None` when neither is present
+/// (an interactive-shaped launch that lets the CLI mint its own id).
+///
+/// Read from `args` rather than threaded down from the caller because this
+/// chokepoint is reached by every spawn path (new session, auto-resume, handoff,
+/// loop, chat relaunch) and only some of them carry the id in a parameter — the
+/// argv is the one place all of them agree.
+fn session_id_from_args(args: &[String]) -> Option<String> {
+    args.windows(2)
+        .find(|w| w[0] == "--session-id" || w[0] == "--resume")
+        .map(|w| w[1].clone())
+}
+
 pub fn spawn_claude_detached_with_envs(
     claude_path: &str,
     args: &[String],
@@ -380,10 +394,22 @@ pub fn spawn_claude_detached_with_envs(
         );
     }
 
-    let stderr_file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(stderr_log)
-        .map_err(|e| format!("reopen stderr log {}: {}", stderr_log.display(), e))?;
+    // A local agent's stderr goes straight to the log file — nothing reads it
+    // live. An rca-wrapped one is piped instead, because rca announces a dead
+    // ssh tunnel on its own stderr and that announcement is the only warning
+    // anyone gets before the agent starts working against the empty local
+    // mirror (see `remote_disconnect`). The monitor thread below tees every
+    // line into this same log, so the file's content is unchanged either way.
+    let watch_stderr = rca_wrap.is_some();
+    let stderr_stdio = if watch_stderr {
+        std::process::Stdio::piped()
+    } else {
+        let stderr_file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(stderr_log)
+            .map_err(|e| format!("reopen stderr log {}: {}", stderr_log.display(), e))?;
+        std::process::Stdio::from(stderr_file)
+    };
 
     // Live-thinking sidecar: open a uniquely-named temp file now (PID isn't
     // known until after spawn), point the child's stdout at it, then rename to
@@ -417,7 +443,7 @@ pub fn spawn_claude_detached_with_envs(
         .current_dir(workspace_path)
         .stdin(std::process::Stdio::null())
         .stdout(stdout_stdio)
-        .stderr(std::process::Stdio::from(stderr_file));
+        .stderr(stderr_stdio);
     // Own process group: a terminal Ctrl-C / group signal at the spawner must
     // not interrupt the agent's in-flight turn (see process_util docs).
     crate::process_util::detach_process_group(&mut cmd);
@@ -481,6 +507,30 @@ pub fn spawn_claude_detached_with_envs(
         .spawn()
         .map_err(|e| format!("spawn claude failed: {e}"))?;
     let pid = child.id();
+
+    // rca-wrapped launch: drain the piped stderr on its own thread, teeing it to
+    // the log and watching for the transport-failure markers. Must be spawned
+    // before the reaper below — an unread pipe fills up and blocks the child.
+    //
+    // Without a session id there is nowhere to file the verdict, so the monitor
+    // still tees and still stops the agent (stopping is the part that prevents
+    // damage) but the card can't be labelled. In practice every Fleet spawn
+    // names its session: `--session-id` on a first run, `--resume` on a
+    // follow-up.
+    if let Some(stderr) = child.stderr.take() {
+        let log_path = stderr_log.to_path_buf();
+        let ws = workspace_path.to_string();
+        let session_id = session_id_from_args(args).unwrap_or_default();
+        std::thread::spawn(move || {
+            crate::remote_disconnect::watch_stderr(stderr, &log_path, &session_id, &ws, move || {
+                // Force-kill: the agent is mid-turn against a directory that
+                // just became a lie, and a SIGTERM it might catch and "handle"
+                // buys nothing. The tree, not the root — the agent's own tool
+                // children (a build, a test run) would otherwise survive it.
+                crate::session::kill_pid_tree(pid, true).is_ok()
+            });
+        });
+    }
 
     // Now that we have the pid, give the sidecar its stable pid-keyed name.
     // The child's held fd is unaffected by the rename.
@@ -1376,5 +1426,124 @@ mod remote_workspace_spawn_tests {
         drop(lock);
         let _ = std::fs::remove_dir_all(&home);
         let _ = PathBuf::new(); // keep the unused-import lint honest if imports shrink
+    }
+
+    #[test]
+    fn session_id_comes_off_either_flag() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            super::session_id_from_args(&a(&["-p", "hi", "--session-id", "u1"])),
+            Some("u1".to_string())
+        );
+        assert_eq!(
+            super::session_id_from_args(&a(&["--resume", "u2", "-p", "continue"])),
+            Some("u2".to_string())
+        );
+        assert_eq!(super::session_id_from_args(&a(&["-p", "hi"])), None);
+        // A trailing flag with no value must not panic or mis-read.
+        assert_eq!(super::session_id_from_args(&a(&["-p", "--session-id"])), None);
+    }
+
+    /// The stop-loss, end to end through the real spawn path: an rca that
+    /// announces a dead tunnel on stderr and then keeps running (exactly what
+    /// was measured — the agent does NOT die on its own) must be killed by
+    /// Fleet, and the reason must land in the side-channel record the session
+    /// card reads.
+    ///
+    /// Without this the agent survives and starts seeing the empty local mirror
+    /// as a deleted repository.
+    #[cfg(unix)]
+    #[test]
+    fn rca_transport_failure_stops_the_agent_and_records_why() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let lock = crate::session::fleet_home_lock();
+        let home = std::env::temp_dir().join(format!(
+            "fleet-rcadrop-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized on the process-wide FLEET_HOME lock.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+
+        let ws = home.join("remote-repo");
+        let fake_rca = home.join("fake-rca");
+        // Prints one benign line, then the transport failure, then hangs — the
+        // measured behaviour. If Fleet does not kill it, `recv_timeout` below
+        // expires and the test fails.
+        std::fs::write(
+            &fake_rca,
+            "#!/bin/sh\n\
+             echo 'rca serve [fs] PREAD handle=2 off=0 len=6 -> 6' >&2\n\
+             echo 'rca remote recv failed: stream reset: connection closed: EOF' >&2\n\
+             sleep 120\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_rca, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        crate::remote_workspace::upsert(crate::remote_workspace::RemoteWorkspace {
+            path: ws.to_string_lossy().into_owned(),
+            pairing_code: Some("rca1.TESTCODE".to_string()),
+            rca_path: Some(fake_rca.to_string_lossy().into_owned()),
+            label: Some("test-host".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stderr_log = home.join("stderr.log");
+        super::spawn_claude_detached_with_envs(
+            "/fake/claude",
+            &["-p".to_string(), "hi".to_string(), "--session-id".to_string(), "drop-1".to_string()],
+            ws.to_str().unwrap(),
+            &stderr_log,
+            "rca-drop-test",
+            "session=drop-1",
+            &[],
+            false,
+            move |_| {
+                let _ = tx.send(());
+            },
+        )
+        .expect("spawn through rca wrapper");
+
+        rx.recv_timeout(std::time::Duration::from_secs(15))
+            .expect("Fleet must kill the agent after rca reports a dead transport");
+
+        // The monitor stops the agent BEFORE filing the record (damage first,
+        // paperwork second), and the reaper's `on_exit` above fires the moment
+        // the child dies — so the record can still be a beat behind. Poll for
+        // it rather than racing it.
+        let rec = (0..100)
+            .find_map(|_| {
+                crate::remote_disconnect::read("drop-1").or_else(|| {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    None
+                })
+            })
+            .expect("the disconnect must be recorded against the session id");
+        assert_eq!(rec.code, crate::remote_workspace::codes::TRANSPORT_LOST);
+        assert!(rec.detail.contains("stream reset"), "got detail: {}", rec.detail);
+        assert_eq!(rec.host_label.as_deref(), Some("test-host"));
+        assert!(rec.agent_stopped);
+
+        // Piping stderr must not cost the log its content.
+        let logged = std::fs::read_to_string(&stderr_log).unwrap();
+        assert!(logged.contains("PREAD handle=2"), "stderr log lost lines:\n{logged}");
+        assert!(logged.contains("remote recv failed"), "stderr log lost lines:\n{logged}");
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        drop(lock);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

@@ -992,6 +992,11 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // desktop card does (what it's waiting on, elapsed, poll count). Small array;
     // enrich sets it only for sessions with a live watch, so absent for the rest.
     "watches",
+    // Why a remote session stopped. `status` alone would say
+    // "remoteDisconnected" with no reason and no host name, and the phone is the
+    // most likely place to be looking when a laptop's ssh tunnel dies. Small
+    // object, absent for every session that hasn't disconnected.
+    "remoteDisconnect",
 ];
 
 /// Byte size a re-encoded decision-asset image is squeezed toward. Every image
@@ -2879,6 +2884,9 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
     // A "done" task resumed from mobile is active again — drop the done mark so
     // it re-surfaces as needs-review (next snapshot re-enriches user_mark).
     crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
+    // Same as the desktop resume: drop a stale remote-disconnect verdict so the
+    // row isn't pinned red after the user has asked for a retry.
+    crate::remote_disconnect::clear(&req.session_id);
     // Route by source (blank → claude); manual resume is untracked → no-op box.
     crate::agent_source::resume_session(
         &req.agent_source,

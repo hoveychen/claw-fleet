@@ -635,8 +635,20 @@ async function handleIPC(
       return hits;
     }
     case "resume_fleet_session":
-    case "resume_rate_limited_session":
+    case "resume_rate_limited_session": {
+      // Mirror the real backends: a user-initiated resume drops the
+      // remote-disconnect verdict (all three of them do — desktop, fleet serve,
+      // mobile). Without this the demo's reopen button is a button that visibly
+      // does nothing, which is exactly the shape of "looks finished, isn't".
+      const sessionId = args.sessionId as string;
+      currentSessions = currentSessions.map((s) =>
+        s.id === sessionId && s.remoteDisconnect
+          ? { ...s, remoteDisconnect: null, status: "active" as const }
+          : s,
+      );
+      emit("sessions-updated", currentSessions);
       return null;
+    }
     case "get_workflow_trees":
       return [];
     case "list_session_decisions":

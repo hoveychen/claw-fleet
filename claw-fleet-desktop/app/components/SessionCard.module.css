@@ -158,9 +158,42 @@
 /* Transient server error, auto-retrying. Amber (not the rate-limit red) reads
    as "recovering on its own" rather than "blocked waiting for quota". */
 .badge_serverErrored { color: #d97706; }
+/* Remote transport died and Fleet stopped the agent. Same red family as the
+   rate limit — both mean "this session is not coming back on its own" — but a
+   deeper shade, because nothing retries this one. */
+.badge_remoteDisconnected { color: #991b1b; }
 /* Wedged mid tool-batch. Orange-red keeps it distinct from the darker
    rate-limit red — a different failure that needs a different action (⎋). */
 .badge_stuck       { color: #ea580c; font-weight: 600; }
+
+/* The disconnect chip. Shares the remote-badge shape (.tag_remote / .gm_remote)
+   so it reads as "that host badge, gone wrong" rather than a new kind of thing;
+   only the colour changes. Sized between the two so one component can sit on
+   both header paths. */
+.remote_disconnect {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid #991b1b;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #991b1b;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The kill failed: the agent may still be running against the empty mirror.
+   Filled rather than outlined — this is the one state that needs the human. */
+.remote_disconnect_unstopped {
+  background: #991b1b;
+  color: #fff;
+  font-weight: 600;
+}
 
 .rate_limit_countdown {
   display: inline-flex;

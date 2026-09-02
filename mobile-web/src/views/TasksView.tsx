@@ -12,6 +12,7 @@ import {
   Radar,
   Search,
   SearchX,
+  ServerOff,
   Share2,
   Square,
   WifiOff,
@@ -42,7 +43,7 @@ function maxScroll(): number {
 }
 
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
-const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimited", "serverErrored"];
+const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimited", "serverErrored", "remoteDisconnected"];
 
 /** Dot tone for the row status accent — mirrors the desktop launchpad's
  *  `rowBarColor`: a colour only for live/waiting rows, `null` (no dot) for
@@ -58,7 +59,8 @@ export function statusTone(s: SessionInfo): string | null {
   if (WORKING.includes(s.status)) return "working";
   if (s.status === "waitingInput") return "waiting";
   if (s.status === "active") return "active";
-  if (s.status === "rateLimited" || s.status === "serverErrored") return "error";
+  if (s.status === "rateLimited" || s.status === "serverErrored" || s.status === "remoteDisconnected")
+    return "error";
   if (s.procAlive) return "quiet";
   return null;
 }
@@ -724,6 +726,19 @@ export function TasksView({
             <span className={styles.handoff}>
               <Share2 size={11} />
               {s.handoff.hop}/{s.handoff.chainLen}
+            </span>
+          )}
+          {/* 远端 ssh 隧道断了、会话被 Fleet 停掉 —— 手机上只看到一个红点会
+              以为是普通报错,必须把「哪台机器没了」直接写出来。 */}
+          {s.remoteDisconnect && (
+            <span
+              className={styles.remoteLost}
+              title={s.remoteDisconnect.detail}
+            >
+              <ServerOff size={11} />
+              {s.remoteDisconnect.agentStopped
+                ? t("{0} 断开,已停止", s.remoteDisconnect.hostLabel ?? t("远端"))
+                : t("{0} 断开,agent 未停", s.remoteDisconnect.hostLabel ?? t("远端"))}
             </span>
           )}
           {s.watches?.map((w) => (

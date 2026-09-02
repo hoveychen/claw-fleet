@@ -549,6 +549,13 @@ pub mod codes {
     pub const HOST_GONE: &str = "rca:host-gone";
     /// The entry has no usable transport (neither host/ssh target nor code).
     pub const NO_TRANSPORT: &str = "rca:no-transport";
+    /// The transport died *mid-session*: rca lost its link to the remote host
+    /// (ssh dropped, remote rebooted, network went away). Unlike the four above
+    /// this is not a launch failure — it is raised by the stderr monitor in
+    /// [`crate::remote_disconnect`] after the session was already running, and
+    /// travels on `SessionInfo.remote_disconnect` rather than on a command's
+    /// `Err`.
+    pub const TRANSPORT_LOST: &str = "rca:transport-lost";
 }
 
 /// Create the local mirror directory when `path` is (under) a registered
