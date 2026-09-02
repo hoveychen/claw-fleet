@@ -113,11 +113,18 @@ EXPECTED_FP="$(
 VERSION_CODE="$(git rev-list --count HEAD)"
 GIT_SHA="$(git rev-parse --short HEAD)"
 BASE_VERSION="$(node -p "require('./package.json').version")"
+# The `-dirty` tag means "this APK does not correspond to any commit", so the
+# check must look at what actually goes INTO the APK — `mobile-web/`, i.e. the
+# web bundle plus the android project. Scanning the whole repo tagged builds as
+# dirty because of edits elsewhere (a stray untracked doc, another agent's
+# in-flight merge on the Rust side), which is both wrong and self-defeating: a
+# marker that is always on stops meaning anything.
 DIRTY=""
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git status --porcelain -- .)" ]; then
   DIRTY="-dirty"
-  echo "warning: working tree is dirty — the APK will be tagged '$DIRTY' and is not"
-  echo "         reproducible from a commit. Fine for testing, not for a release." >&2
+  echo "warning: mobile-web has uncommitted changes — the APK will be tagged"
+  echo "         '$DIRTY' and is not reproducible from a commit. Fine for" >&2
+  echo "         testing, not for something you hand out." >&2
 fi
 VERSION_NAME="${BASE_VERSION}+${VERSION_CODE}.${GIT_SHA}${DIRTY}"
 
