@@ -883,6 +883,22 @@ mod tests {
     /// The published release has lagged `serve --stdio` landing on rca main
     /// before; installing that build must fail loudly here instead of at the
     /// user's first session spawn.
+    /// The real thing: download the published release for this machine into
+    /// `~/.fleet/bin/rca` and probe it. Ignored by default — it hits the
+    /// network and writes to the real home, which no unit test should do
+    /// unasked. Run with `cargo test -p claw-fleet-core --lib
+    /// install_local_rca_really_installs -- --ignored --nocapture` to verify
+    /// the installer against the live release.
+    #[test]
+    #[ignore = "hits the network and writes to the real ~/.fleet/bin"]
+    fn install_local_rca_really_installs_a_working_binary() {
+        let path = install_local_rca().expect("install");
+        assert!(Path::new(&path).is_file(), "{path} was not created");
+        verify_local_rca_stdio(&path).expect("installed rca must speak --stdio");
+        assert_eq!(find_local_rca().as_deref(), Some(path.as_str()));
+        eprintln!("installed rca at {path}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn stdio_probe_rejects_a_release_predating_the_transport() {
