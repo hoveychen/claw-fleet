@@ -143,6 +143,8 @@ mod tests {
             // if anything it is more sensitive than BROWSE_DIR, not less.
             routes::REMOTE_BROWSE_DIR,
             routes::REMOTE_HOST_HEALTH,
+            // Writes to a third machine's filesystem.
+            routes::REMOTE_CREATE_DIR,
             // Writes to the host filesystem (mkdir), so it belongs on the same
             // side of the boundary as the listing it complements.
             routes::CREATE_DIR,
@@ -222,6 +224,7 @@ mod tests {
             routes::BROWSE_DIR,             // directory listing
             routes::REMOTE_BROWSE_DIR,      // directory listing on a third host
             routes::REMOTE_HOST_HEALTH,     // reveals ssh reachability of a host
+            routes::REMOTE_CREATE_DIR,      // mkdir on a third host
             routes::SOURCES_CONFIG,         // provider source config
             routes::SOURCES_CLAUDE_ACCOUNT, // provider account detail
             "/sources/claude/account",      // SOURCES_PREFIX arm → account/creds info

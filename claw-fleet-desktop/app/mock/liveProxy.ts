@@ -259,10 +259,19 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/remote_host_health",
     query: { target: q(a.sshTarget) },
   }),
-  // NOTE: `remote_browse_dir` (GET /remote_browse_dir, {target, path}) still
-  // has no entry — nothing invokes it until the composer's browse flow lands,
-  // and this table's guard rejects a route no component calls. Whoever wires
-  // that UI adds it in the same change, or the browser build rejects the call.
+  // The picker one ssh hop past `browse_dir`, plus the mkdir it needs to be
+  // usable on a host whose tree is empty.
+  remote_browse_dir: (a) => ({
+    method: "GET",
+    path: "/remote_browse_dir",
+    query: { target: q(a.sshTarget), path: q(a.path) },
+  }),
+
+  remote_create_dir: (a) => ({
+    method: "POST",
+    path: "/remote_create_dir",
+    body: { target: a.sshTarget, path: q(a.path) ?? null, name: a.name },
+  }),
 
   cancel_loop: (a) => ({
     method: "POST",
@@ -1224,11 +1233,11 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: a.update,
   }),
 
-  // NOTE: `upsert_remote_workspace` (POST /remote_workspaces/upsert, body =
-  // the entry) has no route here because nothing invokes it right now — the
-  // pairing-code form that used to is gone, and the composer's
-  // browse-and-register flow lands in the next plan. This table's guard
-  // rejects a route no component calls, so it goes back in with that UI.
+  upsert_remote_workspace: (a) => ({
+    method: "POST",
+    path: "/remote_workspaces/upsert",
+    body: a.entry,
+  }),
 
   usage_range_breakdown: (a) => ({
     method: "GET",

@@ -238,6 +238,15 @@ impl Backend for NullBackend {
         }
     }
 
+    fn remote_create_dir(
+        &self,
+        _: String,
+        _: Option<String>,
+        _: String,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        Err("backend not ready".into())
+    }
+
     fn list_ssh_hosts(&self) -> Vec<claw_fleet_core::remote_host::SshHost> {
         Vec::new()
     }

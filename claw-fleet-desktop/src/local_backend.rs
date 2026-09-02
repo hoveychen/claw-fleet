@@ -1939,6 +1939,15 @@ impl Backend for LocalBackend {
         claw_fleet_core::remote_host::host_health(&ssh_target)
     }
 
+    fn remote_create_dir(
+        &self,
+        ssh_target: String,
+        path: Option<String>,
+        name: String,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        claw_fleet_core::remote_host::create_remote_dir(&ssh_target, path.as_deref(), &name)
+    }
+
     fn list_ssh_hosts(&self) -> Vec<claw_fleet_core::remote_host::SshHost> {
         claw_fleet_core::remote_host::load_hosts()
     }
