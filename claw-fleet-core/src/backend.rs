@@ -489,6 +489,13 @@ pub trait Backend: Send + Sync {
         to_ms: i64,
     ) -> crate::today_usage::UsageRangeBreakdown;
     fn check_setup(&self) -> SetupStatus;
+    /// Per-harness environment probe (claude-code / codex / dsh): installed,
+    /// path, version, install channel, login state — the environment wizard's
+    /// data source. Default empty keeps placeholder backends (NullBackend)
+    /// buildable; Local and Remote both override (drift-guard check A).
+    fn harness_statuses(&self) -> Vec<crate::harness_status::HarnessStatus> {
+        Vec::new()
+    }
     /// Start tailing a session file for new lines.
     /// Returns the initial byte offset (file size at call time).
     /// New lines are delivered as `session-tail` Tauri events.

@@ -2,7 +2,7 @@
 //
 // The PWA gets its pairing secret from the URL it was opened with — the desktop
 // QR encodes `https://<relay>/#k=<secret>`. The shell has no such URL: it boots
-// from bundled assets at `capacitor://localhost`, so `loadSecretSync()` always
+// from bundled assets at `capacitor://localhost`, so `consumeHashSecret()` always
 // comes up empty and the app is stuck on the pairing gate forever.
 //
 // Universal Links (iOS) / App Links (Android) close that gap: the OS hands the

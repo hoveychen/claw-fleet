@@ -272,6 +272,20 @@ pub(crate) fn route_sources_prefix(
                 }
             }
 
+pub(crate) fn route_harness_statuses(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    _query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let statuses = crate::harness_status::probe_all();
+    let body = serde_json::to_string(&statuses).unwrap_or_default();
+    let _ = request.respond(
+        tiny_http::Response::from_string(body).with_header(json_header),
+    );
+}
+
 pub(crate) fn route_setup_status(
     ctx: &ServeCtx,
     request: tiny_http::Request,

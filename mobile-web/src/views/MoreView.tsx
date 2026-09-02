@@ -1,14 +1,14 @@
 // 「更多」tab：把原来散在 header 齿轮 / 顶部横幅里的设置项收纳到一处——
 // 语言 / 主题、桌面端连接状态、通知开关、重新配对、关于/版本。
 
-import { ChevronRight, FolderGit2, Gauge, ListTree, Package } from "lucide-react";
+import { useState } from "react";
+import { Check, ChevronRight, FolderGit2, Gauge, ListTree, Package } from "lucide-react";
 import { useDraft } from "../draft";
 import { dateLocale, useI18n, type Lang } from "../i18n";
 import type { RttSplit } from "../connQuality";
 import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
-import { clearSecret } from "../secretStore";
-import { clearCachedSessions } from "../sessionCache";
+import type { PairedDevice } from "../devices";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
 import styles from "./MoreView.module.css";
@@ -46,6 +46,15 @@ interface Props {
   onOpenPlans: () => void;
   onOpenArtifacts: () => void;
   onOpenUsage: () => void;
+  /** 这台手机配对过的每一台 Fleet，按加入顺序。 */
+  devices: PairedDevice[];
+  /** 当前作用域那一台的 id；一台都没配对时 null（同源形态恒为 null）。 */
+  activeDeviceId: string | null;
+  onSwitchDevice: (id: string) => void;
+  onRenameDevice: (id: string, label: string) => void;
+  onRemoveDevice: (device: PairedDevice) => void;
+  /** 清除全部配对并重载。 */
+  onUnpairAll: () => void;
 }
 
 export function MoreView({
@@ -64,8 +73,18 @@ export function MoreView({
   onOpenPlans,
   onOpenArtifacts,
   onOpenUsage,
+  devices,
+  activeDeviceId,
+  onSwitchDevice,
+  onRenameDevice,
+  onRemoveDevice,
+  onUnpairAll,
 }: Props) {
   const { lang, setLang, t } = useI18n();
+  // 正在改名的那台（内联输入，不用 window.prompt —— 鸿蒙 ArkWeb 里那个对话框
+  // 未必可用，而这里没有任何理由依赖它）。
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [labelDraft, setLabelDraft] = useState("");
   const { setting, setTheme } = useTheme();
   const wakeLock = useWakeLock();
   // Task-list handoff grouping — same "tasks:groupHandoff" draft the task page
@@ -414,6 +433,88 @@ export function MoreView({
         </div>
       </div>
 
+      {/* ── 设备 ── */}
+      {devices.length > 0 && (
+        <div className={styles.section}>
+          <div className={styles.sectionLabel}>{t("设备")}</div>
+          <div className={styles.card}>
+            {devices.map((d, i) => (
+              <div key={d.id}>
+                {i > 0 && <div className={styles.divider} />}
+                {editingId === d.id ? (
+                  <div className={styles.deviceRow}>
+                    <input
+                      className={styles.deviceInput}
+                      value={labelDraft}
+                      autoFocus
+                      onChange={(e) => setLabelDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          onRenameDevice(d.id, labelDraft);
+                          setEditingId(null);
+                        }
+                      }}
+                    />
+                    <button
+                      className={styles.deviceBtn}
+                      onClick={() => {
+                        onRenameDevice(d.id, labelDraft);
+                        setEditingId(null);
+                      }}
+                    >
+                      {t("保存")}
+                    </button>
+                    <button className={styles.deviceBtn} onClick={() => setEditingId(null)}>
+                      {t("取消")}
+                    </button>
+                  </div>
+                ) : (
+                  <div className={styles.deviceRow}>
+                    {/* 整行可点 = 切到这台。当前那台不再可点，避免一次无效重连。 */}
+                    <button
+                      className={styles.deviceMain}
+                      disabled={d.id === activeDeviceId}
+                      onClick={() => onSwitchDevice(d.id)}
+                    >
+                      <span className={styles.deviceCheck}>
+                        {d.id === activeDeviceId && <Check size={16} />}
+                      </span>
+                      <span className={styles.deviceLabel}>{d.label}</span>
+                    </button>
+                    <button
+                      className={styles.deviceBtn}
+                      onClick={() => {
+                        setLabelDraft(d.label);
+                        setEditingId(d.id);
+                      }}
+                    >
+                      {t("改名")}
+                    </button>
+                    <button
+                      className={styles.deviceBtnDanger}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            t("移除「{0}」？它的通知会停掉，本机为它缓存的任务与草稿一并清除。", d.label),
+                          )
+                        ) {
+                          onRemoveDevice(d);
+                        }
+                      }}
+                    >
+                      {t("移除")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className={styles.rowNote}>
+            {t("在另一台桌面端 Fleet 的「移动端」板块扫码，即可把它一并加进这个列表。")}
+          </div>
+        </div>
+      )}
+
       {/* ── 配对 ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("配对")}</div>
@@ -421,14 +522,16 @@ export function MoreView({
           <button
             className={styles.dangerRow}
             onClick={() => {
-              if (window.confirm(t("清除本机配对密钥？需回到桌面端重新扫码才能再连接。"))) {
-                clearSecret();
-                clearCachedSessions();
-                location.reload();
+              if (
+                window.confirm(
+                  t("清除本机全部配对密钥？需回到桌面端重新扫码才能再连接。"),
+                )
+              ) {
+                onUnpairAll();
               }
             }}
           >
-            {t("重新配对 / 清除密钥")}
+            {t("重新配对 / 清除全部密钥")}
           </button>
         </div>
       </div>
