@@ -2169,6 +2169,40 @@ fn ensure_local_rca(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Install rca on `conn` and record it in the host book — no workspace.
+///
+/// Split out from [`install_rca_remote_impl`] because "make this host an rca
+/// executor" and "register a workspace path on it" are two decisions, and
+/// fusing them forced the user to name a path before they could set up a host
+/// at all — the path being the hardest field on the form, since it has to exist
+/// identically on both machines. Choosing a workspace is the composer's job now.
+fn install_rca_on_host_impl(
+    app: &AppHandle,
+    conn: RemoteConnection,
+) -> Result<Vec<RemoteConnection>, String> {
+    emit_install_progress(app, "Connecting via SSH…", false);
+    ssh_exec(&conn, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
+    let remote_rca = provision_rca(app, |cmd| ssh_exec(&conn, cmd))?;
+    ensure_local_rca(app)?;
+    let host_id = claw_fleet_core::remote_host::adopt_host(&conn)?;
+    claw_fleet_core::remote_host::set_host_rca_path(&host_id, &remote_rca)?;
+    emit_install_progress(app, "Host is ready to run workspaces.", true);
+    Ok(claw_fleet_core::remote_host::load_hosts())
+}
+
+/// Tauri command — provision `conn` as an rca executor. Desktop-layer local SSH
+/// op (like [`connect_remote`]); the ssh runs from here, which is also where a
+/// locally-backed session spawns.
+#[tauri::command]
+pub async fn install_rca_on_host(
+    conn: RemoteConnection,
+    app: AppHandle,
+) -> Result<Vec<RemoteConnection>, String> {
+    tauri::async_runtime::spawn_blocking(move || install_rca_on_host_impl(&app, conn))
+        .await
+        .map_err(|e| format!("install task join failed: {e}"))?
+}
+
 fn install_rca_remote_impl(
     app: &AppHandle,
     conn: RemoteConnection,
