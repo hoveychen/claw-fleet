@@ -173,6 +173,38 @@ pub(crate) fn remote_host_health(
     state.backend.read().unwrap().remote_host_health(ssh_target)
 }
 
+/// The ssh host book — list / upsert / remove, through the backend.
+///
+/// Distinct from `list_saved_connections`, which stays deliberately local: that
+/// one answers "which Fleet backends can THIS desktop dial", and you cannot ask
+/// a backend to remember the connection you use to reach it. This one answers
+/// "which machines can the backend host ssh into", which is what a workspace's
+/// `hostId` is resolved against when a session spawns there. Under a local
+/// backend the two are the same records — which is exactly the merged host list
+/// the settings page renders.
+#[tauri::command(async)]
+pub(crate) fn list_ssh_hosts(
+    state: tauri::State<'_, AppState>,
+) -> Vec<claw_fleet_core::remote_host::SshHost> {
+    state.backend.read().unwrap().list_ssh_hosts()
+}
+
+#[tauri::command(async)]
+pub(crate) fn upsert_ssh_host(
+    state: tauri::State<'_, AppState>,
+    host: claw_fleet_core::remote_host::SshHost,
+) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+    state.backend.read().unwrap().upsert_ssh_host(host)
+}
+
+#[tauri::command(async)]
+pub(crate) fn remove_ssh_host(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+    state.backend.read().unwrap().remove_ssh_host(id)
+}
+
 /// Remote-workspace registry (rca-routed workspaces) — list / upsert / remove.
 /// All three delegate through the backend: the registry lives on the host
 /// where sessions spawn (the probe host under a remote connection).

@@ -1166,6 +1166,14 @@ fn handle_request(
             // the session appears via the scanner once its JSONL exists.
             crate::routes::SPAWN_SESSION if request.method() == &tiny_http::Method::Post => route_spawn_session(ctx, request, &query, json_header, path),
 
+            // The ssh host book. Spawn-time state (a workspace's hostId is
+            // resolved through it at launch), so it belongs to THIS host.
+            crate::routes::SSH_HOSTS => route_ssh_hosts(request, json_header),
+
+            crate::routes::SSH_HOSTS_UPSERT if request.method() == &tiny_http::Method::Post => route_ssh_hosts_upsert(request, json_header),
+
+            crate::routes::SSH_HOSTS_REMOVE if request.method() == &tiny_http::Method::Post => route_ssh_hosts_remove(request, json_header),
+
             // Remote-workspace registry (rca): list / upsert / remove.
             crate::routes::REMOTE_WORKSPACES => route_remote_workspaces(ctx, request, &query, json_header, path),
 

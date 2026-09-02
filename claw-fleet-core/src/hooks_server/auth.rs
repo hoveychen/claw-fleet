@@ -151,6 +151,11 @@ mod tests {
             routes::MEMORIES,
             routes::SKILL_CONTENT,
             routes::REMOTE_WORKSPACES,
+            // The host book names machines and key paths, and editing it
+            // changes where sessions execute — squarely internal.
+            routes::SSH_HOSTS,
+            routes::SSH_HOSTS_UPSERT,
+            routes::SSH_HOSTS_REMOVE,
             // The three host-settings pairs. `PERMISSIONS_CONFIG` is the sharp
             // one: a POST there flips the `settings.json` allow-rule injection
             // for every session on the host, so a customer token reaching it

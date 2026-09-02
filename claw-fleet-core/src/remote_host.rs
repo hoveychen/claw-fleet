@@ -104,6 +104,15 @@ pub fn save_hosts(hosts: &[SshHost]) -> Result<(), String> {
     std::fs::write(&path, data).map_err(|e| e.to_string())
 }
 
+/// Remove one host by id. Idempotent: removing an id that is not there is not
+/// an error, the book just comes back unchanged.
+pub fn remove_host(id: &str) -> Result<Vec<SshHost>, String> {
+    let mut hosts = load_hosts();
+    hosts.retain(|h| h.id != id);
+    save_hosts(&hosts)?;
+    Ok(hosts)
+}
+
 pub fn find_host(id: &str) -> Option<SshHost> {
     load_hosts().into_iter().find(|h| h.id == id)
 }

@@ -238,6 +238,24 @@ impl Backend for NullBackend {
         }
     }
 
+    fn list_ssh_hosts(&self) -> Vec<claw_fleet_core::remote_host::SshHost> {
+        Vec::new()
+    }
+
+    fn upsert_ssh_host(
+        &self,
+        _: claw_fleet_core::remote_host::SshHost,
+    ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+        Err("backend not ready".into())
+    }
+
+    fn remove_ssh_host(
+        &self,
+        _: String,
+    ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+        Err("backend not ready".into())
+    }
+
     fn list_remote_workspaces(&self) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
         claw_fleet_core::remote_workspace::RemoteWorkspacesConfig::default()
     }
