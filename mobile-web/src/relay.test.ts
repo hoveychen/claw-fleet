@@ -40,7 +40,31 @@ class FakeWs {
   }
 }
 
+/** 睡一个固定时长。
+ *
+ *  **只在两种场合用它，别拿它等一件事发生**（那是 `waitFor` 的活）：
+ *  1. 负向断言——要给「错误的行为」真实的机会发生，之后才能断言它没发生
+ *     （`expect(settled).toBe(false)` 之类）。这里轮询会立刻返回、什么都没
+ *     验证到，是把测试改弱。
+ *  2. 时间夹具——刻意推进墙钟，让某个时长本身可断言（如 `tick(40)` 之后
+ *     断言 `totalMs >= 40`）。 */
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
+
+/** 等到 `ok()` 成立再返回（最多约 2s），而不是睡一个固定时长。
+ *
+ *  固定时长的 `await tick()` 只够那些「解封一次就回调」的帧。gzip 帧要先
+ *  WebCrypto 解封、再过一道 `DecompressionStream` inflate 才回调，是本文件里
+ *  单个 tick 内异步活最重的一条路径——机器一凉 20ms 就过不去，断言会在回调
+ *  还没跑时看到初始值。这在冷 vite 缓存下实测偶发（热跑 0/29、冷跑 1/6），
+ *  CI 每次都是冷缓存，所以那边概率更高。抬高睡眠时长只是把窗口往后挪，轮询
+ *  才是消掉它——`nextWs` 用的就是同一个套路。 */
+async function waitFor(ok: () => boolean | Promise<boolean>, what: string): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    if (await ok()) return;
+    await tick(10);
+  }
+  throw new Error(`${what} 未在预期时间内发生`);
+}
 
 /** 连接是异步建立的（open() 先 await 派生密钥再 new WebSocket），所以等到新的
  *  FakeWs 出现为止再返回它。 */
@@ -69,12 +93,22 @@ async function openSent(ws: FakeWs): Promise<Array<Record<string, unknown>>> {
   return out;
 }
 
-/** 取某连接发出的 `req` 帧的 req_id（先解密）。 */
+/** 取某连接发出的 `req` 帧的 req_id（先解密）。
+ *
+ *  出站是异步加密的，所以这里等到帧真正落到 `ws.sent` 上为止，而不是让调用方
+ *  在前面睡一个固定时长再赌它到了——睡不够就抛「该连接没有发出 req 帧」。 */
 async function sentReqId(ws: FakeWs): Promise<string> {
-  for (const p of await openSent(ws)) {
-    if (p.event === "req") return String(p.req_id);
-  }
-  throw new Error("该连接没有发出 req 帧");
+  let found: string | undefined;
+  await waitFor(async () => {
+    for (const p of await openSent(ws)) {
+      if (p.event === "req") {
+        found = String(p.req_id);
+        return true;
+      }
+    }
+    return false;
+  }, "该连接发出 req 帧");
+  return found!;
 }
 
 const windowShim = () => ({
@@ -148,8 +182,6 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
     let bSettled: unknown = "PENDING";
     pb.then((v) => (bSettled = v)).catch(() => (bSettled = "REJECTED"));
 
-    // 出站是异步加密的，等 req 帧真正落到 sent 上。
-    await tick();
     const reqIdA = await sentReqId(a.ws);
 
     // agent 对 A 请求的回复（携带 A 的 req_id），被 relay 广播到 A 和 B 两个连接。
@@ -164,7 +196,8 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
 
     await expect(pa).resolves.toEqual({ who: "A-tail" });
 
-    // 让 microtask/timer 有机会跑，再断言 B 没被 A 的回复串号。
+    // 负向断言：让 microtask/timer 有机会跑，再断言 B 没被 A 的回复串号。
+    // 这里必须是固定睡眠——轮询「bSettled 仍是 PENDING」会立刻返回，等于没验。
     await tick();
     expect(bSettled).toBe("PENDING");
   });
@@ -191,11 +224,13 @@ describe("RelayClient 早 ack(方案 A)", () => {
     });
     let settled: unknown = "PENDING";
     p.then((v) => (settled = v)).catch(() => (settled = "REJECTED"));
-    await tick();
     const reqId = await sentReqId(ws);
 
     // 早 ack 到达：onAck 触发，但 promise 不 resolve（仍等最终 reply）。
     ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
+    // 先等 ack 真被处理（正向），再多睡一会儿给「promise 被错误 resolve」留出
+    // 机会——否则机器一凉，两件事都还没发生，下面那句就白白通过了。
+    await waitFor(() => acked, "onAck 触发");
     await tick();
     expect(acked).toBe(true);
     expect(settled).toBe("PENDING");
@@ -212,10 +247,12 @@ describe("RelayClient 早 ack(方案 A)", () => {
       count++;
     });
     p.catch(() => {});
-    await tick();
     const reqId = await sentReqId(ws);
     ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
     ws.deliver(await sealedMsg({ event: "ack", req_id: reqId }));
+    // 先等第一个 ack 落地（正向），再睡一会儿给第二个 ack 机会去错误地二次触发。
+    // 只睡固定时长的话，凉机器上可能一个都没跑，`count === 1` 就成了假绿。
+    await waitFor(() => count >= 1, "首个 ack 触发 onAck");
     await tick();
     expect(count).toBe(1);
   });
@@ -255,19 +292,19 @@ describe("RelayClient RTT 分段", () => {
     ws.deliver({ type: "authed", agent_online: true, clients: 1 });
     const p = client.request("today_usage");
     p.catch(() => {});
-    await tick();
     return { ws, reqId: await sentReqId(ws), samples };
   }
 
   it("ack 与 handle_ms 都在时，三段可分辨", async () => {
     const { ws, reqId, samples } = await requestWithSamples();
     // relay 先回 msg_ack（此时桌面还没参与），隔一会儿桌面的 reply 才到。
+    // 时间夹具：这 40ms 本身就是下面 `totalMs >= 40` 要断言的量，不能换成轮询。
     ws.deliver({ type: "msg_ack", ack_id: reqId, status: "delivered" });
     await tick(40);
     ws.deliver(
       await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: {}, handle_ms: 380 }),
     );
-    await tick();
+    await waitFor(() => samples.length >= 1, "RTT 样本产出");
 
     expect(samples).toHaveLength(1);
     const s = samples[0];
@@ -283,7 +320,7 @@ describe("RelayClient RTT 分段", () => {
     ws.deliver(
       await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: {}, handle_ms: 12 }),
     );
-    await tick();
+    await waitFor(() => samples.length >= 1, "RTT 样本产出");
     expect(samples[0].phoneRelayMs).toBeNull();
     expect(samples[0].desktopHandleMs).toBe(12);
   });
@@ -293,7 +330,7 @@ describe("RelayClient RTT 分段", () => {
     ws.deliver({ type: "msg_ack", ack_id: reqId, status: "delivered" });
     await tick();
     ws.deliver(await sealedMsg({ event: "reply", req_id: reqId, ok: true, data: {} }));
-    await tick();
+    await waitFor(() => samples.length >= 1, "RTT 样本产出");
     expect(samples[0].desktopHandleMs).toBeNull();
     expect(samples[0].phoneRelayMs).not.toBeNull();
   });
@@ -305,7 +342,7 @@ describe("RelayClient RTT 分段", () => {
     ws.deliver(
       await sealedMsg({ event: "reply", req_id: reqId, ok: false, error: "nope", handle_ms: 7 }),
     );
-    await tick();
+    await waitFor(() => samples.length >= 1, "RTT 样本产出");
     expect(samples).toHaveLength(1);
     expect(samples[0].desktopHandleMs).toBe(7);
   });
@@ -334,7 +371,6 @@ describe("RelayClient 失败来源可区分", () => {
   it("桌面端 ok:false 的 reply → remote 错误，携带桌面原文", async () => {
     const { client, ws } = await connected(clients);
     const p = client.request("spawn_session", { workspacePath: "~/nope" });
-    await tick();
     const reply = await sealedMsg({
       event: "reply",
       req_id: await sentReqId(ws),
@@ -406,7 +442,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     ws.deliver({ type: "authed", agent_online: true, clients: 1 });
 
     ws.deliver(await sealedMsg({ event: "sessions", sessions }));
-    await tick(); // 解密是异步的
+    await waitFor(() => got !== null, "sessions 帧解密后分发"); // 解密是异步的
     expect(got).toEqual(sessions);
   });
 
@@ -429,7 +465,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
       { id: "s3", lastActivityMs: 1, status: "idle" },
     ];
     ws.deliver(await sealedMsg({ event: "sessions", sessions: full }));
-    await tick();
+    await waitFor(() => got.length === 3, "整表基线到达");
     expect(got.map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
 
     // 增量：s2 活跃度升到 9、s4 新增(4)、s3 删除。
@@ -443,7 +479,9 @@ describe("RelayClient sessions 快照收发（加密）", () => {
         remove: ["s3"],
       }),
     );
-    await tick();
+    // s3 被移除后整表仍是 3 条（s2/s4/s1），所以只看长度分不出增量到没到——
+    // 盯 s3 消失这个只有增量应用后才成立的条件。
+    await waitFor(() => !got.some((s) => s.id === "s3"), "sessions_delta 应用");
     // 合并后按 lastActivityMs desc: s2(9) s4(4) s1(3)；s3 已移除。
     expect(got.map((s) => s.id)).toEqual(["s2", "s4", "s1"]);
     expect(got.find((s) => s.id === "s2")?.status).toBe("active");
@@ -465,7 +503,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     const sealed = await sealBytes(KEYS.encKey, gz);
     ws.deliver({ type: "msg", payload: { ...sealed, z: true } });
 
-    await tick();
+    await waitFor(() => got !== null, "gzip 帧解密 + inflate 后分发");
     expect(got).toEqual(sessions);
   });
 
@@ -481,6 +519,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
 
     // 永远加密下，明文业务 payload 不该被处理（可能来自不受信来源）。
     ws.deliver({ type: "msg", payload: { event: "sessions", sessions: [{ id: "x" }] } });
+    // 负向断言：给「明文帧被错误处理」留出机会，固定睡眠是对的工具。
     await tick();
     expect(got).toBe("UNTOUCHED");
   });
@@ -519,7 +558,10 @@ describe("RelayClient client_hello 携带构建 commit", () => {
     ws.onopen?.();
     ws.deliver({ type: "authed", agent_online: true, clients: 1 });
 
-    await tick();
+    await waitFor(
+      async () => (await openSent(ws)).some((p) => p.event === "client_hello"),
+      "client_hello 发出",
+    );
     const hello = (await openSent(ws)).find((p) => p.event === "client_hello");
     expect(hello).toBeTruthy();
     expect(hello!.appCommit).toBe("abc1234");
@@ -740,6 +782,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
       () => (settled = true),
       () => (settled = true),
     );
+    // 负向断言：给「delivered/queued 被当成终局」留出机会，固定睡眠是对的工具。
     await tick(5);
     expect(settled).toBe(false);
 
@@ -764,6 +807,7 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
       () => (settled = true),
       () => (settled = true),
     );
+    // 负向断言：给「delivered/queued 被当成终局」留出机会，固定睡眠是对的工具。
     await tick(5);
     expect(settled).toBe(false);
   });
