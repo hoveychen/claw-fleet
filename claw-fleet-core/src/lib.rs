@@ -47,6 +47,7 @@ pub mod git_ops;
 pub mod guard;
 pub mod handoff;
 pub mod harness_install;
+pub mod harness_login;
 pub mod harness_status;
 pub mod headless_runtime;
 pub mod hook_timing;

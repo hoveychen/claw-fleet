@@ -46,7 +46,7 @@ pub(crate) async fn harness_statuses(
 /// channel (own channel, mirroring `rca-install-progress`, so wizard cards
 /// don't collide with the backend-connect flow).
 #[derive(Clone, serde::Serialize)]
-struct HarnessInstallProgress {
+pub(crate) struct HarnessInstallProgress {
     source: String,
     line: String,
 }
@@ -137,6 +137,102 @@ pub(crate) async fn install_node_runtime(
 #[tauri::command]
 pub(crate) async fn harness_login_context() -> Result<claw_fleet_core::foxy::FoxyCustody, String> {
     Ok(claw_fleet_core::foxy::fetch_custody().await)
+}
+
+// ── Claude login flow (wizard) ───────────────────────────────────────────────
+//
+// Drives `claude setup-token` under the existing proc_runner pty surface:
+// start → poll (URL appears; CLI opens the browser itself) → user pastes the
+// one-time code into the wizard → submit writes it to the pty → poll captures
+// the long-lived token and persists it (see core::harness_login).
+
+/// What the wizard's claude-login card renders on each poll tick.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClaudeLoginPoll {
+    parse: claw_fleet_core::harness_login::ClaudeLoginParse,
+    /// pty process still alive (false once setup-token exited).
+    running: bool,
+    /// Token was captured and persisted during this poll.
+    token_saved: bool,
+}
+
+#[tauri::command]
+pub(crate) async fn claude_login_start(
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let home = session::real_home_dir()
+        .map(|h| h.to_string_lossy().into_owned())
+        .ok_or("cannot resolve home directory")?;
+    let backend = state.backend.clone();
+    let record = tokio::task::spawn_blocking(move || {
+        backend.read().unwrap().spawn_proc(home, "claude setup-token".into(), 100, 30)
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))??;
+    Ok(record.id)
+}
+
+#[tauri::command]
+pub(crate) async fn claude_login_poll(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ClaudeLoginPoll, String> {
+    use base64::Engine as _;
+    let backend = state.backend.clone();
+    let chunk = tokio::task::spawn_blocking(move || {
+        // Offset 0: setup-token's whole transcript is a few KB, far under the
+        // 256 KB chunk cap, so a cumulative re-read keeps the parser stateless.
+        backend.read().unwrap().proc_output(id, Some(0))
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))??;
+
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(&chunk.data_b64)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+    let parse = claw_fleet_core::harness_login::parse_claude_login_output(&raw);
+
+    let mut token_saved = false;
+    if let Some(token) = &parse.token {
+        claw_fleet_core::harness_login::save_claude_oauth_token(token)?;
+        token_saved = true;
+    }
+    let running = matches!(
+        chunk.record.status,
+        claw_fleet_core::proc_runner::ProcStatus::Starting
+            | claw_fleet_core::proc_runner::ProcStatus::Running
+    );
+    Ok(ClaudeLoginPoll { parse, running, token_saved })
+}
+
+#[tauri::command]
+pub(crate) async fn claude_login_submit_code(
+    id: String,
+    code: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    use base64::Engine as _;
+    // Trim: the code arrives from a copy button / manual paste; a stray
+    // newline inside would submit twice. One trailing \r is the pty Enter.
+    let payload = format!("{}\r", code.trim());
+    let data_b64 = base64::engine::general_purpose::STANDARD.encode(payload.as_bytes());
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.read().unwrap().proc_input(id, data_b64))
+        .await
+        .map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn claude_login_cancel(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.read().unwrap().kill_proc(id, false))
+        .await
+        .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]
