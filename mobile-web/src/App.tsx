@@ -57,6 +57,7 @@ import {
   loadCachedSessions,
   saveCachedSessions,
 } from "./sessionCache";
+import { DeviceScopeProvider, scopedKey } from "./deviceScope";
 import { t as translate, useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
@@ -134,6 +135,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 当前设备指名的 relay。`null` = 构建默认值（迁移过来的设备、以及扫码时没带
   // `&relay=` 的都是这一类），传输层与推送各自把它解析成实际地址。
   const relayBase = current?.relayBase ?? null;
+  // 本地持久化的命名空间。会话快照缓存、草稿、附件、workspace 记忆都按它分家
+  // ——那些内容只对某一台机器有意义（见 deviceScope.tsx）。
+  const deviceId = current?.id ?? null;
+  // 分享菜单那条 effect 的依赖是空的（只在挂载时订阅一次），但它开火时要用**当下**
+  // 的设备，所以那一处读 ref 而不是闭包里的值。
+  const deviceIdRef = useRef<string | null>(deviceId);
+  deviceIdRef.current = deviceId;
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
   const [a2hsDismissed, setA2hsDismissed] = useState(
@@ -188,8 +196,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         const fetched = new Set(files.map((f) => f.name));
         const missed = share.files.filter((f) => !fetched.has(f.name));
         const prompt = shareToPrompt({ ...share, files: missed });
-        const current = loadDraft<Record<string, unknown>>(NEW_SESSION_DRAFT_KEY, {});
-        saveDraft(NEW_SESSION_DRAFT_KEY, { ...current, prompt });
+        // 草稿按设备分家，否则从分享菜单塞进来的提示词会落进另一台的新会话表单。
+        const key = scopedKey(deviceIdRef.current, NEW_SESSION_DRAFT_KEY);
+        const existing = loadDraft<Record<string, unknown>>(key, {});
+        saveDraft(key, { ...existing, prompt });
         setSharedFiles(files);
         setShowNewSession(true);
       })();
@@ -233,14 +243,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   useEffect(() => {
     if (MOCK) return;
     let cancelled = false;
-    void loadCachedSessions().then((cached) => {
+    void loadCachedSessions(deviceId).then((cached) => {
       if (cancelled || !cached?.length) return;
       setSessions((prev) => (prev.length === 0 ? cached : prev));
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [deviceId]);
   const [todayUsage, setTodayUsage] = useState<TodayUsage | null>(null);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   // Mirrors `sessionsLoaded`: flips true once the first authoritative pending
@@ -414,7 +424,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         // Persist the merged full list so the next cold start paints it. Both
         // full and delta frames arrive here already merged (see relay.ts), so
         // the cache always holds the latest complete snapshot.
-        saveCachedSessions(list);
+        saveCachedSessions(deviceId, list);
       },
       onSessionsKind: (kind: "full" | "delta") =>
         setSessionsFrame((s) => ({
@@ -447,7 +457,18 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       window.removeEventListener("pagehide", onPageHide);
       client.close();
     };
-  }, [secret, makeTransport, addDecision, removeDecision, refreshPending, recomputeCongestion]);
+    // deviceId / relayBase 与 secret 总是同时变（它们都来自当前那台设备），列进
+    // 依赖是为了让「切设备」这件事在这里显式成立，而不是靠 secret 恰好也变了。
+  }, [
+    secret,
+    deviceId,
+    relayBase,
+    makeTransport,
+    addDecision,
+    removeDecision,
+    refreshPending,
+    recomputeCongestion,
+  ]);
 
   // Today's cumulative token/cost counter in the header. Polls while the desktop
   // is online; the desktop computes the figure (agent sessions created today +
@@ -688,7 +709,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           className={styles.gateButton}
           onClick={() => {
             clearBook();
-            clearCachedSessions();
+            clearCachedSessions(deviceId);
             location.reload();
           }}
         >
@@ -699,6 +720,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }
 
   return (
+    // 整棵树跑在「当前作用域设备」里：里面所有按设备分家的本地存储（草稿、附件、
+    // workspace 记忆）都从这里取命名空间，无需逐个 prop 往下传。
+    <DeviceScopeProvider deviceId={deviceId}>
     <div className={styles.app}>
       <header className={styles.header}>
         <span className={styles.title}>Fleet</span>
@@ -991,5 +1015,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </button>
       </nav>
     </div>
+    </DeviceScopeProvider>
   );
 }

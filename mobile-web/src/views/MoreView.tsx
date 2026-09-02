@@ -8,6 +8,7 @@ import type { RttSplit } from "../connQuality";
 import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
 import { clearBook } from "../devices";
+import { useDeviceScope } from "../deviceScope";
 import { clearCachedSessions } from "../sessionCache";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
@@ -66,6 +67,7 @@ export function MoreView({
   onOpenUsage,
 }: Props) {
   const { lang, setLang, t } = useI18n();
+  const deviceId = useDeviceScope();
   const { setting, setTheme } = useTheme();
   const wakeLock = useWakeLock();
   // Task-list handoff grouping — same "tasks:groupHandoff" draft the task page
@@ -423,7 +425,7 @@ export function MoreView({
             onClick={() => {
               if (window.confirm(t("清除本机配对密钥？需回到桌面端重新扫码才能再连接。"))) {
                 clearBook();
-                clearCachedSessions();
+                clearCachedSessions(deviceId);
                 location.reload();
               }
             }}
