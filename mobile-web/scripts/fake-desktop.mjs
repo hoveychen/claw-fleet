@@ -41,12 +41,23 @@ import crypto from "node:crypto";
 // ── 参数 ─────────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
-  const out = { relay: "ws://127.0.0.1:18099", label: "fake", cards: 1, sessions: 3 };
+  const out = {
+    relay: "ws://127.0.0.1:18099",
+    label: "fake",
+    cards: 1,
+    sessions: 3,
+    // 两个刻意制造畸形数据的开关,用来验渲染兜底(ErrorBoundary.tsx):真桌面端
+    // 不会这样,但版本错配 / 协议演进 / 主机侧 bug 都会,而代价曾经是整个 app 变白。
+    badCard: false, // 第一张卡少掉 riskTags 数组
+    badSources: false, // sources_config 回一个对象而不是数组
+  };
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i]?.replace(/^--/, "");
     const value = argv[i + 1];
     if (!key || value === undefined) continue;
     if (key === "cards" || key === "sessions") out[key] = Number(value);
+    else if (key === "bad-card") out.badCard = value !== "false";
+    else if (key === "bad-sources") out.badSources = value !== "false";
     else out[key] = value;
   }
   return out;
@@ -140,7 +151,9 @@ const cards = Array.from({ length: args.cards }, (_, i) => ({
   toolName: "Bash",
   command: `echo hello-from-${label}-${i + 1}`,
   commandSummary: `echo hello-from-${label}-${i + 1}`,
-  riskTags: [],
+  // --bad-card:第一张卡故意不带 riskTags。它以前会让渲染抛异常、React 卸掉整棵
+  // 树(页面纯白、控制台空);现在该被那张卡自己的 ErrorBoundary 接住。
+  ...(args.badCard && i === 0 ? {} : { riskTags: [] }),
   timestamp: new Date().toISOString(),
 }));
 
@@ -236,10 +249,14 @@ ws.addEventListener("message", (event) => {
       // 对象就在渲染期抛 TypeError,而 React 会把整棵树卸掉(页面全白、控制台空)。
       // 注册名是 `claude-code`(不是裸的 `claude`),tool 值才是 `claude` ——
       // 见 agentSource.ts::sourceNameToTool。写错的话工具选择器会退回 Claude-only。
-      data = [
-        { name: "claude-code", enabled: true, available: true },
-        { name: "codex", enabled: true, available: true },
-      ];
+      data = args.badSources
+        ? // --bad-sources:回对象而不是数组。表单把它交给 toolChoicesForSources
+          // 直接 .filter,于是在渲染期抛 TypeError —— 该被浮层那层兜底接住。
+          { sources: [{ name: "claude-code", enabled: true, available: true }] }
+        : [
+            { name: "claude-code", enabled: true, available: true },
+            { name: "codex", enabled: true, available: true },
+          ];
     } else if (method === "chat_workspace") {
       // 纯聊天目录。给个每台不同的路径,好看出表单读的是哪一台的。
       data = { path: `/home/${label}/.fleet/chat` };

@@ -31,6 +31,15 @@ export function formatBoundaryDetail(
   return parts.join("\n\n");
 }
 
+const BUTTON_STYLE = {
+  padding: "6px 12px",
+  borderRadius: "8px",
+  border: "1px solid rgba(176, 0, 32, 0.4)",
+  background: "transparent",
+  color: "inherit",
+  fontSize: "13px",
+} as const;
+
 interface Props {
   /** 哪一块崩了。进标题也进 console —— 「决策卡 g1」比「出错了」有用得多。 */
   label: string;
@@ -42,6 +51,13 @@ interface Props {
   resetKey?: string;
   /** `screen` = 占满可用高度(整页/整 tab);`inline` = 一小块(单张卡片位置)。 */
   variant?: "screen" | "inline";
+  /** 一条「离开这里」的出路,fallback 上多一个按钮。
+   *
+   *  浮层那层必须给:浮层的 `HistoryLayer`(负责接系统返回键的那个)和内容是同一
+   *  块 JSX,一起被 fallback 替换掉,于是**返回键退不掉这个浮层** —— 实测过:关掉
+   *  新会话表单那一步,浮层状态没变、兜底一直挂着。而 iOS PWA 连系统返回键都没有,
+   *  只剩「重试」的话崩一次就把人困死在这儿。 */
+  onDismiss?: { label: string; run: () => void };
   children: ReactNode;
 }
 
@@ -102,19 +118,16 @@ export class ErrorBoundary extends Component<Props, State> {
         <div style={{ opacity: 0.85, marginBottom: 10 }}>
           {t("其余部分仍然可用。{0}", this.props.label)}
         </div>
-        <button
-          onClick={this.retry}
-          style={{
-            padding: "6px 12px",
-            borderRadius: "8px",
-            border: "1px solid rgba(176, 0, 32, 0.4)",
-            background: "transparent",
-            color: "inherit",
-            fontSize: "13px",
-          }}
-        >
-          {t("重试")}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={this.retry} style={BUTTON_STYLE}>
+            {t("重试")}
+          </button>
+          {this.props.onDismiss && (
+            <button onClick={this.props.onDismiss.run} style={BUTTON_STYLE}>
+              {this.props.onDismiss.label}
+            </button>
+          )}
+        </div>
         {/* 细节默认折叠:手机屏幕不该被堆栈占满,但它必须能被复制出来给我看。 */}
         <details style={{ marginTop: 10 }}>
           <summary style={{ cursor: "pointer", fontSize: "12px", opacity: 0.8 }}>
