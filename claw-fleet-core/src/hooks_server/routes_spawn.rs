@@ -209,6 +209,68 @@ pub(crate) fn route_browse_dir(
                 }
             }
 
+/// GET `/remote_browse_dir?target=<ssh target>&path=<dir>` — the listing is of
+/// a host one ssh hop past this one, so the ssh originates here (this process
+/// is where sessions spawn and where the keys live).
+pub(crate) fn route_remote_browse_dir(
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+) {
+    let decode = |k: &str| {
+        query
+            .get(k)
+            .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let Some(target) = decode("target") else {
+        let body = serde_json::json!({ "error": "target is required" }).to_string();
+        let _ = request.respond(
+            tiny_http::Response::from_string(body).with_status_code(400).with_header(json_header),
+        );
+        return;
+    };
+    match crate::remote_host::browse_remote_dir(&target, decode("path").as_deref()) {
+        Ok(resp) => {
+            let body = serde_json::to_string(&resp).unwrap_or_default();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(400)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
+/// GET `/remote_host_health?target=<ssh target>`. Only a missing `target` is a
+/// 400: an unreachable host is a 200 carrying `sshOk: false`, because the
+/// caller is a status badge and needs the reason, not an HTTP error.
+pub(crate) fn route_remote_host_health(
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+) {
+    let target = query
+        .get("target")
+        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+        .filter(|s| !s.is_empty());
+    let Some(target) = target else {
+        let body = serde_json::json!({ "error": "target is required" }).to_string();
+        let _ = request.respond(
+            tiny_http::Response::from_string(body).with_status_code(400).with_header(json_header),
+        );
+        return;
+    };
+    let body =
+        serde_json::to_string(&crate::remote_host::host_health(&target)).unwrap_or_default();
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
 pub(crate) fn route_create_dir(
     ctx: &ServeCtx,
     mut request: tiny_http::Request,

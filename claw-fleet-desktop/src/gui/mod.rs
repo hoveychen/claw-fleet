@@ -2042,6 +2042,8 @@ pub fn run() {
             chat_workspace,
             browse_dir,
             create_dir,
+            remote_browse_dir,
+            remote_host_health,
             list_remote_workspaces,
             upsert_remote_workspace,
             remove_remote_workspace,

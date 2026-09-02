@@ -139,6 +139,10 @@ mod tests {
             // Same read power as EXPLORER_FILE with no workspace gate at all.
             routes::EXPLORER_EXTERNAL_FILE,
             routes::BROWSE_DIR,
+            // Lists directories on a THIRD machine (an rca executor host), so
+            // if anything it is more sensitive than BROWSE_DIR, not less.
+            routes::REMOTE_BROWSE_DIR,
+            routes::REMOTE_HOST_HEALTH,
             // Writes to the host filesystem (mkdir), so it belongs on the same
             // side of the boundary as the listing it complements.
             routes::CREATE_DIR,
@@ -211,6 +215,8 @@ mod tests {
             routes::PROC_RUN,               // arbitrary command exec
             routes::PROC_OUTPUT,            // output of arbitrary command
             routes::BROWSE_DIR,             // directory listing
+            routes::REMOTE_BROWSE_DIR,      // directory listing on a third host
+            routes::REMOTE_HOST_HEALTH,     // reveals ssh reachability of a host
             routes::SOURCES_CONFIG,         // provider source config
             routes::SOURCES_CLAUDE_ACCOUNT, // provider account detail
             "/sources/claude/account",      // SOURCES_PREFIX arm → account/creds info

@@ -1927,6 +1927,18 @@ impl Backend for LocalBackend {
         claw_fleet_core::workspace_browse::browse_dir(path.as_deref(), &self.known_workspaces())
     }
 
+    fn remote_browse_dir(
+        &self,
+        ssh_target: String,
+        path: Option<String>,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        claw_fleet_core::remote_host::browse_remote_dir(&ssh_target, path.as_deref())
+    }
+
+    fn remote_host_health(&self, ssh_target: String) -> claw_fleet_core::remote_host::HostHealth {
+        claw_fleet_core::remote_host::host_health(&ssh_target)
+    }
+
     fn create_dir(
         &self,
         path: Option<String>,
