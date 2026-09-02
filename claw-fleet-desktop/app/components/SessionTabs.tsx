@@ -30,6 +30,7 @@ import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
   Columns2,
+  Server,
   SquareSplitHorizontal,
   SquareSplitVertical,
 } from "lucide-react";
@@ -40,6 +41,7 @@ import { isKeyboardActivationKey } from "../keyboard";
 import { preferredSessionTitle, rowBarColor, type SessionInfo } from "../types";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import styles from "./SessionTabs.module.css";
+import { findRemoteWorkspace, useRemoteWorkspacesStore } from "../hooks/useRemoteWorkspaces";
 
 /** What the tab wears as its name. Mirrors the list row's title, so a session
  *  reads the same in the list and in the strip. Falls back down to a short id
@@ -135,6 +137,7 @@ export function SessionTabs({
   onSplitDown: () => void;
 }) {
   const { t } = useTranslation();
+  const remoteWorkspaces = useRemoteWorkspacesStore((s) => s.workspaces);
   const sessions = useSessionsStore((s) => s.sessions);
   const menu = useContextMenu();
   // Which tab the open context menu belongs to — `useContextMenu` only tracks
@@ -289,6 +292,7 @@ export function SessionTabs({
           const dot = live ? rowBarColor(live) : null;
           const isActive = tab.id === activeId;
           const label = live ? tabLabel(live) : tab.label ?? "";
+          const remoteWs = findRemoteWorkspace(remoteWorkspaces, live?.workspacePath);
           return (
             <div
               key={tab.id}
@@ -301,7 +305,9 @@ export function SessionTabs({
               }`}
               title={
                 live
-                  ? `${label}\n${live.workspaceName}`
+                  ? `${label}\n${live.workspaceName}${
+                      remoteWs ? `\n${t("session.remote_on_host", { host: remoteWs.label || remoteWs.path })}` : ""
+                    }`
                   : tab.tooltip
                     ? `${label}\n${tab.tooltip}`
                     : label
@@ -372,6 +378,9 @@ export function SessionTabs({
                   strokeWidth={1.8}
                   className={styles.second_view}
                 />
+              )}
+              {remoteWs && (
+                <Server size={10} strokeWidth={1.9} className={styles.remote_icon} />
               )}
               <span className={styles.label}>{label}</span>
               <button

@@ -23,6 +23,7 @@ import { isWebBuild } from "../hostEnv";
 import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
 import { sshTargetOf, type RemoteConnection } from "./ConnectionDialog";
 import styles from "./NewSessionForm.module.css";
+import { rcaErrorMessage } from "../rcaErrors";
 
 export interface NewSessionCreated {
   /** PID of the spawned `claude` process — the caller matches it against
@@ -226,26 +227,6 @@ export function defaultWorkspace(
  *  session's live SessionDetail. Styled in the composer design language: ghost
  *  pills and custom popovers instead of labeled form rows and native
  *  <select>s. */
-/** Unwrap the `HTTP 500: {"error":"…"}` envelope a probe error arrives in.
- *
- *  The message underneath is written for a person ("the workspace must live at
- *  a path creatable on this machine"); the status code and JSON around it are
- *  not, and pasting them into a dialog buries the sentence that tells the user
- *  what to do. Anything that does not match the envelope is passed through
- *  unchanged rather than guessed at. */
-function humanBackendError(e: unknown): string {
-  const raw = String(e);
-  const brace = raw.indexOf("{");
-  if (brace >= 0) {
-    try {
-      const parsed = JSON.parse(raw.slice(brace)) as { error?: unknown };
-      if (typeof parsed.error === "string" && parsed.error) return parsed.error;
-    } catch {
-      // Not JSON after all — fall through to the raw string.
-    }
-  }
-  return raw.replace(/^Error:\s*/, "");
-}
 
 export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormProps) {
   const { t } = useTranslation();
@@ -419,7 +400,7 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
       // which path and why, right where the choice was made — the alternative
       // is a spawn that fails much later with no way back to this dialog.
       setRegisterError(
-        t("new_session.remote_register_failed", { path, error: humanBackendError(e) }),
+        t("new_session.remote_register_failed", { path, error: rcaErrorMessage(e, t) }),
       );
       return false;
     }
@@ -581,7 +562,10 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
       clear();
       onCreated({ pid: resp.pid, sessionId: resp.sessionId, workspacePath: ws });
     } catch (e) {
-      setError(String(e));
+      // A spawn into a remote workspace fails through `wrap_launch`, whose
+      // launch-path errors carry an `rca:` code precisely so this is a sentence
+      // and not a Rust string. Anything else passes through unchanged.
+      setError(rcaErrorMessage(e, t));
       setSubmitting(false);
     }
   };

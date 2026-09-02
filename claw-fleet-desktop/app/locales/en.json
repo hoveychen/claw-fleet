@@ -2493,5 +2493,15 @@
     "pairing_no_actions": "Pairing-code transport — environment actions need an ssh entry",
     "login_unknown": "Login state unknown",
     "remote_codex_device_hint": "Open the link on any device and enter the code; the remote host polls until approved."
+  },
+  "session": {
+    "remote_on_host": "File I/O runs on {{host}} (rca)",
+    "remote_short": "Remote"
+  },
+  "rca_error": {
+    "no_local_rca": "rca is not installed on this machine, so a remote workspace cannot start. Install rca for this host again from Settings.",
+    "bad_rca_override": "The configured rca path points at a file that is not there. Clear the override, or re-install from Settings.",
+    "host_gone": "The host this workspace runs on has been removed. Pick a host that still exists in the composer, or re-add it in Settings.",
+    "no_transport": "This remote workspace has no host to run on. Register it again from the new-session composer."
   }
 }
