@@ -311,6 +311,43 @@ pub(crate) async fn codex_login_cancel(
         .map_err(|e| format!("join: {e}"))?
 }
 
+// ── dsh credential flow (wizard) ─────────────────────────────────────────────
+//
+// dsh has no login: "logging in" = storing provider API keys. Refs are
+// discovered from settings' `apiKeyEnv` fields (the protocol's own rule),
+// described (configured/source/writable — never values) and set over RPC.
+// Local phase-1 like the other login actions; the dsh server runs locally.
+
+#[tauri::command]
+pub(crate) async fn dsh_credential_refs() -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(claw_fleet_core::dsh_source::dsh_credential_refs)
+        .await
+        .map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn dsh_credentials_describe(
+    refs: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || {
+        claw_fleet_core::dsh_source::dsh_credentials_describe(refs)
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn dsh_credentials_set(
+    reference: String,
+    value: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        claw_fleet_core::dsh_source::dsh_credentials_set(&reference, &value)
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
+}
+
 #[tauri::command]
 pub(crate) async fn get_account_info(
     state: tauri::State<'_, AppState>,
