@@ -244,6 +244,45 @@ function handleIPC(
       return null;
     }
 
+    // Environment panel: one harness per state so the card variants all render
+    // under ?mock (installed+logged-in / installed+logged-out / not installed).
+    case "harness_statuses":
+      return [
+        {
+          source: "claude-code",
+          installed: true,
+          path: "/Users/mock/.local/bin/claude",
+          version: "2.1.246",
+          channel: "native-installer",
+          loggedIn: true,
+          authDetail: "max",
+        },
+        {
+          source: "codex",
+          installed: true,
+          path: "/Users/mock/.codex/packages/standalone/current/bin/codex",
+          version: "0.148.0",
+          channel: "standalone",
+          loggedIn: false,
+          authDetail: null,
+        },
+        {
+          source: "dsh",
+          installed: false,
+          path: null,
+          version: null,
+          channel: null,
+          loggedIn: null,
+          authDetail: null,
+        },
+      ];
+    case "harness_login_context":
+      return { alive: false, managesClaude: false, managesCodex: false };
+    case "dsh_credential_refs":
+      return ["OPENROUTER_API_KEY"];
+    case "dsh_credentials_describe":
+      return { credentials: { OPENROUTER_API_KEY: { configured: false, writable: true } } };
+
     case "list_skills":
       return MOCK_SKILLS;
     case "skill_sync_inventory":
