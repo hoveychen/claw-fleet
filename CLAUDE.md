@@ -3,6 +3,8 @@ New features must always support both LocalBackend (local file system) and Remot
 
 **Why:** The user caught that the initial Memory feature only worked locally because the Tauri commands called `memory::` functions directly instead of going through `state.backend`. Remote users would see nothing.
 
+本条是全局 CLAUDE.md 里「体验优先」准则在本项目的一个**具体特例**——只接本地实现起来容易得多，但代价是远端用户什么都看不到。所以「走 Backend trait 太麻烦」永远不是跳过它的理由；真觉得成本高，按那条准则把取舍显式呈给老板，不要自己砍掉远端那一半还不说。
+
 **How to apply:** When adding any new data-fetching capability:
 1. Add methods to the `Backend` trait in `claw-fleet-core/src/backend.rs`
 2. Implement in `LocalBackend` (`claw-fleet-desktop/src/local_backend.rs`) — usually delegates to a core module function
