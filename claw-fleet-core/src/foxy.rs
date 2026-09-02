@@ -168,6 +168,68 @@ fn parse_codex_window(v: &Value) -> Option<crate::codex_source::CodexRateLimitWi
     })
 }
 
+/// Which harness credentials a running foxy-switcher daemon currently
+/// custodies. The environment wizard's login step checks this FIRST: when foxy
+/// manages a provider's credentials, Fleet must never start its own login for
+/// that provider — Codex refresh tokens are single-use-and-rotate, so a
+/// wizard-initiated login/refresh would burn foxy's copy and 401 every device
+/// foxy serves.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FoxyCustody {
+    pub alive: bool,
+    pub manages_claude: bool,
+    pub manages_codex: bool,
+}
+
+/// Pure mapping from a `/api/cred/status` body, split for testing. foxy
+/// reports 0 (or omits the key) when a provider has no in-use account.
+fn custody_from_status(status: &Value) -> FoxyCustody {
+    let id = |k: &str| status.get(k).and_then(Value::as_i64).unwrap_or(0);
+    FoxyCustody {
+        alive: true,
+        manages_claude: id("managed_account_id") != 0,
+        manages_codex: id("codex_managed_account_id") != 0,
+    }
+}
+
+/// Probe the local foxy daemon's custody state. Any failure (no port file,
+/// daemon down, slow) is the default "not alive" — never an error, the wizard
+/// simply proceeds with Fleet-driven login.
+pub async fn fetch_custody() -> FoxyCustody {
+    let Some(port) = read_port() else {
+        return FoxyCustody::default();
+    };
+    let status: Option<Value> = async {
+        reqwest::Client::new()
+            .get(format!("http://127.0.0.1:{port}/api/cred/status"))
+            .timeout(Duration::from_secs(3))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()
+    }
+    .await;
+    match status {
+        Some(s) => custody_from_status(&s),
+        None => FoxyCustody::default(),
+    }
+}
+
+/// Blocking bridge for [`fetch_custody`], same runtime handling as
+/// [`fetch_in_use_codex_account_blocking`].
+pub fn fetch_custody_blocking() -> FoxyCustody {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(fetch_custody()))
+    } else {
+        tokio::runtime::Runtime::new()
+            .map(|rt| rt.block_on(fetch_custody()))
+            .unwrap_or_default()
+    }
+}
+
 /// Fetch the in-use account's usage from a running foxy daemon, or `None` if
 /// foxy isn't reachable. Two requests: `/api/cred/status` (cheap, instant) for
 /// the in-use account id, then `/api/accounts` (can take a few seconds) for the
@@ -263,6 +325,26 @@ pub fn fetch_in_use_codex_account_blocking() -> Option<FoxyCodexAccount> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn custody_maps_both_independent_pointers() {
+        let both = json!({ "managed_account_id": 3, "codex_managed_account_id": 7 });
+        assert_eq!(
+            custody_from_status(&both),
+            FoxyCustody { alive: true, manages_claude: true, manages_codex: true }
+        );
+        // 0 = provider configured but no lease; absent key = not configured.
+        let claude_only = json!({ "managed_account_id": 3, "codex_managed_account_id": 0 });
+        assert_eq!(
+            custody_from_status(&claude_only),
+            FoxyCustody { alive: true, manages_claude: true, manages_codex: false }
+        );
+        let none = json!({});
+        assert_eq!(
+            custody_from_status(&none),
+            FoxyCustody { alive: true, manages_claude: false, manages_codex: false }
+        );
+    }
 
     fn sample_accounts() -> Value {
         json!({

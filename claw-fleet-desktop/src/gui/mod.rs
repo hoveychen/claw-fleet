@@ -2065,6 +2065,7 @@ pub fn run() {
             install_harness,
             install_node_runtime,
             update_harness,
+            harness_login_context,
             install_fleet_cli,
             detect_ai_tools,
             install_fleet_skill,
