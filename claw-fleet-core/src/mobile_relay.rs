@@ -992,6 +992,11 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // desktop card does (what it's waiting on, elapsed, poll count). Small array;
     // enrich sets it only for sessions with a live watch, so absent for the rest.
     "watches",
+    // Why a remote session stopped. `status` alone would say
+    // "remoteDisconnected" with no reason and no host name, and the phone is the
+    // most likely place to be looking when a laptop's ssh tunnel dies. Small
+    // object, absent for every session that hasn't disconnected.
+    "remoteDisconnect",
 ];
 
 /// Byte size a re-encoded decision-asset image is squeezed toward. Every image

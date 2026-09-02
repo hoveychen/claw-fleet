@@ -388,6 +388,20 @@
   min-width: 0;
 }
 
+/* 断线提示走和 .handoff 一样的 chip 形状,只把颜色换掉 —— 它是同一行里
+   「这条会话出事了」的那一枚,不该长成另一种东西。 */
+.remoteLost {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--t-aux, 12px);
+  color: #b91c1c;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .project {
   overflow: hidden;
   text-overflow: ellipsis;

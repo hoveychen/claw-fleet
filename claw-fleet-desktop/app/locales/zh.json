@@ -167,7 +167,15 @@
     "idle": "空闲",
     "rateLimited": "速率限制",
     "serverErrored": "服务器错误",
+    "remoteDisconnected": "远端断开",
     "stuck": "卡死"
+  },
+  "remoteDisconnect": {
+    "badge": "远端断开",
+    "badge_not_stopped": "远端断开 · agent 未停",
+    "tip": "与 {{host}} 的连接中断了，Fleet 已经把这个会话停掉——再让它跑下去，它看到的是空的本地镜像目录，会以为整个仓库被删了。rca 报告：{{detail}}",
+    "tip_not_stopped": "与 {{host}} 的连接中断了，但 Fleet 没能把 agent 停下来。它现在很可能正对着空的本地镜像目录工作，请手动确认这个会话的进程。rca 报告：{{detail}}",
+    "host_fallback": "远端主机"
   },
   "rateLimit": {
     "resetsIn": "{{time}} 后恢复",

@@ -1545,6 +1545,7 @@ fn make_session_info_for_date(
         compact_cost_usd: 0.0,
         pending_messages: Vec::new(),
         watches: Vec::new(),
+        remote_disconnect: None,
     })
 }
 
@@ -2263,6 +2264,7 @@ mod tests {
             compact_cost_usd: 0.0,
             pending_messages: Vec::new(),
             watches: Vec::new(),
+            remote_disconnect: None,
         };
 
         let s2 = crate::session::SessionInfo {
@@ -2312,6 +2314,7 @@ mod tests {
             compact_cost_usd: 0.0,
             pending_messages: Vec::new(),
             watches: Vec::new(),
+            remote_disconnect: None,
         };
 
         let sessions: Vec<&crate::session::SessionInfo> = vec![&s1, &s2];

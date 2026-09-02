@@ -79,6 +79,7 @@ fn status_label(s: &SessionStatus) -> &'static str {
         SessionStatus::Idle => "idle",
         SessionStatus::RateLimited => "rate-limited",
         SessionStatus::ServerErrored => "server-error",
+        SessionStatus::RemoteDisconnected => "remote-disconnected",
         SessionStatus::Stuck => "stuck",
     }
 }

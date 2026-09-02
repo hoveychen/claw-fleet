@@ -882,6 +882,7 @@ pub fn parse_session_info(
         compact_cost_usd: stats.compact_cost_usd,
         pending_messages: Vec::new(),
         watches: Vec::new(),
+        remote_disconnect: None,
     })
     .map(|info| (info, state))
 }
