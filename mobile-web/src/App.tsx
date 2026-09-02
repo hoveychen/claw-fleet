@@ -59,7 +59,9 @@ import {
   type DeviceBook,
   type PairedDevice,
 } from "./devices";
-import { onPairingLink } from "./deepLink";
+import { isNativeShell, onPairingLink } from "./deepLink";
+import type { PairedLink } from "./pairingLink";
+import { PairPasteForm } from "./views/PairPasteForm";
 import {
   clearCachedSessions,
   loadCachedSessions,
@@ -182,22 +184,23 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     };
   }, [secret]);
 
+  /** 一次配对落地。App Link 递来的、以及用户手动粘贴的，都走这里 —— 与 PWA 的
+   *  `#k=` 路径同一个入口：去重、保留用户改过的名字、焦点落到刚配的那台，三条
+   *  规则只有一份实现（devices.ts::adoptScannedDevice）。
+   *
+   *  relayBase 必须一起传下去 —— 壳的页面 origin 是 `capacitor://localhost`，
+   *  丢了它就只能连打包时烧进去的那个 relay，自建 relay 永远配不上。 */
+  const adoptPaired = useCallback((paired: PairedLink) => {
+    setBook(
+      (prev) => adoptScannedDevice(prev, paired.secret, newDeviceMint(prev), paired.relayBase).book,
+    );
+    setIdbProbed(true);
+  }, []);
+
   // Native shell only: the app boots from bundled assets, so there is no URL to
   // read the pairing secret from. Universal Links / App Links deliver the
   // scanned pairing URL here instead. No-op in the browser/PWA.
-  useEffect(() => {
-    return onPairingLink((paired) => {
-      // 与 PWA 的 `#k=` 路径走同一个入口：去重、保留用户改过的名字、焦点落到
-      // 刚扫的那台，三条规则只有一份实现（devices.ts::adoptScannedDevice）。
-      // relayBase 必须一起传下去 —— 壳的页面 origin 是 `capacitor://localhost`，
-      // 丢了它就只能连打包时烧进去的那个 relay，自建 relay 永远配不上。
-      setBook(
-        (prev) =>
-          adoptScannedDevice(prev, paired.secret, newDeviceMint(prev), paired.relayBase).book,
-      );
-      setIdbProbed(true);
-    });
-  }, []);
+  useEffect(() => onPairingLink(adoptPaired), [adoptPaired]);
 
   // ── 设备管理（「更多」页那一块）─────────────────────────────────────────
   //
@@ -835,6 +838,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             ? t("请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。")
             : t("正在恢复配对…")}
         </p>
+        {/* 原生壳限定。扫码走的是 App Link，而 App Link 只认 manifest 里编译期
+            写死的 host —— 自建 relay 的 host 编译期不可知，那条路对它结构上不
+            可用（扫出来只会打开浏览器）。粘贴不依赖任何 host 声明。
+            PWA 不需要：它本来就是被那条链接打开的。 */}
+        {idbProbed && isNativeShell() && <PairPasteForm onPaired={adoptPaired} />}
       </div>
     );
   }

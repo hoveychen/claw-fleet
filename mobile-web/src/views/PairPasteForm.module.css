@@ -1,0 +1,74 @@
+/* 配对门里的粘贴入口。收起时只是一行次要文字链——扫码仍是主路径,这条是
+   自建 relay 与相机不可用时的出路,不该抢主按钮的位置。 */
+
+.link {
+  margin-top: 16px;
+  color: var(--color-text-secondary);
+  font-size: var(--t-ui, 14px);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.form {
+  margin-top: 16px;
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.hint {
+  color: var(--color-text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.error {
+  color: var(--color-error);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.cancel,
+.submit {
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: var(--t-ui, 14px);
+}
+
+.cancel {
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.submit {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.submit:disabled {
+  opacity: 0.5;
+}

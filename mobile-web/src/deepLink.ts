@@ -16,16 +16,7 @@
 
 import { App } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
-import { pairingLinkRelayBase } from "./relayBase";
-import { extractSecretFromUrl } from "./secretStore";
-
-/** 一次配对递过来的东西:密钥,以及它指名的 relay(`null` = 没指名,用构建默认
- *  值)。**两样都要**——只取密钥的话,扫了自建 relay 的二维码,app 照样去连打包
- *  时烧进去的官方 relay,而现象只是「一直连不上」。 */
-export interface PairedLink {
-  secret: string;
-  relayBase: string | null;
-}
+import { type PairedLink, parsePairingLink } from "./pairingLink";
 
 /** True inside the Capacitor shell, false in the browser/PWA. */
 export function isNativeShell(): boolean {
@@ -45,8 +36,8 @@ export function onPairingLink(handler: (paired: PairedLink) => void): () => void
   let cancelled = false;
   const deliver = (url: string | undefined | null) => {
     if (cancelled || !url) return;
-    const secret = extractSecretFromUrl(url);
-    if (secret) handler({ secret, relayBase: pairingLinkRelayBase(url) });
+    const paired = parsePairingLink(url);
+    if (paired) handler(paired);
   };
 
   // Cold start — the launch URL is already spent by the time React mounts, so

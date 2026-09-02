@@ -111,6 +111,12 @@ const DICT: Record<string, string> = {
   "请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。":
     "Open this page by scanning the QR code in the desktop Fleet's Mobile panel (the link carries the pairing secret).",
   "正在恢复配对…": "Restoring pairing…",
+  // 粘贴配对（原生壳限定）——自建 relay 的唯一入口，扫码那条路对它不通。
+  改为粘贴配对链接: "Paste a pairing link instead",
+  "在桌面端「移动端」板块点「复制配对链接」，把它贴到这里。自建 relay 只能走这条路——二维码扫出来的链接系统交不到 app 手上。":
+    "Click “Copy pairing link” in the desktop's Mobile panel and paste it here. A self-hosted relay can only be paired this way — the system won't hand a scanned link for it to the app.",
+  "这不像一条配对链接。它应该形如 https://<你的 relay>/#k=<密钥>。":
+    "That doesn't look like a pairing link. It should look like https://<your relay>/#k=<secret>.",
   配对失败: "Pairing failed",
   "{0}。密钥可能已被重置，请回到桌面端重新扫码。":
     "{0}. The secret may have been reset — go back to the desktop and scan again.",
