@@ -16,6 +16,7 @@ import type { FleetTransport, TransportHandlers } from "./transport";
 import { NEEDS_PAIRING, SUPPORTS_PUSH } from "./hostMode";
 import { formatRttSplit } from "./connQuality";
 import { DeviceConnection, type DeviceHandle } from "./DeviceConnection";
+import { HIDDEN_DISCONNECT_MS, type VisibilityState } from "./connectionPolicy";
 import {
   aggregateDecisions,
   aggregateSessions,
@@ -477,6 +478,34 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     dispatch({ deviceId, type: "answered", id, now: Date.now() });
   }, []);
 
+  // 页面可见性。多设备之后它是**连接策略**的输入而不只是一次补拉的触发:隐藏
+  // 够久就把 N 条 socket 全放掉(后台通道是推送,不是这条 socket),回到前台再
+  // 错峰重连。见 connectionPolicy.ts。
+  const [visibility, setVisibility] = useState<VisibilityState>(() => ({
+    visible: typeof document === "undefined" || document.visibilityState === "visible",
+    hiddenSince: Date.now(),
+  }));
+  useEffect(() => {
+    const onChange = () => {
+      const visible = document.visibilityState === "visible";
+      setVisibility((prev) =>
+        prev.visible === visible ? prev : { visible, hiddenSince: Date.now() },
+      );
+    };
+    document.addEventListener("visibilitychange", onChange);
+    return () => document.removeEventListener("visibilitychange", onChange);
+  }, []);
+  // 隐藏之后到了宽限期就重算一次(否则「该断开了」这件事没有任何东西来触发)。
+  useEffect(() => {
+    if (visibility.visible) return;
+    const left = HIDDEN_DISCONNECT_MS - (Date.now() - visibility.hiddenSince);
+    const timer = window.setTimeout(
+      () => setVisibility((prev) => ({ ...prev })),
+      Math.max(left, 0) + 100,
+    );
+    return () => window.clearTimeout(timer);
+  }, [visibility]);
+
   // 回到前台/重新获得焦点时重算推送状态:Notification.permission 可能在后台期间
   // 被改过(老板在系统设置里开了或关了),而横幅只在挂载时读过一次 pushState()。
   // 快照的补拉不在这里 —— 那是每台设备自己的事(DeviceConnection)。
@@ -708,7 +737,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     <DeviceScopeProvider deviceId={deviceId}>
     {/* 每台设备一条连接。不渲染任何 DOM：它只是把那条 socket 的生命周期挂在
         React 树上，设备被移除时 key 消失、清理函数自然把它关掉。 */}
-    {runtimeDevices.map((d) => (
+    {runtimeDevices.map((d, i) => (
       <DeviceConnection
         key={d.id}
         device={d}
@@ -718,6 +747,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         registerHandle={registerHandle}
         hasPendingDecisions={(states[d.id]?.decisions.length ?? 0) > 0}
         agentOnline={states[d.id]?.agentOnline ?? false}
+        isActive={d.id === activeDeviceId}
+        index={i}
+        visibility={visibility}
       />
     ))}
     <div className={styles.app}>

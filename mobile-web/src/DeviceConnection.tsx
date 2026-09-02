@@ -13,6 +13,12 @@ import { useEffect, useRef } from "react";
 import type { TransportFactory } from "./App";
 import type { PairedDevice } from "./devices";
 import type { DeviceAction } from "./deviceRuntime";
+import {
+  connectDelayMs,
+  shouldConnect,
+  usagePollMs,
+  type VisibilityState,
+} from "./connectionPolicy";
 import { reconcilePlan } from "./reconcilePlan";
 import { loadCachedSessions, saveCachedSessions } from "./sessionCache";
 import type { FleetTransport, RttSample } from "./transport";
@@ -46,6 +52,12 @@ interface Props {
   hasPendingDecisions: boolean;
   /** 那台桌面端在不在线 —— 两条轮询都以它为闸门。 */
   agentOnline: boolean;
+  /** 这台是不是当前作用域那一台。只影响问得多勤(见 connectionPolicy.ts)。 */
+  isActive: boolean;
+  /** 这台在设备清单里的序号,用来错峰连接。 */
+  index: number;
+  /** 页面可见性。隐藏够久就把连接放掉 —— 后台通道是推送,不是这条 socket。 */
+  visibility: VisibilityState;
 }
 
 /** `pending_snapshot` 的六类请求摊平成一串卡。 */
@@ -75,6 +87,9 @@ export function DeviceConnection({
   registerHandle,
   hasPendingDecisions,
   agentOnline,
+  isActive,
+  index,
+  visibility,
 }: Props) {
   const deviceId = device.id;
   const clientRef = useRef<FleetTransport | null>(null);
@@ -102,9 +117,11 @@ export function DeviceConnection({
     }
   };
 
-  // 传输层的生命周期。依赖只有「这台设备是哪一台、连哪个 relay」——其余东西
-  // 变了都不该把 socket 拆掉重连。
+  // 传输层的生命周期。依赖里除了「这台设备是哪一台、连哪个 relay」,只多一个
+  // 可见性策略算出来的开关 —— 其余东西变了都不该把 socket 拆掉重连。
+  const connectAllowed = shouldConnect(visibility, Date.now());
   useEffect(() => {
+    if (!connectAllowed) return;
     const d = (a: DeviceAction) => dispatchRef.current({ ...a, deviceId });
     const client = makeTransport(device.secret, {
       onStatus: (connected) => d({ type: "status", connected }),
@@ -133,19 +150,30 @@ export function DeviceConnection({
     }, device.relayBase);
     clientRef.current = client;
     d({ type: "attach" });
-    client.connect();
+    // 错峰:N 条连接同时握手会在网络恢复那一刻挤成一堆。
+    const startAt = window.setTimeout(() => client.connect(), connectDelayMs(index));
     registerHandle(deviceId, { transport: client, refresh: () => refreshRef.current() });
     // 手机浏览器可能永远不跑 React 的清理函数(直接关标签),所以 pagehide 也说
     // 一声「我走了」,让桌面端不必等超时才把这台摘掉。
     const onPageHide = () => client.sayGoodbye();
     window.addEventListener("pagehide", onPageHide);
     return () => {
+      window.clearTimeout(startAt);
       window.removeEventListener("pagehide", onPageHide);
       registerHandle(deviceId, null);
       clientRef.current = null;
       client.close();
     };
-  }, [deviceId, storageId, device.secret, device.relayBase, makeTransport, registerHandle]);
+  }, [
+    deviceId,
+    storageId,
+    device.secret,
+    device.relayBase,
+    makeTransport,
+    registerHandle,
+    connectAllowed,
+    index,
+  ]);
 
   // 冷启动先画缓存里的任务列表,免得 socket 还在握手时页面一片空白。
   useEffect(() => {
@@ -163,11 +191,14 @@ export function DeviceConnection({
   // 今日花费。桌面端在线时才轮询;数字由桌面端算好,手机只负责显示。
   useEffect(() => {
     if (!agentOnline) return;
+    const intervalMs = usagePollMs(isActive);
     let cancelled = false;
     let timer: number | undefined;
     const poll = async () => {
       const client = clientRef.current;
-      if (client?.isAuthed) {
+      // 页面不可见时跳过这一轮(但仍排下一次):后台问一个只用来显示的数字,
+      // 纯属白烧电与流量。
+      if (client?.isAuthed && document.visibilityState === "visible") {
         try {
           const usage = await client.request<TodayUsage>("today_usage");
           if (!cancelled) dispatchRef.current({ deviceId, type: "usage", usage });
@@ -175,14 +206,14 @@ export function DeviceConnection({
           /* 瞬时失败 —— 保留上一次的值 */
         }
       }
-      if (!cancelled) timer = window.setTimeout(poll, 20_000);
+      if (!cancelled) timer = window.setTimeout(poll, intervalMs);
     };
     void poll();
     return () => {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [agentOnline, deviceId]);
+  }, [agentOnline, deviceId, isActive]);
 
   // 待决策卡的前台兜底对账。decision_created / decision_resolved 都是无 ack 无
   // 重传的广播,弱网掉一帧就会漏一张卡;(重)连时那一次 refresh 也可能超时被吞。
