@@ -44,15 +44,29 @@ interface SharePayload {
 /// mobile-web 就多一分「为鸿蒙写分支」的压力，而那正是我们要消灭的漂移。
 class NativeBridge {
   private ctx: common.UIAbilityContext;
+  /// 页面请求扫码时回调进页面组件（扫码要动组件状态:src / pairError）。
+  private onScanRequested: () => void;
 
-  constructor(ctx: common.UIAbilityContext) {
+  constructor(ctx: common.UIAbilityContext, onScanRequested: () => void) {
     this.ctx = ctx;
+    this.onScanRequested = onScanRequested;
   }
 
   /// WebView 里 <a download> / createObjectURL 不会触发系统下载，交给
   /// DocumentViewPicker 让用户选位置落盘。
   saveFile(filename: string, base64: string): void {
     saveBase64File(this.ctx, filename, base64).catch(() => {});
+  }
+
+  /// 唤起扫码添加设备。壳自己的配对页只在**尚未配对**时可达（build() 只在
+  /// src 为空时画它），所以装了 app 的用户没有第二个入口去加第二台机器 ——
+  /// 而那是多设备最主要的入口。这里把扫码暴露给页面，页面在设备列表里给出
+  /// 一行「扫码添加设备」（mobile-web 的 nativeScan.ts）。
+  ///
+  /// 回调交给随后那次 WebView 重载：扫到之后走 loadPairing(true)，注入新的
+  /// `#k=`，web 侧照常把它收成一台新设备。
+  scanPairing(): void {
+    this.onScanRequested();
   }
 
   /// navigator.wakeLock 在 ArkWeb 未必可用；不可用时页面回退调这里。
@@ -100,13 +114,17 @@ struct WebShell {
   /// 闪一下配对页再跳走。
   @State private pairChecked: boolean = false;
   @State private pairError: string = '';
-  private bridge: NativeBridge = new NativeBridge(getContext(this) as common.UIAbilityContext);
+  private bridge: NativeBridge = new NativeBridge(
+    getContext(this) as common.UIAbilityContext,
+    () => { this.startPairing(); },
+  );
 
   aboutToAppear(): void {
     this.loadPairing();
   }
 
-  private loadPairing(): void {
+  /// `fresh` = 这次是刚扫完码(抢焦点到那一台);缺省是启动重注(不抢)。
+  private loadPairing(fresh: boolean = false): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     RelayStore.loadPairing(ctx).then((p: RelayPairing | null) => {
       this.pairChecked = true;
@@ -128,9 +146,14 @@ struct WebShell {
       // 一起存进那台设备的记录（devices.ts），优先级高于打包值，所以这里给了它
       // 就生效，web 侧不需要鸿蒙分支。多设备之后 relay 归属是**每台设备各自**的，
       // 而这个壳每次加载都重新注入一遍，所以自建 relay 也能在升级后自愈。
+      // `boot=1` 说明这是**启动重注**而不是刚扫的码。多设备之后 web 侧把配对
+      // 存成一本设备簿,壳每次启动仍会把它存的那一份重新注入一遍;不区分的话
+      // 用户在设备列表里切过去的那一台,每次重开 app 都会被这次注入抢回焦点。
+      // 刚扫完码那次走 loadPairing(true),不带这个标记 —— 那时抢焦点正是用户要的。
+      const boot = fresh ? '' : '&boot=1';
       this.src = p === null
         ? ''
-        : ORIGIN + 'index.html#k=' + p.secret + '&relay=' + encodeURIComponent(p.relayUrl);
+        : ORIGIN + 'index.html#k=' + p.secret + '&relay=' + encodeURIComponent(p.relayUrl) + boot;
     }).catch(() => { this.pairChecked = true; this.src = ''; });
   }
 
@@ -154,7 +177,7 @@ struct WebShell {
       }
       await RelayStore.savePairing(ctx, pairing);
       this.pairError = '';
-      this.loadPairing();
+      this.loadPairing(true);
     } catch (e) {
       this.pairError = '扫码取消或失败';
     }
@@ -546,7 +569,7 @@ struct WebShell {
           .javaScriptProxy({
             object: this.bridge,
             name: 'fleetNative',
-            methodList: ['saveFile', 'keepAwake', 'shareContent'],
+            methodList: ['saveFile', 'keepAwake', 'shareContent', 'scanPairing'],
             controller: this.controller,
           })
           .onInterceptRequest((event) => {
