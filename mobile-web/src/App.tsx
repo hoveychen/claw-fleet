@@ -110,26 +110,31 @@ const MOCK = isMockMode();
 
 /** 造出这次部署该用的传输层。由 main.tsx 按构建模式注入。 */
 export type TransportFactory = (
-  secret: string,
+  /** 要连的那一台。传整台而不是散参数:这台走 relay 还是走 HTTP 直连、它的
+   *  relay 地址 / baseUrl / token,全是这台设备记录自己的属性(devices.ts)。 */
+  device: PairedDevice,
   handlers: TransportHandlers,
-  /** 这台设备指名的 relay;`null` = 构建默认值。同源形态忽略它。 */
-  relayBase?: string | null,
 ) => FleetTransport;
 
 /** mock / 同源形态没有配对这回事,但下游一切都以「一台设备」为单位。给它们各
  *  合成一台,整条链路就只有一种形状 —— 不必在每个视图里再分一次叉。 */
 const MOCK_DEVICE: PairedDevice = {
+  kind: "relay",
   id: "mock",
   label: "Mock",
   secret: "mock-secret",
   relayBase: null,
   addedAt: 0,
 };
+/** 同源形态那一台。它本来就是一台 HTTP 设备,只是 baseUrl 为空 = 就问发出这张
+ *  页面的那个 origin —— 于是「按设备种类分派传输层」这一条规则同时覆盖了同源
+ *  部署,不必为它留一条特例分支。 */
 const SAME_ORIGIN_DEVICE: PairedDevice = {
+  kind: "http",
   id: "same-origin",
   label: "",
-  secret: "same-origin",
-  relayBase: null,
+  baseUrl: "",
+  token: null,
   addedAt: 0,
 };
 
@@ -158,14 +163,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // MockRelayClient. 同源形态没有配对这回事（后端就是发出这张页面的那个进程），
   // 所以那道门整个不存在，直接给一个占位串让下面建连接的 effect 跑起来。
   const current = NEEDS_PAIRING && !MOCK ? activeDevice(book) : null;
-  const secret = MOCK
-    ? "mock-secret"
-    : NEEDS_PAIRING
-      ? (current?.secret ?? null)
-      : "same-origin";
-  // 当前设备指名的 relay。`null` = 构建默认值（迁移过来的设备、以及扫码时没带
-  // `&relay=` 的都是这一类），传输层与推送各自把它解析成实际地址。
-  const relayBase = current?.relayBase ?? null;
+  /** 配对门的闸门:配对形态下一台都没有时才显示那张引导页。 */
+  const paired = !NEEDS_PAIRING || MOCK || current !== null;
+  /** 当前设备指名的 relay(仅 relay 设备有);推送要用它取 VAPID 公钥。 */
+  const relayBase = current?.kind === "relay" ? current.relayBase : null;
   // 本地持久化的命名空间。会话快照缓存、草稿、附件、workspace 记忆都按它分家
   // ——那些内容只对某一台机器有意义（见 deviceScope.tsx）。mock 与同源形态不分家
   // （它们只有一个数据源，加前缀只会让老用户已有的草稿凭空消失）。
@@ -198,7 +199,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // localStorage wiped (iOS 7-day eviction, cache clear) but the IDB copy may
   // have survived — re-hydrate before declaring the pairing lost.
   useEffect(() => {
-    if (secret) {
+    if (paired) {
       setIdbProbed(true);
       return;
     }
@@ -215,7 +216,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     return () => {
       cancelled = true;
     };
-  }, [secret]);
+  }, [paired]);
 
   /** 一次配对落地。App Link 递来的、以及用户手动粘贴的，都走这里 —— 与 PWA 的
    *  `#k=` 路径同一个入口：去重、保留用户改过的名字、焦点落到刚配的那台，三条
@@ -246,7 +247,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const unpairAll = useCallback(() => {
     const now = Date.now();
     for (const d of bookRef.current.devices) {
-      if (SUPPORTS_PUSH) addPendingUnsub({ secret: d.secret, relayBase: d.relayBase, at: now });
+      // 只有 relay 设备有 channel 可退订;HTTP 直连那条传输层压根没有推送通道。
+      if (SUPPORTS_PUSH && d.kind === "relay") {
+        addPendingUnsub({ secret: d.secret, relayBase: d.relayBase, at: now });
+      }
       clearCachedSessions(d.id);
       clearDraftsByPrefix(scopedKey(d.id, ""));
     }
@@ -280,10 +284,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
    *  把它记进待办退订，下次启动重试。 */
   const stopPushFor = useCallback(
     async (device: PairedDevice): Promise<boolean> => {
+      // HTTP 直连的设备没有推送通道(pushSubscribe 恒返回 false),所以没有什么
+      // 需要退订 —— 直接算成功,免得移除它时白等一次临时连接的握手。
+      if (device.kind !== "relay") return true;
       // 这台设备正连着的话直接借用它那条连接。
       const live = handlesRef.current[device.id]?.transport;
       if (live?.isAuthed) return unsubscribeChannel(live);
-      const temp = makeTransport(device.secret, {}, device.relayBase);
+      const temp = makeTransport(device, {});
       try {
         temp.connect();
         if (!(await waitAuthed(temp, AUTH_WAIT_MS))) return false;
@@ -302,7 +309,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       // 先退订、再改簿子：反过来的话失败重试就没有 secret 可用了（记待办那条
       // 路仍然需要它）。
       const unsubscribed = SUPPORTS_PUSH ? await stopPushFor(device) : true;
-      if (!unsubscribed) {
+      if (!unsubscribed && device.kind === "relay") {
         addPendingUnsub({ secret: device.secret, relayBase: device.relayBase, at: Date.now() });
       }
       // 这台设备的本地痕迹一并清掉：会话快照缓存 + 它命名空间下的全部草稿
@@ -328,7 +335,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     void (async () => {
       for (const entry of pending) {
         if (cancelled) return;
-        const temp = makeTransport(entry.secret, {}, entry.relayBase);
+        // 待办退订只记 relay 设备(HTTP 直连没有 channel),所以这里合成一台
+        // relay 设备去连 —— 它只活一次请求那么久。
+        const temp = makeTransport(
+          {
+            kind: "relay",
+            id: "pending-unsub",
+            label: "",
+            secret: entry.secret,
+            relayBase: entry.relayBase,
+            addedAt: 0,
+          },
+          {},
+        );
         try {
           temp.connect();
           if (await waitAuthed(temp, AUTH_WAIT_MS)) {
@@ -605,6 +624,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       void (async () => {
         const { channelIdOf } = await import("./relayCrypto");
         for (const d of bookRef.current.devices) {
+          // 只有 relay 设备有 channel;HTTP 直连的通知不经 relay,也就不会带标记。
+          if (d.kind !== "relay") continue;
           const id = await channelIdOf(d.secret);
           if (!id.startsWith(mark)) continue;
           setFocusDecision({ id: target.id, deviceId: d.id, nonce: Date.now() });
@@ -647,7 +668,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       const t = handlesRef.current[device.id]?.transport;
       if (!t) return;
       if (muted) await unsubscribeChannel(t);
-      else await enablePush(t, device.relayBase, device.id);
+      else if (device.kind === "relay") await enablePush(t, device.relayBase, device.id);
     },
     [],
   );
@@ -753,7 +774,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const showDecisionDrawer =
     decisions.length > 0 && (tab !== "decisions" || overlayOpen);
 
-  if (!secret) {
+  if (!paired) {
     // 原生壳限定的两条入口。系统相机扫出来的链接由 App Link 决定交给谁，而
     // App Link 只认 manifest 里编译期写死的 host —— 自建 relay 的 host 编译期
     // 不可知，那条路对它结构上不可用（扫出来只会打开浏览器）。app 内扫码拿到的

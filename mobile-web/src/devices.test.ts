@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  addHttpDevice,
+  checkHostUrl,
   addPendingUnsub,
   dropPendingUnsub,
   loadPendingUnsub,
@@ -17,6 +19,8 @@ import {
   renameDevice,
   setActiveDevice,
   type DeviceBook,
+  type PairedDevice,
+  type RelayDevice,
 } from "./devices";
 
 const A = "secret-aaaa";
@@ -24,6 +28,12 @@ const B = "secret-bbbb";
 
 function mint(id: string) {
   return { id, label: "设备 1", now: 1000 };
+}
+
+/** 断言用:把一台设备窄化成 relay 设备(测试里造的都是 relay 那一种)。 */
+function asRelay(d: PairedDevice): RelayDevice {
+  if (d.kind !== "relay") throw new Error("expected a relay device");
+  return d;
 }
 
 function twoDevices(): DeviceBook {
@@ -47,12 +57,12 @@ describe("addDevice", () => {
     expect(deduped).toBe(false);
     expect(book.devices).toHaveLength(1);
     expect(book.activeId).toBe("d1");
-    expect(device.relayBase).toBeNull();
+    expect(asRelay(device).relayBase).toBeNull();
   });
 
   it("keeps both pairings when the secrets differ", () => {
     const book = twoDevices();
-    expect(book.devices.map((d) => d.secret)).toEqual([A, B]);
+    expect(book.devices.map((d) => asRelay(d).secret)).toEqual([A, B]);
     expect(book.activeId).toBe("d2");
   });
 
@@ -76,7 +86,7 @@ describe("addDevice", () => {
       relayBase: "https://relay.example.com",
     });
     expect(again.device.label).toBe("公司 Mac");
-    expect(again.device.relayBase).toBe("https://relay.example.com");
+    expect(asRelay(again.device).relayBase).toBe("https://relay.example.com");
   });
 
   it("a re-scan without a relay does not wipe the stored one", () => {
@@ -88,7 +98,7 @@ describe("addDevice", () => {
       relayBase: "https://relay.example.com",
     }).book;
     const again = addDevice(book, { secret: A, label: "Mac", id: "d9", now: 2 });
-    expect(again.device.relayBase).toBe("https://relay.example.com");
+    expect(asRelay(again.device).relayBase).toBe("https://relay.example.com");
   });
 });
 
@@ -196,8 +206,9 @@ describe("loadBookSync", () => {
   it("migrates the single-device era secret into a one-entry book", () => {
     localStorage.setItem("fleet-relay-secret", A);
     const book = loadBookSync(mint("d1"));
+    // 迁移出来的记录带上 kind:"relay" —— 单设备时代只有中转一条路。
     expect(book.devices).toEqual([
-      { id: "d1", label: "设备 1", secret: A, relayBase: null, addedAt: 1000 },
+      { kind: "relay", id: "d1", label: "设备 1", secret: A, relayBase: null, addedAt: 1000 },
     ]);
     expect(book.activeId).toBe("d1");
   });
@@ -219,7 +230,7 @@ describe("loadBookSync", () => {
   it("prefers the new book over a stale legacy secret", () => {
     localStorage.setItem("fleet-relay-secret", "stale-secret");
     persistBook(twoDevices());
-    expect(loadBookSync(mint("dX")).devices.map((d) => d.secret)).toEqual([A, B]);
+    expect(loadBookSync(mint("dX")).devices.map((d) => asRelay(d).secret)).toEqual([A, B]);
   });
 });
 
@@ -257,14 +268,14 @@ describe("adoptScannedDevice", () => {
       mint("d1"),
       "https://relay.example.com",
     );
-    expect(device.relayBase).toBe("https://relay.example.com");
+    expect(asRelay(device).relayBase).toBe("https://relay.example.com");
   });
 });
 
 describe("bookFromLegacySecret", () => {
   it("records no relay, meaning the build default the old code used", () => {
     const book = bookFromLegacySecret(A, { id: "d1", label: "设备 1", now: 5 });
-    expect(book.devices[0].relayBase).toBeNull();
+    expect(asRelay(book.devices[0]).relayBase).toBeNull();
     expect(book.activeId).toBe("d1");
   });
 });
@@ -312,5 +323,124 @@ describe("pending unsubscribe ledger", () => {
     expect(loadPendingUnsub(NOW)).toEqual([]);
     localStorage.setItem("fleet-pending-unsub", JSON.stringify([{ nope: 1 }, "x"]));
     expect(loadPendingUnsub(NOW)).toEqual([]);
+  });
+});
+
+// 设备簿现在有两种设备:经中转配对的桌面端,与直连的 HTTP 主机(`fleet webui`
+// 或云容器)。两种在收件箱里并列,但连的方式、有没有推送通道都不同。
+describe("http devices", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("adds a host and focuses it", () => {
+    const { book, device, deduped } = addHttpDevice(emptyBook(), {
+      baseUrl: "https://fleet.example.com/",
+      token: "t0",
+      label: "云端",
+      id: "h1",
+      now: 1,
+    });
+    expect(deduped).toBe(false);
+    expect(device.kind).toBe("http");
+    // 末尾斜杠被规范掉 —— 否则同一台主机会因为多打一个 / 而变成两台。
+    if (device.kind !== "http") throw new Error("expected http");
+    expect(device.baseUrl).toBe("https://fleet.example.com");
+    expect(device.token).toBe("t0");
+    expect(book.activeId).toBe("h1");
+  });
+
+  it("dedupes by host and takes the fresh token but keeps the name", () => {
+    let book = addHttpDevice(emptyBook(), {
+      baseUrl: "https://fleet.example.com",
+      token: "old",
+      label: "云端",
+      id: "h1",
+      now: 1,
+    }).book;
+    book = renameDevice(book, "h1", "公司云");
+    const again = addHttpDevice(book, {
+      baseUrl: "https://fleet.example.com",
+      token: "new",
+      label: "云端",
+      id: "h9",
+      now: 2,
+    });
+    expect(again.deduped).toBe(true);
+    expect(again.book.devices).toHaveLength(1);
+    expect(again.device.label).toBe("公司云");
+    if (again.device.kind !== "http") throw new Error("expected http");
+    expect(again.device.token).toBe("new");
+  });
+
+  it("a relay device and an http device coexist", () => {
+    let book = addDevice(emptyBook(), { secret: A, label: "Mac", id: "d1", now: 1 }).book;
+    book = addHttpDevice(book, {
+      baseUrl: "https://fleet.example.com",
+      label: "云端",
+      id: "h1",
+      now: 2,
+    }).book;
+    expect(book.devices.map((d) => d.kind)).toEqual(["relay", "http"]);
+  });
+
+  it("round-trips both kinds through storage", () => {
+    let book = addDevice(emptyBook(), { secret: A, label: "Mac", id: "d1", now: 1 }).book;
+    book = addHttpDevice(book, {
+      baseUrl: "https://fleet.example.com",
+      token: "t0",
+      label: "云端",
+      id: "h1",
+      now: 2,
+    }).book;
+    persistBook(book);
+    expect(loadBookSync(mint("dX"))).toEqual(book);
+  });
+
+  // 旧记录没有 kind 字段 —— 那个年代只有中转一条路。
+  it("reads a pre-kind record as a relay device", () => {
+    const raw = JSON.stringify({
+      devices: [{ id: "d1", secret: A, label: "Mac", relayBase: null, addedAt: 1 }],
+      activeId: "d1",
+    });
+    expect(parseBook(raw)?.devices[0].kind).toBe("relay");
+  });
+
+  it("drops an http record with no host", () => {
+    const raw = JSON.stringify({
+      devices: [
+        { kind: "http", id: "h1", label: "x", addedAt: 1 },
+        { kind: "http", id: "h2", label: "y", baseUrl: "https://ok.example.com", addedAt: 2 },
+      ],
+      activeId: "h1",
+    });
+    expect(parseBook(raw)?.devices.map((d) => d.id)).toEqual(["h2"]);
+  });
+});
+
+// 手机上那个 PWA 是 https 发的,浏览器不允许它 fetch 明文 http(混合内容)。
+// 与其让用户填完之后只看到一句「连不上」,不如当场说清楚。
+describe("checkHostUrl", () => {
+  it("accepts an https host", () => {
+    expect(checkHostUrl("https://fleet.example.com", "https:")).toBeNull();
+  });
+
+  it("rejects a plain-http host from an https page", () => {
+    expect(checkHostUrl("http://192.168.1.5:8080", "https:")).toBe("mixed-content");
+  });
+
+  // localhost 是例外:浏览器把它当可信来源,而同源部署下页面自己就在那儿。
+  it("allows http on localhost", () => {
+    expect(checkHostUrl("http://localhost:8080", "https:")).toBeNull();
+    expect(checkHostUrl("http://127.0.0.1:8080", "https:")).toBeNull();
+  });
+
+  it("allows plain http when the page itself is http (dev server)", () => {
+    expect(checkHostUrl("http://192.168.1.5:8080", "http:")).toBeNull();
+  });
+
+  it("rejects junk and non-http schemes", () => {
+    expect(checkHostUrl("", "https:")).toBe("empty");
+    expect(checkHostUrl("not a url", "https:")).toBe("not-a-url");
+    expect(checkHostUrl("ws://fleet.example.com", "https:")).toBe("bad-scheme");
+    expect(checkHostUrl("javascript:alert(1)", "https:")).toBe("bad-scheme");
   });
 });

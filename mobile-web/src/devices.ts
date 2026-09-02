@@ -22,19 +22,45 @@ const BOOK_KEY = "fleet-devices";
 /** 单设备时代的键。只在迁移时读一次,之后不再写。 */
 const LEGACY_SECRET_KEY = "fleet-relay-secret";
 
-/** 一台配对过的 Fleet。 */
-export interface PairedDevice {
-  /** 本机生成的稳定 id。用它而不是 secret 做外键,免得把密钥撒进缓存键、
-   *  路由参数、React key 这些会被日志和 devtools 看见的地方。 */
+/** 一台设备用哪条路接:经中转配对,还是直连一个 HTTP 主机。
+ *
+ *  两条路本来就都在(mobile-web 有 RelayClient 与 HttpTransport 两个实现),区别
+ *  只在「谁是后端」:relay 那条解决的是「手机不在桌面端同一张网里」,而 HTTP 那条
+ *  是直接问一台自己能访问到的主机(`fleet webui` / 云容器)—— 省掉中转一跳,代价
+ *  是没有推送通道,而且必须是 https 端点(手机上那个 PWA 是 https 发的,浏览器
+ *  不允许它去 fetch 明文 http)。 */
+export type DeviceKind = "relay" | "http";
+
+interface DeviceCommon {
+  /** 本机生成的稳定 id。用它而不是密钥做外键,免得把密钥撒进缓存键、路由参数、
+   *  React key 这些会被日志和 devtools 看见的地方。 */
   id: string;
   /** 用户可改的显示名。 */
   label: string;
+  addedAt: number;
+}
+
+/** 经中转配对的一台桌面端。 */
+export interface RelayDevice extends DeviceCommon {
+  kind: "relay";
   /** 配对密钥。channelToken 与 encKey 都由它 HKDF 派生(relayCrypto.ts)。 */
   secret: string;
   /** 这份配对指名的 relay origin;`null` 表示用构建默认值。 */
   relayBase: string | null;
-  addedAt: number;
 }
+
+/** 直连的一台 HTTP 主机(`fleet webui` 或云容器)。 */
+export interface HttpDevice extends DeviceCommon {
+  kind: "http";
+  /** 主机地址(origin,可含路径前缀)。跨源访问,所以必须是绝对地址。 */
+  baseUrl: string;
+  /** 访问令牌。服务端同时认 `Authorization: Bearer` 与 `?token=`(后者是给
+   *  EventSource 用的,它不能带 header)。`null` = 那个端点自己没有 token 门。 */
+  token: string | null;
+}
+
+/** 一台在册的设备。 */
+export type PairedDevice = RelayDevice | HttpDevice;
 
 export interface DeviceBook {
   devices: PairedDevice[];
@@ -65,13 +91,31 @@ export function parseBook(raw: unknown): DeviceBook | null {
     if (typeof item !== "object" || item === null) continue;
     const d = item as Record<string, unknown>;
     if (typeof d.id !== "string" || !d.id) continue;
+    const label = typeof d.label === "string" ? d.label : "";
+    const addedAt = typeof d.addedAt === "number" ? d.addedAt : 0;
+    // 没有 `kind` 的记录来自只有中转一条路的年代 —— 它们都是 relay 设备。
+    // 判据用「有没有 secret」而不是「kind 缺席」,这样一条既缺 kind 又缺 secret
+    // 的坏记录仍然被丢掉,而不是变成一台连不上的幽灵设备。
+    if (d.kind === "http") {
+      if (typeof d.baseUrl !== "string" || !d.baseUrl) continue;
+      devices.push({
+        kind: "http",
+        id: d.id,
+        label,
+        addedAt,
+        baseUrl: d.baseUrl,
+        token: typeof d.token === "string" && d.token ? d.token : null,
+      });
+      continue;
+    }
     if (typeof d.secret !== "string" || !d.secret) continue;
     devices.push({
+      kind: "relay",
       id: d.id,
+      label,
+      addedAt,
       secret: d.secret,
-      label: typeof d.label === "string" ? d.label : "",
       relayBase: typeof d.relayBase === "string" ? d.relayBase : null,
-      addedAt: typeof d.addedAt === "number" ? d.addedAt : 0,
     });
   }
   if (devices.length === 0) return null;
@@ -86,6 +130,7 @@ export function parseBook(raw: unknown): DeviceBook | null {
 /** 单设备时代的一个 secret → 一本单条目的簿子。 */
 export function bookFromLegacySecret(secret: string, opts: DeviceMint): DeviceBook {
   const device: PairedDevice = {
+    kind: "relay",
     id: opts.id,
     label: opts.label,
     secret,
@@ -143,7 +188,9 @@ export interface AddDeviceResult {
  *  描述的是「这份配对现在挂在哪个 relay」,桌面端换了 relay 地址重出一张码时,
  *  新的那个才是对的。 */
 export function addDevice(book: DeviceBook, input: AddDeviceInput): AddDeviceResult {
-  const existing = book.devices.find((d) => d.secret === input.secret);
+  const existing = book.devices.find(
+    (d): d is RelayDevice => d.kind === "relay" && d.secret === input.secret,
+  );
   if (existing) {
     const relayBase = input.relayBase ?? existing.relayBase;
     const updated: PairedDevice = { ...existing, relayBase };
@@ -157,6 +204,7 @@ export function addDevice(book: DeviceBook, input: AddDeviceInput): AddDeviceRes
     };
   }
   const device: PairedDevice = {
+    kind: "relay",
     id: input.id,
     label: input.label,
     secret: input.secret,
@@ -168,6 +216,74 @@ export function addDevice(book: DeviceBook, input: AddDeviceInput): AddDeviceRes
     device,
     deduped: false,
   };
+}
+
+export interface AddHttpDeviceInput {
+  /** 主机地址。绝对地址(跨源必需),末尾斜杠会被规范掉。 */
+  baseUrl: string;
+  token?: string | null;
+  label: string;
+  id: string;
+  now: number;
+}
+
+/** 新增一台 HTTP 直连主机(或认出它本来就在册)。
+ *
+ *  去重按 **baseUrl** —— 同一台主机再填一次不该多出一台。重填时更新 token
+ *  (换 token 正是「再填一次」最常见的理由),但保留用户改过的 label。 */
+export function addHttpDevice(
+  book: DeviceBook,
+  input: AddHttpDeviceInput,
+): AddDeviceResult {
+  const baseUrl = input.baseUrl.trim().replace(/\/+$/, "");
+  const existing = book.devices.find(
+    (d): d is HttpDevice => d.kind === "http" && d.baseUrl === baseUrl,
+  );
+  if (existing) {
+    const updated: HttpDevice = { ...existing, token: input.token ?? existing.token };
+    return {
+      book: {
+        devices: book.devices.map((d) => (d.id === existing.id ? updated : d)),
+        activeId: existing.id,
+      },
+      device: updated,
+      deduped: true,
+    };
+  }
+  const device: HttpDevice = {
+    kind: "http",
+    id: input.id,
+    label: input.label,
+    baseUrl,
+    token: input.token ?? null,
+    addedAt: input.now,
+  };
+  return {
+    book: { devices: [...book.devices, device], activeId: device.id },
+    device,
+    deduped: false,
+  };
+}
+
+/** 一条用户粘贴/填写的主机地址是否可用,以及为什么不可用。
+ *
+ *  只认绝对的 http/https。**https 那条不是洁癖**:手机上那个 PWA 是 https 发的,
+ *  浏览器不允许它去 fetch 明文 http(混合内容),所以一个 `http://` 的局域网地址
+ *  填进来只会得到一次「连不上」而无从解释。唯一的例外是 localhost —— 浏览器把它
+ *  当作可信来源,而同源部署下页面自己就在那儿。 */
+export function checkHostUrl(raw: string, pageProtocol: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return "empty";
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return "not-a-url";
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return "bad-scheme";
+  const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (pageProtocol === "https:" && url.protocol === "http:" && !isLocal) return "mixed-content";
+  return null;
 }
 
 /** 移除一台。删掉的正好是当前设备时,焦点落到剩下的第一台(没有剩下的就是

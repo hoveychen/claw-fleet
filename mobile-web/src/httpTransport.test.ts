@@ -295,3 +295,70 @@ describe("HttpTransport 没有的能力", () => {
     expect(t.pushUnsubscribe({ endpoint: "x" })).toBe(false);
   });
 });
+
+// 设备簿里的「HTTP 直连主机」跨源指向另一台机器,而那台通常有 token 门。两条
+// 通道带 token 的方式必须不同,这不是风格问题:EventSource 不能设置请求头。
+describe("cross-origin host with a token", () => {
+  function makeWithHost(fetchImpl?: typeof fetch) {
+    const created: FakeEventSource[] = [];
+    class Spy extends FakeEventSource {
+      constructor(url: string) {
+        super(url);
+        created.push(this);
+      }
+    }
+    const transport = new HttpTransport(
+      {},
+      {
+        baseUrl: "https://fleet.example.com",
+        token: "tok en/1",
+        fetchImpl:
+          fetchImpl ??
+          (vi.fn(async () => jsonResponse({ ok: true, data: null })) as unknown as typeof fetch),
+        eventSourceImpl: Spy as unknown as typeof EventSource,
+      },
+    );
+    return { transport, created };
+  }
+
+  it("puts the token in the Authorization header on requests", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ ok: true, data: null }));
+    const { transport } = makeWithHost(fetchImpl as unknown as typeof fetch);
+    await transport.request("pending_snapshot");
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://fleet.example.com/mobile_rpc");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok en/1");
+    expect(headers["Content-Type"]).toBe("application/json");
+  });
+
+  // EventSource 不能带 header —— 服务端为此同时认 `?token=`(它的注释里明写了
+  // 就是为 SSE 准备的)。少了这一步,直连主机会连不上流,而症状只是「一直在连」。
+  it("puts the token in the SSE query string, url-encoded", () => {
+    const { transport, created } = makeWithHost();
+    transport.connect();
+    expect(created).toHaveLength(1);
+    expect(created[0].url).toBe("https://fleet.example.com/events?token=tok%20en%2F1");
+  });
+
+  it("shows the host as the endpoint label", () => {
+    const { transport } = makeWithHost();
+    expect(transport.endpointLabel).toBe("fleet.example.com");
+  });
+
+  it("sends no Authorization header when the host has no token", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ ok: true, data: null }));
+    const t = new HttpTransport(
+      {},
+      {
+        baseUrl: "https://open.example.com",
+        token: null,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        eventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+      },
+    );
+    await t.request("pending_snapshot");
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+});
