@@ -208,6 +208,54 @@ ws.addEventListener("message", (event) => {
     } else if (method === "tail" || method === "tail_delta") {
       // 详情页要的是 transcript 行。空列表足够验「请求发到了哪一台」。
       data = method === "tail" ? [] : { lines: [], offset: 0 };
+    } else if (method === "spawn_session") {
+      // 「新会话开到了哪一台」的验证点:两台都在册时,只有被选中那台该打印这行。
+      console.log(
+        `[${label}] SPAWN workspace=${params.workspacePath} tool=${params.tool} ` +
+          `model=${params.model ?? "-"} id=${String(params.sessionId).slice(0, 8)} ` +
+          `prompt=${JSON.stringify(String(params.prompt ?? "").slice(0, 60))}`,
+      );
+      // 真桌面端按 sessionId 幂等去重;这里照做,好让「超时重发不双开」也能验。
+      if (!sessions.some((s) => s.id === params.sessionId)) {
+        sessions.unshift({
+          ...sessions[0],
+          id: params.sessionId,
+          workspacePath: params.workspacePath,
+          workspaceName: `${label}:new`,
+          aiTitle: String(params.prompt ?? "").slice(0, 30) || `${label} 的新会话`,
+          slug: params.sessionId,
+          lastActivityMs: Date.now(),
+          createdAtMs: Date.now(),
+          procAlive: true,
+        });
+        sendPayload({ event: "sessions", sessions });
+      }
+      data = { sessionId: params.sessionId };
+    } else if (method === "sources_config") {
+      // **必须是数组**:表单把它交给 toolChoicesForSources 直接 .filter,回个
+      // 对象就在渲染期抛 TypeError,而 React 会把整棵树卸掉(页面全白、控制台空)。
+      // 注册名是 `claude-code`(不是裸的 `claude`),tool 值才是 `claude` ——
+      // 见 agentSource.ts::sourceNameToTool。写错的话工具选择器会退回 Claude-only。
+      data = [
+        { name: "claude-code", enabled: true, available: true },
+        { name: "codex", enabled: true, available: true },
+      ];
+    } else if (method === "chat_workspace") {
+      // 纯聊天目录。给个每台不同的路径,好看出表单读的是哪一台的。
+      data = { path: `/home/${label}/.fleet/chat` };
+    } else if (method === "list_dir") {
+      data = { entries: [] };
+    } else if (method === "upload_attachment") {
+      // 路径**带上本机 label**:附件是「已上传到某一台」的东西,路径里看得见是
+      // 哪一台,才能验出跨设备串用(见下面 attachments_exist 只认自己的前缀)。
+      data = { path: `/home/${label}/.fleet/user-attachments/${params.name}` };
+      console.log(`[${label}] UPLOAD ${params.name} → ${data.path}`);
+    } else if (method === "attachments_exist") {
+      // 真桌面端是查文件在不在。这里按前缀判:别台上传的路径在本机不存在,于是
+      // 恢复草稿时那些 chip 会被剔掉 —— 与真机行为一致。
+      const mine = (params.paths ?? []).filter((p) => String(p).startsWith(`/home/${label}/`));
+      console.log(`[${label}] EXIST ${JSON.stringify(params.paths)} → kept ${mine.length}`);
+      data = { existing: mine };
     }
     sendPayload({ event: "reply", req_id, ok: true, data, handle_ms: 3 });
   }
