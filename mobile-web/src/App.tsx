@@ -189,7 +189,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     return onPairingLink((paired) => {
       // 与 PWA 的 `#k=` 路径走同一个入口：去重、保留用户改过的名字、焦点落到
       // 刚扫的那台，三条规则只有一份实现（devices.ts::adoptScannedDevice）。
-      setBook((prev) => adoptScannedDevice(prev, paired, newDeviceMint(prev)).book);
+      // relayBase 必须一起传下去 —— 壳的页面 origin 是 `capacitor://localhost`，
+      // 丢了它就只能连打包时烧进去的那个 relay，自建 relay 永远配不上。
+      setBook(
+        (prev) =>
+          adoptScannedDevice(prev, paired.secret, newDeviceMint(prev), paired.relayBase).book,
+      );
       setIdbProbed(true);
     });
   }, []);
