@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { App, type TransportFactory } from "./App";
 import { CloudApp } from "./cloud/CloudApp";
 import { LightboxProvider } from "./views/Lightbox";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { t } from "./i18n";
 import { initTheme } from "./theme";
 import { initWakeLock } from "./wakeLock";
 import { lockZoom } from "./lockZoom";
@@ -40,12 +42,18 @@ const { makeTransport }: { makeTransport: TransportFactory } =
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {cloudMode ? (
-      <CloudApp />
-    ) : (
-      <LightboxProvider>
-        <App makeTransport={makeTransport} />
-      </LightboxProvider>
-    )}
+    {/* 最外层兜底。里面还有两层更细的(每个 tab、每张决策卡),这一层只接那些
+        没被它们围住的东西 —— app 外壳本身、各个浮层、以及云端形态。没有它的话,
+        那些位置一抛异常就是纯白页面 + 空控制台,手机上完全没法诊断。
+        resetKey 不传:根崩了没有「换一张」可言,用户点重试或者重开。 */}
+    <ErrorBoundary label={t("Fleet")}>
+      {cloudMode ? (
+        <CloudApp />
+      ) : (
+        <LightboxProvider>
+          <App makeTransport={makeTransport} />
+        </LightboxProvider>
+      )}
+    </ErrorBoundary>
   </StrictMode>,
 );
