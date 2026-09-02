@@ -1150,6 +1150,11 @@ fn handle_request(
             // its own boundary (home + off-home known workspaces, canonical).
             crate::routes::BROWSE_DIR if request.method() == &tiny_http::Method::Get => route_browse_dir(ctx, request, &query, json_header, path),
 
+            // The same picker, one ssh hop further out: an rca executor host.
+            // The ssh originates here because this is where sessions spawn.
+            crate::routes::REMOTE_BROWSE_DIR if request.method() == &tiny_http::Method::Get => route_remote_browse_dir(request, &query, json_header),
+            crate::routes::REMOTE_HOST_HEALTH if request.method() == &tiny_http::Method::Get => route_remote_host_health(request, &query, json_header),
+
             // ...and the one write that picker needs: make a directory to pick.
             // Same boundary as the listing above — `workspace_browse` refuses a
             // parent outside the roots and a name that is anything but one plain
