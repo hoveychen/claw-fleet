@@ -4,6 +4,7 @@ import type { DshModelCatalog } from "./generated/types";
 // "default" entry, since the default differs per surface (the new-session
 // launcher, for one, follows the CLI's own configured model).
 export const CLAUDE_MODEL_CHOICES: { value: string; label: string }[] = [
+  { value: "claude-fable-5-1", label: "Fable 5.1" },
   { value: "claude-fable-5", label: "Fable 5" },
   { value: "claude-opus-5", label: "Opus 5" },
   { value: "claude-opus-4-8", label: "Opus 4.8" },

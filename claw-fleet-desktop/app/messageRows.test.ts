@@ -7,6 +7,7 @@ describe("shortModelName", () => {
     expect(shortModelName("claude-opus-4-8")).toBe("opus 4.8");
     expect(shortModelName("claude-sonnet-5")).toBe("sonnet 5");
     expect(shortModelName("claude-fable-5")).toBe("fable 5");
+    expect(shortModelName("claude-fable-5-1")).toBe("fable 5.1");
     expect(shortModelName("claude-haiku-4-5-20251001")).toBe("haiku 4.5");
   });
 

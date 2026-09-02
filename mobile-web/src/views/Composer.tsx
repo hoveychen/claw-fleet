@@ -24,6 +24,7 @@ import { AttachmentThumbs } from "./AttachmentThumb";
 
 const MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
+  ["claude-fable-5-1", "Fable 5.1"],
   ["claude-fable-5", "Fable 5"],
   ["claude-opus-5", "Opus 5"],
   ["claude-opus-4-8", "Opus 4.8"],
