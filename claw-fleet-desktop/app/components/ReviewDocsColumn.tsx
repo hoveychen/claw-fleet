@@ -1,10 +1,8 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown, { type Components } from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
 import type { ReviewDoc, ReviewDocContent } from "../types";
-import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
-import { normalizeSvgBlankLines, markdownUrlTransform } from "../markdown/plugins";
+import { ProgressiveMarkdown } from "../markdown/ProgressiveMarkdown";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { AutoHeightFrame } from "./AutoHeightFrame";
 import styles from "./ReviewDocsColumn.module.css";
@@ -26,41 +24,18 @@ function fallbackLabel(doc: ReviewDoc): string {
   return ref;
 }
 
-/** The rendered document body, kept behind its own `memo` so switching tabs or
- *  a fetch settling doesn't drag the *current* body through the remark/rehype
- *  chain again — `react-markdown` has no memo of its own, so every render of it
- *  is a full re-parse. */
-const MarkdownBody = memo(function MarkdownBody({
-  body,
-  components,
-}: {
-  body: string;
-  components: Components;
-}) {
-  const normalized = useMemo(() => normalizeSvgBlankLines(body), [body]);
-  return (
-    <ReactMarkdown
-      urlTransform={markdownUrlTransform}
-      remarkPlugins={safeRemarkPlugins}
-      rehypePlugins={safeRehypePlugins}
-      components={components}
-    >
-      {normalized}
-    </ReactMarkdown>
-  );
-});
-
 /** Side column shown next to a fleet__ask card: one tab per review doc the
  *  agent attached, so the user reads the `.md` files / wiki entries in place
  *  instead of hunting down the path. Bodies are fetched live through the
  *  backend (`read_review_doc`) — never snapshotted — so they always show the
  *  current on-disk content.
  *
- *  Memoised, and its body memoised again inside: `react-markdown` re-runs the
- *  whole remark/rehype chain on every render (no memo of its own), and the
- *  panel around this column re-renders on every 2s backend rescan. Without
- *  both layers a review doc is re-parsed ~30×/min for as long as the card is
- *  open — which is what pinned a core on a 1.5 MB TASKS.md. */
+ *  Memoised: `react-markdown` re-runs the whole remark/rehype chain on every
+ *  render (no memo of its own), and the panel around this column re-renders on
+ *  every 2s backend rescan — without this a review doc was re-parsed ~30×/min
+ *  for as long as the card stayed open, which pinned a core on a 1.5 MB
+ *  TASKS.md. `ProgressiveMarkdown` memoises each chunk in turn and defers the
+ *  ones nobody has scrolled to yet. */
 function ReviewDocsColumnInner({
   docs,
   sessionId,
@@ -151,7 +126,7 @@ function ReviewDocsColumnInner({
           />
         ) : (
           <div className={styles.markdown}>
-            <MarkdownBody body={active.content.body} components={mdComponents} />
+            <ProgressiveMarkdown body={active.content.body} components={mdComponents} />
           </div>
         )}
       </div>
