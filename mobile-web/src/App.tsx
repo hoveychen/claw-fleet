@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { BookOpen, Inbox, ListChecks, MoreHorizontal, Plus } from "lucide-react";
 import styles from "./App.module.css";
 import {
@@ -12,32 +12,23 @@ import {
 // 这里不再认识任何一个具体传输层。造哪一个由 main.tsx 按构建模式决定并注入
 // —— 那处选择是一对动态 import，同源构建把 relay 那条分支连同整棵依赖树一起
 // 消掉，而如果 App 静态 import 了 RelayClient，那套安排就白做了。
-import type { FleetTransport, RttSample, TransportHandlers } from "./transport";
+import type { FleetTransport, TransportHandlers } from "./transport";
 import { NEEDS_PAIRING, SUPPORTS_PUSH } from "./hostMode";
+import { formatRttSplit } from "./connQuality";
+import { DeviceConnection, type DeviceHandle } from "./DeviceConnection";
 import {
-  computeCongestion,
-  formatRttSplit,
-  splitRtt,
-  RECONNECT_WINDOW_MS,
-  type Congestion,
-  type RttSplit,
-} from "./connQuality";
-import { agentKeyOf, reconcileDecisions } from "./decisionReconcile";
-import { recordSnapshotSource, type SnapshotSource } from "./snapshotSources";
-import { reconcilePlan } from "./reconcilePlan";
+  anyAgentOnline,
+  anyConnected,
+  devicesReducer,
+  emptyDeviceState,
+  totalUsage,
+  worstCongestion,
+  type DeviceStates,
+} from "./deviceRuntime";
 // 只取零依赖的开关。`?mock` 那个假客户端 extends RelayClient，从这里 import
 // 会把整棵 relay 依赖树静态拖进同源构建 —— 造它的活儿归 transportRelay.ts。
 import { isMockMode } from "./mockMode";
-import type {
-  DecisionKind,
-  DecisionRequest,
-  PendingDecision,
-  PendingSnapshot,
-  RepoSummary,
-  SessionInfo,
-  TodayUsage,
-  WikiDoc,
-} from "./types";
+import type { RepoSummary, SessionInfo, WikiDoc } from "./types";
 import { randomId } from "./clientId";
 import { needsA2hsForDurableStorage } from "./secretStore";
 import {
@@ -60,11 +51,7 @@ import {
   type PairedDevice,
 } from "./devices";
 import { onPairingLink } from "./deepLink";
-import {
-  clearCachedSessions,
-  loadCachedSessions,
-  saveCachedSessions,
-} from "./sessionCache";
+import { clearCachedSessions } from "./sessionCache";
 import { AUTH_WAIT_MS, waitAuthed } from "./transportWait";
 import { DeviceScopeProvider, scopedKey } from "./deviceScope";
 import { t as translate, useI18n } from "./i18n";
@@ -117,6 +104,27 @@ export type TransportFactory = (
   relayBase?: string | null,
 ) => FleetTransport;
 
+/** mock / 同源形态没有配对这回事,但下游一切都以「一台设备」为单位。给它们各
+ *  合成一台,整条链路就只有一种形状 —— 不必在每个视图里再分一次叉。 */
+const MOCK_DEVICE: PairedDevice = {
+  id: "mock",
+  label: "Mock",
+  secret: "mock-secret",
+  relayBase: null,
+  addedAt: 0,
+};
+const SAME_ORIGIN_DEVICE: PairedDevice = {
+  id: "same-origin",
+  label: "",
+  secret: "same-origin",
+  relayBase: null,
+  addedAt: 0,
+};
+
+/** 还没收到过任何一帧的设备读到的状态。模块级常量:每次渲染新建一个对象会让
+ *  下面那些解构出来的数组每渲染都换引用。 */
+const EMPTY_DEVICE_STATE = emptyDeviceState();
+
 export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
   const { t } = useI18n();
@@ -145,8 +153,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // `&relay=` 的都是这一类），传输层与推送各自把它解析成实际地址。
   const relayBase = current?.relayBase ?? null;
   // 本地持久化的命名空间。会话快照缓存、草稿、附件、workspace 记忆都按它分家
-  // ——那些内容只对某一台机器有意义（见 deviceScope.tsx）。
+  // ——那些内容只对某一台机器有意义（见 deviceScope.tsx）。mock 与同源形态不分家
+  // （它们只有一个数据源，加前缀只会让老用户已有的草稿凭空消失）。
   const deviceId = current?.id ?? null;
+
+  // 运行时视角的设备清单：配对形态是簿子本身，mock / 同源各是一台合成设备。
+  const runtimeDevices = useMemo(
+    () => (MOCK ? [MOCK_DEVICE] : NEEDS_PAIRING ? book.devices : [SAME_ORIGIN_DEVICE]),
+    [book.devices],
+  );
+  const deviceOrder = useMemo(() => runtimeDevices.map((d) => d.id), [runtimeDevices]);
+  /** 当前作用域那一台的运行时 id。 */
+  const activeDeviceId =
+    MOCK || !NEEDS_PAIRING ? runtimeDevices[0].id : (deviceId ?? "");
   // 分享菜单那条 effect 的依赖是空的（只在挂载时订阅一次），但它开火时要用**当下**
   // 的设备，所以那一处读 ref 而不是闭包里的值。
   const deviceIdRef = useRef<string | null>(deviceId);
@@ -239,10 +258,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
    *  把它记进待办退订，下次启动重试。 */
   const stopPushFor = useCallback(
     async (device: PairedDevice): Promise<boolean> => {
-      const live = clientRef.current;
-      if (device.id === deviceIdRef.current && live?.isAuthed) {
-        return unsubscribeChannel(live);
-      }
+      // 这台设备正连着的话直接借用它那条连接。
+      const live = handlesRef.current[device.id]?.transport;
+      if (live?.isAuthed) return unsubscribeChannel(live);
       const temp = makeTransport(device.secret, {}, device.relayBase);
       try {
         temp.connect();
@@ -333,66 +351,51 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [tab, setTab] = useState<Tab>("decisions");
   /// 通知点击要聚焦的决策卡。nonce 让「同一张卡被连点两次」也能触发。
   const [focusDecision, setFocusDecision] = useState<{ id: string; nonce: number } | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [agentOnline, setAgentOnline] = useState(false);
-  // Whether the desktop's sessions delta path is engaged, surfaced in More.
-  // `last` is the most recent frame kind; the counts accumulate for the session.
-  const [sessionsFrame, setSessionsFrame] = useState<{
-    last: "full" | "delta" | null;
-    full: number;
-    delta: number;
-  }>({ last: null, full: 0, delta: 0 });
-  // Header congestion light. Raw signals live in refs (RTT of the last reply,
-  // timestamps of recent reconnects) so they don't each force a re-render; the
-  // level is recomputed and set explicitly when a sample or reconnect lands.
-  const [congestion, setCongestion] = useState<Congestion>("good");
-  // The latest round trip attributed to phone link / desktop link / desktop
-  // handler. State (not a ref) because the More page renders it: the total says
-  // "it's slow", only the split says which of the three to go fix.
-  const [rttSplit, setRttSplit] = useState<RttSplit | null>(null);
-  const rttRef = useRef<number | null>(null);
-  const reconnectsRef = useRef<number[]>([]);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  // Flips true the first time a `sessions` snapshot arrives, so the task page
-  // can tell "still waiting for the first push" from "pushed, genuinely empty".
-  const [sessionsLoaded, setSessionsLoaded] = useState(false);
 
-  // Cold-start hydrate: paint the last cached task list immediately so the page
-  // isn't blank while the socket (re)connects and delivers the first full
-  // snapshot. Seed only if the live snapshot hasn't already landed — the
-  // functional update keeps fresh data if `onSessions` won the race. `sessions`
-  // being non-empty while `sessionsLoaded` is still false is exactly the
-  // "showing cache, awaiting first live push" state the task page labels.
-  useEffect(() => {
-    if (MOCK) return;
-    // 切设备先清场：上一台的任务列表、决策卡、今日用量、可信 agent 判定都只对
-    // 上一台成立。留着它们不是「先显示旧数据再刷新」——那些卡上的 id 在新设备
-    // 上根本不存在，点一下就是一次打错地方的请求。首次挂载时这些本来就是空的。
-    setSessions([]);
-    setSessionsLoaded(false);
-    setDecisions([]);
-    setDecisionsLoaded(false);
-    setTodayUsage(null);
-    trustedAgentRef.current = undefined;
-    answeredRef.current = new Map();
-    snapshotSourcesRef.current = [];
-    let cancelled = false;
-    void loadCachedSessions(deviceId).then((cached) => {
-      if (cancelled || !cached?.length) return;
-      setSessions((prev) => (prev.length === 0 ? cached : prev));
+  // ── 每台设备的运行时 ─────────────────────────────────────────────────────
+  //
+  // 从前这里是一把扁平的 useState:一个 connected、一个 sessions、一个 decisions。
+  // 那把状态把「只有一个数据源」焊死进了组件。现在每台设备一份(deviceRuntime.ts
+  // 的纯 reducer),连接则由每台一个 <DeviceConnection> 负责。
+  const [states, dispatch] = useReducer(devicesReducer, {} as DeviceStates);
+  // 每台设备的操作面(transport + 主动刷新)。用 state 而不是 ref:UI 要在连接
+  // 建立那一刻重新渲染,才能把 transport 交给下面各个视图。
+  const [handles, setHandles] = useState<Record<string, DeviceHandle>>({});
+  const registerHandle = useCallback((id: string, handle: DeviceHandle | null) => {
+    setHandles((prev) => {
+      if (!handle) {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: handle };
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [deviceId]);
-  const [todayUsage, setTodayUsage] = useState<TodayUsage | null>(null);
-  const [decisions, setDecisions] = useState<PendingDecision[]>([]);
-  // Mirrors `sessionsLoaded`: flips true once the first authoritative pending
-  // snapshot (or a live decision event) has landed, so the decisions tab can
-  // tell "still awaiting the first push" (show skeleton cards) from "pushed,
-  // genuinely nothing pending" (show the empty state).
-  const [decisionsLoaded, setDecisionsLoaded] = useState(false);
+  }, []);
+
+  // stopPushFor / unpairAll 这类空依赖的回调要读**当下**的连接表。
+  const handlesRef = useRef(handles);
+  handlesRef.current = handles;
+
+  const activeState = states[activeDeviceId] ?? EMPTY_DEVICE_STATE;
+  const client = handles[activeDeviceId]?.transport ?? null;
+  const {
+    sessions,
+    sessionsLoaded,
+    decisions,
+    decisionsLoaded,
+    sessionsFrame,
+    rttSplit,
+    snapshotSources,
+    authError,
+  } = activeState;
+  // 头部那三样看的是**全体**:一台离线不该让整个界面显示离线,而用户感觉到的
+  // 拥塞是最卡的那条链路。花费是所有设备当日之和。
+  const connected = anyConnected(states, deviceOrder);
+  const agentOnline = anyAgentOnline(states, deviceOrder);
+  const congestion = worstCongestion(states, deviceOrder);
+  const todayUsage = totalUsage(states, deviceOrder);
+
   const [push, setPush] = useState<PushState>(pushState);
   // Sub-state below "granted": the user can turn notifications off even while
   // the browser permission stays granted. Persisted so it survives reloads.
@@ -412,18 +415,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // new-session sheet mounts (that's where the attachment state lives).
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [exitArmed, setExitArmed] = useState(false);
-  const clientRef = useRef<FleetTransport | null>(null);
-  // ids answered on THIS device whose answer is still in flight → timestamp.
-  // Suppresses the just-answered card from flickering back when a fallback
-  // `pending_snapshot` (which lags the send on a slow link) still lists it.
-  const answeredRef = useRef<Map<string, number>>(new Map());
-  // Fingerprint of the agent whose snapshots actually carry this machine's
-  // cards. The relay fans every request out to all agents in the channel, so
-  // "which agent answered" is the only way to tell the desktop's authoritative
-  // empty list from a stray agent's (decisionReconcile.ts).
-  const trustedAgentRef = useRef<string | undefined>(undefined);
-  // Every agent that has answered a snapshot, for the More tab's diagnostics.
-  const snapshotSourcesRef = useRef<SnapshotSource[]>([]);
 
   // 栈底（主页 tab、无浮层）按返回：先拦一次给「再按一次退出」，再按才真走。
   // beforeunload 只覆盖刷新/关标签/地址栏跳走这些非返回路径——mock 模式不装，
@@ -447,201 +438,20 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     };
   }, []);
 
-  const addDecision = useCallback((kind: DecisionKind, request: unknown) => {
-    const req = request as DecisionRequest;
-    if (!req?.id) return;
-    // A live decision frame is proof the pipe is delivering — clear the skeleton
-    // even if the initial snapshot request hasn't returned yet.
-    setDecisionsLoaded(true);
-    setDecisions((prev) => {
-      if (prev.some((d) => d.id === req.id)) return prev;
-      return [...prev, { kind, id: req.id, request: req, arrivedAt: Date.now() }];
-    });
+  /** 本机刚答完一张卡:先乐观移除,并记下时间戳,压住迟到快照把它复活
+   *  (deviceRuntime.ts 的 answered/snapshot 两个 action)。答复发给哪一台由
+   *  调用方点名 —— 收件箱是合并的,卡不一定属于当前作用域那台。 */
+  const markAnswered = useCallback((deviceId: string, id: string) => {
+    dispatch({ deviceId, type: "answered", id, now: Date.now() });
   }, []);
 
-  // Local answer sent from this device: drop the card now (optimistic) and
-  // remember the id so a lagging snapshot can't resurrect it before the desktop
-  // confirms. ANSWER_GRACE_MS is the fallback ceiling for a lost answer frame.
-  const markAnswered = useCallback((id: string) => {
-    answeredRef.current.set(id, Date.now());
-    setDecisions((prev) => prev.filter((d) => d.id !== id));
-  }, []);
-
-  const removeDecision = useCallback((_kind: DecisionKind, id: string) => {
-    // Authoritative resolution (desktop/another device) — the in-flight-answer
-    // bookkeeping for this id is moot, clear it so it can't linger.
-    answeredRef.current.delete(id);
-    setDecisions((prev) => prev.filter((d) => d.id !== id));
-  }, []);
-
-  const refreshPending = useCallback(async (client: FleetTransport) => {
-    try {
-      const snap = await client.request<PendingSnapshot>("pending_snapshot");
-      const kinds: Array<[DecisionKind, DecisionRequest[] | undefined]> = [
-        ["guard", snap.guard],
-        ["elicitation", snap.elicitation],
-        ["fleet-ask", snap.fleetAsk],
-        ["plan-approval", snap.planApproval],
-        ["permission-prompt", snap.permissionPrompt],
-        ["a2ui-render", snap.a2uiRender],
-      ];
-      const fresh: PendingDecision[] = [];
-      for (const [kind, list] of kinds) {
-        for (const request of list ?? []) {
-          fresh.push({ kind, id: request.id, request, arrivedAt: Date.now() });
-        }
-      }
-      // Snapshot is authoritative, but a card answered on this device whose
-      // answer is still in flight must not pop back in (reconcileDecisions
-      // suppresses it until confirmed gone, or the grace window lapses) — and
-      // an "empty" from an agent other than our desktop is not authoritative at
-      // all (the relay fans requests out to every agent in the channel; see
-      // decisionReconcile.ts).
-      const agentKey = agentKeyOf(snap.agent);
-      setDecisions((prev) => {
-        const { decisions, answeredAt, ignored, trustedAgentKey } = reconcileDecisions({
-          prev,
-          fresh,
-          answeredAt: answeredRef.current,
-          now: Date.now(),
-          agentKey,
-          trustedAgentKey: trustedAgentRef.current,
-        });
-        answeredRef.current = answeredAt;
-        trustedAgentRef.current = trustedAgentKey;
-        // Diagnostics log, kept in a ref alongside the two above (a nested
-        // setState here would run inside an updater). The More tab renders it,
-        // so a second agent that blanked — or tried to blank — the card list
-        // leaves a trace Boss can read off the phone.
-        snapshotSourcesRef.current = recordSnapshotSource(snapshotSourcesRef.current, {
-          key: agentKey,
-          agent: snap.agent,
-          at: Date.now(),
-          trusted: !!agentKey && agentKey === trustedAgentKey,
-          ignored: !!ignored,
-        });
-        return decisions;
-      });
-      // First authoritative snapshot is in — retire the loading skeleton.
-      setDecisionsLoaded(true);
-    } catch {
-      // agent offline — live events will catch us up later
-    }
-  }, []);
-
-  // Recompute the header congestion level from the latest RTT sample and the
-  // reconnects still inside the recent window. Called whenever either signal
-  // moves; the 20s today_usage poll keeps RTT samples flowing, so the level
-  // decays back down once a weak link recovers.
-  const recomputeCongestion = useCallback(() => {
-    const now = Date.now();
-    reconnectsRef.current = reconnectsRef.current.filter(
-      (ts) => now - ts < RECONNECT_WINDOW_MS,
-    );
-    setCongestion(computeCongestion(rttRef.current, reconnectsRef.current.length));
-  }, []);
-
-  useEffect(() => {
-    if (!secret) return;
-    const handlers = {
-      onStatus: setConnected,
-      onAgentOnline: (online: boolean) => {
-        setAgentOnline(online);
-        if (online && clientRef.current) {
-          void refreshPending(clientRef.current);
-        }
-      },
-      onDecisionCreated: addDecision,
-      onDecisionResolved: removeDecision,
-      onSessions: (list: SessionInfo[]) => {
-        setSessions(list);
-        setSessionsLoaded(true);
-        // Persist the merged full list so the next cold start paints it. Both
-        // full and delta frames arrive here already merged (see relay.ts), so
-        // the cache always holds the latest complete snapshot.
-        saveCachedSessions(deviceId, list);
-      },
-      onSessionsKind: (kind: "full" | "delta") =>
-        setSessionsFrame((s) => ({
-          last: kind,
-          full: s.full + (kind === "full" ? 1 : 0),
-          delta: s.delta + (kind === "delta" ? 1 : 0),
-        })),
-      onRttSample: (sample: RttSample) => {
-        // The congestion light still judges the whole round trip — what the user
-        // feels is the total, whichever segment ate it. The segments are for
-        // telling them *which* one did, on the More page.
-        rttRef.current = sample.totalMs;
-        setRttSplit(splitRtt(sample));
-        recomputeCongestion();
-      },
-      onReconnect: () => {
-        reconnectsRef.current.push(Date.now());
-        recomputeCongestion();
-      },
-      onAuthError: (message: string) => setAuthError(message),
-    };
-    const client = makeTransport(secret, handlers, relayBase);
-    clientRef.current = client;
-    client.connect();
-    // Mobile browsers may never run React cleanup on tab close — tell the
-    // desktop we're leaving on pagehide too (desktop timeout is the backstop).
-    const onPageHide = () => client.sayGoodbye();
-    window.addEventListener("pagehide", onPageHide);
-    return () => {
-      window.removeEventListener("pagehide", onPageHide);
-      client.close();
-    };
-    // deviceId / relayBase 与 secret 总是同时变（它们都来自当前那台设备），列进
-    // 依赖是为了让「切设备」这件事在这里显式成立，而不是靠 secret 恰好也变了。
-  }, [
-    secret,
-    deviceId,
-    relayBase,
-    makeTransport,
-    addDecision,
-    removeDecision,
-    refreshPending,
-    recomputeCongestion,
-  ]);
-
-  // Today's cumulative token/cost counter in the header. Polls while the desktop
-  // is online; the desktop computes the figure (agent sessions created today +
-  // Fleet's own LLM spend) so mobile just displays the single number.
-  useEffect(() => {
-    if (!agentOnline) return;
-    let cancelled = false;
-    let timer: number | undefined;
-    const poll = async () => {
-      const client = clientRef.current;
-      if (client?.isAuthed) {
-        try {
-          const u = await client.request<TodayUsage>("today_usage");
-          if (!cancelled) setTodayUsage(u);
-        } catch {
-          /* transient — keep the last value */
-        }
-      }
-      if (!cancelled) timer = window.setTimeout(poll, 20_000);
-    };
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [agentOnline]);
-
-  // Re-sync when the PWA returns to the foreground (mobile browsers freeze
-  // sockets aggressively; the reconnect fires but the snapshot may be stale).
-  // Also recompute the push state: Notification.permission can change while we
-  // were backgrounded (Boss toggled it in system/browser settings), and the
-  // banner reads pushState() only at mount — without this it stays stale, e.g.
-  // still showing "已拒绝" after the site was re-allowed.
+  // 回到前台/重新获得焦点时重算推送状态:Notification.permission 可能在后台期间
+  // 被改过(老板在系统设置里开了或关了),而横幅只在挂载时读过一次 pushState()。
+  // 快照的补拉不在这里 —— 那是每台设备自己的事(DeviceConnection)。
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       setPush(pushState());
-      if (clientRef.current?.isAuthed) void refreshPending(clientRef.current);
     };
     const onFocus = () => setPush(pushState());
     document.addEventListener("visibilitychange", onVisible);
@@ -663,37 +473,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       window.removeEventListener("focus", onFocus);
       perm?.removeEventListener("change", onFocus);
     };
-  }, [refreshPending]);
-
-  // Foreground fallback reconcile for pending decisions. Both `decision_created`
-  // and `decision_resolved` are best-effort agent→client WS broadcasts with no
-  // ack and no retry; the relay drops them if the phone's socket is down (a weak
-  // link / network switch — the only way to miss a frame over TCP). The one-shot
-  // `refreshPending` on (re)connect / foreground is meant to catch up, but on a
-  // weak link that single pull can time out and is swallowed, with no retry — so
-  // a missed card would strand forever. This loop is the durable backstop: it
-  // keeps re-pulling the authoritative snapshot while the desktop is online and
-  // the tab is visible, fast (3s) while cards are open so an answered-elsewhere
-  // card clears promptly, slow (15s) when idle so a card missed during a drop is
-  // recovered on the next tick. Interval and enablement come from reconcilePlan.
-  useEffect(() => {
-    const plan = reconcilePlan(agentOnline, decisions.length > 0);
-    if (!plan.poll) return;
-    let cancelled = false;
-    let timer: number | undefined;
-    const tick = async () => {
-      const client = clientRef.current;
-      if (client?.isAuthed && document.visibilityState === "visible") {
-        await refreshPending(client);
-      }
-      if (!cancelled) timer = window.setTimeout(tick, plan.intervalMs);
-    };
-    timer = window.setTimeout(tick, plan.intervalMs);
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [agentOnline, decisions.length, refreshPending]);
+  }, []);
 
   // When permission lands on "granted" (fresh grant, or re-allowed in settings
   // after a denial), make sure a live subscription actually exists on the
@@ -715,8 +495,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // reported itself subscribed, and the relay's subscription store never
   // gained the entry.
   useEffect(() => {
-    if (connected && push === "granted" && !pushOptedOut && clientRef.current) {
-      void enablePush(clientRef.current, relayBase);
+    if (connected && push === "granted" && !pushOptedOut && client) {
+      void enablePush(client, relayBase);
     }
   }, [connected, push, pushOptedOut]);
 
@@ -741,14 +521,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }, []);
 
   const handleEnablePush = useCallback(async () => {
-    if (!clientRef.current) return;
-    setPush(await enablePush(clientRef.current, relayBase));
+    if (!client) return;
+    setPush(await enablePush(client, relayBase));
     setPushOptedOut(false);
   }, []);
 
   const handleDisablePush = useCallback(async () => {
-    if (!clientRef.current) return;
-    await disablePush(clientRef.current);
+    if (!client) return;
+    await disablePush(client);
     setPushOptedOut(true);
   }, []);
 
@@ -757,7 +537,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [localReadMs, setLocalReadMs] = useState<Record<string, number>>({});
   const markRead = useCallback((items: SessionInfo[]) => {
     if (items.length === 0) return;
-    clientRef.current
+    client
       ?.request("session_read", {
         items: items.map((s) => ({ sessionId: s.id, workspacePath: s.workspacePath })),
       })
@@ -834,7 +614,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     );
   }
 
-  if (authError) {
+  // 配对失败的整屏拦截只在**只有一台**设备时成立:多台在册时,一台密钥失效不该
+  // 把其他几台的卡一并挡在外面 —— 那一台的错误由「更多」页的连接状态如实呈现,
+  // 用户可以在设备列表里把它移除或重新扫码。
+  if (authError && runtimeDevices.length <= 1) {
     return (
       <div className={styles.gate}>
         <div className={styles.gateLogo}>F</div>
@@ -858,6 +641,20 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     // 整棵树跑在「当前作用域设备」里：里面所有按设备分家的本地存储（草稿、附件、
     // workspace 记忆）都从这里取命名空间，无需逐个 prop 往下传。
     <DeviceScopeProvider deviceId={deviceId}>
+    {/* 每台设备一条连接。不渲染任何 DOM：它只是把那条 socket 的生命周期挂在
+        React 树上，设备被移除时 key 消失、清理函数自然把它关掉。 */}
+    {runtimeDevices.map((d) => (
+      <DeviceConnection
+        key={d.id}
+        device={d}
+        storageId={MOCK ? undefined : NEEDS_PAIRING ? d.id : null}
+        makeTransport={makeTransport}
+        dispatch={dispatch}
+        registerHandle={registerHandle}
+        hasPendingDecisions={(states[d.id]?.decisions.length ?? 0) > 0}
+        agentOnline={states[d.id]?.agentOnline ?? false}
+      />
+    ))}
     <div className={styles.app}>
       <header className={styles.header}>
         <span className={styles.title}>Fleet</span>
@@ -936,19 +733,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         {tab === "decisions" ? (
           <DecisionsView
             decisions={decisions}
-            client={clientRef.current}
+            client={client}
             connected={connected}
             agentOnline={agentOnline}
             decisionsLoaded={decisionsLoaded}
             workspaceOf={workspaceOf}
-            onAnswered={markAnswered}
+            onAnswered={(id) => markAnswered(activeDeviceId, id)}
             onOpenSession={openSessionRoot}
             focusDecision={focusDecision}
           />
         ) : tab === "tasks" ? (
           <TasksView
             sessions={mergedSessions}
-            client={clientRef.current}
+            client={client}
             connected={connected}
             agentOnline={agentOnline}
             sessionsLoaded={sessionsLoaded}
@@ -956,10 +753,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onMarkRead={markRead}
           />
         ) : tab === "wiki" ? (
-          <WikiView client={clientRef.current} onOpenDoc={(doc) => setWikiStack([doc])} />
+          <WikiView client={client} onOpenDoc={(doc) => setWikiStack([doc])} />
         ) : (
           <MoreView
-            endpointLabel={clientRef.current?.endpointLabel ?? ""}
+            endpointLabel={client?.endpointLabel ?? ""}
             devices={book.devices}
             activeDeviceId={deviceId}
             onSwitchDevice={switchDevice}
@@ -971,7 +768,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             agentOnline={agentOnline}
             sessionsFrame={sessionsFrame}
             rttSplit={rttSplit}
-            snapshotSources={snapshotSourcesRef.current}
+            snapshotSources={snapshotSources}
             push={push}
             pushOptedOut={pushOptedOut}
             onEnablePush={handleEnablePush}
@@ -996,7 +793,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <SessionDetailView
           session={detailSession}
           sessions={mergedSessions}
-          client={clientRef.current}
+          client={client}
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
           onOpenSessionId={openSessionById}
           onDwellRead={() => markRead([detailSession])}
@@ -1010,7 +807,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       {wikiStack.length > 0 && (
         <WikiDocView
           doc={wikiStack[wikiStack.length - 1]}
-          client={clientRef.current}
+          client={client}
           onBack={() => setWikiStack((s) => s.slice(0, -1))}
           onOpenDoc={(doc) => setWikiStack((s) => [...s, doc])}
         />
@@ -1020,7 +817,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <>
           <HistoryLayer onBack={() => setShowRepo(false)} />
           <RepoView
-            client={clientRef.current}
+            client={client}
             onBack={() => setShowRepo(false)}
             onOpenRepo={setRepoDetail}
           />
@@ -1032,7 +829,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           <HistoryLayer onBack={() => setRepoDetail(null)} />
           <RepoDetailView
             repo={repoDetail}
-            client={clientRef.current}
+            client={client}
             onBack={() => setRepoDetail(null)}
           />
         </>
@@ -1043,7 +840,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           <HistoryLayer onBack={() => setShowPlans(false)} />
           <PlansView
             sessions={mergedSessions}
-            client={clientRef.current}
+            client={client}
             onBack={() => setShowPlans(false)}
           />
         </>
@@ -1053,7 +850,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <>
           <HistoryLayer onBack={() => setShowArtifacts(false)} />
           <ArtifactsView
-            client={clientRef.current}
+            client={client}
             onBack={() => setShowArtifacts(false)}
           />
         </>
@@ -1063,7 +860,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <>
           <HistoryLayer onBack={() => setShowUsage(false)} />
           <UsageView
-            client={clientRef.current}
+            client={client}
             todayUsage={todayUsage}
             onBack={() => setShowUsage(false)}
           />
@@ -1075,7 +872,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           <HistoryLayer onBack={() => setShowNewSession(false)} />
           <NewSessionSheet
             sessions={mergedSessions}
-            client={clientRef.current}
+            client={client}
             initialFiles={sharedFiles}
             relayReady={connected}
             onClose={() => {
@@ -1090,12 +887,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       {showDecisionDrawer && (
         <DecisionDrawer
           decisions={decisions}
-          client={clientRef.current}
+          client={client}
           connected={connected}
           agentOnline={agentOnline}
           decisionsLoaded={decisionsLoaded}
           workspaceOf={workspaceOf}
-          onAnswered={markAnswered}
+          onAnswered={(id) => markAnswered(activeDeviceId, id)}
           onOpenSession={openSessionRoot}
         />
       )}
