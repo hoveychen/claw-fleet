@@ -45,6 +45,11 @@ const ERROR_TAIL_LINES: usize = 12;
 #[serde(rename_all = "kebab-case")]
 pub enum InstallErrorCode {
     UnsupportedSource,
+    /// The harness is installed through a channel Fleet cannot drive an
+    /// update for (e.g. an IDE-extension bundle that the editor updates).
+    UnsupportedChannel,
+    /// Update requested for a harness that isn't installed yet.
+    NotInstalled,
     /// dsh needs a Node.js runtime before npm can install it (wizard offers
     /// the node bootstrap or skipping dsh).
     NodeMissing,
@@ -289,6 +294,126 @@ fn run_streaming(
         ));
     }
     Ok(())
+}
+
+// ── Update actions ────────────────────────────────────────────────────────────
+//
+// Every harness ships its own updater — Fleet only picks the right trigger per
+// install channel and shows the before/after versions, it never re-implements
+// version resolution itself.
+
+/// Outcome of an update action: the version transition plus the fresh status.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateReport {
+    pub source: String,
+    pub before: Option<String>,
+    pub after: Option<String>,
+    pub status: crate::harness_status::HarnessStatus,
+}
+
+/// Channel-aware update invocation, pure for testing.
+///
+/// - claude native install: `claude update` (its own updater).
+/// - codex (any official channel): `codex update` — it detects its install
+///   method itself (npm/brew/standalone) and runs the matching upgrade.
+/// - npm installs: `npm install -g <pkg>@latest` (more deterministic than
+///   `npm update` for globals).
+/// - homebrew claude: `brew upgrade --cask claude-code`.
+/// - IDE-extension bundles: structured `UnsupportedChannel` — the editor owns
+///   those updates, a shell command would be a lie.
+pub fn update_plan(
+    source: &str,
+    channel: Option<&str>,
+    bin_path: Option<&str>,
+) -> Result<InstallPlan, InstallError> {
+    let bin = |fallback: &str| bin_path.unwrap_or(fallback).to_string();
+    let unsupported = |detail: &str| {
+        Err(InstallError::new(InstallErrorCode::UnsupportedChannel, detail.to_string()))
+    };
+    match source {
+        "claude-code" => match channel.unwrap_or("path") {
+            "npm-global" => Ok(npm_global_latest_plan("@anthropic-ai/claude-code")?),
+            "homebrew" => Ok(InstallPlan {
+                program: "brew".into(),
+                args: vec!["upgrade".into(), "--cask".into(), "claude-code".into()],
+                envs: vec![],
+            }),
+            c if c.ends_with("extension") => {
+                unsupported("this claude binary is bundled with an editor extension; the editor updates it")
+            }
+            // native-installer / path: claude's own updater.
+            _ => Ok(InstallPlan {
+                program: bin("claude"),
+                args: vec!["update".into()],
+                envs: vec![],
+            }),
+        },
+        "codex" => match channel.unwrap_or("path") {
+            c if c.ends_with("extension") => {
+                unsupported("this codex binary is bundled with an editor extension; the editor updates it")
+            }
+            // codex update detects its own install method (standalone/npm/brew).
+            _ => Ok(InstallPlan {
+                program: bin("codex"),
+                args: vec!["update".into()],
+                envs: vec![("CODEX_NON_INTERACTIVE".into(), "1".into())],
+            }),
+        },
+        "dsh" => npm_global_latest_plan(DSH_NPM_PACKAGE),
+        other => Err(InstallError::new(
+            InstallErrorCode::UnsupportedSource,
+            format!("unknown harness source '{other}'"),
+        )),
+    }
+}
+
+fn npm_global_latest_plan(package: &str) -> Result<InstallPlan, InstallError> {
+    let npm = find_npm().ok_or_else(|| {
+        InstallError::new(InstallErrorCode::NodeMissing, "npm not found for the npm-channel update")
+    })?;
+    Ok(InstallPlan {
+        program: npm.to_string_lossy().into_owned(),
+        args: vec!["install".into(), "-g".into(), format!("{package}@latest")],
+        envs: vec![],
+    })
+}
+
+/// Update `source` through its channel's own updater and report the version
+/// transition. Requires the harness to be installed (structured `NotInstalled`
+/// otherwise — the wizard shows the install button instead).
+pub fn update_harness(
+    source: &str,
+    progress: &(dyn Fn(&str) + Sync),
+) -> Result<UpdateReport, InstallError> {
+    let before = crate::harness_status::probe_source(source).ok_or_else(|| {
+        InstallError::new(InstallErrorCode::UnsupportedSource, format!("unknown source '{source}'"))
+    })?;
+    if !before.installed {
+        return Err(InstallError::new(
+            InstallErrorCode::NotInstalled,
+            format!("{source} is not installed — nothing to update"),
+        ));
+    }
+
+    let plan = update_plan(source, before.channel.as_deref(), before.path.as_deref())?;
+    progress(&format!("$ {} {}", plan.program, plan.args.join(" ")));
+    run_streaming(&plan, INSTALL_TIMEOUT, progress)?;
+
+    progress("re-probing version…");
+    let status = crate::harness_status::probe_source(source).unwrap_or(before.clone());
+    let report = UpdateReport {
+        source: source.to_string(),
+        before: before.version.clone(),
+        after: status.version.clone(),
+        status,
+    };
+    match (&report.before, &report.after) {
+        (Some(b), Some(a)) if b == a => progress(&format!("already up to date ({a})")),
+        (Some(b), Some(a)) => progress(&format!("updated {b} → {a}")),
+        _ => progress("updated (version probe unavailable)"),
+    }
+    Ok(report)
 }
 
 // ── Node.js bootstrap (dsh prerequisite) ─────────────────────────────────────
@@ -564,6 +689,50 @@ mod tests {
         let err = run_streaming(&plan, Duration::from_secs(1), &*progress).unwrap_err();
         assert_eq!(err.code, InstallErrorCode::Timeout);
         assert!(start.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn update_plan_branches_by_channel() {
+        // Native claude → its own updater, pinned to the resolved binary.
+        let p = update_plan("claude-code", Some("native-installer"), Some("/x/claude")).unwrap();
+        assert_eq!((p.program.as_str(), p.args[0].as_str()), ("/x/claude", "update"));
+
+        // Editor-extension bundles are the editor's job — structured refusal.
+        let e = update_plan("claude-code", Some("vscode-extension"), Some("/x")).unwrap_err();
+        assert_eq!(e.code, InstallErrorCode::UnsupportedChannel);
+        let e = update_plan("codex", Some("vscode-insiders-extension"), Some("/x")).unwrap_err();
+        assert_eq!(e.code, InstallErrorCode::UnsupportedChannel);
+
+        // codex update is itself channel-aware — standalone and path both use it.
+        let p = update_plan("codex", Some("standalone"), Some("/x/codex")).unwrap();
+        assert_eq!((p.program.as_str(), p.args[0].as_str()), ("/x/codex", "update"));
+        assert!(p.envs.iter().any(|(k, v)| k == "CODEX_NON_INTERACTIVE" && v == "1"));
+
+        // Homebrew claude goes through brew's cask upgrade.
+        let p = update_plan("claude-code", Some("homebrew"), Some("/x")).unwrap();
+        assert_eq!(p.program, "brew");
+        assert_eq!(p.args, vec!["upgrade", "--cask", "claude-code"]);
+
+        // npm channels reinstall @latest (needs npm; on a machine without npm
+        // the structured NodeMissing is also acceptable).
+        for (src, pkg) in [
+            ("claude-code", "@anthropic-ai/claude-code@latest"),
+            ("dsh", "@deepseek-ai/dsh@latest"),
+        ] {
+            let channel = if src == "dsh" { None } else { Some("npm-global") };
+            match update_plan(src, channel, None) {
+                Ok(p) => {
+                    assert!(p.program.contains("npm"));
+                    assert_eq!(p.args, vec!["install", "-g", pkg]);
+                }
+                Err(e) => assert_eq!(e.code, InstallErrorCode::NodeMissing),
+            }
+        }
+
+        assert_eq!(
+            update_plan("copilot", None, None).unwrap_err().code,
+            InstallErrorCode::UnsupportedSource
+        );
     }
 
     #[test]

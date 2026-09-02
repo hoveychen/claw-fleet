@@ -79,6 +79,32 @@ pub(crate) async fn install_harness(
     })?
 }
 
+/// Update an installed harness through its channel's own updater; returns the
+/// before/after version transition. Progress streams like install_harness.
+#[tauri::command]
+pub(crate) async fn update_harness(
+    source: String,
+    app: tauri::AppHandle,
+) -> Result<claw_fleet_core::harness_install::UpdateReport, claw_fleet_core::harness_install::InstallError>
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress_source = source.clone();
+        let emitter = app.clone();
+        let progress = move |line: &str| {
+            let _ = emitter.emit(
+                "harness-install-progress",
+                HarnessInstallProgress { source: progress_source.clone(), line: line.to_string() },
+            );
+        };
+        claw_fleet_core::harness_install::update_harness(&source, &progress)
+    })
+    .await
+    .map_err(|e| claw_fleet_core::harness_install::InstallError {
+        code: claw_fleet_core::harness_install::InstallErrorCode::SpawnFailed,
+        message: format!("update task join failed: {e}"),
+    })?
+}
+
 /// Bootstrap Node.js into ~/.fleet/node (dsh's npm prerequisite on a blank
 /// machine). Streams progress on the same `harness-install-progress` channel
 /// with source "node".
