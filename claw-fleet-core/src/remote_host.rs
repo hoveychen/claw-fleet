@@ -242,13 +242,10 @@ fn validate_ssh_target(target: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Run `remote_cmd` on `ssh_target` and return its stdout.
-///
-/// `ssh_target` is split on whitespace into argv words — that is what lets it
-/// carry `-p 2222 -i /key -J jump user@host` as well as a bare ssh-config
-/// alias. `BatchMode=yes` means a host needing an interactive passphrase fails
-/// fast instead of hanging on a prompt nobody can see.
-pub fn ssh_exec(ssh_target: &str, remote_cmd: &str) -> Result<String, String> {
+/// The full ssh argv for running `remote_cmd` on `ssh_target` — shared by the
+/// one-shot [`ssh_exec`] and the streaming install runner
+/// ([`ssh_harness_install_plan`]) so the option set cannot drift.
+fn ssh_argv(ssh_target: &str, remote_cmd: &str) -> Result<Vec<String>, String> {
     validate_ssh_target(ssh_target)?;
     let mut args: Vec<String> = vec![
         "-o".into(),
@@ -260,6 +257,17 @@ pub fn ssh_exec(ssh_target: &str, remote_cmd: &str) -> Result<String, String> {
     ];
     args.extend(ssh_target.split_whitespace().map(String::from));
     args.push(remote_cmd.to_string());
+    Ok(args)
+}
+
+/// Run `remote_cmd` on `ssh_target` and return its stdout.
+///
+/// `ssh_target` is split on whitespace into argv words — that is what lets it
+/// carry `-p 2222 -i /key -J jump user@host` as well as a bare ssh-config
+/// alias. `BatchMode=yes` means a host needing an interactive passphrase fails
+/// fast instead of hanging on a prompt nobody can see.
+pub fn ssh_exec(ssh_target: &str, remote_cmd: &str) -> Result<String, String> {
+    let args = ssh_argv(ssh_target, remote_cmd)?;
 
     let mut cmd = crate::process_util::command("ssh");
     cmd.args(&args);
@@ -525,6 +533,106 @@ pub fn host_health(ssh_target: &str) -> HostHealth {
     }
 }
 
+// ── Harness environment on a remote host (environment wizard phase 2) ────────
+
+/// The one-round-trip probe script behind [`remote_harness_statuses`]. Tab
+/// separated: one `BIN\t<name>\t<path>\t<version-line>` per harness, then
+/// `AUTH\tclaude\t0|1` / `AUTH\tcodex\t0|1` (credential *files* — see the
+/// parse fn for what that can and cannot claim).
+fn harness_probe_script() -> String {
+    format!(
+        "{path}for b in claude codex dsh; do \
+           p=$(command -v \"$b\" 2>/dev/null || true); \
+           if [ -n \"$p\" ]; then v=$(\"$b\" --version 2>/dev/null | head -1); else v=''; fi; \
+           printf 'BIN\\t%s\\t%s\\t%s\\n' \"$b\" \"$p\" \"$v\"; \
+         done; \
+         [ -f \"$HOME/.claude/.credentials.json\" ] && ca=1 || ca=0; \
+         [ -f \"$HOME/.codex/auth.json\" ] && cx=1 || cx=0; \
+         printf 'AUTH\\tclaude\\t%s\\n' \"$ca\"; printf 'AUTH\\tcodex\\t%s\\n' \"$cx\"",
+        path = "export PATH=\"$HOME/.local/bin:$HOME/.fleet/node/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; "
+    )
+}
+
+/// Parse the probe reply into the same [`crate::harness_status::HarnessStatus`]
+/// shape the local probe produces, with honest gaps:
+/// - `channel` is `None` — classifying install channels remotely would need
+///   more round trips than the badge is worth;
+/// - claude `logged_in` is `Some(true)` when `~/.claude/.credentials.json`
+///   exists and `None` (unknown) otherwise — a macOS host keeps the credential
+///   in the keychain, which a BatchMode ssh cannot read, so "no file" must not
+///   claim "not logged in";
+/// - codex auth.json is the CLI's actual store on every platform, so absence
+///   reads as `Some(false)`;
+/// - dsh has no login concept (same as locally).
+pub(crate) fn parse_harness_probe(raw: &str) -> Vec<crate::harness_status::HarnessStatus> {
+    use crate::harness_status::HarnessStatus;
+    let mut claude_auth: Option<bool> = None;
+    let mut codex_auth = false;
+    let mut bins: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        match parts.as_slice() {
+            ["BIN", name, path, version] => {
+                let path = (!path.is_empty()).then(|| path.to_string());
+                let version = crate::harness_status::parse_version_token(version);
+                bins.push((name.to_string(), path, version));
+            }
+            ["AUTH", "claude", flag] => claude_auth = (*flag == "1").then_some(true),
+            ["AUTH", "codex", flag] => codex_auth = *flag == "1",
+            _ => {}
+        }
+    }
+    ["claude", "codex", "dsh"]
+        .iter()
+        .map(|name| {
+            let (path, version) = bins
+                .iter()
+                .find(|(n, _, _)| n == name)
+                .map(|(_, p, v)| (p.clone(), v.clone()))
+                .unwrap_or((None, None));
+            let source = match *name {
+                "claude" => "claude-code",
+                other => other,
+            };
+            let logged_in = match *name {
+                "claude" => claude_auth, // Some(true) or unknown — see doc.
+                "codex" => Some(codex_auth),
+                _ => None,
+            };
+            HarnessStatus {
+                source: source.to_string(),
+                installed: path.is_some(),
+                path,
+                version,
+                channel: None,
+                logged_in,
+                auth_detail: None,
+            }
+        })
+        .collect()
+}
+
+/// Probe the three harnesses on a remote host — one ssh round trip.
+pub fn remote_harness_statuses(
+    ssh_target: &str,
+) -> Result<Vec<crate::harness_status::HarnessStatus>, String> {
+    let reply = ssh_exec(ssh_target, &harness_probe_script())?;
+    Ok(parse_harness_probe(&reply))
+}
+
+/// The streaming plan for installing `source` on a remote host: `ssh <target>
+/// '<official installer script>'`, runnable through
+/// [`crate::harness_install::run_streaming`] so installer output lines reach
+/// the wizard exactly like a local install's do.
+pub fn ssh_harness_install_plan(
+    ssh_target: &str,
+    source: &str,
+) -> Result<crate::harness_install::InstallPlan, String> {
+    let script = crate::harness_install::install_shell_script(source).map_err(|e| e.message)?;
+    let args = ssh_argv(ssh_target, &script)?;
+    Ok(crate::harness_install::InstallPlan { program: "ssh".into(), args, envs: vec![] })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,6 +770,51 @@ mod tests {
     }
 
     #[test]
+    fn parses_harness_probe_reply_with_honest_auth_gaps() {
+        let reply = "BIN\tclaude\t/home/u/.local/bin/claude\t2.1.246 (Claude Code)\n\
+                     BIN\tcodex\t\t\n\
+                     BIN\tdsh\t/usr/local/bin/dsh\t0.1.1-rc.2\n\
+                     AUTH\tclaude\t0\n\
+                     AUTH\tcodex\t0\n";
+        let s = parse_harness_probe(reply);
+        assert_eq!(s.len(), 3);
+        assert_eq!(s[0].source, "claude-code");
+        assert!(s[0].installed);
+        assert_eq!(s[0].version.as_deref(), Some("2.1.246"));
+        // No credentials *file* must read as unknown, not "logged out" — a
+        // macOS host keeps the credential in the keychain.
+        assert_eq!(s[0].logged_in, None);
+        assert_eq!(s[1].source, "codex");
+        assert!(!s[1].installed);
+        // codex auth.json is the real store everywhere → absence is a real no.
+        assert_eq!(s[1].logged_in, Some(false));
+        assert_eq!(s[2].source, "dsh");
+        assert!(s[2].installed);
+        assert_eq!(s[2].logged_in, None);
+
+        let with_auth = reply.replace("AUTH\tclaude\t0", "AUTH\tclaude\t1")
+            .replace("AUTH\tcodex\t0", "AUTH\tcodex\t1");
+        let s = parse_harness_probe(&with_auth);
+        assert_eq!(s[0].logged_in, Some(true));
+        assert_eq!(s[1].logged_in, Some(true));
+    }
+
+    #[test]
+    fn ssh_install_plan_wraps_official_script() {
+        let plan = ssh_harness_install_plan("user@host", "codex").unwrap();
+        assert_eq!(plan.program, "ssh");
+        assert!(plan.args.contains(&"user@host".to_string()));
+        let script = plan.args.last().unwrap();
+        assert!(script.contains("chatgpt.com/codex/install.sh"));
+        assert!(script.contains("CODEX_NON_INTERACTIVE=1"));
+        // dsh script guards on npm with the structured exit code.
+        let dsh = ssh_harness_install_plan("user@host", "dsh").unwrap();
+        assert!(dsh.args.last().unwrap().contains("exit 42"));
+        // Metachar-carrying targets are refused before any shell sees them.
+        assert!(ssh_harness_install_plan("host; rm -rf /", "codex").is_err());
+    }
+
+    #[test]
     fn ssh_target_rejects_shell_metacharacters_but_allows_arg_fragments() {
         assert!(validate_ssh_target("own-api-ko").is_ok());
         assert!(validate_ssh_target("-p 2222 -i /home/me/key me@box").is_ok());
@@ -781,6 +934,18 @@ mod tests {
     /// remote_host::tests::live -- --ignored --nocapture`.
     fn live_target() -> String {
         std::env::var("FLEET_TEST_SSH_TARGET").unwrap_or_else(|_| "own-api-ko".to_string())
+    }
+
+    #[test]
+    #[ignore = "needs a reachable ssh host"]
+    fn live_harness_probe_reads_a_real_host() {
+        let t = live_target();
+        let statuses = remote_harness_statuses(&t).expect("probe");
+        for s in &statuses {
+            eprintln!("{s:?}");
+        }
+        assert_eq!(statuses.len(), 3);
+        assert_eq!(statuses[0].source, "claude-code");
     }
 
     #[test]

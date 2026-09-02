@@ -2483,6 +2483,11 @@
       "codex": "还没有安装 Codex CLI,没法启动这个会话。",
       "dsh": "还没有安装 dsh,没法启动这个会话。"
     },
-    "open_env_panel": "去环境面板修复"
+    "open_env_panel": "去环境面板修复",
+    "remote_hosts": "远端主机(rca workspace)",
+    "probe_host": "检测该主机",
+    "pairing_no_actions": "配对码通道,暂不支持环境操作(需 ssh 通道)",
+    "login_unknown": "登录状态未知",
+    "remote_codex_device_hint": "在任意设备打开下方链接并输入代码完成授权;远端主机会自动轮询直到通过。"
   }
 }
