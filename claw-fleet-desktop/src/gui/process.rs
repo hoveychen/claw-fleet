@@ -150,6 +150,29 @@ pub(crate) fn create_dir(
     state.backend.read().unwrap().create_dir(path, name)
 }
 
+/// List directories on an rca executor host — the picker one ssh hop past
+/// [`browse_dir`]. Through the backend because the ssh has to originate where
+/// the session will spawn (that host owns the keys and the ssh-config aliases).
+#[tauri::command(async)]
+pub(crate) fn remote_browse_dir(
+    state: tauri::State<'_, AppState>,
+    ssh_target: String,
+    path: Option<String>,
+) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+    state.backend.read().unwrap().remote_browse_dir(ssh_target, path)
+}
+
+/// Probe one rca executor host (reachable / rca installed / speaks `--stdio`).
+/// Never fails: an unreachable host comes back as a status with a reason, which
+/// is what a badge needs.
+#[tauri::command(async)]
+pub(crate) fn remote_host_health(
+    state: tauri::State<'_, AppState>,
+    ssh_target: String,
+) -> claw_fleet_core::remote_host::HostHealth {
+    state.backend.read().unwrap().remote_host_health(ssh_target)
+}
+
 /// Remote-workspace registry (rca-routed workspaces) — list / upsert / remove.
 /// All three delegate through the backend: the registry lives on the host
 /// where sessions spawn (the probe host under a remote connection).

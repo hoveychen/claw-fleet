@@ -366,6 +366,24 @@ pub trait Backend: Send + Sync {
         path: Option<String>,
         name: String,
     ) -> Result<crate::workspace_browse::BrowseDirResponse, String>;
+    /// List directories on an rca executor host, one ssh hop past the backend.
+    ///
+    /// `browse_dir` above lists the backend host's own disk; this lists a host
+    /// that host can ssh into. Both answer with the same shape so one picker
+    /// component renders either. Must go through the backend because the ssh
+    /// must originate wherever the session will spawn — that machine holds the
+    /// keys and the `~/.ssh/config` aliases, and it is the one whose local
+    /// mirror directory has to match.
+    fn remote_browse_dir(
+        &self,
+        ssh_target: String,
+        path: Option<String>,
+    ) -> Result<crate::workspace_browse::BrowseDirResponse, String>;
+    /// Probe one rca executor host: reachable, rca installed, `serve --stdio`
+    /// supported. Same backend reasoning as [`Backend::remote_browse_dir`].
+    /// Infallible by design — an unreachable host is a renderable status, not
+    /// an error the caller has to branch on.
+    fn remote_host_health(&self, ssh_target: String) -> crate::remote_host::HostHealth;
     /// The remote-workspace registry (workspaces executed through rca; see
     /// [`crate::remote_workspace`]). Lives on the backend host — that is where
     /// sessions spawn, so that is whose `~/.fleet/remote-workspaces.json`
