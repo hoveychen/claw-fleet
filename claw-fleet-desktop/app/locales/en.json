@@ -848,6 +848,7 @@
   "cancel": "Cancel",
   "confirm": "Confirm",
   "save": "Save",
+  "edit": "Edit",
   "loading": "Loading…",
   "update": {
     "available": "New version {{version}} is available!",
