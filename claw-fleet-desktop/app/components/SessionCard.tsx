@@ -188,21 +188,68 @@ export function ServerErrorControls({ session }: { session: SessionInfo }) {
  */
 export function RemoteDisconnectNotice({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
+  const [resuming, setResuming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const info = session.remoteDisconnect;
   if (!info) return null;
   const host = info.hostLabel || t("remoteDisconnect.host_fallback");
   const stopped = info.agentStopped;
+  // Nothing retries this state automatically, by decision: `rca serve` is
+  // per-run, so a reconnect is a NEW remote run, not the interrupted one coming
+  // back. Reopening is therefore the user's call, not a background scheduler's —
+  // but the retry itself is one click, not a trip through the composer.
+  // `resume_rate_limited_session` is the same command the rate-limit and
+  // server-error controls use; the backend drops the disconnect record on the
+  // way in, so the card unpins itself.
+  const handleReopen = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (resuming) return;
+    setResuming(true);
+    setError(null);
+    try {
+      await invoke("resume_rate_limited_session", {
+        sessionId: session.id,
+        workspacePath: session.workspacePath,
+        agentSource: session.agentSource,
+      });
+    } catch (err) {
+      setError(resumeErrorText(err));
+    } finally {
+      setResuming(false);
+    }
+  };
+  // Same resumability gate as the other two controls.
+  const RESUMABLE_SOURCES = ["claude-code", "codex"];
+  const canReopen =
+    !session.isSubagent && !session.ideName && RESUMABLE_SOURCES.includes(session.agentSource);
   return (
-    <span
-      className={`${styles.remote_disconnect} ${stopped ? "" : styles.remote_disconnect_unstopped}`}
-      title={t(stopped ? "remoteDisconnect.tip" : "remoteDisconnect.tip_not_stopped", {
-        host,
-        detail: info.detail,
-      })}
-    >
-      <ServerOff size={10} strokeWidth={1.9} />
-      {t(stopped ? "remoteDisconnect.badge" : "remoteDisconnect.badge_not_stopped")}
-    </span>
+    <>
+      <span
+        className={`${styles.remote_disconnect} ${stopped ? "" : styles.remote_disconnect_unstopped}`}
+        title={t(stopped ? "remoteDisconnect.tip" : "remoteDisconnect.tip_not_stopped", {
+          host,
+          detail: info.detail,
+        })}
+      >
+        <ServerOff size={10} strokeWidth={1.9} />
+        {t(stopped ? "remoteDisconnect.badge" : "remoteDisconnect.badge_not_stopped")}
+      </span>
+      {error && (
+        <span className={styles.resume_error} title={error}>
+          {error}
+        </span>
+      )}
+      {canReopen && (
+        <button
+          className={styles.resume_btn}
+          onClick={handleReopen}
+          disabled={resuming}
+          title={t("remoteDisconnect.reopen_tip", { host })}
+        >
+          {resuming ? "…" : <Play size={12} strokeWidth={1.75} />}
+        </button>
+      )}
+    </>
   );
 }
 

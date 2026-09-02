@@ -224,3 +224,32 @@ tick 2 FAILED: FileNotFoundError: No such file or directory: '/private/tmp/ssh-k
 
 信号来源已确定：rca 的 stderr。Fleet 本来就在收每个会话的 stderr
 （`session_launch` 的 `stderr_log`），所以接这条线不需要改 rca。
+
+### 落地：老板 2026-09-02 拍板 —— 停会话 + 明确报错，不自动重连
+
+上面那条待拍板的取舍有结论了：**检测到断线就停会话并说清原因，不自动重连。**
+
+理由是 `rca serve` 是 per-run 的：断掉的那次远端运行已经没了，重连只会开出
+一次**新的**远端运行，而不是把中断的那次接回来。所以"自动重连"这个词在这里
+名不副实——它给人一种"现场恢复了"的错觉，实际上恢复的只是隧道。既然它不能
+自动恢复现场，就不该由后台调度器代替人做这个决定。
+
+**「不自动重连」不等于「让人自己去 composer 里重开」。** 卡片上有一个一键
+重开按钮，走的就是限流/服务器错误那两个控件用的同一个 `resume_session`
+命令（因此没有新的 Tauri 命令，也不需要动 liveProxy 的路由表）。差别只在
+于：这一下是人按的。
+
+#### 实现落点（三处，都在 `prd/rca-ssh-resilience`）
+
+| 环节 | 落点 |
+|------|------|
+| 信号 | `remote_disconnect::transport_failure_marker` —— rca 的三条传输失败串（`remote dial/send/recv failed:`）。取自二进制本体的格式串，不是从单次观测里推的；刻意收窄到这三条，免得把 agent 自己工具打出来的网络错误也当成断线 |
+| 止损 | `session_launch` 里仅对 rca 包装的会话把 stderr 改 `piped`，监视线程照原样把每行写回同一个日志文件，命中 marker 就 `kill_pid_tree(pid, force)`。非 rca 会话的 stderr 通路一字未动 |
+| 告知 | `~/.fleet/remote-disconnect/<session-id>.json` + scan 期 `enrich_sessions`，并新增 `SessionStatus::RemoteDisconnected`。为什么要新状态：被杀掉的会话 transcript 一分钟内就衰减成 `Idle`，屏幕上和"正常收工"长得一模一样 |
+| 恢复 | 卡片上的重开按钮；三个用户发起的 resume 入口（桌面 / `fleet serve` / 手机）都会先把记录清掉，链路还是不通就会在一秒内写一条新的 |
+
+#### 一个刻意留下的差别态
+
+记录里带 `agentStopped`。kill 失败时（`false`）文案和配色都不一样——那是唯一
+一个"agent 可能正对着空目录继续写"的状态，需要人去看一眼进程，不能和已经
+处理好的情况长成一个样子。
