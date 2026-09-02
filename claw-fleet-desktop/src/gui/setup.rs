@@ -51,6 +51,14 @@ pub(crate) struct HarnessInstallProgress {
     line: String,
 }
 
+impl HarnessInstallProgress {
+    /// For emitters outside this module (remote install streams the same
+    /// channel with a `remote:<path>:<source>` key).
+    pub(crate) fn new(source: String, line: String) -> Self {
+        HarnessInstallProgress { source, line }
+    }
+}
+
 /// Install a harness via its official installer (see
 /// `claw_fleet_core::harness_install`). Desktop-layer command like
 /// `install_rca_remote` — install *actions* are local-machine phase 1; the

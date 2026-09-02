@@ -25,6 +25,8 @@ mod decision;
 mod permissions;
 mod notification;
 mod setup;
+// Remote harness install (remote.rs) emits the same progress event shape.
+pub(crate) use setup::HarnessInstallProgress;
 mod process;
 mod proc_runner;
 mod sessions;
@@ -2088,6 +2090,8 @@ pub fn run() {
             remote::connect_remote,
             remote::install_rca_remote,
             remote::update_rca_remote,
+            remote::remote_workspace_harness_statuses,
+            remote::install_harness_remote,
             remote::disconnect_remote,
             pick_file,
             get_source_account,
