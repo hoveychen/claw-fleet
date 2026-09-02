@@ -428,7 +428,7 @@ export function MobileView() {
                     <p className={styles.qrHint}>
                       {t(
                         "mobile_direct_hint",
-                        "手机扫这张码就把「地址 + token」一起加成一台直连设备。地址要填手机能访问到的那个（https，隧道或反代都行；明文 http 会被手机浏览器拦掉），token 默认取本机 ~/.fleet/token，也可以手填云端或反代那套。",
+                        "手机扫这张码就把「地址 + token」一起加成一台直连设备。填的是另一台已经部署好的 Fleet 主机（云容器、或反代后面那台）能被手机访问到的地址，加上它的 admin token。地址必须是 https —— 明文 http 会被手机浏览器拦掉。",
                       )}
                     </p>
                     <div className={styles.fieldRow}>
@@ -452,8 +452,11 @@ export function MobileView() {
                         value={directTokenDraft}
                         placeholder={
                           direct.tokenPresent && !direct.tokenManual
-                            ? t("mobile_direct_token_local", "留空 = 用本机 ~/.fleet/token")
-                            : t("mobile_direct_token_needed", "这台还没有 token,填一个")
+                            ? t(
+                                "mobile_direct_token_local",
+                                "留空 = 用本机 ~/.fleet/token（只有本机正跑着 serve 时才有）",
+                              )
+                            : t("mobile_direct_token_needed", "填那台主机的 admin token")
                         }
                         spellCheck={false}
                         onChange={(e) => setDirectTokenDraft(e.target.value)}
@@ -502,7 +505,7 @@ export function MobileView() {
                       <div className={styles.directWarn}>
                         {t(
                           "mobile_direct_no_token",
-                          "这台机器上没有带 token 的 serve 跑过（~/.fleet/token 为空）。直连必须过 token 门 —— 跨源本来也只对带 token 的端点开放。跑一个 `fleet serve --token <值>`，或在上面手填云端/反代那套 token。",
+                          "本机没有在跑的 serve —— ~/.fleet/token 为空是正常的，桌面端不监听 HTTP。直连要指向的是另一台已经部署好的 Fleet 主机：填它的地址与 admin token（云容器就是 FLEET_ADMIN_TOKEN 那个值）。",
                         )}
                       </div>
                     )}
