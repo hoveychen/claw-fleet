@@ -2405,5 +2405,8 @@
       "text": "Text",
       "other": "Other"
     }
+  },
+  "markdown": {
+    "render_rest": "Render the remaining {{n}} sections"
   }
 }
