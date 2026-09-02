@@ -90,6 +90,8 @@ const DICT: Record<string, string> = {
   静音: "Mute",
   扫码添加设备: "Add a device by QR",
   添加直连主机: "Add a direct host",
+  "正在加入 {0}…": "Adding {0}…",
+  "加入 {0} 失败:{1}": "Couldn't add {0}: {1}",
   "填 fleet serve 的地址与 token,不经中转":
     "Enter a fleet serve address and token — no relay in between",
   "token(~/.fleet/token)": "token (~/.fleet/token)",

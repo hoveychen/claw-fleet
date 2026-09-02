@@ -1418,6 +1418,11 @@ fn handle_request(
             crate::routes::MOBILE_RELAY_STATUS => route_mobile_relay_status(ctx, request, &query, json_header, path),
 
             crate::routes::MOBILE_RELAY_QR => route_mobile_relay_qr(ctx, request, &query, json_header, path),
+
+            crate::routes::DIRECT_HOST_STATUS => route_direct_host_status(ctx, request, &query, json_header, path),
+            crate::routes::DIRECT_HOST_SET if request.method() == &tiny_http::Method::Post => route_direct_host_set(ctx, request, &query, json_header, path),
+            crate::routes::DIRECT_HOST_QR => route_direct_host_qr(ctx, request, &query, json_header, path),
+            crate::routes::DIRECT_HOST_URL => route_direct_host_url(ctx, request, &query, json_header, path),
             crate::routes::MOBILE_RELAY_PAIRING_URL => route_mobile_relay_pairing_url(ctx, request, &query, json_header, path),
 
             crate::routes::MOBILE_RPC if request.method() == &tiny_http::Method::Post => {

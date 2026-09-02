@@ -47,7 +47,7 @@ import {
   addPendingUnsub,
   adoptScannedDevice,
   clearBook,
-  consumeHashSecret,
+  consumeHashPairing,
   dropPendingUnsub,
   emptyBook,
   loadBookFromIdb,
@@ -157,18 +157,38 @@ const EMPTY_DEVICE_STATE = emptyDeviceState();
 export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
   const { t } = useI18n();
+  // 这一次打开若带着直连那张码的 fragment(`#h=`),先记在这里 —— 它要**先探再
+  // 入册**,而探测是异步的,不能在下面那个 useState 初始化器里做。用 ref 而不是
+  // state:它只被读一次,放进 state 只会多一次无意义的重渲。
+  const linkHostRef = useRef<{ baseUrl: string; token: string | null } | null>(null);
+  /** 从链接加入的那台主机此刻处于什么状态 —— 界面用它显示一行横幅。 */
+  const [linkHostState, setLinkHostState] = useState<
+    { phase: "adding"; baseUrl: string } | { phase: "failed"; baseUrl: string; why: string } | null
+  >(null);
   // 这台手机配对过的每一台 Fleet（devices.ts）。`?mock` 与同源形态都没有配对
   // 这回事，簿子留空，下面的 `secret` 直接给占位串。
   const [book, setBook] = useState<DeviceBook>(() => {
     if (MOCK || !NEEDS_PAIRING) return emptyBook();
     const stored = loadBookSync(newDeviceMint(emptyBook()));
-    // PWA 是被一个带 `#k=…` 的 URL 打开的 —— 那就是一次配对。
-    const scanned = consumeHashSecret();
+    // 这一次打开是不是带着「加一台设备」的 fragment(`#k=` 配对 / `#h=` 直连)。
+    const scanned = consumeHashPairing();
     if (!scanned) return stored;
-    return adoptScannedDevice(stored, scanned.secret, newDeviceMint(stored), scanned.relayBase, {
-      // 壳的启动重注不抢焦点:用户切过去的那一台不该每次重开 app 就被打回原形。
-      focus: !scanned.boot,
-    }).book;
+    if (scanned.kind === "relay") {
+      return adoptScannedDevice(
+        stored,
+        scanned.secret,
+        newDeviceMint(stored),
+        scanned.relayBase,
+        {
+          // 壳的启动重注不抢焦点:用户切过去的那一台不该每次重开 app 就被打回原形。
+          focus: !scanned.boot,
+        },
+      ).book;
+    }
+    // 直连那张码要**先探再入册**(与手填那条路同一条规则),而探测是异步的 ——
+    // 所以这里只把它记下来,交给下面那个 effect。
+    linkHostRef.current = scanned;
+    return stored;
   });
   // 当前作用域设备的密钥。`?mock` stands in for a pairing secret so the gate
   // below opens and the effect that builds the client runs — it just builds a
@@ -672,6 +692,46 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     }
   }, [runtimeDevices, activeDeviceId]);
 
+  // 从「直连二维码」进来的那一台:先探再入册,与手填那条路同一条规则(填错的那台
+  // 若直接进了列表,就会安静地停在「连接中…」而原因看不出来)。探测失败时把原因
+  // 显示成一行横幅 —— 用户刚扫了一张码,不该只看到「什么都没发生」。
+  useEffect(() => {
+    const link = linkHostRef.current;
+    if (!link) return;
+    setLinkHostState({ phase: "adding", baseUrl: link.baseUrl });
+    void (async () => {
+      const result = await probeHost(link.baseUrl, link.token);
+      if (!result.ok) {
+        setLinkHostState({
+          phase: "failed",
+          baseUrl: link.baseUrl,
+          why: translate(probeMessage(result)),
+        });
+        return;
+      }
+      linkHostRef.current = null;
+      setBook((prev) => {
+        const mint = newDeviceMint(prev);
+        const next = addHttpDevice(prev, {
+          baseUrl: link.baseUrl,
+          token: link.token,
+          label: hostLabel(link.baseUrl, mint.label),
+          id: mint.id,
+          now: mint.now,
+        });
+        persistBook(next.book);
+        return next.book;
+      });
+      setLinkHostState(null);
+    })();
+    // **刻意不做取消。** 这次「加设备」是一个全局副作用(要落盘),不是一次可以
+    // 丢掉的渲染结果。StrictMode 在开发下会挂载→卸载→再挂载,如果按常规写法在
+    // 清理函数里置 cancelled,第一趟的探测结果会被丢掉、而第二趟又因为 ref 已被
+    // 清空而什么都不做 —— 于是扫码进来的那台**永远加不上**(实测:书还是 null,
+    // 界面停在配对引导页)。
+    // 双跑是安全的:addHttpDevice 按 baseUrl 去重,ref 也只在成功后才清。
+  }, []);
+
   /** 添加一台 HTTP 直连主机。**先探再入册** —— 填错的那台若直接进了列表,就会
    *  安静地停在「连接中…」,而失败的原因(地址 / token / 没开跨源 / 混合内容)
    *  在界面上完全看不出来。返回 null 表示成功,否则是该显示给用户的那句话。 */
@@ -943,6 +1003,25 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           >
             {t("知道了")}
           </button>
+        </div>
+      )}
+
+      {/* 从直连二维码进来的那一台。成功就静默(那台已经出现在设备列表里了),
+          失败必须说出来 —— 用户刚扫了一张码。 */}
+      {linkHostState && (
+        <div className={styles.pushBanner}>
+          {linkHostState.phase === "adding" ? (
+            <span>{t("正在加入 {0}…", linkHostState.baseUrl)}</span>
+          ) : (
+            <>
+              <span>
+                {t("加入 {0} 失败:{1}", linkHostState.baseUrl, linkHostState.why)}
+              </span>
+              <button className={styles.pushButton} onClick={() => setLinkHostState(null)}>
+                {t("知道了")}
+              </button>
+            </>
+          )}
         </div>
       )}
 
