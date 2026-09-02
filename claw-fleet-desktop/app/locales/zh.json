@@ -269,6 +269,7 @@
     "start_timeout": "启动较慢，可再等等，或从左侧列表里查看",
     "remote_badge": "rca 远端执行",
     "browse_on_host": "在 {{host}} 上浏览…",
+    "add_remote_host": "添加远端主机…",
     "remote_register_failed": "无法把 {{path}} 注册为远端 workspace：{{error}}　—— 这个绝对路径必须在本机也能创建（macOS 建不了 /home/…）。换一个两台机器都能用的路径。"
   },
   "launcher": {
