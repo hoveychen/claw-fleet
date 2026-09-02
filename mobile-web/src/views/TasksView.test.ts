@@ -173,3 +173,50 @@ describe("statusTone quiet-alive", () => {
     expect(statusTone(row({ status: "waitingInput", procAlive: true }))).toBe("waiting");
   });
 });
+
+// 合并列表里的每一条都必须一路带着它属于哪一台设备：折叠成接力组、再从组里
+// 取出成员之后，deviceId 不能在中途掉队 —— 掉了就只能猜，而猜错就是拿另一台
+// 的 transport 去拉一条它根本不认识的会话。
+describe("device tag survives grouping", () => {
+  const hop = (id: string, deviceId: string, chainId: string, n: number) =>
+    ({
+      id,
+      deviceId,
+      workspacePath: "/w",
+      workspaceName: "n",
+      status: "idle",
+      handoff: { chainId, chainLen: 2, hop: n },
+    }) as unknown as SessionInfo & { deviceId: string };
+
+  it("carries deviceId through a collapsed relay group", () => {
+    const items = buildRenderItems(
+      [hop("s2", "dev-a", "c1", 2), hop("s1", "dev-a", "c1", 1)],
+      true,
+    );
+    expect(items).toHaveLength(1);
+    const group = items[0];
+    if (group.kind !== "group") throw new Error("expected a group");
+    expect(group.tip.deviceId).toBe("dev-a");
+    expect(group.members.map((m) => m.deviceId)).toEqual(["dev-a", "dev-a"]);
+  });
+
+  it("never folds two devices' same-id chains into one group", () => {
+    const items = buildRenderItems(
+      [
+        hop("s2", "dev-a", "c1", 2),
+        hop("s1", "dev-a", "c1", 1),
+        hop("s2", "dev-b", "c1", 2),
+        hop("s1", "dev-b", "c1", 1),
+      ],
+      true,
+    );
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      if (item.kind !== "group") throw new Error("expected two groups");
+      const devices = new Set(item.members.map((m) => m.deviceId));
+      expect(devices.size).toBe(1);
+    }
+    // React key 也必须分家,否则两组共用一个 key。
+    expect(items[0].key).not.toBe(items[1].key);
+  });
+});

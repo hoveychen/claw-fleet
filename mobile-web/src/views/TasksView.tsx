@@ -23,6 +23,7 @@ import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isFleetOwnedTask, isSessionUnread } from "../types";
 import { useDraft } from "../draft";
 import { useDeviceDraft } from "../deviceScope";
+import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import styles from "./TasksView.module.css";
@@ -182,21 +183,23 @@ const GROUP_VISIBLE = 3;
 const GROUP_LOAD_STEP = 10;
 
 /** Highest-hop (tip / latest relay) member — the chain's "current" session. */
-function chainTip(members: SessionInfo[]): SessionInfo {
+function chainTip<T extends SessionInfo>(members: T[]): T {
   return members.reduce((a, b) => ((b.handoff?.hop ?? 0) > (a.handoff?.hop ?? 0) ? b : a));
 }
 
 /** One entry in the rendered task list: either a standalone session or a
  *  collapsed handoff-relay chain. */
-type RenderItem =
-  | { kind: "single"; key: string; session: SessionInfo }
+// 泛型是为了让 deviceId 一路带到渲染:调用方传进来的是 WithDevice<SessionInfo>,
+// 折叠成接力组之后每一项仍然要知道自己属于哪一台设备。
+type RenderItem<T extends SessionInfo = SessionInfo> =
+  | { kind: "single"; key: string; session: T }
   | {
       kind: "group";
       key: string;
       chainId: string;
       chainLen: number;
-      tip: SessionInfo;
-      members: SessionInfo[];
+      tip: T;
+      members: T[];
     };
 
 /**
@@ -208,35 +211,49 @@ type RenderItem =
  * newest-hop-first so "show last N" reveals the recent relays first. Same shape
  * as the desktop launchpad's `buildRenderItems`.
  */
-export function buildRenderItems(rows: SessionInfo[], group: boolean): RenderItem[] {
-  if (!group) return rows.map((s) => ({ kind: "single", key: s.id, session: s }));
-  const items: RenderItem[] = [];
+export function buildRenderItems<T extends SessionInfo & { deviceId?: string }>(
+  rows: T[],
+  group: boolean,
+): Array<RenderItem<T>> {
+  // 合并列表里 id 只在单机内唯一,所以分组键与 React key 都带上归属设备。
+  // 不带的话两台机器上碰巧同 chainId 的接力链会被折进同一组,展开后是一串
+  // 属于不同机器的会话 —— 点进去就是拿错设备的 transport 去拉一条它不认识的
+  // 会话。
+  const scope = (s: T) => s.deviceId ?? "";
+  if (!group)
+    return rows.map((s) => ({ kind: "single", key: `${scope(s)}::${s.id}`, session: s }));
+  const items: Array<RenderItem<T>> = [];
   const groupAt = new Map<string, number>();
   for (const s of rows) {
     const cid = s.handoff && s.handoff.chainLen > 1 ? s.handoff.chainId : null;
     if (!cid) {
-      items.push({ kind: "single", key: s.id, session: s });
+      items.push({ kind: "single", key: `${scope(s)}::${s.id}`, session: s });
       continue;
     }
-    const at = groupAt.get(cid);
+    const groupKey = `${scope(s)}::${cid}`;
+    const at = groupAt.get(groupKey);
     if (at === undefined) {
-      groupAt.set(cid, items.length);
+      groupAt.set(groupKey, items.length);
       items.push({
         kind: "group",
-        key: `chain:${cid}`,
+        key: `chain:${groupKey}`,
         chainId: cid,
         chainLen: s.handoff!.chainLen,
         tip: s,
         members: [s],
       });
     } else {
-      (items[at] as Extract<RenderItem, { kind: "group" }>).members.push(s);
+      (items[at] as Extract<RenderItem<T>, { kind: "group" }>).members.push(s);
     }
   }
   return items.map((it) => {
     if (it.kind !== "group") return it;
     if (it.members.length < 2) {
-      return { kind: "single", key: it.members[0].id, session: it.members[0] };
+      return {
+        kind: "single",
+        key: `${scope(it.members[0])}::${it.members[0].id}`,
+        session: it.members[0],
+      };
     }
     const members = [...it.members].sort((a, b) => b.handoff!.hop - a.handoff!.hop);
     return { ...it, tip: chainTip(members), members };
@@ -254,15 +271,17 @@ export function buildRenderItems(rows: SessionInfo[], group: boolean): RenderIte
  * glance that backs out shouldn't clear the tip). Already-read members are
  * skipped so we don't re-stamp them.
  */
-export function groupOpenReadTargets(
+export function groupOpenReadTargets<T extends SessionInfo>(
   tip: SessionInfo,
-  markMembers: SessionInfo[],
-): SessionInfo[] {
+  markMembers: T[],
+): T[] {
   return markMembers.filter((m) => m.id !== tip.id && isSessionUnread(m));
 }
 
 interface Props {
-  sessions: SessionInfo[];
+  /** 合并列表:每条会话都带着它属于哪一台设备(deviceRuntime.ts 的 WithDevice)。
+   *  id 只在单机内唯一,所以 React key 与「打开这一条」都必须带上 deviceId。 */
+  sessions: Array<WithDevice<SessionInfo>>;
   client: FleetTransport | null;
   /** WS link phone↔relay. */
   connected: boolean;
@@ -271,8 +290,8 @@ interface Props {
   /** Whether at least one `sessions` snapshot has arrived since connecting.
    *  Distinguishes "still waiting for the first push" from "pushed, but empty". */
   sessionsLoaded: boolean;
-  onOpenSession: (session: SessionInfo) => void;
-  onMarkRead: (sessions: SessionInfo[]) => void;
+  onOpenSession: (session: WithDevice<SessionInfo>) => void;
+  onMarkRead: (sessions: Array<WithDevice<SessionInfo>>) => void;
 }
 
 // 新会话入口由 App 底部导航中间的凸起按钮统一持有，任务页内不再重复放置。
@@ -435,7 +454,7 @@ export function TasksView({
   // aggregate done-state reflects the entire chain. `all` already folds in the
   // optimistic `markOverride`, so this reacts on tap.
   const chainMembersAll = useMemo(() => {
-    const m = new Map<string, SessionInfo[]>();
+    const m = new Map<string, Array<WithDevice<SessionInfo>>>();
     for (const s of all) {
       if (s.handoff && s.handoff.chainLen > 1) {
         const arr = m.get(s.handoff.chainId);
@@ -607,12 +626,12 @@ export function TasksView({
   // (with `group` set: adds an expand chevron + whole-chain mark), and the
   // members inside an expanded group, so all three stay identical.
   const renderCard = (
-    s: SessionInfo,
+    s: WithDevice<SessionInfo>,
     group?: {
       expanded: boolean;
       onToggleExpand: () => void;
       /** Whole-chain membership the mark toggle fans out across. */
-      markMembers: SessionInfo[];
+      markMembers: Array<WithDevice<SessionInfo>>;
     },
   ) => {
     // For a collapsed group the header card is the tip, but its dot and unread
@@ -631,7 +650,7 @@ export function TasksView({
     const live = LIVE.includes(s.status);
     return (
       <div
-        key={s.id}
+        key={itemKey(s.deviceId, s.id)}
         className={styles.card}
         onClick={() => {
           onOpenSession(s);
