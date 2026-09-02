@@ -819,6 +819,13 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     pick: "svg",
   }),
 
+  mobile_relay_pairing_url: (a) => ({
+    method: "GET",
+    path: "/mobile-relay/pairing-url",
+    query: { lang: q(a.lang) },
+    pick: "url",
+  }),
+
   mobile_relay_status: () => ({
     method: "GET",
     path: "/mobile-relay/status",
