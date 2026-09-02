@@ -51,9 +51,10 @@ pub fn render_guidance(locale: &str) -> String {
 \n\
 | 模型 | ID | 上下文 | 输入 $/1M | 输出 $/1M | 何时选 |\n\
 |---|---|---|---|---|---|\n\
-| Fable 5 | `claude-fable-5` | 1M | $10 | $50 | 最强推理 + 超长程 agentic;\
-thinking 常开、原始思维链不返回;需 30 天数据留存;比 Opus 贵一倍——只用在\
-最难的任务 |\n\
+| Fable 5.1 | `claude-fable-5-1` | 1M | $10 | $50 | 当前最强档。最强推理 + \
+超长程 agentic;thinking 常开、原始思维链不返回;需 30 天数据留存;比 Opus \
+贵一倍——只用在最难的任务。前代 `claude-fable-5` 同价仍可选(5.1 上强制 \
+tool_choice `any`/`tool` 会 400,5 没这限制)|\n\
 | Opus 5 | `claude-opus-5` | 1M | $5 | $25 | 默认主力。当前 Opus 档,自主 \
 agentic / 编码 / 长程任务;thinking 默认开启;前代 `claude-opus-4-8` 同价仍\
 可选 |\n\
@@ -106,10 +107,12 @@ and `cws dispatch`'s `--model`/`--effort`.\n\
 \n\
 | Model | ID | Context | In $/1M | Out $/1M | When to pick |\n\
 |---|---|---|---|---|---|\n\
-| Fable 5 | `claude-fable-5` | 1M | $10 | $50 | Strongest reasoning + \
-longest-horizon agentic; thinking always on, raw chain-of-thought never \
-returned; requires 30-day data retention; ~2x the price of Opus — reserve it \
-for the hardest tasks |\n\
+| Fable 5.1 | `claude-fable-5-1` | 1M | $10 | $50 | The current top tier. \
+Strongest reasoning + longest-horizon agentic; thinking always on, raw \
+chain-of-thought never returned; requires 30-day data retention; ~2x the price \
+of Opus — reserve it for the hardest tasks. The previous `claude-fable-5` is \
+still selectable at the same price (forced `tool_choice` `any`/`tool` returns \
+400 on 5.1; 5 has no such restriction) |\n\
 | Opus 5 | `claude-opus-5` | 1M | $5 | $25 | The default workhorse. Current \
 Opus tier: autonomous agentic / coding / long-horizon work; thinking on by \
 default; the previous `claude-opus-4-8` is still selectable at the same \
@@ -275,6 +278,7 @@ mod tests {
             let g = render_guidance(locale);
             // Claude family model IDs
             assert!(g.contains("claude-opus-5"), "{locale} must list Opus 5");
+            assert!(g.contains("claude-fable-5-1"), "{locale} must list Fable 5.1");
             assert!(g.contains("claude-fable-5"), "{locale} must list Fable 5");
             assert!(g.contains("claude-sonnet-5"), "{locale} must list Sonnet 5");
             assert!(g.contains("claude-haiku-4-5"), "{locale} must list Haiku 4.5");

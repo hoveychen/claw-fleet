@@ -668,7 +668,7 @@ Codex effort 档:`minimal` / `low` / `medium` / `high`(**没有** Claude 的 xhi
 \n\
 | 模型 | ID | 上下文 | 输入/输出 $/1M | 何时选 |\n\
 |---|---|---|---|---|\n\
-| Fable 5 | `claude-fable-5` | 1M | $10 / $50 | 最强推理+超长程;只用在最难任务 |\n\
+| Fable 5.1 | `claude-fable-5-1` | 1M | $10 / $50 | 最强推理+超长程;只用在最难任务(前代 `claude-fable-5` 同价仍可选)|\n\
 | Opus 5 | `claude-opus-5` | 1M | $5 / $25 | 默认主力,自主 agentic / 编码 / 长程任务(前代 `claude-opus-4-8` 同价仍可选) |\n\
 | Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15(有优惠)| 近 Opus 编码、成本更低;并行 subagent 首选 |\n\
 | Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | 最快最便宜;分类/抽取/机械活 |\n\
@@ -706,7 +706,7 @@ Codex effort levels: `minimal` / `low` / `medium` / `high` (**no** xhigh or max,
 \n\
 | Model | ID | Context | In/Out $/1M | When to pick |\n\
 |---|---|---|---|---|\n\
-| Fable 5 | `claude-fable-5` | 1M | $10 / $50 | Strongest reasoning + longest-horizon; reserve for the hardest tasks |\n\
+| Fable 5.1 | `claude-fable-5-1` | 1M | $10 / $50 | Strongest reasoning + longest-horizon; reserve for the hardest tasks (previous `claude-fable-5` still selectable, same price) |\n\
 | Opus 5 | `claude-opus-5` | 1M | $5 / $25 | Default workhorse: autonomous agentic / coding / long-horizon work (previous `claude-opus-4-8` still selectable, same price) |\n\
 | Sonnet 5 | `claude-sonnet-5` | 1M | $3 / $15 (intro pricing) | Near-Opus coding at lower cost; value pick for parallel subagents |\n\
 | Haiku 4.5 | `claude-haiku-4-5` | 200K | $1 / $5 | Fastest / cheapest; classification, extraction, mechanical work |\n\

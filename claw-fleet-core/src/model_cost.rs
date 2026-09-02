@@ -417,13 +417,16 @@ mod tests {
 
     #[test]
     fn fable_pricing() {
-        // Claude Fable 5: $10/$50 per Mtok. 1M input + 1M output = $60.
+        // Claude Fable 5 / 5.1: $10/$50 per Mtok. 1M input + 1M output = $60.
+        // `claude-fable-5-1` is covered by the same substring branch as its
+        // predecessor — it ships at the same price, so there is nothing to
+        // route separately, but the id must not fall through to a default tier.
         let usage = TurnUsage {
             input_tokens: 1_000_000,
             output_tokens: 1_000_000,
             ..Default::default()
         };
-        for model in ["claude-fable-5", "fable", "Claude-Fable-5"] {
+        for model in ["claude-fable-5", "claude-fable-5-1", "fable", "Claude-Fable-5"] {
             let cost = turn_cost_usd(model, &usage);
             assert!(
                 (cost - 60.0).abs() < 1e-9,
