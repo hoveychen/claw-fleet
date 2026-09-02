@@ -122,7 +122,7 @@ export function resolveRelayBase(
 
 /** Base URL for HTTP endpoints (/vapid) and the WebSocket.
  *
- *  Resolved once at module load: `loadSecretSync()` scrubs the fragment off the
+ *  Resolved once at module load: `consumeHashSecret()` scrubs the fragment off the
  *  URL right after boot (so the secret doesn't linger in the address bar), and
  *  every later caller — the first connect included — would then see a hash with
  *  no `relay=` in it. */

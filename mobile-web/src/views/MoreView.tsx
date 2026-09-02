@@ -7,7 +7,7 @@ import { dateLocale, useI18n, type Lang } from "../i18n";
 import type { RttSplit } from "../connQuality";
 import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
-import { clearSecret } from "../secretStore";
+import { clearBook } from "../devices";
 import { clearCachedSessions } from "../sessionCache";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
@@ -422,7 +422,7 @@ export function MoreView({
             className={styles.dangerRow}
             onClick={() => {
               if (window.confirm(t("清除本机配对密钥？需回到桌面端重新扫码才能再连接。"))) {
-                clearSecret();
+                clearBook();
                 clearCachedSessions();
                 location.reload();
               }
