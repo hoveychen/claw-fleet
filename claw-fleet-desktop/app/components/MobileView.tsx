@@ -90,10 +90,6 @@ export function MobileView() {
   const [directTokenDraft, setDirectTokenDraft] = useState("");
   const [directOpen, setDirectOpen] = useState(false);
   const [qrSvg, setQrSvg] = useState<string | null>(null);
-  // Text form of the same pairing URL, for the copy button. Kept next to qrSvg
-  // and refreshed together so a rotated secret can never leave a stale link
-  // behind — copying a dead link would look like "pairing is broken".
-  const [pairingUrl, setPairingUrl] = useState<string | null>(null);
   const { urlDraft, editingUrl } = useUIStore((s) => s.mainViewState.mobile);
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
   const setUrlDraft = (value: string) => updateMainViewState("mobile", { urlDraft: value });
@@ -108,7 +104,6 @@ export function MobileView() {
   const refreshQr = useCallback(async (enabled: boolean) => {
     if (!enabled) {
       setQrSvg(null);
-      setPairingUrl(null);
       return;
     }
     // Carry the desktop's current UI language into the QR so a fresh scan opens
@@ -118,13 +113,6 @@ export function MobileView() {
       setQrSvg(await invoke<string>("mobile_relay_qr_svg", { lang }));
     } catch {
       setQrSvg(null);
-    }
-    // Independent of the QR: one failing must not blank the other, since either
-    // alone is enough to pair a phone.
-    try {
-      setPairingUrl(await invoke<string>("mobile_relay_pairing_url", { lang }));
-    } catch {
-      setPairingUrl(null);
     }
   }, [i18n]);
 
@@ -347,24 +335,6 @@ export function MobileView() {
                     "用手机相机扫码打开。二维码包含配对密钥，请勿截图外传。iPhone 需在 Safari 中「添加到主屏幕」后才能收到推送通知。",
                   )}
                 </p>
-                {/* 自建 relay 的安卓 app 只能走这条路：扫码要靠 App Link，而
-                    App Link 只认打包时写进 manifest 的 host，自建 host 编译期
-                    不可知，扫出来只会打开浏览器。链接和二维码内容完全相同，
-                    同样带着配对密钥。 */}
-                {pairingUrl && (
-                  <div className={styles.copyRow}>
-                    <CopyButton
-                      text={pairingUrl}
-                      label={t("mobile_copy_pairing_url", "复制配对链接")}
-                    />
-                    <span className={styles.copyHint}>
-                      {t(
-                        "mobile_copy_pairing_url_hint",
-                        "自建 relay 的安卓 app 扫码进不来，改用它：在手机上粘贴配对。",
-                      )}
-                    </span>
-                  </div>
-                )}
               </div>
             ) : (
               <div className={styles.qrWrap}>
