@@ -2207,6 +2207,7 @@ pub fn run() {
             rotate_mobile_relay_secret,
             mobile_relay_status,
             mobile_relay_qr_svg,
+            mobile_relay_pairing_url,
             generate_mascot_quips,
             list_llm_providers,
             get_llm_config,

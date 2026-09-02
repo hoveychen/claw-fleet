@@ -16,7 +16,7 @@
 
 import { App } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
-import { extractSecretFromUrl } from "./secretStore";
+import { type PairedLink, parsePairingLink } from "./pairingLink";
 
 /** True inside the Capacitor shell, false in the browser/PWA. */
 export function isNativeShell(): boolean {
@@ -24,19 +24,20 @@ export function isNativeShell(): boolean {
 }
 
 /**
- * Call `handler` with the pairing secret whenever the OS delivers a pairing
- * link, including the link that cold-launched the app. No-op on web.
+ * Call `handler` with the pairing secret **and the relay it names** whenever the
+ * OS delivers a pairing link, including the link that cold-launched the app.
+ * No-op on web.
  *
  * Returns an unsubscribe function.
  */
-export function onPairingLink(handler: (secret: string) => void): () => void {
+export function onPairingLink(handler: (paired: PairedLink) => void): () => void {
   if (!Capacitor.isNativePlatform()) return () => {};
 
   let cancelled = false;
   const deliver = (url: string | undefined | null) => {
     if (cancelled || !url) return;
-    const secret = extractSecretFromUrl(url);
-    if (secret) handler(secret);
+    const paired = parsePairingLink(url);
+    if (paired) handler(paired);
   };
 
   // Cold start — the launch URL is already spent by the time React mounts, so

@@ -34,6 +34,32 @@ export function parseRelayParam(hash: string): string | null {
   return candidate.origin;
 }
 
+/** 一条完整配对链接指名的 relay。给**原生壳**用:它拿到的是 App Link /
+ *  Universal Link 递过来的整个 URL,而不是 `window.location.hash`。
+ *
+ *  二维码是 `https://<relay-host>/#k=<secret>`(mobile_relay::pairing_url),
+ *  而那个 host 由**桌面端**决定 —— 地区默认值(relay_region.rs)或用户在设置里
+ *  填的自建地址。所以链接自身的 origin 就是这台设备该连的 relay。
+ *
+ *  显式的 `&relay=` 仍然优先:它描述的是「这一次配对」,比 origin 更具体(鸿蒙
+ *  壳会写它,因为那边的页面 origin 是假域名 `fleet.local`)。与
+ *  `resolveRelayBase` 的优先级一致。
+ *
+ *  非 http/https 的链接(自定义 scheme)没有可用 origin,返回 `null` —— 调用方
+ *  照常配对,只是这台设备没指名 relay,`relayBaseFor` 会给它构建默认值。 */
+export function pairingLinkRelayBase(url: string): string | null {
+  const hashAt = url.indexOf("#");
+  const explicit = parseRelayParam(hashAt < 0 ? "" : url.slice(hashAt));
+  if (explicit) return explicit;
+  try {
+    const parsed = new URL(hashAt < 0 ? url : url.slice(0, hashAt));
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
 /** 没有指名 relay 的设备用哪个地址。
  *
  *  `baked` 是 `VITE_RELAY_URL`,构建时烧进去(鸿蒙壳经

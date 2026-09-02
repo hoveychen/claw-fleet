@@ -17,6 +17,9 @@ dist
 # Capacitor 原生包。`dist` 那条 pattern 不匹配这个名字，所以要单列。
 dist-webui
 dist-ssr
+# Distributable Android builds (`mobile-web/scripts/build-android-apk.sh`).
+# Signed release artifacts, reproducible from a commit — not history.
+dist-apk/
 *.local
 
 # Rust build output

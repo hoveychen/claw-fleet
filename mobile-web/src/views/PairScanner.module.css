@@ -1,0 +1,60 @@
+/* 全屏取景器。盖住配对门（而不是挤在它里面）——扫码时用户举着手机对准另一块
+   屏幕，取景框越大越好对。 */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 对准框。纯视觉引导：解码跑在整帧上，框外的二维码一样能扫到，所以它只负责
+   告诉用户「往这儿放」。 */
+.reticle {
+  position: absolute;
+  width: min(64vw, 280px);
+  aspect-ratio: 1;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+}
+
+.bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 20px 24px calc(24px + var(--safe-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.75), transparent);
+}
+
+.hint {
+  margin: 0;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+  max-width: 320px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.close {
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 999px;
+  padding: 8px 24px;
+  color: #fff;
+  font-size: var(--t-ui, 14px);
+}

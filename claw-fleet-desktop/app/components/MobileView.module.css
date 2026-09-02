@@ -268,3 +268,19 @@
   color: var(--color-error);
   font-size: 13px;
 }
+
+/* 「复制配对链接」那一行。自建 relay 的安卓 app 扫码进不来（App Link 只认
+   打包时写死的 host），粘贴是它唯一的入口，所以这行紧跟在二维码提示后面。 */
+.copyRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.copyHint {
+  color: var(--color-text-dim);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+}

@@ -57,7 +57,10 @@ import {
   type DeviceBook,
   type PairedDevice,
 } from "./devices";
-import { onPairingLink } from "./deepLink";
+import { isNativeShell, onPairingLink } from "./deepLink";
+import type { PairedLink } from "./pairingLink";
+import { PairPasteForm } from "./views/PairPasteForm";
+import { PairScanner } from "./views/PairScanner";
 import { clearCachedSessions } from "./sessionCache";
 import { AUTH_WAIT_MS, waitAuthed } from "./transportWait";
 import { DeviceScopeProvider, scopedKey } from "./deviceScope";
@@ -182,6 +185,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   bookRef.current = book;
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
+  // 配对门里的扫码取景器（原生壳限定）。
+  const [scanning, setScanning] = useState(false);
   const [a2hsDismissed, setA2hsDismissed] = useState(
     () => localStorage.getItem(A2HS_DISMISSED_KEY) === "1",
   );
@@ -208,17 +213,23 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     };
   }, [secret]);
 
+  /** 一次配对落地。App Link 递来的、以及用户手动粘贴的，都走这里 —— 与 PWA 的
+   *  `#k=` 路径同一个入口：去重、保留用户改过的名字、焦点落到刚配的那台，三条
+   *  规则只有一份实现（devices.ts::adoptScannedDevice）。
+   *
+   *  relayBase 必须一起传下去 —— 壳的页面 origin 是 `capacitor://localhost`，
+   *  丢了它就只能连打包时烧进去的那个 relay，自建 relay 永远配不上。 */
+  const adoptPaired = useCallback((paired: PairedLink) => {
+    setBook(
+      (prev) => adoptScannedDevice(prev, paired.secret, newDeviceMint(prev), paired.relayBase).book,
+    );
+    setIdbProbed(true);
+  }, []);
+
   // Native shell only: the app boots from bundled assets, so there is no URL to
   // read the pairing secret from. Universal Links / App Links deliver the
   // scanned pairing URL here instead. No-op in the browser/PWA.
-  useEffect(() => {
-    return onPairingLink((paired) => {
-      // 与 PWA 的 `#k=` 路径走同一个入口：去重、保留用户改过的名字、焦点落到
-      // 刚扫的那台，三条规则只有一份实现（devices.ts::adoptScannedDevice）。
-      setBook((prev) => adoptScannedDevice(prev, paired, newDeviceMint(prev)).book);
-      setIdbProbed(true);
-    });
-  }, []);
+  useEffect(() => onPairingLink(adoptPaired), [adoptPaired]);
 
   // ── 设备管理（「更多」页那一块）─────────────────────────────────────────
   //
@@ -695,6 +706,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     decisions.length > 0 && (tab !== "decisions" || overlayOpen);
 
   if (!secret) {
+    // 原生壳限定的两条入口。系统相机扫出来的链接由 App Link 决定交给谁，而
+    // App Link 只认 manifest 里编译期写死的 host —— 自建 relay 的 host 编译期
+    // 不可知，那条路对它结构上不可用（扫出来只会打开浏览器）。app 内扫码拿到的
+    // 是二维码原文，粘贴更是不依赖任何 host 声明。
+    // PWA 两条都不需要：它本来就是被那条链接打开的。
+    const nativeEntries = idbProbed && isNativeShell();
+    if (scanning) {
+      return <PairScanner onPaired={adoptPaired} onClose={() => setScanning(false)} />;
+    }
     return (
       <div className={styles.gate}>
         <div className={styles.gateLogo}>F</div>
@@ -704,6 +724,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             ? t("请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。")
             : t("正在恢复配对…")}
         </p>
+        {nativeEntries && (
+          <>
+            <button className={styles.gateButton} onClick={() => setScanning(true)}>
+              {t("扫码配对")}
+            </button>
+            <PairPasteForm onPaired={adoptPaired} />
+          </>
+        )}
       </div>
     );
   }
