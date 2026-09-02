@@ -234,7 +234,9 @@ function ClaudeUsageSection() {
           ))}
         </div>
       )}
-      {info && !hasUsage && <p className={styles.dim}>No usage data</p>}
+      {info && !hasUsage && (
+        <p className={styles.dim}>{t("account.no_usage_data", "暂无用量数据")}</p>
+      )}
       {hasUsage && (
         <button
           className={styles.history_btn}
@@ -302,7 +304,9 @@ function CodexUsageSection() {
           {data.secondary && <CodexWindowBar window={data.secondary} />}
         </div>
       )}
-      {data && !hasBars && <p className={styles.dim}>No usage data</p>}
+      {data && !hasBars && (
+        <p className={styles.dim}>{t("account.no_usage_data", "暂无用量数据")}</p>
+      )}
       {hasBars && (
         <button
           className={styles.history_btn}

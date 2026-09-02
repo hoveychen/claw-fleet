@@ -423,8 +423,9 @@ function ParamRow({ name, value }: { name: string; value: unknown }) {
  * transcript shows raw JSON anymore. An empty input reads as a short note.
  */
 function ParamsBody({ block }: { block: ToolUseBlockType }) {
+  const { t } = useTranslation();
   const entries = Object.entries(block.input ?? {});
-  if (entries.length === 0) return <div className={styles.codex_note}>No parameters</div>;
+  if (entries.length === 0) return <div className={styles.codex_note}>{t("detail.no_parameters", "无参数")}</div>;
   return (
     <div className={styles.params}>
       {entries.map(([k, v]) => (
@@ -1124,7 +1125,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
       {open && (
         <div className={styles.body}>
           {loadingFull && !full && (
-            <div className={styles.pending}>Loading full output…</div>
+            <div className={styles.pending}>{t("detail.loading_full_output", "正在加载完整输出…")}</div>
           )}
           {refetchError && (
             <div className={styles.pending}>Could not load full output: {refetchError}</div>
@@ -1168,7 +1169,7 @@ export function ToolUseBlock({ block, result: resultProp, isPartial, meta: metaP
               subagent output); repeating the raw blob under it is noise. */}
           {result && !custom && <ResultContent result={result} />}
           {isPartial && !result && (
-            <div className={styles.pending}>Running…</div>
+            <div className={styles.pending}>{t("detail.tool_running", "运行中…")}</div>
           )}
         </div>
       )}

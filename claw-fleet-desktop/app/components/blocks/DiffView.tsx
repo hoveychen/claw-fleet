@@ -199,9 +199,9 @@ export function DiffView({ filePath, before, after, hunks, tag, context = 3, ful
       )}
       <div className={styles.body}>
         {tooLarge ? (
-          <div className={styles.empty_note}>Diff too large to render inline.</div>
+          <div className={styles.empty_note}>{t("detail.diff_too_large", "改动太大，无法在这里内联渲染。")}</div>
         ) : allEqual ? (
-          <div className={styles.empty_note}>No textual changes.</div>
+          <div className={styles.empty_note}>{t("detail.diff_no_changes", "没有文本改动。")}</div>
         ) : (
           shown.map((r, idx) => {
             if (r.kind === "sep") {
