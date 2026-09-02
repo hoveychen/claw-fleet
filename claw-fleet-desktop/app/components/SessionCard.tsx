@@ -185,6 +185,12 @@ export function ServerErrorControls({ session }: { session: SessionInfo }) {
  * `agentStopped === false` is the dangerous case and gets its own wording: the
  * kill failed, so the agent may still be working against that empty directory.
  * Rendered on BOTH of SessionCard's header paths — see the badge test.
+ *
+ * The chip says what Fleet DID, not what happened — "远端断开" is already the
+ * status badge's job, two inches to the left, and a card that says it twice
+ * spends a chip to tell you nothing (which is how it first shipped on screen).
+ * What the badge cannot carry is the host, rca's own line, and whether the kill
+ * landed; those are here and in the tooltip.
  */
 export function RemoteDisconnectNotice({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();

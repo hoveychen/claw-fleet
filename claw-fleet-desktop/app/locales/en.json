@@ -171,8 +171,8 @@
     "stuck": "Stuck"
   },
   "remoteDisconnect": {
-    "badge": "Remote lost",
-    "badge_not_stopped": "Remote lost · not stopped",
+    "badge": "agent stopped",
+    "badge_not_stopped": "agent NOT stopped",
     "tip": "The link to {{host}} dropped, so Fleet stopped this session. Left running, the agent would be looking at the empty local mirror directory and could conclude the repository was deleted. rca reported: {{detail}}",
     "tip_not_stopped": "The link to {{host}} dropped and Fleet could not stop the agent. It is probably working against the empty local mirror directory right now — check this session's process by hand. rca reported: {{detail}}",
     "host_fallback": "the remote host",

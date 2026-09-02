@@ -253,3 +253,35 @@ tick 2 FAILED: FileNotFoundError: No such file or directory: '/private/tmp/ssh-k
 记录里带 `agentStopped`。kill 失败时（`false`）文案和配色都不一样——那是唯一
 一个"agent 可能正对着空目录继续写"的状态，需要人去看一眼进程，不能和已经
 处理好的情况长成一个样子。
+
+#### 验证：真拔一次 ssh（2026-09-02，两次复现）
+
+不是"单测绿"。`claw-fleet-core/tests/rca_live_disconnect.rs` 真的注册一个远端
+workspace、经真 rca 走真 ssh 隧道起一个探针、然后 `pkill` 掉那条 ssh：
+
+```sh
+FLEET_RCA_LIVE_SSH=own-api-ko \
+  cargo test -p claw-fleet-core --test rca_live_disconnect -- --ignored --nocapture
+```
+
+两次跑的结果一致：
+
+```
+record: RemoteDisconnect { code: "rca:transport-lost",
+  detail: "… rca remote recv failed: stream reset: connection closed: EOF",
+  host_label: Some("own-api-ko"), agent_stopped: true }
+probe ticks against the empty mirror: 0
+```
+
+最后那行是这条功能的全部意义：探针**一次**都没有读到那个空镜像目录。它是
+`#[ignore]` 的（要一台能连上的机器），但它是唯一能证明"marker 串还对得上现役
+rca 实际打印的东西"的测试——这也正是它在写的过程中救回来的两个坑：
+
+- rca 拒绝拦截 Apple 平台二进制（`/bin/sh` 用不了），也拒绝 Homebrew 的动态
+  链接解释器（它把目标**复制**到临时目录重签名，`@rpath/libnode…` 就找不到
+  了）。所以探针是测试自己用 `rustc` 现编的一个静态的小程序。
+- **rca 只路由绝对路径。**同一个探针，`read("marker.txt")` 读到的是本机那个空
+  镜像（NotFound），`read("<绝对路径>/marker.txt")` 才走到远端。也就是说探针
+  用相对路径的话，隧道明明还活着它也会一路报 MISSING——测试会永远"绿"得毫无
+  意义。这是这次在本机对 rca v0.2.0 的实测观察，没有去查 rca 源码确认它是
+  设计如此还是别的原因。
