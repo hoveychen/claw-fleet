@@ -117,6 +117,7 @@ pub const GUARD_ANALYZE: &str = "/guard/analyze";
 pub const GUARD_PENDING: &str = "/guard/pending";
 pub const GUARD_RESPOND: &str = "/guard/respond";
 pub const HANDOFF_CHAIN: &str = "/handoff_chain";
+pub const HARNESS_STATUSES: &str = "/harness_statuses";
 pub const HEALTH: &str = "/health";
 pub const HOOKS_PLAN: &str = "/hooks_plan";
 pub const INTERACTION_DIAGNOSTICS: &str = "/interaction_diagnostics";

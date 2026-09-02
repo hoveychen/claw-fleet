@@ -28,6 +28,20 @@ pub(crate) async fn check_setup_status(state: tauri::State<'_, AppState>) -> Res
     })
 }
 
+/// Per-harness environment probe for the wizard/environment panel. Routed
+/// through the Backend trait so a remote workspace reports the remote host's
+/// harnesses, and moved off the async runtime because the probe shells out to
+/// `<bin> --version` (bounded, but hundreds of ms with dsh's node startup).
+#[tauri::command]
+pub(crate) async fn harness_statuses(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<claw_fleet_core::harness_status::HarnessStatus>, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.read().unwrap().harness_statuses())
+        .await
+        .map_err(|e| format!("join: {e}"))
+}
+
 #[tauri::command]
 pub(crate) async fn get_account_info(
     state: tauri::State<'_, AppState>,
