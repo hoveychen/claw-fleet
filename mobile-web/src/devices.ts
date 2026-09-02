@@ -323,6 +323,65 @@ export function consumeHashSecret(): { secret: string; relayBase: string | null 
   return { secret, relayBase };
 }
 
+// ── 待办退订 ─────────────────────────────────────────────────────────────────
+//
+// 移除一台设备时要顺手告诉它的 relay channel「别再往我推」。这一步可能失败
+// (relay 不可达、手机离线),而失败的后果是用户明明删掉了一台设备,却继续收到
+// 它的通知——点开还找不到对应的卡。所以退订不上就把它记下来,下次启动重试。
+//
+// 记的是 secret + relayBase,因为退订必须以那个 channel 的身份连上去(channel
+// token 由 secret 派生)。它们本来就存在同一个存储里(设备簿),没有新增暴露面。
+
+const PENDING_UNSUB_KEY = "fleet-pending-unsub";
+/** 超过这个时长就放弃重试:那台桌面端可能早就不用了,而一条永远失败的记录不该
+ *  在每次启动时都去拨一个连不上的地址。 */
+const PENDING_UNSUB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface PendingUnsub {
+  secret: string;
+  relayBase: string | null;
+  at: number;
+}
+
+export function loadPendingUnsub(now: number): PendingUnsub[] {
+  const raw = readLocal(PENDING_UNSUB_KEY);
+  if (!raw) return [];
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is PendingUnsub => {
+    if (typeof v !== "object" || v === null) return false;
+    const e = v as Record<string, unknown>;
+    if (typeof e.secret !== "string" || !e.secret) return false;
+    if (typeof e.at !== "number") return false;
+    return now - e.at < PENDING_UNSUB_TTL_MS;
+  });
+}
+
+function savePendingUnsub(list: PendingUnsub[]): void {
+  try {
+    if (list.length === 0) localStorage.removeItem(PENDING_UNSUB_KEY);
+    else localStorage.setItem(PENDING_UNSUB_KEY, JSON.stringify(list));
+  } catch {
+    // 存储满 / 隐私模式 —— 退订就只能靠用户手动关通知了,不值得让移除失败
+  }
+}
+
+/** 记一笔没退成的退订。同一个 secret 只留最新一条。 */
+export function addPendingUnsub(entry: PendingUnsub): void {
+  const rest = loadPendingUnsub(entry.at).filter((e) => e.secret !== entry.secret);
+  savePendingUnsub([...rest, entry]);
+}
+
+/** 退订成功后销账。 */
+export function dropPendingUnsub(secret: string, now: number): void {
+  savePendingUnsub(loadPendingUnsub(now).filter((e) => e.secret !== secret));
+}
+
 /** 清空全部配对(「重新配对」入口)。旧键一并清掉,否则下次启动会被上面的迁移
  *  路径原地复活。 */
 export function clearBook(): void {

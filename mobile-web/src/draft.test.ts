@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearDraft, loadDraft, saveDraft, type DraftStorage } from "./draft";
+import {
+  clearDraft,
+  clearDraftsByPrefix,
+  loadDraft,
+  saveDraft,
+  type DraftStorage,
+} from "./draft";
 
 // node 环境没有 window.localStorage，用内存实现注入。顺带断言 key 带上了命名空间前缀。
 function memStore(): DraftStorage & { map: Map<string, string> } {
@@ -75,5 +81,48 @@ describe("draft store", () => {
     expect(() => saveDraft("k", { a: 1 }, null)).not.toThrow();
     expect(loadDraft("k", { a: 0 }, null)).toEqual({ a: 0 });
     expect(() => clearDraft("k", null)).not.toThrow();
+  });
+});
+
+// 移除一台设备时要扫掉它那个命名空间下的全部草稿（新会话表单、附件路径、上次
+// 用的 repo、各会话的半截输入）。不清的话每移除一台就留下一堆永远不会再被读到
+// 的键；清错了则会连累另一台设备的草稿。
+describe("clearDraftsByPrefix", () => {
+  /** 可枚举的内存 storage —— clearDraftsByPrefix 需要 length/key(i)。 */
+  function enumerableStore() {
+    const map = new Map<string, string>();
+    return {
+      map,
+      get length() {
+        return map.size;
+      },
+      key: (i: number) => [...map.keys()][i] ?? null,
+      getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: (k: string) => void map.delete(k),
+    };
+  }
+
+  it("clears one device's drafts and leaves the other's alone", () => {
+    const store = enumerableStore();
+    saveDraft("d/d1/new-session", { prompt: "a" }, store);
+    saveDraft("d/d1/resume:s-1", "半截", store);
+    saveDraft("d/d2/new-session", { prompt: "b" }, store);
+    saveDraft("tasks:search", "全局偏好", store);
+
+    clearDraftsByPrefix("d/d1/", store);
+
+    expect(loadDraft("d/d1/new-session", null, store)).toBeNull();
+    expect(loadDraft("d/d1/resume:s-1", null, store)).toBeNull();
+    expect(loadDraft<{ prompt: string } | null>("d/d2/new-session", null, store)?.prompt).toBe("b");
+    expect(loadDraft("tasks:search", "", store)).toBe("全局偏好");
+  });
+
+  // 注入的内存实现通常没有 length/key —— 那种情况下什么都不做，而不是抛。
+  it("is a no-op on a storage that cannot be enumerated", () => {
+    const plain = memStore();
+    saveDraft("d/d1/new-session", { prompt: "a" }, plain);
+    expect(() => clearDraftsByPrefix("d/d1/", plain)).not.toThrow();
+    expect(loadDraft<{ prompt: string } | null>("d/d1/new-session", null, plain)?.prompt).toBe("a");
   });
 });

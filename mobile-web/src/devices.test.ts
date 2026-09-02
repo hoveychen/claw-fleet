@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  addPendingUnsub,
+  dropPendingUnsub,
+  loadPendingUnsub,
   addDevice,
   activeDevice,
   adoptScannedDevice,
@@ -272,5 +275,42 @@ describe("clearBook", () => {
     loadBookSync(mint("d1"));
     clearBook();
     expect(loadBookSync(mint("d2"))).toEqual(emptyBook());
+  });
+});
+
+// 移除一台设备时要告诉它的 relay channel 停止推送。那一步会失败（relay 不可达、
+// 手机离线），而失败的后果是用户明明删掉了一台设备却继续收到它的通知。所以退订
+// 不上就记下来，下次启动重试。
+describe("pending unsubscribe ledger", () => {
+  const NOW = 1_700_000_000_000;
+
+  it("records and drops by secret", () => {
+    addPendingUnsub({ secret: A, relayBase: null, at: NOW });
+    addPendingUnsub({ secret: B, relayBase: "https://r.example.com", at: NOW });
+    expect(loadPendingUnsub(NOW).map((e) => e.secret)).toEqual([A, B]);
+    dropPendingUnsub(A, NOW);
+    expect(loadPendingUnsub(NOW).map((e) => e.secret)).toEqual([B]);
+  });
+
+  it("keeps one entry per secret, the newest", () => {
+    addPendingUnsub({ secret: A, relayBase: null, at: NOW });
+    addPendingUnsub({ secret: A, relayBase: "https://r.example.com", at: NOW + 5 });
+    const all = loadPendingUnsub(NOW + 5);
+    expect(all).toHaveLength(1);
+    expect(all[0].relayBase).toBe("https://r.example.com");
+  });
+
+  // 一条永远失败的记录不该在每次启动时都去拨一个连不上的地址。
+  it("expires entries older than the retry window", () => {
+    addPendingUnsub({ secret: A, relayBase: null, at: NOW });
+    const eightDays = 8 * 24 * 60 * 60 * 1000;
+    expect(loadPendingUnsub(NOW + eightDays)).toEqual([]);
+  });
+
+  it("survives junk in the store without throwing", () => {
+    localStorage.setItem("fleet-pending-unsub", "not json");
+    expect(loadPendingUnsub(NOW)).toEqual([]);
+    localStorage.setItem("fleet-pending-unsub", JSON.stringify([{ nope: 1 }, "x"]));
+    expect(loadPendingUnsub(NOW)).toEqual([]);
   });
 });

@@ -86,6 +86,16 @@ const DICT: Record<string, string> = {
   "其他": "Other",
   // ── 设备簿（多设备配对）──
   "设备": "Device",
+  改名: "Rename",
+  移除: "Remove",
+  保存: "Save",
+  "移除「{0}」？它的通知会停掉，本机为它缓存的任务与草稿一并清除。":
+    "Remove \u201c{0}\u201d? Its notifications stop, and the tasks and drafts cached for it on this phone are cleared.",
+  "在另一台桌面端 Fleet 的「移动端」板块扫码，即可把它一并加进这个列表。":
+    "Scan the QR code in another desktop Fleet's Mobile panel to add it to this list.",
+  "清除本机全部配对密钥？需回到桌面端重新扫码才能再连接。":
+    "Clear every pairing secret on this phone? You'll need to scan again from the desktop to reconnect.",
+  "重新配对 / 清除全部密钥": "Re-pair / clear all secrets",
   // ── 代理作用域切换器 ──
   "主进程": "Main",
   "当前": "current",
@@ -234,9 +244,6 @@ const DICT: Record<string, string> = {
   不支持: "Unsupported",
   需添加到主屏幕: "Add to Home Screen",
   配对: "Pairing",
-  "重新配对 / 清除密钥": "Re-pair / clear secret",
-  "清除本机配对密钥？需回到桌面端重新扫码才能再连接。":
-    "Clear the local pairing secret? You'll need to re-scan on the desktop to reconnect.",
   关于: "About",
 
   // ── 知识库 ──

@@ -6,6 +6,7 @@ import {
   enablePush,
   isPushOptedOut,
   pushState,
+  unsubscribeChannel,
   type PushState,
 } from "./push";
 // 这里不再认识任何一个具体传输层。造哪一个由 main.tsx 按构建模式决定并注入
@@ -41,15 +42,22 @@ import { randomId } from "./clientId";
 import { needsA2hsForDurableStorage } from "./secretStore";
 import {
   activeDevice,
+  addPendingUnsub,
   adoptScannedDevice,
   clearBook,
   consumeHashSecret,
+  dropPendingUnsub,
   emptyBook,
   loadBookFromIdb,
   loadBookSync,
+  loadPendingUnsub,
   nextDeviceLabel,
   persistBook,
+  removeDevice,
+  renameDevice,
+  setActiveDevice,
   type DeviceBook,
+  type PairedDevice,
 } from "./devices";
 import { onPairingLink } from "./deepLink";
 import {
@@ -57,12 +65,13 @@ import {
   loadCachedSessions,
   saveCachedSessions,
 } from "./sessionCache";
+import { AUTH_WAIT_MS, waitAuthed } from "./transportWait";
 import { DeviceScopeProvider, scopedKey } from "./deviceScope";
 import { t as translate, useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
 import { NEW_SESSION_DRAFT_KEY, NewSessionSheet } from "./views/Composer";
-import { loadDraft, saveDraft } from "./draft";
+import { clearDraftsByPrefix, loadDraft, saveDraft } from "./draft";
 import { onShareReceived, shareToPrompt, sharedFilesToFiles } from "./shareTarget";
 import { onNativePushToken } from "./nativePush";
 import { onDecisionDeepLink } from "./decisionDeepLink";
@@ -142,6 +151,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 的设备，所以那一处读 ref 而不是闭包里的值。
   const deviceIdRef = useRef<string | null>(deviceId);
   deviceIdRef.current = deviceId;
+  // 同理：清除全部配对那个回调的依赖是空的，但它要遍历**当下**的簿子。
+  const bookRef = useRef(book);
+  bookRef.current = book;
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
   const [a2hsDismissed, setA2hsDismissed] = useState(
@@ -181,6 +193,118 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       setIdbProbed(true);
     });
   }, []);
+
+  // ── 设备管理（「更多」页那一块）─────────────────────────────────────────
+  //
+  // 三个动作都是「改簿子 + 落盘」，落盘紧跟状态更新，免得一次意外退出让用户
+  // 以为改过的东西没了。
+
+  /** 清除全部配对。每台设备的退订都先记进待办（而不是在这里逐台连上去退）：
+   *  紧接着就要 reload，等不了 N 条临时连接的握手；下次启动那条重试 effect 会
+   *  把它们补掉。 */
+  const unpairAll = useCallback(() => {
+    const now = Date.now();
+    for (const d of bookRef.current.devices) {
+      if (SUPPORTS_PUSH) addPendingUnsub({ secret: d.secret, relayBase: d.relayBase, at: now });
+      clearCachedSessions(d.id);
+      clearDraftsByPrefix(scopedKey(d.id, ""));
+    }
+    clearBook();
+    location.reload();
+  }, []);
+
+  const switchDevice = useCallback((id: string) => {
+    setBook((prev) => {
+      const next = setActiveDevice(prev, id);
+      persistBook(next);
+      return next;
+    });
+  }, []);
+
+  const renameDeviceLabel = useCallback((id: string, label: string) => {
+    setBook((prev) => {
+      const next = renameDevice(prev, id, label);
+      persistBook(next);
+      return next;
+    });
+  }, []);
+
+  /** 让某台设备的 relay channel 停止推送。
+   *
+   *  它可能不是当前连着的那一台，所以为它临时开一条连接。不能靠「本地退订」
+   *  代替：浏览器订阅是所有设备共用的一份，退掉它等于把其他设备的通知一起
+   *  掐掉（见 push.ts::unsubscribeChannel）。
+   *
+   *  返回是否退成。退不成不该拦住用户移除设备——那是他明确的意图——所以调用方
+   *  把它记进待办退订，下次启动重试。 */
+  const stopPushFor = useCallback(
+    async (device: PairedDevice): Promise<boolean> => {
+      const live = clientRef.current;
+      if (device.id === deviceIdRef.current && live?.isAuthed) {
+        return unsubscribeChannel(live);
+      }
+      const temp = makeTransport(device.secret, {}, device.relayBase);
+      try {
+        temp.connect();
+        if (!(await waitAuthed(temp, AUTH_WAIT_MS))) return false;
+        return await unsubscribeChannel(temp);
+      } catch {
+        return false;
+      } finally {
+        temp.close();
+      }
+    },
+    [makeTransport],
+  );
+
+  const removeDeviceEntry = useCallback(
+    async (device: PairedDevice) => {
+      // 先退订、再改簿子：反过来的话失败重试就没有 secret 可用了（记待办那条
+      // 路仍然需要它）。
+      const unsubscribed = SUPPORTS_PUSH ? await stopPushFor(device) : true;
+      if (!unsubscribed) {
+        addPendingUnsub({ secret: device.secret, relayBase: device.relayBase, at: Date.now() });
+      }
+      // 这台设备的本地痕迹一并清掉：会话快照缓存 + 它命名空间下的全部草稿
+      // （新会话表单、附件路径、上次用的 repo、各会话的半截输入）。
+      clearCachedSessions(device.id);
+      clearDraftsByPrefix(scopedKey(device.id, ""));
+      setBook((prev) => {
+        const next = removeDevice(prev, device.id);
+        persistBook(next);
+        return next;
+      });
+    },
+    [stopPushFor],
+  );
+
+  /** 上次没退成的退订，启动后补一次。失败就留着，等下次（7 天后过期，见
+   *  devices.ts）。 */
+  useEffect(() => {
+    if (!SUPPORTS_PUSH || MOCK) return;
+    const pending = loadPendingUnsub(Date.now());
+    if (pending.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const entry of pending) {
+        if (cancelled) return;
+        const temp = makeTransport(entry.secret, {}, entry.relayBase);
+        try {
+          temp.connect();
+          if (await waitAuthed(temp, AUTH_WAIT_MS)) {
+            if (await unsubscribeChannel(temp)) dropPendingUnsub(entry.secret, Date.now());
+          }
+        } catch {
+          // 留着下次再试
+        } finally {
+          temp.close();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [makeTransport]);
 
   // Android share sheet → new-session composer. Seed the draft *before* opening
   // the sheet: NewSessionSheet reads it once on mount via useDraft, so writing
@@ -242,6 +366,17 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // "showing cache, awaiting first live push" state the task page labels.
   useEffect(() => {
     if (MOCK) return;
+    // 切设备先清场：上一台的任务列表、决策卡、今日用量、可信 agent 判定都只对
+    // 上一台成立。留着它们不是「先显示旧数据再刷新」——那些卡上的 id 在新设备
+    // 上根本不存在，点一下就是一次打错地方的请求。首次挂载时这些本来就是空的。
+    setSessions([]);
+    setSessionsLoaded(false);
+    setDecisions([]);
+    setDecisionsLoaded(false);
+    setTodayUsage(null);
+    trustedAgentRef.current = undefined;
+    answeredRef.current = new Map();
+    snapshotSourcesRef.current = [];
     let cancelled = false;
     void loadCachedSessions(deviceId).then((cached) => {
       if (cancelled || !cached?.length) return;
@@ -825,6 +960,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         ) : (
           <MoreView
             endpointLabel={clientRef.current?.endpointLabel ?? ""}
+            devices={book.devices}
+            activeDeviceId={deviceId}
+            onSwitchDevice={switchDevice}
+            onRenameDevice={renameDeviceLabel}
+            onRemoveDevice={(d) => void removeDeviceEntry(d)}
+            onUnpairAll={unpairAll}
             supportsPush={SUPPORTS_PUSH}
             connected={connected}
             agentOnline={agentOnline}
