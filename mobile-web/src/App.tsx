@@ -37,20 +37,27 @@ import type {
   TodayUsage,
   WikiDoc,
 } from "./types";
+import { randomId } from "./clientId";
+import { needsA2hsForDurableStorage } from "./secretStore";
 import {
-  clearSecret,
-  loadSecretFromIdb,
-  loadSecretSync,
-  needsA2hsForDurableStorage,
-  persistSecret,
-} from "./secretStore";
+  activeDevice,
+  addDevice,
+  clearBook,
+  consumeHashSecret,
+  emptyBook,
+  loadBookFromIdb,
+  loadBookSync,
+  nextDeviceLabel,
+  persistBook,
+  type DeviceBook,
+} from "./devices";
 import { onPairingLink } from "./deepLink";
 import {
   clearCachedSessions,
   loadCachedSessions,
   saveCachedSessions,
 } from "./sessionCache";
-import { useI18n } from "./i18n";
+import { t as translate, useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
 import { NEW_SESSION_DRAFT_KEY, NewSessionSheet } from "./views/Composer";
@@ -82,6 +89,12 @@ function fmtTokens(n: number): string {
 
 type Tab = "decisions" | "tasks" | "wiki" | "more";
 
+/** 一台新配对设备的默认字段。默认名走 i18n，所以它在这里而不在 devices.ts ——
+ *  那一层刻意不认识 i18n，好让它整层保持可测的纯函数。 */
+function newDeviceMint(book: DeviceBook): { id: string; label: string; now: number } {
+  return { id: randomId(), label: nextDeviceLabel(book, translate("设备")), now: Date.now() };
+}
+
 // `?mock` runs the whole app on fixtures (no relay, no pairing) — used by the
 // promo screen-recording pipeline and for quick UI work in a plain browser.
 const MOCK = isMockMode();
@@ -92,13 +105,28 @@ export type TransportFactory = (secret: string, handlers: TransportHandlers) => 
 export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
   const { t } = useI18n();
-  // `?mock` stands in for a pairing secret so the gate below opens and the
-  // effect that builds the client runs — it just builds a MockRelayClient.
-  // 同源形态没有配对这回事（后端就是发出这张页面的那个进程），所以那道门整个
-  // 不存在，直接给一个占位串让下面建连接的 effect 跑起来。
-  const [secret, setSecret] = useState<string | null>(() =>
-    MOCK ? "mock-secret" : NEEDS_PAIRING ? loadSecretSync() : "same-origin",
-  );
+  // 这台手机配对过的每一台 Fleet（devices.ts）。`?mock` 与同源形态都没有配对
+  // 这回事，簿子留空，下面的 `secret` 直接给占位串。
+  const [book, setBook] = useState<DeviceBook>(() => {
+    if (MOCK || !NEEDS_PAIRING) return emptyBook();
+    let next = loadBookSync(newDeviceMint(emptyBook()));
+    // PWA 是被一个带 `#k=…` 的 URL 打开的 —— 那就是一次配对。
+    const scanned = consumeHashSecret();
+    if (scanned) {
+      next = addDevice(next, { secret: scanned, ...newDeviceMint(next) }).book;
+      persistBook(next);
+    }
+    return next;
+  });
+  // 当前作用域设备的密钥。`?mock` stands in for a pairing secret so the gate
+  // below opens and the effect that builds the client runs — it just builds a
+  // MockRelayClient. 同源形态没有配对这回事（后端就是发出这张页面的那个进程），
+  // 所以那道门整个不存在，直接给一个占位串让下面建连接的 effect 跑起来。
+  const secret = MOCK
+    ? "mock-secret"
+    : NEEDS_PAIRING
+      ? (activeDevice(book)?.secret ?? null)
+      : "same-origin";
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
   const [a2hsDismissed, setA2hsDismissed] = useState(
@@ -113,11 +141,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       return;
     }
     let cancelled = false;
-    loadSecretFromIdb().then((s) => {
+    loadBookFromIdb(newDeviceMint(emptyBook())).then((recovered) => {
       if (cancelled) return;
-      if (s) {
-        persistSecret(s);
-        setSecret(s);
+      if (recovered) {
+        // 把活下来的那一份写回两个存储，下次冷启动就不必再走兜底。
+        persistBook(recovered);
+        setBook(recovered);
       }
       setIdbProbed(true);
     });
@@ -131,8 +160,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // scanned pairing URL here instead. No-op in the browser/PWA.
   useEffect(() => {
     return onPairingLink((paired) => {
-      persistSecret(paired);
-      setSecret(paired);
+      setBook((prev) => {
+        // 同一张码扫第二次不该多出一台（devices.ts::addDevice 按 secret 去重），
+        // 但仍然把焦点落到刚扫的那台 —— 用户刚扫完，想看的就是它。
+        const { book: next } = addDevice(prev, { secret: paired, ...newDeviceMint(prev) });
+        persistBook(next);
+        return next;
+      });
       setIdbProbed(true);
     });
   }, []);
@@ -650,7 +684,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <button
           className={styles.gateButton}
           onClick={() => {
-            clearSecret();
+            clearBook();
             clearCachedSessions();
             location.reload();
           }}

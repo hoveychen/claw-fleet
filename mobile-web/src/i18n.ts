@@ -13,7 +13,7 @@ const LANG_KEY = "fleet-lang";
 const LANG_MANUAL_KEY = "fleet-lang-manual";
 
 /** Language the desktop encoded into the pairing URL fragment (`&lang=zh|en`).
- *  Read at module load, BEFORE loadSecretSync() scrubs the hash. */
+ *  Read at module load, BEFORE devices.ts 的 loadBookSync() scrubs the hash. */
 function langFromHash(): Lang | null {
   const m = window.location.hash.match(/[#&]lang=(zh|en)\b/);
   return m ? (m[1] as Lang) : null;
@@ -84,6 +84,8 @@ export function t(zh: string, ...args: Array<string | number>): string {
 
 const DICT: Record<string, string> = {
   "其他": "Other",
+  // ── 设备簿（多设备配对）──
+  "设备": "Device",
   // ── 代理作用域切换器 ──
   "主进程": "Main",
   "当前": "current",
