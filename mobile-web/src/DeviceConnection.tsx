@@ -135,7 +135,7 @@ export function DeviceConnection({
   useEffect(() => {
     if (!connectAllowed) return;
     const d = (a: DeviceAction) => dispatchRef.current({ ...a, deviceId });
-    const client = makeTransport(device.secret, {
+    const client = makeTransport(device, {
       onStatus: (connected) => d({ type: "status", connected }),
       onAgentOnline: (online) => {
         d({ type: "agentOnline", online });
@@ -159,7 +159,7 @@ export function DeviceConnection({
       onRttSample: (sample: RttSample) => d({ type: "rtt", sample }),
       onReconnect: () => d({ type: "reconnect", now: Date.now() }),
       onAuthError: (message) => d({ type: "authError", message }),
-    }, device.relayBase);
+    });
     clientRef.current = client;
     d({ type: "attach" });
     // 错峰:N 条连接同时握手会在网络恢复那一刻挤成一堆。
@@ -176,11 +176,13 @@ export function DeviceConnection({
       clientRef.current = null;
       client.close();
     };
+    // 依赖里放 `device` 整体:换密钥 / 换 relay / 换 baseUrl / 换 token 都该重连,
+    // 而 devices.ts 的每一次修改都产出新对象(纯函数层),所以引用比较正好等价于
+    // 「这台设备的连接参数变了没有」。
   }, [
     deviceId,
     storageId,
-    device.secret,
-    device.relayBase,
+    device,
     makeTransport,
     registerHandle,
     connectAllowed,
@@ -257,10 +259,13 @@ export function DeviceConnection({
   useEffect(() => {
     if (!SUPPORTS_PUSH) return;
     if (!connected || !pushGranted || pushMuted) return;
+    // HTTP 直连那条传输层没有推送通道(pushSubscribe 恒返回 false),订阅也就无处
+    // 登记 —— 别去问 VAPID 公钥,那个请求只会白打一次。
+    if (device.kind !== "relay") return;
     const client = clientRef.current;
     if (!client) return;
     void enablePush(client, device.relayBase, deviceId);
-  }, [connected, pushGranted, pushMuted, deviceId, device.relayBase]);
+  }, [connected, pushGranted, pushMuted, deviceId, device]);
 
   // 回到前台时补拉一次:手机浏览器会冻结后台标签的 socket,重连虽然会发生,但
   // 那一刻的快照可能已经过期。

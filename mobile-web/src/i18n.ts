@@ -89,6 +89,19 @@ const DICT: Record<string, string> = {
   改名: "Rename",
   静音: "Mute",
   扫码添加设备: "Add a device by QR",
+  添加直连主机: "Add a direct host",
+  "填 fleet serve 的地址与 token,不经中转":
+    "Enter a fleet serve address and token — no relay in between",
+  "token(~/.fleet/token)": "token (~/.fleet/token)",
+  "检查中…": "Checking…",
+  添加: "Add",
+  "地址要写成完整的 https://… 形式": "Write the full address, e.g. https://…",
+  "浏览器不允许这个页面连明文 http 地址,请用 https(或先架一层 TLS)":
+    "The browser blocks plain http from this page — use https (or put TLS in front)",
+  "连不上这台主机,或它没有对本页开放跨源访问(需要带 token 的 fleet serve)":
+    "Can't reach this host, or it doesn't allow cross-origin access from here (needs a token-gated fleet serve)",
+  "这台主机拒绝了这个 token": "This host rejected that token",
+  "这个地址答的不是 Fleet 主机": "That address doesn't answer as a Fleet host",
   "扫另一台桌面端「移动端」面板里的二维码": "Scan the QR in another desktop's Mobile panel",
   "每台桌面端各出一张码;扫过的会留在上面这个列表里。":
     "Each desktop shows its own QR code; the ones you scan stay in the list above.",

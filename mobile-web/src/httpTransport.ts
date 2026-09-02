@@ -47,8 +47,23 @@ const REQUEST_TIMEOUT_MS = 15_000;
 
 export interface HttpTransportOptions {
   /** 数据路由的前缀。同源部署下留空即可 —— `/mobile_rpc` 是根路径,页面挂在
-   *  `/m/` 下也能正确解析。测试用它指向替身。 */
+   *  `/m/` 下也能正确解析。测试用它指向替身。
+   *
+   *  设备簿里那种「HTTP 直连主机」给的是**绝对地址**(跨源),此时服务端必须
+   *  回 CORS 头,否则浏览器直接拦(见 claw-fleet-core 的 hooks_server)。 */
   baseUrl?: string;
+  /** 访问令牌。跨源直连一台带 token 门的主机时必需。
+   *
+   *  两条通道的带法不同,而这不是风格问题:
+   *  - 请求走 `Authorization: Bearer <t>` 头;
+   *  - SSE 走 `?token=<t>` 查询参数 —— **EventSource 不能设置请求头**,这是
+   *    浏览器 API 的硬限制。服务端为此同时认这两种(hooks_server/mod.rs 的
+   *    auth check 里明写了「后者是给 SSE 用的」)。
+   *
+   *  代价是 token 会出现在 SSE 那条 URL 里,也就可能落进服务端访问日志。这是
+   *  EventSource 逼出来的取舍,不是我们选的 —— 换成 fetch+ReadableStream 手写
+   *  SSE 才能避免,而那要重写整条流式通道与重连语义。 */
+  token?: string | null;
   fetchImpl?: typeof fetch;
   eventSourceImpl?: typeof EventSource;
 }
@@ -67,11 +82,25 @@ export class HttpTransport implements FleetTransport {
     return (this.opts.baseUrl ?? "").replace(/\/$/, "");
   }
 
+  /** SSE 那条 URL 上的 token 查询串。没有 token 时是空串。 */
+  private tokenQuery(): string {
+    const token = this.opts.token;
+    return token ? `?token=${encodeURIComponent(token)}` : "";
+  }
+
+  /** 请求头。跨源直连带 token 的主机时加上 Bearer;同源部署下没有 token,
+   *  头就只有 Content-Type,与从前逐字节相同。 */
+  private headers(): Record<string, string> {
+    const h: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.opts.token) h.Authorization = `Bearer ${this.opts.token}`;
+    return h;
+  }
+
   connect(): void {
     if (this.stream) return;
     this.closed = false;
     const ES = this.opts.eventSourceImpl ?? globalThis.EventSource;
-    const stream = new ES(`${this.base}/events`);
+    const stream = new ES(`${this.base}/events${this.tokenQuery()}`);
     this.stream = stream;
 
     stream.onopen = () => {
@@ -167,10 +196,17 @@ export class HttpTransport implements FleetTransport {
     return this.connected;
   }
 
-  /** 同源:后端就是发出这张页面的那个 origin。显示它而不是一句「本机」——
-   *  一台手机可能同时开着云端容器和局域网里的 webui,分得清才有意义。 */
+  /** 显示「我连到哪」。同源时是发出这张页面的那个 origin;直连时是那台主机的
+   *  地址(去掉 scheme 与末尾斜杠,与 relay 那边的口径一致)。 */
   get endpointLabel(): string {
-    return this.base || globalThis.location?.host || "";
+    const base = this.base;
+    if (!base) return globalThis.location?.host ?? "";
+    try {
+      const u = new URL(base);
+      return u.protocol === "https:" ? u.host + u.pathname.replace(/\/$/, "") : base;
+    } catch {
+      return base;
+    }
   }
 
   async request<T>(
@@ -192,7 +228,7 @@ export class HttpTransport implements FleetTransport {
     try {
       res = await fetchImpl(`${this.base}/mobile_rpc`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.headers(),
         body: JSON.stringify({ method, params: params ?? {} }),
         signal: controller.signal,
       });
