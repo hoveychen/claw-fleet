@@ -37,7 +37,19 @@ fi
 
 ./scripts/build-android-apk.sh
 
-APK="$(ls -t dist-apk/*.apk | head -1)"
+# 取 dist-apk 下 mtime 最新的那个 —— 也就是上面那行刚构建出来的。
+#
+# 不用 `ls -t`(SC2012),也不用 `find -printf '%T@'` —— 后者是 GNU 扩展,本机
+# macOS 的 BSD find 没有它,套上去等于把一个 lint 提示换成一个真的平台 bug。
+# `-nt` 是 POSIX test,两边都有。
+APK=""
+for candidate in dist-apk/*.apk; do
+  [ -e "$candidate" ] || continue   # 空 glob 时它是自己的字面量
+  if [ -z "$APK" ] || [ "$candidate" -nt "$APK" ]; then
+    APK="$candidate"
+  fi
+done
+[ -n "$APK" ] || { echo "no apk under dist-apk/ — did the build above fail?" >&2; exit 1; }
 echo
 echo "==> installing $(basename "$APK") ($(du -h "$APK" | cut -f1))"
 # -r keeps app data across reinstalls; a signature change still needs a manual
