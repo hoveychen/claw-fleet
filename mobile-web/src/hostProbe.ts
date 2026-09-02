@@ -111,7 +111,7 @@ export function probeMessage(result: HostProbeResult): string {
     case "mixed-content":
       return "浏览器不允许这个页面连明文 http 地址,请用 https(或先架一层 TLS)";
     case "unreachable":
-      return "连不上这台主机,或它没有对本页开放跨源访问(需要带 token 的 fleet serve)";
+      return "连不上这台主机,或它没有对本页开放跨源访问(要指向一台带 admin token 的 Fleet 主机)";
     case "unauthorized":
       return "这台主机拒绝了这个 token";
     case "not-fleet":
