@@ -68,6 +68,7 @@ import { PairScanner } from "./views/PairScanner";
 import { clearCachedSessions } from "./sessionCache";
 import { AUTH_WAIT_MS, waitAuthed } from "./transportWait";
 import { DeviceScopeProvider, scopedKey } from "./deviceScope";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { t as translate, useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
@@ -99,6 +100,15 @@ function fmtTokens(n: number): string {
 }
 
 type Tab = "decisions" | "tasks" | "wiki" | "more";
+
+/** tab 的显示名。只给渲染兜底的标题与 console 标签用(底部导航的文案仍内联在
+ *  各个按钮里) —— 「决策 页没能显示」比「decisions 页没能显示」有用。 */
+const TAB_LABEL: Record<Tab, string> = {
+  decisions: "决策",
+  tasks: "任务",
+  wiki: "知识库",
+  more: "更多",
+};
 
 /** HTTP 主机的默认显示名:主机名本身,比「设备 3」有信息量。解析不出来就退回
  *  给定的序号名。 */
@@ -888,6 +898,22 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const showDecisionDrawer =
     decisions.length > 0 && (tab !== "decisions" || overlayOpen);
 
+  /** 当前打开的是哪个浮层。拿它当浮层那层渲染兜底的 resetKey —— 关掉再开、或
+   *  换到另一个浮层时自动清错重试,一次渲染失败不该把这个入口永久钉死。 */
+  const overlayKey = [
+    detailSession ? `detail:${detailSession.deviceId}:${detailSession.id}` : "",
+    wikiStack.length ? `wiki:${wikiStack.length}:${wikiStack[wikiStack.length - 1].doc.slug}` : "",
+    showRepo ? "repo" : "",
+    repoDetail ? `repoDetail:${repoDetail.repo.root}` : "",
+    showPlans ? "plans" : "",
+    showArtifacts ? "artifacts" : "",
+    showUsage ? "usage" : "",
+    showNewSession ? `newSession:${newSessionTargetId}` : "",
+    showDecisionDrawer ? "drawer" : "",
+  ]
+    .filter(Boolean)
+    .join("|");
+
   if (!paired) {
     // 原生壳限定的两条入口。系统相机扫出来的链接由 App Link 决定交给谁，而
     // App Link 只认 manifest 里编译期写死的 host —— 自建 relay 的 host 编译期
@@ -1059,7 +1085,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </div>
       )}
 
+      {/* 每个 tab 一层。resetKey 是 tab 名 —— 一个 tab 崩了,底部导航还在,切走
+          再切回来自动重试。以前这里任何一处抛异常都是整个 app 变白。 */}
       <main className={styles.main}>
+        <ErrorBoundary label={t("{0} 页", t(TAB_LABEL[tab]))} resetKey={tab}>
         {tab === "decisions" ? (
           <DecisionsView
             decisions={decisions}
@@ -1118,12 +1147,18 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onOpenUsage={() => setShowUsage(true)}
           />
         )}
+        </ErrorBoundary>
       </main>
 
       {/* 后退栈的底层：只要不在主页 tab，返回一次先回主页（安卓惯例，反复切 tab
           也只占一条历史），再返回才轮到栈底的退出确认。挂在浮层之前，保证浮层始终压在它上面。 */}
       {tab !== "decisions" && <HistoryLayer onBack={() => setTab("decisions")} />}
 
+      {/* 浮层各自一层。tab 层管不到这里(浮层是 main 的兄弟),而根层接住只会
+          让整个 app 变成一张错误页 —— 已知咬过人的 sources_config 异形应答就发生
+          在新会话表单里,它正是一个浮层。resetKey 是栈顶浮层的身份,所以关掉再开
+          自动重试。 */}
+      <ErrorBoundary label={t("当前页面")} resetKey={overlayKey}>
       {/* 每一层下钻占一层历史，但只渲染栈顶那层详情——底下几层不必挂着重复拉 tail。 */}
       {detailStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setDetailStack((s) => s.slice(0, i))} />
@@ -1254,6 +1289,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           deviceLabelOf={deviceLabelOf}
         />
       )}
+
+      </ErrorBoundary>
 
       {exitArmed && <div className={styles.exitToast}>{t("再按一次返回退出")}</div>}
 
