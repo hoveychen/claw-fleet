@@ -133,16 +133,46 @@ function guardAnalysisFor(command: string): string {
 
 let spawnCounter = 0;
 
-// Remote-workspace registry (rca), in-memory so the settings section's
-// add/remove flow is exercisable in ?mock screenshots.
+// The ssh host book and the rca workspace registry, in-memory so the whole
+// flow (add a host, browse it, register a workspace, badge the session) is
+// exercisable in ?mock screenshots.
+//
+// The registered workspace deliberately matches a path the mock sessions
+// already run in, so the session card's remote badge actually appears — a
+// fixture registry pointing at a path no session uses renders an empty feature.
+let mockSshHosts: {
+  id: string;
+  label: string;
+  host: string;
+  port: number;
+  username: string;
+  identityFile: string | null;
+  jumpHost: string | null;
+  sshProfile: string | null;
+  rcaPath?: string | null;
+}[] = [
+  {
+    id: "gpu-box",
+    label: "gpu-box",
+    host: "gpu-box",
+    port: 22,
+    username: "dev",
+    identityFile: null,
+    jumpHost: null,
+    sshProfile: "gpu-box",
+    rcaPath: "/home/dev/.fleet/bin/rca",
+  },
+];
+
 let mockRemoteWorkspaces: {
   path: string;
+  hostId?: string;
   pairingCode?: string;
   sshTarget?: string;
   remoteRcaPath?: string;
   label?: string;
 }[] = [
-  { path: "/Users/dev/remote-api", pairingCode: "rca1.JgAkCAESIPuTmockmockmock", label: "gpu-box" },
+  { path: "/Users/demo/workspace/billing-service", hostId: "gpu-box", label: "gpu-box" },
 ];
 
 function handleIPC(
@@ -615,10 +645,12 @@ function handleIPC(
     case "list_remote_workspaces":
       return { workspaces: mockRemoteWorkspaces };
     case "upsert_remote_workspace": {
-      const entry = args.entry as { path: string; pairingCode: string; label?: string };
-      if (!entry.pairingCode.startsWith("rca1.") || entry.pairingCode.length <= 5) {
+      const entry = args.entry as { path: string; hostId?: string; label?: string };
+      // Mirrors the real `upsert`: an entry needs a transport, and since the
+      // pairing-code path was removed that means a host.
+      if (!entry.hostId) {
         throw new Error(
-          "pairing code must be the 'rca1.…' string printed by `rca serve` on the remote host",
+          "rca:no-transport: this remote workspace has no host to run on — register it again from the new-session composer",
         );
       }
       mockRemoteWorkspaces = [
@@ -637,6 +669,61 @@ function handleIPC(
       // No-op in mock: the entry already exists; just return the registry.
       return { workspaces: mockRemoteWorkspaces };
     }
+    case "list_ssh_hosts":
+      return mockSshHosts;
+    case "upsert_ssh_host": {
+      const host = args.host as { id: string };
+      mockSshHosts = [...mockSshHosts.filter((h) => h.id !== host.id), host as never];
+      return mockSshHosts;
+    }
+    case "remove_ssh_host": {
+      mockSshHosts = mockSshHosts.filter((h) => h.id !== (args.id as string));
+      return mockSshHosts;
+    }
+    case "install_rca_on_host": {
+      const conn = args.conn as { id?: string; label?: string; sshProfile?: string | null; username?: string; host?: string };
+      const id = conn.id && conn.id !== "manual" ? conn.id : `ssh-${conn.username ?? "user"}-${conn.host ?? "host"}`;
+      mockSshHosts = [
+        ...mockSshHosts.filter((h) => h.id !== id),
+        {
+          id,
+          label: conn.label || conn.sshProfile || `${conn.username ?? "user"}@${conn.host ?? "host"}`,
+          host: conn.host ?? "host",
+          port: 22,
+          username: conn.username ?? "user",
+          identityFile: null,
+          jumpHost: conn.sshProfile ? null : null,
+          sshProfile: conn.sshProfile ?? null,
+          rcaPath: "/home/user/.fleet/bin/rca",
+        },
+      ];
+      return mockSshHosts;
+    }
+    case "remote_host_health":
+      return {
+        sshOk: true,
+        home: "/home/dev",
+        rcaPath: "/home/dev/.fleet/bin/rca",
+        rcaVersion: "rca v0.2.0",
+        stdioOk: true,
+      };
+    case "remote_browse_dir": {
+      const at = ((args.path as string | null) ?? "/home/dev").replace(/\/+$/, "") || "/";
+      const kids = at === "/home/dev" ? ["projects", "scratch"] : ["src", "tests"];
+      return {
+        path: at,
+        parent: at === "/" ? null : at.slice(0, at.lastIndexOf("/")) || "/",
+        entries: kids.map((n) => ({ name: n, path: `${at}/${n}`, isGitRepo: n === "projects" })),
+        truncated: false,
+        roots: ["/home/dev"],
+      };
+    }
+    case "remote_create_dir": {
+      const parent = ((args.path as string | null) ?? "/home/dev").replace(/\/+$/, "");
+      const made = `${parent}/${args.name as string}`;
+      return { path: made, parent, entries: [], truncated: false, roots: ["/home/dev"] };
+    }
+
     case "install_rca_remote": {
       const conn = args.conn as { sshProfile?: string | null; username?: string; host?: string };
       const path = args.path as string;

@@ -437,3 +437,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Same badge on the compact group-main strip: smaller, same quiet weight as
+   the other gm_* chips beside it. */
+.gm_remote {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  font-size: 9px;
+  line-height: 1.4;
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
