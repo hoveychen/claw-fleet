@@ -42,6 +42,43 @@ pub(crate) async fn harness_statuses(
         .map_err(|e| format!("join: {e}"))
 }
 
+/// One streamed installer output line, on the `harness-install-progress`
+/// channel (own channel, mirroring `rca-install-progress`, so wizard cards
+/// don't collide with the backend-connect flow).
+#[derive(Clone, serde::Serialize)]
+struct HarnessInstallProgress {
+    source: String,
+    line: String,
+}
+
+/// Install a harness via its official installer (see
+/// `claw_fleet_core::harness_install`). Desktop-layer command like
+/// `install_rca_remote` — install *actions* are local-machine phase 1; the
+/// probe/status surface stays on the Backend trait for remote parity.
+#[tauri::command]
+pub(crate) async fn install_harness(
+    source: String,
+    app: tauri::AppHandle,
+) -> Result<claw_fleet_core::harness_status::HarnessStatus, claw_fleet_core::harness_install::InstallError>
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress_source = source.clone();
+        let emitter = app.clone();
+        let progress = move |line: &str| {
+            let _ = emitter.emit(
+                "harness-install-progress",
+                HarnessInstallProgress { source: progress_source.clone(), line: line.to_string() },
+            );
+        };
+        claw_fleet_core::harness_install::install_harness(&source, &progress)
+    })
+    .await
+    .map_err(|e| claw_fleet_core::harness_install::InstallError {
+        code: claw_fleet_core::harness_install::InstallErrorCode::SpawnFailed,
+        message: format!("install task join failed: {e}"),
+    })?
+}
+
 #[tauri::command]
 pub(crate) async fn get_account_info(
     state: tauri::State<'_, AppState>,
