@@ -246,3 +246,11 @@
   opacity: 1;
   background: var(--color-bg-secondary);
 }
+
+/* rca marker on a tab. A tab strip has no room for a text badge, so the icon
+   carries it and the tab's tooltip names the host. */
+.remote_icon {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+  margin-right: 2px;
+}

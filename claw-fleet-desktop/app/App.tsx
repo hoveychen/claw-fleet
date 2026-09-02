@@ -25,6 +25,7 @@ import { type Connection, applyWindowTheme, navigateToSessionDetail, useConnecti
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
+import { useRemoteWorkspacesSync } from "./hooks/useRemoteWorkspaces";
 
 const ONBOARDING_DISMISSED_KEY = "onboarding-dismissed";
 const WIZARD_COMPLETED_KEY = "wizard-completed";
@@ -44,6 +45,11 @@ function App() {
   // (e.g. lite mode with no pending decisions).
   useDecisionEvents();
   useDecisionPeerSync();
+
+  // The rca registry, fetched once for the whole app: the session card, list
+  // and tab strip all badge remote workspaces from it, and a per-card fetch
+  // would be one IPC round trip per card per board render.
+  useRemoteWorkspacesSync();
 
   // In-app Cmd/Ctrl+F find bar. The controller's key listener is global, so the
   // bar can be summoned from any view; we render it in the searchable returns.
