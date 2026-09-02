@@ -92,16 +92,16 @@ const DICT: Record<string, string> = {
   添加直连主机: "Add a direct host",
   "正在加入 {0}…": "Adding {0}…",
   "加入 {0} 失败:{1}": "Couldn't add {0}: {1}",
-  "填 fleet serve 的地址与 token,不经中转":
-    "Enter a fleet serve address and token — no relay in between",
+  "填另一台 Fleet 主机的地址与 admin token,不经中转":
+    "Enter another Fleet host's address and admin token — no relay in between",
   "token(~/.fleet/token)": "token (~/.fleet/token)",
   "检查中…": "Checking…",
   添加: "Add",
   "地址要写成完整的 https://… 形式": "Write the full address, e.g. https://…",
   "浏览器不允许这个页面连明文 http 地址,请用 https(或先架一层 TLS)":
     "The browser blocks plain http from this page — use https (or put TLS in front)",
-  "连不上这台主机,或它没有对本页开放跨源访问(需要带 token 的 fleet serve)":
-    "Can't reach this host, or it doesn't allow cross-origin access from here (needs a token-gated fleet serve)",
+  "连不上这台主机,或它没有对本页开放跨源访问(要指向一台带 admin token 的 Fleet 主机)":
+    "Can't reach this host, or it doesn't allow cross-origin access from here (point it at a Fleet host with an admin token)",
   "这台主机拒绝了这个 token": "This host rejected that token",
   "这个地址答的不是 Fleet 主机": "That address doesn't answer as a Fleet host",
   "扫另一台桌面端「移动端」面板里的二维码": "Scan the QR in another desktop's Mobile panel",
