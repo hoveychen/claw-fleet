@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Play } from "lucide-react";
+import { Play, Server } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
@@ -10,6 +10,7 @@ import styles from "./SessionCard.module.css";
 import { BG_TASK_KINDS } from "../bgTaskKinds";
 import { isKeyboardActivationKey } from "../keyboard";
 import { PlanProgressRow } from "./PlanProgressRow";
+import { findRemoteWorkspace, useRemoteWorkspacesStore } from "../hooks/useRemoteWorkspaces";
 
 // ── Rate-limit countdown ──────────────────────────────────────────────────────
 
@@ -432,6 +433,11 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
   const { t } = useTranslation();
   const openDetail = useDetailStore((s) => s.open);
   const multiSource = useMultiSource();
+  // Once a session is running, nothing else on screen says its file I/O is
+  // happening on another machine — the composer's badge disappeared the moment
+  // the workspace was picked.
+  const remoteWorkspaces = useRemoteWorkspacesStore((s) => s.workspaces);
+  const remoteWorkspace = findRemoteWorkspace(remoteWorkspaces, session.workspacePath);
   const isActive = ["thinking", "executing", "streaming", "processing", "waitingInput", "delegating"].includes(
     session.status
   );
@@ -506,6 +512,17 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
         <>
           <div className={`${styles.header} ${hideHeader ? styles.header_compact : ""}`}>
             {!hideHeader && <span className={styles.workspace}>{session.workspaceName}</span>}
+            {!hideHeader && remoteWorkspace && (
+              <span
+                className={styles.tag_remote}
+                title={t("session.remote_on_host", {
+                  host: remoteWorkspace.label || remoteWorkspace.path,
+                })}
+              >
+                <Server size={11} strokeWidth={1.8} />
+                {remoteWorkspace.label || t("session.remote_short")}
+              </span>
+            )}
             {!hideHeader && <StatusBadge status={session.status} />}
             {!hideHeader && <RateLimitControls session={session} />}
             {!hideHeader && <ServerErrorControls session={session} />}

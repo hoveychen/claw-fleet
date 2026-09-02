@@ -2488,5 +2488,9 @@
       "dsh": "dsh isn't installed, so this session can't start."
     },
     "open_env_panel": "Fix in Environment panel"
+  },
+  "session": {
+    "remote_on_host": "File I/O runs on {{host}} (rca)",
+    "remote_short": "Remote"
   }
 }

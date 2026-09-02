@@ -418,3 +418,22 @@
 :global([data-platform="macos"][data-theme="light"]) .badge_idle {
   background: rgba(0, 0, 0, 0.06);
 }
+
+/* rca remote-execution badge. Reads as a quiet property of the workspace, not
+   an alert: being remote is normal for these sessions, so it must not compete
+   with the status badge beside it. */
+.tag_remote {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -2484,5 +2484,9 @@
       "dsh": "还没有安装 dsh,没法启动这个会话。"
     },
     "open_env_panel": "去环境面板修复"
+  },
+  "session": {
+    "remote_on_host": "文件读写在 {{host}} 上执行（rca）",
+    "remote_short": "远端"
   }
 }
