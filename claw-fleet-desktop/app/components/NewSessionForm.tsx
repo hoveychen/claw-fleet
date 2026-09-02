@@ -362,11 +362,12 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
 
   // rca: registered remote workspaces (badged in the picker, and offered when
   // they have no sessions yet so they are reachable at all), plus the hosts a
-  // workspace can be chosen ON. Still DEV-gated while the flow is finished.
+  // workspace can be chosen ON. No longer DEV-gated (老板 2026-09-02): an
+  // install with no remote hosts registered just gets two empty arrays here and
+  // the picker looks exactly as it did before.
   const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspace[]>([]);
   const [rcaHosts, setRcaHosts] = useState<RemoteConnection[]>([]);
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
       .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
       .catch(() => {});

@@ -73,8 +73,8 @@ agent（claude / codex）**仍在本机跑**，rca 把 workspace 路径下的文
 `wrap_launch` 的错误原样冒到 spawn 失败里：`rca binary not found`、
 `workspace rcaPath points to X, which does not exist`。这些是给开发者读的。
 
-会话跑起来之后 ssh 隧道断了 = 会话直接死，**没有任何 UI 提示、没有重连**
-（serve 是 per-run 无状态的，断线就得重跑）。
+会话跑起来之后 ssh 隧道断了会怎样——**这条我原先写错了，2026-09-02 实测更正**，
+见第七节。
 
 ### G. 没有连通性自检
 
@@ -175,7 +175,126 @@ X1（会话界面远端标识）、X2（ssh 断线提示/重连）、X3（错误
 X4（条目「测试连接」）**四项全要**。X5（拆共享 state）是重做注册入口的副产品，
 不单列。
 
-### 6.6 尚未拍板
+### 6.6 曾经尚未拍板的一条 —— 老板 2026-09-02 已拍板
 
-- **门控什么时候解？** 设计做完随之解除，还是等真机全链 e2e 跑通再解。
-  留到实现落地前再问。
+- **门控什么时候解？** ~~设计做完随之解除，还是等真机全链 e2e 跑通再解。~~
+  **已解。** rca UI 不再有 `import.meta.env.DEV` 门控：SettingsPanel 的
+  「远端主机（RCA 执行器）」整段、以及 NewSessionForm 里拉取远端 workspace /
+  主机列表的那个 effect，两处 gate 都拆掉了。
+
+  拆的时机是断线止损（第七节）落地之后 —— 门控当初等的就是「composer 侧
+  挑主机、浏览、注册」那条流程，它已经随 `rca-session-picker` 上线；断线
+  止损补上了最后一块能让人放心开着的止损位。
+
+  验证是对**打包产物**做的（门控只在 `vite build` 里才为 false，dev 下永远
+  看不出差别）：`pnpm build` 之后起 `pnpm preview`，用 patchwright 在
+  `localhost:4173/?mock` 上确认设置页的「远端主机（RCA 执行器）」整段可见、
+  新建会话的目录下拉里有「在 gpu-box 上浏览…」。
+
+  没有远端主机的安装不受影响：两个 invoke 各拿回一个空数组，界面和从前一样。
+
+
+---
+
+## 七、ssh 断线时到底发生什么（2026-09-02 实测，两次复现）
+
+本节更正第三节 F 里那句「ssh 断了 = 会话直接死」。**不是。真实情况更糟。**
+
+### 实验
+
+本机 rca v0.2.0，`--via` 指向一个可被 kill 的 ssh 包装脚本，远端 own-api-ko。
+agent 每秒读一次只存在于远端的 `marker.txt`，跑到一半 `pkill` 掉那条 ssh。
+
+### 观察到的（原始日志）
+
+```
+15:07:58 rca serve [fs] PREAD handle=2 off=0 len=6 -> 6
+tick 1 ok
+00:08:00 rca remote recv failed: stream reset: connection closed: EOF
+tick 2 FAILED: FileNotFoundError: No such file or directory: '/private/tmp/ssh-kill-demo/marker.txt'
+```
+
+三件事，都与原先的假设不同：
+
+1. **agent 进程没有死。** 它继续跑，只是从下一次系统调用起，看到的是本机那个
+   **空的镜像目录**。
+2. **agent 收到的不是传输错误，是 `FileNotFoundError`。** 从它的视角，这与
+   「仓库被人删空了」完全无法区分。一个 agent 在这个状态下完全可能得出
+   「代码没了」的结论，然后开始从头写。
+3. **rca 自己是知道的。** 它在 stderr 上打了
+   `rca remote recv failed: stream reset: connection closed: EOF`。信号是现成的，
+   只是没有人把它接到界面上。
+
+### 这对设计意味着什么
+
+原先设想的「断线提示 + 可选重连」低估了严重性。真正的要求排序是：
+
+- **P0 · 止损。** 一旦检测到断开，必须让 agent **停下**，而不是继续对着空目录
+  工作。看到空仓库的 agent 会做出破坏性的错误决定。
+- **P1 · 告知。** 会话上明确标出「远端连接断开」，并说清它停在哪一步。
+- **P2 · 恢复。** serve 是 per-run 无状态的，重连不等于恢复现场——这是需要
+  老板拍板的取舍（自动重跑 ssh 继续 / 只给一个「重开会话」按钮）。
+
+信号来源已确定：rca 的 stderr。Fleet 本来就在收每个会话的 stderr
+（`session_launch` 的 `stderr_log`），所以接这条线不需要改 rca。
+
+### 落地：老板 2026-09-02 拍板 —— 停会话 + 明确报错，不自动重连
+
+上面那条待拍板的取舍有结论了：**检测到断线就停会话并说清原因，不自动重连。**
+
+理由是 `rca serve` 是 per-run 的：断掉的那次远端运行已经没了，重连只会开出
+一次**新的**远端运行，而不是把中断的那次接回来。所以"自动重连"这个词在这里
+名不副实——它给人一种"现场恢复了"的错觉，实际上恢复的只是隧道。既然它不能
+自动恢复现场，就不该由后台调度器代替人做这个决定。
+
+**「不自动重连」不等于「让人自己去 composer 里重开」。** 卡片上有一个一键
+重开按钮，走的就是限流/服务器错误那两个控件用的同一个 `resume_session`
+命令（因此没有新的 Tauri 命令，也不需要动 liveProxy 的路由表）。差别只在
+于：这一下是人按的。
+
+#### 实现落点（三处，都在 `prd/rca-ssh-resilience`）
+
+| 环节 | 落点 |
+|------|------|
+| 信号 | `remote_disconnect::transport_failure_marker` —— rca 的三条传输失败串（`remote dial/send/recv failed:`）。取自二进制本体的格式串，不是从单次观测里推的；刻意收窄到这三条，免得把 agent 自己工具打出来的网络错误也当成断线 |
+| 止损 | `session_launch` 里仅对 rca 包装的会话把 stderr 改 `piped`，监视线程照原样把每行写回同一个日志文件，命中 marker 就 `kill_pid_tree(pid, force)`。非 rca 会话的 stderr 通路一字未动 |
+| 告知 | `~/.fleet/remote-disconnect/<session-id>.json` + scan 期 `enrich_sessions`，并新增 `SessionStatus::RemoteDisconnected`。为什么要新状态：被杀掉的会话 transcript 一分钟内就衰减成 `Idle`，屏幕上和"正常收工"长得一模一样 |
+| 恢复 | 卡片上的重开按钮；三个用户发起的 resume 入口（桌面 / `fleet serve` / 手机）都会先把记录清掉，链路还是不通就会在一秒内写一条新的 |
+
+#### 一个刻意留下的差别态
+
+记录里带 `agentStopped`。kill 失败时（`false`）文案和配色都不一样——那是唯一
+一个"agent 可能正对着空目录继续写"的状态，需要人去看一眼进程，不能和已经
+处理好的情况长成一个样子。
+
+#### 验证：真拔一次 ssh（2026-09-02，两次复现）
+
+不是"单测绿"。`claw-fleet-core/tests/rca_live_disconnect.rs` 真的注册一个远端
+workspace、经真 rca 走真 ssh 隧道起一个探针、然后 `pkill` 掉那条 ssh：
+
+```sh
+FLEET_RCA_LIVE_SSH=own-api-ko \
+  cargo test -p claw-fleet-core --test rca_live_disconnect -- --ignored --nocapture
+```
+
+两次跑的结果一致：
+
+```
+record: RemoteDisconnect { code: "rca:transport-lost",
+  detail: "… rca remote recv failed: stream reset: connection closed: EOF",
+  host_label: Some("own-api-ko"), agent_stopped: true }
+probe ticks against the empty mirror: 0
+```
+
+最后那行是这条功能的全部意义：探针**一次**都没有读到那个空镜像目录。它是
+`#[ignore]` 的（要一台能连上的机器），但它是唯一能证明"marker 串还对得上现役
+rca 实际打印的东西"的测试——这也正是它在写的过程中救回来的两个坑：
+
+- rca 拒绝拦截 Apple 平台二进制（`/bin/sh` 用不了），也拒绝 Homebrew 的动态
+  链接解释器（它把目标**复制**到临时目录重签名，`@rpath/libnode…` 就找不到
+  了）。所以探针是测试自己用 `rustc` 现编的一个静态的小程序。
+- **rca 只路由绝对路径。**同一个探针，`read("marker.txt")` 读到的是本机那个空
+  镜像（NotFound），`read("<绝对路径>/marker.txt")` 才走到远端。也就是说探针
+  用相对路径的话，隧道明明还活着它也会一路报 MISSING——测试会永远"绿"得毫无
+  意义。这是这次在本机对 rca v0.2.0 的实测观察，没有去查 rca 源码确认它是
+  设计如此还是别的原因。

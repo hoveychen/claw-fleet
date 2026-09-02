@@ -47,6 +47,14 @@ pub enum SessionStatus {
                    // (the transient "Server error mid-response / Response stalled
                    // mid-stream" family). Unlike RateLimited it resumes immediately
                    // — the auto-resume scheduler retries Fleet-headless sessions.
+    RemoteDisconnected, // The session ran on a registered remote workspace whose
+                   // transport (rca over ssh) died mid-run. Fleet stopped the
+                   // agent on purpose — left running it would have kept working
+                   // against the now-empty local mirror. Terminal: unlike
+                   // RateLimited/ServerErrored nothing retries it, because
+                   // `rca serve` is per-run and reconnecting would not restore
+                   // the remote-side run. Stamped from the side-channel record
+                   // in `remote_disconnect`, not from the transcript.
     Stuck,        // Fleet-spawned, process alive, but wedged mid tool-use batch:
                   // a non-interactive tool_use has been missing its tool_result
                   // for minutes (STUCK_TOOL_BATCH_FLOOR_SECS). The turn is
@@ -273,6 +281,16 @@ pub struct SessionInfo {
     /// waiting session's jsonl doesn't.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub watches: Vec<crate::watch::WatchSummary>,
+    /// Set when this session's remote workspace lost its transport mid-run and
+    /// Fleet stopped the agent (see [`crate::remote_disconnect`]). `None` for
+    /// every local session and every healthy remote one. Carries the reason,
+    /// because the session's own transcript ends without one — it stops
+    /// mid-turn, and the last thing in it is whatever the agent was doing when
+    /// the link died. Stamped by `remote_disconnect::enrich_sessions` at scan
+    /// time, not during the cached deep parse: the record appears while the
+    /// jsonl doesn't change.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub remote_disconnect: Option<crate::remote_disconnect::RemoteDisconnect>,
 }
 
 
@@ -676,6 +694,7 @@ mod tests {
             compact_cost_usd: 0.0,
             pending_messages: Vec::new(),
             watches: Vec::new(),
+            remote_disconnect: None,
         }
     }
 

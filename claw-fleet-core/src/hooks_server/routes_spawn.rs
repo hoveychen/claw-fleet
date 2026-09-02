@@ -24,6 +24,9 @@ pub(crate) fn route_resume_session(
                         // is active again — drop the done mark on the host where it
                         // lives so it re-surfaces as needs-review.
                         crate::session_mark::clear_done_on_resume(&req.session_id, &req.workspace_path);
+                        // Same as the desktop resume: a retry clears the stale
+                        // remote-disconnect verdict on the host where it lives.
+                        crate::remote_disconnect::clear(&req.session_id);
                         // Route by source: codex sessions resume via
                         // `codex exec resume`, claude via `claude --resume`.
                         // Manual resume is untracked → no-op on_exit box.

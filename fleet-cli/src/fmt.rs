@@ -21,6 +21,7 @@ fn status_color(status: &SessionStatus) -> &'static str {
         SessionStatus::Idle => "\x1b[2m",
         SessionStatus::RateLimited => "\x1b[31m",
         SessionStatus::ServerErrored => "\x1b[31m",
+        SessionStatus::RemoteDisconnected => "\x1b[31m",
         SessionStatus::Stuck => "\x1b[91m",
     }
 }
@@ -78,6 +79,8 @@ pub(crate) fn format_status(status: &SessionStatus) -> &'static str {
         SessionStatus::Idle => "Idle",
         SessionStatus::RateLimited => "RateLimit",
         SessionStatus::ServerErrored => "ServerErr",
+        // Same 9-column budget as the labels around it.
+        SessionStatus::RemoteDisconnected => "RemoteOff",
         SessionStatus::Stuck => "Stuck",
     }
 }

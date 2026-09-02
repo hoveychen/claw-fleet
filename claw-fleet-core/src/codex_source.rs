@@ -1748,6 +1748,7 @@ fn build_session_from_sqlite(
         compact_cost_usd: 0.0,
         pending_messages: Vec::new(),
         watches: Vec::new(),
+        remote_disconnect: None,
     })
 }
 
@@ -4689,6 +4690,7 @@ fn parse_codex_session(
         compact_cost_usd: 0.0,
         pending_messages: Vec::new(),
         watches: Vec::new(),
+        remote_disconnect: None,
     })
 }
 

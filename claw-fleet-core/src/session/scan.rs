@@ -818,6 +818,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         compact_cost_usd: 0.0,
         pending_messages: Vec::new(),
         watches: Vec::new(),
+        remote_disconnect: None,
     }
 }
 
@@ -833,6 +834,10 @@ pub fn enrich_all(sessions: &mut [SessionInfo]) {
     crate::session_title::enrich_sessions(sessions);
     crate::session_read::enrich_sessions(sessions);
     crate::pending_message::enrich_sessions(sessions);
+    // Last: it overrides `status`, so it must run after everything that reads or
+    // sets one. A disconnected session's transcript-derived status describes a
+    // process Fleet has already killed.
+    crate::remote_disconnect::enrich_sessions(sessions);
 }
 
 /// Scan all registered agent sources and merge into a single sorted list.

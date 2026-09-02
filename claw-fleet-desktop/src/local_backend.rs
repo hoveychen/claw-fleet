@@ -1872,6 +1872,11 @@ impl Backend for LocalBackend {
         // the done mark so it re-surfaces as needs-review, then re-emit so the
         // task page updates instantly rather than waiting for the rescan below.
         claw_fleet_core::session_mark::clear_done_on_resume(&session_id, &workspace_path);
+        // A resume is the user's answer to a dead remote transport: forget the
+        // old verdict so the card stops being pinned to `remoteDisconnected`.
+        // If the link is still down the new run's stderr monitor files a fresh
+        // record within a second.
+        claw_fleet_core::remote_disconnect::clear(&session_id);
         self.restamp_marks_and_emit();
         resume_session_impl(
             &session_id,
@@ -3960,6 +3965,7 @@ mod tests {
             todos: None,
             background_tasks: Vec::new(),
             watches: Vec::new(),
+            remote_disconnect: None,
             task_plan: None,
             handoff: None,
             user_mark: None,
