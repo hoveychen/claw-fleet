@@ -100,7 +100,12 @@ function newDeviceMint(book: DeviceBook): { id: string; label: string; now: numb
 const MOCK = isMockMode();
 
 /** 造出这次部署该用的传输层。由 main.tsx 按构建模式注入。 */
-export type TransportFactory = (secret: string, handlers: TransportHandlers) => FleetTransport;
+export type TransportFactory = (
+  secret: string,
+  handlers: TransportHandlers,
+  /** 这台设备指名的 relay;`null` = 构建默认值。同源形态忽略它。 */
+  relayBase?: string | null,
+) => FleetTransport;
 
 export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
@@ -113,17 +118,22 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     // PWA 是被一个带 `#k=…` 的 URL 打开的 —— 那就是一次配对。
     const scanned = consumeHashSecret();
     if (!scanned) return stored;
-    return adoptScannedDevice(stored, scanned, newDeviceMint(stored)).book;
+    return adoptScannedDevice(stored, scanned.secret, newDeviceMint(stored), scanned.relayBase)
+      .book;
   });
   // 当前作用域设备的密钥。`?mock` stands in for a pairing secret so the gate
   // below opens and the effect that builds the client runs — it just builds a
   // MockRelayClient. 同源形态没有配对这回事（后端就是发出这张页面的那个进程），
   // 所以那道门整个不存在，直接给一个占位串让下面建连接的 effect 跑起来。
+  const current = NEEDS_PAIRING && !MOCK ? activeDevice(book) : null;
   const secret = MOCK
     ? "mock-secret"
     : NEEDS_PAIRING
-      ? (activeDevice(book)?.secret ?? null)
+      ? (current?.secret ?? null)
       : "same-origin";
+  // 当前设备指名的 relay。`null` = 构建默认值（迁移过来的设备、以及扫码时没带
+  // `&relay=` 的都是这一类），传输层与推送各自把它解析成实际地址。
+  const relayBase = current?.relayBase ?? null;
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
   const [a2hsDismissed, setA2hsDismissed] = useState(
@@ -426,7 +436,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       },
       onAuthError: (message: string) => setAuthError(message),
     };
-    const client = makeTransport(secret, handlers);
+    const client = makeTransport(secret, handlers, relayBase);
     clientRef.current = client;
     client.connect();
     // Mobile browsers may never run React cleanup on tab close — tell the
@@ -550,7 +560,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // gained the entry.
   useEffect(() => {
     if (connected && push === "granted" && !pushOptedOut && clientRef.current) {
-      void enablePush(clientRef.current);
+      void enablePush(clientRef.current, relayBase);
     }
   }, [connected, push, pushOptedOut]);
 
@@ -576,7 +586,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const handleEnablePush = useCallback(async () => {
     if (!clientRef.current) return;
-    setPush(await enablePush(clientRef.current));
+    setPush(await enablePush(clientRef.current, relayBase));
     setPushOptedOut(false);
   }, []);
 
