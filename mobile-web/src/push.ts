@@ -106,6 +106,30 @@ export async function enablePush(
   return "granted";
 }
 
+/** 只让**这一个 channel** 停止推送:告诉这台设备的 relay 别再往这个订阅发,
+ *  但**不动**浏览器订阅本体,也不碰全局静音开关。
+ *
+ *  移除某一台设备时用它。这里的关键区别是浏览器订阅是**所有设备共用的一份**
+ *  (一个 endpoint 注册在 N 个 channel 下,见 fleet-relay 的 push.rs:每个
+ *  channel 一个订阅文件)。所以 `subscription.unsubscribe()` 在这里是错的 ——
+ *  那会把其他设备的通知一起掐掉。
+ *
+ *  返回是否把退订帧发出去了。false 意味着「relay 那边可能还留着这个订阅」,
+ *  调用方要么重试、要么如实告诉用户。 */
+export async function unsubscribeChannel(client: FleetTransport): Promise<boolean> {
+  if (hasNativePushToken()) {
+    return client.pushUnsubscribe({ platform: "harmony", token: nativePushToken() });
+  }
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return true; // 本来就没订阅,无事可退
+    return client.pushUnsubscribe({ endpoint: subscription.endpoint, platform: "web" });
+  } catch {
+    return false;
+  }
+}
+
 /** Turn notifications off: tell the relay to drop the subscription, unsubscribe
  *  in the browser, and persist the opt-out so nothing re-subscribes. Sends the
  *  unsubscribe frame BEFORE `subscription.unsubscribe()` so the endpoint the
