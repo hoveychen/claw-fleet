@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, GitBranch, ListTree, TriangleAlert, X } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
+import { useHistoryLayer } from "../useNavStack";
 import type { FleetTransport } from "../transport";
 import type { PlanForest, PlanNode, SessionInfo } from "../types";
 import {
@@ -297,6 +298,9 @@ function PlanSheet({
 }) {
   const [doneShown, setDoneShown] = useState(false);
   const [titleOpen, setTitleOpen] = useState(false);
+  // 和产出预览同理：sheet 是压在计划页之上的第二层，自己不登记一层历史，
+  // 返回键就会把整个计划页弹掉，人一步退回「更多」。
+  useHistoryLayer(onClose);
   const indexed = node.items.map((item, i) => ({ item, i }));
   const pendingItems = indexed.filter((x) => !x.item.done);
   const doneItems = indexed.filter((x) => x.item.done);
