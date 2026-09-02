@@ -14,43 +14,32 @@
 #      an app whose signature matches. An APK signed with any other key (or
 #      unsigned) installs fine and can then never be paired — so this script
 #      refuses to emit an APK it hasn't verified against the keystore.
-#   2. The relay hostname, compiled into the bundle as VITE_RELAY_URL, because
-#      inside the shell `window.location.origin` is `capacitor://localhost`.
-#      Which host a given user *needs* is decided by their desktop's region
-#      (claw-fleet-core/src/relay_region.rs), not by this build, so by default
-#      both variants are produced and the operator hands out the right one.
-#      Both hostnames front the same relay — the difference is network path,
-#      not pairing state.
+#   2. The relay hostname, compiled into the bundle as VITE_RELAY_URL. This is
+#      only a *fallback default*, not the relay the app will use: a device
+#      records the relay named by the QR it scanned (devices.ts `relayBase`,
+#      fed by deepLink.ts) and dials that one, whatever host it is — including
+#      a self-hosted relay this build has never heard of. The baked value is
+#      what a device that named no relay falls back to (`relayBaseFor`), which
+#      after the pairing-link fix is only migrated pre-multi-device installs.
+#      So one APK serves every user; override this only if you run your own
+#      relay and want it to be the out-of-the-box default.
 #
 # Usage:
-#   ./scripts/build-android-apk.sh                # both variants (default)
-#   ./scripts/build-android-apk.sh --region cn    # mainland-China host only
-#   ./scripts/build-android-apk.sh --region global
+#   ./scripts/build-android-apk.sh
+#   RELAY_URL=https://relay.example.com ./scripts/build-android-apk.sh
 #
 # Environment overrides:
+#   RELAY_URL           fallback relay baked into the bundle (see above)
 #   FLEET_SIGNING_DIR   where fleet-release.jks + keystore-password.txt live
-#   OUT_DIR             where the finished APKs land (default mobile-web/dist-apk)
+#   OUT_DIR             where the finished APK lands (default mobile-web/dist-apk)
 #   JAVA_HOME           JDK 21 (defaults to the JBR shipped with Android Studio)
 #   ANDROID_HOME        Android SDK (defaults to ~/Library/Android/sdk)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Keep these in sync with claw-fleet-core/src/relay_region.rs.
-RELAY_URL_GLOBAL="https://fleet-relay.muveeai.com"
-RELAY_URL_CN="https://fleet-relay.eternizedlab.com"
-
-REGION="both"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --region)
-      REGION="${2:-}"
-      shift 2
-      ;;
-    --region=*)
-      REGION="${1#*=}"
-      shift
-      ;;
     -h|--help)
       sed -n '2,40p' "$0"
       exit 0
@@ -61,13 +50,9 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
-case "$REGION" in
-  both|cn|global) ;;
-  *)
-    echo "--region must be one of: both, cn, global (got '$REGION')" >&2
-    exit 2
-    ;;
-esac
+
+# Defaults to build-shell.sh's own default (the non-mainland host) when unset.
+RELAY_URL="${RELAY_URL:-}"
 
 # The keystore lives in the MAIN checkout, not in a linked worktree —
 # --git-common-dir points at the main .git even from inside one.
@@ -130,19 +115,21 @@ VERSION_NAME="${BASE_VERSION}+${VERSION_CODE}.${GIT_SHA}${DIRTY}"
 
 mkdir -p "$OUT_DIR"
 
-build_variant() {
-  local label="$1" relay_url="$2"
-  local apk="android/app/build/outputs/apk/release/app-release.apk"
-  local out="$OUT_DIR/Fleet-${VERSION_NAME}-${label}.apk"
+APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+OUT_APK="$OUT_DIR/Fleet-${VERSION_NAME}.apk"
 
-  echo
-  echo "=================================================================="
-  echo "==> variant '$label' — relay $relay_url"
-  echo "=================================================================="
+build_apk() {
+  local apk="$APK_PATH"
+  local out="$OUT_APK"
 
   # build-shell.sh bakes VITE_RELAY_URL into the bundle and runs `cap sync`,
-  # which is what copies it into android/app/src/main/assets/public.
-  RELAY_URL="$relay_url" ./scripts/build-shell.sh
+  # which is what copies it into android/app/src/main/assets/public. Passing an
+  # empty RELAY_URL lets its own default apply rather than overriding it here.
+  if [ -n "$RELAY_URL" ]; then
+    RELAY_URL="$RELAY_URL" ./scripts/build-shell.sh
+  else
+    ./scripts/build-shell.sh
+  fi
 
   echo "==> assembling signed release APK (versionCode=$VERSION_CODE versionName=$VERSION_NAME)"
   rm -f "$apk" "${apk%.apk}-unsigned.apk"
@@ -181,44 +168,27 @@ build_variant() {
     "APK is signed with $actual_fp but the release keystore is $EXPECTED_FP — the relay's assetlinks.json names the latter, so this build could never be paired"
 
   mv "$apk" "$out"
-  echo "==> $out"
-  BUILT+=("$out")
 }
 
-BUILT=()
-case "$REGION" in
-  both)
-    build_variant global "$RELAY_URL_GLOBAL"
-    build_variant cn "$RELAY_URL_CN"
-    ;;
-  global) build_variant global "$RELAY_URL_GLOBAL" ;;
-  cn) build_variant cn "$RELAY_URL_CN" ;;
-esac
+build_apk
 
 # ------------------------------------------------------------------ summary --
 echo
 echo "=================================================================="
-echo "  built ${#BUILT[@]} APK(s) — versionName $VERSION_NAME"
+echo "  $(basename "$OUT_APK")"
 echo "=================================================================="
-for apk in "${BUILT[@]}"; do
-  echo
-  echo "  $(basename "$apk")"
-  echo "    path   $apk"
-  echo "    size   $(du -h "$apk" | cut -f1)"
-  echo "    sha256 $(shasum -a 256 "$apk" | cut -d' ' -f1)"
-  if [ -x "$AAPT2" ]; then
-    "$AAPT2" dump badging "$apk" 2>/dev/null |
-      awk -F"'" '/^package:/ { printf "    package %s  versionCode %s  versionName %s\n", $2, $4, $6 }'
-  fi
-done
+echo "    path   $OUT_APK"
+echo "    size   $(du -h "$OUT_APK" | cut -f1)"
+echo "    sha256 $(shasum -a 256 "$OUT_APK" | cut -d' ' -f1)"
+if [ -x "$AAPT2" ]; then
+  "$AAPT2" dump badging "$OUT_APK" 2>/dev/null |
+    awk -F"'" '/^package:/ { printf "    package %s  versionCode %s  versionName %s\n", $2, $4, $6 }'
+fi
 cat <<'NOTE'
 
   Handing it out
-    - "-global" is for desktops outside mainland China, "-cn" for inside. The
-      variant only picks the network path to the same relay; a desktop's own
-      region decides which QR host it shows, so give a mainland user the -cn
-      build. Both are signed with the same key, so one can be installed over
-      the other.
+    - One APK serves everyone. Each phone dials the relay named by the QR it
+      scanned — the two official hosts and any self-hosted relay alike.
     - The recipient has to allow "install unknown apps" for whatever app opens
       the file (browser / file manager), then pair by scanning the QR in their
       own Fleet desktop: Settings -> Mobile.
