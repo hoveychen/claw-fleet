@@ -21,6 +21,8 @@ import {
 import { TriStateToggle } from "./TriStateToggle";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
 import { AccountInfo } from "./AccountInfo";
+import { EnvironmentPanel } from "./EnvironmentPanel";
+import { SETTINGS_OPEN_TAB_KEY } from "../harnessErrors";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { ThemeToggle } from "./ThemeToggle";
 import { AgentSourceIcon } from "./SessionCard";
@@ -84,9 +86,9 @@ type TtsMode = "chime_and_speech" | "chime_only" | "off";
 // Redesigned IA: 3 everyday tabs (general / alerts / account) + 4 advanced
 // tabs (interaction / model / integration / usage) shown under a collapsible
 // "Advanced" group. See the settings-redesign plan.
-type SettingsTab = "general" | "alerts" | "account" | "interaction" | "model" | "integration" | "usage";
+type SettingsTab = "general" | "alerts" | "account" | "environment" | "interaction" | "model" | "integration" | "usage";
 const BASE_TABS: SettingsTab[] = ["general", "alerts", "account"];
-const ADVANCED_TABS: SettingsTab[] = ["interaction", "model", "integration", "usage"];
+const ADVANCED_TABS: SettingsTab[] = ["environment", "interaction", "model", "integration", "usage"];
 
 const tabIcons: Record<SettingsTab, React.ReactNode> = {
   general: (
@@ -107,6 +109,12 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="8" cy="5" r="3" />
       <path d="M2.5 14a5.5 5.5 0 0 1 11 0" />
+    </svg>
+  ),
+  // Environment = wrench: install/upgrade/login health for the agent harnesses.
+  environment: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M9.5 3.5a3 3 0 0 1 3.9-.7L11 5.2l1.8 1.8 2.4-2.4a3 3 0 0 1-4.1 3.7L5.5 14a1.4 1.4 0 0 1-2-2l5.7-5.7a3 3 0 0 1 .3-2.8z" />
     </svg>
   ),
   interaction: (
@@ -145,6 +153,25 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   // Advanced group starts expanded only when an advanced tab is somehow the
   // initial tab; otherwise everyday users see just the 3 base tabs.
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Cross-window tab deep-link (e.g. a spawn error's "open the environment
+  // panel" button): consume SETTINGS_OPEN_TAB_KEY on mount, and via the
+  // `storage` event when this window is already open. Consumed = removed, so
+  // it never persists into an unrelated later open.
+  useEffect(() => {
+    const consume = () => {
+      const tab = window.localStorage.getItem(SETTINGS_OPEN_TAB_KEY);
+      if (!tab) return;
+      window.localStorage.removeItem(SETTINGS_OPEN_TAB_KEY);
+      if (([...BASE_TABS, ...ADVANCED_TABS] as string[]).includes(tab)) {
+        setActiveTab(tab as SettingsTab);
+        if ((ADVANCED_TABS as string[]).includes(tab)) setShowAdvanced(true);
+      }
+    };
+    consume();
+    window.addEventListener("storage", consume);
+    return () => window.removeEventListener("storage", consume);
+  }, []);
 
   // ── Sources state ────────────────────────────────────────────────────────
   const [sources, setSources] = useState<SourceInfo[]>([]);
@@ -1096,6 +1123,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     general: t("settings.tab_general"),
     alerts: t("settings.tab_alerts"),
     account: t("settings.tab_account"),
+    environment: t("settings.tab_environment"),
     interaction: t("settings.tab_interaction"),
     model: t("settings.tab_model"),
     integration: t("settings.tab_integration"),
@@ -1427,6 +1455,13 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     {t("switch_connection")}
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* ── Environment (advanced): harness install/upgrade/login health ── */}
+            {activeTab === "environment" && (
+              <div className={styles.section}>
+                <EnvironmentPanel />
               </div>
             )}
 

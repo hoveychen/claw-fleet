@@ -230,6 +230,25 @@ const KNOWN_WEB_GAPS = [
   "delete_connection",
   "install_rca_remote",
   "update_rca_remote",
+  // Environment wizard *actions*: run installers / drive a login pty on the
+  // machine you are sitting at, which a tab cannot do (statuses themselves are
+  // routed — `harness_statuses` reports the serving host). The panel disables
+  // these buttons under `isWebBuild()`, mirroring the install_fleet_cli
+  // precedent above.
+  "harness_login_context",
+  "install_harness",
+  "update_harness",
+  "install_node_runtime",
+  "claude_login_start",
+  "claude_login_poll",
+  "claude_login_submit_code",
+  "claude_login_cancel",
+  "codex_login_start",
+  "codex_login_poll",
+  "codex_login_cancel",
+  "dsh_credential_refs",
+  "dsh_credentials_describe",
+  "dsh_credentials_set",
 ];
 
 /**
