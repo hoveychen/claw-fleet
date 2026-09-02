@@ -1,10 +1,9 @@
-import { memo, useMemo, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import { memo, useMemo, useRef, type ReactNode } from "react";
+import type { Components } from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { safeLinkComponent, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
-import { normalizeSvgBlankLines, markdownUrlTransform } from "../../markdown/plugins";
+import { safeLinkComponent, safeRemarkPlugins } from "../../markdown/safeLinks";
 import { isFencedBlock } from "../../markdown/codeBlock";
 import {
   remarkWikiLinks,
@@ -15,6 +14,7 @@ import { useWikiLinks } from "../../markdown/wikiLinksContext";
 import { MermaidBlock } from "../../markdown/MermaidBlock";
 import { PathChip, type PathLinkContext } from "../../markdown/pathLinks";
 import { localImageComponent } from "../../markdown/localImages";
+import { ProgressiveMarkdown } from "../../markdown/ProgressiveMarkdown";
 import { parsePathRef } from "../../markdown/pathRef";
 import styles from "./TextBlock.module.css";
 
@@ -80,9 +80,18 @@ export const TextBlock = memo(function TextBlock({
   const ambientWiki = useWikiLinks();
   const wiki = wikiProp ?? ambientWiki ?? undefined;
   // When streaming, strip the last incomplete paragraph to avoid visual flicker.
-  // normalizeSvgBlankLines keeps an inline <svg> from being truncated at a blank
-  // line inside the drawing (see plugins.ts) — a no-op for prose without SVG.
-  const content = normalizeSvgBlankLines(isPartial ? stripLastParagraph(text) : text);
+  // The blank-line normalisation that keeps an inline <svg> intact now happens
+  // inside ProgressiveMarkdown, which has to do it before splitting anyway.
+  const content = isPartial ? stripLastParagraph(text) : text;
+
+  // A message that arrived by streaming is never chunked, even after it
+  // finishes: the reader watched it grow and is somewhere inside it, and
+  // collapsing it back to the first two chunks the moment the stream ends would
+  // yank the page out from under them. Chunking is for content that lands all
+  // at once — a transcript opened from history, a wiki doc — which is also the
+  // only case that stalls.
+  const everStreamed = useRef(false);
+  if (isPartial) everStreamed.current = true;
 
   const searchRegex = useMemo(() => {
     if (!searchTerms?.length) return null;
@@ -96,13 +105,16 @@ export const TextBlock = memo(function TextBlock({
     return (children: ReactNode): ReactNode => highlightChildren(children, searchRegex);
   }, [searchRegex]);
 
-  return (
-    <div className={styles.root}>
-      <ReactMarkdown
-        urlTransform={markdownUrlTransform}
-        remarkPlugins={wiki ? [...safeRemarkPlugins, remarkWikiLinks] : safeRemarkPlugins}
-        rehypePlugins={safeRehypePlugins}
-        components={{
+  const remarkPlugins = useMemo(
+    () => (wiki ? [...safeRemarkPlugins, remarkWikiLinks] : safeRemarkPlugins),
+    [wiki],
+  );
+
+  // Memoised because ProgressiveMarkdown hands this straight to every chunk: a
+  // fresh object each render would defeat the per-chunk memo and re-parse the
+  // whole document on every re-render — the very thing being fixed.
+  const components: Components = useMemo(
+    () => ({
           // Search term highlighting in text-bearing elements
           ...(highlight ? {
             p: ({ children }) => <p>{highlight(children)}</p>,
@@ -206,11 +218,19 @@ export const TextBlock = memo(function TextBlock({
           // Local image refs (`![](/Users/…/shot.png)`) are read through the
           // Backend and inlined; a bare <img> would resolve the path against
           // the webview origin and break. See markdown/localImages.
-          img: localImageComponent(paths),
-        }}
-      >
-        {content}
-      </ReactMarkdown>
+      img: localImageComponent(paths),
+    }),
+    [highlight, paths, wiki],
+  );
+
+  return (
+    <div className={styles.root}>
+      <ProgressiveMarkdown
+        body={content}
+        components={components}
+        remarkPlugins={remarkPlugins}
+        streaming={everStreamed.current}
+      />
     </div>
   );
 });

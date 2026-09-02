@@ -179,6 +179,26 @@ describe("ProgressiveMarkdown", () => {
     expect(lastProps.remarkPlugins).toContain(marker);
   });
 
+  it("does not cut an inline SVG apart", () => {
+    // Blank lines inside a drawing are why `normalizeSvgBlankLines` exists —
+    // and they look exactly like the blank lines the splitter cuts at. A cut
+    // between `<svg>` and `</svg>` leaves two broken halves.
+    // The drawing itself is bigger than one chunk, so it must straddle a cut.
+    const svg =
+      '<svg viewBox="0 0 10 10">\n\n' +
+      bulk('  <rect width="10" height="10"/>\n\n', 50_000) +
+      "</svg>";
+    const src = bulk("para text here\n\n", 20_000) + svg + "\n\ntail para\n";
+    const el = render(src);
+    const rest = el.querySelector("button");
+    if (rest) act(() => rest.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const bodies = [...el.querySelectorAll("[data-chunk]")].map((n) => n.textContent ?? "");
+    expect(bodies.length).toBeGreaterThan(1); // the split really did happen
+    const opener = bodies.filter((b) => b.includes("<svg"));
+    expect(opener).toHaveLength(1);
+    expect(opener[0]).toContain("</svg>");
+  });
+
   it("shows everything when the platform has no IntersectionObserver", () => {
     // Without the fallback the reader would be stuck at the first two chunks
     // with no way to scroll further.

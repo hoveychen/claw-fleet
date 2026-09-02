@@ -25,7 +25,6 @@ const MarkdownChunk = memo(function MarkdownChunk({
   components: Components;
   remarkPlugins: PluggableList;
 }) {
-  const normalized = useMemo(() => normalizeSvgBlankLines(body), [body]);
   return (
     <ReactMarkdown
       urlTransform={markdownUrlTransform}
@@ -33,7 +32,7 @@ const MarkdownChunk = memo(function MarkdownChunk({
       rehypePlugins={safeRehypePlugins}
       components={components}
     >
-      {normalized}
+      {body}
     </ReactMarkdown>
   );
 });
@@ -54,6 +53,7 @@ export const ProgressiveMarkdown = memo(function ProgressiveMarkdown({
   body,
   components,
   remarkPlugins = safeRemarkPlugins,
+  streaming = false,
 }: {
   body: string;
   components: Components;
@@ -61,15 +61,30 @@ export const ProgressiveMarkdown = memo(function ProgressiveMarkdown({
    *  `[[slug]]` refs, say) passes its own list. Keep it referentially stable,
    *  or every chunk re-parses on each render. */
   remarkPlugins?: PluggableList;
+  /** The body is arriving (or arrived) a token at a time. Chunking is turned
+   *  off: the reader is already inside the text watching it grow, and folding
+   *  it back to the first two chunks would yank the page out from under them.
+   *  Deferring parses helps content that lands all at once, which is also the
+   *  only case that stalls. */
+  streaming?: boolean;
 }) {
   const { t } = useTranslation();
+  // `normalizeSvgBlankLines` runs *before* the split, not per chunk. An inline
+  // <svg> is written with blank lines between its shapes, and those look
+  // exactly like the blank lines the splitter cuts at — a cut between `<svg>`
+  // and `</svg>` leaves two broken halves. Stripping them first means the
+  // drawing contains no cut point at all, and the chunks are then rendered
+  // as-is.
+  //
   // Most bodies in the app are chat messages of a few KB. Scanning each one for
   // cut points would be pure overhead, so anything that cannot possibly need a
   // second chunk skips the split entirely.
-  const chunks = useMemo(
-    () => (body.length <= DEFAULT_CHUNK_BYTES ? [body] : chunkMarkdown(body)),
-    [body],
-  );
+  const chunks = useMemo(() => {
+    const normalized = normalizeSvgBlankLines(body);
+    return streaming || normalized.length <= DEFAULT_CHUNK_BYTES
+      ? [normalized]
+      : chunkMarkdown(normalized);
+  }, [body, streaming]);
   const [shown, setShown] = useState(INITIAL_CHUNKS);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
