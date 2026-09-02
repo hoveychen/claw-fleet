@@ -27,6 +27,13 @@ hostLabel?: string | null,
 detectedAtMs: number, 
 agentStopped: boolean, };
 
+export type MirrorWrite = { 
+files: Array<string>, 
+truncated: boolean, 
+total: number, 
+workspacePath: string, 
+detectedAtMs: number, };
+
 export type SessionInfo = { id: string, workspacePath: string, workspaceName: string, ideName: string | null, 
 entrypoint: string | null, isSubagent: boolean, 
 fleetSpawned: boolean, parentSessionId: string | null, agentType: string | null, agentDescription: string | null, slug: string | null, aiTitle: string | null, status: SessionStatus, tokenSpeed: number, 
@@ -58,7 +65,8 @@ compactPostTokens: number,
 compactCostUsd: number, 
 pendingMessages: Array<string>, 
 watches?: Array<WatchSummary>, 
-remoteDisconnect?: RemoteDisconnect | null, };
+remoteDisconnect?: RemoteDisconnect | null, 
+mirrorWrite?: MirrorWrite | null, };
 
 export type SessionMark = "pending" | "done";
 

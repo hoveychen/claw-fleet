@@ -23,6 +23,7 @@ import type {
   SessionHandoffInfo,
   WatchSummary,
   RemoteDisconnect,
+  MirrorWrite,
   GuardRequest,
   ElicitationRequest,
   FleetAskRequest,
@@ -143,6 +144,9 @@ export interface SessionInfo {
    *  one. `status` alone would say `remoteDisconnected` without naming the host
    *  or the cause. */
   remoteDisconnect?: RemoteDisconnect | null;
+  /** 会话结束后留在本机镜像目录里的文件——本该写到远端主机上的产物。
+   *  会话状态不受影响,所以只有这个字段会说。 */
+  mirrorWrite?: MirrorWrite | null;
 }
 
 /** Codex has no `CLAUDE_CODE_ENTRYPOINT`; the Codex scanner surfaces the rollout
