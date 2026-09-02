@@ -280,6 +280,29 @@ fn token_gated_serve_allows_cross_origin_mobile_rpc() {
     );
 }
 
+/// 拒绝也必须带跨源头。少了它,手机那边**看不见** 401 —— 浏览器对缺 CORS 头的
+/// 响应只交给 JS 一个笼统的网络错误,于是「token 填错了」在界面上显示成「连不上
+/// 这台主机」。两句话指向完全不同的修法,所以这一条单独钉住。
+#[test]
+fn cross_origin_rejection_is_readable_by_the_page() {
+    let home = tempfile::TempDir::new().unwrap();
+    let port_file = home.path().join("port");
+    let mut serve = spawn_serve(home.path(), &port_file);
+    let port = wait_for_port(&port_file, &mut serve);
+
+    let (status, body) = post(
+        port,
+        "/mobile_rpc",
+        r#"{"method":"wiki_list","params":{}}"#,
+        Some("wrong-token"),
+    );
+    assert_eq!(status, 403, "{}", serve.logs());
+    assert!(
+        body.to_ascii_lowercase().contains("access-control-allow-origin: *"),
+        "a rejected cross-origin request must still be readable\ngot: {body}"
+    );
+}
+
 /// 反面:`fleet webui` 那个端口本身没有认证(它自己的启动日志就写着必须在前面放
 /// 网关)。在那种端口上发 CORS 头等于让用户浏览器里任何一个网页都能驱动这台
 /// Fleet,所以它**不**发 —— 那种部署要跨源就在自己的网关上配。

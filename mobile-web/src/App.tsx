@@ -39,9 +39,11 @@ import {
 import { isMockMode } from "./mockMode";
 import type { RepoSummary, SessionInfo, WikiDoc } from "./types";
 import { randomId } from "./clientId";
+import { probeHost, probeMessage } from "./hostProbe";
 import { needsA2hsForDurableStorage } from "./secretStore";
 import {
   activeDevice,
+  addHttpDevice,
   addPendingUnsub,
   adoptScannedDevice,
   clearBook,
@@ -97,6 +99,16 @@ function fmtTokens(n: number): string {
 }
 
 type Tab = "decisions" | "tasks" | "wiki" | "more";
+
+/** HTTP 主机的默认显示名:主机名本身,比「设备 3」有信息量。解析不出来就退回
+ *  给定的序号名。 */
+function hostLabel(baseUrl: string, fallback: string): string {
+  try {
+    return new URL(baseUrl.trim()).host || fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 /** 一台新配对设备的默认字段。默认名走 i18n，所以它在这里而不在 devices.ts ——
  *  那一层刻意不认识 i18n，好让它整层保持可测的纯函数。 */
@@ -660,6 +672,31 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     }
   }, [runtimeDevices, activeDeviceId]);
 
+  /** 添加一台 HTTP 直连主机。**先探再入册** —— 填错的那台若直接进了列表,就会
+   *  安静地停在「连接中…」,而失败的原因(地址 / token / 没开跨源 / 混合内容)
+   *  在界面上完全看不出来。返回 null 表示成功,否则是该显示给用户的那句话。 */
+  const addHost = useCallback(async (baseUrl: string, token: string): Promise<string | null> => {
+    const trimmedToken = token.trim();
+    const result = await probeHost(baseUrl, trimmedToken || null);
+    if (!result.ok) return translate(probeMessage(result));
+    let added: PairedDevice | null = null;
+    setBook((prev) => {
+      const mint = newDeviceMint(prev);
+      const next = addHttpDevice(prev, {
+        baseUrl,
+        token: trimmedToken || null,
+        label: hostLabel(baseUrl, mint.label),
+        id: mint.id,
+        now: mint.now,
+      });
+      added = next.device;
+      persistBook(next.book);
+      return next.book;
+    });
+    void added;
+    return null;
+  }, []);
+
   /** 只关/只开某一台(设备列表里的那个开关)。这里绝不碰浏览器订阅本体。 */
   const handleMuteDevice = useCallback(
     async (device: PairedDevice, muted: boolean) => {
@@ -961,11 +998,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             endpointLabel={client?.endpointLabel ?? ""}
             devices={book.devices}
             activeDeviceId={deviceId}
+            activeKind={current?.kind ?? (NEEDS_PAIRING && !MOCK ? "relay" : "http")}
             onSwitchDevice={switchDevice}
             onRenameDevice={renameDeviceLabel}
             onRemoveDevice={(d) => void removeDeviceEntry(d)}
             deviceMuted={(id) => pushMuted[id] ?? true}
             onMuteDevice={(d, muted) => void handleMuteDevice(d, muted)}
+            onAddHost={addHost}
             onUnpairAll={unpairAll}
             supportsPush={SUPPORTS_PUSH}
             connected={connected}

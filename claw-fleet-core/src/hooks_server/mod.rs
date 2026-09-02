@@ -952,7 +952,17 @@ fn handle_request(
             // 401 when nothing was presented, 403 when a token was presented but
             // is wrong or a scoped token reached a non-public path.
             let status = if presented.is_some() { 403 } else { 401 };
-            let _ = request.respond(tiny_http::Response::empty(status));
+            // 拒绝也要带上跨源头 —— 否则手机那边**看不见这个状态码**:浏览器
+            // 对一个缺 CORS 头的响应只交给 JS 一个笼统的网络错误。实测过:填错
+            // token 时手机上显示的是「连不上这台主机,或它没开放跨源」,而正确
+            // 的话应该是「这台主机拒绝了这个 token」—— 两句话指向完全不同的修法。
+            // 让页面读到 401/403 不泄露任何东西:响应体是空的,而「这个端口要
+            // token」本来就是它对任何请求的公开事实。
+            let mut res = tiny_http::Response::empty(status);
+            for h in cors::headers(auth_disabled, path) {
+                res.add_header(h);
+            }
+            let _ = request.respond(res);
             return;
         }
 
