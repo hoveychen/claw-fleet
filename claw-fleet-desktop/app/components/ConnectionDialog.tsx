@@ -7,6 +7,11 @@ import styles from "./ConnectionDialog.module.css";
 
 // ── Types mirroring Rust structs ─────────────────────────────────────────────
 
+/** One SSH host — `claw_fleet_core::remote_host::SshHost`.
+ *
+ *  The same record now carries both of a host's capabilities: it can be a Fleet
+ *  backend (this dialog's subject) and/or an rca executor (`rcaPath` set).
+ *  Named `RemoteConnection` still because every call site reads that way. */
 export interface RemoteConnection {
   id: string;
   label: string;
@@ -16,6 +21,19 @@ export interface RemoteConnection {
   identityFile: string | null;
   jumpHost: string | null;
   sshProfile: string | null;
+  /** rca capability: absolute path of the rca installed on this host.
+   *  Absent = not (yet) an rca executor. */
+  rcaPath?: string | null;
+}
+
+/** What a health probe learned — `claw_fleet_core::remote_host::HostHealth`. */
+export interface HostHealth {
+  sshOk: boolean;
+  home?: string | null;
+  rcaPath?: string | null;
+  rcaVersion?: string | null;
+  stdioOk: boolean;
+  error?: string | null;
 }
 
 interface ConnectProgress {

@@ -27,7 +27,27 @@ import { AgentSourceIcon } from "./SessionCard";
 import { UsageTrendPanel } from "./UsageTrendPanel";
 import styles from "./SettingsPanel.module.css";
 import type { RemoteWorkspace, RemoteWorkspacesConfig } from "../types";
-import type { RemoteConnection } from "./ConnectionDialog";
+import type { HostHealth, RemoteConnection } from "./ConnectionDialog";
+
+/** The ssh argument fragment for a host — mirrors
+ *  `claw_fleet_core::remote_host::ssh_target_for`. Only used for display and
+ *  for the health probe's `sshTarget` argument; the launch path resolves this
+ *  on the backend, from the same fields. */
+function sshTargetOf(h: RemoteConnection): string {
+  const profile = h.sshProfile?.trim();
+  if (profile) return profile;
+  const host = h.host.trim();
+  const user = h.username.trim();
+  if (!host || !user) return "";
+  const parts: string[] = [];
+  if (h.port !== 22) parts.push(`-p ${h.port}`);
+  const key = h.identityFile?.trim();
+  if (key) parts.push(`-i ${key}`);
+  const jump = h.jumpHost?.trim();
+  if (jump) parts.push(`-J ${jump}`);
+  parts.push(`${user}@${host}`);
+  return parts.join(" ");
+}
 
 interface HookSetupPlan {
   toAdd: string[];
@@ -194,13 +214,16 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, []);
 
-  // ── Remote workspaces (rca) ──────────────────────────────────────────────
+  // ── Remote hosts (rca executors) ─────────────────────────────────────────
+  //
+  // One list of hosts, each carrying its capabilities, with the workspaces
+  // registered on it nested underneath. Previously this was a flat list of
+  // workspace paths plus two parallel registration forms — and, because both
+  // forms bound the same `rwPath` / `rwLabel` state, typing into one silently
+  // filled the other.
+  const [sshHosts, setSshHosts] = useState<RemoteConnection[]>([]);
   const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspace[]>([]);
-  const [rwPath, setRwPath] = useState("");
-  const [rwCode, setRwCode] = useState("");
-  const [rwLabel, setRwLabel] = useState("");
   const [rwError, setRwError] = useState("");
-  const [rwBusy, setRwBusy] = useState(false);
   // stdio-over-ssh auto-installer wizard. The ssh-target picker merges three
   // sources: ~/.ssh/config Host aliases, saved Fleet connections, and a manual
   // `user@host` entry — all resolved to a RemoteConnection for install_rca_remote.
@@ -226,6 +249,15 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
       .then((cfg) => setRemoteWorkspaces(cfg.workspaces ?? []))
       .catch(() => {});
+    // The BACKEND host's book — that is the one a session resolves a
+    // workspace's `hostId` against. Under a local backend it is the same
+    // records `list_saved_connections` returns, which is what makes this one
+    // merged list rather than two.
+    invoke<RemoteConnection[]>("list_ssh_hosts")
+      .then((hosts) => setSshHosts(hosts ?? []))
+      .catch(() => {});
+    // Deliberately still local: "which Fleet backends can THIS desktop dial".
+    // Only feeds the add-a-host picker below.
     invoke<RemoteConnection[]>("list_saved_connections")
       .then((conns) => setRwSavedConns(conns ?? []))
       .catch(() => {});
@@ -258,22 +290,18 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     return null;
   }, [rwConnId, rwManualTarget, rwSavedConns]);
 
+  // Provision the picked host as an rca executor. No workspace path: setting up
+  // a host and choosing a directory on it are two decisions, and fusing them
+  // used to make the hardest field (an absolute path that must exist
+  // identically on both machines) a prerequisite for the easy one.
   const handleInstallRca = useCallback(async () => {
-    const path = rwPath.trim();
     const conn = resolveInstallConn();
-    if (!path || !conn) return;
+    if (!conn) return;
     setRwInstalling(true);
     setRwError("");
     setRwInstallSteps([]);
     try {
-      const cfg = await invoke<RemoteWorkspacesConfig>("install_rca_remote", {
-        conn,
-        path,
-        label: rwLabel.trim() || null,
-      });
-      setRemoteWorkspaces(cfg.workspaces ?? []);
-      setRwPath("");
-      setRwLabel("");
+      setSshHosts(await invoke<RemoteConnection[]>("install_rca_on_host", { conn }));
       setRwConnId("");
       setRwManualTarget("");
     } catch (e) {
@@ -281,28 +309,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     } finally {
       setRwInstalling(false);
     }
-  }, [rwPath, rwLabel, resolveInstallConn]);
-
-  const handleAddRemoteWorkspace = useCallback(async () => {
-    const path = rwPath.trim();
-    const pairingCode = rwCode.trim();
-    if (!path || !pairingCode) return;
-    setRwBusy(true);
-    setRwError("");
-    try {
-      const cfg = await invoke<RemoteWorkspacesConfig>("upsert_remote_workspace", {
-        entry: { path, pairingCode, label: rwLabel.trim() || undefined },
-      });
-      setRemoteWorkspaces(cfg.workspaces ?? []);
-      setRwPath("");
-      setRwCode("");
-      setRwLabel("");
-    } catch (e) {
-      setRwError(String(e));
-    } finally {
-      setRwBusy(false);
-    }
-  }, [rwPath, rwCode, rwLabel]);
+  }, [resolveInstallConn]);
 
   const handleRemoveRemoteWorkspace = useCallback(async (path: string) => {
     setRwError("");
@@ -314,6 +321,28 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, []);
 
+  // Removing a host that still has workspaces would leave them resolving a
+  // `hostId` that is gone — which fails loudly at spawn, but only then. Say so
+  // up front instead.
+  const handleRemoveHost = useCallback(async (host: RemoteConnection) => {
+    setRwError("");
+    const orphans = remoteWorkspaces.filter((w) => w.hostId === host.id);
+    if (orphans.length > 0) {
+      setRwError(
+        t("settings.remote_host_remove_blocked", {
+          count: orphans.length,
+          paths: orphans.map((w) => w.path).join(", "),
+        }),
+      );
+      return;
+    }
+    try {
+      setSshHosts(await invoke<RemoteConnection[]>("remove_ssh_host", { id: host.id }));
+    } catch (e) {
+      setRwError(String(e));
+    }
+  }, [remoteWorkspaces, t]);
+
   const [rwUpdating, setRwUpdating] = useState<string | null>(null);
   const handleUpdateRca = useCallback(async (path: string) => {
     setRwError("");
@@ -322,10 +351,30 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     try {
       const cfg = await invoke<RemoteWorkspacesConfig>("update_rca_remote", { path });
       setRemoteWorkspaces(cfg.workspaces ?? []);
+      setSshHosts(await invoke<RemoteConnection[]>("list_ssh_hosts"));
     } catch (e) {
       setRwError(String(e));
     } finally {
       setRwUpdating(null);
+    }
+  }, []);
+
+  // Whether a host is actually usable, on demand. Until this runs, a row can
+  // only report what was true at install time — which is why a dead host used
+  // to be discoverable only by starting a session and watching it fail.
+  const [rwHealth, setRwHealth] = useState<Record<string, HostHealth | "probing">>({});
+  const handleTestHost = useCallback(async (host: RemoteConnection) => {
+    const target = sshTargetOf(host);
+    if (!target) return;
+    setRwHealth((prev) => ({ ...prev, [host.id]: "probing" }));
+    try {
+      const health = await invoke<HostHealth>("remote_host_health", { sshTarget: target });
+      setRwHealth((prev) => ({ ...prev, [host.id]: health }));
+    } catch (e) {
+      setRwHealth((prev) => ({
+        ...prev,
+        [host.id]: { sshOk: false, stdioOk: false, error: String(e) },
+      }));
     }
   }, []);
 
@@ -1566,63 +1615,138 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </div>
                 )}
 
-                {/* rca remote workspaces: re-gated debug-only (import.meta.env.DEV
-                    false in `vite build`). The install wizard's ssh picker only
-                    lists saved connections — not ~/.ssh/config aliases — so the
-                    release-facing UX is not ready. Keep out of shipped builds
-                    until the picker + design are revisited. */}
+                {/* rca remote hosts: still debug-only until the flow is
+                    finished (import.meta.env.DEV is false in `vite build`).
+                    The composer-side "pick a host, browse it, register" flow
+                    lands next; until it does, this section can set a host up
+                    but not choose a directory on it. */}
                 {import.meta.env.DEV && (
                   <>
-                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.remote_workspaces")}</div>
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.remote_hosts")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                    {t("settings.remote_workspaces_desc")}
+                    {t("settings.remote_hosts_desc")}
                   </span>
                 </div>
-                {remoteWorkspaces.length === 0 && (
+                {sshHosts.length === 0 && (
                   <div className={styles.row}>
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                      {t("settings.remote_ws_empty")}
+                      {t("settings.remote_host_empty")}
                     </span>
                   </div>
                 )}
-                {remoteWorkspaces.map((w) => (
-                  <div className={styles.row} key={w.path}>
-                    <span className={styles.row_label} style={{ minWidth: 0 }}>
-                      {w.label ? `${w.label} — ` : ""}
-                      <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}>{w.path}</span>
-                      <span style={{ display: "block", fontSize: 10, color: "var(--color-text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 360 }}>
-                        {w.sshTarget
-                          ? `ssh · ${w.sshTarget}${w.remoteRcaPath ? ` · ${w.remoteRcaPath}` : ""}`
-                          : w.pairingCode}
-                      </span>
-                    </span>
-                    {w.sshTarget && (
-                      <button
-                        className={styles.sources_restart_btn}
-                        onClick={() => handleUpdateRca(w.path)}
-                        disabled={rwUpdating !== null}
-                      >
-                        {rwUpdating === w.path
-                          ? t("settings.remote_ws_installing")
-                          : t("settings.remote_ws_update_btn")}
-                      </button>
-                    )}
-                    <button
-                      className={styles.sources_restart_btn}
-                      onClick={() => handleRemoveRemoteWorkspace(w.path)}
-                    >
-                      {t("settings.remote_ws_remove")}
-                    </button>
-                  </div>
-                ))}
-                {/* stdio-over-ssh auto-installer (recommended path) */}
+                {sshHosts.map((h) => {
+                  const target = sshTargetOf(h);
+                  const health = rwHealth[h.id];
+                  const spaces = remoteWorkspaces.filter((w) => w.hostId === h.id);
+                  return (
+                    <div key={h.id} style={{ borderTop: "1px solid var(--color-border)", paddingTop: 6, marginTop: 6 }}>
+                      <div className={styles.row}>
+                        <span className={styles.row_label} style={{ minWidth: 0 }}>
+                          {h.label || target}
+                          <span style={{ display: "block", fontSize: 10, color: "var(--color-text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 360, fontFamily: "var(--font-mono, monospace)" }}>
+                            {target}
+                          </span>
+                          <span style={{ display: "block", fontSize: 10, marginTop: 2 }}>
+                            {h.rcaPath
+                              ? <span style={{ color: "var(--color-text-dim)" }}>{t("settings.remote_host_cap_rca")}</span>
+                              : <span style={{ color: "var(--color-text-dim)" }}>{t("settings.remote_host_cap_none")}</span>}
+                            {health === "probing" && <span style={{ marginLeft: 8 }}>{t("settings.remote_host_testing")}</span>}
+                            {health && health !== "probing" && (
+                              <span style={{ marginLeft: 8, color: health.sshOk && health.stdioOk ? "var(--color-ok, inherit)" : "var(--color-danger, inherit)" }}>
+                                {health.sshOk && health.stdioOk
+                                  ? t("settings.remote_host_ready", { version: health.rcaVersion ?? "rca" })
+                                  : (health.error ?? t("settings.remote_host_unreachable"))}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                        <button
+                          className={styles.sources_restart_btn}
+                          onClick={() => handleTestHost(h)}
+                          disabled={health === "probing" || !target}
+                        >
+                          {t("settings.remote_host_test")}
+                        </button>
+                        <button
+                          className={styles.sources_restart_btn}
+                          onClick={() => handleRemoveHost(h)}
+                        >
+                          {t("settings.remote_ws_remove")}
+                        </button>
+                      </div>
+                      {spaces.map((w) => (
+                        <div className={styles.row} key={w.path} style={{ paddingLeft: 14 }}>
+                          <span className={styles.row_label} style={{ minWidth: 0, fontSize: 11, fontFamily: "var(--font-mono, monospace)" }}>
+                            {w.path}
+                          </span>
+                          <button
+                            className={styles.sources_restart_btn}
+                            onClick={() => handleUpdateRca(w.path)}
+                            disabled={rwUpdating !== null}
+                          >
+                            {rwUpdating === w.path
+                              ? t("settings.remote_ws_installing")
+                              : t("settings.remote_ws_update_btn")}
+                          </button>
+                          <button
+                            className={styles.sources_restart_btn}
+                            onClick={() => handleRemoveRemoteWorkspace(w.path)}
+                          >
+                            {t("settings.remote_ws_remove")}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+
+                {/* Workspaces whose entry predates the host book: they carry a
+                    baked-in ssh target rather than a host id, so no row above
+                    owns them. Shown so they are still removable. */}
+                {remoteWorkspaces.filter((w) => !w.hostId).length > 0 && (
+                  <>
+                    <div className={styles.section_title} style={{ marginTop: 12 }}>
+                      {t("settings.remote_ws_unattached_title")}
+                    </div>
+                    {remoteWorkspaces.filter((w) => !w.hostId).map((w) => (
+                      <div className={styles.row} key={w.path}>
+                        <span className={styles.row_label} style={{ minWidth: 0 }}>
+                          <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}>{w.path}</span>
+                          <span style={{ display: "block", fontSize: 10, color: "var(--color-text-dim)" }}>
+                            {w.sshTarget ?? w.pairingCode}
+                          </span>
+                        </span>
+                        {w.sshTarget && (
+                          <button
+                            className={styles.sources_restart_btn}
+                            onClick={() => handleUpdateRca(w.path)}
+                            disabled={rwUpdating !== null}
+                          >
+                            {rwUpdating === w.path
+                              ? t("settings.remote_ws_installing")
+                              : t("settings.remote_ws_update_btn")}
+                          </button>
+                        )}
+                        <button
+                          className={styles.sources_restart_btn}
+                          onClick={() => handleRemoveRemoteWorkspace(w.path)}
+                        >
+                          {t("settings.remote_ws_remove")}
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {/* Add a host: pick an ssh target, install rca. No workspace
+                    path — that is the composer's job. */}
                 <div className={styles.section_title} style={{ marginTop: 12 }}>
-                  {t("settings.remote_ws_install_title")}
+                  {t("settings.remote_host_add_title")}
                 </div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                    {t("settings.remote_ws_install_desc")}
+                    {t("settings.remote_host_add_desc")}
                   </span>
                 </div>
                 <div className={styles.row} style={{ flexWrap: "wrap", gap: 6 }}>
@@ -1661,30 +1785,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       spellCheck={false}
                     />
                   )}
-                  <input
-                    className={styles.select}
-                    style={{ flex: "1 1 180px" }}
-                    value={rwPath}
-                    onChange={(e) => setRwPath(e.target.value)}
-                    placeholder={t("settings.remote_ws_path_placeholder")}
-                    spellCheck={false}
-                  />
-                  <input
-                    className={styles.select}
-                    style={{ flex: "0 1 120px" }}
-                    value={rwLabel}
-                    onChange={(e) => setRwLabel(e.target.value)}
-                    placeholder={t("settings.remote_ws_label_placeholder")}
-                    spellCheck={false}
-                  />
                   <button
                     className={styles.sources_restart_btn}
                     onClick={handleInstallRca}
-                    disabled={rwInstalling || !rwPath.trim() || !resolveInstallConn()}
+                    disabled={rwInstalling || !resolveInstallConn()}
                   >
                     {rwInstalling
                       ? t("settings.remote_ws_installing")
-                      : t("settings.remote_ws_install_btn")}
+                      : t("settings.remote_host_install_btn")}
                   </button>
                 </div>
                 {rwSavedConns.length === 0 && rwSshProfiles.length === 0 && (
@@ -1707,44 +1815,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     ))}
                   </div>
                 )}
-
-                {/* Manual pairing-code registration (libp2p transport) */}
-                <div className={styles.section_title} style={{ marginTop: 12 }}>
-                  {t("settings.remote_ws_manual_title")}
-                </div>
-                <div className={styles.row} style={{ flexWrap: "wrap", gap: 6 }}>
-                  <input
-                    className={styles.select}
-                    style={{ flex: "1 1 180px" }}
-                    value={rwPath}
-                    onChange={(e) => setRwPath(e.target.value)}
-                    placeholder={t("settings.remote_ws_path_placeholder")}
-                    spellCheck={false}
-                  />
-                  <input
-                    className={styles.select}
-                    style={{ flex: "2 1 220px" }}
-                    value={rwCode}
-                    onChange={(e) => setRwCode(e.target.value)}
-                    placeholder={t("settings.remote_ws_code_placeholder")}
-                    spellCheck={false}
-                  />
-                  <input
-                    className={styles.select}
-                    style={{ flex: "0 1 120px" }}
-                    value={rwLabel}
-                    onChange={(e) => setRwLabel(e.target.value)}
-                    placeholder={t("settings.remote_ws_label_placeholder")}
-                    spellCheck={false}
-                  />
-                  <button
-                    className={styles.sources_restart_btn}
-                    onClick={handleAddRemoteWorkspace}
-                    disabled={rwBusy || !rwPath.trim() || !rwCode.trim()}
-                  >
-                    {rwBusy ? t("account.loading") : t("settings.remote_ws_add")}
-                  </button>
-                </div>
                 {rwError && (
                   <p className={styles.hooks_error}>{rwError}</p>
                 )}
