@@ -2092,6 +2092,8 @@ pub fn run() {
             remote::update_rca_remote,
             remote::remote_workspace_harness_statuses,
             remote::install_harness_remote,
+            remote_codex_login_start,
+            remote_codex_login_poll,
             remote::disconnect_remote,
             pick_file,
             get_source_account,

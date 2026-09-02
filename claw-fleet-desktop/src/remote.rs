@@ -2324,7 +2324,7 @@ pub async fn update_rca_remote(
 /// Resolve a registered remote workspace's ssh target by workspace path.
 /// Pairing-code (libp2p) entries carry no ssh route, so harness actions on
 /// them are a structured refusal rather than a hang.
-fn ssh_target_for_workspace(path: &str) -> Result<String, String> {
+pub(crate) fn ssh_target_for_workspace(path: &str) -> Result<String, String> {
     let entry = claw_fleet_core::remote_workspace::find_for_path(path)
         .ok_or("no remote workspace is registered at this path")?;
     entry

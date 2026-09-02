@@ -178,6 +178,75 @@ pub fn parse_codex_login_output(raw: &str) -> CodexLoginParse {
     }
 }
 
+// ── Remote codex login (device-auth over ssh) ─────────────────────────────────
+//
+// A remote host has no browser and no reachable localhost callback, so the
+// only sane remote login is `codex login --device-auth`: it prints a URL and a
+// one-time code, the user authorizes from any device, the CLI polls until
+// approved. Copying a local auth.json instead is deliberately NOT offered —
+// codex refresh tokens are single-use-and-rotate, so two hosts sharing one
+// token 401 each other (the foxy lesson, at host scale).
+
+/// The shell command to run `codex login --device-auth` on a remote host via
+/// the workspace's ssh route, streamable through the Backend proc surface.
+/// Single-quote-free by construction so it nests inside `$SHELL -lc '<cmd>'`.
+pub fn codex_device_auth_ssh_command(ssh_target: &str) -> Result<String, String> {
+    // Same validation gate as every stored ssh target (remote_host mirrors
+    // remote_workspace's rule); re-checked here because this string reaches a
+    // local login shell.
+    if ssh_target.trim().is_empty()
+        || ssh_target.contains('\'')
+        || ssh_target.contains(';')
+        || ssh_target.contains('|')
+        || ssh_target.contains('&')
+    {
+        return Err(format!("invalid ssh target: {ssh_target:?}"));
+    }
+    Ok(format!(
+        "ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes {ssh_target} \
+         \"export PATH=\\\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\\\"; codex login --device-auth\""
+    ))
+}
+
+/// What the wizard's remote-codex-login card renders per poll tick. Shape of
+/// the device-auth output is parsed permissively (URL + a XXXX-XXXX style
+/// code); re-verified against a live run in the wizard e2e.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexDeviceAuthParse {
+    pub verify_url: Option<String>,
+    pub user_code: Option<String>,
+    pub success: bool,
+}
+
+pub fn parse_codex_device_auth_output(raw: &str) -> CodexDeviceAuthParse {
+    let stripped = strip_ansi(raw);
+    let verify_url = stripped
+        .split_whitespace()
+        .find(|tok| tok.starts_with("https://"))
+        .map(|s| s.trim_end_matches(&[')', ']', '.', ','][..]).to_string());
+    // Device codes read as dash-separated groups of UPPERCASE alphanumerics
+    // (e.g. ABCD-1234). Uppercase-only keeps UUID fragments and version
+    // strings from matching.
+    let user_code = stripped
+        .split_whitespace()
+        .map(|tok| tok.trim_end_matches(&['.', ','][..]))
+        .find(|t| {
+            t.len() >= 8
+                && t.len() <= 16
+                && t.contains('-')
+                && t.split('-').all(|g| {
+                    g.len() >= 4 && g.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+                })
+        })
+        .map(str::to_string);
+    CodexDeviceAuthParse {
+        verify_url,
+        user_code,
+        success: normalize_ws(&stripped).contains("Successfully logged in"),
+    }
+}
+
 // ── Token persistence ─────────────────────────────────────────────────────────
 
 /// Fleet-held harness auth material: the claude long-lived OAuth token from
@@ -315,6 +384,32 @@ mod tests {
             parse_codex_login_output("Starting local login server on http://localhost:1455.").auth_url,
             None
         );
+    }
+
+    #[test]
+    fn codex_device_auth_command_is_quoted_and_validated() {
+        let cmd = codex_device_auth_ssh_command("user@host").unwrap();
+        assert!(cmd.starts_with("ssh "));
+        assert!(cmd.contains("codex login --device-auth"));
+        assert!(!cmd.contains('\''), "must nest inside $SHELL -lc '<cmd>': {cmd}");
+        assert!(codex_device_auth_ssh_command("host; rm -rf /").is_err());
+        assert!(codex_device_auth_ssh_command("").is_err());
+    }
+
+    #[test]
+    fn parses_codex_device_auth_stream() {
+        let raw = "To authenticate, visit\n\
+                   https://chatgpt.com/device\n\
+                   and enter the code: ABCD-1234\n";
+        let p = parse_codex_device_auth_output(raw);
+        assert_eq!(p.verify_url.as_deref(), Some("https://chatgpt.com/device"));
+        assert_eq!(p.user_code.as_deref(), Some("ABCD-1234"));
+        assert!(!p.success);
+        let done = format!("{raw}Successfully logged in\n");
+        assert!(parse_codex_device_auth_output(&done).success);
+        // A UUID-ish or URL token must not read as a user code.
+        let noise = "poll id 123e4567-e89b apache-2.0 https://x.y/a-b";
+        assert_eq!(parse_codex_device_auth_output(noise).user_code, None);
     }
 
     #[test]
