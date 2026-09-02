@@ -2032,6 +2032,41 @@ impl crate::backend::Backend for RemoteBackend {
         Ok(env.svg)
     }
 
+    fn direct_host_status(
+        &self,
+    ) -> Result<claw_fleet_core::direct_host::DirectHostStatus, String> {
+        self.probe.get(claw_fleet_core::routes::DIRECT_HOST_STATUS)
+    }
+
+    fn set_direct_host_config(
+        &self,
+        base_url: &str,
+        token: &str,
+    ) -> Result<claw_fleet_core::direct_host::DirectHostStatus, String> {
+        self.probe.post_json(
+            claw_fleet_core::routes::DIRECT_HOST_SET,
+            &serde_json::json!({ "baseUrl": base_url, "token": token }),
+        )
+    }
+
+    fn direct_host_qr_svg(&self) -> Result<String, String> {
+        #[derive(serde::Deserialize)]
+        struct QrEnvelope {
+            svg: String,
+        }
+        let env: QrEnvelope = self.probe.get(claw_fleet_core::routes::DIRECT_HOST_QR)?;
+        Ok(env.svg)
+    }
+
+    fn direct_host_url(&self) -> Result<String, String> {
+        #[derive(serde::Deserialize)]
+        struct UrlEnvelope {
+            url: String,
+        }
+        let env: UrlEnvelope = self.probe.get(claw_fleet_core::routes::DIRECT_HOST_URL)?;
+        Ok(env.url)
+    }
+
     fn mobile_relay_pairing_url(&self, lang: Option<&str>) -> Result<String, String> {
         #[derive(serde::Deserialize)]
         struct UrlEnvelope {
