@@ -5,6 +5,7 @@
 // 页面里要先引导用户 A2HS。
 
 import { SUPPORTS_PUSH } from "./hostMode";
+import { relayBaseFor } from "./relayBase";
 import type { FleetTransport } from "./transport";
 import { classifyPush, type PushState } from "./push-classify";
 import { hasNativePushToken, nativePushToken } from "./nativePush";
@@ -59,7 +60,10 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
 }
 
 /** Subscribe and register on the relay. Returns the resulting PushState. */
-export async function enablePush(client: FleetTransport): Promise<PushState> {
+export async function enablePush(
+  client: FleetTransport,
+  relayBase?: string | null,
+): Promise<PushState> {
   // 原生壳：token 已由壳交来（系统通知授权也在壳里问过了），这里只剩注册。
   // 不走 Notification.requestPermission —— WebView 里那个 API 要么不存在、要么
   // 恒返回 denied，调了只会把已经能用的推送判死。
@@ -82,17 +86,12 @@ export async function enablePush(client: FleetTransport): Promise<PushState> {
     return permission === "denied" ? "denied" : "prompt";
   }
   const registration = await navigator.serviceWorker.ready;
-  // VAPID 公钥由 relay 提供，而同源构建里不能有 relay.ts —— 所以这条 import 是
-  // 动态的，且守卫直接写 define 的那个表达式而不是 hostMode 的 SUPPORTS_PUSH：
-  // vite 只替换字面出现处，折叠成 `"webui" !== "webui"` 之后 Rollup 才会连
-  // chunk 一起消掉。经 const 中转时它照样会为这条 import 落出一个 relay-*.js
-  // （实测过）。这个 if 在 relay 形态下恒真，纯粹是为了给折叠一个着力点。
-  let publicKey = "";
-  if (import.meta.env.VITE_FLEET_HOST !== "webui") {
-    const { relayHttpBase } = await import("./relay");
-    const res = await fetch(`${relayHttpBase().replace(/\/$/, "")}/vapid`);
-    ({ publicKey } = (await res.json()) as { publicKey: string });
-  }
+  // VAPID 公钥是**每个 relay 各自**的一把（订阅绑在公钥上），所以取哪一把由
+  // 调用方给的设备 relay 决定 —— 两台设备挂在不同 relay 上时，用错一把会让订阅
+  // 静默收不到通知。地址计算走 relayBase.ts 这个叶子模块，同源构建因此不再需要
+  // 为了一个地址动态 import 整个 relay 客户端。
+  const res = await fetch(`${relayBaseFor(relayBase).replace(/\/$/, "")}/vapid`);
+  const { publicKey } = (await res.json()) as { publicKey: string };
   const subscription =
     (await registration.pushManager.getSubscription()) ??
     (await registration.pushManager.subscribe({

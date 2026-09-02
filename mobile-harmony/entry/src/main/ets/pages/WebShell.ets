@@ -110,7 +110,7 @@ struct WebShell {
     const ctx = getContext(this) as common.UIAbilityContext;
     RelayStore.loadPairing(ctx).then((p: RelayPairing | null) => {
       this.pairChecked = true;
-      // 密钥走 URL fragment：mobile-web 的 loadSecretSync 本来就从
+      // 密钥走 URL fragment：mobile-web 的 consumeHashSecret 本来就从
       // window.location.hash 读 `#k=`（桌面二维码就是这个形状），所以这里
       // 复用同一条路径，web 侧无需为鸿蒙加任何分支。fragment 也不会进
       // 请求行，拦截器按路径取资源不受影响。
@@ -124,8 +124,10 @@ struct WebShell {
       // relayUrl 也一起交给页面。以前这里只取 secret，relay 永远是打包时
       // sync-web.sh 烧进 VITE_RELAY_URL 的那个——扫了指向自建 relay 的二维码，
       // app 照样去连官方 relay，配对必然失败且现象只是「一直连不上」。
-      // mobile-web 的 resolveRelayBase 认 fragment 里的 &relay=，优先级高于
-      // 打包值，所以这里给了它就生效，web 侧不需要鸿蒙分支。
+      // mobile-web 的 consumeHashSecret 认 fragment 里的 &relay=，并把它连同密钥
+      // 一起存进那台设备的记录（devices.ts），优先级高于打包值，所以这里给了它
+      // 就生效，web 侧不需要鸿蒙分支。多设备之后 relay 归属是**每台设备各自**的，
+      // 而这个壳每次加载都重新注入一遍，所以自建 relay 也能在升级后自愈。
       this.src = p === null
         ? ''
         : ORIGIN + 'index.html#k=' + p.secret + '&relay=' + encodeURIComponent(p.relayUrl);

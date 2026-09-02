@@ -14,6 +14,7 @@
 // 环境(node)没有 indexedDB,所以凡是需要断言的语义都在纯函数层;IO 层只负责
 // 把 book 搬进搬出,任何失败都退化成「这一份存储没读到」,绝不抛。
 
+import { parseRelayParam } from "./relayBase";
 import { extractSecretFromUrl, openDb } from "./secretStore";
 
 /** 本机存 book 的键(localStorage 与 IDB 共用同一个名字)。 */
@@ -307,12 +308,19 @@ export function adoptScannedDevice(
  *  里被截图、被历史记录带走。
  *
  *  只读一次:调用后 hash 已被清空,所以第二次调用返回 `null`。原生壳走的是
- *  deepLink.ts,不经这条路。 */
-export function consumeHashSecret(): string | null {
-  const secret = extractSecretFromUrl(window.location.hash);
+ *  deepLink.ts,不经这条路。
+ *
+ *  一并取走同一个 fragment 里的 `&relay=` —— 它说的是**这次配对**挂在哪个
+ *  relay 上,而 fragment 马上就要被抹掉,所以必须在这里一次读完,不能留给后面
+ *  某个模块再去读一遍(那正是 relay.ts 从前那个模块加载期 `RELAY_BASE` 常量
+ *  存在的理由)。 */
+export function consumeHashSecret(): { secret: string; relayBase: string | null } | null {
+  const hash = window.location.hash;
+  const secret = extractSecretFromUrl(hash);
   if (!secret) return null;
+  const relayBase = parseRelayParam(hash);
   history.replaceState(null, "", window.location.pathname);
-  return secret;
+  return { secret, relayBase };
 }
 
 /** 清空全部配对(「重新配对」入口)。旧键一并清掉,否则下次启动会被上面的迁移
