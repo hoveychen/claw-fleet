@@ -138,6 +138,46 @@ fn strip_ansi(raw: &str) -> String {
     out
 }
 
+// ── Codex login parsing ───────────────────────────────────────────────────────
+//
+// `codex login` needs no code paste-back: it runs a localhost callback server
+// (port 1455, fallback 1457 — a server-side allow-list, not configurable) and
+// finishes entirely in the browser. The CLI opens the browser itself and
+// prints to stderr: "Starting local login server on http://localhost:{port}.
+// If your browser did not open, navigate to this URL to authenticate:\n\n{url}"
+// then "Successfully logged in" / exits 1 on failure. (Shape read from
+// codex-rs cli/src/login.rs + login/src/server.rs; re-verified on-device in
+// the wizard e2e.) `codex login --device-auth` is the no-browser fallback.
+
+/// What the wizard's codex-login card renders on each poll tick.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexLoginParse {
+    /// The authorize URL (not the localhost line) once printed.
+    pub auth_url: Option<String>,
+    pub success: bool,
+    /// Both allowed callback ports are taken by something else.
+    pub port_busy: bool,
+}
+
+/// Parse the cumulative output of `codex login` (pty or pipes).
+pub fn parse_codex_login_output(raw: &str) -> CodexLoginParse {
+    let stripped = strip_ansi(raw);
+    let auth_url = stripped
+        .split_whitespace()
+        // Exclude only a literal localhost *host* (the "server started" line);
+        // the real authorize URL legitimately embeds "localhost" inside its
+        // percent-encoded redirect_uri parameter.
+        .find(|tok| tok.starts_with("https://") && !tok.starts_with("https://localhost"))
+        .map(|s| s.trim_end_matches(&[')', ']', '.', ','][..]).to_string());
+    let normalized = normalize_ws(&stripped);
+    CodexLoginParse {
+        auth_url,
+        success: normalized.contains("Successfully logged in"),
+        port_busy: normalized.to_lowercase().contains("address already in use"),
+    }
+}
+
 // ── Token persistence ─────────────────────────────────────────────────────────
 
 /// Fleet-held harness auth material: the claude long-lived OAuth token from
@@ -250,6 +290,31 @@ mod tests {
         // Ink spaces words via cursor-column escapes; the phrase reads back
         // after whitespace normalization.
         assert!(normalize_ws(&s).contains("Paste code here"));
+    }
+
+    #[test]
+    fn parses_codex_login_stream() {
+        // Stderr shape from codex-rs cli/src/login.rs::print_login_server_start.
+        let raw = "Starting local login server on http://localhost:1455.\n\
+                   If your browser did not open, navigate to this URL to authenticate:\n\n\
+                   https://auth.openai.com/oauth/authorize?client_id=abc&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=xyz\n";
+        let p = parse_codex_login_output(raw);
+        assert_eq!(
+            p.auth_url.as_deref(),
+            Some("https://auth.openai.com/oauth/authorize?client_id=abc&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=xyz")
+        );
+        assert!(!p.success && !p.port_busy);
+
+        let done = format!("{raw}Successfully logged in\n");
+        assert!(parse_codex_login_output(&done).success);
+
+        let busy = "error binding local login server: Address already in use (os error 48)";
+        assert!(parse_codex_login_output(busy).port_busy);
+        // The localhost line alone must not be mistaken for the auth URL.
+        assert_eq!(
+            parse_codex_login_output("Starting local login server on http://localhost:1455.").auth_url,
+            None
+        );
     }
 
     #[test]

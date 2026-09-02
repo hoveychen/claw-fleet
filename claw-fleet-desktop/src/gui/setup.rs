@@ -235,6 +235,82 @@ pub(crate) async fn claude_login_cancel(
         .map_err(|e| format!("join: {e}"))?
 }
 
+// ── Codex login flow (wizard) ────────────────────────────────────────────────
+//
+// Simpler than claude's: `codex login` finishes entirely in the browser via
+// its localhost callback (1455/1457, server-side allow-list), no code paste.
+// start → poll (URL + success / port-busy) → probe_source("codex") confirms.
+// `device_auth = true` runs `codex login --device-auth` for no-browser setups.
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexLoginPoll {
+    parse: claw_fleet_core::harness_login::CodexLoginParse,
+    running: bool,
+    /// Post-success confirmation from the auth.json probe.
+    logged_in: bool,
+}
+
+#[tauri::command]
+pub(crate) async fn codex_login_start(
+    device_auth: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let home = session::real_home_dir()
+        .map(|h| h.to_string_lossy().into_owned())
+        .ok_or("cannot resolve home directory")?;
+    let command = if device_auth { "codex login --device-auth" } else { "codex login" };
+    let backend = state.backend.clone();
+    let record = tokio::task::spawn_blocking(move || {
+        backend.read().unwrap().spawn_proc(home, command.into(), 100, 30)
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))??;
+    Ok(record.id)
+}
+
+#[tauri::command]
+pub(crate) async fn codex_login_poll(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CodexLoginPoll, String> {
+    use base64::Engine as _;
+    let backend = state.backend.clone();
+    let chunk = tokio::task::spawn_blocking(move || {
+        backend.read().unwrap().proc_output(id, Some(0))
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))??;
+
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(&chunk.data_b64)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+    let parse = claw_fleet_core::harness_login::parse_codex_login_output(&raw);
+    let running = matches!(
+        chunk.record.status,
+        claw_fleet_core::proc_runner::ProcStatus::Starting
+            | claw_fleet_core::proc_runner::ProcStatus::Running
+    );
+    // Ground truth for "logged in" is the auth.json probe, not the banner.
+    let logged_in = (parse.success || !running)
+        && claw_fleet_core::harness_status::probe_source("codex")
+            .and_then(|s| s.logged_in)
+            .unwrap_or(false);
+    Ok(CodexLoginPoll { parse, running, logged_in })
+}
+
+#[tauri::command]
+pub(crate) async fn codex_login_cancel(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.read().unwrap().kill_proc(id, false))
+        .await
+        .map_err(|e| format!("join: {e}"))?
+}
+
 #[tauri::command]
 pub(crate) async fn get_account_info(
     state: tauri::State<'_, AppState>,
