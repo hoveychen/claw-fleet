@@ -643,6 +643,23 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
     },
   }),
 
+  // billing-service — finished cleanly, but part of its output is on the wrong
+  // machine. Deliberately a normal status: that's exactly why it needs a chip.
+  mkSession({
+    id: "sess-billing-mirror", workspaceName: "billing-service", status: "idle",
+    aiTitle: "Usage-based billing — 导出对账 CSV",
+    lastMessagePreview: "Wrote the reconciliation export and verified the row count.",
+    tokenSpeed: 0, contextPercent: 0.18, totalOutputTokens: 12_400,
+    createdAtMs: NOW - 26 * MIN, lastActivityMs: NOW - 11 * MIN,
+    mirrorWrite: {
+      files: ["reconciliation.csv", "export.log"],
+      truncated: false,
+      total: 2,
+      workspacePath: "/Users/demo/workspace/billing-service",
+      detectedAtMs: NOW - 11 * MIN,
+    },
+  }),
+
   // payments-gateway — 2-hop handoff chain
   mkSession({
     id: "sess-pay-1", workspaceName: "payments-gateway", status: "idle",

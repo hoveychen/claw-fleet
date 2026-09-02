@@ -170,6 +170,11 @@
     "remoteDisconnected": "远端断开",
     "stuck": "卡死"
   },
+  "mirrorWrite": {
+    "badge": "{{count}} 个文件留在本机",
+    "tip": "这些文件出现在 {{path}} 的「本机」镜像目录里,而不是远端主机上——说明有人用相对路径写了文件。rca 只把绝对路径路由到远端;相对路径的读会报「找不到」,写却会成功,然后静静地落在这台机器上。文件:{{files}}",
+    "tip_more": "(还有更多,只列出前 {{shown}} 个)"
+  },
   "remoteDisconnect": {
     "badge": "已停止 agent",
     "badge_not_stopped": "agent 未停下",

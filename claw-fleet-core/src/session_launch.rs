@@ -543,9 +543,20 @@ pub fn spawn_claude_detached_with_envs(
     let label_owned = label.to_string();
     let detail_owned = detail.to_string();
     let log_path_owned = stderr_log.to_path_buf();
+    // Only rca-wrapped launches have a mirror to check; a local workspace's
+    // directory is supposed to have files in it. `None` skips the check.
+    let mirror_check = rca_wrap
+        .is_some()
+        .then(|| session_id_from_args(args).map(|id| (id, workspace_path.to_string())))
+        .flatten();
     std::thread::spawn(move || {
         let result = child.wait();
         let success = matches!(&result, Ok(status) if status.success());
+        // After the child is gone, so nothing can still be writing: anything in
+        // the local mirror is output that was meant for the remote host.
+        if let Some((session_id, ws)) = mirror_check {
+            crate::mirror_guard::check_after_exit(&session_id, &ws);
+        }
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

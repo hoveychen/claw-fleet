@@ -819,6 +819,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         pending_messages: Vec::new(),
         watches: Vec::new(),
         remote_disconnect: None,
+        mirror_write: None,
     }
 }
 
@@ -838,6 +839,7 @@ pub fn enrich_all(sessions: &mut [SessionInfo]) {
     // sets one. A disconnected session's transcript-derived status describes a
     // process Fleet has already killed.
     crate::remote_disconnect::enrich_sessions(sessions);
+    crate::mirror_guard::enrich_sessions(sessions);
 }
 
 /// Scan all registered agent sources and merge into a single sorted list.
