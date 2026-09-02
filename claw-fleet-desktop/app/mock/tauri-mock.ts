@@ -1058,23 +1058,6 @@ async function handleIPC(
     // not (stale) so the mock exercises both banner states.
     case "desktop_build_commit":
       return "abc1234";
-    // ── 直连(Mobile 板块的第二块;静态演示值)──
-    //
-    // 这一组也要在 mock 里给,否则 `?mock` 下 direct_host_status 返回 undefined,
-    // 那一整块直接不渲染 —— 而那正是改这块 UI 时唯一能看见它的方式。
-    case "direct_host_status":
-    case "set_direct_host_config":
-      return {
-        baseUrl: "https://fleet.example.com",
-        problem: null,
-        tokenPresent: true,
-        tokenManual: false,
-        ready: true,
-      };
-    case "direct_host_url":
-      return "https://fleet-relay.example.com/#h=https%3A%2F%2Ffleet.example.com&t=demo-direct-token";
-    case "direct_host_qr_svg":
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><rect width="29" height="29" fill="#fff"/><path fill="#000" d="M2 2h7v7H2zM20 2h7v7h-7zM2 20h7v7H2zM4 4h3v3H4zM22 4h3v3h-4zM4 22h3v3H4zM12 3h2v2h-2zM16 3h2v3h-2zM12 7h3v2h-3zM17 7h2v2h-2zM12 11h2v3h-2zM16 12h3v2h-3zM21 12h3v2h-3zM3 12h3v2H3zM7 13h3v2H7zM12 16h2v3h-2zM15 17h3v2h-3zM20 16h2v3h-2zM24 17h2v2h-2zM12 21h3v2h-3zM17 22h2v3h-2zM21 21h3v2h-3zM12 25h2v2h-2z"/></svg>`;
     case "mobile_relay_qr_svg":
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><rect width="29" height="29" fill="#fff"/><path fill="#000" d="M2 2h7v7H2zM20 2h7v7h-7zM2 20h7v7H2zM4 4h3v3H4zM22 4h3v3h-4zM4 22h3v3H4zM11 2h2v2h-2zM15 2h2v3h-2zM11 6h3v2h-3zM16 6h2v2h-2zM11 10h2v3h-2zM15 11h3v2h-3zM20 11h3v2h-3zM25 11h2v3h-2zM2 11h3v2H2zM6 12h3v2H6zM11 15h2v3h-2zM14 16h3v2h-3zM19 15h2v3h-2zM23 16h2v2h-2zM26 16h1v3h-1zM11 20h3v2h-3zM16 21h2v3h-2zM20 20h3v2h-3zM24 21h3v2h-3zM11 24h2v3h-2zM14 25h3v2h-3zM20 24h2v3h-2zM23 25h3v2h-3z"/></svg>`;
 

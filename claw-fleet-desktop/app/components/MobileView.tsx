@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CopyButton } from "./CopyButton";
 import { PageShell } from "./PageShell";
 import { useUIStore } from "../store";
 import styles from "./MobileView.module.css";
@@ -33,17 +32,6 @@ function isStale(deviceCommit: string | undefined, desktopCommit: string | null)
   if (!deviceCommit || !desktopCommit) return false;
   if (deviceCommit === "unknown" || desktopCommit === "unknown") return false;
   return deviceCommit.slice(0, 7) !== desktopCommit.slice(0, 7);
-}
-
-/** 直连现状(claw-fleet-core::direct_host::DirectHostStatus)。 */
-interface DirectHostStatus {
-  baseUrl: string;
-  /** 地址的问题:empty / noScheme / noHost / plainHttp / loopback,null = 没问题。 */
-  problem: string | null;
-  tokenPresent: boolean;
-  /** token 是手填的还是取自本机 ~/.fleet/token。 */
-  tokenManual: boolean;
-  ready: boolean;
 }
 
 interface MobileRelayStatus {
@@ -81,14 +69,6 @@ export function MobileView() {
   const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<MobileRelayConfig | null>(null);
   const [status, setStatus] = useState<MobileRelayStatus | null>(null);
-  // 直连(手机不经中转,直接问这台主机的 HTTP 数据面)。与中转那半边并列,因为
-  // 它是另一种设备而不是同一种设备的另一种连法。
-  const [direct, setDirect] = useState<DirectHostStatus | null>(null);
-  const [directQr, setDirectQr] = useState<string | null>(null);
-  const [directUrl, setDirectUrl] = useState<string | null>(null);
-  const [directUrlDraft, setDirectUrlDraft] = useState("");
-  const [directTokenDraft, setDirectTokenDraft] = useState("");
-  const [directOpen, setDirectOpen] = useState(false);
   const [qrSvg, setQrSvg] = useState<string | null>(null);
   const { urlDraft, editingUrl } = useUIStore((s) => s.mainViewState.mobile);
   const updateMainViewState = useUIStore((s) => s.updateMainViewState);
@@ -116,42 +96,7 @@ export function MobileView() {
     }
   }, [i18n]);
 
-  /** 拉一遍直连现状,现状说能出码就把码与链接一起取回来。
-   *
-   *  出不了码时**清掉**上一次的码 —— 一张连不上的码留在界面上,比没有码更糟。 */
-  const refreshDirect = useCallback(async () => {
-    let st: DirectHostStatus | null = null;
-    try {
-      st = await invoke<DirectHostStatus>("direct_host_status");
-    } catch {
-      // 远端 backend 太旧、或这条能力不可用 —— 整块隐掉,不摆一个点不动的入口。
-      setDirect(null);
-      setDirectQr(null);
-      setDirectUrl(null);
-      return;
-    }
-    setDirect(st);
-    setDirectUrlDraft(st.baseUrl);
-    if (!st.ready) {
-      setDirectQr(null);
-      setDirectUrl(null);
-      return;
-    }
-    // 码与链接各自独立取:一个失败不该把另一个也抹掉,任一单独就够加一台设备。
-    try {
-      setDirectQr(await invoke<string>("direct_host_qr_svg"));
-    } catch {
-      setDirectQr(null);
-    }
-    try {
-      setDirectUrl(await invoke<string>("direct_host_url"));
-    } catch {
-      setDirectUrl(null);
-    }
-  }, []);
-
   const load = useCallback(async () => {
-    void refreshDirect();
     try {
       const cfg = await invoke<MobileRelayConfig>("get_mobile_relay_config");
       setConfig(cfg);
@@ -162,7 +107,7 @@ export function MobileView() {
     } catch (e) {
       setError(String(e));
     }
-  }, [refreshQr, refreshDirect]);
+  }, [refreshQr]);
 
   useEffect(() => {
     void load();
@@ -372,145 +317,6 @@ export function MobileView() {
                 </>
               )}
             </div>
-
-            {/* ── 直连(手机不经中转)───────────────────────────────────
-                另一种设备,不是同一种设备的另一种连法:手机把这台主机的 HTTP
-                数据面直接加进设备簿,省掉中转一跳,代价是没有推送通道。
-                地址必须由人给 —— 这台机器不知道自己在手机那边叫什么(serve 绑在
-                127.0.0.1 上,对外那一层只有部署它的人知道)。 */}
-            {direct && (
-              <div className={styles.directBlock}>
-                <button
-                  className={styles.directHead}
-                  onClick={() => setDirectOpen((v) => !v)}
-                >
-                  <span className={styles.directTitle}>
-                    {t("mobile_direct_title", "直连(不经中转)")}
-                  </span>
-                  <span className={styles.directState} data-ready={direct.ready ? "yes" : "no"}>
-                    {direct.ready
-                      ? t("mobile_direct_ready", "可出码")
-                      : t("mobile_direct_not_ready", "未就绪")}
-                  </span>
-                </button>
-                {directOpen && (
-                  <div className={styles.directBody}>
-                    <p className={styles.qrHint}>
-                      {t(
-                        "mobile_direct_hint",
-                        "手机扫这张码就把「地址 + token」一起加成一台直连设备。填的是另一台已经部署好的 Fleet 主机（云容器、或反代后面那台）能被手机访问到的地址，加上它的 admin token。地址必须是 https —— 明文 http 会被手机浏览器拦掉。",
-                      )}
-                    </p>
-                    <div className={styles.fieldRow}>
-                      <span className={styles.fieldLabel}>
-                        {t("mobile_direct_url", "对外地址")}
-                      </span>
-                      <input
-                        className={styles.urlInput}
-                        value={directUrlDraft}
-                        placeholder="https://fleet.example.com"
-                        spellCheck={false}
-                        onChange={(e) => setDirectUrlDraft(e.target.value)}
-                      />
-                    </div>
-                    <div className={styles.fieldRow}>
-                      <span className={styles.fieldLabel}>
-                        {t("mobile_direct_token", "token")}
-                      </span>
-                      <input
-                        className={styles.urlInput}
-                        value={directTokenDraft}
-                        placeholder={
-                          direct.tokenPresent && !direct.tokenManual
-                            ? t(
-                                "mobile_direct_token_local",
-                                "留空 = 用本机 ~/.fleet/token（只有本机正跑着 serve 时才有）",
-                              )
-                            : t("mobile_direct_token_needed", "填那台主机的 admin token")
-                        }
-                        spellCheck={false}
-                        onChange={(e) => setDirectTokenDraft(e.target.value)}
-                      />
-                      <button
-                        className={styles.smallButton}
-                        disabled={busy}
-                        onClick={() => {
-                          setBusy(true);
-                          void invoke<DirectHostStatus>("set_direct_host_config", {
-                            baseUrl: directUrlDraft.trim(),
-                            token: directTokenDraft.trim(),
-                          })
-                            .then(() => refreshDirect())
-                            .catch((e) => setError(String(e)))
-                            .finally(() => setBusy(false));
-                        }}
-                      >
-                        {t("save", "保存")}
-                      </button>
-                    </div>
-                    {/* 每种「未就绪」都给出那一句能照着做的话 —— 合成一句
-                        「未就绪」等于让人去猜。 */}
-                    {direct.problem === "plainHttp" && (
-                      <div className={styles.directWarn}>
-                        {t(
-                          "mobile_direct_plain_http",
-                          "手机上那个页面是 https 的，浏览器不允许它连明文 http —— 换成 https（隧道或反代），否则扫了也连不上。",
-                        )}
-                      </div>
-                    )}
-                    {direct.problem === "loopback" && (
-                      <div className={styles.directWarn}>
-                        {t(
-                          "mobile_direct_loopback",
-                          "这是本机回环地址，手机访问不到 —— 只在同机调试时有意义。",
-                        )}
-                      </div>
-                    )}
-                    {(direct.problem === "noScheme" || direct.problem === "noHost") && (
-                      <div className={styles.directWarn}>
-                        {t("mobile_direct_bad_url", "地址要写成完整的 https://… 形式。")}
-                      </div>
-                    )}
-                    {!direct.tokenPresent && (
-                      <div className={styles.directWarn}>
-                        {t(
-                          "mobile_direct_no_token",
-                          "本机没有在跑的 serve —— ~/.fleet/token 为空是正常的，桌面端不监听 HTTP。直连要指向的是另一台已经部署好的 Fleet 主机：填它的地址与 admin token（云容器就是 FLEET_ADMIN_TOKEN 那个值）。",
-                        )}
-                      </div>
-                    )}
-                    {directQr && (
-                      <div className={styles.qrWrap}>
-                        <div
-                          className={styles.qr}
-                          dangerouslySetInnerHTML={{ __html: directQr }}
-                        />
-                        <p className={styles.qrHint}>
-                          {t(
-                            "mobile_direct_qr_hint",
-                            "这张码带着 token，请勿截图外传。",
-                          )}
-                        </p>
-                        {directUrl && (
-                          <div className={styles.copyRow}>
-                            <CopyButton
-                              text={directUrl}
-                              label={t("mobile_direct_copy", "复制直连链接")}
-                            />
-                            <span className={styles.copyHint}>
-                              {t(
-                                "mobile_direct_copy_hint",
-                                "扫码进不来时改用它：在手机上粘贴。",
-                              )}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
 
             <div className={styles.dangerZone}>
               <button className={styles.dangerButton} disabled={busy} onClick={() => void rotate()}>

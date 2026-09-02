@@ -9,7 +9,6 @@ import {
   ChevronRight,
   FolderGit2,
   Gauge,
-  Link2,
   ListTree,
   Package,
   QrCode,
@@ -71,9 +70,6 @@ interface Props {
   deviceMuted: (deviceId: string) => boolean;
   /** 只开/只关某一台的通知。整部手机的总开关在上面「连接与通知」那一块。 */
   onMuteDevice: (device: PairedDevice, muted: boolean) => void;
-  /** 添加一台 HTTP 直连主机。返回 null 表示成功入册,否则是该显示给用户的原因
-   *  (地址错 / 混合内容 / 连不上或没开跨源 / token 不对 / 不是 Fleet 主机)。 */
-  onAddHost: (baseUrl: string, token: string) => Promise<string | null>;
   /** 清除全部配对并重载。 */
   onUnpairAll: () => void;
 }
@@ -102,7 +98,6 @@ export function MoreView({
   onRemoveDevice,
   deviceMuted,
   onMuteDevice,
-  onAddHost,
   onUnpairAll,
 }: Props) {
   const { lang, setLang, t } = useI18n();
@@ -110,12 +105,6 @@ export function MoreView({
   // 未必可用，而这里没有任何理由依赖它）。
   const [editingId, setEditingId] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
-  // 「添加直连主机」那张小表单。默认收起 —— 大多数人只用扫码那条路。
-  const [hostFormOpen, setHostFormOpen] = useState(false);
-  const [hostUrl, setHostUrl] = useState("");
-  const [hostToken, setHostToken] = useState("");
-  const [hostBusy, setHostBusy] = useState(false);
-  const [hostError, setHostError] = useState("");
   const { setting, setTheme } = useTheme();
   const wakeLock = useWakeLock();
   // Task-list handoff grouping — same "tasks:groupHandoff" draft the task page
@@ -580,85 +569,6 @@ export function MoreView({
               </button>
             </div>
           )}
-          {/* 直连一台 HTTP 主机 —— 与扫码那条路并列的第二种设备。它不经中转、
-              因此也没有推送通道,换来的是少一跳。地址必须是 https(手机上这个
-              页面是 https 发的,浏览器不允许它连明文 http),而那台主机必须带
-              admin token —— 无认证的端口按设计不发跨源头。
-              「那台主机」指的是**已经部署好的**一台(云容器,或反代后面那台):
-              serve 是无头形态的进程,由容器 entrypoint 或桌面端替远端主机拉起,
-              不是一条要用户手敲的命令。本机桌面端不监听 HTTP。 */}
-          <div className={styles.card} style={{ marginTop: 8 }}>
-            {!hostFormOpen ? (
-              <button className={styles.navRow} onClick={() => setHostFormOpen(true)}>
-                <span className={styles.navIcon}>
-                  <Link2 size={18} />
-                </span>
-                <span className={styles.navText}>
-                  <span className={styles.navLabel}>{t("添加直连主机")}</span>
-                  <span className={styles.navSub}>
-                    {t("填另一台 Fleet 主机的地址与 admin token,不经中转")}
-                  </span>
-                </span>
-                <ChevronRight size={16} className={styles.navChevron} />
-              </button>
-            ) : (
-              <div className={styles.hostForm}>
-                <input
-                  className={styles.deviceInput}
-                  value={hostUrl}
-                  placeholder="https://fleet.example.com"
-                  autoFocus
-                  inputMode="url"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  onChange={(e) => setHostUrl(e.target.value)}
-                />
-                <input
-                  className={styles.deviceInput}
-                  value={hostToken}
-                  placeholder={t("token(~/.fleet/token)")}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  onChange={(e) => setHostToken(e.target.value)}
-                />
-                {hostError && <div className={styles.hostError}>{hostError}</div>}
-                <div className={styles.hostActions}>
-                  <button
-                    className={styles.deviceBtn}
-                    disabled={hostBusy}
-                    onClick={() => {
-                      setHostFormOpen(false);
-                      setHostError("");
-                    }}
-                  >
-                    {t("取消")}
-                  </button>
-                  <button
-                    className={styles.actionButton}
-                    disabled={hostBusy || hostUrl.trim().length === 0}
-                    onClick={() => {
-                      setHostBusy(true);
-                      setHostError("");
-                      void onAddHost(hostUrl, hostToken)
-                        .then((err) => {
-                          if (err) {
-                            setHostError(err);
-                            return;
-                          }
-                          // 成功就收表单、清字段 —— 那台已经出现在上面的列表里了。
-                          setHostFormOpen(false);
-                          setHostUrl("");
-                          setHostToken("");
-                        })
-                        .finally(() => setHostBusy(false));
-                    }}
-                  >
-                    {hostBusy ? t("检查中…") : t("添加")}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
           <div className={styles.rowNote}>
             {canScanPairing()
               ? t("每台桌面端各出一张码;扫过的会留在上面这个列表里。")
