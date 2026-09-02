@@ -130,6 +130,15 @@ pub(crate) async fn install_node_runtime(
     })?
 }
 
+/// Login-step context: whether a local foxy-switcher daemon custodies
+/// claude/codex credentials. When it does, the wizard shows "managed by foxy"
+/// instead of offering Fleet-driven login (starting our own OAuth would rotate
+/// away foxy's single-use refresh token and 401 every device it serves).
+#[tauri::command]
+pub(crate) async fn harness_login_context() -> Result<claw_fleet_core::foxy::FoxyCustody, String> {
+    Ok(claw_fleet_core::foxy::fetch_custody().await)
+}
+
 #[tauri::command]
 pub(crate) async fn get_account_info(
     state: tauri::State<'_, AppState>,
