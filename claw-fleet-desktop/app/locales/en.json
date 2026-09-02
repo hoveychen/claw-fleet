@@ -2476,6 +2476,12 @@
       "install-failed": "Install/update failed.",
       "timeout": "The installer timed out and was stopped.",
       "verify-failed": "The installer finished, but no runnable binary was detected."
-    }
+    },
+    "spawn_missing": {
+      "claude-code": "Claude Code isn't installed, so this session can't start.",
+      "codex": "The Codex CLI isn't installed, so this session can't start.",
+      "dsh": "dsh isn't installed, so this session can't start."
+    },
+    "open_env_panel": "Fix in Environment panel"
   }
 }

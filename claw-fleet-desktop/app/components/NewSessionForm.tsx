@@ -3,7 +3,8 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder, FolderOpen, MessageCircle } from "lucide-react";
-import { useConnectionStore, useSessionsStore } from "../store";
+import { openSettingsWindow, useConnectionStore, useSessionsStore } from "../store";
+import { classifyHarnessError, requestSettingsTab } from "../harnessErrors";
 import {
   ChatComposer,
   type ChatComposerAttachment,
@@ -695,7 +696,30 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
             : t("new_session.hint_pick_workspace")}
       </p>
 
-      {error && <div className={styles.error}>{error}</div>}
+      {error &&
+        (() => {
+          // A "harness not found" spawn failure gets a localized message plus
+          // a jump into the environment panel instead of the raw backend
+          // string; anything unrecognized still renders raw.
+          const missing = classifyHarnessError(error);
+          return (
+            <div className={styles.error}>
+              {missing ? t(`env.spawn_missing.${missing}`) : error}
+              {missing && (
+                <button
+                  type="button"
+                  className={styles.error_action}
+                  onClick={() => {
+                    requestSettingsTab("environment");
+                    void openSettingsWindow();
+                  }}
+                >
+                  {t("env.open_env_panel")}
+                </button>
+              )}
+            </div>
+          );
+        })()}
 
       {pickingDir && (
         <DirPickerDialog

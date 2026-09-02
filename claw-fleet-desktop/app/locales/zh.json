@@ -2472,6 +2472,12 @@
       "install-failed": "安装/更新失败。",
       "timeout": "安装超时,已中止。",
       "verify-failed": "安装程序结束了,但没有检测到可用的程序。"
-    }
+    },
+    "spawn_missing": {
+      "claude-code": "还没有安装 Claude Code,没法启动这个会话。",
+      "codex": "还没有安装 Codex CLI,没法启动这个会话。",
+      "dsh": "还没有安装 dsh,没法启动这个会话。"
+    },
+    "open_env_panel": "去环境面板修复"
   }
 }

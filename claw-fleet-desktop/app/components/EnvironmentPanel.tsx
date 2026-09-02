@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useConnectionStore } from "../store";
+import { isWebBuild } from "../hostEnv";
 import { AgentSourceIcon } from "./SessionCard";
 import styles from "./EnvironmentPanel.module.css";
 
@@ -88,6 +89,9 @@ export function EnvironmentPanel() {
   const { t } = useTranslation();
   const connection = useConnectionStore((s) => s.connection);
   const isRemote = connection?.type === "remote";
+  // A browser tab can neither run installers nor drive a login pty on the
+  // machine the user sits at; statuses still show (routed to the serving host).
+  const actionsDisabled = isRemote || isWebBuild();
 
   const [statuses, setStatuses] = useState<HarnessStatus[] | null>(null);
   const [custody, setCustody] = useState<FoxyCustody | null>(null);
@@ -411,7 +415,7 @@ export function EnvironmentPanel() {
     if (!s.installed || managed || s.loggedIn) return null;
     if (!claudeFlow) {
       return (
-        <button className={styles.action_btn} onClick={() => void startClaudeLogin()} disabled={isRemote}>
+        <button className={styles.action_btn} onClick={() => void startClaudeLogin()} disabled={actionsDisabled}>
           {t("env.login_btn")}
         </button>
       );
@@ -457,7 +461,7 @@ export function EnvironmentPanel() {
     if (!s.installed || managed || s.loggedIn) return null;
     if (!codexFlow) {
       return (
-        <button className={styles.action_btn} onClick={() => void startCodexLogin()} disabled={isRemote}>
+        <button className={styles.action_btn} onClick={() => void startCodexLogin()} disabled={actionsDisabled}>
           {t("env.login_btn")}
         </button>
       );
@@ -490,7 +494,7 @@ export function EnvironmentPanel() {
       return (
         <button
           className={styles.action_btn}
-          disabled={isRemote}
+          disabled={actionsDisabled}
           onClick={() => {
             setDshOpen(true);
             void loadDshCreds();
@@ -576,7 +580,7 @@ export function EnvironmentPanel() {
           {!s.installed && (
             <button
               className={styles.action_btn_primary}
-              disabled={!!b || isRemote}
+              disabled={!!b || actionsDisabled}
               onClick={() => void runInstall(s.source)}
             >
               {b === "install" ? t("env.installing") : t("env.install_btn")}
@@ -585,7 +589,7 @@ export function EnvironmentPanel() {
           {s.installed && !extensionChannel && (
             <button
               className={styles.action_btn}
-              disabled={!!b || isRemote}
+              disabled={!!b || actionsDisabled}
               onClick={() => void runUpdate(s.source)}
             >
               {b === "update" ? t("env.updating") : t("env.update_btn")}
@@ -594,7 +598,7 @@ export function EnvironmentPanel() {
           {s.source === "dsh" && needNode && (
             <button
               className={styles.action_btn_primary}
-              disabled={!!b || isRemote}
+              disabled={!!b || actionsDisabled}
               onClick={() => void runNodeInstall()}
             >
               {b === "node" ? t("env.installing") : t("env.install_node_btn")}
