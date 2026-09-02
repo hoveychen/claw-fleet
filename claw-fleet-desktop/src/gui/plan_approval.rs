@@ -109,40 +109,6 @@ pub(crate) fn mobile_relay_pairing_url(
     state.backend.read().unwrap().mobile_relay_pairing_url(lang.as_deref())
 }
 
-// ── 直连(手机不经中转直接问这台主机)────────────────────────────────────
-//
-// 四个命令都经 `state.backend`,所以远端 workspace 里答的是**那台机器自己**:
-// 「对手机而言的地址」「token 在不在」只有它知道(见项目 CLAUDE.md 的 Backend
-// trait 硬规则)。
-
-#[tauri::command(async)]
-pub(crate) fn direct_host_status(
-    state: tauri::State<'_, AppState>,
-) -> Result<claw_fleet_core::direct_host::DirectHostStatus, String> {
-    state.backend.read().unwrap().direct_host_status()
-}
-
-#[tauri::command(async)]
-pub(crate) fn set_direct_host_config(
-    state: tauri::State<'_, AppState>,
-    base_url: String,
-    token: String,
-) -> Result<claw_fleet_core::direct_host::DirectHostStatus, String> {
-    state.backend.read().unwrap().set_direct_host_config(&base_url, &token)
-}
-
-#[tauri::command(async)]
-pub(crate) fn direct_host_qr_svg(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state.backend.read().unwrap().direct_host_qr_svg()
-}
-
-/// 直连链接的文本形式(给复制按钮)。**带 token**,与中转那条链接同样敏感 ——
-/// 它去剪贴板,不去日志。
-#[tauri::command(async)]
-pub(crate) fn direct_host_url(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state.backend.read().unwrap().direct_host_url()
-}
-
 /// Read the last non-tool-use assistant message from a session, for guard context.
 #[tauri::command(async)]
 pub(crate) fn get_guard_context(state: tauri::State<'_, AppState>, session_id: String) -> String {
