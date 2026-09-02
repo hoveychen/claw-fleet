@@ -1939,6 +1939,24 @@ impl Backend for LocalBackend {
         claw_fleet_core::remote_host::host_health(&ssh_target)
     }
 
+    fn list_ssh_hosts(&self) -> Vec<claw_fleet_core::remote_host::SshHost> {
+        claw_fleet_core::remote_host::load_hosts()
+    }
+
+    fn upsert_ssh_host(
+        &self,
+        host: claw_fleet_core::remote_host::SshHost,
+    ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+        claw_fleet_core::remote_host::upsert_host(host)
+    }
+
+    fn remove_ssh_host(
+        &self,
+        id: String,
+    ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+        claw_fleet_core::remote_host::remove_host(&id)
+    }
+
     fn create_dir(
         &self,
         path: Option<String>,

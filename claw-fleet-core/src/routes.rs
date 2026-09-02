@@ -178,6 +178,15 @@ pub const PROC_OUTPUT: &str = "/proc_output";
 pub const PROC_RESIZE: &str = "/proc_resize";
 pub const PROC_RUN: &str = "/proc_run";
 pub const PROCS: &str = "/procs";
+/// The ssh host book (`remote_host::SshHost`): list / upsert / remove.
+///
+/// On the backend host, not this desktop. The book is spawn-time state —
+/// `remote_workspace::transport` resolves a workspace's `hostId` through it
+/// when the session launches — and sessions launch on the backend host, so
+/// that is whose book governs and whose book the settings page must edit.
+pub const SSH_HOSTS: &str = "/ssh_hosts";
+pub const SSH_HOSTS_UPSERT: &str = "/ssh_hosts/upsert";
+pub const SSH_HOSTS_REMOVE: &str = "/ssh_hosts/remove";
 /// Remote-workspace registry (rca): list / upsert / remove.
 pub const REMOTE_WORKSPACES: &str = "/remote_workspaces";
 pub const REMOTE_WORKSPACES_UPSERT: &str = "/remote_workspaces/upsert";

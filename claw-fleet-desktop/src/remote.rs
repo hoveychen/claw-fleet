@@ -670,6 +670,30 @@ impl crate::backend::Backend for RemoteBackend {
         })
     }
 
+    fn list_ssh_hosts(&self) -> Vec<claw_fleet_core::remote_host::SshHost> {
+        // The probe host's book, not this desktop's — that is the one a session
+        // spawned there resolves a workspace's `hostId` against.
+        self.probe.get(claw_fleet_core::routes::SSH_HOSTS).unwrap_or_default()
+    }
+
+    fn upsert_ssh_host(
+        &self,
+        host: claw_fleet_core::remote_host::SshHost,
+    ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+        self.probe
+            .post_json(claw_fleet_core::routes::SSH_HOSTS_UPSERT, &host)
+            .map_err(|e| format!("probe /ssh_hosts/upsert failed: {e}"))
+    }
+
+    fn remove_ssh_host(
+        &self,
+        id: String,
+    ) -> Result<Vec<claw_fleet_core::remote_host::SshHost>, String> {
+        self.probe
+            .post_json(claw_fleet_core::routes::SSH_HOSTS_REMOVE, &serde_json::json!({ "id": id }))
+            .map_err(|e| format!("probe /ssh_hosts/remove failed: {e}"))
+    }
+
     fn create_dir(
         &self,
         path: Option<String>,
