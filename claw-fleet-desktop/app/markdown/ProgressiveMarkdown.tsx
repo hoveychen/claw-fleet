@@ -1,10 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown, { type Components } from "react-markdown";
+import type { PluggableList } from "unified";
 
 import { safeRemarkPlugins, safeRehypePlugins } from "./safeLinks";
 import { normalizeSvgBlankLines, markdownUrlTransform } from "./plugins";
-import { chunkMarkdown } from "./chunkMarkdown";
+import { chunkMarkdown, DEFAULT_CHUNK_BYTES } from "./chunkMarkdown";
 import styles from "./markdown.module.css";
 
 /** How many chunks are rendered before the reader has scrolled anywhere. Two
@@ -18,15 +19,17 @@ const INITIAL_CHUNKS = 2;
 const MarkdownChunk = memo(function MarkdownChunk({
   body,
   components,
+  remarkPlugins,
 }: {
   body: string;
   components: Components;
+  remarkPlugins: PluggableList;
 }) {
   const normalized = useMemo(() => normalizeSvgBlankLines(body), [body]);
   return (
     <ReactMarkdown
       urlTransform={markdownUrlTransform}
-      remarkPlugins={safeRemarkPlugins}
+      remarkPlugins={remarkPlugins}
       rehypePlugins={safeRehypePlugins}
       components={components}
     >
@@ -50,12 +53,23 @@ const MarkdownChunk = memo(function MarkdownChunk({
 export const ProgressiveMarkdown = memo(function ProgressiveMarkdown({
   body,
   components,
+  remarkPlugins = safeRemarkPlugins,
 }: {
   body: string;
   components: Components;
+  /** Overrides the default chain — a caller that needs an extra plugin (wiki
+   *  `[[slug]]` refs, say) passes its own list. Keep it referentially stable,
+   *  or every chunk re-parses on each render. */
+  remarkPlugins?: PluggableList;
 }) {
   const { t } = useTranslation();
-  const chunks = useMemo(() => chunkMarkdown(body), [body]);
+  // Most bodies in the app are chat messages of a few KB. Scanning each one for
+  // cut points would be pure overhead, so anything that cannot possibly need a
+  // second chunk skips the split entirely.
+  const chunks = useMemo(
+    () => (body.length <= DEFAULT_CHUNK_BYTES ? [body] : chunkMarkdown(body)),
+    [body],
+  );
   const [shown, setShown] = useState(INITIAL_CHUNKS);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -94,7 +108,12 @@ export const ProgressiveMarkdown = memo(function ProgressiveMarkdown({
   return (
     <>
       {chunks.slice(0, shown).map((chunk, i) => (
-        <MarkdownChunk key={i} body={chunk} components={components} />
+        <MarkdownChunk
+          key={i}
+          body={chunk}
+          components={components}
+          remarkPlugins={remarkPlugins}
+        />
       ))}
       {remaining > 0 && (
         <div ref={sentinelRef} className={styles.progressive_sentinel}>

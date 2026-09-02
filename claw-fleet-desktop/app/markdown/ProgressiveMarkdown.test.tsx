@@ -7,12 +7,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  *  render, so this count is the parse count — the thing the whole feature is
  *  about. */
 const parses = vi.fn();
+/** Props of the most recent react-markdown render, so a test can assert what
+ *  the component actually handed down rather than that it rendered at all. */
+let lastProps: Record<string, unknown> = {};
 vi.mock("react-markdown", () => ({
-  default: ({ children }: { children?: string }) => {
+  default: (props: { children?: string } & Record<string, unknown>) => {
     parses();
-    return <div data-chunk>{children}</div>;
+    lastProps = props;
+    return <div data-chunk>{props.children}</div>;
   },
 }));
+
+/** Spy over the real splitter: a small body must not even reach it. */
+const chunkSpy = vi.fn();
+vi.mock("./chunkMarkdown", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./chunkMarkdown")>();
+  return {
+    ...actual,
+    chunkMarkdown: (src: string, target?: number) => {
+      chunkSpy(src);
+      return actual.chunkMarkdown(src, target);
+    },
+  };
+});
 
 import "../i18n";
 import { ProgressiveMarkdown } from "./ProgressiveMarkdown";
@@ -42,6 +59,8 @@ afterEach(() => {
   container?.remove();
   container = null;
   parses.mockReset();
+  chunkSpy.mockReset();
+  lastProps = {};
   delete (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver;
 });
 
@@ -126,6 +145,38 @@ describe("ProgressiveMarkdown", () => {
     expect(parses.mock.calls.length).toBe(1);
     expect(el.querySelector("button")).toBeNull();
     expect(el.textContent).toContain("Small");
+  });
+
+  it("hands a small body straight through, unsplit", () => {
+    // Chat is thousands of small messages; scanning each for cut points would
+    // be pure overhead. Anything that cannot need a second chunk skips it.
+    const src = "para one\n\npara two\n\n" + bulk("- bullet\n", 2_000);
+    const el = render(src);
+    expect(chunkSpy).not.toHaveBeenCalled();
+    expect(parses.mock.calls.length).toBe(1);
+    expect(el.querySelectorAll("[data-chunk]")[0]?.textContent).toBe(src);
+  });
+
+  it("does split a body large enough to need it", () => {
+    render(longDoc);
+    expect(chunkSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the caller's remark plugins down to every chunk", () => {
+    // TextBlock adds the wiki-link plugin only when it has a wiki context; if
+    // this component kept a hard-coded chain it would silently drop it, and
+    // `[[slug]]` refs would render as literal text with nothing to notice.
+    const marker = () => () => {};
+    render("# hi\n");
+    expect(lastProps.remarkPlugins).toBeDefined();
+    expect(lastProps.remarkPlugins).not.toContain(marker);
+
+    act(() =>
+      root!.render(
+        <ProgressiveMarkdown body="# hi\n" components={{}} remarkPlugins={[marker]} />,
+      ),
+    );
+    expect(lastProps.remarkPlugins).toContain(marker);
   });
 
   it("shows everything when the platform has no IntersectionObserver", () => {
