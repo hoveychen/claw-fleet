@@ -269,6 +269,7 @@
     "start_timeout": "Taking longer than usual — wait a moment or open it from the list on the left.",
     "remote_badge": "remote via rca",
     "browse_on_host": "Browse on {{host}}…",
+    "add_remote_host": "Add a remote host…",
     "remote_register_failed": "Could not register {{path}} as a remote workspace: {{error}} — this absolute path must also be creatable on this machine (macOS cannot make /home/…). Pick one that works on both."
   },
   "launcher": {
