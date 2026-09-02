@@ -42,6 +42,22 @@ class FakeWs {
 
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 
+/** 等到 `ok()` 成立再返回（最多约 2s），而不是睡一个固定时长。
+ *
+ *  固定时长的 `await tick()` 只够那些「解封一次就回调」的帧。gzip 帧要先
+ *  WebCrypto 解封、再过一道 `DecompressionStream` inflate 才回调，是本文件里
+ *  单个 tick 内异步活最重的一条路径——机器一凉 20ms 就过不去，断言会在回调
+ *  还没跑时看到初始值。这在冷 vite 缓存下实测偶发（热跑 0/29、冷跑 1/6），
+ *  CI 每次都是冷缓存，所以那边概率更高。抬高睡眠时长只是把窗口往后挪，轮询
+ *  才是消掉它——`nextWs` 用的就是同一个套路。 */
+async function waitFor(ok: () => boolean, what: string): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    if (ok()) return;
+    await tick(10);
+  }
+  throw new Error(`${what} 未在预期时间内发生`);
+}
+
 /** 连接是异步建立的（open() 先 await 派生密钥再 new WebSocket），所以等到新的
  *  FakeWs 出现为止再返回它。 */
 async function nextWs(baseline: number): Promise<FakeWs> {
@@ -465,7 +481,7 @@ describe("RelayClient sessions 快照收发（加密）", () => {
     const sealed = await sealBytes(KEYS.encKey, gz);
     ws.deliver({ type: "msg", payload: { ...sealed, z: true } });
 
-    await tick();
+    await waitFor(() => got !== null, "gzip 帧解密 + inflate 后分发");
     expect(got).toEqual(sessions);
   });
 
