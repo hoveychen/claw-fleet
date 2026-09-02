@@ -3451,6 +3451,10 @@ impl Backend for LocalBackend {
     fn mobile_relay_qr_svg(&self, lang: Option<&str>) -> Result<String, String> {
         claw_fleet_core::mobile_relay::qr_svg(lang)
     }
+
+    fn mobile_relay_pairing_url(&self, lang: Option<&str>) -> Result<String, String> {
+        claw_fleet_core::mobile_relay::pairing_url_text(lang)
+    }
 }
 
 /// Fetch usage summaries from all available sources via trait dispatch.

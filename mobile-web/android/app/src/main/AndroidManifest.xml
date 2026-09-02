@@ -23,17 +23,36 @@
             </intent-filter>
 
             <!-- App Link for pairing: the desktop QR encodes
-                 https://fleet-relay.muveeai.com/#k=<secret>. With autoVerify
-                 the OS checks /.well-known/assetlinks.json on that host against
-                 this package's signing certificate and, on success, opens the
-                 link here instead of in a browser — which is the only way the
-                 shell ever receives a pairing secret (see src/deepLink.ts).
-                 The fragment carrying the secret is never sent to the relay. -->
+                 https://<relay-host>/#k=<secret>. With autoVerify the OS checks
+                 /.well-known/assetlinks.json on that host against this package's
+                 signing certificate and, on success, opens the link here instead
+                 of in a browser — which is the only way the shell ever receives
+                 a pairing secret (see src/deepLink.ts). The fragment carrying
+                 the secret is never sent to the relay.
+
+                 BOTH relay hostnames have to be claimed, because the host in the
+                 QR is chosen by the *desktop's* region, not by this build
+                 (claw-fleet-core/src/relay_region.rs: CN -> eternizedlab, else
+                 -> muveeai). Claiming only one leaves every user on the other
+                 side unable to pair at all — their scan opens a browser. Both
+                 hosts front the same relay and serve the same assetlinks.json
+                 with this keystore's SHA-256, so both verify.
+
+                 The coupling that buys: on Android 11 and lower the system
+                 makes the app default handler "only if it finds a matching
+                 Digital Asset Links file for *all* hosts in the manifest"
+                 (developer.android.com/training/app-links/verify-android-applinks),
+                 and minSdk here is 24. So if either host ever stops serving
+                 /.well-known/assetlinks.json, pairing breaks on pre-12 devices
+                 for BOTH hosts, not just the broken one. Android 12+ verifies
+                 per-host. Both are served by the same relay deployment, so
+                 they fail together anyway in practice. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="fleet-relay.muveeai.com" />
+                <data android:scheme="https" android:host="fleet-relay.eternizedlab.com" />
             </intent-filter>
 
             <!-- Share target: put Fleet in the system share sheet so text or
@@ -72,4 +91,12 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 配对门里的应用内扫码（src/views/PairScanner.tsx）。只声明就够了：
+         Capacitor 的 BridgeWebChromeClient.onPermissionRequest 已经把 WebView
+         的 VIDEO_CAPTURE 请求映射成这个运行时权限并代为申请。
+         required=false：扫码只是两条配对入口之一，没有摄像头的设备照样能用
+         粘贴配对，不该因此在应用市场被判为不兼容。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

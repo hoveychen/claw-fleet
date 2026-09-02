@@ -7,8 +7,16 @@ android {
         applicationId "com.hoveychen.clawfleet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Injected by scripts/build-android-apk.sh so every distributed APK
+        // carries an identifiable version. The literals below are the fallback
+        // for a bare `./gradlew assembleRelease` / Android Studio run.
+        //
+        // versionCode must increase monotonically or Android refuses to install
+        // the newer APK over the older one ("app not installed" with no further
+        // explanation), so the script derives it from the commit count rather
+        // than from the human-facing versionName.
+        versionCode System.getenv("FLEET_VERSION_CODE") ? System.getenv("FLEET_VERSION_CODE").toInteger() : 1
+        versionName System.getenv("FLEET_VERSION_NAME") ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
