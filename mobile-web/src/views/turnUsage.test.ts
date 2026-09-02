@@ -48,6 +48,7 @@ describe("shortModelName", () => {
   it("shortens known families and passes unknowns through", () => {
     expect(shortModelName("claude-opus-4-8")).toBe("opus");
     expect(shortModelName("claude-fable-5")).toBe("fable");
+    expect(shortModelName("claude-fable-5-1")).toBe("fable");
     expect(shortModelName("gpt-5.6-sol")).toBe("sol");
     expect(shortModelName("weird-model")).toBe("weird-model");
     expect(shortModelName(undefined)).toBeUndefined();

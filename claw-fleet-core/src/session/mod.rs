@@ -2827,7 +2827,13 @@ mod tests {
         // 200K), these must report 1M from the very first turn, when observed
         // input is still tiny. Otherwise a fresh Fable session briefly shows a
         // fake 200K window / inflated ctx-%.
-        for model in ["claude-fable-5", "fable", "claude-mythos-5", "claude-mythos-preview"] {
+        for model in [
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "fable",
+            "claude-mythos-5",
+            "claude-mythos-preview",
+        ] {
             assert_eq!(
                 context_window_for_model(model, 0),
                 Some(1_000_000),
