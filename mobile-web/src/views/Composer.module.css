@@ -53,6 +53,36 @@
   font-size: var(--t-ui, 14px);
 }
 
+/* 「开在哪台设备上」——只在配了两台以上时渲染。带一行小标签而不是只放个裸下拉：
+   下拉里都是设备名，光看名字看不出这是在选目标机器还是在选目录。 */
+.deviceRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.deviceRowLabel {
+  flex: none;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+}
+
+.deviceSelect {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 7px 9px;
+  color: var(--color-text);
+  font-size: var(--t-ui, 14px);
+}
+
+.deviceOffline {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-warning);
+}
+
 /* 纯聊天模式开关 —— 和目录下拉同宽、互斥（打开时下拉整个不渲染）。做成一整条
    而不是小 pill：它替代的是原来下拉里那条最长的选项，得撑得住副标题。 */
 .chatToggle {

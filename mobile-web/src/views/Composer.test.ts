@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defaultWorkspace, recentWorkspaces } from "./Composer";
+import { carryPromptToDevice, defaultWorkspace, recentWorkspaces } from "./Composer";
+import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import type { SessionInfo } from "../types";
 
 /**
@@ -122,5 +123,55 @@ describe("defaultWorkspace", () => {
 
   it("纯聊天路径可作为上次用过的目标被记住", () => {
     expect(defaultWorkspace("", recents, "/home/chat", "/home/chat")).toBe("/home/chat");
+  });
+});
+
+// 换新会话目标设备时,只有 prompt 该跟着走。其余每一项(workspace / 模型 /
+// 附件路径)都属于某一台具体机器,搬过去就是一串在目标机上不存在的东西。
+describe("carryPromptToDevice", () => {
+  function memStore(): DraftStorage & { map: Map<string, string> } {
+    const map = new Map<string, string>();
+    return {
+      map,
+      getItem: (k) => (map.has(k) ? map.get(k)! : null),
+      setItem: (k, v) => void map.set(k, v),
+      removeItem: (k) => void map.delete(k),
+    };
+  }
+  const read = (store: DraftStorage, id: string) =>
+    loadDraft<Record<string, string>>(`d/${id}/new-session`, {}, store);
+
+  it("prompt 落进目标设备的命名空间,不动来源那台", () => {
+    const store = memStore();
+    saveDraft("d/mac/new-session", { workspace: "/repos/mac", prompt: "旧的" }, store);
+    carryPromptToDevice("cloud", "刚敲的字", store);
+    expect(read(store, "cloud").prompt).toBe("刚敲的字");
+    // 来源那台的草稿原封不动 —— 切回去应当还是它自己那份。
+    expect(read(store, "mac")).toEqual({ workspace: "/repos/mac", prompt: "旧的" });
+  });
+
+  it("保留目标设备自己的 workspace / 模型,只覆盖 prompt", () => {
+    const store = memStore();
+    saveDraft(
+      "d/cloud/new-session",
+      { workspace: "/workspace/repo", model: "sonnet", prompt: "云端上没提交的" },
+      store,
+    );
+    carryPromptToDevice("cloud", "换过来的字", store);
+    expect(read(store, "cloud")).toMatchObject({
+      workspace: "/workspace/repo",
+      model: "sonnet",
+      prompt: "换过来的字",
+    });
+  });
+
+  it("目标设备还没有草稿时,拿到默认值 + 这段 prompt", () => {
+    const store = memStore();
+    carryPromptToDevice("fresh", "第一句", store);
+    const d = read(store, "fresh");
+    expect(d.prompt).toBe("第一句");
+    // 默认值必须在(不是只存了个 {prompt}),否则重挂载后 tool/permissionMode 会是 undefined。
+    expect(d.tool).toBe("claude");
+    expect(d.permissionMode).toBe("acceptEdits");
   });
 });
