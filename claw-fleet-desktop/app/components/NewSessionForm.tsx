@@ -660,6 +660,26 @@ export function NewSessionForm({ onCreated, onCancel, compact }: NewSessionFormP
             setPickingDir("workspace");
           },
         })),
+        // Nothing above renders on an install where no host has rca yet — which
+        // made the whole capability invisible to the only person who needs to be
+        // told it exists. This row is that person's way in: it says remote work
+        // is possible and lands them on the settings section that sets it up
+        // (via the same `requestSettingsTab` seam the harness-error jump uses —
+        // dropping them on "General" to go hunting would just move the
+        // discoverability problem one screen along).
+        ...(rcaHosts.length === 0
+          ? [
+              {
+                id: "rca-add-host",
+                label: t("new_session.add_remote_host"),
+                icon: <Server size={13} strokeWidth={1.7} className={pillStyles.menu_icon} />,
+                onSelect: () => {
+                  requestSettingsTab("integration");
+                  void openSettingsWindow();
+                },
+              },
+            ]
+          : []),
       ]}
     />
   );
