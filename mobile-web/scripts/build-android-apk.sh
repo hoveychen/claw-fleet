@@ -85,8 +85,15 @@ fail() { echo "error: $*" >&2; exit 1; }
 command -v pnpm >/dev/null || fail "pnpm not on PATH"
 
 # apksigner/aapt2 live in a versioned build-tools dir; take the newest present.
-BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/*/ 2>/dev/null | sort -V | tail -1 || true)"
-[ -n "$BUILD_TOOLS" ] || fail "no build-tools under $ANDROID_HOME/build-tools"
+# glob + `sort -V` rather than `ls`: `sort -V` is what picks 34.0.0 over 9.0.0
+# (the glob itself expands in lexical order, where 9 sorts last). The trailing
+# slash the glob leaves on each entry is load-bearing — the two paths below
+# concatenate onto it.
+# The guard is `-d` rather than `-n` because an unmatched glob expands to its
+# own literal text: non-empty, but not a directory, so this still fails here
+# with the message that names the missing dir instead of further down.
+BUILD_TOOLS="$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)"
+[ -d "$BUILD_TOOLS" ] || fail "no build-tools under $ANDROID_HOME/build-tools"
 APKSIGNER="${BUILD_TOOLS}apksigner"
 AAPT2="${BUILD_TOOLS}aapt2"
 [ -x "$APKSIGNER" ] || fail "no apksigner in $BUILD_TOOLS"
@@ -98,7 +105,7 @@ KEYSTORE_PASSWORD="$(cat "$KEYSTORE_PASSWORD_FILE")"
 # The fingerprint the relay's assetlinks.json is expected to carry. Read from
 # the keystore rather than hardcoded so rotating the key can't leave a stale
 # constant silently "verifying" the wrong thing.
-normalize_fp() { tr 'A-Z' 'a-z' | tr -d ': '; }
+normalize_fp() { tr '[:upper:]' '[:lower:]' | tr -d ': '; }
 EXPECTED_FP="$(
   "$JAVA_HOME/bin/keytool" -list -v \
     -keystore "$KEYSTORE" -alias fleet -storepass "$KEYSTORE_PASSWORD" 2>/dev/null |
