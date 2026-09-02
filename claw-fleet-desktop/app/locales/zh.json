@@ -1013,7 +1013,11 @@
       "description": "检测到你同时装了 Claude Code 与 Codex。打开后两个 skill 目录会自动保持同步：往一端丢新 skill 会自动收编并镜像到另一端，从一端删除会两端一起移除。因为删除会传播，默认关闭。",
       "toggle_hint": "监听 ~/.claude/skills 与 ~/.agents/skills。从任一端删除某个 skill 会两端同时移除。"
     },
-    "copy_hint": "点击复制"
+    "copy_hint": "点击复制",
+    "env_setup": {
+      "title": "环境还差几步",
+      "description": "Fleet 可以替你把缺的装好、登好——点下面的按钮即可,不用开终端。"
+    }
   },
   "mascot": {
     "panel_title": "小助手",
@@ -1919,7 +1923,8 @@
     "remote_ws_no_conns": "在 ~/.ssh/config 和已保存连接里都没找到 SSH 主机——选「手动输入 user@host」或往 ~/.ssh/config 加一个 Host。",
     "remote_ws_install_btn": "安装 rca 并注册",
     "remote_ws_installing": "正在安装 rca…",
-    "remote_ws_manual_title": "或手动注册(配对码)"
+    "remote_ws_manual_title": "或手动注册(配对码)",
+    "tab_environment": "环境"
   },
   "usage": {
     "total_tokens": "Token 总数",
@@ -2404,5 +2409,75 @@
   },
   "markdown": {
     "render_rest": "展开剩余 {{n}} 段"
+  },
+  "env": {
+    "subtitle": "三个 agent 环境(Claude Code / Codex / dsh)的安装、升级与登录状态。",
+    "refresh": "重新检测",
+    "probing": "检测中…",
+    "loading": "加载中…",
+    "remote_note": "当前连接的是远端主机:下方显示远端环境状态;安装/登录操作暂只支持本机(远端支持在路上)。",
+    "installed": "已安装",
+    "not_installed": "未安装",
+    "logged_in": "已登录",
+    "not_logged_in": "未登录",
+    "managed_by_foxy": "凭证由 foxy 托管",
+    "dsh_byok": "无需登录(自带 API Key)",
+    "channel_label": "安装渠道",
+    "channel": {
+      "native-installer": "官方安装器",
+      "standalone": "官方自更新版",
+      "npm-global": "npm 全局",
+      "homebrew": "Homebrew",
+      "vscode-extension": "VS Code 扩展内置",
+      "vscode-insiders-extension": "VS Code Insiders 扩展内置",
+      "windsurf-extension": "Windsurf 扩展内置",
+      "usr-local-bin": "/usr/local/bin",
+      "path": "PATH",
+      "override": "手动指定"
+    },
+    "install_btn": "一键安装",
+    "installing": "安装中…",
+    "update_btn": "检查更新",
+    "updating": "更新中…",
+    "updated": "已更新 {{before}} → {{after}}",
+    "up_to_date": "已是最新版({{version}})",
+    "updated_unknown": "更新完成",
+    "install_node_btn": "先安装 Node.js",
+    "login_btn": "登录",
+    "cancel": "取消",
+    "close": "收起",
+    "save": "保存",
+    "open_browser": "在浏览器中打开登录页",
+    "claude_login_hint": "浏览器会打开 Claude 登录页;授权后把页面上显示的代码粘贴到下面。",
+    "claude_login_done": "登录完成,凭证已保存。",
+    "codex_login_hint": "浏览器会打开 ChatGPT 登录页;在浏览器里完成授权即可,无需回填。",
+    "codex_login_done": "登录完成。",
+    "codex_port_busy": "登录回调端口(1455/1457)被占用,请关闭占用程序后重试。",
+    "login_proc_exited": "登录进程已退出但未完成,请重试。",
+    "paste_code": "粘贴授权代码",
+    "submit_code": "提交",
+    "dsh_creds_btn": "配置 API Key",
+    "dsh_creds_hint": "dsh 使用你自己的模型 API Key;选择凭证名并粘贴 Key。",
+    "dsh_no_refs": "dsh 尚未配置任何模型 provider,先在 dsh 设置里添加 provider。",
+    "dsh_key_placeholder": "粘贴 API Key",
+    "dsh_key_saved": "{{ref}} 已保存。",
+    "configured": "已配置",
+    "err_details": "详细输出",
+    "err": {
+      "node-missing": "缺少 Node.js:dsh 通过 npm 安装,需要先安装 Node.js。",
+      "unsupported-channel": "该安装渠道由编辑器管理,请在编辑器里更新。",
+      "not-installed": "尚未安装,请先安装。",
+      "unsupported-source": "未知的 agent 类型。",
+      "spawn-failed": "无法启动安装程序。",
+      "install-failed": "安装/更新失败。",
+      "timeout": "安装超时,已中止。",
+      "verify-failed": "安装程序结束了,但没有检测到可用的程序。"
+    },
+    "spawn_missing": {
+      "claude-code": "还没有安装 Claude Code,没法启动这个会话。",
+      "codex": "还没有安装 Codex CLI,没法启动这个会话。",
+      "dsh": "还没有安装 dsh,没法启动这个会话。"
+    },
+    "open_env_panel": "去环境面板修复"
   }
 }

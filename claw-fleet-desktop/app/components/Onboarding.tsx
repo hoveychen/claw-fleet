@@ -25,6 +25,7 @@ import {
 import { TriStateToggle } from "./TriStateToggle";
 import { type ChimePreset, CHIME_PRESETS, playChime } from "../audio";
 import { ThemeToggle } from "./ThemeToggle";
+import { EnvironmentPanel } from "./EnvironmentPanel";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import styles from "./Onboarding.module.css";
 
@@ -47,8 +48,6 @@ interface SetupStatus {
   has_sessions: boolean;
   credentials_valid: boolean | null;
 }
-
-type ToolTab = "cli" | "vscode" | "jetbrains" | "desktop";
 
 type Issue =
   | "no_claude_at_all"
@@ -187,121 +186,6 @@ function CopyableCommand({ cmd }: { cmd: string }) {
         <span className={styles.copy_icon}>&#x2398;</span>
       )}
     </button>
-  );
-}
-
-// ── Tool tabs for login guidance ─────────────────────────────────────────────
-
-const ALL_TABS: ToolTab[] = ["cli", "vscode", "jetbrains", "desktop"];
-
-function getRecommendedTab(tools: DetectedTools): ToolTab {
-  // Prefer the tool the user actually has installed
-  if (tools.vscode) return "vscode";
-  if (tools.cli) return "cli";
-  if (tools.desktop) return "desktop";
-  if (tools.jetbrains) return "jetbrains";
-  return "cli"; // default
-}
-
-function LoginTabContent({ tab }: { tab: ToolTab }) {
-  const { t } = useTranslation();
-
-  switch (tab) {
-    case "cli":
-      return (
-        <div className={styles.tab_content}>
-          <p className={styles.hint}>{t("onboarding.login_tabs.cli.hint")}</p>
-          <CopyableCommand cmd="claude login" />
-          <p className={styles.hint}>{t("onboarding.login_tabs.cli.browser")}</p>
-        </div>
-      );
-    case "vscode":
-      return (
-        <div className={styles.tab_content}>
-          <p className={styles.hint}>{t("onboarding.login_tabs.vscode.step1")}</p>
-          <p className={styles.hint}>{t("onboarding.login_tabs.vscode.step2")}</p>
-          <p className={styles.hint}>{t("onboarding.login_tabs.vscode.step3")}</p>
-        </div>
-      );
-    case "jetbrains":
-      return (
-        <div className={styles.tab_content}>
-          <p className={styles.hint}>{t("onboarding.login_tabs.jetbrains.step1")}</p>
-          <p className={styles.hint}>{t("onboarding.login_tabs.jetbrains.step2")}</p>
-        </div>
-      );
-    case "desktop":
-      return (
-        <div className={styles.tab_content}>
-          <p className={styles.hint}>{t("onboarding.login_tabs.desktop.step1")}</p>
-          <p className={styles.hint}>{t("onboarding.login_tabs.desktop.step2")}</p>
-        </div>
-      );
-  }
-}
-
-function NotLoggedInCard({ tools }: { tools: DetectedTools }) {
-  const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<ToolTab>(() => getRecommendedTab(tools));
-
-  return (
-    <div className={`${styles.card} ${styles.card_warn}`}>
-      <div className={styles.card_header}>
-        <span className={styles.card_icon}>&#x1F511;</span>
-        <span className={styles.card_title}>{t("onboarding.not_logged_in.title")}</span>
-      </div>
-      <p className={styles.card_description}>{t("onboarding.not_logged_in.description")}</p>
-
-      <div className={styles.tabs}>
-        {ALL_TABS.map((tab) => (
-          <button
-            key={tab}
-            className={`${styles.tab} ${activeTab === tab ? styles.tab_active : ""} ${
-              tools[tab] ? styles.tab_detected : ""
-            }`}
-            onClick={() => setActiveTab(tab)}
-          >
-            {t(`onboarding.login_tabs.${tab}.label`)}
-            {tools[tab] && <span className={styles.tab_badge}>{t("onboarding.login_tabs.detected")}</span>}
-          </button>
-        ))}
-      </div>
-
-      <LoginTabContent tab={activeTab} />
-
-      <div className={styles.divider}>{t("onboarding.not_logged_in.api_key")}</div>
-      <p className={styles.hint}>{t("onboarding.not_logged_in.api_key_hint")}</p>
-    </div>
-  );
-}
-
-// ── Other issue cards ────────────────────────────────────────────────────────
-
-function NoClaudeAtAllCard() {
-  const { t } = useTranslation();
-  return (
-    <div className={`${styles.card} ${styles.card_error}`}>
-      <div className={styles.card_header}>
-        <span className={styles.card_icon}>&#x26A0;</span>
-        <span className={styles.card_title}>{t("onboarding.no_claude_at_all.title")}</span>
-      </div>
-      <p className={styles.card_description}>{t("onboarding.no_claude_at_all.description")}</p>
-      <div className={styles.solutions}>
-        <div className={styles.solution}>
-          <span className={styles.solution_label}>{t("onboarding.cli_not_installed.install_npm")}</span>
-          <CopyableCommand cmd={t("onboarding.cli_not_installed.install_npm_cmd")} />
-        </div>
-        <div className={styles.solution}>
-          <span className={styles.solution_label}>{t("onboarding.cli_not_installed.install_brew")}</span>
-          <CopyableCommand cmd={t("onboarding.cli_not_installed.install_brew_cmd")} />
-        </div>
-        <div className={styles.solution}>
-          <span className={styles.solution_label}>{t("onboarding.no_claude_at_all.install_vscode")}</span>
-          <p className={styles.hint}>{t("onboarding.no_claude_at_all.install_vscode_hint")}</p>
-        </div>
-        <p className={styles.hint}>{t("onboarding.cli_not_installed.after_install")}</p>
-      </div>
-    </div>
   );
 }
 
@@ -1655,11 +1539,18 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                 </div>
               )
             ) : issues.length > 0 ? (
+              // Something is missing → embed the environment wizard right
+              // here: install / update / log-in buttons instead of the old
+              // copy-a-command-into-a-terminal guidance.
               <div className={styles.cards}>
-                {issues.includes("no_claude_at_all") && <NoClaudeAtAllCard />}
-                {issues.includes("not_logged_in") && (
-                  <NotLoggedInCard tools={status.detected_tools} />
-                )}
+                <div className={`${styles.card} ${styles.card_warn}`}>
+                  <div className={styles.card_header}>
+                    <span className={styles.card_icon}>&#x1F527;</span>
+                    <span className={styles.card_title}>{t("onboarding.env_setup.title")}</span>
+                  </div>
+                  <p className={styles.card_description}>{t("onboarding.env_setup.description")}</p>
+                  <EnvironmentPanel />
+                </div>
               </div>
             ) : (
               // Environment is fine. Without a session yet the green card

@@ -296,6 +296,11 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   // that is the honest answer for a browser tab.
   check_setup_status: () => ({ method: "GET", path: "/setup-status" }),
 
+  // Same honesty rule: the environment panel in a tab reports the harness
+  // state of the machine serving the page (install/login *actions* stay
+  // desktop-only — see KNOWN_WEB_GAPS).
+  harness_statuses: () => ({ method: "GET", path: "/harness_statuses" }),
+
   clear_workspace_procs: (a) => ({
     method: "POST",
     path: "/proc_clear",
