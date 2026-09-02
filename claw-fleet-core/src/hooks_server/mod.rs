@@ -1010,6 +1010,8 @@ fn handle_request(
 
             crate::routes::SETUP_STATUS => route_setup_status(ctx, request, &query, json_header, path),
 
+            crate::routes::HARNESS_STATUSES => route_harness_statuses(ctx, request, &query, json_header, path),
+
             crate::routes::USAGE_SUMMARIES => route_usage_summaries(ctx, request, &query, json_header, path),
 
             crate::routes::TODAY_USAGE => route_today_usage(ctx, request, &query, json_header, path),
