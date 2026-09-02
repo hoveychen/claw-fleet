@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom";
 import { Check, Copy, FileJson2, Folder, Info, Menu, Terminal, X } from "lucide-react";
 import { t } from "../i18n";
+import { HistoryLayer } from "../useNavStack";
 import type { SessionInfo } from "../types";
 import { agentIdTail, agentLabel } from "./agentScope";
 import { resumeCommand } from "./sessionInfoRows";
@@ -154,6 +155,8 @@ export function SessionHeaderMenu({
           z-index:30`, i.e. its own stacking context, so a sheet rendered inside
           it can never rise above the decision drawer's z-45 bar no matter what
           z-index it takes — measured: the bar covered the last two menu items. */}
+      {/* 菜单也算一层：不登记的话返回键弹掉的是整个会话详情页。 */}
+      {open && <HistoryLayer onBack={close} />}
       {open && createPortal(
         <div className={styles.backdrop} onClick={close}>
           <div
