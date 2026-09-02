@@ -371,20 +371,27 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   // only report what was true at install time — which is why a dead host used
   // to be discoverable only by starting a session and watching it fail.
   const [rwHealth, setRwHealth] = useState<Record<string, HostHealth | "probing">>({});
-  const handleTestHost = useCallback(async (host: RemoteConnection) => {
-    const target = sshTargetOf(host);
+  // Keyed by an arbitrary id rather than a host, because legacy workspaces have
+  // an ssh target but no host record — and they are exactly the entries most
+  // likely to be dead, so they need the probe most.
+  const probeHealth = useCallback(async (key: string, target: string) => {
     if (!target) return;
-    setRwHealth((prev) => ({ ...prev, [host.id]: "probing" }));
+    setRwHealth((prev) => ({ ...prev, [key]: "probing" }));
     try {
       const health = await invoke<HostHealth>("remote_host_health", { sshTarget: target });
-      setRwHealth((prev) => ({ ...prev, [host.id]: health }));
+      setRwHealth((prev) => ({ ...prev, [key]: health }));
     } catch (e) {
       setRwHealth((prev) => ({
         ...prev,
-        [host.id]: { sshOk: false, stdioOk: false, error: String(e) },
+        [key]: { sshOk: false, stdioOk: false, error: String(e) },
       }));
     }
   }, []);
+
+  const handleTestHost = useCallback(
+    (host: RemoteConnection) => probeHealth(host.id, sshTargetOf(host)),
+    [probeHealth],
+  );
 
   // ── Hooks state ──────────────────────────────────────────────────────────
   const [hooksPlan, setHooksPlan] = useState<HookSetupPlan | null>(null);
@@ -1732,17 +1739,39 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                           <span style={{ display: "block", fontSize: 10, color: "var(--color-text-dim)" }}>
                             {w.sshTarget ?? w.pairingCode}
                           </span>
+                          {(() => {
+                            const h = rwHealth[`ws:${w.path}`];
+                            if (!h || h === "probing") return null;
+                            return (
+                              <span style={{ display: "block", fontSize: 10, color: h.sshOk && h.stdioOk ? "var(--color-ok, inherit)" : "var(--color-danger, inherit)" }}>
+                                {h.sshOk && h.stdioOk
+                                  ? t("settings.remote_host_ready", { version: h.rcaVersion ?? "rca" })
+                                  : (h.error ?? t("settings.remote_host_unreachable"))}
+                              </span>
+                            );
+                          })()}
                         </span>
                         {w.sshTarget && (
-                          <button
-                            className={styles.sources_restart_btn}
-                            onClick={() => handleUpdateRca(w.path)}
-                            disabled={rwUpdating !== null}
-                          >
-                            {rwUpdating === w.path
-                              ? t("settings.remote_ws_installing")
-                              : t("settings.remote_ws_update_btn")}
-                          </button>
+                          <>
+                            <button
+                              className={styles.sources_restart_btn}
+                              onClick={() => void probeHealth(`ws:${w.path}`, w.sshTarget!)}
+                              disabled={rwHealth[`ws:${w.path}`] === "probing"}
+                            >
+                              {rwHealth[`ws:${w.path}`] === "probing"
+                                ? t("settings.remote_host_testing")
+                                : t("settings.remote_host_test")}
+                            </button>
+                            <button
+                              className={styles.sources_restart_btn}
+                              onClick={() => handleUpdateRca(w.path)}
+                              disabled={rwUpdating !== null}
+                            >
+                              {rwUpdating === w.path
+                                ? t("settings.remote_ws_installing")
+                                : t("settings.remote_ws_update_btn")}
+                            </button>
+                          </>
                         )}
                         <button
                           className={styles.sources_restart_btn}

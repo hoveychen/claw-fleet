@@ -478,6 +478,20 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           {session.lastSkill && (
             <span className={styles.gm_skill} title={t("card.tip_skill", { skill: session.lastSkill })}>/{session.lastSkill}</span>
           )}
+          {/* The compact strip is a separate render path from the default
+              header below; a badge added to only one of them is invisible on
+              whichever board uses the other. */}
+          {remoteWorkspace && (
+            <span
+              className={styles.gm_remote}
+              title={t("session.remote_on_host", {
+                host: remoteWorkspace.label || remoteWorkspace.path,
+              })}
+            >
+              <Server size={9} strokeWidth={1.9} />
+              {remoteWorkspace.label || t("session.remote_short")}
+            </span>
+          )}
           {(subagentCount ?? 0) > 0 && (
             <span
               className={styles.gm_sub_count}
