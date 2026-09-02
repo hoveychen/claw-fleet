@@ -21,6 +21,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use crate::frames::{InFrame, MsgAckStatus, OutFrame, PushPayload, Role};
 use crate::limits::ConnGuard;
+use crate::notify_target;
 use crate::registry::{channel_id, Delivery, OutMsg};
 use crate::AppState;
 
@@ -219,18 +220,27 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket, _conn: ConnG
                 }
             }
             InFrame::Notify { title, body, tag, url } if role == Role::Agent => {
+                // 盖上「这条来自哪个 channel」。一部手机可以同时配对多台桌面端,
+                // 而桌面端产出的 url 只带卡 id —— 卡 id 只在单机内唯一,所以两台
+                // 同时有卡时,点开落到哪一张是不确定的。relay 是唯一在扇出时确切
+                // 知道 channel 的一方,而且这样不需要桌面端配合改任何东西。
+                //
+                // 转发给在线客户端的那份也一起盖:那条路上手机其实能从「帧走的
+                // 哪条 socket」推出设备,但两条路径给出同一个 url 才不会让点击
+                // 行为取决于当时是否在线。
+                let stamped = notify_target::stamp_channel(url.as_deref(), &channel);
                 let out = OutFrame::Notify {
                     title: title.clone(),
                     body: body.clone(),
                     tag: tag.clone(),
-                    url: url.clone(),
+                    url: stamped.clone(),
                 };
                 state.registry.forward(&channel, role, &out);
                 let payload = PushPayload {
                     title: &title,
                     body: &body,
                     tag: tag.as_deref(),
-                    url: url.as_deref(),
+                    url: stamped.as_deref(),
                 };
                 state.push.notify(&channel, &payload, state.harmony.as_ref()).await;
             }
