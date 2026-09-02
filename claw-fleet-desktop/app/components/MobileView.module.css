@@ -284,3 +284,68 @@
   line-height: 1.45;
   text-align: left;
 }
+
+/* ── 直连（手机不经中转）────────────────────────────────────────────────
+   与中转那半边并列的一块，默认折起：多数人只用扫码配对那条路，而这条需要先有
+   一个对外可达的 https 端点。 */
+.directBlock {
+  margin-top: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.directHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--color-bg-card);
+  text-align: left;
+}
+
+.directHead:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.directTitle {
+  font-size: var(--t-ui, 13px);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.directState {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+}
+
+.directState[data-ready="yes"] {
+  color: var(--color-success);
+}
+
+.directBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* 每一种「未就绪」都配一句能照着做的话，所以这里是提示而不是红色错误。 */
+.directWarn {
+  font-size: var(--t-aux, 12px);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-card-hover);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+/* 这一块里的说明文字是表单说明，靠左读起来才顺；.qrHint 本身是给二维码下方那句
+   居中说明用的，两处共用一个类但对齐要求不同。 */
+.directBody > .qrHint {
+  text-align: left;
+  margin: 0;
+}

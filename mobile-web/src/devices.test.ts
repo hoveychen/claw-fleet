@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   addHttpDevice,
+  parseHostParam,
   checkHostUrl,
   addPendingUnsub,
   dropPendingUnsub,
@@ -442,5 +443,48 @@ describe("checkHostUrl", () => {
     expect(checkHostUrl("not a url", "https:")).toBe("not-a-url");
     expect(checkHostUrl("ws://fleet.example.com", "https:")).toBe("bad-scheme");
     expect(checkHostUrl("javascript:alert(1)", "https:")).toBe("bad-scheme");
+  });
+});
+
+// 桌面端「直连」那张码编的就是这个 fragment(core 的 direct_host::direct_url)。
+// 两端的格式必须逐字对齐 —— 差一个参数名,扫码就只是打开一个什么都不做的页面。
+describe("parseHostParam", () => {
+  // 冻结向量:与 core 那侧 `direct_host::tests::builds_the_scan_url_...` 断言的
+  // 那一串逐字相同。两边各钉一次,格式就不可能单边漂移。
+  it("reads what the desktop QR encodes", () => {
+    expect(parseHostParam("#h=https%3A%2F%2Ffleet.example.com&t=abc123")).toEqual({
+      baseUrl: "https://fleet.example.com",
+      token: "abc123",
+    });
+  });
+
+  it("tolerates a host QR with no token (an endpoint behind someone else's gateway)", () => {
+    expect(parseHostParam("#h=https%3A%2F%2Ffleet.example.com")).toEqual({
+      baseUrl: "https://fleet.example.com",
+      token: null,
+    });
+  });
+
+  it("decodes a token with url-unsafe characters", () => {
+    expect(parseHostParam("#h=https%3A%2F%2Fh.example.com&t=a%26b%3Dc%20d%2Fe")?.token).toBe(
+      "a&b=c d/e",
+    );
+  });
+
+  it("normalises a trailing slash so the same host is never added twice", () => {
+    expect(parseHostParam("#h=https%3A%2F%2Fh.example.com%2F")?.baseUrl).toBe(
+      "https://h.example.com",
+    );
+  });
+
+  it("ignores a relay pairing fragment", () => {
+    expect(parseHostParam("#k=" + "a".repeat(64))).toBeNull();
+  });
+
+  it("refuses anything that is not an absolute http(s) address", () => {
+    expect(parseHostParam("#h=fleet.example.com")).toBeNull();
+    expect(parseHostParam("#h=javascript%3Aalert(1)")).toBeNull();
+    expect(parseHostParam("#h=")).toBeNull();
+    expect(parseHostParam("")).toBeNull();
   });
 });
