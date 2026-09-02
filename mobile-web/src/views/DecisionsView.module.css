@@ -1065,3 +1065,29 @@
   font-size: var(--t-aux, 12px);
   line-height: 1.5;
 }
+
+/* 归属设备徽标（多设备时才出现）。刻意比 workspace 更轻：workspace 是「在哪个
+   项目」，设备是「在哪台机器」，后者是次要限定语，不该抢主标题的注意力。 */
+.deviceChip {
+  flex-shrink: 0;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-card-hover);
+  border-radius: 5px;
+  padding: 1px 6px;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 队列条上的同一个信息，更小一号。 */
+.queueDevice {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 8em;
+}

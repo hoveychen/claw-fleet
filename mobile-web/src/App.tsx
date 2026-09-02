@@ -17,6 +17,8 @@ import { NEEDS_PAIRING, SUPPORTS_PUSH } from "./hostMode";
 import { formatRttSplit } from "./connQuality";
 import { DeviceConnection, type DeviceHandle } from "./DeviceConnection";
 import {
+  aggregateDecisions,
+  allDecisionsLoaded,
   anyAgentOnline,
   anyConnected,
   itemKey,
@@ -391,13 +393,28 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const {
     sessions,
     sessionsLoaded,
-    decisions,
-    decisionsLoaded,
     sessionsFrame,
     rttSplit,
     snapshotSources,
     authError,
   } = activeState;
+  // 决策卡是**合并**的:全部设备的卡按到达时间排在一起,每张带着归属设备。
+  // 这就是多设备的核心价值——一个收件箱,而不是「记得去另一台看看」。
+  const decisions = useMemo(
+    () => aggregateDecisions(states, deviceOrder),
+    [states, deviceOrder],
+  );
+  // 骨架屏只在**每一台**都还没回过首份快照时显示;有一台回了就先画它的卡。
+  const decisionsLoaded = allDecisionsLoaded(states, deviceOrder);
+  /** 卡片/列表上的设备徽标。只配了一台时返回 null —— 单设备用户不该为多设备
+   *  付出一行视觉噪音。 */
+  const deviceLabelOf = useCallback(
+    (id: string): string | null => {
+      if (runtimeDevices.length <= 1) return null;
+      return runtimeDevices.find((d) => d.id === id)?.label ?? null;
+    },
+    [runtimeDevices],
+  );
   // 头部那三样看的是**全体**:一台离线不该让整个界面显示离线,而用户感觉到的
   // 拥塞是最卡的那条链路。花费是所有设备当日之和。
   const connected = anyConnected(states, deviceOrder);
@@ -771,13 +788,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         {tab === "decisions" ? (
           <DecisionsView
             decisions={decisions}
-            client={client}
+            transportFor={transportFor}
             connected={connected}
             agentOnline={agentOnline}
             decisionsLoaded={decisionsLoaded}
-            workspaceOf={(sessionId: string) => workspaceOf(activeDeviceId, sessionId)}
-            onAnswered={(id) => markAnswered(activeDeviceId, id)}
-            onOpenSession={(id: string) => openSessionRoot(activeDeviceId, id)}
+            workspaceOf={workspaceOf}
+            onAnswered={markAnswered}
+            onOpenSession={openSessionRoot}
+            deviceLabelOf={deviceLabelOf}
             focusDecision={focusDecision}
           />
         ) : tab === "tasks" ? (
@@ -930,13 +948,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       {showDecisionDrawer && (
         <DecisionDrawer
           decisions={decisions}
-          client={client}
+          transportFor={transportFor}
           connected={connected}
           agentOnline={agentOnline}
           decisionsLoaded={decisionsLoaded}
-          workspaceOf={(sessionId: string) => workspaceOf(activeDeviceId, sessionId)}
-          onAnswered={(id) => markAnswered(activeDeviceId, id)}
-          onOpenSession={(id: string) => openSessionRoot(activeDeviceId, id)}
+          workspaceOf={workspaceOf}
+          onAnswered={markAnswered}
+          onOpenSession={openSessionRoot}
+          deviceLabelOf={deviceLabelOf}
         />
       )}
 

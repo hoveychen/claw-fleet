@@ -198,3 +198,13 @@
     animation: none;
   }
 }
+
+/* 折叠态 peek 条上的归属设备。两台同时有卡时，不写清楚就只能靠猜。 */
+.peekDevice {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 7em;
+}

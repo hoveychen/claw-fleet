@@ -18,6 +18,7 @@ import { fetchDecisionAsset } from "../decisionAsset";
 import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
 import { getLang, t } from "../i18n";
+import { itemKey, type WithDevice } from "../deviceRuntime";
 import type { FleetTransport } from "../transport";
 import type {
   A2uiRenderRequest,
@@ -53,32 +54,40 @@ export const KIND_LABEL: Record<string, string> = {
 };
 
 interface Props {
-  decisions: PendingDecision[];
-  client: FleetTransport | null;
+  /** 合并收件箱:每张卡都带着它属于哪一台设备。 */
+  decisions: Array<WithDevice<PendingDecision>>;
+  /** 某一台设备的连接。答复必须发回**这张卡所属**的那一台 —— 收件箱是合并的,
+   *  当前作用域那一台未必是卡的主人。 */
+  transportFor: (deviceId: string) => FleetTransport | null;
   connected: boolean;
   agentOnline: boolean;
   decisionsLoaded: boolean;
-  workspaceOf: (sessionId: string) => SessionInfo | undefined;
-  onAnswered: (id: string) => void;
-  onOpenSession: (sessionId: string) => void;
+  workspaceOf: (deviceId: string, sessionId: string) => SessionInfo | undefined;
+  onAnswered: (deviceId: string, id: string) => void;
+  onOpenSession: (deviceId: string, sessionId: string) => void;
+  /** 这台设备的显示名;只配了一台时返回 null,徽标整个不出现 —— 单设备用户不该
+   *  为多设备付出一行视觉噪音。 */
+  deviceLabelOf: (deviceId: string) => string | null;
   /** 通知点击要聚焦的卡。`nonce` 使连点同一张卡也能重新触发。 */
   focusDecision?: { id: string; nonce: number } | null;
 }
 
 export function DecisionsView({
   decisions,
-  client,
+  transportFor,
   connected,
   agentOnline,
   decisionsLoaded,
   workspaceOf,
   onAnswered,
   onOpenSession,
+  deviceLabelOf,
   focusDecision,
 }: Props) {
   // One focused card at a time + a queue bar, mirroring the desktop panel's
   // active-card/tab model. When the active card resolves, focus falls to the
   // card at the same queue position (desktop's "next after removed").
+  // 复合键:两台机器上同号的卡是两张不同的卡。
   const [activeId, setActiveId] = useState<string | null>(null);
   const lastIndexRef = useRef(0);
 
@@ -86,7 +95,7 @@ export function DecisionsView({
     () => [...decisions].sort((a, b) => a.arrivedAt - b.arrivedAt),
     [decisions],
   );
-  const foundIndex = sorted.findIndex((d) => d.id === activeId);
+  const foundIndex = sorted.findIndex((d) => itemKey(d.deviceId, d.id) === activeId);
   const activeIndex =
     foundIndex >= 0 ? foundIndex : Math.min(lastIndexRef.current, sorted.length - 1);
   useEffect(() => {
@@ -107,11 +116,15 @@ export function DecisionsView({
   const focusNonce = focusDecision?.nonce;
   useEffect(() => {
     if (!focusId) return;
-    if (!decisions.some((d) => d.id === focusId)) return;
-    setActiveId(focusId);
+    // 通知目前只带卡 id(设备限定符是 md-push-multi 那条计划的事),所以这里按 id
+    // 找第一张匹配的卡。多台设备上同号的卡同时在场是极小概率,而「跳错一张」也
+    // 好过「点了没反应」。
+    const hit = decisions.find((d) => d.id === focusId);
+    if (!hit) return;
+    setActiveId(itemKey(hit.deviceId, hit.id));
   }, [focusId, focusNonce, decisions]);
 
-  const activeCardId = active?.id ?? null;
+  const activeCardId = active ? itemKey(active.deviceId, active.id) : null;
   useEffect(() => {
     if (activeCardId === null || window.scrollY === 0) return;
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -150,18 +163,20 @@ export function DecisionsView({
       {sorted.length > 1 && (
         <div className={styles.queueBar}>
           {sorted.map((d, i) => {
-            const s = workspaceOf(d.request.sessionId);
+            const s = workspaceOf(d.deviceId, d.request.sessionId);
             const ws = d.request.workspaceName || s?.workspaceName || "Fleet";
+            const device = deviceLabelOf(d.deviceId);
             return (
               <button
-                key={d.id}
+                key={itemKey(d.deviceId, d.id)}
                 className={styles.queueChip}
                 data-active={i === activeIndex}
                 data-kind={d.kind}
-                onClick={() => setActiveId(d.id)}
+                onClick={() => setActiveId(itemKey(d.deviceId, d.id))}
               >
                 <span className={styles.queueKind}>{t(KIND_LABEL[d.kind] ?? d.kind)}</span>
                 <span className={styles.queueWs}>{ws}</span>
+                {device && <span className={styles.queueDevice}>{device}</span>}
               </button>
             );
           })}
@@ -169,12 +184,13 @@ export function DecisionsView({
       )}
       {active && (
         <DecisionCard
-          key={active.id}
+          key={itemKey(active.deviceId, active.id)}
           decision={active}
-          client={client}
-          workspaceOf={workspaceOf}
-          onAnswered={onAnswered}
-          onOpenSession={onOpenSession}
+          client={transportFor(active.deviceId)}
+          deviceLabel={deviceLabelOf(active.deviceId)}
+          workspaceOf={(sessionId) => workspaceOf(active.deviceId, sessionId)}
+          onAnswered={(id) => onAnswered(active.deviceId, id)}
+          onOpenSession={(sessionId) => onOpenSession(active.deviceId, sessionId)}
         />
       )}
       {sorted.length > 1 && (
@@ -210,12 +226,21 @@ function SkeletonCard() {
 interface CardProps {
   decision: PendingDecision;
   client: FleetTransport | null;
+  /** 这张卡来自哪一台的显示名;单设备时 null,徽标不渲染。 */
+  deviceLabel?: string | null;
   workspaceOf: (sessionId: string) => SessionInfo | undefined;
   onAnswered: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
 }
 
-function DecisionCard({ decision, client, workspaceOf, onAnswered, onOpenSession }: CardProps) {
+function DecisionCard({
+  decision,
+  client,
+  deviceLabel,
+  workspaceOf,
+  onAnswered,
+  onOpenSession,
+}: CardProps) {
   const req = decision.request;
   const session = workspaceOf(req.sessionId);
   const workspace = req.workspaceName || session?.workspaceName || "Fleet";
@@ -264,6 +289,9 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered, onOpenSession
           {t(KIND_LABEL[decision.kind] ?? decision.kind)}
         </span>
         <span className={styles.workspace}>{workspace}</span>
+        {/* 合并收件箱里必须一眼看出这张卡在哪台机器上 —— 答复会发回那一台,
+            而「在哪台机器上批的这条命令」本身就是判断要不要批的依据。 */}
+        {deviceLabel && <span className={styles.deviceChip}>{deviceLabel}</span>}
         {session && (
           <button
             className={styles.sessionLink}
