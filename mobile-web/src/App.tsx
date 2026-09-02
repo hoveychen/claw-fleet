@@ -6,6 +6,7 @@ import {
   enablePush,
   isPushOptedOut,
   pushState,
+  unsubscribeChannel,
   type PushState,
 } from "./push";
 // 这里不再认识任何一个具体传输层。造哪一个由 main.tsx 按构建模式决定并注入
@@ -37,24 +38,40 @@ import type {
   TodayUsage,
   WikiDoc,
 } from "./types";
+import { randomId } from "./clientId";
+import { needsA2hsForDurableStorage } from "./secretStore";
 import {
-  clearSecret,
-  loadSecretFromIdb,
-  loadSecretSync,
-  needsA2hsForDurableStorage,
-  persistSecret,
-} from "./secretStore";
+  activeDevice,
+  addPendingUnsub,
+  adoptScannedDevice,
+  clearBook,
+  consumeHashSecret,
+  dropPendingUnsub,
+  emptyBook,
+  loadBookFromIdb,
+  loadBookSync,
+  loadPendingUnsub,
+  nextDeviceLabel,
+  persistBook,
+  removeDevice,
+  renameDevice,
+  setActiveDevice,
+  type DeviceBook,
+  type PairedDevice,
+} from "./devices";
 import { onPairingLink } from "./deepLink";
 import {
   clearCachedSessions,
   loadCachedSessions,
   saveCachedSessions,
 } from "./sessionCache";
-import { useI18n } from "./i18n";
+import { AUTH_WAIT_MS, waitAuthed } from "./transportWait";
+import { DeviceScopeProvider, scopedKey } from "./deviceScope";
+import { t as translate, useI18n } from "./i18n";
 import { ExitGuard, installUnloadPrompt } from "./exitGuard";
 import { HistoryLayer, setRootBackHandler } from "./useNavStack";
 import { NEW_SESSION_DRAFT_KEY, NewSessionSheet } from "./views/Composer";
-import { loadDraft, saveDraft } from "./draft";
+import { clearDraftsByPrefix, loadDraft, saveDraft } from "./draft";
 import { onShareReceived, shareToPrompt, sharedFilesToFiles } from "./shareTarget";
 import { onNativePushToken } from "./nativePush";
 import { onDecisionDeepLink } from "./decisionDeepLink";
@@ -82,23 +99,61 @@ function fmtTokens(n: number): string {
 
 type Tab = "decisions" | "tasks" | "wiki" | "more";
 
+/** 一台新配对设备的默认字段。默认名走 i18n，所以它在这里而不在 devices.ts ——
+ *  那一层刻意不认识 i18n，好让它整层保持可测的纯函数。 */
+function newDeviceMint(book: DeviceBook): { id: string; label: string; now: number } {
+  return { id: randomId(), label: nextDeviceLabel(book, translate("设备")), now: Date.now() };
+}
+
 // `?mock` runs the whole app on fixtures (no relay, no pairing) — used by the
 // promo screen-recording pipeline and for quick UI work in a plain browser.
 const MOCK = isMockMode();
 
 /** 造出这次部署该用的传输层。由 main.tsx 按构建模式注入。 */
-export type TransportFactory = (secret: string, handlers: TransportHandlers) => FleetTransport;
+export type TransportFactory = (
+  secret: string,
+  handlers: TransportHandlers,
+  /** 这台设备指名的 relay;`null` = 构建默认值。同源形态忽略它。 */
+  relayBase?: string | null,
+) => FleetTransport;
 
 export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
   const { t } = useI18n();
-  // `?mock` stands in for a pairing secret so the gate below opens and the
-  // effect that builds the client runs — it just builds a MockRelayClient.
-  // 同源形态没有配对这回事（后端就是发出这张页面的那个进程），所以那道门整个
-  // 不存在，直接给一个占位串让下面建连接的 effect 跑起来。
-  const [secret, setSecret] = useState<string | null>(() =>
-    MOCK ? "mock-secret" : NEEDS_PAIRING ? loadSecretSync() : "same-origin",
-  );
+  // 这台手机配对过的每一台 Fleet（devices.ts）。`?mock` 与同源形态都没有配对
+  // 这回事，簿子留空，下面的 `secret` 直接给占位串。
+  const [book, setBook] = useState<DeviceBook>(() => {
+    if (MOCK || !NEEDS_PAIRING) return emptyBook();
+    const stored = loadBookSync(newDeviceMint(emptyBook()));
+    // PWA 是被一个带 `#k=…` 的 URL 打开的 —— 那就是一次配对。
+    const scanned = consumeHashSecret();
+    if (!scanned) return stored;
+    return adoptScannedDevice(stored, scanned.secret, newDeviceMint(stored), scanned.relayBase)
+      .book;
+  });
+  // 当前作用域设备的密钥。`?mock` stands in for a pairing secret so the gate
+  // below opens and the effect that builds the client runs — it just builds a
+  // MockRelayClient. 同源形态没有配对这回事（后端就是发出这张页面的那个进程），
+  // 所以那道门整个不存在，直接给一个占位串让下面建连接的 effect 跑起来。
+  const current = NEEDS_PAIRING && !MOCK ? activeDevice(book) : null;
+  const secret = MOCK
+    ? "mock-secret"
+    : NEEDS_PAIRING
+      ? (current?.secret ?? null)
+      : "same-origin";
+  // 当前设备指名的 relay。`null` = 构建默认值（迁移过来的设备、以及扫码时没带
+  // `&relay=` 的都是这一类），传输层与推送各自把它解析成实际地址。
+  const relayBase = current?.relayBase ?? null;
+  // 本地持久化的命名空间。会话快照缓存、草稿、附件、workspace 记忆都按它分家
+  // ——那些内容只对某一台机器有意义（见 deviceScope.tsx）。
+  const deviceId = current?.id ?? null;
+  // 分享菜单那条 effect 的依赖是空的（只在挂载时订阅一次），但它开火时要用**当下**
+  // 的设备，所以那一处读 ref 而不是闭包里的值。
+  const deviceIdRef = useRef<string | null>(deviceId);
+  deviceIdRef.current = deviceId;
+  // 同理：清除全部配对那个回调的依赖是空的，但它要遍历**当下**的簿子。
+  const bookRef = useRef(book);
+  bookRef.current = book;
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
   const [a2hsDismissed, setA2hsDismissed] = useState(
@@ -113,11 +168,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       return;
     }
     let cancelled = false;
-    loadSecretFromIdb().then((s) => {
+    loadBookFromIdb(newDeviceMint(emptyBook())).then((recovered) => {
       if (cancelled) return;
-      if (s) {
-        persistSecret(s);
-        setSecret(s);
+      if (recovered) {
+        // 把活下来的那一份写回两个存储，下次冷启动就不必再走兜底。
+        persistBook(recovered);
+        setBook(recovered);
       }
       setIdbProbed(true);
     });
@@ -131,11 +187,124 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // scanned pairing URL here instead. No-op in the browser/PWA.
   useEffect(() => {
     return onPairingLink((paired) => {
-      persistSecret(paired);
-      setSecret(paired);
+      // 与 PWA 的 `#k=` 路径走同一个入口：去重、保留用户改过的名字、焦点落到
+      // 刚扫的那台，三条规则只有一份实现（devices.ts::adoptScannedDevice）。
+      setBook((prev) => adoptScannedDevice(prev, paired, newDeviceMint(prev)).book);
       setIdbProbed(true);
     });
   }, []);
+
+  // ── 设备管理（「更多」页那一块）─────────────────────────────────────────
+  //
+  // 三个动作都是「改簿子 + 落盘」，落盘紧跟状态更新，免得一次意外退出让用户
+  // 以为改过的东西没了。
+
+  /** 清除全部配对。每台设备的退订都先记进待办（而不是在这里逐台连上去退）：
+   *  紧接着就要 reload，等不了 N 条临时连接的握手；下次启动那条重试 effect 会
+   *  把它们补掉。 */
+  const unpairAll = useCallback(() => {
+    const now = Date.now();
+    for (const d of bookRef.current.devices) {
+      if (SUPPORTS_PUSH) addPendingUnsub({ secret: d.secret, relayBase: d.relayBase, at: now });
+      clearCachedSessions(d.id);
+      clearDraftsByPrefix(scopedKey(d.id, ""));
+    }
+    clearBook();
+    location.reload();
+  }, []);
+
+  const switchDevice = useCallback((id: string) => {
+    setBook((prev) => {
+      const next = setActiveDevice(prev, id);
+      persistBook(next);
+      return next;
+    });
+  }, []);
+
+  const renameDeviceLabel = useCallback((id: string, label: string) => {
+    setBook((prev) => {
+      const next = renameDevice(prev, id, label);
+      persistBook(next);
+      return next;
+    });
+  }, []);
+
+  /** 让某台设备的 relay channel 停止推送。
+   *
+   *  它可能不是当前连着的那一台，所以为它临时开一条连接。不能靠「本地退订」
+   *  代替：浏览器订阅是所有设备共用的一份，退掉它等于把其他设备的通知一起
+   *  掐掉（见 push.ts::unsubscribeChannel）。
+   *
+   *  返回是否退成。退不成不该拦住用户移除设备——那是他明确的意图——所以调用方
+   *  把它记进待办退订，下次启动重试。 */
+  const stopPushFor = useCallback(
+    async (device: PairedDevice): Promise<boolean> => {
+      const live = clientRef.current;
+      if (device.id === deviceIdRef.current && live?.isAuthed) {
+        return unsubscribeChannel(live);
+      }
+      const temp = makeTransport(device.secret, {}, device.relayBase);
+      try {
+        temp.connect();
+        if (!(await waitAuthed(temp, AUTH_WAIT_MS))) return false;
+        return await unsubscribeChannel(temp);
+      } catch {
+        return false;
+      } finally {
+        temp.close();
+      }
+    },
+    [makeTransport],
+  );
+
+  const removeDeviceEntry = useCallback(
+    async (device: PairedDevice) => {
+      // 先退订、再改簿子：反过来的话失败重试就没有 secret 可用了（记待办那条
+      // 路仍然需要它）。
+      const unsubscribed = SUPPORTS_PUSH ? await stopPushFor(device) : true;
+      if (!unsubscribed) {
+        addPendingUnsub({ secret: device.secret, relayBase: device.relayBase, at: Date.now() });
+      }
+      // 这台设备的本地痕迹一并清掉：会话快照缓存 + 它命名空间下的全部草稿
+      // （新会话表单、附件路径、上次用的 repo、各会话的半截输入）。
+      clearCachedSessions(device.id);
+      clearDraftsByPrefix(scopedKey(device.id, ""));
+      setBook((prev) => {
+        const next = removeDevice(prev, device.id);
+        persistBook(next);
+        return next;
+      });
+    },
+    [stopPushFor],
+  );
+
+  /** 上次没退成的退订，启动后补一次。失败就留着，等下次（7 天后过期，见
+   *  devices.ts）。 */
+  useEffect(() => {
+    if (!SUPPORTS_PUSH || MOCK) return;
+    const pending = loadPendingUnsub(Date.now());
+    if (pending.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const entry of pending) {
+        if (cancelled) return;
+        const temp = makeTransport(entry.secret, {}, entry.relayBase);
+        try {
+          temp.connect();
+          if (await waitAuthed(temp, AUTH_WAIT_MS)) {
+            if (await unsubscribeChannel(temp)) dropPendingUnsub(entry.secret, Date.now());
+          }
+        } catch {
+          // 留着下次再试
+        } finally {
+          temp.close();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [makeTransport]);
 
   // Android share sheet → new-session composer. Seed the draft *before* opening
   // the sheet: NewSessionSheet reads it once on mount via useDraft, so writing
@@ -151,8 +320,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         const fetched = new Set(files.map((f) => f.name));
         const missed = share.files.filter((f) => !fetched.has(f.name));
         const prompt = shareToPrompt({ ...share, files: missed });
-        const current = loadDraft<Record<string, unknown>>(NEW_SESSION_DRAFT_KEY, {});
-        saveDraft(NEW_SESSION_DRAFT_KEY, { ...current, prompt });
+        // 草稿按设备分家，否则从分享菜单塞进来的提示词会落进另一台的新会话表单。
+        const key = scopedKey(deviceIdRef.current, NEW_SESSION_DRAFT_KEY);
+        const existing = loadDraft<Record<string, unknown>>(key, {});
+        saveDraft(key, { ...existing, prompt });
         setSharedFiles(files);
         setShowNewSession(true);
       })();
@@ -195,15 +366,26 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // "showing cache, awaiting first live push" state the task page labels.
   useEffect(() => {
     if (MOCK) return;
+    // 切设备先清场：上一台的任务列表、决策卡、今日用量、可信 agent 判定都只对
+    // 上一台成立。留着它们不是「先显示旧数据再刷新」——那些卡上的 id 在新设备
+    // 上根本不存在，点一下就是一次打错地方的请求。首次挂载时这些本来就是空的。
+    setSessions([]);
+    setSessionsLoaded(false);
+    setDecisions([]);
+    setDecisionsLoaded(false);
+    setTodayUsage(null);
+    trustedAgentRef.current = undefined;
+    answeredRef.current = new Map();
+    snapshotSourcesRef.current = [];
     let cancelled = false;
-    void loadCachedSessions().then((cached) => {
+    void loadCachedSessions(deviceId).then((cached) => {
       if (cancelled || !cached?.length) return;
       setSessions((prev) => (prev.length === 0 ? cached : prev));
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [deviceId]);
   const [todayUsage, setTodayUsage] = useState<TodayUsage | null>(null);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   // Mirrors `sessionsLoaded`: flips true once the first authoritative pending
@@ -377,7 +559,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         // Persist the merged full list so the next cold start paints it. Both
         // full and delta frames arrive here already merged (see relay.ts), so
         // the cache always holds the latest complete snapshot.
-        saveCachedSessions(list);
+        saveCachedSessions(deviceId, list);
       },
       onSessionsKind: (kind: "full" | "delta") =>
         setSessionsFrame((s) => ({
@@ -399,7 +581,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       },
       onAuthError: (message: string) => setAuthError(message),
     };
-    const client = makeTransport(secret, handlers);
+    const client = makeTransport(secret, handlers, relayBase);
     clientRef.current = client;
     client.connect();
     // Mobile browsers may never run React cleanup on tab close — tell the
@@ -410,7 +592,18 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       window.removeEventListener("pagehide", onPageHide);
       client.close();
     };
-  }, [secret, makeTransport, addDecision, removeDecision, refreshPending, recomputeCongestion]);
+    // deviceId / relayBase 与 secret 总是同时变（它们都来自当前那台设备），列进
+    // 依赖是为了让「切设备」这件事在这里显式成立，而不是靠 secret 恰好也变了。
+  }, [
+    secret,
+    deviceId,
+    relayBase,
+    makeTransport,
+    addDecision,
+    removeDecision,
+    refreshPending,
+    recomputeCongestion,
+  ]);
 
   // Today's cumulative token/cost counter in the header. Polls while the desktop
   // is online; the desktop computes the figure (agent sessions created today +
@@ -523,7 +716,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // gained the entry.
   useEffect(() => {
     if (connected && push === "granted" && !pushOptedOut && clientRef.current) {
-      void enablePush(clientRef.current);
+      void enablePush(clientRef.current, relayBase);
     }
   }, [connected, push, pushOptedOut]);
 
@@ -549,7 +742,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const handleEnablePush = useCallback(async () => {
     if (!clientRef.current) return;
-    setPush(await enablePush(clientRef.current));
+    setPush(await enablePush(clientRef.current, relayBase));
     setPushOptedOut(false);
   }, []);
 
@@ -650,8 +843,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <button
           className={styles.gateButton}
           onClick={() => {
-            clearSecret();
-            clearCachedSessions();
+            clearBook();
+            clearCachedSessions(deviceId);
             location.reload();
           }}
         >
@@ -662,6 +855,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   }
 
   return (
+    // 整棵树跑在「当前作用域设备」里：里面所有按设备分家的本地存储（草稿、附件、
+    // workspace 记忆）都从这里取命名空间，无需逐个 prop 往下传。
+    <DeviceScopeProvider deviceId={deviceId}>
     <div className={styles.app}>
       <header className={styles.header}>
         <span className={styles.title}>Fleet</span>
@@ -764,6 +960,12 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         ) : (
           <MoreView
             endpointLabel={clientRef.current?.endpointLabel ?? ""}
+            devices={book.devices}
+            activeDeviceId={deviceId}
+            onSwitchDevice={switchDevice}
+            onRenameDevice={renameDeviceLabel}
+            onRemoveDevice={(d) => void removeDeviceEntry(d)}
+            onUnpairAll={unpairAll}
             supportsPush={SUPPORTS_PUSH}
             connected={connected}
             agentOnline={agentOnline}
@@ -954,5 +1156,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </button>
       </nav>
     </div>
+    </DeviceScopeProvider>
   );
 }

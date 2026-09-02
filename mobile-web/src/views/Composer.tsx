@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
 import { randomId } from "../clientId";
-import { useDraft, loadDraft, saveDraft } from "../draft";
+import { loadDraft, saveDraft } from "../draft";
+import { scopedKey, useDeviceDraft, useDeviceScope } from "../deviceScope";
 import { t } from "../i18n";
 import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type FleetTransport } from "../transport";
 import { waitForSessionId } from "../spawnConfirm";
@@ -128,7 +129,12 @@ export async function uploadAttachmentFiles(
 // 回来后附件不用重挑。存的是已上传到 relay 的路径；万一桌面端清过 user-attachments
 // 存储，恢复的路径会失效，但 chip 可手动删除，故不额外做存在性校验。
 function useAttachments(client: FleetTransport | null, draftKey: string) {
-  const [attachments, setAttachments, clearAttachments] = useDraft<Attachment[]>(draftKey, []);
+  // 设备作用域:附件是「已上传到**某一台**桌面端」的路径,拿到另一台上去恢复只会
+  // 得到一串失效路径。
+  const [attachments, setAttachments, clearAttachments] = useDeviceDraft<Attachment[]>(
+    draftKey,
+    [],
+  );
   const [uploading, setUploading] = useState(false);
   // path → `blob:` URL for files picked in *this* page life. Not state: it is
   // only ever read during a render that `attachments` already triggered, and
@@ -386,7 +392,8 @@ interface NewSessionProps {
   onClose: () => void;
 }
 
-/** 新会话表单的未提交草稿 key。全局唯一（同时只有一个新会话 sheet），意外关闭
+/** 新会话表单的未提交草稿 key（实际落盘时按设备加前缀，见 deviceScope.tsx）。
+ *  每台设备同时只有一个新会话 sheet，意外关闭
  *  sheet / 切标签 / iOS 杀 PWA 后回来原样恢复；只有创建成功才清空。附件不入草稿——
  *  它们是已上传到 relay 的产物，重开时重新挑选即可。 */
 export const NEW_SESSION_DRAFT_KEY = "new-session";
@@ -453,8 +460,9 @@ export function recentWorkspaces(
     .map(([path, { name }]) => [path, name]);
 }
 
-/** localStorage key（走 draft.ts 的 `fleet-draft:` 前缀），记住上次成功创建会话用的
- *  repo。与新会话草稿是独立的键，故提交成功 clearDraft() 时不会被清掉。 */
+/** localStorage key（走 draft.ts 的 `fleet-draft:` 前缀，再按设备加命名空间），
+ *  记住上次成功创建会话用的 repo —— repo 路径属于某一台机器，所以必须分家。
+ *  与新会话草稿是独立的键，故提交成功 clearDraft() 时不会被清掉。 */
 const LAST_WORKSPACE_KEY = "last-new-session-workspace";
 
 /** 新会话默认选中的 workspace：用户本次已选且有效（draftWorkspace）时沿用；否则优先
@@ -494,7 +502,12 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
   // 供超时后的宽限期确认读取最新快照(prop 每次快照推送都会更新)。
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
-  const [draft, setDraft, clearDraft] = useDraft(NEW_SESSION_DRAFT_KEY, NEW_SESSION_DEFAULT);
+  // 新会话草稿按设备分家:里面记着 workspace 路径和模型,那是某一台机器上的东西。
+  const [draft, setDraft, clearDraft] = useDeviceDraft(
+    NEW_SESSION_DRAFT_KEY,
+    NEW_SESSION_DEFAULT,
+  );
+  const deviceId = useDeviceScope();
   const patch = (p: Partial<typeof NEW_SESSION_DEFAULT>) => setDraft((d) => ({ ...d, ...p }));
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -549,7 +562,7 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
     draft.workspace,
     recents,
     chatPath,
-    loadDraft(LAST_WORKSPACE_KEY, ""),
+    loadDraft(scopedKey(deviceId, LAST_WORKSPACE_KEY), ""),
   );
 
   const isChat = Boolean(chatPath) && workspace === chatPath;
@@ -579,7 +592,7 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
       if (settled) return;
       settled = true;
       // 记住这次用的 repo，下次打开新会话 sheet 默认选中它（独立键，不受 clearDraft 影响）。
-      saveDraft(LAST_WORKSPACE_KEY, effectiveWorkspace);
+      saveDraft(scopedKey(deviceId, LAST_WORKSPACE_KEY), effectiveWorkspace);
       clearDraft();
       reset();
       onClose();
@@ -788,7 +801,9 @@ export function ResumeComposer({
   const pendingMessages = session.pendingMessages ?? [];
   // 每个会话各自的续写草稿，按 sessionId 分 key——切到别的会话再回来，
   // 各自的半截输入互不覆盖；发送成功后清空。
-  const [prompt, setPrompt, clearPrompt] = useDraft(`resume:${session.id}`, "");
+  // 设备作用域:会话 id 只在单机内唯一,不分家两台机器上同号的会话会共用一份
+  // 半截输入。
+  const [prompt, setPrompt, clearPrompt] = useDeviceDraft(`resume:${session.id}`, "");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [permissionMode, setPermissionMode] = useState("");
