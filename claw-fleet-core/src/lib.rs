@@ -60,7 +60,6 @@ pub mod interaction_mode_diagnostics;
 pub mod interaction_mode_test;
 pub mod jsonl_tail;
 pub mod launchd;
-pub mod direct_host;
 pub mod live_thinking;
 pub mod llm_provider;
 pub mod llm_usage;

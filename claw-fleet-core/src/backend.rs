@@ -1286,36 +1286,6 @@ pub trait Backend: Send + Sync {
         Err("mobile relay not configured".into())
     }
 
-    // ── 直连(手机不经中转,直接问这台主机的 HTTP 数据面)──────────────────
-    //
-    // 与中转那一组同样走 Backend trait:远端 workspace 里,「这台机器对手机而言
-    // 的地址是什么、它的 token 在不在」只有那台机器自己知道。
-
-    /// 这台主机的直连现状:已配地址、地址的问题、token 在不在、能不能出码。
-    fn direct_host_status(&self) -> Result<crate::direct_host::DirectHostStatus, String> {
-        Err("direct host not available".into())
-    }
-
-    /// 保存这台主机对手机而言的地址,并回一份新现状。
-    fn set_direct_host_config(
-        &self,
-        _base_url: &str,
-        _token: &str,
-    ) -> Result<crate::direct_host::DirectHostStatus, String> {
-        Err("direct host not available".into())
-    }
-
-    /// 直连链接的 SVG 二维码。内容是 `<移动端页面>/#h=<地址>&t=<token>` ——
-    /// 两项都在 fragment 里,所以 token 不进任何请求行。
-    fn direct_host_qr_svg(&self) -> Result<String, String> {
-        Err("direct host not available".into())
-    }
-
-    /// 同一条链接的文本形式,给复制按钮。与中转那条同理:扫码在自建域名上未必
-    /// 落到 app 里,粘贴不依赖任何 host 声明。
-    fn direct_host_url(&self) -> Result<String, String> {
-        Err("direct host not available".into())
-    }
 }
 
 /// Upper bound on a single attachment payload. Enforced by both the uploader
