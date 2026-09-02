@@ -350,7 +350,8 @@
     "ai_skill_installed_btn": "已安装",
     "ai_skill_save_btn": "保存 skill 文件…",
     "ai_modal_close": "完成",
-    "codex_limit": "速率限制"
+    "codex_limit": "速率限制",
+    "no_usage_data": "暂无用量数据"
   },
   "skills": {
     "panel_title": "Skills",
@@ -570,7 +571,12 @@
     "save": "保存",
     "saving": "保存中",
     "open_session": "查看会话",
-    "open_session_tip": "查看触发出的会话"
+    "open_session_tip": "查看触发出的会话",
+    "open_run_tip": "查看这次执行的会话",
+    "run_no_report": "（会话已不在扫描范围）",
+    "runs_collapse": "收起",
+    "runs_expand": "查看全部 {{count}} 次",
+    "runs_head": "执行记录"
   },
   "plans": {
     "title": "计划树",
@@ -694,7 +700,8 @@
     "folder_rename_confirm": "重命名",
     "folder_dissolve": "解散目录（文档移到上级）",
     "folder_delete": "删除目录及其 {{count}} 篇文档",
-    "delete_folder_confirm": "删除目录 “{{path}}” 下的全部 {{count}} 篇文档（含所有历史版本）？此操作不可撤销。"
+    "delete_folder_confirm": "删除目录 “{{path}}” 下的全部 {{count}} 篇文档（含所有历史版本）？此操作不可撤销。",
+    "version": "版本"
   },
   "live": {
     "section_title": "实时"
@@ -756,7 +763,19 @@
     "agentRunning": "运行中",
     "agentDone": "已完成",
     "resultChars": "{{n}} 字符",
-    "noAgents": "暂无代理活动记录。"
+    "noAgents": "暂无代理活动记录。",
+    "dag_approx": "启发式绑定",
+    "dag_approx_tip": "启发式绑定（近似）",
+    "dag_click_collapse": "点击收起",
+    "dag_click_expand": "点击展开",
+    "dag_collapse": "收起",
+    "dag_no_result_text": "（无结果文本）",
+    "dag_no_runtime_agent": "尚无运行时 agent（未启动）",
+    "dag_open_agent_session": "在 Fleet 里打开该 agent 的 session",
+    "dag_open_session": "打开 session",
+    "dag_resolved_prompt_tip": "执行时解析出的 prompt（… 为插值点）",
+    "dag_running_no_result": "运行中，暂无结果",
+    "dag_unparsed": "无法解析编排结构，按 agent 列表展示："
   },
   "token_spend": {
     "loading": "正在分析 token 花销…",
@@ -847,6 +866,31 @@
   "confirm": "确认",
   "save": "保存",
   "edit": "编辑",
+  "search_matches": "条匹配",
+  "window": {
+    "maximize": "最大化",
+    "minimize": "最小化",
+    "restore": "还原"
+  },
+  "common": {
+    "close": "关闭",
+    "actions": "操作",
+    "copied": "已复制",
+    "dismiss": "忽略"
+  },
+  "find": {
+    "close": "关闭",
+    "next": "下一个",
+    "placeholder": "在页面中查找",
+    "prev": "上一个",
+    "unsupported": "此环境不支持高亮"
+  },
+  "review_docs": {
+    "chip": "📄 文档 · {{count}}",
+    "error": "这份文档没能加载",
+    "loading": "加载中…",
+    "toggle": "待审文档"
+  },
   "loading": "加载中…",
   "update": {
     "available": "新版本 {{version}} 已发布！",
@@ -1584,7 +1628,9 @@
     "web_blocked": "该站禁止被嵌入",
     "web_reload": "重新加载",
     "web_open_browser": "在浏览器中打开",
-    "web_open_browser_short": "浏览器"
+    "web_open_browser_short": "浏览器",
+    "split_down": "向下分屏",
+    "split_right": "向右分屏"
   },
   "detail": {
     "triggered_by_schedule": "由计划 {{id}} 触发",
@@ -1718,7 +1764,14 @@
     "switch_agent": "切换查看的 agent",
     "agent_current": "当前",
     "load_stalled": "加载对话超时——后端一直没有响应。它可能正忙,也可能挂了;稍后会自动恢复,也可以立刻重试。",
-    "load_retry": "重试"
+    "load_retry": "重试",
+    "diff_no_changes": "没有文本改动。",
+    "diff_too_large": "改动太大，无法在这里内联渲染。",
+    "loading_full_output": "正在加载完整输出…",
+    "no_parameters": "无参数",
+    "no_results": "没有结果。",
+    "no_summary": "没有记录摘要。",
+    "tool_running": "运行中…"
   },
   "settings": {
     "title": "设置",
@@ -2197,7 +2250,8 @@
     "dc_type_elicitation": "问答卡",
     "dc_type_fleet_ask": "富交互卡",
     "dc_type_plan_approval": "计划审批",
-    "dc_no_rec": "无推荐"
+    "dc_no_rec": "无推荐",
+    "total_cost": "总花费"
   },
   "command": {
     "nested": {
@@ -2257,7 +2311,15 @@
     "group_load_more": "显示更早的 {{n}} 棒",
     "group_toggle_done": "整条接力链已完成 — 点击全部改回进行中",
     "group_toggle_pending": "点击把整条接力链标为已完成",
-    "select_hint": "从左侧选择一个会话查看详情"
+    "select_hint": "从左侧选择一个会话查看详情",
+    "empty_hint": "还没有会话，点上方新建一个",
+    "enqueue_cancel": "取消这条排队消息",
+    "enqueue_placeholder": "会话运行中，发送后排队，本轮结束自动接上…",
+    "enqueue_queued_label": "已排队，本轮结束后自动发送",
+    "group_collapse": "收起接力链",
+    "group_expand": "展开接力链上更早的会话",
+    "toggle_done": "已完成 — 点击改回进行中",
+    "toggle_pending": "进行中 — 点击标为已完成"
   },
   "view_files": "仓库",
   "files": {

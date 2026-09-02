@@ -66,7 +66,7 @@ function AlertCard({
           e.stopPropagation();
           handleDismiss();
         }}
-        aria-label="Dismiss"
+        aria-label={t("common.dismiss", "忽略")}
       >
         ✕
       </button>

@@ -181,7 +181,7 @@ function CopyableCommand({ cmd }: { cmd: string }) {
     >
       <span className={styles.code_text}>{cmd}</span>
       {copied ? (
-        <span className={styles.copied}>Copied!</span>
+        <span className={styles.copied}>{t("common.copied", "已复制")}</span>
       ) : (
         <span className={styles.copy_icon}>&#x2398;</span>
       )}

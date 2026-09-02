@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { TextBlock } from "./TextBlock";
 import styles from "./ThinkingBlock.module.css";
 
@@ -29,6 +30,7 @@ function useOverflow(ref: React.RefObject<HTMLDivElement | null>, deps: unknown[
 }
 
 export function ThinkingBlock({ thinking, live = false, rail = false }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const windowRef = useRef<HTMLDivElement>(null);
   const overflowing = useOverflow(windowRef, [thinking, open, live, rail]);
@@ -76,7 +78,7 @@ export function ThinkingBlock({ thinking, live = false, rail = false }: Props) {
     <div className={styles.root} data-live={live || undefined}>
       <button className={styles.toggle} onClick={() => setOpen((o) => !o)}>
         <span className={styles.icon}>{open ? "▾" : "▸"}</span>
-        <span className={styles.label}>Thinking</span>
+        <span className={styles.label}>{t("detail.work_cat_think")}</span>
         {!open && (
           <span className={styles.preview}>
             {preview}
