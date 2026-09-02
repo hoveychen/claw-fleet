@@ -883,6 +883,7 @@ pub fn parse_session_info(
         pending_messages: Vec::new(),
         watches: Vec::new(),
         remote_disconnect: None,
+        mirror_write: None,
     })
     .map(|info| (info, state))
 }

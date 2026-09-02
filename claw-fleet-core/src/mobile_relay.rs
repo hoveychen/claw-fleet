@@ -997,6 +997,11 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     // most likely place to be looking when a laptop's ssh tunnel dies. Small
     // object, absent for every session that hasn't disconnected.
     "remoteDisconnect",
+    // Output that landed on the wrong machine. Same reason as above: the phone
+    // is a likely place to be looking, and the warning is useless without the
+    // file names. Absent for every session with a clean mirror, which is all of
+    // them in normal operation.
+    "mirrorWrite",
 ];
 
 /// Byte size a re-encoded decision-asset image is squeezed toward. Every image
@@ -2887,6 +2892,7 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
     // Same as the desktop resume: drop a stale remote-disconnect verdict so the
     // row isn't pinned red after the user has asked for a retry.
     crate::remote_disconnect::clear(&req.session_id);
+    crate::mirror_guard::clear(&req.session_id);
     // Route by source (blank → claude); manual resume is untracked → no-op box.
     crate::agent_source::resume_session(
         &req.agent_source,

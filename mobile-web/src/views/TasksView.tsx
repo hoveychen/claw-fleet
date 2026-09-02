@@ -12,6 +12,7 @@ import {
   Radar,
   Search,
   SearchX,
+  FileWarning,
   ServerOff,
   Share2,
   Square,
@@ -739,6 +740,20 @@ export function TasksView({
               {s.remoteDisconnect.agentStopped
                 ? t("{0} 断开,已停止", s.remoteDisconnect.hostLabel ?? t("远端"))
                 : t("{0} 断开,agent 未停", s.remoteDisconnect.hostLabel ?? t("远端"))}
+            </span>
+          )}
+          {/* 输出落在了错的机器上 —— 会话本身跑得好好的,不提就没人会发现。 */}
+          {s.mirrorWrite && (
+            <span
+              className={styles.remoteLost}
+              title={t(
+                "这些文件留在了本机镜像目录 {0},没同步到远端主机:{1}",
+                s.mirrorWrite.workspacePath,
+                s.mirrorWrite.files.join(", "),
+              )}
+            >
+              <FileWarning size={11} />
+              {t("{0} 个文件留在本机", String(s.mirrorWrite.total))}
             </span>
           )}
           {s.watches?.map((w) => (

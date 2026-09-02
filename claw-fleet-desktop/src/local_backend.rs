@@ -1877,6 +1877,7 @@ impl Backend for LocalBackend {
         // If the link is still down the new run's stderr monitor files a fresh
         // record within a second.
         claw_fleet_core::remote_disconnect::clear(&session_id);
+        claw_fleet_core::mirror_guard::clear(&session_id);
         self.restamp_marks_and_emit();
         resume_session_impl(
             &session_id,
@@ -3966,6 +3967,7 @@ mod tests {
             background_tasks: Vec::new(),
             watches: Vec::new(),
             remote_disconnect: None,
+            mirror_write: None,
             task_plan: None,
             handoff: None,
             user_mark: None,

@@ -170,6 +170,11 @@
     "remoteDisconnected": "Remote lost",
     "stuck": "Stuck"
   },
+  "mirrorWrite": {
+    "badge": "{{count}} file(s) left here",
+    "tip": "These are sitting in the **local** mirror of {{path}} instead of on the remote host — something wrote with a relative path. rca routes only absolute paths to the remote; a relative read fails with \"not found\", but a relative write succeeds and quietly lands on this machine. Files: {{files}}",
+    "tip_more": "(and more — showing the first {{shown}})"
+  },
   "remoteDisconnect": {
     "badge": "agent stopped",
     "badge_not_stopped": "agent NOT stopped",

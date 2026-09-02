@@ -74,6 +74,7 @@ fn build_bundle() -> String {
         claw_fleet_core::session::SessionStatus,
         claw_fleet_core::session::RateLimitState,
         claw_fleet_core::remote_disconnect::RemoteDisconnect,
+        claw_fleet_core::mirror_guard::MirrorWrite,
         claw_fleet_core::session::SessionInfo,
         claw_fleet_core::session_mark::SessionMark,
         claw_fleet_core::rate_limit_parser::RateLimitType,

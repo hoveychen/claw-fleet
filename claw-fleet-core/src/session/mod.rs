@@ -291,6 +291,14 @@ pub struct SessionInfo {
     /// jsonl doesn't change.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub remote_disconnect: Option<crate::remote_disconnect::RemoteDisconnect>,
+    /// Set when this session's remote workspace has files sitting in its LOCAL
+    /// mirror directory — output that was meant for the remote host and landed
+    /// on this machine instead (see [`crate::mirror_guard`]). Advisory: unlike
+    /// `remote_disconnect` it does not change `status`, because the session may
+    /// have finished perfectly and still left work on the wrong host. Stamped by
+    /// `mirror_guard::enrich_sessions` at scan time.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mirror_write: Option<crate::mirror_guard::MirrorWrite>,
 }
 
 
@@ -695,6 +703,7 @@ mod tests {
             pending_messages: Vec::new(),
             watches: Vec::new(),
             remote_disconnect: None,
+            mirror_write: None,
         }
     }
 

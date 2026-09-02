@@ -1749,6 +1749,7 @@ fn build_session_from_sqlite(
         pending_messages: Vec::new(),
         watches: Vec::new(),
         remote_disconnect: None,
+        mirror_write: None,
     })
 }
 
@@ -4691,6 +4692,7 @@ fn parse_codex_session(
         pending_messages: Vec::new(),
         watches: Vec::new(),
         remote_disconnect: None,
+        mirror_write: None,
     })
 }
 

@@ -580,6 +580,7 @@ mod tests {
             pending_messages: Vec::new(),
             watches: Vec::new(),
             remote_disconnect: None,
+            mirror_write: None,
         }
     }
 
