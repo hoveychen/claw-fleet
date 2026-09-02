@@ -18,9 +18,11 @@ import { formatRttSplit } from "./connQuality";
 import { DeviceConnection, type DeviceHandle } from "./DeviceConnection";
 import {
   aggregateDecisions,
+  aggregateSessions,
   allDecisionsLoaded,
   anyAgentOnline,
   anyConnected,
+  anySessionsLoaded,
   itemKey,
   devicesReducer,
   emptyDeviceState,
@@ -391,13 +393,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const activeState = states[activeDeviceId] ?? EMPTY_DEVICE_STATE;
   const client = handles[activeDeviceId]?.transport ?? null;
   const {
-    sessions,
-    sessionsLoaded,
     sessionsFrame,
     rttSplit,
     snapshotSources,
     authError,
   } = activeState;
+  // 首屏「正在加载任务」的闸门:有任意一台推过首帧就不再算加载中。
+  const sessionsLoaded = anySessionsLoaded(states, deviceOrder);
   // 决策卡是**合并**的:全部设备的卡按到达时间排在一起,每张带着归属设备。
   // 这就是多设备的核心价值——一个收件箱,而不是「记得去另一台看看」。
   const decisions = useMemo(
@@ -593,17 +595,25 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [],
   );
 
-  // 会话一律带着归属设备往下走。这一条 P 只是把管子铺成设备感知的形状 ——
-  // 数据源仍是当前作用域那一台,合并成跨设备列表是下一条 P 的事。
+  // 任务列表也是**合并**的:全部设备的会话排在一起,每条带着归属设备。本地那份
+  // 乐观已读时间戳按复合键覆盖上去(服务端下次扫描会重新算出 lastReadMs)。
   const mergedSessions = useMemo<Array<WithDevice<SessionInfo>>>(
     () =>
-      sessions.map((s) => {
-        const local = localReadMs[itemKey(activeDeviceId, s.id)];
-        const withRead =
-          local && local > (s.lastReadMs ?? 0) ? { ...s, lastReadMs: local } : s;
-        return { ...withRead, deviceId: activeDeviceId };
-      }),
-    [sessions, localReadMs, activeDeviceId],
+      aggregateSessions(states, deviceOrder)
+        .map((s) => {
+          const local = localReadMs[itemKey(s.deviceId, s.id)];
+          return local && local > (s.lastReadMs ?? 0) ? { ...s, lastReadMs: local } : s;
+        })
+        .sort((a, b) => (b.lastActivityMs ?? 0) - (a.lastActivityMs ?? 0)),
+    [states, deviceOrder, localReadMs],
+  );
+
+  /** 当前作用域那一台的会话。按设备作用域的页面(新会话、计划、会话详情里的
+   *  子代理解析)用它 —— 那些页面问的是「这一台上有什么」,把别台的混进去只会
+   *  让它们看到自己拉不动的 id。 */
+  const scopedSessions = useMemo(
+    () => mergedSessions.filter((s) => s.deviceId === activeDeviceId),
+    [mergedSessions, activeDeviceId],
   );
 
   // 决策卡上「这张卡属于哪个会话」的反查。键是复合键 —— 两台机器上同号的会话
@@ -801,6 +811,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         ) : tab === "tasks" ? (
           <TasksView
             sessions={mergedSessions}
+            deviceLabelOf={runtimeDevices.length > 1 ? deviceLabelOf : undefined}
             client={client}
             connected={connected}
             agentOnline={agentOnline}
@@ -851,7 +862,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
       {detailSession && (
         <SessionDetailView
           session={detailSession}
-          sessions={mergedSessions}
+          // 详情页解析子代理/父会话都按 id 找,所以只给它**这条会话所属那一台**的
+          // 列表 —— 混进别台的会话只会让它按同名 id 找到一条自己拉不动的记录。
+          sessions={mergedSessions.filter((s) => s.deviceId === detailSession.deviceId)}
           client={transportFor(detailSession.deviceId)}
           onBack={() => setDetailStack((s) => s.slice(0, -1))}
           onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
@@ -900,7 +913,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <>
           <HistoryLayer onBack={() => setShowPlans(false)} />
           <PlansView
-            sessions={mergedSessions}
+            sessions={scopedSessions}
             client={client}
             onBack={() => setShowPlans(false)}
           />
@@ -932,7 +945,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         <>
           <HistoryLayer onBack={() => setShowNewSession(false)} />
           <NewSessionSheet
-            sessions={mergedSessions}
+            // 新会话开在**当前作用域**那一台上,所以最近 workspace 也只取它的。
+            sessions={scopedSessions}
             client={client}
             initialFiles={sharedFiles}
             relayReady={connected}
