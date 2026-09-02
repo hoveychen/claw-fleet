@@ -4,18 +4,20 @@ import { HistoryLayer } from "../useNavStack";
 import { DecisionsView, KIND_LABEL } from "./DecisionsView";
 import { t } from "../i18n";
 import type { FleetTransport } from "../transport";
+import type { WithDevice } from "../deviceRuntime";
 import type { PendingDecision, SessionInfo } from "../types";
 import styles from "./DecisionDrawer.module.css";
 
 interface Props {
-  decisions: PendingDecision[];
-  client: FleetTransport | null;
+  decisions: Array<WithDevice<PendingDecision>>;
+  transportFor: (deviceId: string) => FleetTransport | null;
   connected: boolean;
   agentOnline: boolean;
   decisionsLoaded: boolean;
-  workspaceOf: (sessionId: string) => SessionInfo | undefined;
-  onAnswered: (id: string) => void;
-  onOpenSession: (sessionId: string) => void;
+  workspaceOf: (deviceId: string, sessionId: string) => SessionInfo | undefined;
+  onAnswered: (deviceId: string, id: string) => void;
+  onOpenSession: (deviceId: string, sessionId: string) => void;
+  deviceLabelOf: (deviceId: string) => string | null;
 }
 
 /** Global decision surface that floats above whatever page the boss is on (a
@@ -28,7 +30,7 @@ interface Props {
  *  card arrives (no screen hijack while reading); tapping expands it into a
  *  bottom sheet whose body reuses the same DecisionsView the 决策 tab renders. */
 export function DecisionDrawer(props: Props) {
-  const { decisions, workspaceOf, onOpenSession } = props;
+  const { decisions, workspaceOf, onOpenSession, deviceLabelOf } = props;
   const [expanded, setExpanded] = useState(false);
   const count = decisions.length;
 
@@ -40,17 +42,20 @@ export function DecisionDrawer(props: Props) {
   );
   const frontWs = front
     ? front.request.workspaceName ||
-      workspaceOf(front.request.sessionId)?.workspaceName ||
+      workspaceOf(front.deviceId, front.request.sessionId)?.workspaceName ||
       "Fleet"
     : "";
+  // 折叠态那一行也要说清「这张卡在哪台机器上」——不然两台同时有卡时,peek 条
+  // 说的是哪一台全靠猜。
+  const frontDevice = front ? deviceLabelOf(front.deviceId) : null;
   const frontKind = front ? t(KIND_LABEL[front.kind] ?? front.kind) : "";
 
   // Opening a session from a card must not bury the session detail (z-index 30)
   // under the drawer (z-index 45) — collapse to the peek first so the detail
   // shows with just the low-profile bar above it.
-  const openSession = (id: string) => {
+  const openSession = (deviceId: string, id: string) => {
     setExpanded(false);
-    onOpenSession(id);
+    onOpenSession(deviceId, id);
   };
 
   if (expanded) {
@@ -102,6 +107,7 @@ export function DecisionDrawer(props: Props) {
       <span className={styles.peekMain}>
         <span className={styles.peekKind}>{frontKind}</span>
         {frontWs && <span className={styles.peekWs}>{frontWs}</span>}
+        {frontDevice && <span className={styles.peekDevice}>{frontDevice}</span>}
       </span>
       {count > 1 && <span className={styles.peekCount}>{t("共 {0} 张", count)}</span>}
       <ChevronUp size={18} className={styles.peekChevron} />
