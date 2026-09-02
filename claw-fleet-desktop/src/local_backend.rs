@@ -3938,6 +3938,7 @@ mod tests {
             todos: None,
             background_tasks: Vec::new(),
             watches: Vec::new(),
+            remote_disconnect: None,
             task_plan: None,
             handoff: None,
             user_mark: None,

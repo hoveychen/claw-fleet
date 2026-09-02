@@ -579,6 +579,7 @@ mod tests {
             compact_cost_usd: 0.0,
             pending_messages: Vec::new(),
             watches: Vec::new(),
+            remote_disconnect: None,
         }
     }
 

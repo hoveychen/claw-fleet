@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, Server } from "lucide-react";
+import { Play, Server, ServerOff } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
@@ -170,6 +170,39 @@ export function ServerErrorControls({ session }: { session: SessionInfo }) {
         </button>
       )}
     </>
+  );
+}
+
+// ── Remote-disconnect notice ────────────────────────────────────────────────
+
+/**
+ * A session whose remote workspace lost its ssh tunnel mid-run does not fail —
+ * it goes quiet. Fleet kills the agent on purpose (left running it would see the
+ * empty local mirror and could conclude the repo was deleted), and the transcript
+ * simply stops, with no error in it to explain why. This chip is the only place
+ * that says what happened.
+ *
+ * `agentStopped === false` is the dangerous case and gets its own wording: the
+ * kill failed, so the agent may still be working against that empty directory.
+ * Rendered on BOTH of SessionCard's header paths — see the badge test.
+ */
+export function RemoteDisconnectNotice({ session }: { session: SessionInfo }) {
+  const { t } = useTranslation();
+  const info = session.remoteDisconnect;
+  if (!info) return null;
+  const host = info.hostLabel || t("remoteDisconnect.host_fallback");
+  const stopped = info.agentStopped;
+  return (
+    <span
+      className={`${styles.remote_disconnect} ${stopped ? "" : styles.remote_disconnect_unstopped}`}
+      title={t(stopped ? "remoteDisconnect.tip" : "remoteDisconnect.tip_not_stopped", {
+        host,
+        detail: info.detail,
+      })}
+    >
+      <ServerOff size={10} strokeWidth={1.9} />
+      {t(stopped ? "remoteDisconnect.badge" : "remoteDisconnect.badge_not_stopped")}
+    </span>
   );
 }
 
@@ -519,6 +552,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             </span>
           )}
           <span className={styles.gm_spacer} />
+          <RemoteDisconnectNotice session={session} />
           <RateLimitControls session={session} />
           <ServerErrorControls session={session} />
         </div>
@@ -538,6 +572,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
               </span>
             )}
             {!hideHeader && <StatusBadge status={session.status} />}
+            {!hideHeader && <RemoteDisconnectNotice session={session} />}
             {!hideHeader && <RateLimitControls session={session} />}
             {!hideHeader && <ServerErrorControls session={session} />}
           </div>

@@ -15,9 +15,17 @@ export type NestedKind = "bash-c" | "sh-c" | "zsh-c" | "python-c" | "node-e" | "
 
 export type Connector = "and" | "or" | "pipe" | "semi";
 
-export type SessionStatus = "thinking" | "executing" | "streaming" | "delegating" | "processing" | "waitingInput" | "active" | "idle" | "rateLimited" | "serverErrored" | "stuck";
+export type SessionStatus = "thinking" | "executing" | "streaming" | "delegating" | "processing" | "waitingInput" | "active" | "idle" | "rateLimited" | "serverErrored" | "remoteDisconnected" | "stuck";
 
 export type RateLimitState = { resetsAt: string, limitType: RateLimitType, parsed: boolean, errorTimestamp: string, };
+
+export type RemoteDisconnect = { 
+code: string, 
+detail: string, 
+workspacePath: string, 
+hostLabel?: string | null, 
+detectedAtMs: number, 
+agentStopped: boolean, };
 
 export type SessionInfo = { id: string, workspacePath: string, workspaceName: string, ideName: string | null, 
 entrypoint: string | null, isSubagent: boolean, 
@@ -49,7 +57,8 @@ compactPreTokens: number,
 compactPostTokens: number, 
 compactCostUsd: number, 
 pendingMessages: Array<string>, 
-watches?: Array<WatchSummary>, };
+watches?: Array<WatchSummary>, 
+remoteDisconnect?: RemoteDisconnect | null, };
 
 export type SessionMark = "pending" | "done";
 

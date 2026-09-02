@@ -119,6 +119,7 @@ pub mod prd_discipline;
 pub mod prd_tasks;
 pub mod task_progress;
 pub mod rate_limit_parser;
+pub mod remote_disconnect;
 pub mod remote_host;
 pub mod remote_workspace;
 pub mod scan_cache_disk;

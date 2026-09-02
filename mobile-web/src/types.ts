@@ -22,6 +22,7 @@ import type {
   TaskPlanSummary,
   SessionHandoffInfo,
   WatchSummary,
+  RemoteDisconnect,
   GuardRequest,
   ElicitationRequest,
   FleetAskRequest,
@@ -137,6 +138,11 @@ export interface SessionInfo {
    *  each watch's poll count and start time. Absent when it has none. Mirrors the
    *  desktop watch chip. */
   watches?: WatchSummary[];
+  /** Why a remote session stopped: its rca-over-ssh transport died and Fleet
+   *  killed the agent. Absent for every local session and every healthy remote
+   *  one. `status` alone would say `remoteDisconnected` without naming the host
+   *  or the cause. */
+  remoteDisconnect?: RemoteDisconnect | null;
 }
 
 /** Codex has no `CLAUDE_CODE_ENTRYPOINT`; the Codex scanner surfaces the rollout

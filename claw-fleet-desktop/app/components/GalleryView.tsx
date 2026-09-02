@@ -17,8 +17,12 @@ import sessionStyles from "./SessionCard.module.css";
 // distinct look via RateLimitControls (countdown + resume), and SessionCard's
 // own isActive (live-process pulse / stop button) deliberately excludes it.
 // "serverErrored" is the same shape: unfinished work being auto-retried.
+// "remoteDisconnected" is unfinished work that will NOT resume on its own — all
+// the more reason to keep it in the default view. Letting it drop into the
+// "show all" tail would recreate the exact failure this state exists to fix:
+// a remote session that died and never told anyone.
 const ACTIVE_STATUSES: SessionStatus[] = [
-  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating", "rateLimited", "serverErrored",
+  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating", "rateLimited", "serverErrored", "remoteDisconnected",
 ];
 
 function isActive(s: SessionInfo) {
