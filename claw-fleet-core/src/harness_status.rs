@@ -89,6 +89,12 @@ fn probe_claude() -> HarnessStatus {
 
     let (logged_in, auth_detail) = match crate::account::read_keychain_credentials() {
         Ok((_token, subscription)) => (Some(true), Some(subscription)),
+        // The wizard's setup-token flow stores a long-lived token under
+        // ~/.fleet and injects it at spawn time — that IS a working login for
+        // Fleet-driven sessions, so report it as one.
+        Err(_) if crate::harness_login::stored_claude_token().is_some() => {
+            (Some(true), Some("fleet-token".to_string()))
+        }
         Err(_) => (Some(false), None),
     };
 
