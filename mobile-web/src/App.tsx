@@ -145,8 +145,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     // PWA 是被一个带 `#k=…` 的 URL 打开的 —— 那就是一次配对。
     const scanned = consumeHashSecret();
     if (!scanned) return stored;
-    return adoptScannedDevice(stored, scanned.secret, newDeviceMint(stored), scanned.relayBase)
-      .book;
+    return adoptScannedDevice(stored, scanned.secret, newDeviceMint(stored), scanned.relayBase, {
+      // 壳的启动重注不抢焦点:用户切过去的那一台不该每次重开 app 就被打回原形。
+      focus: !scanned.boot,
+    }).book;
   });
   // 当前作用域设备的密钥。`?mock` stands in for a pairing secret so the gate
   // below opens and the effect that builds the client runs — it just builds a

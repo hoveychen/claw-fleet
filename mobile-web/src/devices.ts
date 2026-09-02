@@ -291,14 +291,21 @@ export function adoptScannedDevice(
   secret: string,
   mint: DeviceMint,
   relayBase?: string | null,
+  opts?: { focus?: boolean },
 ): { book: DeviceBook; device: PairedDevice; added: boolean } {
-  const { book: next, device, deduped } = addDevice(book, {
+  const { book: added, device, deduped } = addDevice(book, {
     secret,
     relayBase,
     id: mint.id,
     label: mint.label,
     now: mint.now,
   });
+  // 原生壳每次启动都把它存的那份配对重新注入一遍(见 mobile-harmony 的
+  // WebShell.ets)。那不是一次「扫码」,所以不该把焦点抢回那一台 —— 否则用户在
+  // 设备列表里切过去的那一台,每次重开 app 都被打回原形。壳用 `&boot=1` 说明
+  // 这是启动重注,而不是刚扫的码。
+  const keepFocus = opts?.focus === false && deduped;
+  const next = keepFocus ? { ...added, activeId: book.activeId ?? added.activeId } : added;
   persistBook(next);
   return { book: next, device, added: !deduped };
 }
@@ -314,13 +321,19 @@ export function adoptScannedDevice(
  *  relay 上,而 fragment 马上就要被抹掉,所以必须在这里一次读完,不能留给后面
  *  某个模块再去读一遍(那正是 relay.ts 从前那个模块加载期 `RELAY_BASE` 常量
  *  存在的理由)。 */
-export function consumeHashSecret(): { secret: string; relayBase: string | null } | null {
+export function consumeHashSecret(): {
+  secret: string;
+  relayBase: string | null;
+  /** 这次注入是原生壳的**启动重注**,不是用户刚扫的码(`&boot=1`)。 */
+  boot: boolean;
+} | null {
   const hash = window.location.hash;
   const secret = extractSecretFromUrl(hash);
   if (!secret) return null;
   const relayBase = parseRelayParam(hash);
+  const boot = /[#&]boot=1\b/.test(hash);
   history.replaceState(null, "", window.location.pathname);
-  return { secret, relayBase };
+  return { secret, relayBase, boot };
 }
 
 // ── 待办退订 ─────────────────────────────────────────────────────────────────

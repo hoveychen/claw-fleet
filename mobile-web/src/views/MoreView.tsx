@@ -11,6 +11,7 @@ import {
   Gauge,
   ListTree,
   Package,
+  QrCode,
 } from "lucide-react";
 import { useDraft } from "../draft";
 import { dateLocale, useI18n, type Lang } from "../i18n";
@@ -18,6 +19,7 @@ import type { RttSplit } from "../connQuality";
 import type { SnapshotSource } from "../snapshotSources";
 import type { PushState } from "../push";
 import type { PairedDevice } from "../devices";
+import { canScanPairing, scanPairing } from "../nativeScan";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
 import styles from "./MoreView.module.css";
@@ -535,8 +537,29 @@ export function MoreView({
               </div>
             ))}
           </div>
+          {/* 原生壳里没有「打开一个带密钥的网址」这条路(它从 rawfile 启动,
+              地址栏不存在),而壳自己的配对页只在尚未配对时可达 —— 于是装了 app
+              的用户加不了第二台机器。这一行把壳的扫码能力接出来。 */}
+          {canScanPairing() && (
+            <div className={styles.card} style={{ marginTop: 8 }}>
+              <button className={styles.navRow} onClick={scanPairing}>
+                <span className={styles.navIcon}>
+                  <QrCode size={18} />
+                </span>
+                <span className={styles.navText}>
+                  <span className={styles.navLabel}>{t("扫码添加设备")}</span>
+                  <span className={styles.navSub}>
+                    {t("扫另一台桌面端「移动端」面板里的二维码")}
+                  </span>
+                </span>
+                <ChevronRight size={16} className={styles.navChevron} />
+              </button>
+            </div>
+          )}
           <div className={styles.rowNote}>
-            {t("在另一台桌面端 Fleet 的「移动端」板块扫码，即可把它一并加进这个列表。")}
+            {canScanPairing()
+              ? t("每台桌面端各出一张码;扫过的会留在上面这个列表里。")
+              : t("在另一台桌面端 Fleet 的「移动端」板块扫码，即可把它一并加进这个列表。")}
           </div>
         </div>
       )}
