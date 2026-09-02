@@ -446,12 +446,18 @@ pub fn spawn_claude_detached_with_envs(
     // (bg_guard stopped blocking on them for the same reason; see its module
     // docs for the isolation experiment). `extra_envs` below can still override.
     cmd.env("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0");
-    // Environment-wizard login fallback: when the CLI has no credential of its
-    // own (keychain / ~/.claude/.credentials.json), inject the long-lived
-    // token captured by `claude setup-token` (see `harness_login`). Gated on
-    // the keychain read failing so a later proper `/login` always wins, and
-    // set before `extra_envs` so an explicit caller override still wins.
-    if crate::account::read_keychain_credentials().is_err() {
+    // Environment-wizard login fallback: inject the long-lived token captured
+    // by `claude setup-token` (see `harness_login`) when the claude that will
+    // actually run has no credential of its own:
+    // - local spawn → gated on the local keychain read failing, so a proper
+    //   `/login` always wins;
+    // - rca-wrapped spawn → always injected when a token is stored, because
+    //   rca forwards this process's env verbatim to the remote child
+    //   (SpawnRequest.Env, remote-adapter executor/exec.go) while the remote
+    //   host has no access to the local keychain.
+    // Set before `extra_envs` so an explicit caller override still wins.
+    let claude_runs_remotely = rca_wrap.is_some();
+    if claude_runs_remotely || crate::account::read_keychain_credentials().is_err() {
         if let Some(token) = crate::harness_login::stored_claude_token() {
             cmd.env("CLAUDE_CODE_OAUTH_TOKEN", token);
         }

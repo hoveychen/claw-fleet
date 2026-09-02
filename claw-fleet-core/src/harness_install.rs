@@ -32,7 +32,7 @@ const DSH_NPM_PACKAGE: &str = "@deepseek-ai/dsh";
 
 /// Network installs legitimately run minutes (npm's dsh tree is ~300 MB); this
 /// bounds a wedged installer, not a slow one.
-const INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// How many trailing output lines to keep for the error report when an
 /// installer fails.
@@ -208,7 +208,7 @@ pub fn install_harness(
 /// Run an [`InstallPlan`], forwarding stdout+stderr lines to `progress` as
 /// they arrive and keeping a tail for the failure report. Kills the child on
 /// timeout (same pid-kill as the version probe / llm_provider runners).
-fn run_streaming(
+pub fn run_streaming(
     plan: &InstallPlan,
     timeout: Duration,
     progress: &(dyn Fn(&str) + Sync),
@@ -294,6 +294,38 @@ fn run_streaming(
         ));
     }
     Ok(())
+}
+
+// ── Remote (ssh) install script ──────────────────────────────────────────────
+
+/// PATH prefix for remote scripts: a non-interactive `ssh host '<script>'`
+/// runs no login shell, so user-space install locations must be added by hand.
+const REMOTE_PATH_PREFIX: &str = r#"export PATH="$HOME/.local/bin:$HOME/.fleet/node/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; "#;
+
+/// Exit code the dsh script uses for "no npm on the remote host", so the
+/// caller can map it to the structured `NodeMissing` instead of tail-grepping.
+pub const REMOTE_NODE_MISSING_EXIT: i32 = 42;
+
+/// The official-installer invocation as a single sh script, for running on a
+/// remote unix host over ssh (`rca` workspace hosts are unix-only, same as the
+/// rca release-slug table). Same vendors' commands as [`install_plan`]; the
+/// Windows `irm|iex` variant has no ssh story and is out of scope here.
+pub fn install_shell_script(source: &str) -> Result<String, InstallError> {
+    match source {
+        "claude-code" => Ok(format!(
+            "{REMOTE_PATH_PREFIX}curl -fsSL '{CLAUDE_INSTALL_SH}' | bash"
+        )),
+        "codex" => Ok(format!(
+            "{REMOTE_PATH_PREFIX}curl -fsSL '{CODEX_INSTALL_SH}' | CODEX_NON_INTERACTIVE=1 sh"
+        )),
+        "dsh" => Ok(format!(
+            "{REMOTE_PATH_PREFIX}command -v npm >/dev/null 2>&1 || {{ echo 'npm not found on the remote host - install Node.js there first' >&2; exit {REMOTE_NODE_MISSING_EXIT}; }}; npm install -g {DSH_NPM_PACKAGE}"
+        )),
+        other => Err(InstallError::new(
+            InstallErrorCode::UnsupportedSource,
+            format!("unknown harness source '{other}'"),
+        )),
+    }
 }
 
 // ── Update actions ────────────────────────────────────────────────────────────

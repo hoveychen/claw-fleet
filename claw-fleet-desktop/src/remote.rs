@@ -2366,6 +2366,101 @@ pub async fn update_rca_remote(
         .map_err(|e| format!("update task join failed: {e}"))?
 }
 
+// ── Harness environment on remote workspace hosts (wizard phase 2) ───────────
+
+/// Resolve a registered remote workspace's ssh target by workspace path.
+/// Pairing-code (libp2p) entries carry no ssh route, so harness actions on
+/// them are a structured refusal rather than a hang.
+pub(crate) fn ssh_target_for_workspace(path: &str) -> Result<String, String> {
+    let entry = claw_fleet_core::remote_workspace::find_for_path(path)
+        .ok_or("no remote workspace is registered at this path")?;
+    entry
+        .ssh_target
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            "this remote workspace uses the pairing-code transport — harness actions need an ssh entry".to_string()
+        })
+}
+
+/// Probe claude/codex/dsh on a remote workspace's host (one ssh round trip).
+#[tauri::command]
+pub async fn remote_workspace_harness_statuses(
+    path: String,
+) -> Result<Vec<claw_fleet_core::harness_status::HarnessStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let ssh_target = ssh_target_for_workspace(&path)?;
+        claw_fleet_core::remote_host::remote_harness_statuses(&ssh_target)
+    })
+    .await
+    .map_err(|e| format!("probe task join failed: {e}"))?
+}
+
+/// Install a harness on a remote workspace's host via its official installer
+/// over ssh, streaming output on `harness-install-progress` with source
+/// `remote:<path>:<source>`. Returns the host's fresh statuses (post-install
+/// probe is the success criterion, same as locally).
+#[tauri::command]
+pub async fn install_harness_remote(
+    path: String,
+    source: String,
+    app: AppHandle,
+) -> Result<Vec<claw_fleet_core::harness_status::HarnessStatus>, claw_fleet_core::harness_install::InstallError>
+{
+    use claw_fleet_core::harness_install::{InstallError, InstallErrorCode, REMOTE_NODE_MISSING_EXIT};
+    tauri::async_runtime::spawn_blocking(move || {
+        let structured = |code: InstallErrorCode, message: String| InstallError { code, message };
+        let ssh_target = ssh_target_for_workspace(&path)
+            .map_err(|e| structured(InstallErrorCode::SpawnFailed, e))?;
+        let plan = claw_fleet_core::remote_host::ssh_harness_install_plan(&ssh_target, &source)
+            .map_err(|e| structured(InstallErrorCode::SpawnFailed, e))?;
+
+        let progress_key = format!("remote:{path}:{source}");
+        let emitter = app.clone();
+        let progress = move |line: &str| {
+            let _ = emitter.emit(
+                "harness-install-progress",
+                crate::gui::HarnessInstallProgress::new(progress_key.clone(), line.to_string()),
+            );
+        };
+        progress(&format!("$ ssh {ssh_target} <official installer>"));
+        claw_fleet_core::harness_install::run_streaming(
+            &plan,
+            claw_fleet_core::harness_install::INSTALL_TIMEOUT,
+            &progress,
+        )
+        .map_err(|e| {
+            // The dsh remote script exits 42 for "no npm" — surface it as the
+            // same structured NodeMissing the local path uses.
+            if e.message.contains(&format!("exit status: {REMOTE_NODE_MISSING_EXIT}"))
+                || e.message.contains("npm not found on the remote host")
+            {
+                structured(InstallErrorCode::NodeMissing, e.message)
+            } else {
+                e
+            }
+        })?;
+
+        progress("verifying installation on the remote host…");
+        let statuses = claw_fleet_core::remote_host::remote_harness_statuses(&ssh_target)
+            .map_err(|e| structured(InstallErrorCode::VerifyFailed, e))?;
+        let installed = statuses.iter().any(|s| s.source == source && s.installed);
+        if !installed {
+            return Err(structured(
+                InstallErrorCode::VerifyFailed,
+                format!("installer finished but no runnable {source} was found on the remote host"),
+            ));
+        }
+        progress("remote install verified.");
+        Ok(statuses)
+    })
+    .await
+    .map_err(|e| InstallError {
+        code: InstallErrorCode::SpawnFailed,
+        message: format!("install task join failed: {e}"),
+    })?
+}
+
 // ── SSH helpers ───────────────────────────────────────────────────────────────
 
 /// Apply the real HOME environment to an SSH/SCP `Command` so that the child

@@ -307,7 +307,7 @@ fn probe_version(bin: &str) -> Option<String> {
 /// shapes: `2.1.246 (Claude Code)`, `codex-cli 0.148.0`, `0.1.1-rc.2` — the
 /// first whitespace-separated token that starts with a digit and contains a
 /// dot.
-fn parse_version_token(output: &str) -> Option<String> {
+pub(crate) fn parse_version_token(output: &str) -> Option<String> {
     output
         .lines()
         .find(|l| !l.trim().is_empty())?

@@ -252,6 +252,12 @@ const KNOWN_WEB_GAPS = [
   "dsh_credential_refs",
   "dsh_credentials_describe",
   "dsh_credentials_set",
+  // Phase-2 remote actions: ssh from the machine running the desktop app —
+  // same "the machine that matters is not a tab" shape as install_rca_remote.
+  "remote_workspace_harness_statuses",
+  "install_harness_remote",
+  "remote_codex_login_start",
+  "remote_codex_login_poll",
 ];
 
 /**
