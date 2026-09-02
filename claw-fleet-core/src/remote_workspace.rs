@@ -251,9 +251,9 @@ impl RemoteWorkspace {
         if let Some(id) = self.host_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             let host = crate::remote_host::find_host(id).ok_or_else(|| {
                 format!(
-                    "remote workspace {} points at ssh host {id}, which is no longer in the host \
-                     book — re-register the workspace against an existing host",
-                    self.path
+                    "{}: the host this workspace runs on ({id}) has been removed — pick it again \
+                     from a host that still exists, or re-add that host in Settings",
+                    codes::HOST_GONE
                 )
             })?;
             let target = crate::remote_host::ssh_target_for(&host)?;
@@ -295,11 +295,11 @@ impl RemoteWorkspace {
                  transport"
                     .to_string(),
             ),
-            (None, None) => Err(
-                "a remote workspace needs either a pairing code (libp2p) or an ssh target \
-                 (stdio-over-ssh)"
-                    .to_string(),
-            ),
+            (None, None) => Err(format!(
+                "{}: this remote workspace has no host to run on — register it again from the \
+                 new-session composer",
+                codes::NO_TRANSPORT
+            )),
         }
     }
 }
@@ -370,7 +370,11 @@ fn resolve_rca_binary(entry: &RemoteWorkspace, cfg: &RemoteWorkspacesConfig) -> 
             if Path::new(p).is_file() {
                 return Ok(p.clone());
             }
-            return Err(format!("{source} points to {p}, which does not exist"));
+            return Err(format!(
+                "{}: the configured rca path ({source}) points at {p}, which does not exist — \
+                 clear the override, or re-run the host's rca install from Settings",
+                codes::BAD_RCA_OVERRIDE
+            ));
         }
     }
     if let Some(bin) = crate::fleet_cli::fleet_bin_dir().map(|d| d.join("rca")) {
@@ -379,9 +383,14 @@ fn resolve_rca_binary(entry: &RemoteWorkspace, cfg: &RemoteWorkspacesConfig) -> 
         }
     }
     crate::process_util::which("rca").ok_or_else(|| {
-        "rca binary not found — install it on PATH or into ~/.fleet/bin, or set rcaPath in \
-         ~/.fleet/remote-workspaces.json"
-            .to_string()
+        // The installer puts rca on this machine too, so by the time a user
+        // meets this the actionable step is "run it again", not "go and edit
+        // a JSON file by hand".
+        format!(
+            "{}: rca is not installed on this machine, so a remote workspace cannot start — \
+             open Settings and install rca for this host again",
+            codes::NO_LOCAL_RCA
+        )
     })
 }
 
@@ -520,6 +529,26 @@ fn verify_local_rca_stdio(rca_path: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Stable machine-readable prefixes on the errors a *session launch* can fail
+/// with, so the UI can render them in the user's language instead of pasting an
+/// English sentence written for a developer.
+///
+/// Only launch-path failures carry a code: those are the ones a user meets
+/// without having asked for anything technical (they pressed "start session").
+/// Validation errors raised while registering are already next to the field
+/// that caused them. The prose after the code stays meaningful on its own —
+/// anything that does not recognise the code shows the sentence unchanged.
+pub mod codes {
+    /// No rca on this machine at all.
+    pub const NO_LOCAL_RCA: &str = "rca:no-local-rca";
+    /// A configured `rcaPath` override points at a file that is not there.
+    pub const BAD_RCA_OVERRIDE: &str = "rca:bad-rca-override";
+    /// The entry's `hostId` names a host that has been deleted.
+    pub const HOST_GONE: &str = "rca:host-gone";
+    /// The entry has no usable transport (neither host/ssh target nor code).
+    pub const NO_TRANSPORT: &str = "rca:no-transport";
 }
 
 /// Create the local mirror directory when `path` is (under) a registered
@@ -941,7 +970,9 @@ mod tests {
         crate::remote_host::save_hosts(&[]).unwrap();
 
         let err = wrap_launch(&ws, "claude", &[]).unwrap_err();
-        assert!(err.contains("no longer in the host book"), "{err}");
+        // Assert the CODE, not the prose: the sentence is meant to be reworded
+        // (and localised in the UI), the code is the contract.
+        assert!(err.contains(codes::HOST_GONE), "{err}");
     }
 
     /// The remote rca path now lives on the host record, so one install serves

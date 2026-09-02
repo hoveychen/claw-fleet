@@ -2488,5 +2488,11 @@
   "session": {
     "remote_on_host": "文件读写在 {{host}} 上执行（rca）",
     "remote_short": "远端"
+  },
+  "rca_error": {
+    "no_local_rca": "这台机器上没装 rca，远端 workspace 起不来。去设置里给这台主机重新装一次 rca。",
+    "bad_rca_override": "配置里指定的 rca 路径指向一个不存在的文件。清掉这个覆盖，或在设置里重新安装。",
+    "host_gone": "这个 workspace 所在的主机已被移除。在新建会话里重新挑一台还在的主机，或到设置里把那台主机加回来。",
+    "no_transport": "这个远端 workspace 没有可运行的主机。在新建会话里重新注册一次。"
   }
 }
