@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRenderItems,
+  workspaceFilterValue,
   groupOpenReadTargets,
   matchesWorkspaceFilter,
   statusTone,
@@ -218,5 +219,32 @@ describe("device tag survives grouping", () => {
     }
     // React key 也必须分家,否则两组共用一个 key。
     expect(items[0].key).not.toBe(items[1].key);
+  });
+});
+
+// 两台机器上同路径的 /repos/foo 是两个不同的仓库。目录筛选若只按路径匹配，
+// 选中一个就会把另一台同名目录的会话也筛进来 —— 列表看着对，点进去却是另一台
+// 的会话。
+describe("workspace filter across devices", () => {
+  const row = (deviceId: string, workspacePath: string) =>
+    ({ id: "s", deviceId, workspacePath, workspaceName: "foo", status: "idle" }) as unknown as
+      SessionInfo & { deviceId: string };
+
+  it("scopes the filter value by device when several are paired", () => {
+    expect(workspaceFilterValue("dev-a", "/repos/foo", true)).toBe("dev-a::/repos/foo");
+    // 单设备保持原样：老草稿里存的是裸路径，值一变筛选就会静默失效。
+    expect(workspaceFilterValue("dev-a", "/repos/foo", false)).toBe("/repos/foo");
+  });
+
+  it("does not let one device's folder pick in the other device's sessions", () => {
+    const filter = workspaceFilterValue("dev-a", "/repos/foo", true);
+    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), filter, null, false)).toBe(true);
+    expect(matchesWorkspaceFilter(row("dev-b", "/repos/foo"), filter, null, false)).toBe(false);
+  });
+
+  it("still matches by bare path for a single-device filter value", () => {
+    expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), "/repos/foo", null, false)).toBe(
+      true,
+    );
   });
 });

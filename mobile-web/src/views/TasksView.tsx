@@ -6,6 +6,7 @@ import {
   Circle,
   Clock,
   Folder,
+  MonitorSmartphone,
   Inbox,
   Loader2,
   Radar,
@@ -154,14 +155,27 @@ const LEGACY_CHAT_HIDDEN = "no-chat";
  *  answers (or if it never does) — the toggle cannot be honoured without it, so
  *  it goes inert rather than showing an empty list. */
 export function matchesWorkspaceFilter(
-  s: SessionInfo,
+  s: SessionInfo & { deviceId?: string },
   filter: string,
   chatPath: string | null,
   chatOnly: boolean,
 ): boolean {
   if (chatPath != null && chatOnly) return s.workspacePath === chatPath;
   if (!filter) return true;
-  return s.workspacePath === filter;
+  // 多设备时筛选值是 `<deviceId>::<workspacePath>`:两台机器上同路径的
+  // `/repos/foo` 是两个不同的仓库,合到一个选项里筛出来的列表是混的。
+  const sep = filter.indexOf("::");
+  if (sep < 0) return s.workspacePath === filter;
+  return s.deviceId === filter.slice(0, sep) && s.workspacePath === filter.slice(sep + 2);
+}
+
+/** 目录筛选项的值。单设备时就是路径本身(与从前一致,老的草稿值继续有效)。 */
+export function workspaceFilterValue(
+  deviceId: string | undefined,
+  workspacePath: string,
+  multiDevice: boolean,
+): string {
+  return multiDevice && deviceId ? `${deviceId}::${workspacePath}` : workspacePath;
 }
 
 /** FTS5 snippets arrive with literal `<mark>…</mark>` markers (see the desktop
@@ -292,12 +306,16 @@ interface Props {
   sessionsLoaded: boolean;
   onOpenSession: (session: WithDevice<SessionInfo>) => void;
   onMarkRead: (sessions: Array<WithDevice<SessionInfo>>) => void;
+  /** 这台设备的显示名。整个 prop 缺席 = 只配了一台,徽标与「设备 · 目录」的
+   *  筛选项都不出现 —— 单设备用户不该为多设备付出任何一处视觉噪音。 */
+  deviceLabelOf?: (deviceId: string) => string | null;
 }
 
 // 新会话入口由 App 底部导航中间的凸起按钮统一持有，任务页内不再重复放置。
 export function TasksView({
   sessions,
   client,
+  deviceLabelOf,
   connected,
   agentOnline,
   sessionsLoaded,
@@ -350,14 +368,17 @@ export function TasksView({
 
   // Chat is filtered through its own pinned options, so it is kept out of the
   // project list — otherwise it would sit there a second time as plain "Chat".
+  const multiDevice = deviceLabelOf !== undefined;
   const workspaces = useMemo(() => {
     const names = new Map<string, string>();
     for (const s of all) {
       if (s.workspacePath === chatPath) continue;
-      names.set(s.workspacePath, s.workspaceName);
+      const value = workspaceFilterValue(s.deviceId, s.workspacePath, multiDevice);
+      const device = deviceLabelOf?.(s.deviceId);
+      names.set(value, device ? `${device} · ${s.workspaceName}` : s.workspaceName);
     }
     return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [all, chatPath]);
+  }, [all, chatPath, multiDevice, deviceLabelOf]);
 
   // 迁移：聊天还是下拉里一条选项时存下来的值。"chat" 交给 toggle，"no-chat"
   // 已经没有对应项了（「全部目录」现在也含聊天），直接归零。要抢在下面那个孤
@@ -691,6 +712,14 @@ export function TasksView({
             <Folder size={11} />
             {s.workspaceName}
           </span>
+          {/* 合并列表里必须一眼看出这条会话在哪台机器上 —— 同名项目在两台机器
+              上很常见,而点进去拉的是那一台的 transcript。 */}
+          {deviceLabelOf?.(s.deviceId) && (
+            <span className={styles.device}>
+              <MonitorSmartphone size={11} />
+              {deviceLabelOf(s.deviceId)}
+            </span>
+          )}
           {s.handoff && (
             <span className={styles.handoff}>
               <Share2 size={11} />
