@@ -265,7 +265,10 @@ export class RelayClient implements FleetTransport {
       // don't hammer a weak link once per second (the old `wasAuthed ? 1000`
       // reset did exactly that on every auth→drop cycle).
       if (stableMs >= STABLE_CONNECTION_MS) this.reconnectDelay = 1000;
-      const delay = this.reconnectDelay;
+      // 抖动:多设备之后同一部手机上有 N 条这样的连接,网络恢复的那一刻它们会
+      // 同时醒来撞在一起(N 次握手挤在同一个 RTT 里,弱网上正好把它拖垮)。给每
+      // 次重连加最多 30% 的随机偏移,让它们自然错开;单设备时这点偏移无感。
+      const delay = this.reconnectDelay * (1 + Math.random() * 0.3);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
       window.setTimeout(() => void this.open(), delay);
     };
