@@ -41,7 +41,7 @@ import { randomId } from "./clientId";
 import { needsA2hsForDurableStorage } from "./secretStore";
 import {
   activeDevice,
-  addDevice,
+  adoptScannedDevice,
   clearBook,
   consumeHashSecret,
   emptyBook,
@@ -109,14 +109,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // 这回事，簿子留空，下面的 `secret` 直接给占位串。
   const [book, setBook] = useState<DeviceBook>(() => {
     if (MOCK || !NEEDS_PAIRING) return emptyBook();
-    let next = loadBookSync(newDeviceMint(emptyBook()));
+    const stored = loadBookSync(newDeviceMint(emptyBook()));
     // PWA 是被一个带 `#k=…` 的 URL 打开的 —— 那就是一次配对。
     const scanned = consumeHashSecret();
-    if (scanned) {
-      next = addDevice(next, { secret: scanned, ...newDeviceMint(next) }).book;
-      persistBook(next);
-    }
-    return next;
+    if (!scanned) return stored;
+    return adoptScannedDevice(stored, scanned, newDeviceMint(stored)).book;
   });
   // 当前作用域设备的密钥。`?mock` stands in for a pairing secret so the gate
   // below opens and the effect that builds the client runs — it just builds a
@@ -160,13 +157,9 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   // scanned pairing URL here instead. No-op in the browser/PWA.
   useEffect(() => {
     return onPairingLink((paired) => {
-      setBook((prev) => {
-        // 同一张码扫第二次不该多出一台（devices.ts::addDevice 按 secret 去重），
-        // 但仍然把焦点落到刚扫的那台 —— 用户刚扫完，想看的就是它。
-        const { book: next } = addDevice(prev, { secret: paired, ...newDeviceMint(prev) });
-        persistBook(next);
-        return next;
-      });
+      // 与 PWA 的 `#k=` 路径走同一个入口：去重、保留用户改过的名字、焦点落到
+      // 刚扫的那台，三条规则只有一份实现（devices.ts::adoptScannedDevice）。
+      setBook((prev) => adoptScannedDevice(prev, paired, newDeviceMint(prev)).book);
       setIdbProbed(true);
     });
   }, []);

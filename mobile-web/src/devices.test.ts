@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   addDevice,
   activeDevice,
+  adoptScannedDevice,
   bookFromLegacySecret,
   clearBook,
   emptyBook,
@@ -216,6 +217,44 @@ describe("loadBookSync", () => {
     localStorage.setItem("fleet-relay-secret", "stale-secret");
     persistBook(twoDevices());
     expect(loadBookSync(mint("dX")).devices.map((d) => d.secret)).toEqual([A, B]);
+  });
+});
+
+describe("adoptScannedDevice", () => {
+  it("persists the new device, so a reload keeps the pairing", () => {
+    const { book, added } = adoptScannedDevice(emptyBook(), A, mint("d1"));
+    expect(added).toBe(true);
+    expect(loadBookSync(mint("dX"))).toEqual(book);
+  });
+
+  it("re-scanning the same QR adds nothing but re-focuses that device", () => {
+    let book = adoptScannedDevice(emptyBook(), A, mint("d1")).book;
+    book = adoptScannedDevice(book, B, { id: "d2", label: "设备 2", now: 2 }).book;
+    expect(book.activeId).toBe("d2");
+    const again = adoptScannedDevice(book, A, { id: "d9", label: "设备 3", now: 3 });
+    expect(again.added).toBe(false);
+    expect(again.book.devices).toHaveLength(2);
+    expect(again.book.activeId).toBe("d1");
+  });
+
+  it("a re-scan keeps the name the user gave that device", () => {
+    let book = adoptScannedDevice(emptyBook(), A, mint("d1")).book;
+    book = renameDevice(book, "d1", "公司 Mac");
+    persistBook(book);
+    const again = adoptScannedDevice(book, A, { id: "d9", label: "设备 2", now: 9 });
+    expect(again.device.label).toBe("公司 Mac");
+    // …and the persisted copy carries the kept name too.
+    expect(loadBookSync(mint("dX")).devices[0].label).toBe("公司 Mac");
+  });
+
+  it("carries the relay the scan named", () => {
+    const { device } = adoptScannedDevice(
+      emptyBook(),
+      A,
+      mint("d1"),
+      "https://relay.example.com",
+    );
+    expect(device.relayBase).toBe("https://relay.example.com");
   });
 });
 
