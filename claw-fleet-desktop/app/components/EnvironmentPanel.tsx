@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useConnectionStore } from "../store";
 import { isWebBuild } from "../hostEnv";
+import type { RemoteWorkspacesConfig } from "../types";
 import { AgentSourceIcon } from "./SessionCard";
 import styles from "./EnvironmentPanel.module.css";
 
@@ -47,6 +48,19 @@ interface CodexLoginPoll {
   parse: { authUrl: string | null; success: boolean; portBusy: boolean };
   running: boolean;
   loggedIn: boolean;
+}
+
+interface RemoteCodexLoginPoll {
+  parse: { verifyUrl: string | null; userCode: string | null; success: boolean };
+  running: boolean;
+  loggedIn: boolean;
+}
+
+/** One rca workspace host's probe state in the 远端主机 section. */
+interface RemoteHostState {
+  statuses: HarnessStatus[] | null;
+  probing: boolean;
+  error: string | null;
 }
 
 const SOURCES = ["claude-code", "codex", "dsh"] as const;
@@ -116,6 +130,22 @@ export function EnvironmentPanel() {
   const [dshRef, setDshRef] = useState("");
   const [dshKey, setDshKey] = useState("");
   const [dshMsg, setDshMsg] = useState<string | null>(null);
+
+  // rca remote-workspace hosts (phase 2): probed lazily per host — each probe
+  // is an ssh round trip, so nothing fires until the user asks.
+  const [remoteHosts, setRemoteHosts] = useState<
+    Array<{ path: string; label: string; ssh: boolean }>
+  >([]);
+  const [hostState, setHostState] = useState<Record<string, RemoteHostState>>({});
+  const [remoteBusy, setRemoteBusy] = useState<Record<string, string | null>>({});
+  const [remoteCodexFlow, setRemoteCodexFlow] = useState<{
+    path: string;
+    procId: string;
+    url: string | null;
+    code: string | null;
+    done: boolean;
+    error: string | null;
+  } | null>(null);
 
   const probe = useCallback(async () => {
     setProbing(true);
@@ -381,6 +411,111 @@ export function EnvironmentPanel() {
     }
   }, [dshRef, dshKey, loadDshCreds, t]);
 
+  // ── rca remote-workspace hosts (phase 2) ────────────────────────────────────
+
+  useEffect(() => {
+    // The rca registry is this machine's; on a RemoteBackend connection the
+    // panel already shows that host's own environment instead.
+    if (isRemote) return;
+    invoke<RemoteWorkspacesConfig>("list_remote_workspaces")
+      .then((cfg) =>
+        setRemoteHosts(
+          (cfg.workspaces ?? []).map((w) => ({
+            path: w.path,
+            label: w.label || w.sshTarget || w.path,
+            ssh: !!w.sshTarget,
+          })),
+        ),
+      )
+      .catch(() => {});
+  }, [isRemote]);
+
+  const probeHost = useCallback(async (path: string) => {
+    setHostState((p) => ({ ...p, [path]: { statuses: null, probing: true, error: null } }));
+    try {
+      const statuses = await invoke<HarnessStatus[]>("remote_workspace_harness_statuses", { path });
+      setHostState((p) => ({ ...p, [path]: { statuses, probing: false, error: null } }));
+    } catch (e) {
+      setHostState((p) => ({ ...p, [path]: { statuses: null, probing: false, error: String(e) } }));
+    }
+  }, []);
+
+  const installRemote = useCallback(
+    async (path: string, source: string) => {
+      setRemoteBusy((p) => ({ ...p, [path]: source }));
+      const logKey = `remote:${path}:${source}`;
+      setLogs((p) => ({ ...p, [logKey]: [] }));
+      try {
+        const statuses = await invoke<HarnessStatus[]>("install_harness_remote", { path, source });
+        setHostState((p) => ({ ...p, [path]: { statuses, probing: false, error: null } }));
+      } catch (e) {
+        const msg = isInstallError(e) ? `${t(`env.err.${e.code}`, { defaultValue: e.code })}\n${e.message}` : String(e);
+        setHostState((p) => ({
+          ...p,
+          [path]: { statuses: p[path]?.statuses ?? null, probing: false, error: msg },
+        }));
+      } finally {
+        setRemoteBusy((p) => ({ ...p, [path]: null }));
+      }
+    },
+    [t],
+  );
+
+  const remoteCodexPollRef = useRef<number | null>(null);
+  const stopRemoteCodexPoll = useCallback(() => {
+    if (remoteCodexPollRef.current !== null) {
+      window.clearInterval(remoteCodexPollRef.current);
+      remoteCodexPollRef.current = null;
+    }
+  }, []);
+
+  const startRemoteCodexLogin = useCallback(
+    async (path: string) => {
+      try {
+        const procId = await invoke<string>("remote_codex_login_start", { path });
+        setRemoteCodexFlow({ path, procId, url: null, code: null, done: false, error: null });
+        stopRemoteCodexPoll();
+        remoteCodexPollRef.current = window.setInterval(async () => {
+          try {
+            const p = await invoke<RemoteCodexLoginPoll>("remote_codex_login_poll", {
+              id: procId,
+              path,
+            });
+            setRemoteCodexFlow((prev) =>
+              prev && prev.procId === procId
+                ? {
+                    ...prev,
+                    url: p.parse.verifyUrl ?? prev.url,
+                    code: p.parse.userCode ?? prev.code,
+                    done: p.loggedIn,
+                    error: !p.running && !p.loggedIn ? t("env.login_proc_exited") : prev.error,
+                  }
+                : prev,
+            );
+            if (p.loggedIn || !p.running) {
+              stopRemoteCodexPoll();
+              if (p.loggedIn) void probeHost(path);
+            }
+          } catch {
+            /* transient poll failure — next tick retries */
+          }
+        }, 1500);
+      } catch (e) {
+        setRemoteCodexFlow({ path, procId: "", url: null, code: null, done: false, error: String(e) });
+      }
+    },
+    [probeHost, stopRemoteCodexPoll, t],
+  );
+
+  const cancelRemoteCodexLogin = useCallback(async () => {
+    stopRemoteCodexPoll();
+    const id = remoteCodexFlow?.procId;
+    setRemoteCodexFlow(null);
+    if (id) await invoke("codex_login_cancel", { id }).catch(() => {});
+  }, [remoteCodexFlow, stopRemoteCodexPoll]);
+
+  useEffect(() => () => stopRemoteCodexPoll(), [stopRemoteCodexPoll]);
+
   // ── render helpers ──────────────────────────────────────────────────────────
 
   const channelLabel = (channel: string | null) =>
@@ -625,6 +760,100 @@ export function EnvironmentPanel() {
     );
   };
 
+  const renderRemoteHost = (host: { path: string; label: string; ssh: boolean }) => {
+    const st = hostState[host.path];
+    const busySource = remoteBusy[host.path];
+    const flow = remoteCodexFlow?.path === host.path ? remoteCodexFlow : null;
+    return (
+      <div key={host.path} className={styles.card}>
+        <div className={styles.card_head}>
+          <span className={styles.card_name}>{host.label}</span>
+          <span className={styles.path}>{host.path}</span>
+          {host.ssh ? (
+            <button
+              className={styles.action_btn}
+              disabled={st?.probing || actionsDisabled}
+              onClick={() => void probeHost(host.path)}
+            >
+              {st?.probing ? t("env.probing") : t("env.probe_host")}
+            </button>
+          ) : (
+            <span className={styles.muted}>{t("env.pairing_no_actions")}</span>
+          )}
+        </div>
+        {st?.error && <div className={styles.error}>{st.error}</div>}
+        {st?.statuses?.map((s) => {
+          const logKey = `remote:${host.path}:${s.source}`;
+          const log = logs[logKey] ?? [];
+          return (
+            <div key={s.source} className={styles.card_head}>
+              <AgentSourceIcon source={s.source} />
+              <span className={styles.card_name}>{SOURCE_NAMES[s.source] ?? s.source}</span>
+              {s.installed ? (
+                <span className={styles.badge_ok}>
+                  {t("env.installed")}
+                  {s.version ? ` v${s.version}` : ""}
+                </span>
+              ) : (
+                <span className={styles.badge_warn}>{t("env.not_installed")}</span>
+              )}
+              {s.source !== "dsh" &&
+                (s.loggedIn === true ? (
+                  <span className={styles.badge_ok}>{t("env.logged_in")}</span>
+                ) : s.loggedIn === false ? (
+                  <span className={styles.badge_warn}>{t("env.not_logged_in")}</span>
+                ) : (
+                  <span className={styles.muted}>{t("env.login_unknown")}</span>
+                ))}
+              {!s.installed && (
+                <button
+                  className={styles.action_btn}
+                  disabled={!!busySource || actionsDisabled}
+                  onClick={() => void installRemote(host.path, s.source)}
+                >
+                  {busySource === s.source ? t("env.installing") : t("env.install_btn")}
+                </button>
+              )}
+              {s.source === "codex" && s.installed && s.loggedIn === false && !flow && (
+                <button
+                  className={styles.action_btn}
+                  disabled={actionsDisabled}
+                  onClick={() => void startRemoteCodexLogin(host.path)}
+                >
+                  {t("env.login_btn")}
+                </button>
+              )}
+              {busySource === s.source && log.length > 0 && (
+                <pre className={styles.log}>{log.join("\n")}</pre>
+              )}
+            </div>
+          );
+        })}
+        {flow && (
+          <div className={styles.flow}>
+            {flow.done ? (
+              <div className={styles.flow_done}>{t("env.codex_login_done")}</div>
+            ) : (
+              <>
+                <div className={styles.flow_hint}>{t("env.remote_codex_device_hint")}</div>
+                {flow.code && <div className={styles.card_name}>{flow.code}</div>}
+                {flow.url && (
+                  <button className={styles.link_btn} onClick={() => void openExternal(flow.url!)}>
+                    {t("env.open_browser")}
+                  </button>
+                )}
+                {flow.error && <div className={styles.error}>{flow.error}</div>}
+                <button className={styles.link_btn} onClick={() => void cancelRemoteCodexLogin()}>
+                  {t("env.cancel")}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className={styles.root}>
       <div className={styles.head_row}>
@@ -641,6 +870,14 @@ export function EnvironmentPanel() {
           const s = statuses.find((x) => x.source === src);
           return s ? renderCard(s) : null;
         })
+      )}
+      {!isRemote && remoteHosts.length > 0 && (
+        <>
+          <div className={styles.head_row}>
+            <p className={styles.subtitle}>{t("env.remote_hosts")}</p>
+          </div>
+          {remoteHosts.map(renderRemoteHost)}
+        </>
       )}
     </div>
   );
