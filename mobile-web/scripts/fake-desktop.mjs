@@ -176,6 +176,12 @@ ws.addEventListener("message", (event) => {
   if (frame.type !== "msg") return;
   const payload = JSON.parse(open(frame.payload));
 
+  if (payload.event === "client_hello") {
+    console.log(
+      `[${label}] hello from ${payload.clientId?.slice(0, 8)} pushSubscribed=${payload.pushSubscribed}`,
+    );
+    return;
+  }
   if (payload.event === "req") {
     const { req_id, method, params = {} } = payload;
     console.log(`[${label}] req ${method} ${JSON.stringify(params).slice(0, 140)}`);

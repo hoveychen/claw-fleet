@@ -87,6 +87,8 @@ const DICT: Record<string, string> = {
   // ── 设备簿（多设备配对）──
   "设备": "Device",
   改名: "Rename",
+  静音: "Mute",
+  开启通知: "Enable notifications",
   移除: "Remove",
   保存: "Save",
   "移除「{0}」？它的通知会停掉，本机为它缓存的任务与草稿一并清除。":
