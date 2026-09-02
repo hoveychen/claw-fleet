@@ -696,7 +696,9 @@ function TaskRow({
               >
                 {showAllRuns
                   ? t("schedule.runs_collapse", "收起")
-                  : t("schedule.runs_expand", `查看全部 ${runsNewestFirst.length} 次`)}
+                  : t("schedule.runs_expand", "查看全部 {{count}} 次", {
+                      count: runsNewestFirst.length,
+                    })}
               </button>
             )}
           </div>
