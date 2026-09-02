@@ -1016,7 +1016,11 @@
       "description": "Detected both Claude Code and Codex. Turn on to keep your two skill folders in sync automatically: a skill dropped into one is adopted and mirrored to the other, and a skill deleted from one is removed from both. Off by default because deletion propagates.",
       "toggle_hint": "Watches ~/.claude/skills and ~/.agents/skills. Deleting a skill from either side removes it from both."
     },
-    "copy_hint": "Click to copy"
+    "copy_hint": "Click to copy",
+    "env_setup": {
+      "title": "A few setup steps left",
+      "description": "Fleet can install and log in what’s missing for you — just use the buttons below, no terminal needed."
+    }
   },
   "mascot": {
     "panel_title": "Assistant",

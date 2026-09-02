@@ -1013,7 +1013,11 @@
       "description": "检测到你同时装了 Claude Code 与 Codex。打开后两个 skill 目录会自动保持同步：往一端丢新 skill 会自动收编并镜像到另一端，从一端删除会两端一起移除。因为删除会传播，默认关闭。",
       "toggle_hint": "监听 ~/.claude/skills 与 ~/.agents/skills。从任一端删除某个 skill 会两端同时移除。"
     },
-    "copy_hint": "点击复制"
+    "copy_hint": "点击复制",
+    "env_setup": {
+      "title": "环境还差几步",
+      "description": "Fleet 可以替你把缺的装好、登好——点下面的按钮即可,不用开终端。"
+    }
   },
   "mascot": {
     "panel_title": "小助手",
