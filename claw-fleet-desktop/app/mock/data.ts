@@ -622,6 +622,27 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
     model: "claude-sonnet-4-20250514",
   }),
 
+  // billing-service — the remote host went away mid-run. Fleet killed the agent
+  // on purpose; without a card that says so this looks exactly like a session
+  // that finished. Kept in the mock board so the state can be seen (and its
+  // layout checked) without unplugging a real ssh tunnel.
+  mkSession({
+    id: "sess-billing-remote-lost", workspaceName: "billing-service",
+    status: "remoteDisconnected",
+    aiTitle: "Usage-based billing — backfill on the GPU box",
+    lastMessagePreview: "Rewriting the ledger backfill in chunks of 50k rows...",
+    tokenSpeed: 0, contextPercent: 0.41, totalOutputTokens: 44_800,
+    createdAtMs: NOW - 52 * MIN, lastActivityMs: NOW - 6 * MIN,
+    remoteDisconnect: {
+      code: "rca:transport-lost",
+      detail: "2026/09/02 01:04:58 rca remote recv failed: stream reset: connection closed: EOF",
+      workspacePath: "/Users/demo/workspace/billing-service",
+      hostLabel: "gpu-box",
+      detectedAtMs: NOW - 6 * MIN,
+      agentStopped: true,
+    },
+  }),
+
   // payments-gateway — 2-hop handoff chain
   mkSession({
     id: "sess-pay-1", workspaceName: "payments-gateway", status: "idle",
