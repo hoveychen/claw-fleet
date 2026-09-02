@@ -2061,6 +2061,7 @@ pub fn run() {
             get_keep_awake,
             set_keep_awake,
             check_setup_status,
+            harness_statuses,
             install_fleet_cli,
             detect_ai_tools,
             install_fleet_skill,

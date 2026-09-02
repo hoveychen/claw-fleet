@@ -2169,6 +2169,10 @@ impl Backend for LocalBackend {
         }
     }
 
+    fn harness_statuses(&self) -> Vec<crate::harness_status::HarnessStatus> {
+        crate::harness_status::probe_all()
+    }
+
     fn start_watch(&self, path: String) -> Result<u64, String> {
         match watch_start_target(&self.sources, &path)? {
             // Non-filesystem (polling) source — nothing to tail on disk.
