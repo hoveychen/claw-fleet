@@ -578,6 +578,35 @@ pub fn ensure_local_mirror(path: &str) -> Result<(), String> {
 /// its remote routing prefix to its working directory, which is exactly the
 /// registered workspace (or a subdirectory of it, still under the prefix the
 /// remote serves).
+/// Put rca's own transport flags where rca will actually read them.
+///
+/// rca's flag parsing stops at the first bare `--` (Go's `flag` package), so
+/// flags appended after one are simply never seen — rca exits with
+/// "exactly one of --code, --peer, --sock or --via is required (got 0)".
+/// Codex's argv always carries such a separator (`… -- "<prompt>"`, see
+/// `codex_launch::build_codex_spawn_args`), which is why appending was fine for
+/// claude and fatal for codex.
+///
+/// The duplicated `--` is load-bearing, not belt-and-braces: rca **consumes**
+/// the separator it stops at, so inserting the flags before a lone `--` would
+/// hand codex its prompt with no separator left — and codex puts one there
+/// precisely so a prompt beginning with `-` isn't parsed as a flag. Adding one
+/// back means the child receives its original argv byte for byte.
+///
+/// An argv with no separator (claude's) is appended to exactly as before, and
+/// no separator is invented.
+fn splice_transport_flags(argv: &mut Vec<String>, flags: Vec<String>) {
+    // Skip index 0 — that's the wrapped program's own path, never a separator.
+    match argv.iter().skip(1).position(|a| a == "--").map(|i| i + 1) {
+        Some(sep) => {
+            let mut splice = flags;
+            splice.push("--".to_string());
+            argv.splice(sep..sep, splice);
+        }
+        None => argv.extend(flags),
+    }
+}
+
 pub fn wrap_launch(
     workspace_path: &str,
     program: &str,
@@ -591,26 +620,26 @@ pub fn wrap_launch(
     let transport = entry.transport()?;
     fs::create_dir_all(workspace_path)
         .map_err(|e| format!("create local mirror directory {workspace_path}: {e}"))?;
-    let mut wrapped = Vec::with_capacity(args.len() + 3);
-    wrapped.push(program.to_string());
-    wrapped.extend_from_slice(args);
-    match transport {
-        Transport::Pairing(code) => {
-            wrapped.push("--code".to_string());
-            wrapped.push(code);
-        }
+    let transport_flags: Vec<String> = match transport {
+        Transport::Pairing(code) => vec!["--code".to_string(), code],
         Transport::Stdio { ssh_target, remote_rca } => {
             // `--via '<shell cmd>'` — rca runs it under `sh -c` and speaks a
             // single yamux stream over its stdin/stdout. ServerAliveInterval
             // keeps the ssh tunnel from silently half-dying on an idle
             // session; both fields are shell-token-validated in `transport()`.
-            wrapped.push("--via".to_string());
-            wrapped.push(format!(
-                "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 {ssh_target} {remote_rca} \
-                 serve --stdio"
-            ));
+            vec![
+                "--via".to_string(),
+                format!(
+                    "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 {ssh_target} \
+                     {remote_rca} serve --stdio"
+                ),
+            ]
         }
-    }
+    };
+    let mut wrapped = Vec::with_capacity(args.len() + transport_flags.len() + 2);
+    wrapped.push(program.to_string());
+    wrapped.extend_from_slice(args);
+    splice_transport_flags(&mut wrapped, transport_flags);
     Ok(Some(WrappedLaunch {
         program: rca,
         args: wrapped,
@@ -832,6 +861,125 @@ mod tests {
         assert!(!got.args.contains(&"--code".to_string()), "stdio must not append --code");
         // The fleet-local pins still apply regardless of transport.
         assert!(got.envs.iter().any(|(k, _)| k == "RCC_LOCAL_BINS"));
+    }
+
+    /// Codex's argv always ends with `-- "<prompt>"`, and rca's flag parsing
+    /// stops dead at a bare `--`. Appending the transport flags after it means
+    /// rca never sees them and refuses to start:
+    ///
+    /// ```text
+    /// rca: exactly one of --code, --peer, --sock or --via is required (got 0)
+    /// ```
+    ///
+    /// Measured against the real rca v0.2.0 with Fleet's own argv shape, so this
+    /// is the whole feature broken, not a cosmetic ordering nit — no codex
+    /// session on a remote workspace could ever launch.
+    ///
+    /// The extra `--` is not decoration: rca **consumes** the separator it stops
+    /// at (Go's `flag` package drops it), so a single `--` would leave codex
+    /// receiving the prompt bare. Codex puts it there precisely so a prompt
+    /// starting with `-` isn't parsed as a flag; the duplicate keeps one for
+    /// codex after rca has eaten its own. Both halves verified end to end
+    /// against the real binary.
+    #[test]
+    fn wrap_launch_puts_transport_flags_before_a_bare_separator() {
+        let home = TmpHome::new("sep-wrap");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        let mut e = stdio_entry(&ws, "gpu-box");
+        e.rca_path = Some(fake_rca.clone());
+        upsert(e).unwrap();
+
+        // The shape `codex_launch::build_codex_*_args` produces.
+        let args: Vec<String> = ["exec", "--json", "-c", "x=y", "--", "写点什么"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let got = wrap_launch(&ws, "/usr/local/bin/codex", &args).unwrap().unwrap();
+
+        let via = got.args.iter().position(|a| a == "--via").expect("must carry --via");
+        let sep = got.args.iter().position(|a| a == "--").expect("must keep a separator");
+        assert!(
+            via < sep,
+            "rca stops parsing at the bare `--`, so its flags must come first: {:?}",
+            got.args
+        );
+        // What the child ends up with after rca eats one `--`: codex's original
+        // argv, separator and all.
+        assert_eq!(
+            got.args,
+            vec![
+                "/usr/local/bin/codex",
+                "exec",
+                "--json",
+                "-c",
+                "x=y",
+                "--via",
+                "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 gpu-box rca serve --stdio",
+                "--",
+                "--",
+                "写点什么",
+            ],
+            "the child must still receive its own `--` after rca consumes one",
+        );
+    }
+
+    /// The pairing-code transport inserts at the same position, so it breaks and
+    /// is fixed the same way.
+    #[test]
+    fn wrap_launch_pairing_code_also_lands_before_the_separator() {
+        let home = TmpHome::new("sep-code");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        upsert(RemoteWorkspace {
+            path: ws.clone(),
+            pairing_code: Some("rca1.CODE".into()),
+            rca_path: Some(fake_rca),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let args: Vec<String> =
+            ["exec", "--", "hi"].iter().map(|s| s.to_string()).collect();
+        let got = wrap_launch(&ws, "/bin/codex", &args).unwrap().unwrap();
+        assert_eq!(
+            got.args,
+            vec!["/bin/codex", "exec", "--code", "rca1.CODE", "--", "--", "hi"],
+        );
+    }
+
+    /// Claude's argv has no bare `--`, so nothing about its launch may change —
+    /// the flags stay appended at the end and no separator is invented.
+    #[test]
+    fn wrap_launch_without_a_separator_is_untouched() {
+        let home = TmpHome::new("sep-none");
+        let ws = home.path("proj");
+        let fake_rca = home.path("rca-bin");
+        fs::write(&fake_rca, "").unwrap();
+        let mut e = stdio_entry(&ws, "gpu-box");
+        e.rca_path = Some(fake_rca);
+        upsert(e).unwrap();
+
+        let args: Vec<String> = ["-p", "hi", "--session-id", "s1"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let got = wrap_launch(&ws, "/usr/local/bin/claude", &args).unwrap().unwrap();
+        assert_eq!(
+            got.args,
+            vec![
+                "/usr/local/bin/claude",
+                "-p",
+                "hi",
+                "--session-id",
+                "s1",
+                "--via",
+                "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 gpu-box rca serve --stdio",
+            ],
+        );
+        assert!(!got.args.contains(&"--".to_string()), "must not invent a separator");
     }
 
     /// A stdio entry with no explicit remote rca path defaults to `rca`.
