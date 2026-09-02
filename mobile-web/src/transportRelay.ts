@@ -13,11 +13,15 @@ import type { FleetTransport, TransportHandlers } from "./transport";
 export function makeTransport(
   secret: string,
   handlers: TransportHandlers,
+  relayBase?: string | null,
 ): FleetTransport {
   // `?mock` 用固定数据跑整个 UI（promo 录屏、无 relay 时改界面）。它归这里而不
   // 归 App：那个假客户端 extends RelayClient，所以它本来就只在 relay 形态下存在。
   if (isMockMode()) return new MockRelayClient(handlers);
-  return new RelayClient(secret, handlers, () => {
+  return new RelayClient(
+    secret,
+    handlers,
+    () => {
     // 每次心跳都现读,而不是在构造时捕获 —— `pushSubscribed` 要反映当下。
     const { label, platform } = deviceLabel(navigator.userAgent);
     return {
@@ -33,5 +37,8 @@ export function makeTransport(
       // 每份构建固定;让桌面端能标出一个跑着旧包的设备。
       appCommit: __APP_COMMIT__,
     };
-  });
+  },
+    // 这台设备指名的 relay(设备簿里存的);null = 构建默认值。
+    relayBase,
+  );
 }

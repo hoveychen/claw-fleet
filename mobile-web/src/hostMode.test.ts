@@ -22,8 +22,16 @@ describe("同源构建不得含 relay —— 对常量折叠敏感的几处写�
     expect(mainSrc).not.toMatch(/IS_WEBUI\s*[?&|]/);
   });
 
-  it("push.ts 守 relay 那条动态 import 时同样直接用 define 的表达式", () => {
-    expect(pushSrc).toContain('import.meta.env.VITE_FLEET_HOST !== "webui"');
+  // push.ts 从前为了取 VAPID 公钥而动态 import 整个 relay 客户端，并用 define
+  // 的原表达式守着它好让 Rollup 消掉。多设备之后 VAPID 是**每个 relay 各自**
+  // 一把，地址由调用方给，于是那条 import 整个不存在了 —— 比守着它更彻底。
+  // 剩下要钉的就是它别再长回来：`./relayBase` 是允许的（纯叶子模块，无模块加载
+  // 期副作用、不含 WebSocket 与加密），`./relay` 及 `./relayCrypto` 不允许。
+  it("push.ts 不得 import relay 客户端（只允许 relayBase 这个纯叶子）", () => {
+    const imports = [...pushSrc.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+    const dynamic = [...pushSrc.matchAll(/import\(\s*"([^"]+)"/g)].map((m) => m[1]);
+    const relayish = [...imports, ...dynamic].filter((spec) => /(^|\/)relay/i.test(spec));
+    expect(relayish).toEqual(["./relayBase"]);
   });
 
   // App.tsx 曾经为了读一个 query param 而 import mock/relay.ts，而那个文件

@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { RelayClient, RelayRequestError, type RttSample, isDesktopRejection, relayDisplayHost, resolveRelayBase } from "./relay";
+import { RelayClient, RelayRequestError, type RttSample, isDesktopRejection } from "./relay";
+// URL 归属计算搬去了 relayBase.ts（一个不含 relay 客户端的叶子模块）。
+import { relayDisplayHost, resolveRelayBase } from "./relayBase";
 import { deriveKeys, isSealed, open, type RelayKeys, seal, sealBytes } from "./relayCrypto";
 
 // relay.ts 依赖浏览器全局（window.setTimeout/WebSocket/location），node 环境没有，

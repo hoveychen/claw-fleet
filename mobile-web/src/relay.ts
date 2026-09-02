@@ -4,6 +4,7 @@
 // answer / req / ack / reply) — see claw-fleet-core/src/mobile_relay.rs.
 
 import { t } from "./i18n";
+import { defaultRelayBase, relayDisplayHost, relayWsUrl } from "./relayBase";
 import { deriveKeys, isSealed, open, openBytes, seal, type SealedBox } from "./relayCrypto";
 import {
   ANSWER_MAX_ATTEMPTS,
@@ -81,81 +82,10 @@ async function inflateGzipBytes(buf: ArrayBuffer): Promise<string> {
   return new Response(stream).text();
 }
 
-/** Decide which relay this device talks to, from the three sources that can
- *  name one. Pure so it can be tested without a `window`.
- *
- *  `baked` is `VITE_RELAY_URL`, compiled in at build time (the harmony shell
- *  bakes it via `mobile-harmony/scripts/sync-web.sh`, because its page origin
- *  is the fake `https://fleet.local` and falling back to it would make the app
- *  dial itself). `origin` is `window.location.origin` — correct for the PWA,
- *  which the relay itself serves.
- *
- *  `hash` may carry `&relay=<encoded origin>` alongside the `#k=` secret. Only
- *  the harmony shell writes it, from the relay origin the pairing QR actually
- *  named (`WebShell.ets` → `RelayStore`): without it the shell dialed the baked
- *  relay forever and a self-hosted relay could never be paired to from harmony.
- *  It outranks `baked` because it describes *this* pairing, while the baked
- *  value is only the default the bundle happened to ship with.
- *
- *  Only absolute http/https URLs are honoured — a QR is untrusted input, and
- *  this value becomes the base of every URL the client builds. The origin is
- *  taken (path dropped, trailing slash normalised): a relay behind a path
- *  prefix isn't supported anywhere in this client anyway — the PWA derives its
- *  base from `window.location.origin`, which loses the prefix just the same. */
-export function resolveRelayBase(
-  hash: string,
-  baked: string | undefined,
-  origin: string,
-): string {
-  const fallback = baked || origin;
-  const match = hash.match(/[#&]relay=([^&]+)/);
-  if (!match) return fallback;
-  let candidate: URL;
-  try {
-    candidate = new URL(decodeURIComponent(match[1]));
-  } catch {
-    return fallback;
-  }
-  if (candidate.protocol !== "https:" && candidate.protocol !== "http:") return fallback;
-  return candidate.origin;
-}
+/** 这台设备的 relay 地址由调用方决定 —— 设备簿里那台指名的,或构建默认值。
+ *  纯 URL 计算住在 relayBase.ts(一个不含 relay 客户端的叶子模块),这样想知道
+ *  一个地址的人不必把整个 WebSocket + 加密栈拖进来。 */
 
-/** Base URL for HTTP endpoints (/vapid) and the WebSocket.
- *
- *  Resolved once at module load: `loadSecretSync()` scrubs the fragment off the
- *  URL right after boot (so the secret doesn't linger in the address bar), and
- *  every later caller — the first connect included — would then see a hash with
- *  no `relay=` in it. */
-const RELAY_BASE = resolveRelayBase(
-  window.location.hash,
-  import.meta.env.VITE_RELAY_URL,
-  window.location.origin,
-);
-
-export function relayHttpBase(): string {
-  return RELAY_BASE;
-}
-
-/** Short, human-readable form of the relay this device talks to, for the More
- *  tab. `https` is the norm so its scheme is dropped as noise; anything else
- *  (a `http://127.0.0.1:…` dev relay) keeps the scheme, because that difference
- *  is exactly what you're looking at the row to find out.
- *
- *  Takes the base as an argument so it stays pure/testable; callers in the UI
- *  pass nothing and get the live one. */
-export function relayDisplayHost(base: string = relayHttpBase()): string {
-  try {
-    const u = new URL(base);
-    return u.protocol === "https:" ? u.host : `${u.protocol}//${u.host}`;
-  } catch {
-    return base;
-  }
-}
-
-function relayWsUrl(): string {
-  const base = relayHttpBase().replace(/\/$/, "");
-  return base.replace(/^http/, "ws") + "/ws";
-}
 
 /** Control messages (snapshots, tails, marks) are small and 15s is plenty.
  *  The asset/upload budgets that go with it live in `transport.ts` — every
@@ -174,6 +104,8 @@ const STABLE_CONNECTION_MS = 30_000;
 export class RelayClient implements FleetTransport {
   private ws: WebSocket | null = null;
   private secret: string;
+  /** 这台设备连的 relay(已解析成 origin)。 */
+  private base: string;
   private handlers: TransportHandlers;
   private deviceInfo?: () => DeviceInfo;
   private helloTimer: number | null = null;
@@ -222,8 +154,15 @@ export class RelayClient implements FleetTransport {
   private encKey?: CryptoKey;
   private keysReady?: Promise<void>;
 
-  constructor(secret: string, handlers: TransportHandlers, deviceInfo?: () => DeviceInfo) {
+  /** `base` 省略 = 用构建默认值,与设备记录里 `relayBase: null` 同义。 */
+  constructor(
+    secret: string,
+    handlers: TransportHandlers,
+    deviceInfo?: () => DeviceInfo,
+    base?: string | null,
+  ) {
     this.secret = secret;
+    this.base = base ?? defaultRelayBase();
     this.handlers = handlers;
     this.deviceInfo = deviceInfo;
   }
@@ -284,7 +223,7 @@ export class RelayClient implements FleetTransport {
 
   /** 这台设备说话的对象是中转,不是桌面端 —— 所以显示的是 relay 主机名。 */
   get endpointLabel(): string {
-    return relayDisplayHost();
+    return relayDisplayHost(this.base);
   }
 
   private async open() {
@@ -293,7 +232,7 @@ export class RelayClient implements FleetTransport {
     // not the raw secret. Memoized, so reconnects resolve instantly.
     await this.ensureKeys();
     if (this.closed) return; // close() may have fired while deriving
-    const ws = new WebSocket(relayWsUrl());
+    const ws = new WebSocket(relayWsUrl(this.base));
     this.ws = ws;
     this.authed = false;
     ws.onopen = () => {

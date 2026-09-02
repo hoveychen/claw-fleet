@@ -69,6 +69,31 @@ export function clearDraft(
   }
 }
 
+/** 清掉某个前缀下的全部草稿。移除一台设备时用它扫掉那台的命名空间
+ *  （`d/<deviceId>/…`，见 deviceScope.ts）——不清的话每移除一台就留下一份
+ *  永远不会再被读到的草稿、附件路径和 workspace 记忆。
+ *
+ *  只在能枚举键的存储上生效（`Storage` 有 length/key(i)，注入的内存实现通常
+ *  没有），所以枚举能力是运行时探测的：探测不到就什么都不做，而不是抛。 */
+export function clearDraftsByPrefix(
+  prefix: string,
+  store: DraftStorage | null = defaultStorage(),
+): void {
+  const enumerable = store as (DraftStorage & Partial<Storage>) | null;
+  if (!enumerable || typeof enumerable.length !== "number" || !enumerable.key) return;
+  const full = PREFIX + prefix;
+  const doomed: string[] = [];
+  try {
+    for (let i = 0; i < enumerable.length; i++) {
+      const k = enumerable.key(i);
+      if (k && k.startsWith(full)) doomed.push(k);
+    }
+    for (const k of doomed) enumerable.removeItem(k);
+  } catch {
+    // 同上，忽略。
+  }
+}
+
 /** useState 的持久化版：初值从草稿恢复，每次 set 落盘，clear() 清盘并复位到 fallback。 */
 export function useDraft<T>(
   key: string,
