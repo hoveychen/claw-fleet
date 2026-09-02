@@ -13,6 +13,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 claw-fleet-core = { path = "../claw-fleet-core" }
+# Already in the tree via claw-fleet-core (proc_runner wire format); named here
+# so the claude-login flow can en/decode pty bytes at the Tauri layer.
+base64 = "0.22"
 
 # ── Tauri & GUI ──────────────────────────────────────────────────────────────
 tauri = { version = "2", features = ["tray-icon"] }
