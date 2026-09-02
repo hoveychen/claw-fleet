@@ -99,6 +99,16 @@ pub(crate) fn mobile_relay_qr_svg(
     state.backend.read().unwrap().mobile_relay_qr_svg(lang.as_deref())
 }
 
+/// Text form of the pairing URL, for the 「复制配对链接」 button. Carries the
+/// pairing secret, same as the QR — it goes to the clipboard, never to a log.
+#[tauri::command(async)]
+pub(crate) fn mobile_relay_pairing_url(
+    state: tauri::State<'_, AppState>,
+    lang: Option<String>,
+) -> Result<String, String> {
+    state.backend.read().unwrap().mobile_relay_pairing_url(lang.as_deref())
+}
+
 /// Read the last non-tool-use assistant message from a session, for guard context.
 #[tauri::command(async)]
 pub(crate) fn get_guard_context(state: tauri::State<'_, AppState>, session_id: String) -> String {

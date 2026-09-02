@@ -139,6 +139,7 @@ pub const MESSAGES: &str = "/messages";
 pub const TOOL_RESULT: &str = "/tool-result";
 pub const MOBILE_RELAY_CONFIG: &str = "/mobile-relay/config";
 pub const MOBILE_RELAY_QR: &str = "/mobile-relay/qr";
+pub const MOBILE_RELAY_PAIRING_URL: &str = "/mobile-relay/pairing-url";
 pub const MOBILE_RELAY_ROTATE: &str = "/mobile-relay/rotate";
 pub const MOBILE_RELAY_STATUS: &str = "/mobile-relay/status";
 /// The phone's whole data surface over plain HTTP: `POST {method, params}` onto

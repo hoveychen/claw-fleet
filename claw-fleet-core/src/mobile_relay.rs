@@ -151,6 +151,24 @@ pub fn rotate_secret() -> Result<MobileRelayConfig, String> {
 /// Render the pairing URL as an SVG QR code for the 「移动端」 view. `lang`
 /// carries the desktop's current UI language into the encoded URL (see
 /// [`pairing_url`]).
+/// The pairing URL as text, for copy-to-clipboard.
+///
+/// Same content as the QR, in the form a user can paste into the phone. That
+/// path exists because scanning cannot reach a self-hosted relay: Android App
+/// Links only fire for hosts declared in the manifest at build time, and a
+/// self-hosted host is unknowable then, so the scan opens a browser instead of
+/// the app. Pasting depends on no host declaration at all.
+///
+/// Carries the same secret as the QR and is equally sensitive — the caller is
+/// handing it to the clipboard, not to a log.
+pub fn pairing_url_text(lang: Option<&str>) -> Result<String, String> {
+    let cfg = load_config();
+    if cfg.secret.is_empty() {
+        return Err("mobile relay secret not set".into());
+    }
+    Ok(pairing_url(&cfg, lang))
+}
+
 pub fn qr_svg(lang: Option<&str>) -> Result<String, String> {
     let cfg = load_config();
     if cfg.secret.is_empty() {

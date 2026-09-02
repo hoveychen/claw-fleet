@@ -1234,6 +1234,13 @@ pub trait Backend: Send + Sync {
     fn mobile_relay_qr_svg(&self, _lang: Option<&str>) -> Result<String, String> {
         Err("mobile relay not configured".into())
     }
+    /// The same pairing URL as text, for copy-to-clipboard. Needed because a
+    /// self-hosted relay cannot be reached by scanning: Android App Links only
+    /// fire for hosts baked into the manifest, so the scan opens a browser and
+    /// the phone app never sees the link. Pasting is that user's way in.
+    fn mobile_relay_pairing_url(&self, _lang: Option<&str>) -> Result<String, String> {
+        Err("mobile relay not configured".into())
+    }
 }
 
 /// Upper bound on a single attachment payload. Enforced by both the uploader
