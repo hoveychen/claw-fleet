@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
 import { randomId } from "../clientId";
-import { loadDraft, saveDraft } from "../draft";
+import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import { scopedKey, useDeviceDraft, useDeviceScope } from "../deviceScope";
 import { t } from "../i18n";
 import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type FleetTransport } from "../transport";
@@ -383,6 +383,13 @@ function OptionSelects({
 interface NewSessionProps {
   sessions: SessionInfo[];
   client: FleetTransport | null;
+  /** 可选的目标设备清单。只有 ≥2 台时 App 才传 —— 单设备下那个选择器是纯噪音。
+   *  只要 id 与显示名,不要密钥：这东西会进 React key 和 DOM。 */
+  devices?: readonly { id: string; label: string }[];
+  /** 这次要开在哪台上（`devices` 里的一个 id）。 */
+  targetDeviceId?: string;
+  /** 换目标设备。App 收到后换 provider 并按新 id 重挂载本组件。 */
+  onTargetDevice?: (id: string) => void;
   /** 别的 app 分享进来的文件（见 shareTarget.ts）。附件状态住在本组件里，
    *  所以 App 只把 File 递过来，由这里在 client 就绪后走正常上传路径。 */
   initialFiles?: File[];
@@ -494,7 +501,34 @@ const NEW_SESSION_DEFAULT = {
   permissionMode: "acceptEdits",
 };
 
-export function NewSessionSheet({ sessions, client, initialFiles, relayReady, onClose }: NewSessionProps) {
+/** 换新会话的目标设备时,把手上这段 prompt 搬进**目标设备**那份草稿。
+ *
+ *  为什么只搬 prompt:表单其余每一项都是「某一台机器上的东西」—— workspace 是
+ *  A 上的目录路径、model/effort 可能是 A 上的 codex profile、附件是已上传到 A 的
+ *  路径。换到 B 之后 App 会按新 id 重挂载本组件(见 App.tsx 的 `key`),那三样就
+ *  各自从 B 的命名空间恢复,带不过去正是我们要的。
+ *
+ *  prompt 不同:那是用户刚敲的字,跟机器无关,重挂载不该把它弄丢。代价是覆盖掉
+ *  目标设备上一段未提交的旧文本 —— 手上正在打的字优先。 */
+export function carryPromptToDevice(
+  nextDeviceId: string,
+  prompt: string,
+  store?: DraftStorage | null,
+): void {
+  const key = scopedKey(nextDeviceId, NEW_SESSION_DRAFT_KEY);
+  saveDraft(key, { ...loadDraft(key, NEW_SESSION_DEFAULT, store), prompt }, store);
+}
+
+export function NewSessionSheet({
+  sessions,
+  client,
+  devices,
+  targetDeviceId,
+  onTargetDevice,
+  initialFiles,
+  relayReady,
+  onClose,
+}: NewSessionProps) {
   // 纯聊天 workspace：不绑定项目，没有「最近会话」可被发现，必须显式钉在选项首位。
   const chatPath = useChatWorkspace(client);
 
@@ -564,6 +598,12 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
     chatPath,
     loadDraft(scopedKey(deviceId, LAST_WORKSPACE_KEY), ""),
   );
+
+  const switchDevice = (nextId: string) => {
+    if (!onTargetDevice || nextId === targetDeviceId) return;
+    carryPromptToDevice(nextId, prompt);
+    onTargetDevice(nextId);
+  };
 
   const isChat = Boolean(chatPath) && workspace === chatPath;
   const effectiveWorkspace = workspace === "__custom__" ? customWorkspace.trim() : workspace;
@@ -642,6 +682,26 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
             <X size={18} />
           </button>
         </div>
+        {/* 目标设备。放在最上面是因为它决定了下面每一项的来源:目录清单、纯聊天
+            路径、模型/profile 清单、附件都属于选中那台机器。只有 ≥2 台时 App 才
+            把 `devices` 传进来。 */}
+        {devices && devices.length > 1 && (
+          <div className={styles.deviceRow}>
+            <span className={styles.deviceRowLabel}>{t("开在")}</span>
+            <select
+              className={styles.deviceSelect}
+              value={targetDeviceId ?? ""}
+              aria-label={t("开在哪台设备上")}
+              onChange={(e) => switchDevice(e.target.value)}
+            >
+              {devices.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {/* 纯聊天是一个模式，不是下拉里的一个特殊目录：给它自己的开关，打开时
             目录选择器整个消失（聊天本来就没有目录可选）。relay 没报出聊天目录
             时不显示——那时它没法生效。*/}
@@ -746,6 +806,15 @@ export function NewSessionSheet({ sessions, client, initialFiles, relayReady, on
           permissionDefaultLabel="默认权限"
           onChange={(p) => patch(p)}
         />
+        {/* 目标设备当下没连上。只提示、**不禁用**提交:connected 会随重连抖动,
+            而提交本身已经为丢帧铺了三层兜底(早 ack / 超时重发 / 宽限期盯快照),
+            禁用反而会在抖动那一瞬挡住用户。多设备下这条尤其要有 —— 用户是主动
+            挑了这台的,得让他在打字之前就知道它是离线的。 */}
+        {devices && devices.length > 1 && relayReady === false && (
+          <span className={styles.deviceOffline}>
+            {t("这台设备当前离线，创建请求可能要等它连上才生效")}
+          </span>
+        )}
         <button className={styles.submit} disabled={!canSubmit} onClick={() => void submit()}>
           {busy ? (
             t("创建中…")
