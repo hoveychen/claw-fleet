@@ -68,8 +68,9 @@ interface Props {
   /** 这台设备的显示名;只配了一台时返回 null,徽标整个不出现 —— 单设备用户不该
    *  为多设备付出一行视觉噪音。 */
   deviceLabelOf: (deviceId: string) => string | null;
-  /** 通知点击要聚焦的卡。`nonce` 使连点同一张卡也能重新触发。 */
-  focusDecision?: { id: string; nonce: number } | null;
+  /** 通知点击要聚焦的卡。`nonce` 使连点同一张卡也能重新触发;`deviceId` 来自
+   *  relay 盖在通知上的来源标记 —— 有它才能在两台机器同号的卡之间选对。 */
+  focusDecision?: { id: string; deviceId?: string; nonce: number } | null;
 }
 
 export function DecisionsView({
@@ -113,16 +114,18 @@ export function DecisionsView({
   // 依赖里放 nonce 而不是 focusDecision 本身:后者是每次渲染新建的对象,会让
   // effect 每帧重跑;而只依赖 id 又会让「连点同一条通知」第二次失效。
   const focusId = focusDecision?.id;
+  const focusDeviceId = focusDecision?.deviceId;
   const focusNonce = focusDecision?.nonce;
   useEffect(() => {
     if (!focusId) return;
-    // 通知目前只带卡 id(设备限定符是 md-push-multi 那条计划的事),所以这里按 id
-    // 找第一张匹配的卡。多台设备上同号的卡同时在场是极小概率,而「跳错一张」也
-    // 好过「点了没反应」。
-    const hit = decisions.find((d) => d.id === focusId);
+    // 知道来源设备就精确到那一台(relay 在通知上盖了来源标记);不知道就按 id
+    // 找第一张 —— 老 relay 不盖标记,而「跳错一张」也好过「点了没反应」。
+    const hit = focusDeviceId
+      ? decisions.find((d) => d.deviceId === focusDeviceId && d.id === focusId)
+      : decisions.find((d) => d.id === focusId);
     if (!hit) return;
     setActiveId(itemKey(hit.deviceId, hit.id));
-  }, [focusId, focusNonce, decisions]);
+  }, [focusId, focusDeviceId, focusNonce, decisions]);
 
   const activeCardId = active ? itemKey(active.deviceId, active.id) : null;
   useEffect(() => {

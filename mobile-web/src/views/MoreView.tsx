@@ -2,7 +2,16 @@
 // 语言 / 主题、桌面端连接状态、通知开关、重新配对、关于/版本。
 
 import { useState } from "react";
-import { Check, ChevronRight, FolderGit2, Gauge, ListTree, Package } from "lucide-react";
+import {
+  Bell,
+  BellOff,
+  Check,
+  ChevronRight,
+  FolderGit2,
+  Gauge,
+  ListTree,
+  Package,
+} from "lucide-react";
 import { useDraft } from "../draft";
 import { dateLocale, useI18n, type Lang } from "../i18n";
 import type { RttSplit } from "../connQuality";
@@ -53,6 +62,10 @@ interface Props {
   onSwitchDevice: (id: string) => void;
   onRenameDevice: (id: string, label: string) => void;
   onRemoveDevice: (device: PairedDevice) => void;
+  /** 这台设备的通知是不是被关掉了。 */
+  deviceMuted: (deviceId: string) => boolean;
+  /** 只开/只关某一台的通知。整部手机的总开关在上面「连接与通知」那一块。 */
+  onMuteDevice: (device: PairedDevice, muted: boolean) => void;
   /** 清除全部配对并重载。 */
   onUnpairAll: () => void;
 }
@@ -78,6 +91,8 @@ export function MoreView({
   onSwitchDevice,
   onRenameDevice,
   onRemoveDevice,
+  deviceMuted,
+  onMuteDevice,
   onUnpairAll,
 }: Props) {
   const { lang, setLang, t } = useI18n();
@@ -481,6 +496,17 @@ export function MoreView({
                       </span>
                       <span className={styles.deviceLabel}>{d.label}</span>
                     </button>
+                    {/* 只关这一台的通知。家里那台在跑长任务、公司那台半夜发卡,
+                        这两件事应该能分开处置 —— 而不是只有一个「全关」。 */}
+                    {supportsPush && (
+                      <button
+                        className={styles.deviceBtn}
+                        onClick={() => onMuteDevice(d, !deviceMuted(d.id))}
+                        aria-label={deviceMuted(d.id) ? t("开启通知") : t("静音")}
+                      >
+                        {deviceMuted(d.id) ? <BellOff size={15} /> : <Bell size={15} />}
+                      </button>
+                    )}
                     <button
                       className={styles.deviceBtn}
                       onClick={() => {

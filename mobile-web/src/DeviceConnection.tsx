@@ -19,6 +19,8 @@ import {
   usagePollMs,
   type VisibilityState,
 } from "./connectionPolicy";
+import { SUPPORTS_PUSH } from "./hostMode";
+import { enablePush } from "./push";
 import { reconcilePlan } from "./reconcilePlan";
 import { loadCachedSessions, saveCachedSessions } from "./sessionCache";
 import type { FleetTransport, RttSample } from "./transport";
@@ -58,6 +60,13 @@ interface Props {
   index: number;
   /** 页面可见性。隐藏够久就把连接放掉 —— 后台通道是推送,不是这条 socket。 */
   visibility: VisibilityState;
+  /** 这台此刻连上中转了没有。推送订阅是直接写 socket 的(无队列无重传),所以
+   *  必须等它为真才注册 —— 否则那一帧掉在地上,relay 那边永远不会有这条订阅。 */
+  connected: boolean;
+  /** 浏览器/系统层面的通知权限是否已授予(整部手机一份)。 */
+  pushGranted: boolean;
+  /** 用户是否把**这一台**的通知关掉了。 */
+  pushMuted: boolean;
 }
 
 /** `pending_snapshot` 的六类请求摊平成一串卡。 */
@@ -90,6 +99,9 @@ export function DeviceConnection({
   isActive,
   index,
   visibility,
+  connected,
+  pushGranted,
+  pushMuted,
 }: Props) {
   const deviceId = device.id;
   const clientRef = useRef<FleetTransport | null>(null);
@@ -233,6 +245,22 @@ export function DeviceConnection({
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [agentOnline, hasPendingDecisions]);
+
+  // 推送订阅按**设备**登记:relay 的订阅是每个 channel 一份文件,所以一部手机
+  // 想收到 N 台的通知,就得在 N 个 channel 下各注册一次(同一个浏览器 endpoint)。
+  //
+  // `connected` 是依赖而不是顺手:pushSubscribe 直接写 socket,socket 没 OPEN 时
+  // 返回 false 且不排队不重传。历史上这个 effect 只依赖 [push, optedOut],注册
+  // 因此总在握手之前发生 —— 手机报告自己已订阅,而 relay 的订阅库里什么都没有。
+  //
+  // enablePush 是幂等的:已有订阅就复用,权限已授予时 requestPermission 直接返回。
+  useEffect(() => {
+    if (!SUPPORTS_PUSH) return;
+    if (!connected || !pushGranted || pushMuted) return;
+    const client = clientRef.current;
+    if (!client) return;
+    void enablePush(client, device.relayBase, deviceId);
+  }, [connected, pushGranted, pushMuted, deviceId, device.relayBase]);
 
   // 回到前台时补拉一次:手机浏览器会冻结后台标签的 socket,重连虽然会发生,但
   // 那一刻的快照可能已经过期。
