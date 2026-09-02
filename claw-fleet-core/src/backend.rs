@@ -384,6 +384,16 @@ pub trait Backend: Send + Sync {
     /// Infallible by design — an unreachable host is a renderable status, not
     /// an error the caller has to branch on.
     fn remote_host_health(&self, ssh_target: String) -> crate::remote_host::HostHealth;
+    /// Create one directory on an rca executor host and answer with the NEW
+    /// directory's listing. The remote twin of [`Backend::create_dir`], and
+    /// needed for the same reason: browsing alone cannot choose a workspace on
+    /// a host whose tree is empty, and a fresh one always is.
+    fn remote_create_dir(
+        &self,
+        ssh_target: String,
+        path: Option<String>,
+        name: String,
+    ) -> Result<crate::workspace_browse::BrowseDirResponse, String>;
     /// The remote-workspace registry (workspaces executed through rca; see
     /// [`crate::remote_workspace`]). Lives on the backend host — that is where
     /// sessions spawn, so that is whose `~/.fleet/remote-workspaces.json`

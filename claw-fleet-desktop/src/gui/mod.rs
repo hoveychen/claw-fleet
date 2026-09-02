@@ -2043,6 +2043,7 @@ pub fn run() {
             browse_dir,
             create_dir,
             remote_browse_dir,
+            remote_create_dir,
             remote_host_health,
             list_ssh_hosts,
             upsert_ssh_host,

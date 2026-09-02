@@ -173,6 +173,19 @@ pub(crate) fn remote_host_health(
     state.backend.read().unwrap().remote_host_health(ssh_target)
 }
 
+/// Make one directory on an rca executor host and answer with its listing.
+/// Through the backend for `remote_browse_dir`'s reason: it must be created on
+/// the machine that will actually execute the workspace.
+#[tauri::command(async)]
+pub(crate) fn remote_create_dir(
+    state: tauri::State<'_, AppState>,
+    ssh_target: String,
+    path: Option<String>,
+    name: String,
+) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+    state.backend.read().unwrap().remote_create_dir(ssh_target, path, name)
+}
+
 /// The ssh host book — list / upsert / remove, through the backend.
 ///
 /// Distinct from `list_saved_connections`, which stays deliberately local: that
