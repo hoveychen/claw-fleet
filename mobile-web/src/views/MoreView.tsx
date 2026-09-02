@@ -582,8 +582,11 @@ export function MoreView({
           )}
           {/* 直连一台 HTTP 主机 —— 与扫码那条路并列的第二种设备。它不经中转、
               因此也没有推送通道,换来的是少一跳。地址必须是 https(手机上这个
-              页面是 https 发的,浏览器不允许它连明文 http),而那台主机必须是
-              带 token 门的 fleet serve —— 无认证的端口按设计不发跨源头。 */}
+              页面是 https 发的,浏览器不允许它连明文 http),而那台主机必须带
+              admin token —— 无认证的端口按设计不发跨源头。
+              「那台主机」指的是**已经部署好的**一台(云容器,或反代后面那台):
+              serve 是无头形态的进程,由容器 entrypoint 或桌面端替远端主机拉起,
+              不是一条要用户手敲的命令。本机桌面端不监听 HTTP。 */}
           <div className={styles.card} style={{ marginTop: 8 }}>
             {!hostFormOpen ? (
               <button className={styles.navRow} onClick={() => setHostFormOpen(true)}>
@@ -593,7 +596,7 @@ export function MoreView({
                 <span className={styles.navText}>
                   <span className={styles.navLabel}>{t("添加直连主机")}</span>
                   <span className={styles.navSub}>
-                    {t("填 fleet serve 的地址与 token,不经中转")}
+                    {t("填另一台 Fleet 主机的地址与 admin token,不经中转")}
                   </span>
                 </span>
                 <ChevronRight size={16} className={styles.navChevron} />

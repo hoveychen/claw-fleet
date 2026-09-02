@@ -266,7 +266,10 @@ fn direct_url_text(page_base: &str) -> Result<String, String> {
         }
     }
     let token = effective_token()
-        .ok_or_else(|| "no token: run a token-gated `fleet serve`, or set one here".to_string())?;
+        // 别在这里教用户去跑 serve:那是无头形态(云容器 / 桌面端替远端主机拉起)
+        // 的进程,不是一条用户操作。直连要指向的是**另一台已经部署好的**主机,
+        // 所以缺 token 时该说的是「填那台的 admin token」。
+        .ok_or_else(|| "no token: enter the admin token of the host you are pointing at".to_string())?;
     Ok(direct_url(page_base, &cfg.base_url, &token))
 }
 
