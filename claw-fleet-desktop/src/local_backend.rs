@@ -3482,6 +3482,28 @@ impl Backend for LocalBackend {
     fn mobile_relay_pairing_url(&self, lang: Option<&str>) -> Result<String, String> {
         claw_fleet_core::mobile_relay::pairing_url_text(lang)
     }
+
+    fn direct_host_status(
+        &self,
+    ) -> Result<claw_fleet_core::direct_host::DirectHostStatus, String> {
+        Ok(claw_fleet_core::direct_host::status())
+    }
+
+    fn set_direct_host_config(
+        &self,
+        base_url: &str,
+        token: &str,
+    ) -> Result<claw_fleet_core::direct_host::DirectHostStatus, String> {
+        claw_fleet_core::direct_host::set_config(base_url, token)
+    }
+
+    fn direct_host_qr_svg(&self) -> Result<String, String> {
+        claw_fleet_core::direct_host::direct_qr_svg_here()
+    }
+
+    fn direct_host_url(&self) -> Result<String, String> {
+        claw_fleet_core::direct_host::direct_url_text_here()
+    }
 }
 
 /// Fetch usage summaries from all available sources via trait dispatch.

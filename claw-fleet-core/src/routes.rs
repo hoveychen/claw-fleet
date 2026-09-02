@@ -153,6 +153,12 @@ pub const MOBILE_RELAY_QR: &str = "/mobile-relay/qr";
 pub const MOBILE_RELAY_PAIRING_URL: &str = "/mobile-relay/pairing-url";
 pub const MOBILE_RELAY_ROTATE: &str = "/mobile-relay/rotate";
 pub const MOBILE_RELAY_STATUS: &str = "/mobile-relay/status";
+/// 直连(手机不经中转直接问这台主机)。`set` 收地址,`qr`/`url` 出扫码链接;
+/// 链接里的 token 在 fragment 之后,所以不进任何请求行。
+pub const DIRECT_HOST_STATUS: &str = "/direct-host/status";
+pub const DIRECT_HOST_SET: &str = "/direct-host/set";
+pub const DIRECT_HOST_QR: &str = "/direct-host/qr";
+pub const DIRECT_HOST_URL: &str = "/direct-host/url";
 /// The phone's whole data surface over plain HTTP: `POST {method, params}` onto
 /// [`crate::mobile_relay::serve_request`], answering `{ok, data}` / `{ok, error}`.
 ///

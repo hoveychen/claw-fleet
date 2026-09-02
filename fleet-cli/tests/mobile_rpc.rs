@@ -109,6 +109,30 @@ fn wait_for_port(path: &Path, serve: &mut ServeGuard) -> u16 {
     }
 }
 
+/// Minimal HTTP/1.0 GET with a bearer token.
+fn get(port: u16, path: &str, bearer: Option<&str>) -> (u16, String) {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    let auth = match bearer {
+        Some(t) => format!("Authorization: Bearer {t}\r\n"),
+        None => String::new(),
+    };
+    let req = format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n{auth}\r\n");
+    std::io::Write::write_all(&mut stream, req.as_bytes()).unwrap();
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).unwrap();
+    let text = String::from_utf8_lossy(&raw).to_string();
+    let status = text
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(0);
+    (status, text)
+}
+
 /// Minimal HTTP/1.0 request with an arbitrary method and no body — for the CORS
 /// preflight, which is an `OPTIONS` carrying only headers.
 fn options(port: u16, path: &str) -> (u16, String) {
@@ -327,4 +351,57 @@ fn no_auth_webui_does_not_open_cross_origin() {
         !body.to_ascii_lowercase().contains("access-control-allow-origin"),
         "an unauthenticated port must not advertise CORS\ngot: {body}"
     );
+}
+
+/// 直连的四条路由。走 `fleet serve` 的真进程,因为这条能力的意义正在于**远端**
+/// workspace 也能出自己那台的码(项目 CLAUDE.md 的 Backend trait 硬规则):
+/// RemoteBackend 打的就是这几个端点。
+#[test]
+fn serve_exposes_the_direct_host_routes() {
+    let home = tempfile::TempDir::new().unwrap();
+    let port_file = home.path().join("port");
+    let mut serve = spawn_serve(home.path(), &port_file);
+    let port = wait_for_port(&port_file, &mut serve);
+
+    // 还没配过地址:status 答得出来,而且明说出不了码。
+    let (status, body) = get(port, "/direct-host/status", Some(TOKEN));
+    assert_eq!(status, 200, "{}", serve.logs());
+    assert!(body.contains(r#""ready":false"#), "got: {body}");
+
+    // 明文 http 的真实主机必须被拒 —— 手机上那个 https 页面连不了它。
+    let (status, body) = post(
+        port,
+        "/direct-host/set",
+        r#"{"baseUrl":"http://192.168.1.5:8080","token":"tok"}"#,
+        Some(TOKEN),
+    );
+    assert_eq!(status, 200, "{}", serve.logs());
+    assert!(body.contains("plainHttp"), "got: {body}");
+    assert!(body.contains(r#""ready":false"#), "got: {body}");
+
+    // https + 手填 token → 出得了码,而且链接把两项都放在 fragment 之后
+    // (token 不进请求行)。
+    let (status, body) = post(
+        port,
+        "/direct-host/set",
+        r#"{"baseUrl":"https://fleet.example.com","token":"tok-123"}"#,
+        Some(TOKEN),
+    );
+    assert_eq!(status, 200, "{}", serve.logs());
+    assert!(body.contains(r#""ready":true"#), "got: {body}");
+    assert!(body.contains(r#""tokenManual":true"#), "got: {body}");
+
+    let (status, body) = get(port, "/direct-host/url", Some(TOKEN));
+    assert_eq!(status, 200, "{}", serve.logs());
+    assert!(body.contains("%23h=") || body.contains("#h="), "got: {body}");
+    assert!(body.contains("tok-123"), "got: {body}");
+
+    let (status, body) = get(port, "/direct-host/qr", Some(TOKEN));
+    assert_eq!(status, 200, "{}", serve.logs());
+    assert!(body.contains("<svg"), "got: {body}");
+
+    // 这几条路由都在 token 门后面 —— 它们能吐出一个带 token 的链接,不能对匿名
+    // 请求开放。
+    let (status, _) = get(port, "/direct-host/url", None);
+    assert_eq!(status, 401);
 }
