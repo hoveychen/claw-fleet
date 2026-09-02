@@ -53,6 +53,16 @@ pub fn probe_all() -> Vec<HarnessStatus> {
     vec![probe_claude(), probe_codex(), probe_dsh()]
 }
 
+/// Probe a single harness by its source id; `None` for an unknown id.
+pub fn probe_source(source: &str) -> Option<HarnessStatus> {
+    match source {
+        "claude-code" => Some(probe_claude()),
+        "codex" => Some(probe_codex()),
+        "dsh" => Some(probe_dsh()),
+        _ => None,
+    }
+}
+
 // ── claude-code ───────────────────────────────────────────────────────────────
 
 fn probe_claude() -> HarnessStatus {
