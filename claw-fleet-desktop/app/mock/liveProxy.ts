@@ -821,6 +821,31 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     body: { items: a.items },
   }),
 
+  // 直连(手机不经中转)。浏览器构建走同一套 HTTP 路由 —— 少了这几条,那几个
+  // 命令在 webui 里会静默 no-op(见 webTransport.test.ts 的覆盖门禁)。
+  direct_host_status: () => ({
+    method: "GET",
+    path: "/direct-host/status",
+  }),
+
+  set_direct_host_config: (a) => ({
+    method: "POST",
+    path: "/direct-host/set",
+    body: { baseUrl: a.baseUrl, token: a.token },
+  }),
+
+  direct_host_qr_svg: () => ({
+    method: "GET",
+    path: "/direct-host/qr",
+    pick: "svg",
+  }),
+
+  direct_host_url: () => ({
+    method: "GET",
+    path: "/direct-host/url",
+    pick: "url",
+  }),
+
   mobile_relay_qr_svg: (a) => ({
     method: "GET",
     path: "/mobile-relay/qr",

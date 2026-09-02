@@ -2493,5 +2493,20 @@
     "pairing_no_actions": "Pairing-code transport — environment actions need an ssh entry",
     "login_unknown": "Login state unknown",
     "remote_codex_device_hint": "Open the link on any device and enter the code; the remote host polls until approved."
-  }
+  },
+  "mobile_direct_title": "Direct connect (no relay)",
+  "mobile_direct_ready": "QR ready",
+  "mobile_direct_not_ready": "Not ready",
+  "mobile_direct_hint": "Scanning this code adds this host as a direct device on the phone, address and token together. Enter the address the phone can actually reach (https — a tunnel or reverse proxy is fine; plain http is blocked by the phone's browser). The token defaults to this machine's ~/.fleet/token; enter one by hand for a cloud host or a proxy with its own.",
+  "mobile_direct_url": "External address",
+  "mobile_direct_token": "Token",
+  "mobile_direct_token_local": "Leave empty to use this machine's ~/.fleet/token",
+  "mobile_direct_token_needed": "No token on this machine — enter one",
+  "mobile_direct_plain_http": "The page on the phone is served over https and the browser will not let it reach plain http — use https (a tunnel or reverse proxy), or scanning still won't connect.",
+  "mobile_direct_loopback": "That's a loopback address the phone cannot reach — only useful when debugging on this same machine.",
+  "mobile_direct_bad_url": "Write the full address, e.g. https://…",
+  "mobile_direct_no_token": "No token-gated serve has run on this machine (~/.fleet/token is empty). Direct connect must pass a token gate — cross-origin is only opened for token-gated endpoints. Run `fleet serve --token <value>`, or enter the cloud/proxy token above.",
+  "mobile_direct_qr_hint": "This code carries a token — do not share screenshots.",
+  "mobile_direct_copy": "Copy direct link",
+  "mobile_direct_copy_hint": "Use this when scanning can't get in: paste it on the phone."
 }
