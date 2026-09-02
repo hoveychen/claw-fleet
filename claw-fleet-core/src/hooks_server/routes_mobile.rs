@@ -104,6 +104,9 @@ pub(crate) fn route_mobile_rpc(
     query: &std::collections::HashMap<String, String>,
     json_header: tiny_http::Header,
     path: &str,
+    // `cors`:跨源头(见 hooks_server::cors)。手机在设备簿里直连一台主机时,页面
+    // 的 origin 是中转域名,少了这些头浏览器会在页面读到响应之前把它拦掉。
+    cors: Vec<tiny_http::Header>,
 ) {
     let mut body_bytes = Vec::new();
     let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
@@ -129,11 +132,13 @@ pub(crate) fn route_mobile_rpc(
             serde_json::json!({"ok": false, "error": format!("invalid body: {e}")}).to_string(),
         ),
     };
-    let _ = request.respond(
-        tiny_http::Response::from_string(body)
-            .with_status_code(status)
-            .with_header(json_header),
-    );
+    let mut res = tiny_http::Response::from_string(body)
+        .with_status_code(status)
+        .with_header(json_header);
+    for h in cors {
+        res.add_header(h);
+    }
+    let _ = request.respond(res);
 }
 
 /// Text form of the pairing URL — what the desktop's 「复制配对链接」 button
