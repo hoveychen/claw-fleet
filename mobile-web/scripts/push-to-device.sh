@@ -15,8 +15,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # The keystore lives in the MAIN checkout, not this worktree — --git-common-dir
-# points at the main .git even from inside a linked worktree.
-SIGNING_DIR="${FLEET_SIGNING_DIR:-$(git rev-parse --git-common-dir | xargs dirname)/.signing}"
+# points at the main .git even from inside a linked worktree. Absolutised for
+# the same reason as in build-android-apk.sh: the path is handed to gradle,
+# which runs from `android/`, and --git-common-dir is relative in a plain
+# checkout — a relative path there yields a silently UNSIGNED apk.
+SIGNING_DIR="${FLEET_SIGNING_DIR:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/.signing}"
 RELAY_URL="${RELAY_URL:-https://fleet-relay.muveeai.com}"
 
 export JAVA_HOME="${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}"

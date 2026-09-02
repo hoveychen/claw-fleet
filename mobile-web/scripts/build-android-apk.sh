@@ -56,7 +56,15 @@ RELAY_URL="${RELAY_URL:-}"
 
 # The keystore lives in the MAIN checkout, not in a linked worktree —
 # --git-common-dir points at the main .git even from inside one.
-SIGNING_DIR="${FLEET_SIGNING_DIR:-$(git rev-parse --git-common-dir | xargs dirname)/.signing}"
+#
+# It must be made ABSOLUTE here. --git-common-dir answers relative to the cwd
+# (`../.git` from mobile-web in a normal checkout) but absolute from a linked
+# worktree, and the resulting path is later handed to gradle, which runs one
+# directory deeper (`cd android`). A relative path therefore passes the
+# preflight check below and *then* resolves to nothing for gradle, whose
+# response is to silently emit an unsigned APK — so the failure only showed up
+# in a plain checkout, never in the worktree this script was developed in.
+SIGNING_DIR="${FLEET_SIGNING_DIR:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/.signing}"
 KEYSTORE="$SIGNING_DIR/fleet-release.jks"
 KEYSTORE_PASSWORD_FILE="$SIGNING_DIR/keystore-password.txt"
 OUT_DIR="${OUT_DIR:-$PWD/dist-apk}"
