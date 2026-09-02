@@ -535,6 +535,15 @@ const DICT: Record<string, string> = {
   新建目录失败: "Could not create that directory",
   "要让 agent 做什么？": "What should the agent do?",
   创建会话失败: "Failed to create session",
+  // ── 渲染兜底(ErrorBoundary)──
+  这一块没能显示出来: "This part could not be displayed",
+  "其余部分仍然可用。{0}": "The rest still works. {0}",
+  重试: "Retry",
+  技术细节: "Technical details",
+  "决策卡 {0}": "Decision card {0}",
+  "{0} 页": "{0} tab",
+  当前页面: "This screen",
+  返回主界面: "Back to main screen",
   开在: "On",
   开在哪台设备上: "Which device to create it on",
   "这台设备当前离线，创建请求可能要等它连上才生效":

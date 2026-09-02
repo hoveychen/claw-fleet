@@ -19,6 +19,7 @@ import { IMG_ZOOM_INJECT, parseImgZoom } from "../iframeImgZoom";
 import { useLightbox } from "./Lightbox";
 import { getLang, t } from "../i18n";
 import { itemKey, type WithDevice } from "../deviceRuntime";
+import { ErrorBoundary } from "../ErrorBoundary";
 import type { FleetTransport } from "../transport";
 import type {
   A2uiRenderRequest,
@@ -186,15 +187,24 @@ export function DecisionsView({
         </div>
       )}
       {active && (
-        <DecisionCard
-          key={itemKey(active.deviceId, active.id)}
-          decision={active}
-          client={transportFor(active.deviceId)}
-          deviceLabel={deviceLabelOf(active.deviceId)}
-          workspaceOf={(sessionId) => workspaceOf(active.deviceId, sessionId)}
-          onAnswered={(id) => onAnswered(active.deviceId, id)}
-          onOpenSession={(sessionId) => onOpenSession(active.deviceId, sessionId)}
-        />
+        // 一张畸形卡(比如缺 riskTags 数组)以前会把整个 app 变白。包一层之后
+        // 爆炸半径就这一张:上面的队列条还在,用户能直接翻到下一张;resetKey 是
+        // 复合键,所以翻过去就自动恢复,不必手动点重试。
+        <ErrorBoundary
+          label={t("决策卡 {0}", active.id)}
+          resetKey={itemKey(active.deviceId, active.id)}
+          variant="inline"
+        >
+          <DecisionCard
+            key={itemKey(active.deviceId, active.id)}
+            decision={active}
+            client={transportFor(active.deviceId)}
+            deviceLabel={deviceLabelOf(active.deviceId)}
+            workspaceOf={(sessionId) => workspaceOf(active.deviceId, sessionId)}
+            onAnswered={(id) => onAnswered(active.deviceId, id)}
+            onOpenSession={(sessionId) => onOpenSession(active.deviceId, sessionId)}
+          />
+        </ErrorBoundary>
       )}
       {sorted.length > 1 && (
         <div className={styles.queueHint}>
