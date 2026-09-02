@@ -87,6 +87,12 @@ const DICT: Record<string, string> = {
   // ── 设备簿（多设备配对）──
   "设备": "Device",
   改名: "Rename",
+  静音: "Mute",
+  扫码添加设备: "Add a device by QR",
+  "扫另一台桌面端「移动端」面板里的二维码": "Scan the QR in another desktop's Mobile panel",
+  "每台桌面端各出一张码;扫过的会留在上面这个列表里。":
+    "Each desktop shows its own QR code; the ones you scan stay in the list above.",
+  开启通知: "Enable notifications",
   移除: "Remove",
   保存: "Save",
   "移除「{0}」？它的通知会停掉，本机为它缓存的任务与草稿一并清除。":

@@ -41,3 +41,34 @@ describe("parseDecisionDeepLink", () => {
     expect(parseDecisionDeepLink("/#d=:g1")).toBeNull();
   });
 });
+
+// relay 在扇出通知时会把来源 channel 盖进点击目标(fleet-relay 的
+// notify_target.rs)。没有它,两台机器同时有卡时点开落到哪一张全靠运气。
+describe("channel mark", () => {
+  it("reads the source channel relay stamped on", () => {
+    const target = parseDecisionDeepLink("/#d=guard:g1&ch=105e300f");
+    expect(target).toEqual({ kind: "guard", id: "g1", channelMark: "105e300f" });
+  });
+
+  // 关键回归:老的解析是「前缀 d= 之后全是 id」,那会把 &ch=… 一起吞进 id,
+  // 于是**每一条**带标记的通知都点不开(id 对不上任何一张卡)。
+  it("does not swallow the mark into the card id", () => {
+    expect(parseDecisionDeepLink("/#d=guard:g1&ch=105e300f")?.id).toBe("g1");
+  });
+
+  it("still parses a link from a relay that stamps nothing", () => {
+    expect(parseDecisionDeepLink("/#d=guard:g1")).toEqual({ kind: "guard", id: "g1" });
+  });
+
+  it("tolerates the mark coming first", () => {
+    expect(parseDecisionDeepLink("/#ch=105e300f&d=fleet-ask:abc")).toEqual({
+      kind: "fleet-ask",
+      id: "abc",
+      channelMark: "105e300f",
+    });
+  });
+
+  it("ignores a link that only carries a mark", () => {
+    expect(parseDecisionDeepLink("/#ch=105e300f")).toBeNull();
+  });
+});

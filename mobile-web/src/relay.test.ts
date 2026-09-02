@@ -586,10 +586,14 @@ describe("RelayClient.answerViaReq 弱网送达确认", () => {
       "fleet-ask",
       "d-resend",
       { cancelled: false, answers: {} },
-      { attempts: 2, timeoutMs: 50 },
+      // 200ms 而不是 50ms:这条用的是**真**定时器,而断言要在第二帧发出之后再
+      // 投递回复。50ms 的预算在机器有负载时会让第二帧也超时,于是整条 promise
+      // 变成 reject —— 实测偶发过两次,查了两轮才认出是测试自己的竞态而不是
+      // 被测代码。放宽的是投递窗口,不是被测语义:第一帧仍然必须超时才会重发。
+      { attempts: 2, timeoutMs: 200 },
     );
     p.catch(() => {});
-    // 第一帧超时(50ms,不投递)后应自动发第二帧。
+    // 第一帧超时(不投递)后应自动发第二帧。
     await waitAnswerReqCount(ws, 2);
     const reqs = await answerReqIds(ws);
     expect(reqs.length).toBe(2);

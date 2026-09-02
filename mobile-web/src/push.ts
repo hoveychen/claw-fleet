@@ -42,14 +42,42 @@ export function pushState(): PushState {
 // localStorage "1"/"0" convention.
 const PUSH_OPT_OUT_KEY = "fleet:push-opt-out";
 
-export function isPushOptedOut(): boolean {
+/** 每台设备各自的静音位。多设备之后「关掉通知」必须能只关一台 —— 家里那台在
+ *  跑长任务、公司那台在半夜发卡,这两件事应该能分开处置。 */
+function mutedKey(deviceId: string): string {
+  return `${PUSH_OPT_OUT_KEY}:${deviceId}`;
+}
+
+/** 这台设备的通知是否被用户关掉。
+ *
+ *  单设备时代只有一个全局位,所以没有本设备记录时回落到它 —— 升级前把通知关掉
+ *  的用户,升级后不该突然又开始收到推送。 */
+export function isPushMuted(deviceId: string): boolean {
   if (typeof localStorage === "undefined") return false;
+  const own = localStorage.getItem(mutedKey(deviceId));
+  if (own !== null) return own === "1";
   return localStorage.getItem(PUSH_OPT_OUT_KEY) === "1";
 }
 
-export function setPushOptedOut(optedOut: boolean): void {
+export function setPushMuted(deviceId: string, muted: boolean): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(mutedKey(deviceId), muted ? "1" : "0");
+}
+
+/** 这部手机整体是否静音 —— 只有**每一台**都被关掉才算。头部那条「开启通知」的
+ *  横幅与「更多」页那个总开关看的是它。 */
+export function isPushOptedOut(deviceIds: string[] = []): boolean {
+  if (typeof localStorage === "undefined") return false;
+  if (deviceIds.length === 0) return localStorage.getItem(PUSH_OPT_OUT_KEY) === "1";
+  return deviceIds.every((id) => isPushMuted(id));
+}
+
+/** 总开关:一次改掉全部设备,并把全局位也写上 —— 后者是**新配对设备**的默认值
+ *  (刚扫进来的那台还没有自己的记录,回落到全局位才不会违背用户刚表达的意愿)。 */
+export function setPushOptedOut(optedOut: boolean, deviceIds: string[] = []): void {
   if (typeof localStorage === "undefined") return;
   localStorage.setItem(PUSH_OPT_OUT_KEY, optedOut ? "1" : "0");
+  for (const id of deviceIds) setPushMuted(id, optedOut);
 }
 
 function urlBase64ToUint8Array(base64: string): Uint8Array {
@@ -63,13 +91,16 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
 export async function enablePush(
   client: FleetTransport,
   relayBase?: string | null,
+  /** 这条订阅登记在哪台设备的 channel 上。给了就顺手把那台的静音位清掉 ——
+   *  用户刚亲手开的这台,不该还被上一次的静音压着。 */
+  deviceId?: string,
 ): Promise<PushState> {
   // 原生壳：token 已由壳交来（系统通知授权也在壳里问过了），这里只剩注册。
   // 不走 Notification.requestPermission —— WebView 里那个 API 要么不存在、要么
   // 恒返回 denied，调了只会把已经能用的推送判死。
   if (hasNativePushToken()) {
     client.pushSubscribe({ platform: "harmony", token: nativePushToken() });
-    setPushOptedOut(false);
+    if (deviceId) setPushMuted(deviceId, false);
     return "granted";
   }
   const state = pushState();
@@ -101,8 +132,8 @@ export async function enablePush(
   // Tag the platform so the relay can route Web Push vs HarmonyOS Push Kit
   // subscriptions on the same channel (relay defaults absent platform to web).
   client.pushSubscribe({ ...subscription.toJSON(), platform: "web" });
-  // Enabling clears any prior explicit opt-out.
-  setPushOptedOut(false);
+  // Enabling clears any prior explicit opt-out — 只清这一台的。
+  if (deviceId) setPushMuted(deviceId, false);
   return "granted";
 }
 
@@ -134,8 +165,11 @@ export async function unsubscribeChannel(client: FleetTransport): Promise<boolea
  *  in the browser, and persist the opt-out so nothing re-subscribes. Sends the
  *  unsubscribe frame BEFORE `subscription.unsubscribe()` so the endpoint the
  *  relay keys on is still available. Best-effort — always records the opt-out. */
-export async function disablePush(client: FleetTransport): Promise<void> {
-  setPushOptedOut(true);
+export async function disablePush(
+  client: FleetTransport,
+  deviceId?: string,
+): Promise<void> {
+  if (deviceId) setPushMuted(deviceId, true);
   if (hasNativePushToken()) {
     // 原生 token 由系统签发，web 侧撤不掉，只能让 relay 别再往它发。
     client.pushUnsubscribe({ platform: "harmony", token: nativePushToken() });

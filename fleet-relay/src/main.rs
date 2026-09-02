@@ -23,6 +23,7 @@ mod applinks;
 mod frames;
 mod harmony_push;
 mod limits;
+mod notify_target;
 mod push;
 mod registry;
 mod ws;
