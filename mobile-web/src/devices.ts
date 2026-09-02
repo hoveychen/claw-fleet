@@ -278,6 +278,30 @@ export function persistBook(book: DeviceBook): void {
     .catch(() => {});
 }
 
+/** 一次扫码落地:把 secret 并入簿子并**当场持久化**。
+ *
+ *  两条配对入口(PWA 的 `#k=…` fragment、原生壳的 Universal/App Link)必须走
+ *  同一个函数 —— 它们此前各自写一遍「存下来、设为当前」,而多设备之后这段逻辑
+ *  长出了去重、保留用户改名、焦点转移三条规则,复制两份就是等着它们漂移。
+ *
+ *  返回新簿子;`added` 为 false 表示这张码本来就在册(同一台被扫了第二次)。 */
+export function adoptScannedDevice(
+  book: DeviceBook,
+  secret: string,
+  mint: DeviceMint,
+  relayBase?: string | null,
+): { book: DeviceBook; device: PairedDevice; added: boolean } {
+  const { book: next, device, deduped } = addDevice(book, {
+    secret,
+    relayBase,
+    id: mint.id,
+    label: mint.label,
+    now: mint.now,
+  });
+  persistBook(next);
+  return { book: next, device, added: !deduped };
+}
+
 /** PWA 的配对入口:地址栏 fragment 里的 `#k=…` 就是一次配对(桌面端二维码编
  *  码的就是这个 URL)。取到后立刻把 fragment 从地址栏抹掉 —— 密钥不该留在那
  *  里被截图、被历史记录带走。
