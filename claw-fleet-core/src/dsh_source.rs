@@ -1652,6 +1652,82 @@ fn parse_model_catalog(value: &Value) -> DshModelCatalog {
 /// machine's configured providers, so the answer is the same for every session
 /// and needs no id. Reached through [`DshSource::with_client`] like every other
 /// read, which starts `dsh web` if it is not already up.
+// ── Credential surface (environment wizard) ─────────────────────────────────
+//
+// dsh is a bring-your-own-key harness: "login" is storing provider API keys.
+// The protocol's own discovery rule (credentials.d.ts): there is no
+// enumeration RPC — clients learn which credential references exist from the
+// settings namespaces' `apiKeyEnv` fields, then drive `credentials.describe`
+// (configured/source/writable, never values) and `credentials.set`.
+
+/// Credential reference names learned from `settings.describe` (`apiKeyEnv`
+/// fields anywhere in the redacted namespace values).
+pub fn dsh_credential_refs() -> Result<Vec<String>, String> {
+    let v = DshSource::new()
+        .with_client(|client| client.call("settings.describe", json!({})).map_err(Into::into))?;
+    let mut refs = Vec::new();
+    collect_api_key_envs(&v, &mut refs);
+    refs.sort();
+    refs.dedup();
+    Ok(refs)
+}
+
+fn collect_api_key_envs(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Object(map) => {
+            for (k, val) in map {
+                if k == "apiKeyEnv" {
+                    if let Some(s) = val.as_str() {
+                        if !s.is_empty() {
+                            out.push(s.to_string());
+                        }
+                    }
+                }
+                collect_api_key_envs(val, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_api_key_envs(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `credentials.describe` for the given refs; returns the raw
+/// `{credentials: {ref: {configured, source?, writable}}}` payload (values
+/// never ride the wire by design).
+pub fn dsh_credentials_describe(refs: Vec<String>) -> Result<Value, String> {
+    DshSource::new().with_client(|client| {
+        client
+            .call("credentials.describe", json!({ "refs": refs }))
+            .map_err(Into::into)
+    })
+}
+
+/// Store one credential value in dsh's writable layer. A `credential-rejected`
+/// error means a read-only layer (live environment variable) shadows the ref —
+/// surfaced as-is so the wizard can tell the user which env var to clear.
+pub fn dsh_credentials_set(reference: &str, value: &str) -> Result<(), String> {
+    DshSource::new().with_client(|client| {
+        client
+            .call("credentials.set", json!({ "ref": reference, "value": value }))
+            .map(|_| ())
+            .map_err(Into::into)
+    })
+}
+
+/// Remove one credential from the writable layer (idempotent on absent refs).
+pub fn dsh_credentials_unset(reference: &str) -> Result<(), String> {
+    DshSource::new().with_client(|client| {
+        client
+            .call("credentials.unset", json!({ "ref": reference }))
+            .map(|_| ())
+            .map_err(Into::into)
+    })
+}
+
 pub fn dsh_models() -> Result<DshModelCatalog, String> {
     let value = DshSource::new()
         .with_client(|client| client.call("llm.models", json!({})).map_err(Into::into))?;
@@ -1661,6 +1737,46 @@ pub fn dsh_models() -> Result<DshModelCatalog, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collect_api_key_envs_walks_namespace_values() {
+        // Shape mirrors a live settings.describe: namespaces[].value carries
+        // providers.<id>.apiKeyEnv (this machine's real settings.yaml layout).
+        let v = json!({
+            "writable": true,
+            "hasDocument": true,
+            "namespaces": [
+                { "ns": "llm-pi-ai",
+                  "value": { "providers": { "openrouter": { "apiKeyEnv": "OPENROUTER_API_KEY" } } } },
+                { "ns": "llm-deepseek",
+                  "value": { "apiKeyEnv": "DEEPSEEK_API_KEY" } },
+                { "ns": "ui-onboarding", "value": { "welcomeNoticeVersion": "x" } },
+                { "ns": "dup", "value": { "nested": [ { "apiKeyEnv": "OPENROUTER_API_KEY" }, { "apiKeyEnv": "" } ] } }
+            ]
+        });
+        let mut refs = Vec::new();
+        collect_api_key_envs(&v, &mut refs);
+        refs.sort();
+        refs.dedup();
+        assert_eq!(refs, vec!["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"]);
+    }
+
+    /// Manual smoke against the live dsh server: set → describe(configured)
+    /// → unset a throwaway ref. Run with
+    /// `cargo test -p claw-fleet-core --lib dsh_credentials_smoke -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn dsh_credentials_smoke_roundtrip() {
+        let test_ref = "FLEET_WIZARD_SMOKE_KEY";
+        dsh_credentials_set(test_ref, "smoke-value").unwrap();
+        let desc = dsh_credentials_describe(vec![test_ref.to_string()]).unwrap();
+        println!("describe: {desc}");
+        let configured = desc["credentials"][test_ref]["configured"].as_bool();
+        dsh_credentials_unset(test_ref).unwrap();
+        assert_eq!(configured, Some(true));
+        let desc = dsh_credentials_describe(vec![test_ref.to_string()]).unwrap();
+        assert_eq!(desc["credentials"][test_ref]["configured"].as_bool(), Some(false));
+    }
 
     /// Verbatim shape of one `session.list` item observed live.
     fn live_list_item() -> Value {
