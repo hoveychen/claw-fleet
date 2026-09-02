@@ -306,3 +306,26 @@
   border-radius: 6px;
   padding: 6px 8px;
 }
+
+/* ── 添加直连主机的小表单 ─────────────────────────────────────────────── */
+.hostForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.hostActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 失败原因。四种失败各有各的修法，所以这里给的是能照着做的一句话，不是
+   「添加失败」。 */
+.hostError {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-error);
+  line-height: 1.5;
+}
