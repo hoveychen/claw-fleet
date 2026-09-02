@@ -330,6 +330,143 @@ fn resolve_rca_binary(entry: &RemoteWorkspace, cfg: &RemoteWorkspacesConfig) -> 
     })
 }
 
+/// Public form of [`resolve_rca_binary`] with no registry entry in hand: the
+/// same override → `~/.fleet/bin/rca` → `$PATH` chain the installer wants to
+/// consult before deciding whether a local download is needed.
+pub fn find_local_rca() -> Option<String> {
+    let cfg = load();
+    resolve_rca_binary(&RemoteWorkspace::default(), &cfg).ok()
+}
+
+/// Map a `uname -sm` string to the rca release archive slug (`<os>_<arch>`),
+/// matching the tarballs published at
+/// `github.com/hoveychen/remote-adapter/releases` (Go arch naming: amd64 /
+/// arm64, NOT x86_64 / aarch64). Shared by the remote installer (which reads a
+/// real `uname -sm` over ssh) and [`local_release_slug`].
+pub fn rca_release_slug(uname: &str) -> Option<&'static str> {
+    let u = uname.to_lowercase();
+    let os = if u.contains("linux") {
+        "linux"
+    } else if u.contains("darwin") {
+        "darwin"
+    } else {
+        return None;
+    };
+    let arch = if u.contains("x86_64") || u.contains("amd64") {
+        "amd64"
+    } else if u.contains("aarch64") || u.contains("arm64") {
+        "arm64"
+    } else {
+        return None;
+    };
+    Some(match (os, arch) {
+        ("linux", "amd64") => "linux_amd64",
+        ("linux", "arm64") => "linux_arm64",
+        ("darwin", "amd64") => "darwin_amd64",
+        ("darwin", "arm64") => "darwin_arm64",
+        _ => return None,
+    })
+}
+
+/// The release slug for THIS machine, from `std::env::consts` rather than a
+/// `uname` subprocess. `consts::OS` is already "linux"/"macos" and `consts::ARCH`
+/// "x86_64"/"aarch64" — fed through [`rca_release_slug`] so both sides of the
+/// installer share one mapping table. `None` on any platform rca does not
+/// publish (Windows, FreeBSD, 32-bit).
+pub fn local_release_slug() -> Option<&'static str> {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "linux" => "linux",
+        _ => return None,
+    };
+    rca_release_slug(&format!("{os} {}", std::env::consts::ARCH))
+}
+
+/// The rca release tarball URL for a slug. `releases/latest` follows a 302 to
+/// whatever the newest published tag is, so Fleet never pins a version.
+pub fn rca_release_url(slug: &str) -> String {
+    format!("https://github.com/hoveychen/remote-adapter/releases/latest/download/rca_{slug}.tar.gz")
+}
+
+/// Download rca for this machine into `~/.fleet/bin/rca` and verify it supports
+/// the stdio transport. Returns the installed absolute path.
+///
+/// The LOCAL half of the installer. `wrap_launch` runs rca on the machine that
+/// spawns the agent, so a workspace whose remote rca is installed but whose
+/// local rca is missing fails at first spawn with "rca binary not found" — the
+/// wizard's success message would be a lie. Mirrors the remote install exactly
+/// (same `curl | tar xz`, same `serve --stdio` probe) so the two halves cannot
+/// drift; `curl` and `tar` are in `/usr/bin`, which is on the minimal PATH a
+/// GUI-launched app inherits.
+pub fn install_local_rca() -> Result<String, String> {
+    let slug = local_release_slug().ok_or_else(|| {
+        format!(
+            "rca publishes no release for this platform ({} {}) — remote workspaces are \
+             unavailable here",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )
+    })?;
+    let bin_dir = crate::fleet_cli::fleet_bin_dir().ok_or("cannot resolve ~/.fleet/bin")?;
+    fs::create_dir_all(&bin_dir).map_err(|e| format!("create {}: {e}", bin_dir.display()))?;
+    let dir = bin_dir.to_string_lossy();
+    let url = rca_release_url(slug);
+
+    // Unpack into the real destination in one shot, as the remote side does.
+    let script = format!(
+        "set -e; cd '{dir}'; curl -fsSL '{url}' | tar xz; chmod +x rca; test -x '{dir}/rca'"
+    );
+    let out = crate::process_util::shell_command(&script)
+        .output()
+        .map_err(|e| format!("cannot run the rca download ({e})"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "downloading rca for {slug} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+
+    let rca = bin_dir.join("rca");
+    let rca_path = rca.to_string_lossy().into_owned();
+    verify_local_rca_stdio(&rca_path)?;
+
+    // A configured-but-missing `rcaPath` override short-circuits the whole
+    // chain ahead of `~/.fleet/bin`, so a stale override would shadow the copy
+    // we just installed and the spawn would still fail. Say so here rather
+    // than letting the wizard report success.
+    let cfg = load();
+    if let Err(e) = resolve_rca_binary(&RemoteWorkspace::default(), &cfg) {
+        return Err(format!(
+            "rca was installed at {rca_path}, but it is shadowed by a stale override: {e}"
+        ));
+    }
+    Ok(rca_path)
+}
+
+/// Fail fast when the installed rca predates the stdio-over-ssh transport —
+/// the published release has lagged `serve --stdio` landing on rca main before
+/// (see the guard on the remote side). Checking the same `serve -h` text keeps
+/// both halves honest about the same capability.
+fn verify_local_rca_stdio(rca_path: &str) -> Result<(), String> {
+    let out = crate::process_util::command(rca_path)
+        .args(["serve", "-h"])
+        .output()
+        .map_err(|e| format!("cannot run {rca_path} ({e})"))?;
+    let help = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if !help.to_lowercase().contains("stdio") {
+        return Err(format!(
+            "the rca at {rca_path} has no `serve --stdio` support — its published release \
+             predates the stdio-over-ssh transport. Wait for a newer remote-adapter release \
+             and re-run."
+        ));
+    }
+    Ok(())
+}
+
 /// Create the local mirror directory when `path` is (under) a registered
 /// remote workspace — for callers whose `is_dir` spawn gate runs before the
 /// launch is wrapped. No-op for local workspaces.
@@ -682,5 +819,76 @@ mod tests {
             "ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
              -p 2222 -i /home/me/.ssh/id_ed25519 -J bastion me@gpu-box /opt/rca serve --stdio"
         );
+    }
+
+    // ── local installer ──────────────────────────────────────────────────
+
+    #[test]
+    fn rca_release_slug_maps_uname_to_go_arch_names() {
+        assert_eq!(rca_release_slug("Linux x86_64"), Some("linux_amd64"));
+        assert_eq!(rca_release_slug("Linux aarch64"), Some("linux_arm64"));
+        assert_eq!(rca_release_slug("Darwin arm64"), Some("darwin_arm64"));
+        assert_eq!(rca_release_slug("Darwin x86_64"), Some("darwin_amd64"));
+        assert_eq!(rca_release_slug("FreeBSD amd64"), None);
+        assert_eq!(rca_release_slug("Linux riscv64"), None);
+    }
+
+    /// The local slug must come out of the same table the remote side uses —
+    /// `std::env::consts` spells the arch "aarch64"/"x86_64", the releases
+    /// spell it "arm64"/"amd64", and getting that backwards 404s the download.
+    #[test]
+    fn local_release_slug_translates_std_consts_to_a_published_slug() {
+        let got = local_release_slug();
+        match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("macos", "aarch64") => assert_eq!(got, Some("darwin_arm64")),
+            ("macos", "x86_64") => assert_eq!(got, Some("darwin_amd64")),
+            ("linux", "aarch64") => assert_eq!(got, Some("linux_arm64")),
+            ("linux", "x86_64") => assert_eq!(got, Some("linux_amd64")),
+            // Windows and friends publish nothing — the installer must refuse
+            // rather than build a URL that 404s.
+            _ => assert_eq!(got, None),
+        }
+    }
+
+    #[test]
+    fn rca_release_url_points_at_latest_not_a_pinned_tag() {
+        let url = rca_release_url("darwin_arm64");
+        assert!(url.contains("/releases/latest/download/"), "{url}");
+        assert!(url.ends_with("rca_darwin_arm64.tar.gz"), "{url}");
+    }
+
+    /// A stub standing in for an rca binary, so the stdio probe is exercised
+    /// without a network download.
+    #[cfg(unix)]
+    fn stub_rca(dir: &Path, name: &str, help_text: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join(name);
+        fs::write(&p, format!("#!/bin/sh\ncat <<'EOF'\n{help_text}\nEOF\n")).unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        p.to_string_lossy().into_owned()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stdio_probe_accepts_a_release_that_has_the_transport() {
+        let home = TmpHome::new("probe-ok");
+        let rca = stub_rca(
+            &home.dir,
+            "rca-new",
+            "  -stdio ssh host rca serve --stdio\n\tserve over stdin/stdout via yamux",
+        );
+        assert!(verify_local_rca_stdio(&rca).is_ok());
+    }
+
+    /// The published release has lagged `serve --stdio` landing on rca main
+    /// before; installing that build must fail loudly here instead of at the
+    /// user's first session spawn.
+    #[cfg(unix)]
+    #[test]
+    fn stdio_probe_rejects_a_release_predating_the_transport() {
+        let home = TmpHome::new("probe-stale");
+        let rca = stub_rca(&home.dir, "rca-old", "Serve flags: --listen, --sock, --relays");
+        let err = verify_local_rca_stdio(&rca).unwrap_err();
+        assert!(err.contains("serve --stdio"), "{err}");
     }
 }
