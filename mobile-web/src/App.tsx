@@ -914,6 +914,24 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     .filter(Boolean)
     .join("|");
 
+  /** 把所有浮层收起来,回到主界面。
+   *
+   *  只有渲染兜底用得上:浮层的 `HistoryLayer`(接系统返回键的那个)和浮层内容是
+   *  同一块 JSX,一起被 fallback 替换掉,于是返回键退不掉那个浮层(实测过)。iOS
+   *  PWA 更没有系统返回键,所以 fallback 上必须有一条自己的出路,否则崩一次就把人
+   *  困在那儿。 */
+  const closeAllOverlays = useCallback(() => {
+    setDetailStack([]);
+    setWikiStack([]);
+    setShowRepo(false);
+    setRepoDetail(null);
+    setShowPlans(false);
+    setShowArtifacts(false);
+    setShowUsage(false);
+    setShowNewSession(false);
+    setNewSessionDeviceId(null);
+  }, []);
+
   if (!paired) {
     // 原生壳限定的两条入口。系统相机扫出来的链接由 App Link 决定交给谁，而
     // App Link 只认 manifest 里编译期写死的 host —— 自建 relay 的 host 编译期
@@ -1158,7 +1176,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           让整个 app 变成一张错误页 —— 已知咬过人的 sources_config 异形应答就发生
           在新会话表单里,它正是一个浮层。resetKey 是栈顶浮层的身份,所以关掉再开
           自动重试。 */}
-      <ErrorBoundary label={t("当前页面")} resetKey={overlayKey}>
+      <ErrorBoundary
+        label={t("当前页面")}
+        resetKey={overlayKey}
+        onDismiss={{ label: t("返回主界面"), run: closeAllOverlays }}
+      >
       {/* 每一层下钻占一层历史，但只渲染栈顶那层详情——底下几层不必挂着重复拉 tail。 */}
       {detailStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setDetailStack((s) => s.slice(0, i))} />
