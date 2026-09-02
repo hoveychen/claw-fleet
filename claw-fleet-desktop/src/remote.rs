@@ -2018,33 +2018,7 @@ pub fn delete_connection(id: String) -> Result<(), String> {
 
 // ── rca stdio-over-ssh auto-installer ────────────────────────────────────────
 
-/// Map `uname -sm` output to the rca release archive slug (`<os>_<arch>`),
-/// matching the tarballs published at
-/// `github.com/hoveychen/remote-adapter/releases` (Go arch naming: amd64/arm64).
-fn rca_release_slug(uname: &str) -> Option<&'static str> {
-    let u = uname.to_lowercase();
-    let os = if u.contains("linux") {
-        "linux"
-    } else if u.contains("darwin") {
-        "darwin"
-    } else {
-        return None;
-    };
-    let arch = if u.contains("x86_64") || u.contains("amd64") {
-        "amd64"
-    } else if u.contains("aarch64") || u.contains("arm64") {
-        "arm64"
-    } else {
-        return None;
-    };
-    Some(match (os, arch) {
-        ("linux", "amd64") => "linux_amd64",
-        ("linux", "arm64") => "linux_arm64",
-        ("darwin", "amd64") => "darwin_amd64",
-        ("darwin", "arm64") => "darwin_arm64",
-        _ => return None,
-    })
-}
+use claw_fleet_core::remote_workspace::{rca_release_slug, rca_release_url};
 
 /// Build the ssh argument fragment that goes into the `--via` command
 /// (`ssh <fragment> <remote-rca> serve --stdio`). An ssh-config profile
@@ -2127,9 +2101,7 @@ fn provision_rca(
     let slug = rca_release_slug(&uname)
         .ok_or_else(|| format!("unsupported remote platform for rca: {uname:?}"))?;
 
-    let url = format!(
-        "https://github.com/hoveychen/remote-adapter/releases/latest/download/rca_{slug}.tar.gz"
-    );
+    let url = rca_release_url(slug);
     let install = format!(
         "set -e; mkdir -p \"$HOME/.fleet/bin\"; cd \"$HOME/.fleet/bin\"; \
          curl -fsSL {url} | tar xz; chmod +x rca; test -x \"$HOME/.fleet/bin/rca\"; \
@@ -2163,6 +2135,28 @@ fn provision_rca(
     Ok(remote_rca)
 }
 
+/// Ensure THIS machine has an rca that speaks the stdio transport.
+///
+/// `wrap_launch` runs rca locally (the agent process stays on this host), so a
+/// workspace whose remote half is installed but whose local half is missing
+/// fails at first spawn with "rca binary not found" — after a wizard that said
+/// it succeeded. An already-resolvable rca is left alone: the user may have
+/// pinned a build via `rcaPath`, and re-downloading over it would silently
+/// undo that choice.
+fn ensure_local_rca(app: &AppHandle) -> Result<(), String> {
+    use claw_fleet_core::remote_workspace;
+
+    if let Some(existing) = remote_workspace::find_local_rca() {
+        emit_install_progress(app, &format!("Local rca already present ({existing})."), false);
+        return Ok(());
+    }
+    emit_install_progress(app, "Installing rca on this machine…", false);
+    let local = remote_workspace::install_local_rca()
+        .map_err(|e| format!("local rca install failed: {e}"))?;
+    emit_install_progress(app, &format!("Local rca installed at {local}."), false);
+    Ok(())
+}
+
 fn install_rca_remote_impl(
     app: &AppHandle,
     conn: RemoteConnection,
@@ -2194,6 +2188,11 @@ fn install_rca_remote_impl(
 
     // 2-3. Detect platform, install rca, verify stdio support.
     let remote_rca = provision_rca(app, |cmd| ssh_exec(&conn, cmd))?;
+
+    // 3b. The local half. Both halves must be good before anything is
+    //     registered, so a failure here leaves no entry that would blow up at
+    //     the user's first spawn.
+    ensure_local_rca(app)?;
 
     // 4. ssh target fragment for the `--via` command.
     let ssh_target = ssh_target_from_connection(&conn)?;
@@ -2248,6 +2247,7 @@ fn update_rca_remote_impl(
     ssh_exec_target(&ssh_target, "echo ok").map_err(|e| format!("SSH connection failed: {e}"))?;
 
     let remote_rca = provision_rca(app, |cmd| ssh_exec_target(&ssh_target, cmd))?;
+    ensure_local_rca(app)?;
 
     emit_install_progress(app, "Updating registry…", false);
     let cfg = remote_workspace::upsert(remote_workspace::RemoteWorkspace {
@@ -3610,16 +3610,8 @@ mod tests {
         assert!(inner.is_err());
     }
 
-    #[test]
-    fn rca_release_slug_maps_uname() {
-        use super::rca_release_slug;
-        assert_eq!(rca_release_slug("Linux x86_64"), Some("linux_amd64"));
-        assert_eq!(rca_release_slug("Linux aarch64"), Some("linux_arm64"));
-        assert_eq!(rca_release_slug("Darwin arm64"), Some("darwin_arm64"));
-        assert_eq!(rca_release_slug("Darwin x86_64"), Some("darwin_amd64"));
-        assert_eq!(rca_release_slug("FreeBSD amd64"), None);
-        assert_eq!(rca_release_slug("Linux riscv64"), None);
-    }
+    // `rca_release_slug` now lives in claw_fleet_core::remote_workspace (both
+    // installer halves share one mapping table); its tests moved there too.
 
     #[test]
     fn ssh_target_from_connection_builds_full_arg_fragment() {
