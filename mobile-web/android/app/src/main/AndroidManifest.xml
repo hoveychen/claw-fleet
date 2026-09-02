@@ -91,4 +91,12 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 配对门里的应用内扫码（src/views/PairScanner.tsx）。只声明就够了：
+         Capacitor 的 BridgeWebChromeClient.onPermissionRequest 已经把 WebView
+         的 VIDEO_CAPTURE 请求映射成这个运行时权限并代为申请。
+         required=false：扫码只是两条配对入口之一，没有摄像头的设备照样能用
+         粘贴配对，不该因此在应用市场被判为不兼容。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

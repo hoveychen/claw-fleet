@@ -111,7 +111,16 @@ const DICT: Record<string, string> = {
   "请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。":
     "Open this page by scanning the QR code in the desktop Fleet's Mobile panel (the link carries the pairing secret).",
   "正在恢复配对…": "Restoring pairing…",
-  // 粘贴配对（原生壳限定）——自建 relay 的唯一入口，扫码那条路对它不通。
+  // 应用内扫码 + 粘贴配对（原生壳限定）——系统相机扫出来的链接进不了 app。
+  扫码配对: "Scan to pair",
+  "正在打开摄像头…": "Opening the camera…",
+  "对准桌面端「移动端」板块里的二维码。": "Point at the QR code in the desktop's Mobile panel.",
+  "这个二维码不是配对码。请对准桌面端「移动端」板块里的那张。":
+    "That QR code isn't a pairing code. Point at the one in the desktop's Mobile panel.",
+  "没有摄像头权限，扫不了码。可以到系统设置里允许，或改用粘贴配对链接。":
+    "No camera permission, so scanning is unavailable. Allow it in system settings, or paste a pairing link instead.",
+  "这台设备用不了摄像头。请改用粘贴配对链接。":
+    "This device has no usable camera. Paste a pairing link instead.",
   改为粘贴配对链接: "Paste a pairing link instead",
   "在桌面端「移动端」板块点「复制配对链接」，把它贴到这里。自建 relay 只能走这条路——二维码扫出来的链接系统交不到 app 手上。":
     "Click “Copy pairing link” in the desktop's Mobile panel and paste it here. A self-hosted relay can only be paired this way — the system won't hand a scanned link for it to the app.",

@@ -62,6 +62,7 @@ import {
 import { isNativeShell, onPairingLink } from "./deepLink";
 import type { PairedLink } from "./pairingLink";
 import { PairPasteForm } from "./views/PairPasteForm";
+import { PairScanner } from "./views/PairScanner";
 import {
   clearCachedSessions,
   loadCachedSessions,
@@ -158,6 +159,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   bookRef.current = book;
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
+  // 配对门里的扫码取景器（原生壳限定）。
+  const [scanning, setScanning] = useState(false);
   const [a2hsDismissed, setA2hsDismissed] = useState(
     () => localStorage.getItem(A2HS_DISMISSED_KEY) === "1",
   );
@@ -829,6 +832,15 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     decisions.length > 0 && (tab !== "decisions" || overlayOpen);
 
   if (!secret) {
+    // 原生壳限定的两条入口。系统相机扫出来的链接由 App Link 决定交给谁，而
+    // App Link 只认 manifest 里编译期写死的 host —— 自建 relay 的 host 编译期
+    // 不可知，那条路对它结构上不可用（扫出来只会打开浏览器）。app 内扫码拿到的
+    // 是二维码原文，粘贴更是不依赖任何 host 声明。
+    // PWA 两条都不需要：它本来就是被那条链接打开的。
+    const nativeEntries = idbProbed && isNativeShell();
+    if (scanning) {
+      return <PairScanner onPaired={adoptPaired} onClose={() => setScanning(false)} />;
+    }
     return (
       <div className={styles.gate}>
         <div className={styles.gateLogo}>F</div>
@@ -838,11 +850,14 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             ? t("请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。")
             : t("正在恢复配对…")}
         </p>
-        {/* 原生壳限定。扫码走的是 App Link，而 App Link 只认 manifest 里编译期
-            写死的 host —— 自建 relay 的 host 编译期不可知，那条路对它结构上不
-            可用（扫出来只会打开浏览器）。粘贴不依赖任何 host 声明。
-            PWA 不需要：它本来就是被那条链接打开的。 */}
-        {idbProbed && isNativeShell() && <PairPasteForm onPaired={adoptPaired} />}
+        {nativeEntries && (
+          <>
+            <button className={styles.gateButton} onClick={() => setScanning(true)}>
+              {t("扫码配对")}
+            </button>
+            <PairPasteForm onPaired={adoptPaired} />
+          </>
+        )}
       </div>
     );
   }
