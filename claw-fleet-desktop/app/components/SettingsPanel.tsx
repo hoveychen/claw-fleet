@@ -22,6 +22,7 @@ import { TriStateToggle } from "./TriStateToggle";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
 import { AccountInfo } from "./AccountInfo";
 import { EnvironmentPanel } from "./EnvironmentPanel";
+import { SETTINGS_OPEN_TAB_KEY } from "../harnessErrors";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { ThemeToggle } from "./ThemeToggle";
 import { AgentSourceIcon } from "./SessionCard";
@@ -152,6 +153,25 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   // Advanced group starts expanded only when an advanced tab is somehow the
   // initial tab; otherwise everyday users see just the 3 base tabs.
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Cross-window tab deep-link (e.g. a spawn error's "open the environment
+  // panel" button): consume SETTINGS_OPEN_TAB_KEY on mount, and via the
+  // `storage` event when this window is already open. Consumed = removed, so
+  // it never persists into an unrelated later open.
+  useEffect(() => {
+    const consume = () => {
+      const tab = window.localStorage.getItem(SETTINGS_OPEN_TAB_KEY);
+      if (!tab) return;
+      window.localStorage.removeItem(SETTINGS_OPEN_TAB_KEY);
+      if (([...BASE_TABS, ...ADVANCED_TABS] as string[]).includes(tab)) {
+        setActiveTab(tab as SettingsTab);
+        if ((ADVANCED_TABS as string[]).includes(tab)) setShowAdvanced(true);
+      }
+    };
+    consume();
+    window.addEventListener("storage", consume);
+    return () => window.removeEventListener("storage", consume);
+  }, []);
 
   // ── Sources state ────────────────────────────────────────────────────────
   const [sources, setSources] = useState<SourceInfo[]>([]);
