@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorkflowTree, WorkflowNode, WorkflowAgent } from "../../types";
 import styles from "./WorkflowDag.module.css";
 
@@ -32,6 +33,7 @@ interface Placed {
  * DAG (no nodes).
  */
 export function WorkflowDag({ tree, onOpenAgent }: Props) {
+  const { t } = useTranslation();
   const layout = useMemo(() => computeLayout(tree), [tree]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const agentById = useMemo(
@@ -47,7 +49,7 @@ export function WorkflowDag({ tree, onOpenAgent }: Props) {
     return (
       <div className={styles.fallback}>
         <div className={styles.fallbackHint}>
-          无法解析编排结构，按 agent 列表展示：
+          {t("workflow.dag_unparsed", "无法解析编排结构，按 agent 列表展示：")}
         </div>
         <div className={styles.chips}>
           {tree.agents.map((a) => (
@@ -135,7 +137,7 @@ export function WorkflowDag({ tree, onOpenAgent }: Props) {
                 <span className={styles.count}>×{node.agentIds.length}</span>
               )}
               {node.approximate && (
-                <span className={styles.approx} title="启发式绑定（近似）">
+                <span className={styles.approx} title={t("workflow.dag_approx_tip", "启发式绑定（近似）")}>
                   ≈
                 </span>
               )}
@@ -156,23 +158,25 @@ export function WorkflowDag({ tree, onOpenAgent }: Props) {
             <span className={styles.detailMeta}>
               {kindLabel(selectedNode.kind)} · {selectedNode.status} ·{" "}
               {selectedNode.agentIds.length} agent
-              {selectedNode.approximate ? " · ≈ 启发式绑定" : ""}
+              {selectedNode.approximate ? ` · ≈ ${t("workflow.dag_approx", "启发式绑定")}` : ""}
             </span>
             <button
               className={styles.detailClose}
               onClick={() => setSelectedId(null)}
-              title="收起"
+              title={t("workflow.dag_collapse", "收起")}
             >
               ✕
             </button>
           </div>
           {selectedNode.resolvedPrompt && (
-            <div className={styles.resolvedPrompt} title="执行时解析出的 prompt（… 为插值点）">
+            <div className={styles.resolvedPrompt} title={t("workflow.dag_resolved_prompt_tip", "执行时解析出的 prompt（… 为插值点）")}>
               {selectedNode.resolvedPrompt}
             </div>
           )}
           {selectedNode.agentIds.length === 0 ? (
-            <div className={styles.detailEmpty}>尚无运行时 agent（未启动）</div>
+            <div className={styles.detailEmpty}>
+              {t("workflow.dag_no_runtime_agent", "尚无运行时 agent（未启动）")}
+            </div>
           ) : (
             <div className={styles.agentRows}>
               {selectedNode.agentIds.map((id) => (
@@ -200,6 +204,7 @@ function AgentRow({
   agent: WorkflowAgent | undefined;
   onOpen?: (agentId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const result = agent?.result ?? "";
   const long = result.length > RESULT_PREVIEW;
@@ -220,9 +225,9 @@ function AgentRow({
           <button
             className={styles.openBtn}
             onClick={() => onOpen(agentId)}
-            title="在 Fleet 里打开该 agent 的 session"
+            title={t("workflow.dag_open_agent_session", "在 Fleet 里打开该 agent 的 session")}
           >
-            打开 session ↗
+            {t("workflow.dag_open_session", "打开 session")} ↗
           </button>
         )}
       </div>
@@ -231,13 +236,21 @@ function AgentRow({
           className={styles.result}
           onClick={() => long && setExpanded((v) => !v)}
           style={{ cursor: long ? "pointer" : "default" }}
-          title={long ? (expanded ? "点击收起" : "点击展开") : undefined}
+          title={
+            long
+              ? expanded
+                ? t("workflow.dag_click_collapse", "点击收起")
+                : t("workflow.dag_click_expand", "点击展开")
+              : undefined
+          }
         >
           {shown}
         </pre>
       ) : (
         <div className={styles.detailEmpty}>
-          {status === "done" ? "（无结果文本）" : "运行中，暂无结果"}
+          {status === "done"
+            ? t("workflow.dag_no_result_text", "（无结果文本）")
+            : t("workflow.dag_running_no_result", "运行中，暂无结果")}
         </div>
       )}
     </div>

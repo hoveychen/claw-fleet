@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import styles from "./WindowsFrameOverlay.module.css";
 
@@ -52,6 +53,7 @@ const CaptionClose = () => (
 );
 
 export function WindowsFrameOverlay() {
+  const { t } = useTranslation();
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -95,8 +97,8 @@ export function WindowsFrameOverlay() {
         <button
           type="button"
           className={styles.caption_btn}
-          aria-label="Minimize"
-          title="Minimize"
+          aria-label={t("window.minimize", "最小化")}
+          title={t("window.minimize", "最小化")}
           onClick={onMinimize}
         >
           <CaptionMinimize />
@@ -104,8 +106,12 @@ export function WindowsFrameOverlay() {
         <button
           type="button"
           className={styles.caption_btn}
-          aria-label={isMaximized ? "Restore" : "Maximize"}
-          title={isMaximized ? "Restore" : "Maximize"}
+          aria-label={
+            isMaximized ? t("window.restore", "还原") : t("window.maximize", "最大化")
+          }
+          title={
+            isMaximized ? t("window.restore", "还原") : t("window.maximize", "最大化")
+          }
           onClick={onToggleMax}
         >
           {isMaximized ? <CaptionRestore /> : <CaptionMaximize />}
@@ -113,8 +119,8 @@ export function WindowsFrameOverlay() {
         <button
           type="button"
           className={`${styles.caption_btn} ${styles.caption_close}`}
-          aria-label="Close"
-          title="Close"
+          aria-label={t("common.close", "关闭")}
+          title={t("common.close", "关闭")}
           onClick={onClose}
         >
           <CaptionClose />

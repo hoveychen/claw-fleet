@@ -186,7 +186,7 @@ export function TokenReceiptModal({ onClose }: Props) {
           <span className={styles.title}>
             {t("token_receipt.title", "花费明细")}
           </span>
-          <button className={styles.close_btn} onClick={onClose} aria-label="close">
+          <button className={styles.close_btn} onClick={onClose} aria-label={t("common.close", "关闭")}>
             ✕
           </button>
         </div>

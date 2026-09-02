@@ -858,7 +858,7 @@ function GuardAllowRulesSection() {
                   <th>{t("guard.allow_rules_col_prefix")}</th>
                   <th>{t("guard.allow_rules_col_tag")}</th>
                   <th>{t("guard.allow_rules_col_created")}</th>
-                  <th aria-label="actions" />
+                  <th aria-label={t("common.actions", "操作")} />
                 </tr>
               </thead>
               <tbody>
