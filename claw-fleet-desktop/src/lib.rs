@@ -222,6 +222,22 @@ impl Backend for NullBackend {
         Err("backend not ready".into())
     }
 
+    fn remote_browse_dir(
+        &self,
+        _ssh_target: String,
+        _path: Option<String>,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        Err("backend not ready".into())
+    }
+
+    fn remote_host_health(&self, _: String) -> claw_fleet_core::remote_host::HostHealth {
+        claw_fleet_core::remote_host::HostHealth {
+            ssh_ok: false,
+            error: Some("backend not ready".into()),
+            ..Default::default()
+        }
+    }
+
     fn list_remote_workspaces(&self) -> claw_fleet_core::remote_workspace::RemoteWorkspacesConfig {
         claw_fleet_core::remote_workspace::RemoteWorkspacesConfig::default()
     }

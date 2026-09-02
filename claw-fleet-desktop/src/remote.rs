@@ -643,6 +643,41 @@ impl crate::backend::Backend for RemoteBackend {
             .map_err(|e| format!("probe /browse_dir failed: {e}"))
     }
 
+    fn remote_browse_dir(
+        &self,
+        ssh_target: String,
+        path: Option<String>,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        // The ssh hop starts at the probe host, not here: it holds the keys and
+        // the ~/.ssh/config aliases, and it is where the session will spawn.
+        let mut endpoint = format!(
+            "{}?target={}",
+            claw_fleet_core::routes::REMOTE_BROWSE_DIR,
+            encode_path(&ssh_target)
+        );
+        if let Some(p) = path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            endpoint.push_str(&format!("&path={}", encode_path(p)));
+        }
+        self.probe
+            .get(&endpoint)
+            .map_err(|e| format!("probe /remote_browse_dir failed: {e}"))
+    }
+
+    fn remote_host_health(&self, ssh_target: String) -> claw_fleet_core::remote_host::HostHealth {
+        let endpoint = format!(
+            "{}?target={}",
+            claw_fleet_core::routes::REMOTE_HOST_HEALTH,
+            encode_path(&ssh_target)
+        );
+        // Infallible by contract: a probe that cannot be reached is reported as
+        // an unreachable host rather than swallowed, so the badge still renders.
+        self.probe.get(&endpoint).unwrap_or_else(|e| claw_fleet_core::remote_host::HostHealth {
+            ssh_ok: false,
+            error: Some(format!("probe /remote_host_health failed: {e}")),
+            ..Default::default()
+        })
+    }
+
     fn create_dir(
         &self,
         path: Option<String>,
@@ -2075,25 +2110,13 @@ fn emit_install_progress(app: &AppHandle, step: &str, done: bool) {
 /// [`base_ssh_args`]. Used by `update_rca_remote`, which has no structured
 /// `RemoteConnection`, only the registry's ssh_target string.
 fn ssh_exec_target(ssh_target: &str, remote_cmd: &str) -> Result<String, String> {
-    let mut args: Vec<String> = vec![
-        "-o".into(),
-        "StrictHostKeyChecking=accept-new".into(),
-        "-o".into(),
-        "ConnectTimeout=15".into(),
-        "-o".into(),
-        "BatchMode=yes".into(),
-    ];
-    args.extend(ssh_target.split_whitespace().map(String::from));
-    args.push(remote_cmd.to_string());
-    let mut cmd = claw_fleet_core::process_util::command("ssh");
-    cmd.args(&args);
-    apply_real_home(&mut cmd);
-    let output = cmd.output().map_err(|e| format!("ssh exec failed: {e}"))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
-    }
+    // Delegates to core's runner rather than keeping a second copy of the same
+    // ssh option set — they were byte-identical, and two copies is how one of
+    // them quietly loses a `-o` later. Core additionally metachar-validates the
+    // target, which is strictly a gain here: this target comes from the
+    // registry, where `upsert` already applies the same rule.
+    claw_fleet_core::remote_host::ssh_exec(ssh_target, remote_cmd)
+        .map(|s| s.trim().to_string())
 }
 
 /// Detect the remote platform, download + install rca into `~/.fleet/bin`, and

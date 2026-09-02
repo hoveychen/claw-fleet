@@ -254,6 +254,13 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     path: "/create_dir",
     body: { path: q(a.path) ?? null, name: a.name },
   }),
+  // NOTE: `remote_browse_dir` / `remote_host_health` exist on the Backend trait
+  // and answer at `/remote_browse_dir` + `/remote_host_health`, but have no
+  // entry here yet — this table's guard rejects a route no component invokes,
+  // and their UI lands in a later plan. Whoever wires that UI adds:
+  //   remote_browse_dir:  GET /remote_browse_dir  {target, path}
+  //   remote_host_health: GET /remote_host_health {target}
+  // in the same change, or the browser build silently rejects both calls.
 
   cancel_loop: (a) => ({
     method: "POST",

@@ -54,6 +54,13 @@ pub const AUDIT_RULES_SAVE: &str = "/audit/rules/save";
 pub const AUDIT_RULES_SUGGEST: &str = "/audit/rules/suggest";
 pub const AUDIT_RULES_TOGGLE: &str = "/audit/rules/toggle";
 pub const BROWSE_DIR: &str = "/browse_dir";
+/// List directories on an rca executor host over ssh (GET `?target=&path=`).
+/// The sibling of [`BROWSE_DIR`] one machine further out: `BROWSE_DIR` lists
+/// the backend host's own disk, this lists a host the backend can ssh into.
+pub const REMOTE_BROWSE_DIR: &str = "/remote_browse_dir";
+/// Probe one rca executor host: ssh reachable, rca installed, `serve --stdio`
+/// supported (GET `?target=`).
+pub const REMOTE_HOST_HEALTH: &str = "/remote_host_health";
 /// Create one directory under a browsed path (POST `{path, name}`). The picker
 /// is useless on a host whose tree is empty — a fresh cloud container has
 /// nothing under `$HOME` to select.
