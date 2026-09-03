@@ -9,6 +9,7 @@ import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
 import type { DirtyFile, RepoDetail, RepoSummary, WorktreeHealth } from "../types";
 import { fetchRepoDetail, pullRepo, pushRepo } from "../repo";
+import { useConfirm } from "../confirmDialog";
 import styles from "./RepoDetailView.module.css";
 
 interface Props {
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export function RepoDetailView({ repo, client, onBack }: Props) {
+  const confirm = useConfirm();
   const [detail, setDetail] = useState<RepoDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "push" | "pull">(null);
@@ -43,7 +45,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
     async (op: "push" | "pull") => {
       if (!client || busy) return;
       const prompt = op === "push" ? t("确认 push 到远端？") : t("确认 pull（--ff-only）？");
-      if (!window.confirm(prompt)) return;
+      if (!(await confirm(prompt))) return;
       setBusy(op);
       setOpResult(null);
       try {
@@ -56,7 +58,7 @@ export function RepoDetailView({ repo, client, onBack }: Props) {
         setBusy(null);
       }
     },
-    [client, busy, repo.root, refresh],
+    [client, busy, repo.root, refresh, confirm],
   );
 
   return (

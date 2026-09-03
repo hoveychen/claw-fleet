@@ -22,6 +22,7 @@ import type { PairedDevice } from "../devices";
 import { canScanPairing, scanPairing } from "../nativeScan";
 import { useTheme, type ThemeSetting } from "../theme";
 import { useWakeLock } from "../wakeLock";
+import { useConfirm } from "../confirmDialog";
 import styles from "./MoreView.module.css";
 
 const LANG_CHOICES: Array<[Lang, string]> = [
@@ -101,6 +102,7 @@ export function MoreView({
   onUnpairAll,
 }: Props) {
   const { lang, setLang, t } = useI18n();
+  const confirm = useConfirm();
   // 正在改名的那台（内联输入，不用 window.prompt —— 鸿蒙 ArkWeb 里那个对话框
   // 未必可用，而这里没有任何理由依赖它）。
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -533,9 +535,9 @@ export function MoreView({
                     </button>
                     <button
                       className={styles.deviceBtnDanger}
-                      onClick={() => {
+                      onClick={async () => {
                         if (
-                          window.confirm(
+                          await confirm(
                             t("移除「{0}」？它的通知会停掉，本机为它缓存的任务与草稿一并清除。", d.label),
                           )
                         ) {
@@ -583,9 +585,9 @@ export function MoreView({
         <div className={styles.card}>
           <button
             className={styles.dangerRow}
-            onClick={() => {
+            onClick={async () => {
               if (
-                window.confirm(
+                await confirm(
                   t("清除本机全部配对密钥？需回到桌面端重新扫码才能再连接。"),
                 )
               ) {
