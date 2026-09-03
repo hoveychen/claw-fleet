@@ -8,6 +8,7 @@ import { t } from "./i18n";
 import { initTheme } from "./theme";
 import { initWakeLock } from "./wakeLock";
 import { lockZoom } from "./lockZoom";
+import { ConfirmProvider } from "./confirmDialog";
 import "./index.css";
 
 initTheme();
@@ -47,13 +48,15 @@ createRoot(document.getElementById("root")!).render(
         那些位置一抛异常就是纯白页面 + 空控制台,手机上完全没法诊断。
         resetKey 不传:根崩了没有「换一张」可言,用户点重试或者重开。 */}
     <ErrorBoundary label={t("Fleet")}>
-      {cloudMode ? (
-        <CloudApp />
-      ) : (
-        <LightboxProvider>
-          <App makeTransport={makeTransport} />
-        </LightboxProvider>
-      )}
+      <ConfirmProvider>
+        {cloudMode ? (
+          <CloudApp />
+        ) : (
+          <LightboxProvider>
+            <App makeTransport={makeTransport} />
+          </LightboxProvider>
+        )}
+      </ConfirmProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

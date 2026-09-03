@@ -497,6 +497,7 @@ const DICT: Record<string, string> = {
   已改为多选: "Now multi-select",
   改为多选: "Make multi-select",
   取消: "Cancel",
+  确认: "Confirm",
   拒绝回答: "Decline",
   提交: "Submit",
   附件: "Attach",
