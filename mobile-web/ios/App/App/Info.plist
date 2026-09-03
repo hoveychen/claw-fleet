@@ -24,6 +24,13 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- 语音输入（src/voiceCapacitor.ts）。iOS 上 SFSpeechRecognizer 要两个授权
+	     且缺一不可：只有识别授权而没有麦克风授权，start 会直接崩。文案会原样
+	     显示在系统弹窗里，所以写清楚用途而不是写「需要权限」。 -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于把你说的话转成文字，填进输入框。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>用于把你说的话转成文字，填进输入框。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

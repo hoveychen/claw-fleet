@@ -7,10 +7,12 @@
 // 只需在 REGISTRY 里加一行，调用方不用改。
 
 import { detectVoiceProvider, type VoiceInputProvider, type VoiceProviderId } from "./voiceInput";
+import { capacitorVoiceProvider } from "./voiceCapacitor";
 import { webSpeechProvider } from "./voiceWebSpeech";
 
 const REGISTRY: Partial<Record<VoiceProviderId, VoiceInputProvider>> = {
   "web-speech": webSpeechProvider,
+  capacitor: capacitorVoiceProvider,
 };
 
 /** 当前环境该用的 provider，没有可用实现时 null。 */
