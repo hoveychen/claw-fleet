@@ -1,15 +1,18 @@
-/* 与 Composer 的 .attachAdd 同构 —— 两个按钮并排站在同一行工具栏里，长得不一样
-   会显得是从别处抄来的。差别只在录音时的状态色。 */
+/* 圆形纯图标按钮 —— 对齐 DeepSeek / 千问 / Kimi 的输入框范式：附件、相机、语音
+   这类**操作入口**是纯图标，带文字的胶囊留给「深度思考」那种模式开关。
+   与 Composer 的 .attachAdd 是同一款（那个也按这条改了），两个并排才像一对。 */
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: 1px dashed var(--color-border-strong);
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border-strong);
   background: none;
   color: var(--color-text-dim);
   border-radius: 999px;
-  padding: 3px 12px;
-  font-size: var(--t-aux, 12px);
   /* 长按是这个按钮的主交互，浏览器默认的长按选字 / 拖拽会打断它。 */
   touch-action: none;
   user-select: none;
@@ -18,7 +21,6 @@
 }
 
 .btn[data-listening] {
-  border-style: solid;
   border-color: var(--color-accent);
   color: var(--color-accent);
   background: var(--color-accent-soft);
@@ -31,9 +33,9 @@
   background: none;
 }
 
-/* 实时回显。不换行、超长截断 —— 它是个进行中的提示，不该把工具栏撑成两行把
-   下面的内容顶走。 */
-.partial {
+/* 按钮没了文字标签，指引和实时回显都靠这一行。不换行、超长截断 —— 它是个
+   进行中的提示，不该把工具栏撑成两行把下面的内容顶走。 */
+.hint {
   flex: 1 1 120px;
   min-width: 0;
   font-size: var(--t-aux, 12px);
@@ -41,6 +43,10 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.hint[data-cancel] {
+  color: var(--color-error);
 }
 
 .error {

@@ -10,7 +10,7 @@
 // 环境探测、provider 选择、识别生命周期都在 useVoiceInput 里；这里只管手势和画。
 
 import { useRef, useState } from "react";
-import { Mic, Square } from "lucide-react";
+import { AudioLines, Square, X } from "lucide-react";
 import { t } from "../i18n";
 import { useVoiceInput, voiceErrorText } from "../useVoiceInput";
 import styles from "./VoiceButton.module.css";
@@ -95,6 +95,15 @@ export function VoiceButton({
     }
   };
 
+  // 按钮变成纯图标之后，指引没地方写了 —— 全部落到旁边这行状态文字上：录音中
+  // 先给操作提示，一旦引擎吐字就换成识别到的内容（那时用户已经知道怎么松手了，
+  // 看见字更要紧）。少了这行，纯图标的按钮就成了一个没人知道该怎么松手的黑盒。
+  const hint = !listening
+    ? ""
+    : willCancel
+      ? t("松开取消")
+      : partial || (locked ? t("点击停止") : t("松开结束"));
+
   return (
     <>
       <button
@@ -117,11 +126,13 @@ export function VoiceButton({
         aria-label={listening ? t("停止录音") : t("语音输入")}
         aria-pressed={listening}
       >
-        {listening ? <Square size={13} /> : <Mic size={13} />}
-        {listening ? (willCancel ? t("松开取消") : locked ? t("点击停止") : t("松开结束")) : t("语音")}
+        {willCancel ? <X size={15} /> : listening ? <Square size={15} /> : <AudioLines size={15} />}
       </button>
-      {/* 实时回显。没有它用户不知道有没有听进去,只能对着一个按钮干说。 */}
-      {listening && partial && <span className={styles.partial}>{partial}</span>}
+      {hint && (
+        <span className={styles.hint} data-cancel={willCancel || undefined}>
+          {hint}
+        </span>
+      )}
       {state === "error" && error && <span className={styles.error}>{voiceErrorText(error)}</span>}
     </>
   );

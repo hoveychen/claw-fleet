@@ -508,8 +508,9 @@ const DICT: Record<string, string> = {
   "{0} 张图片加载失败，点按重试": "{0} image(s) failed to load — tap to retry",
 
   // ── 语音输入 ──
-  语音: "Voice",
   语音输入: "Voice input",
+  "要让 agent 做什么？也可按住语音键说": "What should the agent do? Or hold the mic key to talk",
+  "继续这个会话，也可按住语音键说…": "Continue this session, or hold the mic key to talk…",
   停止录音: "Stop recording",
   松开结束: "Release to finish",
   松开取消: "Release to cancel",
