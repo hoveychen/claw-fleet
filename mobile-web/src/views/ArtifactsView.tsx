@@ -1,5 +1,6 @@
-// 产出页：桌面端产出库的手机版。数据走 relay 的 `artifact_list` /
-// `artifact_blob`（claw-fleet-core/src/mobile_relay.rs）。
+// 产出 tab：桌面端产出库的手机版。数据走 relay 的 `artifact_list` /
+// `artifact_blob`（claw-fleet-core/src/mobile_relay.rs）。列表是 tab 正文
+// （流式，跟着 main 一起滚），点开某份产出才升起 ArtifactDetail 那层全屏浮层。
 //
 // 手机只处理小的那一半。relay 传字节只有「单帧 base64」一种形状，而 base64
 // 还要多占三分之一——一段成片没有诚实的办法推过来。所以超过 MAX_RELAY_BYTES
@@ -46,7 +47,6 @@ const OfficePreview = lazy(() => import("./OfficePreview"));
 
 interface Props {
   client: FleetTransport | null;
-  onBack: () => void;
 }
 
 const KIND_ICON: Record<string, typeof FileText> = {
@@ -61,7 +61,7 @@ const KIND_ICON: Record<string, typeof FileText> = {
   text: FileText,
 };
 
-export function ArtifactsView({ client, onBack }: Props) {
+export function ArtifactsView({ client }: Props) {
   const [items, setItems] = useState<Artifact[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -94,12 +94,9 @@ export function ArtifactsView({ client, onBack }: Props) {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
-          <ChevronLeft size={20} />
-        </button>
-        <span className={styles.title}>{t("产出")}</span>
-        {items && <span className={styles.count}>{items.length}</span>}
+      <div className={styles.listHead}>
+        <span className={styles.listTitle}>{t("产出")}</span>
+        {items && <span className={styles.listCount}>{items.length}</span>}
       </div>
 
       {error && <div className={styles.error}>{error}</div>}
@@ -165,8 +162,8 @@ function ArtifactDetail({
   const [err, setErr] = useState<string | null>(null);
   const kind = previewKind(artifact);
 
-  // 预览是压在产出列表之上的第二层浮层，所以它要自己登记一层历史。少了这一层，
-  // 硬件返回键弹掉的是 App 里那层「产出页」，人从预览一步退回「更多」页。
+  // 预览是压在产出 tab 正文之上的浮层，所以它要自己登记一层历史。少了这一层，
+  // 硬件返回键弹掉的是 tab 自己那层，人从预览一步退回决策 tab。
   useHistoryLayer(onBack);
 
   useEffect(() => {

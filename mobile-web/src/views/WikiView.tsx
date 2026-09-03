@@ -1,9 +1,20 @@
-// 知识库 tab：列出桌面端 `fleet wiki publish` 归档的所有文档。空搜索时按 slug
+// 知识库页：列出桌面端 `fleet wiki publish` 归档的所有文档。空搜索时按 slug
 // 虚拟目录分组；输入 ≥2 字走 relay 全文检索（wiki_search，命中正文并给 snippet）。
 // 顶部可按 workspace 筛选。点开进 WikiDocView 全屏阅读。
+//
+// 从「更多」页进来的全屏浮层（层级沿用 RepoView/PlansView 的 30）——它自己不登记
+// 历史层，那一层由 App 里包着它的 HistoryLayer 负责。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, ChevronRight, FileQuestion, RefreshCw, Search, SearchX } from "lucide-react";
+import {
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  FileQuestion,
+  RefreshCw,
+  Search,
+  SearchX,
+} from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { dateLocale, t } from "../i18n";
 import type { FleetTransport } from "../transport";
@@ -33,9 +44,10 @@ function leafOf(slug: string): string {
 interface Props {
   client: FleetTransport | null;
   onOpenDoc: (doc: WikiDoc) => void;
+  onBack: () => void;
 }
 
-export function WikiView({ client, onOpenDoc }: Props) {
+export function WikiView({ client, onOpenDoc, onBack }: Props) {
   const [docs, setDocs] = useState<WikiDoc[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -120,8 +132,11 @@ export function WikiView({ client, onOpenDoc }: Props) {
   );
 
   return (
-    <div className={styles.view}>
-      <div className={styles.head}>
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <button className={styles.backButton} onClick={onBack} aria-label={t("返回")}>
+          <ChevronLeft size={20} />
+        </button>
         <span className={styles.title}>{t("知识库")}</span>
         {total > 0 && <span className={styles.count}>{total}</span>}
         <button className={styles.refresh} onClick={() => void refresh()} aria-label={t("刷新")}>
@@ -129,75 +144,77 @@ export function WikiView({ client, onOpenDoc }: Props) {
         </button>
       </div>
 
-      <div className={styles.filters}>
-        <div className={styles.searchWrap}>
-          <span className={styles.searchIcon}>
-            <Search size={14} />
-          </span>
-          <input
-            className={styles.search}
-            type="search"
-            placeholder={t("搜索标题 / 正文…")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+      <div className={styles.view}>
+        <div className={styles.filters}>
+          <div className={styles.searchWrap}>
+            <span className={styles.searchIcon}>
+              <Search size={14} />
+            </span>
+            <input
+              className={styles.search}
+              type="search"
+              placeholder={t("搜索标题 / 正文…")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          {workspaces.length > 1 && (
+            <select
+              className={styles.wsSelect}
+              value={workspace}
+              onChange={(e) => setWorkspace(e.target.value)}
+            >
+              <option value="">{t("全部项目")}</option>
+              {workspaces.map((w) => (
+                <option key={w} value={w}>
+                  {w}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
-        {workspaces.length > 1 && (
-          <select
-            className={styles.wsSelect}
-            value={workspace}
-            onChange={(e) => setWorkspace(e.target.value)}
-          >
-            <option value="">{t("全部项目")}</option>
-            {workspaces.map((w) => (
-              <option key={w} value={w}>
-                {w}
-              </option>
-            ))}
-          </select>
+
+        {error && <div className={styles.hint}>{t("知识库加载失败：{0}", error)}</div>}
+        {!error && docs === null && <div className={styles.hint}>{t("加载中…")}</div>}
+        {!error && docs !== null && total === 0 && (
+          <EmptyState
+            icon={BookOpen}
+            title={t("还没有归档的文档")}
+            description={t("桌面端 agent 用 fleet wiki publish 发布后，文档会出现在这里。")}
+          />
         )}
+
+        {/* 搜索态 */}
+        {!error && searchActive && (
+          <>
+            {searching && <div className={styles.hint}>{t("搜索中…")}</div>}
+            {!searching && results.length === 0 && (
+              <EmptyState compact icon={SearchX} title={t("没有匹配「{0}」的文档。", query)} />
+            )}
+            {results.length > 0 && (
+              <div className={styles.group}>
+                {results.map((doc) => renderDoc(doc, snippetBySlug.get(doc.slug) || undefined))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* 浏览态 */}
+        {!error &&
+          !searchActive &&
+          docs !== null &&
+          total > 0 &&
+          (groups.length === 0 ? (
+            <EmptyState compact icon={FileQuestion} title={t("该项目下没有文档。")} />
+          ) : (
+            groups.map(([folder, items]) => (
+              <div key={folder || "__root__"} className={styles.group}>
+                <div className={styles.groupLabel}>{folder || t("未归类")}</div>
+                {items.map((doc) => renderDoc(doc))}
+              </div>
+            ))
+          ))}
       </div>
-
-      {error && <div className={styles.hint}>{t("知识库加载失败：{0}", error)}</div>}
-      {!error && docs === null && <div className={styles.hint}>{t("加载中…")}</div>}
-      {!error && docs !== null && total === 0 && (
-        <EmptyState
-          icon={BookOpen}
-          title={t("还没有归档的文档")}
-          description={t("桌面端 agent 用 fleet wiki publish 发布后，文档会出现在这里。")}
-        />
-      )}
-
-      {/* 搜索态 */}
-      {!error && searchActive && (
-        <>
-          {searching && <div className={styles.hint}>{t("搜索中…")}</div>}
-          {!searching && results.length === 0 && (
-            <EmptyState compact icon={SearchX} title={t("没有匹配「{0}」的文档。", query)} />
-          )}
-          {results.length > 0 && (
-            <div className={styles.group}>
-              {results.map((doc) => renderDoc(doc, snippetBySlug.get(doc.slug) || undefined))}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* 浏览态 */}
-      {!error &&
-        !searchActive &&
-        docs !== null &&
-        total > 0 &&
-        (groups.length === 0 ? (
-          <EmptyState compact icon={FileQuestion} title={t("该项目下没有文档。")} />
-        ) : (
-          groups.map(([folder, items]) => (
-            <div key={folder || "__root__"} className={styles.group}>
-              <div className={styles.groupLabel}>{folder || t("未归类")}</div>
-              {items.map((doc) => renderDoc(doc))}
-            </div>
-          ))
-        ))}
     </div>
   );
 }
