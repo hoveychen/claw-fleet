@@ -8,11 +8,13 @@
 
 import { detectVoiceProvider, type VoiceInputProvider, type VoiceProviderId } from "./voiceInput";
 import { capacitorVoiceProvider } from "./voiceCapacitor";
+import { harmonyVoiceProvider } from "./voiceHarmony";
 import { webSpeechProvider } from "./voiceWebSpeech";
 
 const REGISTRY: Partial<Record<VoiceProviderId, VoiceInputProvider>> = {
   "web-speech": webSpeechProvider,
   capacitor: capacitorVoiceProvider,
+  harmony: harmonyVoiceProvider,
 };
 
 /** 当前环境该用的 provider，没有可用实现时 null。 */

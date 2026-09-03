@@ -5,6 +5,7 @@ import { saveBase64File } from '../common/FileTransfer';
 import { setKeepScreenOn } from '../common/WakeLock';
 import { shareFile } from '../common/SystemShare';
 import { acquirePushToken } from '../common/PushRegister';
+import { SpeechAsr } from '../common/SpeechAsr';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { parseScan, DirectHostScan } from '../common/RelayStore';
 import { themeTokens } from '../common/Theme';
@@ -39,6 +40,14 @@ interface SharePayload {
   files: SharedFileEntry[];
 }
 
+/// __fleetVoice 的载荷，形状对齐 voiceHarmony.ts 的 HarmonyVoiceEvent。
+/// 四种事件走同一个通道:中间结果、定稿、出错、引擎自己收工。
+interface VoiceEvent {
+  kind: string;
+  text: string;
+  code: string;
+}
+
 
 /// 暴露给页面的原生桥。只放 web 在 WebView 里确实做不到的事——每多一个方法，
 /// mobile-web 就多一分「为鸿蒙写分支」的压力，而那正是我们要消灭的漂移。
@@ -46,10 +55,19 @@ class NativeBridge {
   private ctx: common.UIAbilityContext;
   /// 页面请求扫码时回调进页面组件（扫码要动组件状态:src / pairError）。
   private onScanRequested: () => void;
+  /// 语音识别的事件出口。由页面组件传进来 —— 事件要经 controller.runJavaScript
+  /// 送回页面，而 controller 住在组件上。
+  private onVoiceEvent: (json: string) => void;
+  private asr: SpeechAsr = new SpeechAsr();
 
-  constructor(ctx: common.UIAbilityContext, onScanRequested: () => void) {
+  constructor(
+    ctx: common.UIAbilityContext,
+    onScanRequested: () => void,
+    onVoiceEvent: (json: string) => void,
+  ) {
     this.ctx = ctx;
     this.onScanRequested = onScanRequested;
+    this.onVoiceEvent = onVoiceEvent;
   }
 
   /// WebView 里 <a download> / createObjectURL 不会触发系统下载，交给
@@ -77,6 +95,47 @@ class NativeBridge {
   /// navigator.share 的原生一端，转调 ShareKit 拉起系统分享面板。
   shareContent(filename: string, mimeType: string, base64: string): void {
     shareFile(this.ctx, filename, mimeType, base64).catch(() => {});
+  }
+
+  /// 语音输入的原生一端（mobile-web 的 voiceHarmony.ts）。ArkWeb 里 Web Speech
+  /// API 不可用，页面拿不到任何识别能力，只能由壳提供。
+  ///
+  /// 结果**不走返回值**：识别是流式的，一次说话要吐多条中间结果和一条定稿，
+  /// 而 javaScriptProxy 的方法是一问一答。所以这里只管「开始」，结果经
+  /// window.__fleetVoice 推回页面 —— 与 __fleetShare / __fleetPushToken 同一套
+  /// 约定，只是不需要 bootScript 占位：语音事件只在用户按下按钮之后才产生，
+  /// 那时页面的 hook 早就注册好了，不存在冷启动赛跑。
+  startVoice(lang: string): void {
+    this.asr.start(this.ctx, lang, {
+      onText: (text: string, isFinal: boolean) => {
+        const ev: VoiceEvent = { kind: isFinal ? 'final' : 'partial', text: text, code: '' };
+        this.onVoiceEvent(JSON.stringify(ev));
+      },
+      onError: (code: string) => {
+        const ev: VoiceEvent = { kind: 'error', text: '', code: code };
+        this.onVoiceEvent(JSON.stringify(ev));
+      },
+      onComplete: () => {
+        // 引擎自己收工（VAD 判定说完了，或到了 maxAudioDuration）。资源要还，
+        // 否则麦克风一直占着；页面据此把按钮复位。
+        this.asr.release();
+        const ev: VoiceEvent = { kind: 'end', text: '', code: '' };
+        this.onVoiceEvent(JSON.stringify(ev));
+      },
+    }).catch(() => {
+      const ev: VoiceEvent = { kind: 'error', text: '', code: 'START_FAILED' };
+      this.onVoiceEvent(JSON.stringify(ev));
+    });
+  }
+
+  /// 停止收音，但让引擎把最后一段定稿吐出来。
+  stopVoice(): void {
+    this.asr.stop();
+  }
+
+  /// 丢弃这次识别。
+  cancelVoice(): void {
+    this.asr.cancel();
   }
 }
 
@@ -117,6 +176,7 @@ struct WebShell {
   private bridge: NativeBridge = new NativeBridge(
     getContext(this) as common.UIAbilityContext,
     () => { this.startPairing(); },
+    (json: string) => { this.deliverVoiceEvent(json); },
   );
 
   aboutToAppear(): void {
@@ -221,6 +281,22 @@ struct WebShell {
       }
     }).catch((e: Error) => {
       hilog.warn(DOMAIN_W, TAG_W, 'deeplink-diag inject failed: %{public}s', e.message);
+    });
+  }
+
+  /// 把一条语音事件交给页面（voiceHarmony.ts 的 window.__fleetVoice）。
+  ///
+  /// 与 deliverShare / deliverDeepLink 不同，这里不需要 bootScript 占位、也不需要
+  /// 投递失败后重投：语音事件只在用户按下按钮之后才产生，那一刻页面的 hook 必然
+  /// 已经注册好了。没有 hook 只可能是页面在识别中途被换掉了，那时这条结果本来
+  /// 就该丢。
+  private deliverVoiceEvent(json: string): void {
+    if (!this.webReady) { return; }
+    this.controller.runJavaScript(
+      `(function(){ if(!window.__fleetVoice) return 'NO_HOOK';` +
+      ` window.__fleetVoice(` + json + `); return 'OK'; })()`,
+    ).catch((e: Error) => {
+      hilog.warn(DOMAIN_W, TAG_W, 'voice deliver failed: %{public}s', e.message);
     });
   }
 
@@ -579,7 +655,13 @@ struct WebShell {
           .javaScriptProxy({
             object: this.bridge,
             name: 'fleetNative',
-            methodList: ['saveFile', 'keepAwake', 'shareContent', 'scanPairing'],
+            methodList: [
+              'saveFile', 'keepAwake', 'shareContent', 'scanPairing',
+              // 语音输入。startVoice 的存在与否就是 web 侧 detectVoiceProvider
+              // 的判据 —— 老壳配新 web 时这三个方法不在，页面会自动回落，
+              // 不会调进一条不存在的实现。
+              'startVoice', 'stopVoice', 'cancelVoice',
+            ],
             controller: this.controller,
           })
           .onInterceptRequest((event) => {

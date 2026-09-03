@@ -19,6 +19,17 @@
       },
       {
         "name": "ohos.permission.GET_NETWORK_INFO"
+      },
+      {
+        // 语音输入（common/SpeechAsr.ets）。Core Speech Kit 的
+        // recognitionMode:0 让引擎自己采麦克风，但采集权限仍要应用来申请。
+        // 敏感权限必须带 reason + usedScene，缺了装不上。
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:mic_reason",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
       }
     ],
     "deviceTypes": [
