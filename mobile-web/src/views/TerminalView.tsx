@@ -33,6 +33,42 @@ interface Props {
   onBack: () => void;
 }
 
+/** 键位条：软键盘上没有的键。发的是完整转义序列，不再经粘滞 Ctrl 折一次。 */
+const KEYS: Array<{ label: string; data: string }> = [
+  { label: "Esc", data: "\x1b" },
+  { label: "Tab", data: "\t" },
+  { label: "^C", data: "\x03" },
+  { label: "^D", data: "\x04" },
+  { label: "↑", data: "\x1b[A" },
+  { label: "↓", data: "\x1b[B" },
+  { label: "←", data: "\x1b[D" },
+  { label: "→", data: "\x1b[C" },
+];
+
+/** 软键盘遮住的高度。
+ *
+ *  iOS 上软键盘不会缩小布局视口，它是盖上来的 —— 而这个页面是 `position:fixed;
+ *  inset:0`，于是键位条和终端底部会整个被盖住，正在输入的那一行反而看不见。
+ *  visualViewport 是唯一能问出「实际还剩多少可视高度」的接口。 */
+function useKeyboardInset(): number {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return; // 老浏览器：退回布局视口，键盘弹起时自然缩小（安卓多数如此）
+    const apply = () => {
+      setInset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+    };
+  }, []);
+  return inset;
+}
+
 /** 标签上显示的命令名：`exec "$SHELL" -i` 这种默认 shell 显示成「shell」，
  *  其余取第一个词，太长再截断。 */
 function procLabel(proc: ProcRecord): string {
@@ -51,6 +87,10 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
   // 一个工作区只自动开一次 shell：接回列表是异步的，没有这道闸，
   // 「列表空 → 开一个」会在第二次渲染时再开一个。
   const autoSpawned = useRef<string | null>(null);
+  // 键位条 → 当前终端的通道。TerminalPane 挂上时把 send 交过来，卸载时交 null。
+  const sendRef = useRef<((data: string) => void) | null>(null);
+  const [ctrl, setCtrl] = useState(false);
+  const keyboardInset = useKeyboardInset();
 
   const client = ws ? clientFor(ws.deviceId) : null;
 
@@ -165,7 +205,7 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
   const exited = active?.status === "exited";
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} style={{ bottom: keyboardInset }}>
       <div className={styles.header}>
         <button className={styles.backButton} onClick={onBack}>
           <ChevronLeft size={20} />
@@ -219,10 +259,50 @@ export function TerminalView({ workspaces, initial, clientFor, onBack }: Props) 
 
       {client && active ? (
         <Suspense fallback={<EmptyState compact icon={Folder} title={t("加载中…")} />}>
-          <TerminalPane key={active.id} client={client} proc={active} onRecord={onRecord} />
+          <TerminalPane
+            key={active.id}
+            client={client}
+            proc={active}
+            onRecord={onRecord}
+            registerInput={(send) => {
+              sendRef.current = send;
+            }}
+            ctrl={ctrl}
+            onCtrlConsumed={() => setCtrl(false)}
+          />
         </Suspense>
       ) : (
         <EmptyState compact icon={Folder} title={busy ? t("正在开终端…") : t("没有终端")} />
+      )}
+
+      {!exited && active && (
+        <div className={styles.keyBar}>
+          <button
+            className={styles.key}
+            data-sticky={ctrl}
+            // onPointerDown + preventDefault:按下就发，且不让浏览器把焦点从
+            // xterm 的隐藏 textarea 上挪走 —— 焦点一丢，软键盘就收起来了，
+            // 而键位条本来就是配着软键盘用的。
+            onPointerDown={(e) => {
+              e.preventDefault();
+              setCtrl((v) => !v);
+            }}
+          >
+            Ctrl
+          </button>
+          {KEYS.map((k) => (
+            <button
+              key={k.label}
+              className={styles.key}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                sendRef.current?.(k.data);
+              }}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
       )}
 
       {exited && active && (

@@ -89,3 +89,24 @@ export function encodeInput(data: string): string {
 export function decodeOutput(dataB64: string): Uint8Array {
   return Uint8Array.from(atob(dataB64), (c) => c.charCodeAt(0));
 }
+
+/** 把一个字符折成它的控制码：Ctrl-A..Z 是 0x01..0x1a，另有几个符号也有定义。
+ *
+ *  软键盘上没有 Ctrl，所以它由键位条上的粘滞按钮提供，作用到下一个敲下去的
+ *  字符上 —— 这个函数就是那一步。不认识的字符原样返回：Ctrl 对它没有定义，
+ *  吞掉只会让人以为按键丢了。 */
+export function applyCtrl(data: string): string {
+  if (data.length !== 1) return data;
+  const c = data.toUpperCase();
+  if (c >= "A" && c <= "Z") return String.fromCharCode(c.charCodeAt(0) - 64);
+  const punct: Record<string, string> = {
+    "@": "\x00",
+    " ": "\x00",
+    "[": "\x1b",
+    "\\": "\x1c",
+    "]": "\x1d",
+    "^": "\x1e",
+    _: "\x1f",
+  };
+  return punct[c] ?? data;
+}
