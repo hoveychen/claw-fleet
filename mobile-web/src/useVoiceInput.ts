@@ -33,6 +33,36 @@ export function voiceErrorText(kind: VoiceErrorKind): string {
   }
 }
 
+/**
+ * 这台设备能不能语音输入。
+ *
+ * 单独抽出来是因为**有两处必须用同一个判断**：语音按钮（不可用就整个不出现）
+ * 和输入框的 placeholder（「发消息或按住说话」）。两边各写一套的话，无 GMS 的
+ * 国产安卓机上就会出现「提示说能按住说话，按钮却不在」——一句指向不存在的
+ * 控件的说明，比不提更糟。
+ *
+ * 异步是因为原生侧要查权限和服务：Android 的 isRecognitionAvailable() 在无
+ * Google 服务的 ROM 上返回 false，只有问过才知道。
+ */
+export function useVoiceAvailable(): "probing" | "ready" | "unsupported" {
+  const [status, setStatus] = useState<"probing" | "ready" | "unsupported">("probing");
+  useEffect(() => {
+    let alive = true;
+    const provider = currentVoiceProvider();
+    if (!provider) {
+      setStatus("unsupported");
+      return;
+    }
+    void provider.isAvailable().then((ok) => {
+      if (alive) setStatus(ok ? "ready" : "unsupported");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return status;
+}
+
 export interface UseVoiceInput {
   state: VoiceState;
   /** 说话过程中的实时回显，未定稿。 */
@@ -61,22 +91,12 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
 
-  // 开机探一次可用性。异步是因为原生侧要查权限和服务 —— 无 GMS 的国产安卓机上
-  // Android 的 isRecognitionAvailable() 返回 false，只有问过才知道。
+  // 开机探一次可用性。
+  const probe = useVoiceAvailable();
   useEffect(() => {
-    let alive = true;
-    const provider = currentVoiceProvider();
-    if (!provider) {
-      setState("unsupported");
-      return;
-    }
-    void provider.isAvailable().then((ok) => {
-      if (alive) setState(ok ? "idle" : "unsupported");
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+    if (probe === "probing") return;
+    setState((s) => (s === "probing" ? (probe === "ready" ? "idle" : "unsupported") : s));
+  }, [probe]);
 
   // 卸载时收掉进行中的识别，否则麦克风会一直开着。
   useEffect(() => {

@@ -194,16 +194,36 @@
   padding: 0 2px;
 }
 
+/* 圆形纯图标按钮，与 VoiceButton.module.css 的 .btn 同款 —— 主流输入框里
+   附件/相机/语音这类操作入口都是纯图标（带文字的胶囊留给模式开关），两个
+   并排才像一对。原来是「📎 附件」带文字的虚线胶囊。 */
 .attachAdd {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: 1px dashed var(--color-border-strong);
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border-strong);
   background: none;
   color: var(--color-text-dim);
   border-radius: 999px;
-  padding: 3px 12px;
-  font-size: var(--t-aux, 12px);
+}
+
+.attachAdd:disabled {
+  opacity: 0.6;
+}
+
+/* 上传中的转圈。@keyframes 就近定义，避免依赖别处是否已有同名动画。 */
+.spin {
+  animation: attach-spin 0.9s linear infinite;
+}
+
+@keyframes attach-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .optionRow {
