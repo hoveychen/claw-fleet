@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyFrozenOrder,
   buildRenderItems,
   workspaceFilterValue,
   groupOpenReadTargets,
@@ -246,5 +247,56 @@ describe("workspace filter across devices", () => {
     expect(matchesWorkspaceFilter(row("dev-a", "/repos/foo"), "/repos/foo", null, false)).toBe(
       true,
     );
+  });
+});
+
+// 任务栏默认按 lastActivityMs 降序,而桌面端每隔几秒就推一次全量快照。手指还
+// 在列表上滑的时候一次重排,会把手指底下那张卡换成另一张 —— 抬手点下去开的是
+// 别的会话。滚动期间(以及停下后的 5 秒内)必须冻住顺序。
+describe("applyFrozenOrder", () => {
+  const row = (deviceId: string, id: string) =>
+    ({ id, deviceId, workspacePath: "/w", workspaceName: "n", status: "idle" }) as unknown as
+      SessionInfo & { deviceId: string };
+  const keys = (rows: Array<{ deviceId?: string; id: string }>) =>
+    rows.map((r) => `${r.deviceId ?? ""}::${r.id}`);
+
+  it("passes rows through untouched when nothing is frozen", () => {
+    const rows = [row("d", "a"), row("d", "b")];
+    expect(keys(applyFrozenOrder(rows, null))).toEqual(["d::a", "d::b"]);
+  });
+
+  it("holds the frozen order even after the fresh sort flipped the rows", () => {
+    // 冻结时屏幕上是 a、b、c;新快照把 c 顶到了最前。
+    const frozen = ["d::a", "d::b", "d::c"];
+    const resorted = [row("d", "c"), row("d", "a"), row("d", "b")];
+    expect(keys(applyFrozenOrder(resorted, frozen))).toEqual(["d::a", "d::b", "d::c"]);
+  });
+
+  it("appends sessions born after the freeze at the bottom, never in the middle", () => {
+    // 新会话按自然顺序本该排第一,插进去会把每张卡都顶下一格。
+    const frozen = ["d::a", "d::b"];
+    const rows = [row("d", "new"), row("d", "a"), row("d", "b")];
+    expect(keys(applyFrozenOrder(rows, frozen))).toEqual(["d::a", "d::b", "d::new"]);
+  });
+
+  it("keeps several post-freeze arrivals in their own natural order", () => {
+    const frozen = ["d::a"];
+    const rows = [row("d", "n2"), row("d", "n1"), row("d", "a")];
+    expect(keys(applyFrozenOrder(rows, frozen))).toEqual(["d::a", "d::n2", "d::n1"]);
+  });
+
+  it("silently drops frozen keys whose session is gone (filtered out or ended)", () => {
+    const frozen = ["d::a", "d::gone", "d::b"];
+    expect(keys(applyFrozenOrder([row("d", "b"), row("d", "a")], frozen))).toEqual([
+      "d::a",
+      "d::b",
+    ]);
+  });
+
+  it("scopes the frozen key by device so two machines' same id never swap places", () => {
+    const frozen = ["dev-b::s", "dev-a::s"];
+    const rows = [row("dev-a", "s"), row("dev-b", "s")];
+    const out = applyFrozenOrder(rows, frozen);
+    expect(keys(out)).toEqual(["dev-b::s", "dev-a::s"]);
   });
 });
