@@ -1,7 +1,34 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
-import { fixSymbolBullets, renderMarkdownInto } from "./officeRender";
+import { fixSymbolBullets, renderMarkdownInto, renderPptxInto } from "./officeRender";
+
+/**
+ * A 19-slide deck that renders in PowerPoint and rendered as a black box in the
+ * app, cut down to its first slide.
+ *
+ * Its `[Content_Types].xml` declares nineteen `slideMaster` parts —
+ * `slideMaster1.xml` through `slideMaster19.xml` — while the package contains
+ * only `slideMaster1.xml`. PowerPoint ignores an override for a part that isn't
+ * there; pptx-preview walks the override list and calls `.async()` on the
+ * missing zip entry, which aborts the rest of the load. The layouts and slides
+ * are read *after* the masters, so the deck arrives at the renderer with zero
+ * slides and `slides[0].background` throws
+ * "Cannot read properties of undefined (reading 'background')" — the message
+ * the artifact stage put on screen.
+ *
+ * Verified by isolation against the real 396 KB deck: deleting only the
+ * eighteen phantom overrides, changing nothing else, took it from
+ * `layouts: 0, slides: 0` to `layouts: 1, slides: 19`.
+ */
+function phantomOverrideDeck(): Blob {
+  // Vitest runs with the package root as cwd, so the path is relative to it
+  // rather than to this file; a wrong cwd throws ENOENT rather than passing.
+  const bytes = readFileSync("app/fixtures/phantom-overrides.pptx");
+  return new Blob([new Uint8Array(bytes)]);
+}
 
 /**
  * Reproduces what docx-preview emits for a Word bulleted list, taken verbatim
@@ -71,6 +98,20 @@ describe("fixSymbolBullets across multiple rules", () => {
     const rules = [...host.querySelector("style")!.sheet!.cssRules] as CSSStyleRule[];
     expect(rules).toHaveLength(2);
     for (const r of rules) expect(r.style.content).toContain("\u2022");
+  });
+});
+
+describe("renderPptxInto — a deck whose content types over-declare", () => {
+  it("renders the first slide instead of throwing", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    await renderPptxInto(phantomOverrideDeck(), host, 820);
+
+    // The library builds one `.slide-wrapper` per rendered slide; before the
+    // repair there was none, because the deck parsed to zero slides.
+    expect(host.querySelector(".slide-wrapper")).not.toBeNull();
+    expect(host.textContent).toContain("短歌行");
   });
 });
 
