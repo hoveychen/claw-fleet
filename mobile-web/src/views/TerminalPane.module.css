@@ -1,0 +1,13 @@
+.pane {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px 0 0 6px;
+  background: var(--color-bg);
+}
+
+/* xterm 自带的 .xterm-viewport 有滚动条；手机上隐藏它，靠手势滚。 */
+.pane :global(.xterm-viewport)::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
