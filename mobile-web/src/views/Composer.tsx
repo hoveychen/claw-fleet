@@ -18,9 +18,11 @@ import { dshEffortsFor, dshModelGroups, useDshModels } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
+import { appendVoiceText } from "../voiceInput";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs } from "./AttachmentThumb";
+import { VoiceButton } from "./VoiceButton";
 
 const MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
@@ -221,6 +223,7 @@ function AttachmentRow({
   onRemove,
   client,
   previews,
+  onVoiceText,
 }: {
   attachments: Attachment[];
   uploading: boolean;
@@ -228,6 +231,10 @@ function AttachmentRow({
   onRemove: (path: string) => void;
   client: FleetTransport | null;
   previews?: Map<string, string>;
+  /** 识别出的一段语音。挂在这一行是因为它和「附件」一样是输入的辅助入口，
+   *  而两个 composer 都已经在用这一行 —— 接在这里两处同时就有了。
+   *  不传则不显示语音按钮。 */
+  onVoiceText?: (text: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   return (
@@ -256,6 +263,7 @@ function AttachmentRow({
           </>
         )}
       </button>
+      {onVoiceText && <VoiceButton onText={onVoiceText} />}
       <input
         ref={inputRef}
         type="file"
@@ -782,6 +790,11 @@ export function NewSessionSheet({
           onRemove={remove}
           client={client}
           previews={previews}
+          // 函数式更新:识别结果是异步到的,期间用户可能又敲了字。读闭包里的
+          // prompt 会把那几个字覆盖掉。
+          onVoiceText={(text) =>
+            setDraft((d) => ({ ...d, prompt: appendVoiceText(d.prompt, text) }))
+          }
         />
         {toolChoices.length > 1 && (
           <div className={styles.optionRow}>
@@ -1045,6 +1058,7 @@ export function ResumeComposer({
         onRemove={remove}
         client={client}
         previews={previews}
+        onVoiceText={(text) => setPrompt((p) => appendVoiceText(p, text))}
       />
       <div className={styles.resumeActions}>
         {!enqueueing && (

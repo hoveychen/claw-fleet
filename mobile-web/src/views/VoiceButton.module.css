@@ -1,0 +1,49 @@
+/* 与 Composer 的 .attachAdd 同构 —— 两个按钮并排站在同一行工具栏里，长得不一样
+   会显得是从别处抄来的。差别只在录音时的状态色。 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px dashed var(--color-border-strong);
+  background: none;
+  color: var(--color-text-dim);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: var(--t-aux, 12px);
+  /* 长按是这个按钮的主交互，浏览器默认的长按选字 / 拖拽会打断它。 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.btn[data-listening] {
+  border-style: solid;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+/* 上滑进了取消区。松手就丢弃，得让用户在松手之前看见。 */
+.btn[data-cancel] {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  background: none;
+}
+
+/* 实时回显。不换行、超长截断 —— 它是个进行中的提示，不该把工具栏撑成两行把
+   下面的内容顶走。 */
+.partial {
+  flex: 1 1 120px;
+  min-width: 0;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.error {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-danger);
+}
