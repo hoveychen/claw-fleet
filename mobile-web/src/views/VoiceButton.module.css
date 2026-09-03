@@ -26,8 +26,8 @@
 
 /* 上滑进了取消区。松手就丢弃，得让用户在松手之前看见。 */
 .btn[data-cancel] {
-  border-color: var(--color-danger);
-  color: var(--color-danger);
+  border-color: var(--color-error);
+  color: var(--color-error);
   background: none;
 }
 
@@ -45,5 +45,5 @@
 
 .error {
   font-size: var(--t-aux, 12px);
-  color: var(--color-danger);
+  color: var(--color-error);
 }
