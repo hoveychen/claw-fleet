@@ -11,6 +11,10 @@
     {
       "name": "EntryAbility_label",
       "value": "Claw Fleet"
+    },
+    {
+      "name": "mic_reason",
+      "value": "用于把你说的话转成文字，填进输入框"
     }
   ]
 }
