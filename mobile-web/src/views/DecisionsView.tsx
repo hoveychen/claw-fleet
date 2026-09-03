@@ -11,6 +11,9 @@ import {
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { fileExtIcon } from "./fileIcon";
+import { VoiceButton } from "./VoiceButton";
+import { VoiceTextarea } from "./VoiceTextarea";
+import { appendVoiceText } from "../voiceInput";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { mermaidMarkdownComponents } from "../markdown/mermaidComponents";
@@ -533,11 +536,11 @@ function GuardCard({
       )}
       <GuardAnalysis request={request} client={client} session={session} />
       {showReason && (
-        <textarea
+        <VoiceTextarea
           className={styles.reasonInput}
           placeholder={t("拒绝理由（可选，会转告给 AI）")}
           value={reason}
-          onChange={(e) => setReason(e.target.value)}
+          onChange={setReason}
           rows={2}
         />
       )}
@@ -642,11 +645,11 @@ function PermissionCard({
       )}
       {hasExtraParams && showRaw && <pre className={styles.command}>{truncate(rawJson, 6000)}</pre>}
       {showReason && (
-        <textarea
+        <VoiceTextarea
           className={styles.reasonInput}
           placeholder={t("拒绝理由（可选）")}
           value={reason}
-          onChange={(e) => setReason(e.target.value)}
+          onChange={setReason}
           rows={2}
         />
       )}
@@ -735,11 +738,11 @@ function PlanCard({
         )}
       </button>
       {rejecting && (
-        <textarea
+        <VoiceTextarea
           className={styles.reasonInput}
           placeholder={t("驳回意见（会转告给 AI 修改计划）")}
           value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
+          onChange={setFeedback}
           rows={3}
         />
       )}
@@ -1371,6 +1374,10 @@ function OtherComposer({
   onRemove: (path: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // 识别结果是异步到的，期间用户可能又敲了字；读 ref 里最近一次渲染的值，
+  // 而不是闭包里那个可能已经过期的 value。
+  const valueRef = useRef(value);
+  valueRef.current = value;
   return (
     <div className={styles.otherBlock}>
       {label && <span className={styles.otherLabel}>{label}</span>}
@@ -1405,6 +1412,10 @@ function OtherComposer({
             onChange={(e) => onChange(e.target.value)}
             rows={2}
           />
+          {/* 这一行本来就有附件 + 号，语音按钮并排进去即可，不用 VoiceTextarea
+              （那个是给没有工具行的裸 textarea 的）。回答决策卡是手机上最高频
+              的输入场景，这里最该能说。 */}
+          <VoiceButton onText={(text) => onChange(appendVoiceText(valueRef.current, text))} />
         </div>
         <input
           ref={inputRef}
@@ -1442,11 +1453,11 @@ function FormFieldControl({
       return (
         <div className={styles.field}>
           {label}
-          <textarea
+          <VoiceTextarea
             rows={3}
             placeholder={field.placeholder ?? undefined}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={onChange}
           />
         </div>
       );

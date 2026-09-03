@@ -1,0 +1,57 @@
+/* 圆形纯图标按钮 —— 对齐 DeepSeek / 千问 / Kimi 的输入框范式：附件、相机、语音
+   这类**操作入口**是纯图标，带文字的胶囊留给「深度思考」那种模式开关。
+   与 Composer 的 .attachAdd 是同一款（那个也按这条改了），两个并排才像一对。 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 34px：28px 在手机上按着太小（触摸目标建议再大些，但视觉上 34 是主流
+     chatbot 图标按钮的量级）。 */
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border-strong);
+  background: none;
+  color: var(--color-text-dim);
+  border-radius: 999px;
+  /* 长按是这个按钮的主交互，浏览器默认的长按选字 / 拖拽会打断它。 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.btn[data-listening] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+/* 上滑进了取消区。松手就丢弃，得让用户在松手之前看见。 */
+.btn[data-cancel] {
+  border-color: var(--color-error);
+  color: var(--color-error);
+  background: none;
+}
+
+/* 按钮没了文字标签，指引和实时回显都靠这一行。不换行、超长截断 —— 它是个
+   进行中的提示，不该把工具栏撑成两行把下面的内容顶走。 */
+.hint {
+  flex: 1 1 120px;
+  min-width: 0;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hint[data-cancel] {
+  color: var(--color-error);
+}
+
+.error {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-error);
+}

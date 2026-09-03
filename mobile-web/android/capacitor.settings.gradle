@@ -7,3 +7,6 @@ project(':capacitor-app').projectDir = new File('../node_modules/.pnpm/@capacito
 
 include ':capgo-capacitor-share-target'
 project(':capgo-capacitor-share-target').projectDir = new File('../node_modules/.pnpm/@capgo+capacitor-share-target@8.0.46_@capacitor+core@8.5.0/node_modules/@capgo/capacitor-share-target/android')
+
+include ':capgo-capacitor-speech-recognition'
+project(':capgo-capacitor-speech-recognition').projectDir = new File('../node_modules/.pnpm/@capgo+capacitor-speech-recognition@8.2.0_@capacitor+core@8.5.0/node_modules/@capgo/capacitor-speech-recognition/android')

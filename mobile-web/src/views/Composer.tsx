@@ -3,7 +3,7 @@
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
+import { Check, FolderSearch, LoaderCircle, Paperclip, Send, X } from "lucide-react";
 import { randomId } from "../clientId";
 import { loadDraft, saveDraft, type DraftStorage } from "../draft";
 import { scopedKey, useDeviceDraft, useDeviceScope } from "../deviceScope";
@@ -18,9 +18,12 @@ import { dshEffortsFor, dshModelGroups, useDshModels } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
+import { appendVoiceText } from "../voiceInput";
+import { useVoiceAvailable } from "../useVoiceInput";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs } from "./AttachmentThumb";
+import { VoiceButton } from "./VoiceButton";
 
 const MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
@@ -221,6 +224,7 @@ function AttachmentRow({
   onRemove,
   client,
   previews,
+  onVoiceText,
 }: {
   attachments: Attachment[];
   uploading: boolean;
@@ -228,6 +232,10 @@ function AttachmentRow({
   onRemove: (path: string) => void;
   client: FleetTransport | null;
   previews?: Map<string, string>;
+  /** 识别出的一段语音。挂在这一行是因为它和「附件」一样是输入的辅助入口，
+   *  而两个 composer 都已经在用这一行 —— 接在这里两处同时就有了。
+   *  不传则不显示语音按钮。 */
+  onVoiceText?: (text: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   return (
@@ -242,20 +250,23 @@ function AttachmentRow({
         onRemove={onRemove}
         compact
       />
+      {/* 纯图标圆按钮，与语音按钮同款 —— 主流输入框里附件/相机/语音这类操作
+          入口都是纯图标，带文字的胶囊留给模式开关。上传中换成转圈图标而不是
+          只把按钮禁掉：反馈不能因为去掉文字标签就丢了。 */}
       <button
         className={styles.attachAdd}
         disabled={uploading}
         onClick={() => inputRef.current?.click()}
+        aria-label={uploading ? t("上传中…") : t("附件")}
+        title={uploading ? t("上传中…") : t("附件")}
       >
         {uploading ? (
-          t("上传中…")
+          <LoaderCircle size={17} className={styles.spin} />
         ) : (
-          <>
-            <Paperclip size={13} />
-            {t("附件")}
-          </>
+          <Paperclip size={17} />
         )}
       </button>
+      {onVoiceText && <VoiceButton onText={onVoiceText} />}
       <input
         ref={inputRef}
         type="file"
@@ -550,6 +561,8 @@ export function NewSessionSheet({
     client,
     NEW_SESSION_ATTACH_KEY,
   );
+  // 与语音按钮同一个探测结果，让 placeholder 的提示和按钮的显示条件一致。
+  const voiceReady = useVoiceAvailable() === "ready";
 
   // 分享进来的文件走一次正常上传。
   //
@@ -768,9 +781,14 @@ export function NewSessionSheet({
             />
           </>
         )}
+        {/* placeholder 承担语音的说明职责（对齐 DeepSeek / 千问 的「发消息或按住
+            说话」）—— 按钮变成纯图标后没地方写字了。用与按钮同一个探测结果开关，
+            否则无 GMS 的安卓机上会提示一个不存在的按钮。 */}
         <textarea
           className={styles.promptInput}
-          placeholder={t("要让 agent 做什么？")}
+          placeholder={
+            voiceReady ? t("要让 agent 做什么？也可按住语音键说") : t("要让 agent 做什么？")
+          }
           rows={5}
           value={prompt}
           onChange={(e) => patch({ prompt: e.target.value })}
@@ -782,6 +800,11 @@ export function NewSessionSheet({
           onRemove={remove}
           client={client}
           previews={previews}
+          // 函数式更新:识别结果是异步到的,期间用户可能又敲了字。读闭包里的
+          // prompt 会把那几个字覆盖掉。
+          onVoiceText={(text) =>
+            setDraft((d) => ({ ...d, prompt: appendVoiceText(d.prompt, text) }))
+          }
         />
         {toolChoices.length > 1 && (
           <div className={styles.optionRow}>
@@ -888,6 +911,8 @@ export function ResumeComposer({
     `resume:${session.id}:attachments`,
   );
   const [focused, setFocused] = useState(false);
+  // 与语音按钮同一个探测结果，让 placeholder 的提示和按钮的显示条件一致。
+  const voiceReady = useVoiceAvailable() === "ready";
   // Folded only when the parent asked AND the user has nothing in flight here.
   const collapsed =
     !!hidden &&
@@ -1030,7 +1055,9 @@ export function ResumeComposer({
         placeholder={
           enqueueing
             ? t("会话运行中，发送后排队，本轮结束自动接上…")
-            : t("继续这个会话（留空 = continue）…")
+            : voiceReady
+              ? t("继续这个会话，也可按住语音键说…")
+              : t("继续这个会话（留空 = continue）…")
         }
         rows={2}
         value={prompt}
@@ -1045,6 +1072,7 @@ export function ResumeComposer({
         onRemove={remove}
         client={client}
         previews={previews}
+        onVoiceText={(text) => setPrompt((p) => appendVoiceText(p, text))}
       />
       <div className={styles.resumeActions}>
         {!enqueueing && (
