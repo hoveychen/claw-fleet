@@ -4,9 +4,24 @@
  * fit the sub-bar, and every pixel of width is worth more to a video or a PDF
  * preview than to a tree nobody navigates. */
 
+/* PageShell's `.main` is a clipping flex column — every page's content root owns
+ * its own scrolling (`.rail_pane` in Wiki, `.list_pane` in Memory). Without the
+ * flex/min-height/overflow trio here the grid sized to its content inside that
+ * clip, so anything past the first rows was cut off with no scrollbar at all.
+ *
+ * `grid-auto-rows: max-content` is load-bearing, not decoration: once the grid's
+ * own height is definite (which `flex: 1` makes it), auto rows are free to shrink
+ * to min-content, and the cards — flex columns whose aspect-ratio thumb can
+ * collapse to nothing — went from 280px to 72px with the wells emptied out.
+ * Pinning the rows to their content keeps the cards whole and forces the
+ * overflow onto the scroller instead. Row height is unchanged when it fits. */
 .grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-auto-rows: max-content;
   gap: var(--space-5);
   padding: var(--space-7);
   align-content: start;
