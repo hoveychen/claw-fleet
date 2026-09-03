@@ -91,6 +91,24 @@ export function detectVoiceProvider(): VoiceProviderId | null {
 }
 
 /**
+ * 把识别出的一段文字并进输入框里已有的内容。
+ *
+ * 要不要补一个空格取决于接缝两侧是什么：中文之间加空格是错的，而两个英文词黏在
+ * 一起同样是错的。Fleet 的语音内容天生中英混排（「把 P3 勾掉」「合一下 worktree」），
+ * 所以两种情况在同一句话里都会出现 —— 只在接缝两侧都是 ASCII 字母/数字时才补。
+ */
+export function appendVoiceText(existing: string, addition: string): string {
+  const add = addition.trim();
+  if (!add) return existing;
+  if (!existing) return add;
+  const left = existing[existing.length - 1];
+  // 已有内容自己就以空白收尾,再补一个就成了双空格。
+  if (/\s/.test(left)) return existing + add;
+  const wordish = /[A-Za-z0-9]/;
+  return wordish.test(left) && wordish.test(add[0]) ? `${existing} ${add}` : existing + add;
+}
+
+/**
  * 浏览器有没有 Web Speech 的识别部分。
  *
  * **只有确认不在任何原生壳里之后才可以调这个** —— 见文件头，壳里它会说谎。

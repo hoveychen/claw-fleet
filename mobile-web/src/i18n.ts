@@ -507,6 +507,20 @@ const DICT: Record<string, string> = {
   "图片加载失败，点按重试": "Image failed to load — tap to retry",
   "{0} 张图片加载失败，点按重试": "{0} image(s) failed to load — tap to retry",
 
+  // ── 语音输入 ──
+  语音: "Voice",
+  语音输入: "Voice input",
+  停止录音: "Stop recording",
+  松开结束: "Release to finish",
+  松开取消: "Release to cancel",
+  点击停止: "Tap to stop",
+  没听到声音: "Didn't catch that",
+  // 「已取消」已在上面的通用词条里，不重复登记。
+  "没有麦克风权限，请在系统设置里允许后重试":
+    "No microphone permission — allow it in system settings and try again",
+  语音识别服务连不上: "Can't reach the speech recognition service",
+  这台设备没有可用的语音识别: "No speech recognition available on this device",
+
   // ── Composer ──
   默认模型: "Default model",
   默认努力度: "Default effort",
