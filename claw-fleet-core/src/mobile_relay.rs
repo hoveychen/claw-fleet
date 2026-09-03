@@ -2119,6 +2119,14 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "repo_detail" => serve_repo_detail(params),
         "repo_push" => serve_repo_push(params),
         "repo_pull" => serve_repo_pull(params),
+        // ── Terminal 「终端」 surface ──────────────────────────────────────
+        "procs" => serve_procs(params),
+        "proc_run" => serve_proc_run(params),
+        "proc_output" => serve_proc_output(params),
+        "proc_input" => serve_proc_input(params),
+        "proc_resize" => serve_proc_resize(params),
+        "proc_kill" => serve_proc_kill(params),
+        "proc_clear" => serve_proc_clear(params),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -3121,6 +3129,99 @@ fn serve_repo_pull(params: &Value) -> Result<Value, String> {
     let known = known_workspaces();
     let res = crate::git_ops::repo_pull(root, &known)?;
     serde_json::to_value(res).map_err(|e| e.to_string())
+}
+
+// ── Terminal (mobile / webui 「终端」 panel) ─────────────────────────────────
+//
+// Thin wrappers over [`crate::proc_runner`], which is already a full
+// interactive pty host (stdin, resize, killpg, offset-addressed output). The
+// desktop reaches those same functions through the Backend trait and the
+// `/proc_*` HTTP routes; the phone and the browser build reach them here,
+// because `/mobile_rpc` and the relay WebSocket share this one dispatcher —
+// adding the methods in this table lights up both transports at once.
+//
+// No workspace gate, deliberately: this whole surface is admin-token only
+// (`/mobile_rpc` is absent from `routes::is_public`) and the very same table
+// already exposes `spawn_session`, which starts an agent that can run any
+// command it likes. A terminal is that existing authority made visible, not a
+// new one — so gating the cwd here would only stop the honest use of it.
+
+fn serve_proc_run(params: &Value) -> Result<Value, String> {
+    let req: crate::proc_runner::SpawnProcRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad proc_run params: {e}"))?;
+    // Same host binary the HTTP route uses: both the desktop app and the fleet
+    // CLI intercept the host argv marker, so re-exec'ing ourselves needs no
+    // PATH lookup and works whichever process is answering.
+    let exe = std::env::current_exe().map_err(|e| format!("cannot locate fleet binary: {e}"))?;
+    let rec = crate::proc_runner::spawn_proc(
+        &exe,
+        &req.workspace_path,
+        &req.command,
+        req.cols,
+        req.rows,
+    )?;
+    serde_json::to_value(rec).map_err(|e| e.to_string())
+}
+
+fn serve_proc_output(params: &Value) -> Result<Value, String> {
+    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    let offset = params.get("offset").and_then(Value::as_u64);
+    let chunk = crate::proc_runner::proc_output(id, offset)?;
+    serde_json::to_value(chunk).map_err(|e| e.to_string())
+}
+
+fn serve_proc_input(params: &Value) -> Result<Value, String> {
+    let req: crate::proc_runner::ProcInputRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad proc_input params: {e}"))?;
+    crate::proc_runner::proc_input(&req.id, &req.data_b64)?;
+    Ok(Value::Null)
+}
+
+fn serve_proc_resize(params: &Value) -> Result<Value, String> {
+    let req: crate::proc_runner::ProcResizeRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad proc_resize params: {e}"))?;
+    crate::proc_runner::proc_resize(&req.id, req.cols, req.rows)?;
+    Ok(Value::Null)
+}
+
+fn serve_proc_kill(params: &Value) -> Result<Value, String> {
+    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    let force = params.get("force").and_then(Value::as_bool).unwrap_or(false);
+    crate::proc_runner::kill_proc(id, force)?;
+    Ok(Value::Null)
+}
+
+/// Every proc this host knows about (newest first — `list_procs` already
+/// orders them) — how a reopened terminal panel finds the sessions it left
+/// running. The pty host is detached, so closing the tab, or the whole
+/// browser, never ends the command.
+fn serve_procs(params: &Value) -> Result<Value, String> {
+    let workspace = params
+        .get("workspacePath")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let mut procs = crate::proc_runner::list_procs();
+    if let Some(ws) = workspace {
+        procs.retain(|p| p.workspace_path == ws);
+    }
+    serde_json::to_value(procs).map_err(|e| e.to_string())
+}
+
+/// Drop an exited proc's record and log. Without it a closed terminal tab
+/// lingers in `procs` forever and the reconnect list only grows.
+fn serve_proc_clear(params: &Value) -> Result<Value, String> {
+    let req: crate::proc_runner::ClearProcRequest = serde_json::from_value(params.clone())
+        .map_err(|e| format!("bad proc_clear params: {e}"))?;
+    match req.id.as_deref().filter(|s| !s.is_empty()) {
+        Some(id) => {
+            crate::proc_runner::clear_proc(id)?;
+            Ok(serde_json::json!({ "cleared": 1 }))
+        }
+        None => {
+            let n = crate::proc_runner::clear_finished_procs(req.workspace_path.as_deref())?;
+            Ok(serde_json::json!({ "cleared": n }))
+        }
+    }
 }
 
 // ── Account & usage (mobile 「账号与用量」 page) ─────────────────────────────────
@@ -7226,6 +7327,92 @@ mod tests {
             let blocks = d["content"].as_array().expect("content blocks");
             assert_eq!(blocks[0]["text"], json!("screenshot taken"));
             assert!(blocks[1].get("source").is_none(), "raw base64 stripped");
+        });
+    }
+
+    // ── Terminal surface ────────────────────────────────────────────────────
+
+    /// Write a proc metadata record straight into the store, the way a live
+    /// `spawn_proc` would have left it behind. Exited on purpose: a `running`
+    /// record naming a dead host pid gets healed by `list_procs`, which would
+    /// make the fixture about healing rather than about this dispatcher.
+    fn seed_proc_record(id: &str, workspace: &str, started_ms: u64) {
+        let dir = crate::proc_runner::procs_dir().expect("procs dir under FLEET_HOME");
+        fs::create_dir_all(&dir).unwrap();
+        let rec = json!({
+            "id": id,
+            "workspacePath": workspace,
+            "command": "echo hi",
+            "status": "exited",
+            "exitCode": 0,
+            "startedMs": started_ms,
+            "finishedMs": started_ms + 10,
+            "cols": 80,
+            "rows": 24,
+        });
+        fs::write(dir.join(format!("{id}.json")), rec.to_string()).unwrap();
+    }
+
+    /// The terminal panel is only as reachable as this table: `proc_runner` has
+    /// been a complete pty host for months, but until these seven names existed
+    /// here the phone and the browser build could not say any of them — both
+    /// transports go through `serve_request` and nothing else.
+    #[test]
+    fn every_terminal_method_is_wired_into_the_dispatcher() {
+        with_temp_home(|| {
+            // Params chosen so each call fails (or succeeds) *inside* its
+            // handler without spawning anything: a missing/!malformed body is
+            // rejected before `proc_runner` ever re-execs a host.
+            for method in [
+                "procs",
+                "proc_run",
+                "proc_output",
+                "proc_input",
+                "proc_resize",
+                "proc_kill",
+                "proc_clear",
+            ] {
+                if let Err(e) = serve_request(method, &json!({})) {
+                    assert!(
+                        !e.contains("unknown method"),
+                        "{method} is not wired into serve_request: {e}"
+                    );
+                }
+            }
+            // Control: the table still rejects what it does not know, so the
+            // assertion above cannot pass vacuously.
+            let err = serve_request("proc_nonsense", &json!({})).unwrap_err();
+            assert!(err.contains("unknown method"), "unexpected error: {err}");
+        });
+    }
+
+    /// A reopened panel asks `procs` for the terminals it left running, and it
+    /// asks per workspace — the entry point is workspace-scoped, so an unfiltered
+    /// list would show a phone every other project's shells.
+    #[test]
+    fn procs_lists_newest_first_and_filters_by_workspace() {
+        with_temp_home(|| {
+            seed_proc_record("older", "/tmp/ws-a", 1_000);
+            seed_proc_record("newer", "/tmp/ws-a", 2_000);
+            seed_proc_record("other", "/tmp/ws-b", 3_000);
+
+            let all = request_ok("procs", json!({}));
+            let ids: Vec<&str> = all
+                .as_array()
+                .expect("procs returns an array")
+                .iter()
+                .map(|p| p["id"].as_str().unwrap())
+                .collect();
+            assert_eq!(ids, vec!["other", "newer", "older"], "newest first");
+
+            let scoped = request_ok("procs", json!({ "workspacePath": "/tmp/ws-a" }));
+            let ids: Vec<&str> = scoped
+                .as_array()
+                .expect("procs returns an array")
+                .iter()
+                .map(|p| p["id"].as_str().unwrap())
+                .collect();
+            assert_eq!(ids, vec!["newer", "older"], "other workspace filtered out");
         });
     }
 }
