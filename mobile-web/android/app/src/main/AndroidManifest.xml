@@ -99,4 +99,21 @@
          粘贴配对，不该因此在应用市场被判为不兼容。 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- 语音输入（src/voiceCapacitor.ts）。RECORD_AUDIO 不在这里声明：
+         @capgo/capacitor-speech-recognition 自己的 manifest 带了它，会 merge 进来。
+
+         需要显式声明的是这段 <queries>：Android 11 (API 30) 起有 package
+         visibility 限制，而插件判可用性用的是
+         SpeechRecognizer.isRecognitionAvailable()，它内部要查询系统里的
+         RecognitionService。没有这段声明，那次查询在 API 30+ 上看不见服务，
+         于是即便设备装了识别引擎也会被判成不可用、语音按钮整个不出现。
+
+         注：本条按 Android package visibility 的机制推断而来，尚未在真机上
+         对照验证（计划 voice-input-native 的 P6 真机验收要确认）。 -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
 </manifest>

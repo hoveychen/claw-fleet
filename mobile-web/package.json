@@ -17,6 +17,7 @@
     "@capacitor/core": "^8.5.0",
     "@capacitor/ios": "^8.5.0",
     "@capgo/capacitor-share-target": "^8.0.46",
+    "@capgo/capacitor-speech-recognition": "^8.2.0",
     "docx-preview": "^0.4.0",
     "jsqr": "^1.4.0",
     "katex": "^0.17.0",
