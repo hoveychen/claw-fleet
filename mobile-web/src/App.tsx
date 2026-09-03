@@ -82,6 +82,7 @@ import { PlansView } from "./views/PlansView";
 import { ArtifactsView } from "./views/ArtifactsView";
 import { RepoView } from "./views/RepoView";
 import { RepoDetailView } from "./views/RepoDetailView";
+import { TerminalView, type TerminalWorkspace } from "./views/TerminalView";
 import { SessionDetailView } from "./views/SessionDetailView";
 import { TasksView } from "./views/TasksView";
 import { UsageView } from "./views/UsageView";
@@ -513,6 +514,10 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     null,
   );
   const [showUsage, setShowUsage] = useState(false);
+  // 终端页。`{ workspace: null }` = 已打开但还没选目录（任务页筛的是「全部目录」
+  // 时进来的），null = 没开 —— 两者不能合并，否则「打开后返回选目录」这一步会
+  // 被当成没打开。
+  const [terminal, setTerminal] = useState<{ workspace: TerminalWorkspace | null } | null>(null);
   const [showPlans, setShowPlans] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
@@ -746,6 +751,24 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     [mergedSessions, activeDeviceId],
   );
 
+  /** 终端页能开在哪些目录上 —— 任务里出现过的每个 workspace,按设备去重。
+   *  跨设备保留:终端进程跑在它所属的那台主机上,所以「哪台」和「哪个目录」是
+   *  一起的一件事。 */
+  const terminalWorkspaces = useMemo(() => {
+    const seen = new Map<string, TerminalWorkspace>();
+    for (const s of mergedSessions) {
+      const key = `${s.deviceId}::${s.workspacePath}`;
+      if (!seen.has(key)) {
+        seen.set(key, {
+          deviceId: s.deviceId,
+          path: s.workspacePath,
+          name: s.workspaceName,
+        });
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [mergedSessions]);
+
   /** 这一次新会话要开在哪台上(用户没另选就是当前作用域那台)。 */
   const newSessionTargetId = newSessionDeviceId ?? activeDeviceId;
   /** 目标设备的本地存储命名空间。与 `deviceId` 同口径 —— mock / 同源形态下只有
@@ -837,6 +860,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     setShowPlans(false);
     setShowArtifacts(false);
     setShowUsage(false);
+    setTerminal(null);
     setShowNewSession(false);
     setNewSessionDeviceId(null);
   }, []);
@@ -1020,6 +1044,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             sessionsLoaded={sessionsLoaded}
             onOpenSession={(s: WithDevice<SessionInfo>) => openSessionRoot(s.deviceId, s.id)}
             onMarkRead={markRead}
+            onOpenTerminal={(workspace) => setTerminal({ workspace })}
           />
         ) : tab === "wiki" ? (
           <WikiView
@@ -1120,6 +1145,18 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             repo={repoDetail.repo}
             client={transportFor(repoDetail.deviceId)}
             onBack={() => setRepoDetail(null)}
+          />
+        </>
+      )}
+
+      {terminal && (
+        <>
+          <HistoryLayer onBack={() => setTerminal(null)} />
+          <TerminalView
+            workspaces={terminalWorkspaces}
+            initial={terminal.workspace}
+            clientFor={transportFor}
+            onBack={() => setTerminal(null)}
           />
         </>
       )}

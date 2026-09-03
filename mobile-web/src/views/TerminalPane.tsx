@@ -53,7 +53,9 @@ interface Props {
   registerInput?: (send: ((data: string) => void) | null) => void;
 }
 
-export function TerminalPane({ client, proc, onRecord, registerInput }: Props) {
+// 默认导出:整个 xterm(含它的 CSS)只在真的开了终端时才下载,同 OfficePreview
+// 的做法 —— 大多数人一整天都不会打开这个页面,不该让他们为它付首屏体积。
+export default function TerminalPane({ client, proc, onRecord, registerInput }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const theme = useResolvedTheme();
