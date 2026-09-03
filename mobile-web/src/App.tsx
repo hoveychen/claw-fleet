@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { BookOpen, Inbox, ListChecks, MoreHorizontal, Plus } from "lucide-react";
+import { Inbox, ListChecks, MoreHorizontal, Package, Plus } from "lucide-react";
 import styles from "./App.module.css";
 import {
   disablePush,
@@ -97,14 +97,14 @@ function fmtTokens(n: number): string {
   return `${n}`;
 }
 
-type Tab = "decisions" | "tasks" | "wiki" | "more";
+type Tab = "decisions" | "tasks" | "artifacts" | "more";
 
 /** tab 的显示名。只给渲染兜底的标题与 console 标签用(底部导航的文案仍内联在
  *  各个按钮里) —— 「决策 页没能显示」比「decisions 页没能显示」有用。 */
 const TAB_LABEL: Record<Tab, string> = {
   decisions: "决策",
   tasks: "任务",
-  wiki: "知识库",
+  artifacts: "产出",
   more: "更多",
 };
 
@@ -514,7 +514,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   );
   const [showUsage, setShowUsage] = useState(false);
   const [showPlans, setShowPlans] = useState(false);
-  const [showArtifacts, setShowArtifacts] = useState(false);
+  const [showWiki, setShowWiki] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
   // 新会话开在**哪一台**上。null = 跟着当前作用域那台(每次打开 sheet 都复位成
   // 它),用户在 sheet 里另选一台时才落一个具体 id。不复用 activeDeviceId 是因为
@@ -798,7 +798,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     repoDetail !== null ||
     showUsage ||
     showPlans ||
-    showArtifacts ||
+    showWiki ||
     showNewSession;
   // Float the decision drawer over whatever the boss is looking at — EXCEPT the
   // plain 决策 tab, which already renders the cards inline (no overlay covering
@@ -811,11 +811,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
    *  换到另一个浮层时自动清错重试,一次渲染失败不该把这个入口永久钉死。 */
   const overlayKey = [
     detailSession ? `detail:${detailSession.deviceId}:${detailSession.id}` : "",
+    showWiki ? "wiki" : "",
     wikiStack.length ? `wiki:${wikiStack.length}:${wikiStack[wikiStack.length - 1].doc.slug}` : "",
     showRepo ? "repo" : "",
     repoDetail ? `repoDetail:${repoDetail.repo.root}` : "",
     showPlans ? "plans" : "",
-    showArtifacts ? "artifacts" : "",
     showUsage ? "usage" : "",
     showNewSession ? `newSession:${newSessionTargetId}` : "",
     showDecisionDrawer ? "drawer" : "",
@@ -831,11 +831,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
    *  困在那儿。 */
   const closeAllOverlays = useCallback(() => {
     setDetailStack([]);
+    setShowWiki(false);
     setWikiStack([]);
     setShowRepo(false);
     setRepoDetail(null);
     setShowPlans(false);
-    setShowArtifacts(false);
     setShowUsage(false);
     setShowNewSession(false);
     setNewSessionDeviceId(null);
@@ -1021,11 +1021,8 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onOpenSession={(s: WithDevice<SessionInfo>) => openSessionRoot(s.deviceId, s.id)}
             onMarkRead={markRead}
           />
-        ) : tab === "wiki" ? (
-          <WikiView
-            client={client}
-            onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
-          />
+        ) : tab === "artifacts" ? (
+          <ArtifactsView client={client} />
         ) : (
           <MoreView
             endpointLabel={client?.endpointLabel ?? ""}
@@ -1050,7 +1047,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             onDisablePush={handleDisablePush}
             onOpenRepo={() => setShowRepo(true)}
             onOpenPlans={() => setShowPlans(true)}
-            onOpenArtifacts={() => setShowArtifacts(true)}
+            onOpenWiki={() => setShowWiki(true)}
             onOpenUsage={() => setShowUsage(true)}
           />
         )}
@@ -1085,6 +1082,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           onOpenSessionId={(id: string) => openSessionById(detailSession.deviceId, id)}
           onDwellRead={() => markRead([detailSession])}
         />
+      )}
+
+      {/* 知识库列表本身也是一层浮层（从「更多」进来），文档详情再压在它之上——
+          所以它要排在 wikiStack 之前渲染。 */}
+      {showWiki && (
+        <>
+          <HistoryLayer onBack={() => setShowWiki(false)} />
+          <WikiView
+            client={client}
+            onBack={() => setShowWiki(false)}
+            onOpenDoc={(doc) => setWikiStack([{ deviceId: activeDeviceId, doc }])}
+          />
+        </>
       )}
 
       {/* 每篇文档占一层，但只渲染栈顶那篇——底下几篇不必挂着重复拉正文/渲 mermaid。 */}
@@ -1131,16 +1141,6 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             sessions={scopedSessions}
             client={client}
             onBack={() => setShowPlans(false)}
-          />
-        </>
-      )}
-
-      {showArtifacts && (
-        <>
-          <HistoryLayer onBack={() => setShowArtifacts(false)} />
-          <ArtifactsView
-            client={client}
-            onBack={() => setShowArtifacts(false)}
           />
         </>
       )}
@@ -1239,13 +1239,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         </button>
         <button
           className={styles.tabButton}
-          data-active={tab === "wiki"}
-          onClick={() => setTab("wiki")}
+          data-active={tab === "artifacts"}
+          onClick={() => setTab("artifacts")}
         >
           <span className={styles.tabIcon}>
-            <BookOpen size={20} />
+            <Package size={20} />
           </span>
-          {t("知识库")}
+          {t("产出")}
         </button>
         <button
           className={styles.tabButton}

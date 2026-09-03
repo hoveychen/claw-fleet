@@ -1,15 +1,35 @@
-/* 产出页：桌面端产出库的手机版。层级沿用 RepoView/PlansView 的全屏浮层 (30)。
+/* 产出 tab：桌面端产出库的手机版。列表是 tab 正文（流式，跟着 main 滚），
+   只有 .detail 那层预览是全屏浮层（35，压在底部导航之上）。
    手机只处理小的那一半——大产出只列卡片并指向桌面端导出，见 artifacts.ts。 */
 
 .page {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
   display: flex;
   flex-direction: column;
-  background: var(--color-bg);
+  gap: 10px;
 }
 
+/* tab 正文的标题行：和知识库/任务等其他 tab 一个字号，没有返回按钮。 */
+.listHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.listTitle {
+  font-size: var(--t-h2, 18px);
+  font-weight: 700;
+}
+
+.listCount {
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+/* 下面的 .header / .backButton / .title 归 .detail 那层浮层用。 */
 .header {
   display: flex;
   align-items: center;
@@ -43,17 +63,9 @@
   white-space: nowrap;
 }
 
-.count {
-  font-size: 12px;
-  color: var(--color-text-dim);
-}
-
 .body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 10px 12px calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
 }
 
 .row {
@@ -239,5 +251,6 @@
 .error {
   font-size: 12px;
   color: var(--color-error, #c0392b);
-  padding: 8px 12px;
+  /* tab 正文左右缩进由 main 给，这里只留纵向间距。 */
+  padding: 2px 0;
 }
