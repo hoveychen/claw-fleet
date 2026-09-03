@@ -8,9 +8,9 @@ import {
   Check,
   ChevronRight,
   FolderGit2,
+  BookOpen,
   Gauge,
   ListTree,
-  Package,
   QrCode,
 } from "lucide-react";
 import { useDraft } from "../draft";
@@ -55,7 +55,7 @@ interface Props {
   onDisablePush: () => void;
   onOpenRepo: () => void;
   onOpenPlans: () => void;
-  onOpenArtifacts: () => void;
+  onOpenWiki: () => void;
   onOpenUsage: () => void;
   /** 这台手机配对过的每一台 Fleet，按加入顺序。 */
   devices: PairedDevice[];
@@ -88,7 +88,7 @@ export function MoreView({
   onDisablePush,
   onOpenRepo,
   onOpenPlans,
-  onOpenArtifacts,
+  onOpenWiki,
   onOpenUsage,
   devices,
   activeDeviceId,
@@ -167,13 +167,13 @@ export function MoreView({
             <ChevronRight size={18} className={styles.navChevron} />
           </button>
           <div className={styles.divider} />
-          <button className={styles.navRow} onClick={onOpenArtifacts}>
+          <button className={styles.navRow} onClick={onOpenWiki}>
             <span className={styles.navIcon}>
-              <Package size={18} />
+              <BookOpen size={18} />
             </span>
             <span className={styles.navText}>
-              <span className={styles.navLabel}>{t("产出")}</span>
-              <span className={styles.navSub}>{t("agent 要交给人的东西，任何格式")}</span>
+              <span className={styles.navLabel}>{t("知识库")}</span>
+              <span className={styles.navSub}>{t("agent 沉淀下来的调研与文档")}</span>
             </span>
             <ChevronRight size={18} className={styles.navChevron} />
           </button>

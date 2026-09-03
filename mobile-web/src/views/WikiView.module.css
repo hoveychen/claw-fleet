@@ -1,18 +1,56 @@
+/* 知识库页：从「更多」进来的全屏浮层，层级沿用 RepoView/PlansView 的 30。 */
+.page {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  flex-shrink: 0;
+}
+
+.backButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
 .view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
+/* 浮层 header 的标题：和仓库/计划/用量各页同一号字，不是 tab 正文的大标题。 */
 .title {
-  font-size: var(--t-h2, 18px);
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .count {
