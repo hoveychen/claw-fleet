@@ -42,6 +42,64 @@ export async function renderDocxInto(blob: Blob, host: HTMLElement): Promise<voi
 }
 
 /**
+ * Drop the `[Content_Types].xml` overrides that name parts the package does not
+ * actually contain, returning the deck unchanged when there are none.
+ *
+ * An `.pptx` is a zip whose `[Content_Types].xml` maps every part to a content
+ * type. Producers sometimes leave an override behind for a part that was never
+ * written — a deck from the artifact store declared nineteen `slideMaster`
+ * parts and shipped one. PowerPoint doesn't care: it resolves content types for
+ * the parts it finds, so the extra rows are inert. pptx-preview instead walks
+ * the override list and calls `.async()` on each named entry, so the first
+ * missing one throws inside its loader. That abort happens while reading the
+ * masters, which come *before* the layouts and slides, so the deck reaches the
+ * renderer with zero slides — and the renderer's first act is to read
+ * `slides[0].background`, which is where the
+ * "Cannot read properties of undefined (reading 'background')" the artifact
+ * page showed actually comes from.
+ *
+ * Repairing here rather than at ingest is deliberate: the store holds the
+ * bytes the agent produced, and rewriting a deliverable to suit one viewer's
+ * strictness would make the stored file disagree with the file the user
+ * exports. This is a render-time accommodation and it stays in memory.
+ *
+ * The healthy case costs one `loadAsync` (which reads the zip's central
+ * directory, not its contents) plus one small string — no repack, same blob
+ * back.
+ */
+export async function repairPptxContentTypes(blob: Blob): Promise<Blob> {
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(blob);
+  const contentTypes = zip.file(CONTENT_TYPES);
+  if (!contentTypes) return blob;
+
+  let dropped = 0;
+  const repaired = (await contentTypes.async("string")).replace(
+    OVERRIDE_ELEMENT,
+    (tag) => {
+      const part = /\bPartName="([^"]+)"/.exec(tag)?.[1];
+      // A malformed override with no PartName is the producer's business, not
+      // ours — leave it exactly as found.
+      if (part === undefined) return tag;
+      // PartNames are absolute within the package ("/ppt/…"); zip entry names
+      // are not.
+      if (zip.file(part.replace(/^\//, "")) !== null) return tag;
+      dropped += 1;
+      return "";
+    },
+  );
+  if (dropped === 0) return blob;
+
+  zip.file(CONTENT_TYPES, repaired);
+  return await zip.generateAsync({ type: "blob" });
+}
+
+const CONTENT_TYPES = "[Content_Types].xml";
+
+/** Both spellings the schema allows, since a producer may write either. */
+const OVERRIDE_ELEMENT = /<Override\b[^>]*(?:\/>|><\/Override>)/g;
+
+/**
  * Render a deck into `host` at `width` px, showing its first slide.
  *
  * Always "slide" mode, never "list": in list mode the library lays every slide
@@ -61,7 +119,7 @@ export async function renderPptxInto(
     height: Math.round(width * SLIDE_RATIO),
     mode: "slide",
   });
-  await previewer.preview(await blob.arrayBuffer());
+  await previewer.preview(await (await repairPptxContentTypes(blob)).arrayBuffer());
   previewer.updatePagination();
 }
 
