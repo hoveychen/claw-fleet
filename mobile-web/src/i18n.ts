@@ -282,7 +282,8 @@ const DICT: Record<string, string> = {
   配对: "Pairing",
   关于: "About",
 
-  // ── 知识库 ──
+  // ── 知识库（「更多」页进去的全屏页）──
+  "agent 沉淀下来的调研与文档": "Research and docs agents archived for later",
   刷新: "Refresh",
   "搜索标题 / slug…": "Search title / slug…",
   "搜索标题 / 正文…": "Search title / content…",
@@ -583,9 +584,8 @@ const DICT: Record<string, string> = {
   "已完成 {0} 个": "{0} completed",
   "已完成 {0} 条": "{0} done",
 
-  // ── 产出（桌面端产出库的手机版）──
+  // ── 产出（桌面端产出库的手机版，底部导航的一级 tab）──
   产出: "Artifacts",
-  "agent 要交给人的东西，任何格式": "Anything agents produced to hand to a person, any format",
   "还没有产出": "No artifacts yet",
   "Agent 把交付物存进产出库后会出现在这里。":
     "Deliverables an agent stores in the library show up here.",
