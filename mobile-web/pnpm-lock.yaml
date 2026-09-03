@@ -23,6 +23,9 @@ importers:
       '@capgo/capacitor-share-target':
         specifier: ^8.0.46
         version: 8.0.46(@capacitor/core@8.5.0)
+      '@capgo/capacitor-speech-recognition':
+        specifier: ^8.2.0
+        version: 8.2.0(@capacitor/core@8.5.0)
       docx-preview:
         specifier: ^0.4.0
         version: 0.4.0
@@ -222,6 +225,11 @@ packages:
 
   '@capgo/capacitor-share-target@8.0.46':
     resolution: {integrity: sha512-fY+rAapXp3HS3LpArso7PT4fmgWQa9ObGJLsK5dmH+t40WA8oxtsqa18yQPdqxgC8U1Z+0bV1WLC57rtFFxZmw==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
+
+  '@capgo/capacitor-speech-recognition@8.2.0':
+    resolution: {integrity: sha512-upIwKGRSAGNgd/lBY7JSYnqFsCgicZlTnviPv7mN69aWqjCeed+vpNXHUfbg2f0nmulzhVTt2G7x8To6+8Ajhg==}
     peerDependencies:
       '@capacitor/core': '>=8.0.0'
 
@@ -2284,6 +2292,10 @@ snapshots:
       '@capacitor/core': 8.5.0
 
   '@capgo/capacitor-share-target@8.0.46(@capacitor/core@8.5.0)':
+    dependencies:
+      '@capacitor/core': 8.5.0
+
+  '@capgo/capacitor-speech-recognition@8.2.0(@capacitor/core@8.5.0)':
     dependencies:
       '@capacitor/core': 8.5.0
 
