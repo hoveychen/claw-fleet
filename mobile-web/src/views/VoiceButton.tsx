@@ -126,7 +126,7 @@ export function VoiceButton({
         aria-label={listening ? t("停止录音") : t("语音输入")}
         aria-pressed={listening}
       >
-        {willCancel ? <X size={15} /> : listening ? <Square size={15} /> : <AudioLines size={15} />}
+        {willCancel ? <X size={17} /> : listening ? <Square size={17} /> : <AudioLines size={17} />}
       </button>
       {hint && (
         <span className={styles.hint} data-cancel={willCancel || undefined}>
