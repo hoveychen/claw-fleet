@@ -37,6 +37,7 @@ import { useDeviceDraft } from "../deviceScope";
 import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
+import { useConfirm } from "../confirmDialog";
 import styles from "./TasksView.module.css";
 
 /** 文档级滚动条被所有 tab 共享，任务页又会随 tab 卸载重挂（见 App 里按 `tab` 的条件
@@ -369,6 +370,7 @@ export function TasksView({
   onOpenSession,
   onMarkRead,
 }: Props) {
+  const confirm = useConfirm();
   // 筛选状态落到 localStorage（复用 Composer 草稿那套 useDraft），这样切标签页
   // 卸载重挂、乃至 iOS 杀掉 PWA 后再回来，搜索词/目录/仅活跃/分段都保持不变，
   // 不会每次回任务页都被复位。busyOp / markOverride 是瞬时态，仍走普通 useState。
@@ -586,13 +588,13 @@ export function TasksView({
         if (mode === "interrupt") {
           await client.request("interrupt", { pid: s.pid });
         } else if (s.pidPrecise) {
-          if (!window.confirm(t("确定停止「{0}」的这个会话吗？", s.workspaceName))) return;
+          if (!(await confirm(t("确定停止「{0}」的这个会话吗？", s.workspaceName)))) return;
           await client.request("stop", { pid: s.pid });
         } else {
           if (
-            !window.confirm(
+            !(await confirm(
               t("无法精确定位进程，将停止「{0}」目录下的所有会话，确定吗？", s.workspaceName),
-            )
+            ))
           )
             return;
           await client.request("stop_workspace", { workspacePath: s.workspacePath });
@@ -603,7 +605,7 @@ export function TasksView({
         setBusyOp(null);
       }
     },
-    [client, busyOp],
+    [client, busyOp, confirm],
   );
 
   // ——— 滚动位置稳定化（详见文件顶部 savedTasksScrollY 的注释）———

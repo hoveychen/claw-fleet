@@ -1,0 +1,61 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  padding-bottom: calc(24px + var(--safe-bottom));
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.dialog {
+  width: min(100%, 360px);
+  padding: 20px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 14px;
+  background: var(--color-bg-card);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+}
+
+.message {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--t-ui);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.cancel,
+.confirm {
+  min-width: 72px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 9px;
+  font-size: var(--t-ui);
+  font-weight: 600;
+}
+
+.cancel {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+}
+
+.confirm {
+  color: #fff;
+  background: var(--color-error);
+}
+
+.cancel:active,
+.confirm:active {
+  opacity: 0.78;
+}
