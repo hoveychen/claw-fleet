@@ -24,6 +24,7 @@ import {
   ServerOff,
   Share2,
   Square,
+  SquareTerminal,
   WifiOff,
 } from "lucide-react";
 import { AgentSourceIcon } from "./AgentSourceIcon";
@@ -38,6 +39,7 @@ import { itemKey, type WithDevice } from "../deviceRuntime";
 import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import { useConfirm } from "../confirmDialog";
+import type { TerminalWorkspace } from "./TerminalView";
 import styles from "./TasksView.module.css";
 
 /** 文档级滚动条被所有 tab 共享，任务页又会随 tab 卸载重挂（见 App 里按 `tab` 的条件
@@ -354,6 +356,9 @@ interface Props {
   sessionsLoaded: boolean;
   onOpenSession: (session: WithDevice<SessionInfo>) => void;
   onMarkRead: (sessions: Array<WithDevice<SessionInfo>>) => void;
+  /** 打开终端页。带着当前筛选的目录进去省一次选择；筛的是「全部目录」时传 null,
+   *  由终端页自己让用户挑。 */
+  onOpenTerminal: (workspace: TerminalWorkspace | null) => void;
   /** 这台设备的显示名。整个 prop 缺席 = 只配了一台,徽标与「设备 · 目录」的
    *  筛选项都不出现 —— 单设备用户不该为多设备付出任何一处视觉噪音。 */
   deviceLabelOf?: (deviceId: string) => string | null;
@@ -369,6 +374,7 @@ export function TasksView({
   sessionsLoaded,
   onOpenSession,
   onMarkRead,
+  onOpenTerminal,
 }: Props) {
   const confirm = useConfirm();
   // 筛选状态落到 localStorage（复用 Composer 草稿那套 useDraft），这样切标签页
@@ -443,6 +449,24 @@ export function TasksView({
     }
     return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [all, chatPath, multiDevice, deviceLabelOf]);
+
+  // 下拉的 value 是「设备::路径」的编码串，而开终端要的是拆开的三件套。这里按
+  // value 反查，省得在按钮那儿再解析一次编码（编码规则只该有一处知道）。
+  const terminalTargets = useMemo(() => {
+    const byValue = new Map<string, TerminalWorkspace>();
+    for (const s of all) {
+      if (s.workspacePath === chatPath) continue;
+      const value = workspaceFilterValue(s.deviceId, s.workspacePath, multiDevice);
+      if (!byValue.has(value)) {
+        byValue.set(value, {
+          deviceId: s.deviceId,
+          path: s.workspacePath,
+          name: s.workspaceName,
+        });
+      }
+    }
+    return byValue;
+  }, [all, chatPath, multiDevice]);
 
   // 迁移：聊天还是下拉里一条选项时存下来的值。"chat" 交给 toggle，"no-chat"
   // 已经没有对应项了（「全部目录」现在也含聊天），直接归零。要抢在下面那个孤
@@ -947,6 +971,14 @@ export function TasksView({
               💬 {t("聊天")}
             </button>
           )}
+          <button
+            className={styles.filterToggle}
+            onClick={() => onOpenTerminal(terminalTargets.get(workspace) ?? null)}
+            title={t("在这台主机上开一个终端")}
+          >
+            <SquareTerminal size={13} />
+            {t("终端")}
+          </button>
           <button
             className={styles.filterToggle}
             data-active={activeOnly}
