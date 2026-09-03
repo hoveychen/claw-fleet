@@ -48,6 +48,16 @@ const HOUR = 3_600_000;
  *  chat-only / hide-chat filter has something to bite on. */
 export const MOCK_CHAT_WORKSPACE = "/Users/demo/.fleet/chat";
 
+/** 假终端的首屏。带 ANSI 颜色和 `\r\n`,因为这一屏正是用来验证 xterm 真的在渲染
+ *  转义序列 —— 换成纯文本就看不出面板到底接没接上终端。 */
+export const MOCK_TERMINAL_SCREEN =
+  "\x1b[32m➜\x1b[0m  \x1b[36mapi-server\x1b[0m git:(\x1b[31mmain\x1b[0m) \r\n" +
+  "$ git status --short\r\n" +
+  " M src/middleware/auth.ts\r\n" +
+  " M src/middleware/auth.test.ts\r\n" +
+  "?? src/middleware/jwks.ts\r\n" +
+  "\x1b[32m➜\x1b[0m  \x1b[36mapi-server\x1b[0m git:(\x1b[31mmain\x1b[0m) ";
+
 export const MOCK_SESSIONS: SessionInfo[] = [
   {
     id: "sess-api-main",
