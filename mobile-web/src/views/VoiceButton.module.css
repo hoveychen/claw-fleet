@@ -5,8 +5,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  /* 34px：28px 在手机上按着太小（触摸目标建议再大些，但视觉上 34 是主流
+     chatbot 图标按钮的量级）。 */
+  width: 34px;
+  height: 34px;
   padding: 0;
   flex-shrink: 0;
   border: 1px solid var(--color-border-strong);

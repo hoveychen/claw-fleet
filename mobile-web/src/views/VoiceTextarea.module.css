@@ -1,0 +1,55 @@
+/* 让语音按钮浮在 textarea 右下角，从而不改动调用点既有的布局。 */
+.wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 调用点透传进来的 textarea 保持它自己的宽度行为。 */
+.wrap > textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.slot {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  /* DOM 里是 button 在前、状态文字在后；反向排让文字落在按钮左边，
+     视觉上「提示 + 按钮」贴着右下角。 */
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 12px);
+}
+
+/* 浮在输入框**内**时不要描边：框自己已经有边框了，再套一圈会显得脏，而且
+   在深色底上那圈暗边比图标还显眼。去掉边框后把图标提亮一档补回可见度 ——
+   截图里带边框的版本在 textarea 底色上几乎看不见。 */
+.slot button {
+  border-color: transparent;
+  color: var(--color-text-secondary);
+}
+
+/* 录音中 / 取消态仍要有明确的色块，那是状态反馈，不能一起去掉。 */
+.slot button[data-listening] {
+  border-color: var(--color-accent);
+}
+
+.slot button[data-cancel] {
+  border-color: var(--color-error);
+}
+
+/* VoiceButton 的状态文字在它自己的工具行里是 flex:1 撑满的；浮到这里就不能再
+   撑，否则会把按钮从右下角推走。同一条也覆盖它的错误文字（同为 span）。 */
+.slot span {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 44vw;
+  /* 文字压在 textarea 内容上会糊成一片，给它一层与输入框同色的底。 */
+  background: var(--color-bg-input);
+  padding: 1px 4px;
+  border-radius: 6px;
+}

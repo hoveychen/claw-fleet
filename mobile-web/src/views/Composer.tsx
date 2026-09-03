@@ -261,9 +261,9 @@ function AttachmentRow({
         title={uploading ? t("上传中…") : t("附件")}
       >
         {uploading ? (
-          <LoaderCircle size={15} className={styles.spin} />
+          <LoaderCircle size={17} className={styles.spin} />
         ) : (
-          <Paperclip size={15} />
+          <Paperclip size={17} />
         )}
       </button>
       {onVoiceText && <VoiceButton onText={onVoiceText} />}
