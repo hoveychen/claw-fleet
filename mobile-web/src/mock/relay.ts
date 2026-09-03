@@ -11,7 +11,7 @@
 // the deployed bundle can be inspected the same way in any browser. Nothing is
 // mocked unless `?mock` is in the URL.
 import { RelayClient, type RelayHandlers } from "../relay";
-import type { DecisionKind } from "../types";
+import type { DecisionKind, ProcRecord } from "../types";
 import {
   MOCK_ARTIFACTS,
   MOCK_ATTACHMENT_BYTES,
@@ -31,6 +31,7 @@ import {
   MOCK_REPOS,
   MOCK_SESSIONS,
   MOCK_PLAN_FOREST,
+  MOCK_TERMINAL_SCREEN,
   MOCK_TODAY_USAGE,
   MOCK_TOOL_DETAILS,
   MOCK_WIKI_DOCS,
@@ -46,6 +47,10 @@ export class MockRelayClient extends RelayClient {
   /** Answered card ids — App's periodic pending_snapshot reconcile (every few
    *  seconds while cards are pending) must not resurrect a card just answered. */
   private answered = new Set<string>();
+  /** 假终端。null = 还没开过（或已清掉），与真主机上「这个工作区没有进程」同义。 */
+  private mockProc: ProcRecord | null = null;
+  /** 0 = 首屏还没发出去。真的 offset 是字节数,这里只需要「发过没有」。 */
+  private mockProcOffset = 0;
 
   constructor(handlers: RelayHandlers) {
     super("mock-secret", handlers);
@@ -241,6 +246,46 @@ export class MockRelayClient extends RelayClient {
       case "cancel_pending_message":
       case "spawn_session":
         return { ok: true };
+
+      // ── 终端 ────────────────────────────────────────────────────────────
+      // 一个假 pty:第一次 proc_output 吐出一屏提示符,之后就没有新字节。够
+      // 截图,也够看出布局(键位条、标签、退出条)对不对。真的按键什么都不会
+      // 发生 —— mock 后面没有主机。
+      case "procs":
+        return this.mockProc ? [this.mockProc] : [];
+      case "proc_run": {
+        this.mockProc = {
+          id: "mock-proc",
+          workspacePath: String(params?.workspacePath ?? ""),
+          command: 'exec "$SHELL" -i',
+          status: "running",
+          startedMs: Date.now(),
+          cols: Number(params?.cols ?? 80),
+          rows: Number(params?.rows ?? 24),
+        };
+        this.mockProcOffset = 0;
+        return this.mockProc;
+      }
+      case "proc_output": {
+        if (!this.mockProc) throw new Error("no such proc");
+        const first = this.mockProcOffset === 0;
+        if (first) this.mockProcOffset = 1;
+        const text = first ? MOCK_TERMINAL_SCREEN : "";
+        return {
+          dataB64: text ? btoa(text) : "",
+          nextOffset: this.mockProcOffset,
+          record: this.mockProc,
+        };
+      }
+      case "proc_kill":
+        if (this.mockProc) this.mockProc = { ...this.mockProc, status: "exited", exitCode: 0 };
+        return null;
+      case "proc_clear":
+        this.mockProc = null;
+        return { cleared: 1 };
+      case "proc_input":
+      case "proc_resize":
+        return null;
       // session_search / wiki_search / usage_history / repo_push / repo_pull —
       // no fixture.
       default:

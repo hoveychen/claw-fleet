@@ -214,7 +214,25 @@ fn require_dir() -> Result<PathBuf, String> {
 // Public API — spawn / list / kill / io (callers: LocalBackend + hooks_server)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// What "open a terminal here" runs when the caller names no command.
+///
+/// Unix: the host already execs `$SHELL -lc <command>` against a real pty, so
+/// re-execing the same shell with `-i` is what turns that into an interactive
+/// session — prompt, job control, `vim`, all of it.
+///
+/// Windows has no ConPTY in this transport (see the module header): the command
+/// runs on plain pipes and sees a non-TTY, so `cmd` there gives echoed output
+/// and working stdin but no cursor addressing.
+pub fn default_shell_command() -> String {
+    if cfg!(windows) {
+        "cmd".to_string()
+    } else {
+        "exec \"$SHELL\" -i".to_string()
+    }
+}
+
 /// Spawn `command` at `workspace_path`'s cwd under a detached host process.
+/// An empty `command` means [`default_shell_command`].
 /// `host_exe` is the binary to re-exec with the [`HOST_ARGV_MARKER`] argv —
 /// callers pass their own `std::env::current_exe()` (both the desktop app and
 /// the fleet CLI intercept the marker), so no PATH lookup is involved.
@@ -237,9 +255,14 @@ pub fn spawn_proc_in(
     cols: u16,
     rows: u16,
 ) -> Result<ProcRecord, String> {
-    if command.trim().is_empty() {
-        return Err("command is empty".into());
-    }
+    // A blank command means "just give me a terminal here" — the caller (a
+    // terminal panel) has no business knowing what this host's shell is, and
+    // guessing client-side would get Windows wrong.
+    let command = if command.trim().is_empty() {
+        default_shell_command()
+    } else {
+        command.to_string()
+    };
     if !Path::new(workspace_path).is_dir() {
         return Err(format!("workspace path does not exist: {workspace_path}"));
     }
@@ -247,7 +270,7 @@ pub fn spawn_proc_in(
     let rec = ProcRecord {
         id: gen_id(),
         workspace_path: workspace_path.to_string(),
-        command: command.to_string(),
+        command: command.clone(),
         status: ProcStatus::Starting,
         child_pid: None,
         host_pid: None,
