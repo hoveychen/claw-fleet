@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   CheckCheck,
   CheckCircle2,
@@ -41,6 +49,42 @@ let savedTasksScrollY = 0;
 /** 页面当前的最大可滚动距离；<= 4px 视作「短到不必滚动」，此时既不记录也不恢复。 */
 function maxScroll(): number {
   return document.documentElement.scrollHeight - window.innerHeight;
+}
+
+/** 滚动停下后顺序继续冻结多久。滚动本身也在冻结区间内（每个 scroll 事件都会把
+ *  这个计时重新推后），所以实际含义是「滚动期间 + 停手后 5 秒」。 */
+const ORDER_FREEZE_MS = 5000;
+
+/**
+ * 冻结期内保持列表顺序不变。
+ *
+ * 任务栏按 lastActivityMs 降序排，而桌面端每隔几秒推一次全量快照：手指还在列表
+ * 上滑的时候一次重排，会把手指底下那张卡换成另一张，抬手点下去开的就是别的会话。
+ * `frozen` 是冻结那一刻屏幕上的键序（`itemKey`），传 null 表示没冻结、原样透传。
+ *
+ * 冻结后才出现的会话追加在**末尾**而不是插回它本该在的位置——它按活跃时间本该
+ * 排第一，插进去会把每一张卡都顶下一格，正是要避免的那种位移。冻结键序里已经
+ * 消失的会话（被筛掉/被清理）直接跳过。
+ */
+export function applyFrozenOrder<T extends SessionInfo & { deviceId?: string }>(
+  rows: T[],
+  frozen: readonly string[] | null,
+): T[] {
+  if (!frozen || frozen.length === 0) return rows;
+  const byKey = new Map<string, T>();
+  for (const s of rows) byKey.set(itemKey(s.deviceId ?? "", s.id), s);
+  const out: T[] = [];
+  const taken = new Set<string>();
+  for (const key of frozen) {
+    const s = byKey.get(key);
+    if (!s) continue; // 这条已经不在列表里了
+    out.push(s);
+    taken.add(key);
+  }
+  for (const s of rows) {
+    if (!taken.has(itemKey(s.deviceId ?? "", s.id))) out.push(s);
+  }
+  return out;
 }
 
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
@@ -349,20 +393,35 @@ export function TasksView({
   // Full-text search over the relay — same FTS the desktop launchpad uses.
   const { searching, ftsMatchPaths, snippetByPath } = useRelaySearch(client, search);
 
+  // 滚动期间（及停手后 ORDER_FREEZE_MS 内）冻住的键序，null = 未冻结。
+  // 状态用于让下面的 useMemo 重算；ref 是滚动回调里的唯一真相（回调闭包读不到
+  // 最新 state，而这里必须在同一批 scroll 事件里立刻知道「已经冻上了」）。
+  const [frozenOrder, setFrozenOrder] = useState<string[] | null>(null);
+  const frozenRef = useRef<string[] | null>(null);
+  /** 最近一次渲染出的键序 —— 冻结时按它取样，也就是用户此刻真正看到的顺序。 */
+  const renderedOrderRef = useRef<string[]>([]);
+
   // Scope to Fleet-launched sessions (新会话 / handoff relay), exactly like the
   // desktop 任务 launchpad (`adhocSessions`). Externally-started transcripts
   // (VS Code / bare CLI) are deliberately out of this list.
   const all = useMemo(
     () =>
-      sessions
-        .filter(isFleetOwnedTask)
-        .map((s) => {
-          const o = markOverride[s.id];
-          return o !== undefined && o !== (s.userMark ?? null) ? { ...s, userMark: o } : s;
-        })
-        .sort((a, b) => b.lastActivityMs - a.lastActivityMs),
-    [sessions, markOverride],
+      applyFrozenOrder(
+        sessions
+          .filter(isFleetOwnedTask)
+          .map((s) => {
+            const o = markOverride[s.id];
+            return o !== undefined && o !== (s.userMark ?? null) ? { ...s, userMark: o } : s;
+          })
+          .sort((a, b) => b.lastActivityMs - a.lastActivityMs),
+        frozenOrder,
+      ),
+    [sessions, markOverride, frozenOrder],
   );
+
+  useEffect(() => {
+    renderedOrderRef.current = all.map((s) => itemKey(s.deviceId, s.id));
+  }, [all]);
 
   // The desktop host's pure-chat workspace — the same path the new-session sheet
   // pins. Null while it's in flight, which keeps the chat options hidden rather
@@ -558,18 +617,33 @@ export function TasksView({
 
   // 滚动停歇 150ms 后才记录「用户真正停留的位置」。若某个外部事件把 scrollY 瞬间
   // 夹到 0，下面的恢复会在停歇前把它纠回，所以那个瞬时 0 永远不会被记下来。
+  //
+  // 同一个监听里还负责冻结排序：第一个 scroll 事件把当前键序拍下来，之后每个
+  // 事件把解冻计时推后，停手 ORDER_FREEZE_MS 后才放开重排。
   useEffect(() => {
     let idle: ReturnType<typeof setTimeout> | undefined;
+    let thaw: ReturnType<typeof setTimeout> | undefined;
     const onScroll = () => {
       if (idle) clearTimeout(idle);
       idle = setTimeout(() => {
         if (maxScroll() > 4) savedTasksScrollY = window.scrollY;
       }, 150);
+      if (frozenRef.current == null) {
+        const snapshot = renderedOrderRef.current;
+        frozenRef.current = snapshot;
+        setFrozenOrder(snapshot);
+      }
+      if (thaw) clearTimeout(thaw);
+      thaw = setTimeout(() => {
+        frozenRef.current = null;
+        setFrozenOrder(null);
+      }, ORDER_FREEZE_MS);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       window.removeEventListener("scroll", onScroll);
       if (idle) clearTimeout(idle);
+      if (thaw) clearTimeout(thaw);
     };
   }, []);
 
