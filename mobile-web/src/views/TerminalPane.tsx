@@ -12,6 +12,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useResolvedTheme } from "../theme";
 import type { FleetTransport } from "../transport";
 import {
+  applyCtrl,
   decodeOutput,
   encodeInput,
   readProcOutput,
@@ -51,11 +52,24 @@ interface Props {
   /** 交出一个「往这个 pty 里塞按键」的函数，给触屏键位条用。组件卸载时以 null
    *  回调一次，免得键位条握着一个已经没了的终端。 */
   registerInput?: (send: ((data: string) => void) | null) => void;
+  /** 键位条上的 Ctrl 是否按下(粘滞修饰键)。软键盘上没有 Ctrl，所以它只能由
+   *  外面那一排按钮提供，再在这里作用到下一个敲下去的字符上。 */
+  ctrl?: boolean;
+  /** Ctrl 已经作用到一个键上了 —— 由父级把粘滞状态弹回去。 */
+  onCtrlConsumed?: () => void;
 }
+
 
 // 默认导出:整个 xterm(含它的 CSS)只在真的开了终端时才下载,同 OfficePreview
 // 的做法 —— 大多数人一整天都不会打开这个页面,不该让他们为它付首屏体积。
-export default function TerminalPane({ client, proc, onRecord, registerInput }: Props) {
+export default function TerminalPane({
+  client,
+  proc,
+  onRecord,
+  registerInput,
+  ctrl = false,
+  onCtrlConsumed,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const theme = useResolvedTheme();
@@ -65,6 +79,11 @@ export default function TerminalPane({ client, proc, onRecord, registerInput }: 
   onRecordRef.current = onRecord;
   const registerInputRef = useRef(registerInput);
   registerInputRef.current = registerInput;
+  // 同理：Ctrl 的开关状态每次都变，但终端只该建一次。
+  const ctrlRef = useRef(ctrl);
+  ctrlRef.current = ctrl;
+  const onCtrlConsumedRef = useRef(onCtrlConsumed);
+  onCtrlConsumedRef.current = onCtrlConsumed;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -97,7 +116,13 @@ export default function TerminalPane({ client, proc, onRecord, registerInput }: 
     const send = (data: string) => {
       void writeProcInput(client, proc.id, encodeInput(data)).catch(() => {});
     };
-    const onData = term.onData(send);
+    // 软键盘敲进来的字符要过一次粘滞 Ctrl；键位条自己发的是完整序列
+    // (`\x1b[A` 之类)，不该再被折一次，所以它走 send 而不是这里。
+    const onData = term.onData((data) => {
+      if (!ctrlRef.current) return send(data);
+      send(applyCtrl(data));
+      onCtrlConsumedRef.current?.();
+    });
     registerInputRef.current?.(send);
 
     const poll = async () => {

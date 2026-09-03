@@ -140,6 +140,39 @@
   flex-shrink: 0;
 }
 
+/* ── 触屏键位条 ────────────────────────────────────────────────────────── */
+
+.keyBar {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.key {
+  min-width: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--t-ui, 14px);
+  white-space: nowrap;
+  /* 连点两下不该被当成放大手势 —— 终端上这个手势毫无用处，只会碍事。 */
+  touch-action: manipulation;
+}
+
+.key[data-sticky="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
 .exitBar {
   display: flex;
   align-items: center;
