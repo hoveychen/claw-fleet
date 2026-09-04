@@ -24,37 +24,54 @@
   margin-right: auto;
 }
 
-.connDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+/* One glyph carries both dimensions: the SVG's shape says *what* state this is
+   (bars / struck-through bars / struck-through monitor) and `color` — inherited
+   by the paths via currentColor — says how bad it is. Colour alone would be
+   unreadable for a colour-blind user and invisible in a screenshot, which is
+   why the silhouette changes too. */
+.connIcon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-success);
 }
 
-.connDot[data-state="online"] {
-  background: var(--color-success);
+.connIcon[data-kind="fair"] {
+  color: var(--color-warning);
 }
 
-/* When online, the congestion level tints the dot: good stays green, fair goes
-   amber, congested goes red — the weak-link signal the header surfaces. */
-.connDot[data-state="online"][data-congestion="fair"] {
-  background: var(--color-warning);
+.connIcon[data-kind="congested"] {
+  color: var(--color-error);
 }
 
-.connDot[data-state="online"][data-congestion="congested"] {
-  background: var(--color-error);
+.connIcon[data-kind="desktop-offline"] {
+  color: var(--color-warning);
 }
 
-.connDot[data-state="agent-offline"] {
-  background: var(--color-warning);
+.connIcon[data-kind="offline"] {
+  color: var(--color-error);
 }
 
-.connDot[data-state="offline"] {
-  background: var(--color-text-dim);
+/* Connecting: dim, and breathing so a socket that never comes up doesn't look
+   like a settled state. */
+.connIcon[data-kind="connecting"] {
+  color: var(--color-text-dim);
+  animation: connPulse 1.6s ease-in-out infinite;
 }
 
-.connLabel {
-  font-size: var(--t-aux, 12px);
-  color: var(--color-text-secondary);
+@keyframes connPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connIcon[data-kind="connecting"] {
+    animation: none;
+  }
 }
 
 .usage {
