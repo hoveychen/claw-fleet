@@ -133,6 +133,12 @@ pub(crate) fn cmd_agent(id_prefix: &str, as_json: bool) {
     if let Some(ref model) = s.model {
         kv("Model:", model);
     }
+    if let Some(ref effort) = s.effort {
+        kv("Effort:", effort);
+    }
+    // The extended-thinking marker, which is a different fact from the effort
+    // dial above — before they were split, dsh's effort arrived in this slot
+    // and printing only `Thinking:` would have dropped it here.
     if let Some(ref thinking) = s.thinking_level {
         kv("Thinking:", thinking);
     }
