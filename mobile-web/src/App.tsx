@@ -17,6 +17,7 @@ import {
 import type { FleetTransport, TransportHandlers } from "./transport";
 import { NEEDS_PAIRING, SUPPORTS_PUSH } from "./hostMode";
 import { formatRttSplit } from "./connQuality";
+import { ConnIcon, connIconKind } from "./views/ConnIcon";
 import { DeviceConnection, type DeviceHandle } from "./DeviceConnection";
 import { HIDDEN_DISCONNECT_MS, type VisibilityState } from "./connectionPolicy";
 import {
@@ -480,6 +481,19 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const agentOnline = anyAgentOnline(states, deviceOrder);
   const congestion = worstCongestion(states, deviceOrder);
   const todayUsage = totalUsage(states, deviceOrder);
+  // header 那枚连接图标：形状/亮度由 kind 决定,原来的文案降级成它的
+  // title + aria-label(读屏与长按仍读得到,只是不再占版面)。
+  const connKind = connIconKind(connected, agentOnline, congestion);
+  const connText =
+    connKind === "connecting"
+      ? t("连接中…")
+      : connKind === "desktop-offline"
+        ? t("桌面端离线")
+        : connKind === "congested"
+          ? t("在线 · 网络拥挤")
+          : connKind === "fair"
+            ? t("在线 · 网络一般")
+            : t("桌面端在线");
 
   const [push, setPush] = useState<PushState>(pushState);
   // Sub-state below "granted": the user can turn notifications off even while
@@ -957,24 +971,16 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             </span>
           </span>
         )}
+        {/* 连接状态与强度收成一个图标：状态文案退居 title/aria-label，不再吃掉
+            窄屏 header 的横向空间。 */}
         <span
-          className={styles.connDot}
-          data-state={!connected ? "offline" : agentOnline ? "online" : "agent-offline"}
-          data-congestion={congestion}
-        />
-        <span
-          className={styles.connLabel}
-          title={rttSplit ? formatRttSplit(rttSplit, t) : undefined}
+          className={styles.connIcon}
+          data-kind={connKind}
+          role="img"
+          aria-label={connText}
+          title={rttSplit ? `${connText} · ${formatRttSplit(rttSplit, t)}` : connText}
         >
-          {!connected
-            ? t("连接中…")
-            : !agentOnline
-              ? t("桌面端离线")
-              : congestion === "congested"
-                ? t("在线 · 网络拥挤")
-                : congestion === "fair"
-                  ? t("在线 · 网络一般")
-                  : t("桌面端在线")}
+          <ConnIcon kind={connKind} />
         </span>
       </header>
 
