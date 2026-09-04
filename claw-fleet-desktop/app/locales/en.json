@@ -909,6 +909,7 @@
     "tip_ide": "Launched from {{name}}",
     "tip_model": "Model: {{model}}",
     "tip_thinking": "Extended thinking: {{level}}",
+    "tip_effort": "Reasoning effort: {{level}}",
     "tip_skill": "Last skill invoked: /{{skill}}",
     "tip_workflow": "{{total}} workflow run(s), {{running}} running",
     "tip_subagents": "{{total}} subagent(s), {{running}} running",

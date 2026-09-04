@@ -519,6 +519,36 @@ export function formatModel(model: string): string {
   return model;
 }
 
+// ── Effort chip label ─────────────────────────────────────────────────────────
+
+/// What the lightbulb chip should read, or `null` for no chip.
+///
+/// `effort` is the real reasoning dial (`low`…`max`), now that every harness
+/// reports it. `thinkingLevel` is the older, overloaded slot and is only worth
+/// falling back to for a subagent whose `meta.json` declared a level — the bare
+/// `"thinking"` marker just records that a transcript has thinking blocks and
+/// names no level at all.
+export function effortChipLabel(s: {
+  effort?: string | null;
+  thinkingLevel?: string | null;
+}): string | null {
+  if (s.effort) return s.effort;
+  if (s.thinkingLevel && s.thinkingLevel !== "thinking") return s.thinkingLevel;
+  return null;
+}
+
+/// Tooltip for that chip: the reasoning dial reads as an effort level, the
+/// legacy `thinkingLevel` fallback keeps its extended-thinking wording.
+export function effortTitle(
+  t: (k: string, o?: Record<string, unknown>) => string,
+  s: { effort?: string | null; thinkingLevel?: string | null },
+): string {
+  const level = effortChipLabel(s) ?? "";
+  return s.effort
+    ? t("card.tip_effort", { level })
+    : t("card.tip_thinking", { level });
+}
+
 // ── SessionCard ───────────────────────────────────────────────────────────────
 
 interface Props {
@@ -584,12 +614,15 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
               {formatModel(session.model)}
             </span>
           )}
-          {session.thinkingLevel && session.thinkingLevel !== "medium" && (
-            <span className={styles.gm_thinking} title={t("card.tip_thinking", { level: session.thinkingLevel })}>
+          {/* Cards keep the `medium` cut — that is the default dial and a chip
+              on every card says nothing. The detail header shows it anyway,
+              because that is where you go to ask what a session is running at. */}
+          {effortChipLabel(session) && effortChipLabel(session) !== "medium" && (
+            <span className={styles.gm_thinking} title={effortTitle(t, session)}>
               <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
                 <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
               </svg>
-              {session.thinkingLevel}
+              {effortChipLabel(session)}
             </span>
           )}
           {session.lastSkill && (
@@ -681,8 +714,8 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             {session.model && (
               <span className={styles.tag_model} title={t("card.tip_model", { model: session.model })}>{formatModel(session.model)}</span>
             )}
-            {session.thinkingLevel && session.thinkingLevel !== "medium" && (
-              <span className={styles.tag_thinking} title={t("card.tip_thinking", { level: session.thinkingLevel })}>
+            {effortChipLabel(session) && effortChipLabel(session) !== "medium" && (
+              <span className={styles.tag_thinking} title={effortTitle(t, session)}>
                 <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
                   <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
                   <line x1="2.5" y1="9.7" x2="5.5" y2="9.7" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" />
