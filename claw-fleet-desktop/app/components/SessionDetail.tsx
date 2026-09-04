@@ -40,7 +40,7 @@ import { ScratchpadView } from "./ScratchpadView";
 import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { AgentScopeSwitcher } from "./AgentScopeSwitcher";
-import { formatModel } from "./SessionCard";
+import { effortChipLabel, effortTitle, formatModel } from "./SessionCard";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { CodexTokenPanel } from "./CodexTokenPanel";
@@ -945,22 +945,20 @@ export function SessionDetail({
                   {formatModel(liveSession.model)}
                 </span>
               )}
-              {/* Reasoning effort — same field, lightbulb and tooltip the cards
-                  use, and the same `medium` cut: that is Claude's default level
-                  and a chip on every session says nothing. Also filtered here:
-                  the bare `thinking` marker, which records that a transcript has
-                  thinking blocks and names no level at all. */}
-              {liveSession.thinkingLevel &&
-                liveSession.thinkingLevel !== "medium" &&
-                liveSession.thinkingLevel !== "thinking" && (
+              {/* Reasoning effort — same lightbulb the cards use, but WITHOUT
+                  their `medium` cut. On a dense board a chip on every card says
+                  nothing; the detail header is the one place you come to ask
+                  what this session is actually running at, so `medium` is an
+                  answer there. */}
+              {effortChipLabel(liveSession) && (
                 <span
                   className={styles.meta_chip}
-                  title={t("card.tip_thinking", { level: liveSession.thinkingLevel })}
+                  title={effortTitle(t, liveSession)}
                 >
                   <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
                     <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
                   </svg>
-                  {liveSession.thinkingLevel}
+                  {effortChipLabel(liveSession)}
                 </span>
               )}
               {/* Context stays out of the fold once it crosses the warn line.
