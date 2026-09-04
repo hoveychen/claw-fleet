@@ -817,6 +817,13 @@ pub fn parse_session_info(
         }
     });
 
+    // The claude CLI writes the model into every turn but never the effort
+    // dial, so the launch note Fleet wrote at spawn is the only ground truth
+    // there is. A session Fleet did not spawn — or one spawned with no
+    // `--effort` override — reports no effort rather than guessing the CLI
+    // default, which is dynamic and would go stale silently.
+    let effort = crate::launch_spec::effort_of(&session_id);
+
     // Ground truth for "Fleet spawned this" — a marker Fleet writes at every
     // spawn — OR a grandfather for sessions predating the marker feature. Lets
     // the Tasks list reject a `claude -p` child that only inherited a Fleet
@@ -858,7 +865,7 @@ pub fn parse_session_info(
         jsonl_path: jsonl_path.to_string_lossy().to_string(),
         model,
         thinking_level,
-        effort: None,
+        effort,
         pid,
         pid_precise,
         // Stamped by `apply_pid_liveness` right after this returns — the parse
