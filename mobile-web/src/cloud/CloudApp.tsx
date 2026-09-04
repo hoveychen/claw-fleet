@@ -13,12 +13,25 @@ import {
 } from "lucide-react";
 import appStyles from "../App.module.css";
 import { EmptyState } from "../views/EmptyState";
+import { ConnIcon, type ConnIconKind } from "../views/ConnIcon";
 import { HttpFleetCloudClient, type FleetCloudClient } from "./client";
 import { applyTaskEvent, initialCloudTaskState, type CloudTaskState } from "./reducer";
 import type { Decision, Task, TaskDetail, TaskStatus } from "./types";
 import styles from "./CloudApp.module.css";
 
 type CloudTab = "tasks" | "decisions";
+
+type SyncState = "online" | "syncing" | "offline";
+
+/** Cloud 的 header 用和主 app 同一枚连接图标。这里没有链路强度可测,只有三档
+ *  同步状态,所以只借用图标的「满格 / 重连中 / 断开」三种形态。 */
+function cloudConnKind(s: SyncState): ConnIconKind {
+  return s === "online" ? "good" : s === "syncing" ? "connecting" : "offline";
+}
+
+function cloudConnText(s: SyncState): string {
+  return s === "online" ? "Cloud 在线" : s === "syncing" ? "同步中" : "连接失败";
+}
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   queued: "排队中",
@@ -215,8 +228,9 @@ export function CloudApp({ client: suppliedClient }: CloudAppProps) {
         <button className={styles.refresh} onClick={() => void refresh()} aria-label="刷新" disabled={loading}>
           <RefreshCw size={15} className={loading ? styles.spinning : undefined} />
         </button>
-        <span className={appStyles.connDot} data-state={syncState === "online" ? "online" : syncState === "offline" ? "offline" : "agent-offline"} aria-hidden="true" />
-        <span className={appStyles.connLabel}>{syncState === "online" ? "Cloud 在线" : syncState === "syncing" ? "同步中" : "连接失败"}</span>
+        <span className={appStyles.connIcon} data-kind={cloudConnKind(syncState)} role="img" aria-label={cloudConnText(syncState)} title={cloudConnText(syncState)}>
+          <ConnIcon kind={cloudConnKind(syncState)} />
+        </span>
       </header>
 
       <main className={`${appStyles.main} ${styles.main}`}>
@@ -312,7 +326,9 @@ function CloudDetail({ client, state, error, syncState, onBack, onDecisionResolv
       <header className={`${appStyles.header} ${styles.detailHeader}`}>
         <button className={styles.back} onClick={onBack}><ArrowLeft size={18} />返回</button>
         <div className={styles.detailHeaderTitle}>{detail ? taskTitle(detail) : "读取任务"}</div>
-        <span className={appStyles.connDot} data-state={syncState === "online" ? "online" : syncState === "offline" ? "offline" : "agent-offline"} />
+        <span className={appStyles.connIcon} data-kind={cloudConnKind(syncState)} role="img" aria-label={cloudConnText(syncState)} title={cloudConnText(syncState)}>
+          <ConnIcon kind={cloudConnKind(syncState)} />
+        </span>
       </header>
       <main className={`${appStyles.main} ${styles.detailMain}`}>
         {error && <ErrorBanner message={error} />}
