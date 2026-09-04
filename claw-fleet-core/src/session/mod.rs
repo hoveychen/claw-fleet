@@ -1533,6 +1533,72 @@ mod tests {
         let _ = fs::remove_file(&p);
     }
 
+    /// A claude transcript records the model but never the effort dial, so the
+    /// only ground truth for a session Fleet spawned is the launch note Fleet
+    /// itself wrote. Without this the header can never name a claude session's
+    /// effort — the chip was falling back to the `"thinking"` marker, which
+    /// says nothing about `low` vs `max`.
+    #[test]
+    fn a_claude_session_takes_its_effort_from_the_launch_spec() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", tmp.path()) };
+
+        let id = format!("effort-spec-{}", uuid::Uuid::new_v4());
+        let p = tmp_jsonl(&id);
+        append(&p, &format!("{}\n", json!({"type": "user", "entrypoint": "cli"})));
+        append(&p, &format!("{}\n", turn("m1", 10)));
+
+        // A session Fleet spawned with no `--effort` override must stay silent
+        // rather than invent the CLI default.
+        crate::launch_spec::record(&id, Some("claude-opus-5[1m]"), None);
+        let (info, _) = parse_with_id(&p, &id);
+        assert_eq!(
+            info.effort, None,
+            "no recorded override must not be reported as an effort level"
+        );
+
+        crate::launch_spec::record(&id, Some("claude-opus-5[1m]"), Some("high"));
+        let (info, _) = parse_with_id(&p, &id);
+        assert_eq!(
+            info.effort.as_deref(),
+            Some("high"),
+            "the header's effort chip reads SessionInfo::effort"
+        );
+        assert_eq!(
+            info.thinking_level, None,
+            "the effort must not be smuggled through the extended-thinking marker"
+        );
+
+        let _ = fs::remove_file(&p);
+        match prev {
+            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
+            None => unsafe { std::env::remove_var("FLEET_HOME") },
+        }
+    }
+
+    fn parse_with_id(p: &Path, id: &str) -> (SessionInfo, IncrParse) {
+        parse_session_info(
+            p,
+            id.to_string(),
+            "/tmp/ws".to_string(),
+            "ws".to_string(),
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+        )
+        .expect("parse_session_info should yield a SessionInfo")
+    }
+
     // ── compute_session_stats tests ─────────────────────────────────────────
 
     #[test]
