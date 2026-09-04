@@ -67,6 +67,11 @@ struct SqliteThread {
     cwd: String,
     title: String,
     model: Option<String>,
+    /// The thread's reasoning-effort dial, as codex itself recorded it
+    /// (`threads.reasoning_effort`). Written at every turn boundary, so it is
+    /// free ground truth for an idle session whose rollout we deliberately do
+    /// not read.
+    reasoning_effort: Option<String>,
     tokens_used: i64,
     agent_nickname: Option<String>,
     agent_role: Option<String>,
@@ -317,6 +322,39 @@ fn extract_model(lines: &[Value]) -> Option<String> {
                     return Some(model.to_string());
                 }
             }
+        }
+    }
+    None
+}
+
+/// Extract the reasoning-effort dial from turn_context lines.
+///
+/// Codex writes it twice on every turn: `payload.effort` and
+/// `payload.collaboration_mode.settings.reasoning_effort`. Both were present —
+/// and in agreement — on all 279 rollouts on this machine carrying a
+/// turn_context, but the nested one is the older shape, so read the top-level
+/// first and fall back. Scans from the tail so a mid-session `/effort` change
+/// is what the header shows.
+fn extract_effort(lines: &[Value]) -> Option<String> {
+    for line in lines.iter().rev() {
+        if line.get("type").and_then(|t| t.as_str()) != Some("turn_context") {
+            continue;
+        }
+        let Some(payload) = line.get("payload") else {
+            continue;
+        };
+        let nested = payload
+            .get("collaboration_mode")
+            .and_then(|c| c.get("settings"))
+            .and_then(|s| s.get("reasoning_effort"));
+        let found = payload
+            .get("effort")
+            .and_then(|e| e.as_str())
+            .or_else(|| nested.and_then(|e| e.as_str()))
+            .map(str::trim)
+            .filter(|e| !e.is_empty());
+        if let Some(effort) = found {
+            return Some(effort.to_string());
         }
     }
     None
@@ -1443,7 +1481,7 @@ fn read_threads_from_sqlite() -> Option<Vec<SqliteThread>> {
         .prepare(
             "SELECT id, rollout_path, created_at, updated_at, source, cwd, title,
                     model, tokens_used, agent_nickname, agent_role, archived,
-                    first_user_message
+                    first_user_message, reasoning_effort
              FROM threads
              WHERE updated_at > ?1 AND archived = 0
              ORDER BY updated_at DESC",
@@ -1466,6 +1504,7 @@ fn read_threads_from_sqlite() -> Option<Vec<SqliteThread>> {
                 agent_role: row.get(10)?,
                 archived: row.get::<_, i64>(11)? != 0,
                 first_user_message: row.get(12)?,
+                reasoning_effort: row.get(13)?,
             })
         })
         .ok()?;
@@ -1504,7 +1543,7 @@ fn build_session_from_sqlite(
     let age_secs = (now_secs as f64 - last_activity_ms as f64 / 1000.0).max(0.0);
 
     // For recently active sessions, read the rollout file for precise status.
-    let (status, token_speed, total_output_tokens, reasoning_output_tokens, last_message_preview, model, thinking_level, context_percent, rate_limit, codex_cost, total_input_tokens) =
+    let (status, token_speed, total_output_tokens, reasoning_output_tokens, last_message_preview, model, thinking_level, effort, context_percent, rate_limit, codex_cost, total_input_tokens) =
         if age_secs < 600.0 && rollout_path.exists() {
             // Update last_activity_ms from file mtime for sub-second precision.
             if let Ok(meta) = fs::metadata(&rollout_path) {
@@ -1564,10 +1603,16 @@ fn build_session_from_sqlite(
                         } else {
                             None
                         };
+                        // The rollout we just parsed carries the freshest dial;
+                        // codex's own thread row and Fleet's launch note cover
+                        // a rollout with no turn_context yet.
+                        let eff = extract_effort(&all_parsed)
+                            .or_else(|| thread.reasoning_effort.clone())
+                            .or_else(|| crate::launch_spec::effort_of(&thread.id));
                         let tok = if tok > 0 { tok } else { thread.tokens_used as u64 };
                         let ctx = extract_context_percent(&all_parsed, mdl.as_deref());
                         let (cost, input) = codex_cost_and_input(&all_parsed, mdl.as_deref());
-                        (st, spd, tok, reasoning, preview, mdl, tl, ctx, rl, cost, input)
+                        (st, spd, tok, reasoning, preview, mdl, tl, eff, ctx, rl, cost, input)
                     } else {
                         (
                             determine_status_from_age(file_age.as_secs_f64()),
@@ -1577,6 +1622,10 @@ fn build_session_from_sqlite(
                             None,
                             thread.model.clone(),
                             None,
+                            thread
+                                .reasoning_effort
+                                .clone()
+                                .or_else(|| crate::launch_spec::effort_of(&thread.id)),
                             None,
                             None,
                             0.0,
@@ -1592,6 +1641,10 @@ fn build_session_from_sqlite(
                         None,
                         thread.model.clone(),
                         None,
+                        thread
+                            .reasoning_effort
+                            .clone()
+                            .or_else(|| crate::launch_spec::effort_of(&thread.id)),
                         None,
                         None,
                         0.0,
@@ -1607,6 +1660,10 @@ fn build_session_from_sqlite(
                     None,
                     thread.model.clone(),
                     None,
+                    thread
+                        .reasoning_effort
+                        .clone()
+                        .or_else(|| crate::launch_spec::effort_of(&thread.id)),
                     None,
                     None,
                     0.0,
@@ -1630,6 +1687,10 @@ fn build_session_from_sqlite(
                 preview,
                 thread.model.clone(),
                 None,
+                thread
+                    .reasoning_effort
+                    .clone()
+                    .or_else(|| crate::launch_spec::effort_of(&thread.id)),
                 None,
                 None,
                 0.0,
@@ -1728,7 +1789,7 @@ fn build_session_from_sqlite(
         jsonl_path: uri,
         model,
         thinking_level,
-        effort: None,
+        effort,
         pid,
         pid_precise,
         // Definitive liveness for Codex: a live process resuming exactly this
@@ -2161,6 +2222,85 @@ mod tests {
         );
     }
 
+    /// Codex records the effort dial in two places on every `turn_context` —
+    /// `payload.effort` and `payload.collaboration_mode.settings.reasoning_effort`
+    /// (both present, and in agreement, on all 279 rollouts on this machine
+    /// that carry a turn_context). The header must read the LAST one, so a
+    /// mid-session `/effort` change is what shows.
+    #[test]
+    fn codex_effort_reads_the_last_turn_context() {
+        use std::io::Write as _;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-09-04T07:16:55.000Z","type":"session_meta","payload":{{"id":"t-effort","cwd":"/tmp/ws","originator":"fleet","source":"exec"}}}}"#
+        )
+        .unwrap();
+        // First turn: medium, recorded the modern way (top-level `effort`).
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-09-04T07:16:57.000Z","type":"turn_context","payload":{{"model":"gpt-5.6-sol","effort":"medium","collaboration_mode":{{"mode":"default","settings":{{"model":"gpt-5.6-sol","reasoning_effort":"medium"}}}}}}}}"#
+        )
+        .unwrap();
+        // Second turn dialled it up, and only the nested shape carries it —
+        // the fallback path must still find it.
+        writeln!(
+            f,
+            r#"{{"timestamp":"2026-09-04T07:20:00.000Z","type":"turn_context","payload":{{"model":"gpt-5.6-sol","collaboration_mode":{{"mode":"default","settings":{{"model":"gpt-5.6-sol","reasoning_effort":"high"}}}}}}}}"#
+        )
+        .unwrap();
+        f.flush().unwrap();
+
+        let info = parse_codex_session(f.path(), &[]).expect("rollout must parse");
+        assert_eq!(
+            info.effort.as_deref(),
+            Some("high"),
+            "the header's effort chip reads SessionInfo::effort, freshest turn wins"
+        );
+        assert_eq!(
+            info.thinking_level, None,
+            "no reasoning items here — the effort must not ride the thinking marker"
+        );
+    }
+
+    /// A codex session idle for >10 min is deliberately built from SQLite
+    /// metadata alone (its rollout is never read, which is what keeps the list
+    /// scan cheap). `threads.reasoning_effort` is written at every turn
+    /// boundary, so the header can still name the effort for free — and that
+    /// covers the common case: opening the detail pane of a session that
+    /// stopped an hour ago.
+    #[test]
+    fn an_idle_codex_session_names_its_effort_from_sqlite() {
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let thread = SqliteThread {
+            id: "019f-idle-effort".to_string(),
+            // Deliberately absent: this is the arm that reads no rollout.
+            rollout_path: "/nonexistent/rollout-idle-effort.jsonl".to_string(),
+            created_at: now_secs - 7200,
+            updated_at: now_secs - 3600,
+            source: "exec".to_string(),
+            cwd: "/tmp/ws".to_string(),
+            title: String::new(),
+            model: Some("gpt-5.6-sol".to_string()),
+            reasoning_effort: Some("high".to_string()),
+            tokens_used: 0,
+            agent_nickname: None,
+            agent_role: None,
+            archived: false,
+            first_user_message: "hi".to_string(),
+        };
+
+        let info = build_session_from_sqlite(&thread, &[]).expect("should build a SessionInfo");
+        assert_eq!(
+            info.effort.as_deref(),
+            Some("high"),
+            "codex's own thread row already knows the effort — no rollout read needed"
+        );
+    }
+
     #[test]
     fn sqlite_worktree_cwd_uses_repo_name() {
         // Same worktree-stripping contract for the SQLite-backed path
@@ -2194,6 +2334,7 @@ mod tests {
             agent_role: None,
             archived: false,
             first_user_message: "hi".to_string(),
+            reasoning_effort: None,
         };
 
         let info = build_session_from_sqlite(&thread, &[]).expect("should build a SessionInfo");
@@ -2267,6 +2408,7 @@ mod tests {
             agent_role: None,
             archived: false,
             first_user_message: "hi".to_string(),
+            reasoning_effort: None,
         };
 
         let procs: Vec<CodexProcess> = Vec::new();
@@ -4591,6 +4733,10 @@ fn parse_codex_session(
     } else {
         None
     };
+    // The rollout's own turn_context is the freshest source; the launch note
+    // Fleet wrote at spawn covers a rollout too short to carry one yet.
+    let effort =
+        extract_effort(&all_parsed).or_else(|| crate::launch_spec::effort_of(&session_id));
 
     // PID resolution: prefer thread-id match, fall back to workspace path.
     let (pid, pid_precise) = resolve_pid(codex_processes, &session_id, &workspace_path);
@@ -4672,7 +4818,7 @@ fn parse_codex_session(
         jsonl_path: uri,
         model,
         thinking_level,
-        effort: None,
+        effort,
         pid,
         pid_precise,
         // Definitive liveness for Codex: a live process resuming exactly this
