@@ -3931,6 +3931,7 @@ mod tests {
             jsonl_path: format!("/tmp/{id}.jsonl"),
             model: None,
             thinking_level: None,
+            effort: None,
             pid: None,
             pid_precise: false,
             proc_alive: false,

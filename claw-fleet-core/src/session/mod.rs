@@ -166,7 +166,23 @@ pub struct SessionInfo {
     pub created_at_ms: u64,
     pub jsonl_path: String,
     pub model: Option<String>,
+    /// Extended-thinking marker, NOT the effort level: the literal `"thinking"`
+    /// when the transcript carries thinking blocks, or a subagent's declared
+    /// level from its `meta.json`. The reasoning-effort dial lives in
+    /// [`SessionInfo::effort`] — the two used to share this one slot, which is
+    /// why anything reading it had to filter magic strings.
     pub thinking_level: Option<String>,
+    /// The reasoning-effort dial this session runs at (`low` / `medium` /
+    /// `high` / `xhigh` / `max`), verbatim as the harness reports it.
+    ///
+    /// Ground truth per harness: dsh reads its log header's `reasoningEffort`;
+    /// codex reads `turn_context.settings.reasoning_effort` off the rollout;
+    /// claude has nothing in the transcript, so it falls back to the launch
+    /// note Fleet wrote at spawn (`launch_spec::effort_of`). `None` for a
+    /// session Fleet did not spawn and whose harness records no effort — the
+    /// header then shows no effort chip rather than guessing the CLI default.
+    #[serde(default)]
+    pub effort: Option<String>,
     pub pid: Option<u32>,
     /// True when the PID is unambiguously matched to this specific session.
     /// False when multiple claude processes share the same cwd and none carries
@@ -684,6 +700,7 @@ mod tests {
             jsonl_path: "/tmp/test.jsonl".into(),
             model: None,
             thinking_level: None,
+            effort: None,
             pid: None,
             pid_precise: false,
             proc_alive: false,
@@ -1514,6 +1531,72 @@ mod tests {
         );
 
         let _ = fs::remove_file(&p);
+    }
+
+    /// A claude transcript records the model but never the effort dial, so the
+    /// only ground truth for a session Fleet spawned is the launch note Fleet
+    /// itself wrote. Without this the header can never name a claude session's
+    /// effort — the chip was falling back to the `"thinking"` marker, which
+    /// says nothing about `low` vs `max`.
+    #[test]
+    fn a_claude_session_takes_its_effort_from_the_launch_spec() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", tmp.path()) };
+
+        let id = format!("effort-spec-{}", uuid::Uuid::new_v4());
+        let p = tmp_jsonl(&id);
+        append(&p, &format!("{}\n", json!({"type": "user", "entrypoint": "cli"})));
+        append(&p, &format!("{}\n", turn("m1", 10)));
+
+        // A session Fleet spawned with no `--effort` override must stay silent
+        // rather than invent the CLI default.
+        crate::launch_spec::record(&id, Some("claude-opus-5[1m]"), None);
+        let (info, _) = parse_with_id(&p, &id);
+        assert_eq!(
+            info.effort, None,
+            "no recorded override must not be reported as an effort level"
+        );
+
+        crate::launch_spec::record(&id, Some("claude-opus-5[1m]"), Some("high"));
+        let (info, _) = parse_with_id(&p, &id);
+        assert_eq!(
+            info.effort.as_deref(),
+            Some("high"),
+            "the header's effort chip reads SessionInfo::effort"
+        );
+        assert_eq!(
+            info.thinking_level, None,
+            "the effort must not be smuggled through the extended-thinking marker"
+        );
+
+        let _ = fs::remove_file(&p);
+        match prev {
+            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
+            None => unsafe { std::env::remove_var("FLEET_HOME") },
+        }
+    }
+
+    fn parse_with_id(p: &Path, id: &str) -> (SessionInfo, IncrParse) {
+        parse_session_info(
+            p,
+            id.to_string(),
+            "/tmp/ws".to_string(),
+            "ws".to_string(),
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+        )
+        .expect("parse_session_info should yield a SessionInfo")
     }
 
     // ── compute_session_stats tests ─────────────────────────────────────────

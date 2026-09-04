@@ -50,6 +50,14 @@ describe("buildInfoRows", () => {
     expect(valueOf({ ...base, model: "claude-opus-5" }, "model")).toBe("claude-opus-5");
   });
 
+  it("effort 成行，紧跟在模型后面（桌面 header 有这颗 chip，手机面板不能没有）", () => {
+    expect(keys(base)).not.toContain("effort");
+    const k = keys({ ...base, model: "claude-opus-5", effort: "high" });
+    expect(k).toContain("effort");
+    expect(k.indexOf("effort")).toBe(k.indexOf("model") + 1);
+    expect(valueOf({ ...base, effort: "high" }, "effort")).toBe("high");
+  });
+
   it("contextPercent 按 0–1 比值换算成百分比", () => {
     expect(valueOf({ ...base, contextPercent: 0.72 }, "context")).toBe("72%");
   });

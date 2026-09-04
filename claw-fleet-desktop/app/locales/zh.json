@@ -906,6 +906,7 @@
     "tip_ide": "从 {{name}} 启动",
     "tip_model": "模型：{{model}}",
     "tip_thinking": "扩展思考：{{level}}",
+    "tip_effort": "推理强度：{{level}}",
     "tip_skill": "最近调用的 Skill：/{{skill}}",
     "tip_workflow": "{{total}} 个 workflow run，{{running}} 个运行中",
     "tip_subagents": "{{total}} 个子代，{{running}} 个运行中",
