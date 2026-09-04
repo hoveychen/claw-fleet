@@ -562,6 +562,7 @@ mod tests {
             jsonl_path: "/w/s1.jsonl".into(),
             model: None,
             thinking_level: None,
+            effort: None,
             pid: None,
             pid_precise: false,
             proc_alive: false,

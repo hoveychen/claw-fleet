@@ -973,6 +973,8 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "createdAtMs",
     "jsonlPath",
     "model",
+    // 手机面板的「推理强度」一行；不放行的话字段过不了快照白名单。
+    "effort",
     "agentSource",
     "contextPercent",
     "totalCostUsd",
@@ -5589,7 +5591,7 @@ mod tests {
                 "id": "old", "isSubagent": false, "lastActivityMs": 100,
                 "workspaceName": "w", "tokenSpeed": 42.0, "rateLimit": {"until": 1},
                 "lastMessagePreview": "短预览", "userMark": "done", "aiTitle": null,
-                "titleOverride": "手动重命名",
+                "titleOverride": "手动重命名", "effort": "high",
                 "entrypoint": NEW_SESSION_ENTRYPOINT
             },
             {
@@ -5623,6 +5625,10 @@ mod tests {
         // bug where titleOverride was absent from SNAPSHOT_FIELDS.
         assert_eq!(list[1]["titleOverride"], "手动重命名");
         assert_eq!(list[1]["userMark"], "done");
+        // The phone's info panel has a 推理强度 row; a field missing from the
+        // whitelist never crosses the relay, so the row would silently never
+        // appear (which is how `model` shipped alone in the first place).
+        assert_eq!(list[1]["effort"], "high");
         assert_eq!(list[1]["lastMessagePreview"], "短预览");
         // Long previews are truncated with an ellipsis.
         let preview = list[0]["lastMessagePreview"].as_str().unwrap();

@@ -323,7 +323,7 @@ fn live_a_read_header_teaches_the_scan_its_effort() {
             .into_iter()
             .find(|x| x.id == s.id)
             .expect("still on the roster");
-        if let Some(effort) = after.thinking_level.as_deref() {
+        if let Some(effort) = after.effort.as_deref() {
             println!(
                 "{} → model={:?} effort={effort}",
                 after.id, after.model

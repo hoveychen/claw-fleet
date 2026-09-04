@@ -115,6 +115,8 @@ export interface SessionInfo {
   createdAtMs: number;
   jsonlPath: string;
   model?: string | null;
+  /** 推理强度档位（low…max）。桌面 header 上是一颗 chip；手机放进展开面板。 */
+  effort?: string | null;
   agentSource?: string;
   contextPercent?: number | null;
   totalCostUsd?: number;
