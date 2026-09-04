@@ -166,7 +166,23 @@ pub struct SessionInfo {
     pub created_at_ms: u64,
     pub jsonl_path: String,
     pub model: Option<String>,
+    /// Extended-thinking marker, NOT the effort level: the literal `"thinking"`
+    /// when the transcript carries thinking blocks, or a subagent's declared
+    /// level from its `meta.json`. The reasoning-effort dial lives in
+    /// [`SessionInfo::effort`] — the two used to share this one slot, which is
+    /// why anything reading it had to filter magic strings.
     pub thinking_level: Option<String>,
+    /// The reasoning-effort dial this session runs at (`low` / `medium` /
+    /// `high` / `xhigh` / `max`), verbatim as the harness reports it.
+    ///
+    /// Ground truth per harness: dsh reads its log header's `reasoningEffort`;
+    /// codex reads `turn_context.settings.reasoning_effort` off the rollout;
+    /// claude has nothing in the transcript, so it falls back to the launch
+    /// note Fleet wrote at spawn (`launch_spec::effort_of`). `None` for a
+    /// session Fleet did not spawn and whose harness records no effort — the
+    /// header then shows no effort chip rather than guessing the CLI default.
+    #[serde(default)]
+    pub effort: Option<String>,
     pub pid: Option<u32>,
     /// True when the PID is unambiguously matched to this specific session.
     /// False when multiple claude processes share the same cwd and none carries
@@ -684,6 +700,7 @@ mod tests {
             jsonl_path: "/tmp/test.jsonl".into(),
             model: None,
             thinking_level: None,
+            effort: None,
             pid: None,
             pid_precise: false,
             proc_alive: false,
