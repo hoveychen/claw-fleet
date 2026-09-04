@@ -594,7 +594,10 @@ pub(crate) fn session_info_from_list_item(item: &Value) -> Option<SessionInfo> {
         // what Fleet asked for (and applied via `session.selectModel`). The log
         // header wins when known — it is the effort a real request went out
         // with, and it tracks a later change the spawn record cannot.
-        thinking_level: known_effort(&id).or_else(|| crate::launch_spec::effort_of(&id)),
+        effort: known_effort(&id).or_else(|| crate::launch_spec::effort_of(&id)),
+        // dsh reports no per-message thinking blocks, so the extended-thinking
+        // marker stays empty — the effort dial above is the whole story here.
+        thinking_level: None,
         id: id.clone(),
         workspace_name: crate::session::workspace_name(&workspace_path),
         workspace_path,
@@ -2124,9 +2127,9 @@ mod tests {
         );
         let info = session_info_from_list_item(&item).expect("mapped");
         assert_eq!(
-            info.thinking_level.as_deref(),
+            info.effort.as_deref(),
             Some("high"),
-            "the header's effort chip reads SessionInfo::thinking_level"
+            "the header's effort chip reads SessionInfo::effort"
         );
     }
 
@@ -2148,7 +2151,7 @@ mod tests {
 
         let info = session_info_from_list_item(&item).expect("mapped");
         assert_eq!(
-            info.thinking_level.as_deref(),
+            info.effort.as_deref(),
             Some("max"),
             "a spawn Fleet recorded needs no transcript read to name its effort"
         );
@@ -2162,7 +2165,7 @@ mod tests {
             },
         );
         let info = session_info_from_list_item(&item).expect("mapped");
-        assert_eq!(info.thinking_level.as_deref(), Some("high"));
+        assert_eq!(info.effort.as_deref(), Some("high"));
 
         match prev {
             Some(v) => std::env::set_var("FLEET_HOME", v),

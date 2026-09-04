@@ -858,6 +858,7 @@ pub fn parse_session_info(
         jsonl_path: jsonl_path.to_string_lossy().to_string(),
         model,
         thinking_level,
+        effort: None,
         pid,
         pid_precise,
         // Stamped by `apply_pid_liveness` right after this returns — the parse

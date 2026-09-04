@@ -1728,6 +1728,7 @@ fn build_session_from_sqlite(
         jsonl_path: uri,
         model,
         thinking_level,
+        effort: None,
         pid,
         pid_precise,
         // Definitive liveness for Codex: a live process resuming exactly this
@@ -4671,6 +4672,7 @@ fn parse_codex_session(
         jsonl_path: uri,
         model,
         thinking_level,
+        effort: None,
         pid,
         pid_precise,
         // Definitive liveness for Codex: a live process resuming exactly this
