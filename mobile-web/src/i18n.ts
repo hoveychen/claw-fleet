@@ -729,6 +729,7 @@ const DICT: Record<string, string> = {
   "纵轴 0–100%": "y: 0–100%",
   // ── 会话详情 header：展开面板 + 汉堡菜单 ──
   模型: "Model",
+  推理强度: "Reasoning effort",
   工作区: "Workspace",
   花费: "Cost",
   "会话 ID": "Session ID",

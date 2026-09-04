@@ -39,6 +39,9 @@ export function buildInfoRows(s: SessionInfo): InfoRow[] {
   };
 
   push("model", t("模型"), s.model);
+  // 紧跟模型：这两个合起来才说明「这个会话在用什么算」。桌面 header 上它们
+  // 也是相邻的两颗 chip。
+  push("effort", t("推理强度"), s.effort);
   push("workspace", t("工作区"), s.workspaceName);
   push("sessionId", t("会话 ID"), s.id, true);
   // contextPercent 是 0–1 的比值（对齐桌面端 SessionDetail 的 `* 100` 用法），
