@@ -15,11 +15,21 @@
   background: none;
   color: var(--color-text-dim);
   border-radius: 999px;
-  /* 长按是这个按钮的主交互，浏览器默认的长按选字 / 拖拽会打断它。 */
-  touch-action: none;
+  /* 交互已经是普通点击，不必再压住浏览器的手势；只保留「别选中图标」。 */
+  touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  position: relative;
+}
+
+/* 视觉 34px、可点 44px。34 在视觉上是主流 chatbot 图标按钮的量级，但 44 才是
+   触摸目标的下限；用一层不可见的外扩把两者分开，免得为了好按把图标画大。 */
+.btn::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: inherit;
 }
 
 .btn[data-listening] {
@@ -28,11 +38,23 @@
   background: var(--color-accent-soft);
 }
 
-/* 上滑进了取消区。松手就丢弃，得让用户在松手之前看见。 */
-.btn[data-cancel] {
-  border-color: var(--color-error);
-  color: var(--color-error);
-  background: none;
+/* 麦克风还没开。转圈是唯一能表达「还没开始，别急着说」的形态 —— 静止的图标
+   和「正在听」分不开，那正是之前把这段画成录音中的代价。 */
+.btn[data-preparing] svg {
+  animation: voice-spin 0.9s linear infinite;
+}
+
+@keyframes voice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn[data-preparing] svg {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 /* 按钮没了文字标签，指引和实时回显都靠这一行。不换行、超长截断 —— 它是个
@@ -45,10 +67,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.hint[data-cancel] {
-  color: var(--color-error);
 }
 
 .error {
