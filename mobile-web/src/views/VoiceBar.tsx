@@ -12,9 +12,9 @@
 // 转文字」两个看得见的区域）。取消现在是录音条上一个明确的 ✕。
 
 import { useRef } from "react";
-import { AudioLines, RotateCcw, Send, Square, X } from "lucide-react";
+import { AudioLines, RotateCcw, Send, Square, TriangleAlert, X } from "lucide-react";
 import { t } from "../i18n";
-import { voiceErrorText } from "../useVoiceInput";
+import { voiceErrorHint, voiceErrorText } from "../useVoiceInput";
 import { formatDuration, pressIntent, type VoiceRecorderApi } from "../useVoiceRecorder";
 import styles from "./VoiceBar.module.css";
 
@@ -59,15 +59,61 @@ export function VoiceMicButton({ rec }: { rec: VoiceRecorderApi }) {
       >
         <AudioLines size={19} />
       </button>
-      {rec.error && (
-        <span className={styles.error} role="alert">
-          {voiceErrorText(rec.error)}
-          <button type="button" className={styles.retryLink} onClick={rec.start}>
+      {rec.error && <VoiceError rec={rec} />}
+    </>
+  );
+}
+
+/**
+ * 出错时那一块。
+ *
+ * 原来是一行小红字加个「重试」——对「没有麦克风权限」这一类来说，重试是**没有
+ * 用的动作**：用户拒过一次之后，鸿蒙和安卓的权限框都不会再弹了，再点一百次
+ * 也还是同一条错误。所以这里按错误类型给不同的下一步：
+ *
+ *   - 能把用户送去授权的环境（原生壳）：给「去授权」，授权完自动接着录。
+ *   - 送不过去的（浏览器）：给一句**说清是哪个设置**的指引，不画按不动的按钮。
+ *   - 这台设备根本没有识别服务：连重试都不给，说清楚改用打字。
+ */
+function VoiceError({ rec }: { rec: VoiceRecorderApi }) {
+  const hint = voiceErrorHint(rec.error!, rec.canOpenSettings, rec.providerId);
+  // 重试只在「再来一次真的有可能不一样」时才给。unavailable 是设备就没有识别
+  // 服务,no-permission 且送不过去时用户得先离开这个界面去改设置 —— 这两种
+  // 情况下的重试按钮只会骗人再点一次。
+  const canRetry = rec.error !== "unavailable" && !(rec.error === "no-permission" && !rec.canOpenSettings);
+
+  return (
+    <div className={styles.errorBox} role="alert">
+      <div className={styles.errorHead}>
+        <TriangleAlert size={15} className={styles.errorIcon} />
+        <span className={styles.errorTitle}>{voiceErrorText(rec.error!)}</span>
+        <button
+          type="button"
+          className={styles.errorClose}
+          onClick={rec.dismissError}
+          aria-label={t("关闭")}
+        >
+          <X size={14} />
+        </button>
+      </div>
+      {hint && <p className={styles.errorHint}>{hint}</p>}
+      <div className={styles.errorActs}>
+        {rec.error === "no-permission" && rec.canOpenSettings && (
+          <button
+            type="button"
+            className={styles.errorPrimary}
+            onClick={() => void rec.openSettings()}
+          >
+            {t("去授权")}
+          </button>
+        )}
+        {canRetry && (
+          <button type="button" className={styles.errorGhost} onClick={rec.start}>
             {t("重试")}
           </button>
-        </span>
-      )}
-    </>
+        )}
+      </div>
+    </div>
   );
 }
 

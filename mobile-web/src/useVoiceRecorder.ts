@@ -13,7 +13,7 @@
 // 语音的产物是文字，不是音频。所以这一层的每个决定都倒向「文字随时可改、可退」。
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { appendVoiceText, type VoiceErrorKind } from "./voiceInput";
+import { appendVoiceText, type VoiceErrorKind, type VoiceProviderId } from "./voiceInput";
 import { useVoiceInput } from "./useVoiceInput";
 
 /** 松手时长 ≤ 这个数算「点按」——录音继续，手指可以离开屏幕。 */
@@ -90,6 +90,12 @@ export interface VoiceRecorderApi {
   stopAndSend(): void;
   /** 关掉错误提示回到待命。 */
   dismissError(): void;
+  /** 这个环境能不能把用户直接送去开麦克风权限（壳里能，浏览器不能）。 */
+  canOpenSettings: boolean;
+  /** 拉起授权入口；授权成功会自动接着开始录音。 */
+  openSettings(): Promise<boolean>;
+  /** 当前实现，错误提示靠它说清「权限在哪」。 */
+  providerId: VoiceProviderId | null;
 }
 
 export function useVoiceRecorder({
@@ -238,6 +244,14 @@ export function useVoiceRecorder({
     voice.clearError();
   }, [voice]);
 
+  // 授权成功就直接接着录。让用户授权完再自己回来点一次麦克风，是把一次操作
+  // 拆成两次——而他刚刚做的那个动作，本意就是「我要说话」。
+  const grantAndStart = useCallback(async (): Promise<boolean> => {
+    const granted = await voice.openSettings();
+    if (granted) start();
+    return granted;
+  }, [voice, start]);
+
   return {
     available: voice.state !== "probing" && voice.state !== "unsupported",
     recording,
@@ -257,6 +271,9 @@ export function useVoiceRecorder({
     cancel,
     retry,
     dismissError,
+    canOpenSettings: voice.canOpenSettings,
+    openSettings: grantAndStart,
+    providerId: voice.providerId,
   };
 }
 

@@ -150,22 +150,83 @@
 
 /* 错误：留在待命行里，但带一个能直接再来一次的入口。原来它只是一行没有出口的
    小红字。 */
-.error {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1 1 140px;
+/* 错误块。原来是一行小红字 + 一个「重试」——对没权限那类错误重试是无效动作，
+   所以现在是一个能给出真正下一步的小卡片：标题 + 指引 + 动作按钮。
+   占满整行而不是挤在工具行里：它需要被读到，被读到才谈得上照着做。 */
+.errorBox {
+  flex: 1 1 100%;
   min-width: 0;
-  font-size: var(--t-aux, 12px);
+  margin-top: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-error);
+  border-radius: 10px;
+  background: var(--color-error-soft, rgba(200, 60, 40, 0.07));
+}
+
+.errorHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.errorIcon {
+  flex: none;
   color: var(--color-error);
 }
 
-.retryLink {
+.errorTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-body, 13px);
+  font-weight: 600;
+  color: var(--color-error);
+}
+
+/* 关掉这条提示。错误不该只能靠再点一次麦克风来赶走 —— 用户可能就是想接着打字。 */
+.errorClose {
   flex: none;
   border: none;
   background: none;
-  padding: 0;
-  color: var(--color-accent);
-  font-size: inherit;
-  text-decoration: underline;
+  padding: 2px;
+  color: var(--color-text-muted);
+  display: inline-flex;
+}
+
+.errorHint {
+  margin: 5px 0 0;
+  font-size: var(--t-aux, 12px);
+  line-height: 1.5;
+  color: var(--color-text-dim);
+}
+
+.errorActs {
+  display: flex;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.errorActs:empty {
+  display: none;
+}
+
+/* 触摸目标 ≥ 32px 高:这两个按钮是错误里唯一的出路,不能做成需要瞄准的小字。 */
+.errorPrimary,
+.errorGhost {
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+}
+
+.errorPrimary {
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.errorGhost {
+  border: 1px solid var(--color-border-strong);
+  background: none;
+  color: var(--color-text-dim);
 }

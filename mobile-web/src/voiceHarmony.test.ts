@@ -50,6 +50,7 @@ afterEach(() => {
   const w = window as unknown as Win;
   delete w["fleetNative"];
   delete w["__fleetVoice"];
+  delete w["__fleetVoicePermission"];
 });
 
 describe("classifyHarmonyError", () => {
@@ -166,5 +167,36 @@ describe("harmonyVoiceProvider 的就绪信号", () => {
     await harmonyVoiceProvider.start("zh-CN", c.handlers);
     push({ kind: "ready" });
     expect(c.ready).toEqual([1]);
+  });
+});
+
+describe("openPermissionSettings", () => {
+  // 老壳（没接二次授权）配新 web：不能假装能拉起面板，否则 UI 会画一个按下去
+  // 什么都不发生的「去授权」。
+  it("壳没登记 openVoiceSettings 时直接说不行", async () => {
+    installBridge();
+    expect(await harmonyVoiceProvider.openPermissionSettings?.()).toBe(false);
+  });
+
+  it("壳报授权成功就 resolve true 并拆掉 hook", async () => {
+    const w = window as unknown as Win;
+    let opened = 0;
+    w["fleetNative"] = { openVoiceSettings: () => opened++ };
+
+    const pending = harmonyVoiceProvider.openPermissionSettings?.();
+    expect(opened).toBe(1);
+    (w["__fleetVoicePermission"] as (g: boolean) => void)(true);
+
+    expect(await pending).toBe(true);
+    // 拆干净:留着的话下一次授权会撞上同一个已经 resolve 过的 promise。
+    expect(w["__fleetVoicePermission"]).toBeUndefined();
+  });
+
+  it("用户没给就是没给", async () => {
+    const w = window as unknown as Win;
+    w["fleetNative"] = { openVoiceSettings: () => {} };
+    const pending = harmonyVoiceProvider.openPermissionSettings?.();
+    (w["__fleetVoicePermission"] as (g: boolean) => void)(false);
+    expect(await pending).toBe(false);
   });
 });
