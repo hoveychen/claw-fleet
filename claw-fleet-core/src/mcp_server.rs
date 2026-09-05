@@ -106,8 +106,8 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
     }
 }
 
-/// Build the `tools/list` result. The five always-on tools (the four UI tools
-/// plus `fleet__image`) are always present; the six
+/// Build the `tools/list` result. The six always-on tools (the four UI tools
+/// plus `fleet__image` / `fleet__image_edit`) are always present; the six
 /// control tools (plan / handoff / watch / loop / schedule / wiki) are appended
 /// ONLY for Fleet-owned sessions — a user's hand-launched `claude` never sees
 /// them and keeps using the `fleet` CLI. This makes "Fleet sessions go through
@@ -123,6 +123,7 @@ fn tools_list_result(fleet_owned: bool) -> Value {
         set_session_title_tool_def(),
         permission_prompt_tool_def(),
         image_tool_def(),
+        image_edit_tool_def(),
     ];
     if fleet_owned {
         tools.extend(crate::mcp_control::control_tool_defs());
@@ -193,6 +194,7 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
         "fleet__set_session_title" => handle_set_session_title_call(params),
         "fleet__permission_prompt" => handle_permission_prompt_call(params),
         "fleet__image" => handle_image_call(params),
+        "fleet__image_edit" => handle_image_edit_call(params),
         n if crate::mcp_control::is_control_tool(n) => handle_control_tool_call(n, params),
         other => Err(JsonRpcError {
             code: -32602,
@@ -245,6 +247,77 @@ fn resolve_workspace_cwd() -> std::path::PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
 }
 
+/// Shared arg plumbing for both image tools.
+fn image_common_args(args: &Value) -> (Vec<String>, Option<String>, std::path::PathBuf) {
+    let images = args
+        .get("images")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let model = args
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string);
+    let workspace = args
+        .get("workspace_path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(resolve_workspace_cwd);
+    (images, model, workspace)
+}
+
+fn required_str(args: &Value, field: &str) -> Result<String, JsonRpcError> {
+    args.get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| JsonRpcError {
+            code: -32602,
+            message: format!("Missing or blank `{field}` argument"),
+        })
+}
+
+/// Render a finished turn for the agent.
+///
+/// The thread id leads because it is what the agent needs to iterate: without it
+/// a follow-up revision has to start from scratch and loses the previous image
+/// from context.
+fn render_image_result(result: &crate::codex_image::GenerateImageResult) -> Value {
+    let mut text = format!(
+        "thread_id: {}  (pass this to fleet__image_edit to revise)\n\n{} new image(s):\n",
+        result.thread_id,
+        result.images.len()
+    );
+    for img in &result.images {
+        text.push_str(&format!("- {} ({} bytes)\n", img.path, img.bytes));
+    }
+    if !result.timeline.is_empty() {
+        text.push_str("\nWhat it did:\n");
+        for ev in &result.timeline {
+            text.push_str(&format!("- [{}] {}\n", ev.kind, ev.text));
+        }
+    }
+    if !result.agent_message.trim().is_empty() {
+        text.push_str(&format!("\nAgent note: {}", result.agent_message.trim()));
+    }
+    json!({
+        "content": [{ "type": "text", "text": text }],
+        "isError": false,
+    })
+}
+
 /// Bridge `fleet__image` to [`crate::codex_image::generate_image`].
 ///
 /// Deliberately **not** gated on `session_is_fleet_owned()`, unlike the control
@@ -254,69 +327,93 @@ fn resolve_workspace_cwd() -> std::path::PathBuf {
 /// image at all.
 fn handle_image_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
-    let description = args
-        .get("description")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|d| !d.is_empty())
-        .ok_or_else(|| JsonRpcError {
-            code: -32602,
-            message: "Missing or blank `description` argument".into(),
-        })?;
-    let model = args
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|m| !m.is_empty());
-    let workspace = args
-        .get("workspace_path")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|w| !w.is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(resolve_workspace_cwd);
+    let description = required_str(&args, "description")?;
+    let (images, model, workspace) = image_common_args(&args);
 
-    match crate::codex_image::generate_image(&workspace.to_string_lossy(), description, model) {
-        Ok(result) => {
-            // Report paths as text: the caller decides where they go (a
-            // fleet__ask `images` preview, an artifact, or a copy into the repo).
-            let mut text = format!("Generated {} image(s):\n", result.images.len());
-            for img in &result.images {
-                text.push_str(&format!("- {} ({} bytes)\n", img.path, img.bytes));
-            }
-            if !result.agent_message.trim().is_empty() {
-                text.push_str(&format!("\nAgent note: {}", result.agent_message.trim()));
-            }
-            Ok(json!({
-                "content": [{ "type": "text", "text": text }],
-                "isError": false,
-            }))
-        }
+    match crate::codex_image::generate_image(
+        &workspace.to_string_lossy(),
+        &description,
+        &images,
+        model.as_deref(),
+    ) {
+        Ok(result) => Ok(render_image_result(&result)),
         Err(e) => Ok(tool_error(e)),
     }
 }
 
+/// Bridge `fleet__image_edit` to [`crate::codex_image::edit_image`].
+fn handle_image_edit_call(params: &Value) -> Result<Value, JsonRpcError> {
+    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let thread_id = required_str(&args, "thread_id")?;
+    let instruction = required_str(&args, "instruction")?;
+    let (images, model, workspace) = image_common_args(&args);
+
+    match crate::codex_image::edit_image(
+        &workspace.to_string_lossy(),
+        &thread_id,
+        &instruction,
+        &images,
+        model.as_deref(),
+    ) {
+        Ok(result) => Ok(render_image_result(&result)),
+        Err(e) => Ok(tool_error(e)),
+    }
+}
+
+/// Property shared by both image tools' schemas.
+fn image_shared_properties() -> Value {
+    json!({
+        "images": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Absolute paths to local reference images to attach. They inform style/composition/subject; they are not returned as-is."
+        },
+        "model": {
+            "type": "string",
+            "description": "Routing model that drives the turn (default gpt-5.6-luna). Generation is always gpt-image-2 regardless, so the cheap tier is usually right."
+        },
+        "workspace_path": {
+            "type": "string",
+            "description": "Workspace to run in. Defaults to the calling session's workspace; you rarely need to set this."
+        }
+    })
+}
+
 fn image_tool_def() -> Value {
+    let mut properties = image_shared_properties();
+    properties["description"] = json!({
+        "type": "string",
+        "description": "What to draw. Be specific about subject, style, composition, and any verbatim text; state the exact pixel size if it matters."
+    });
     json!({
         "name": "fleet__image",
-        "description": "Generate a raster image (illustration, sprite, mockup, hero image, texture) by borrowing Codex's built-in image_gen tool — model `gpt-image-2`, billed against the ChatGPT plan quota, no OPENAI_API_KEY needed. Use this instead of hand-writing SVG/HTML/CSS when the deliverable is genuinely a bitmap; prefer editing repo-native vectors when extending an existing icon or logo system. Returns absolute paths on this machine; the file stays put, so pass the path to fleet__ask `images` to show it, fleet__artifact to hand it over, or copy it into the repo yourself. Blocks for tens of seconds per image. Size notes for the prompt: edges must be multiples of 16px, max 3840px, aspect ratio at most 3:1; gpt-image-2 cannot do transparent backgrounds.",
+        "description": "Generate a NEW raster image (illustration, sprite, mockup, hero image, texture) by borrowing Codex's built-in image_gen tool — model `gpt-image-2`, billed against the ChatGPT plan quota, no OPENAI_API_KEY needed. Use this instead of hand-writing SVG/HTML/CSS when the deliverable is genuinely a bitmap; prefer editing repo-native vectors when extending an existing icon or logo system. Returns a `thread_id` plus absolute paths on this machine — keep the thread_id and call fleet__image_edit to revise the result instead of regenerating from scratch. The file stays put, so pass the path to fleet__ask `images` to show it, fleet__artifact to hand it over, or copy it into the repo yourself. Blocks for tens of seconds. Size notes for the prompt: edges must be multiples of 16px, max 3840px, aspect ratio at most 3:1; gpt-image-2 cannot do transparent backgrounds.",
         "inputSchema": {
             "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string",
-                    "description": "What to draw. Be specific about subject, style, composition, and any verbatim text; state the exact pixel size if it matters."
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Routing model that drives the turn (default gpt-5.6-luna). Generation is always gpt-image-2 regardless, so the cheap tier is usually right."
-                },
-                "workspace_path": {
-                    "type": "string",
-                    "description": "Workspace to run in. Defaults to the calling session's workspace; you rarely need to set this."
-                }
-            },
+            "properties": properties,
             "required": ["description"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn image_edit_tool_def() -> Value {
+    let mut properties = image_shared_properties();
+    properties["thread_id"] = json!({
+        "type": "string",
+        "description": "The thread_id returned by a previous fleet__image or fleet__image_edit call. The image being revised must have come from that thread."
+    });
+    properties["instruction"] = json!({
+        "type": "string",
+        "description": "What to change, phrased as a single targeted edit (\"make the scarf blue\", \"remove the background text\"). Everything not mentioned is kept. One change per call iterates better than several at once."
+    });
+    json!({
+        "name": "fleet__image_edit",
+        "description": "Revise an image you generated earlier with fleet__image, in the same Codex thread — this is the \"keep tweaking until it's right\" path. Because the thread still holds the previous image, the edit builds on it rather than starting over. Returns only the images THIS round produced, plus a timeline of what the agent did. Requires the thread_id from the earlier call; if you don't have one, use fleet__image first. Note: revising a plain local image file that Fleet did not generate is not supported here — attach it via `images` on fleet__image instead.",
+        "inputSchema": {
+            "type": "object",
+            "properties": properties,
+            "required": ["thread_id", "instruction"],
             "additionalProperties": false
         }
     })
@@ -974,6 +1071,102 @@ mod tests {
     }
 
     #[test]
+    fn edit_tool_is_advertised_alongside_the_generator() {
+        for fleet_owned in [false, true] {
+            let result = tools_list_result(fleet_owned);
+            let names: Vec<&str> = result["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap())
+                .collect();
+            assert!(
+                names.contains(&"fleet__image_edit"),
+                "fleet_owned={fleet_owned} must see the edit tool too"
+            );
+        }
+    }
+
+    #[test]
+    fn edit_tool_schema_requires_thread_and_instruction() {
+        let def = image_edit_tool_def();
+        let schema = &def["inputSchema"];
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(required, vec!["thread_id", "instruction"]);
+        // Without the thread_id the whole iterate story collapses back into
+        // regenerating from scratch, so the description must point at it.
+        let desc = def["description"].as_str().unwrap();
+        assert!(desc.contains("thread_id"), "must name the handle: {desc}");
+    }
+
+    #[test]
+    fn both_image_tools_share_the_optional_properties() {
+        // Drift here means one tool silently loses reference images or the
+        // routing-model override.
+        for def in [image_tool_def(), image_edit_tool_def()] {
+            let props = &def["inputSchema"]["properties"];
+            for shared in ["images", "model", "workspace_path"] {
+                assert!(
+                    props[shared].is_object(),
+                    "{} must declare {shared}",
+                    def["name"]
+                );
+            }
+            assert_eq!(props["images"]["type"], "array");
+        }
+    }
+
+    #[test]
+    fn generator_points_at_the_edit_tool() {
+        // An agent that doesn't know the follow-up path exists will regenerate
+        // from scratch and lose the previous image from context.
+        let desc = image_tool_def()["description"].as_str().unwrap().to_string();
+        assert!(desc.contains("fleet__image_edit"), "{desc}");
+        assert!(desc.contains("thread_id"), "{desc}");
+    }
+
+    #[test]
+    fn image_edit_call_rejects_blank_required_args() {
+        for args in [
+            json!({ "arguments": { "thread_id": "  ", "instruction": "bluer" } }),
+            json!({ "arguments": { "thread_id": "abc", "instruction": "   " } }),
+        ] {
+            let err = handle_image_edit_call(&args).expect_err("must be a protocol error");
+            assert_eq!(err.code, -32602);
+        }
+    }
+
+    #[test]
+    fn rendered_result_leads_with_the_thread_id_and_lists_the_timeline() {
+        let result = crate::codex_image::GenerateImageResult {
+            thread_id: "01a06fc8".into(),
+            images: vec![crate::codex_image::GeneratedImage {
+                path: "/d/a.png".into(),
+                bytes: 42,
+            }],
+            agent_message: "saved it".into(),
+            timeline: vec![crate::codex_image::TurnEvent {
+                kind: "command".into(),
+                text: "sips -z 1024 1024 a.png".into(),
+            }],
+        };
+        let text = render_image_result(&result)["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(text.starts_with("thread_id: 01a06fc8"), "{text}");
+        assert!(text.contains("fleet__image_edit"), "must name the follow-up: {text}");
+        assert!(text.contains("/d/a.png (42 bytes)"), "{text}");
+        assert!(text.contains("[command] sips -z 1024 1024 a.png"), "{text}");
+        assert!(text.contains("saved it"), "{text}");
+    }
+
+    #[test]
     fn image_call_rejects_blank_description() {
         let err = handle_image_call(&json!({ "arguments": { "description": "   " } }))
             .expect_err("blank description must be a protocol error");
@@ -982,13 +1175,13 @@ mod tests {
 
     #[test]
     fn tools_list_returns_all_tools() {
-        // Non-Fleet session: only the always-on tools (four UI + fleet__image),
+        // Non-Fleet session: only the always-on tools (four UI + the two image tools),
         // regardless of ambient env (the JSON-RPC path gates on
         // `session_is_fleet_owned`, but the pure builder lets us assert
         // deterministically).
         let result = tools_list_result(false);
         let tools = result["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 5, "non-Fleet session sees only the always-on tools");
+        assert_eq!(tools.len(), 6, "non-Fleet session sees only the always-on tools");
         let names: Vec<&str> = tools
             .iter()
             .map(|t| t["name"].as_str().unwrap())
@@ -1036,7 +1229,7 @@ mod tests {
         let tools = result["tools"].as_array().expect("tools array");
         assert_eq!(
             tools.len(),
-            5 + crate::mcp_control::CONTROL_TOOL_NAMES.len(),
+            6 + crate::mcp_control::CONTROL_TOOL_NAMES.len(),
             "Fleet-owned session sees always-on + control tools"
         );
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
