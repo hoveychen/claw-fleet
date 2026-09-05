@@ -291,7 +291,7 @@ fn build_generate_launch(
         &prompt,
         Some(model.unwrap_or(DEFAULT_ROUTING_MODEL)),
         None,
-        &pre_prompt_args(images),
+        &generate_pre_prompt_args(images),
     );
     crate::codex_launch::wrap_codex_launch(codex, args, workspace_path)
 }
@@ -316,21 +316,33 @@ fn build_edit_launch(
         &prompt,
         Some(model.unwrap_or(DEFAULT_ROUTING_MODEL)),
         None,
-        &pre_prompt_args(images),
+        &edit_pre_prompt_args(images),
     );
     crate::codex_launch::wrap_codex_launch(codex, args, workspace_path)
 }
 
-/// Flags shared by both launches, in front of the `--` separator.
+/// Flags for a **new** turn, in front of the `--` separator.
 ///
 /// `workspace-write` (not read-only): the skill inspects its own SKILL.md and
 /// may run `sips`-style checks on what it produced. No decision-card / notify
 /// bridging — this is a one-shot tool call, not a Fleet-owned session, so it
 /// must not register itself as one.
-fn pre_prompt_args(images: &[String]) -> Vec<String> {
+fn generate_pre_prompt_args(images: &[String]) -> Vec<String> {
     let mut args = vec!["-s".to_string(), "workspace-write".to_string()];
     args.extend(crate::codex_launch::codex_image_args(images));
     args
+}
+
+/// Flags for a **resume** turn.
+///
+/// Deliberately no `-s`: `codex exec resume` has no `--sandbox` flag at all and
+/// hard-errors with `unexpected argument '-s' found` if handed one (caught by
+/// the live e2e — the arg-shape unit tests happily asserted a command line Codex
+/// rejects). A resumed thread keeps the sandbox policy it was created with,
+/// which is the `workspace-write` set by [`generate_pre_prompt_args`], so
+/// nothing is lost.
+fn edit_pre_prompt_args(images: &[String]) -> Vec<String> {
+    crate::codex_launch::codex_image_args(images)
 }
 
 /// Images in `after` that were not already in `before`, keeping `after`'s order.
@@ -778,6 +790,14 @@ mod tests {
         assert!(
             last.contains("Change only what the instruction below asks for"),
             "edit prompt must restate invariants: {last}"
+        );
+        // Regression guard for a bug only the live e2e caught: `codex exec
+        // resume` has no --sandbox flag and hard-errors on `-s`. The resumed
+        // thread keeps the policy it was created with, so there is nothing to
+        // re-specify.
+        assert!(
+            !args.iter().any(|a| a == "-s"),
+            "resume rejects -s outright: {args:?}"
         );
     }
 
