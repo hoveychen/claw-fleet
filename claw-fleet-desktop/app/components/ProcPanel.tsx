@@ -9,10 +9,12 @@ import {
   Play,
   RotateCw,
   Square,
+  SquareTerminal,
   Trash2,
   X,
 } from "lucide-react";
-import { useProcStore } from "../store";
+import { procCommandText } from "./procCommandLabel";
+import { useProcStore, useUIStore } from "../store";
 import { getItem, setItem } from "../storage";
 import type { ProcRecord } from "../types";
 import styles from "./FilesView.module.css";
@@ -95,6 +97,7 @@ export function ProcPanel({
   const { t } = useTranslation();
   const procs = useProcStore((s) => s.procs);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
+  const requestTerminalNav = useUIStore((s) => s.requestTerminalNav);
   const [command, setCommand] = useState("");
   const [runError, setRunError] = useState<string | null>(null);
   const [openTermId, setOpenTermId] = useState<string | null>(null);
@@ -189,7 +192,7 @@ export function ProcPanel({
                   title={shortcut}
                 >
                   <Play size={10} fill="currentColor" />
-                  <code>{shortcut}</code>
+                  <code>{procCommandText(shortcut, t("files.proc_shell"))}</code>
                 </button>
                 <button
                   className={styles.proc_shortcut_remove}
@@ -233,6 +236,17 @@ export function ProcPanel({
           <Play size={12} strokeWidth={2} />
           {t("files.proc_run")}
         </button>
+        {/* 这里不自己起 shell,只是带着本仓库跳到终端页 —— 终端页进去会接回已有的
+            pty、没有才开新的,那套「不留孤儿 shell」的逻辑只该有一份。 */}
+        <button
+          className={styles.proc_term_btn}
+          type="button"
+          onClick={() => requestTerminalNav(workspace)}
+          title={t("files.proc_open_terminal")}
+        >
+          <SquareTerminal size={12} strokeWidth={1.8} />
+          {t("files.proc_open_terminal")}
+        </button>
       </form>
       {runError && (
         <div className={styles.proc_error}>{t("files.proc_run_error", { error: runError })}</div>
@@ -251,6 +265,8 @@ export function ProcPanel({
                 <button
                   className={styles.proc_row_main}
                   onClick={() => setOpenGroupCommand(groupOpen ? null : group.command)}
+                  // tooltip 保留原始命令：行内显示的是「shell」这种友好名，真要查
+                  // 到底跑的是哪个 shell 时，悬停还看得到 exec "/bin/zsh" -i。
                   title={group.command}
                 >
                   {groupOpen ? (
@@ -263,7 +279,9 @@ export function ProcPanel({
                       group.runningCount > 0 ? styles.proc_dot_running : styles.proc_dot_exited
                     }`}
                   />
-                  <code className={styles.proc_command}>{group.command}</code>
+                  <code className={styles.proc_command}>
+                    {procCommandText(group.command, t("files.proc_shell"))}
+                  </code>
                   <span className={styles.proc_status}>
                     {group.records.length > 1 &&
                       `${t("files.proc_run_count", { count: group.records.length })} · `}
