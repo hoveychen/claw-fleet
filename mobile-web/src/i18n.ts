@@ -568,8 +568,17 @@ const DICT: Record<string, string> = {
   // 「重试」已在 ErrorBoundary 段登记，不重复。
   没听到声音: "Didn't catch that",
   // 「已取消」已在上面的通用词条里，不重复登记。
-  "没有麦克风权限，请在系统设置里允许后重试":
-    "No microphone permission — allow it in system settings and try again",
+  没有麦克风权限: "No microphone permission",
+  去授权: "Grant access",
+  // 指引分环境:浏览器里的麦克风权限在站点设置里,不在系统设置里 —— 指错地方
+  // 比不指更糟,用户会真的去翻一遍。
+  "在浏览器地址栏左侧的站点设置里，把麦克风改成「允许」":
+    "Open the site settings next to the address bar and set Microphone to \"Allow\"",
+  "到系统设置 → 应用 → Fleet → 权限里允许麦克风":
+    "Go to Settings → Apps → Fleet → Permissions and allow the microphone",
+  "语音识别要把声音发去厂商服务器，检查下网络":
+    "Speech recognition sends audio to the vendor's servers — check your connection",
+  "换成打字，或在能用的设备上说": "Type instead, or speak on a device that supports it",
   语音识别服务连不上: "Can't reach the speech recognition service",
   这台设备没有可用的语音识别: "No speech recognition available on this device",
 
