@@ -1095,6 +1095,30 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json(claw_fleet_core::routes::REVIEW_DOC, doc)
     }
 
+    fn list_session_images(&self, session_id: &str) -> Vec<crate::codex_image::GeneratedImage> {
+        self.probe
+            .get(&format!(
+                "{}?session={}",
+                claw_fleet_core::routes::SESSION_IMAGES,
+                encode_path(session_id)
+            ))
+            .unwrap_or_default()
+    }
+
+    fn get_session_image(
+        &self,
+        session_id: &str,
+        name: &str,
+    ) -> Result<crate::codex_image::GeneratedImageBytes, String> {
+        let (bytes, mime) = self.probe.get_bytes(&format!(
+            "{}?session={}&name={}",
+            claw_fleet_core::routes::SESSION_IMAGE,
+            encode_path(session_id),
+            encode_path(name),
+        ))?;
+        Ok(crate::codex_image::GeneratedImageBytes { bytes, mime })
+    }
+
     fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
         self.probe.post_ok(&format!("{}?slug={}", claw_fleet_core::routes::WIKI_DELETE, encode_path(slug)))
     }

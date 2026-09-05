@@ -600,6 +600,51 @@ pub(crate) fn route_live_thinking(
                 );
             }
 
+/// `/session_images?session=<thread id>` — JSON list of a Codex session's
+/// generated images, so a remote desktop can populate its thumbnails.
+pub(crate) fn route_session_images(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let session = query
+        .get("session")
+        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+        .unwrap_or_default();
+    let images = crate::codex_image::list_thread_images(&session);
+    let body = serde_json::to_string(&images).unwrap_or_else(|_| "[]".to_string());
+    let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+}
+
+/// `/session_image?session=<thread id>&name=<file>` — bytes of one image.
+/// Traversal/extension gating lives in `read_thread_image`, not here.
+pub(crate) fn route_session_image(
+    _ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    _json_header: tiny_http::Header,
+    _path: &str,
+) {
+    let dec = |key: &str| {
+        query
+            .get(key)
+            .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+            .unwrap_or_default()
+    };
+    match crate::codex_image::read_thread_image(&dec("session"), &dec("name")) {
+        Ok(f) => {
+            let mime_header: tiny_http::Header =
+                format!("Content-Type: {}", f.mime).parse().unwrap();
+            let _ = request.respond(tiny_http::Response::from_data(f.bytes).with_header(mime_header));
+        }
+        Err(_) => {
+            let _ = request.respond(tiny_http::Response::empty(404));
+        }
+    }
+}
+
 pub(crate) fn route_decision_asset(
     ctx: &ServeCtx,
     request: tiny_http::Request,
