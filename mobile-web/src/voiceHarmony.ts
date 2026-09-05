@@ -25,7 +25,7 @@ const HOOK = "__fleetVoice";
 
 /** 壳侧 VoiceEvent 的形状（WebShell.ets）。 */
 interface HarmonyVoiceEvent {
-  kind: "partial" | "final" | "error" | "end";
+  kind: "ready" | "partial" | "final" | "error" | "end";
   text: string;
   code: string;
 }
@@ -78,6 +78,9 @@ export const harmonyVoiceProvider: VoiceInputProvider = {
     w[HOOK] = (ev: HarmonyVoiceEvent) => {
       if (dead) return;
       switch (ev.kind) {
+        case "ready":
+          handlers.onReady();
+          break;
         case "partial":
           if (ev.text) handlers.onPartial(ev.text);
           break;

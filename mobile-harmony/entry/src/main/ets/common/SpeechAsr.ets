@@ -28,6 +28,9 @@ const CHANNEL = 1;
 const OFFLINE = 1;
 
 export interface AsrCallbacks {
+  /// 引擎真的开始收音了。createEngine 是异步的，这之前用户说的话全丢，
+  /// 所以页面必须等到这一声才敢说「正在听」。
+  onReady: () => void;
   onText: (text: string, isFinal: boolean) => void;
   onError: (code: string) => void;
   /// 引擎自己收工了（VAD 判定说完了、或到了 maxAudioDuration）。
@@ -80,7 +83,10 @@ export class SpeechAsr {
       this.engine = engine;
 
       engine.setListener({
-        onStart: (_sid: string, _msg: string) => {},
+        onStart: (sid: string, _msg: string) => {
+          if (this.dead || sid !== session) { return; }
+          cb.onReady();
+        },
         onEvent: (_sid: string, _code: number, _msg: string) => {},
         onResult: (sid: string, result: speechRecognizer.SpeechRecognitionResult) => {
           if (this.dead || sid !== session) { return; }
