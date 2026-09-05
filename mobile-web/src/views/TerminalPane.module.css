@@ -15,3 +15,14 @@
   /* 手机上拖 4px 宽的条不现实，别让它拦住落在同一列上的划动。 */
   pointer-events: none;
 }
+
+/* xterm 的 IME 候选幽灵层：composing 期间它把未上屏的文字画成黑底白字浮在光标
+   位置上（CompositionHelper + xterm.css 的 .composition-view.active）。桌面 IME
+   的候选框不显示已选文字，所以那层在桌面上有用；**手机不是**——系统输入法自己的
+   候选栏就在屏幕底部显示着 composing 文字，这一层只是又画了一遍，还会跟 pty 回
+   显叠在一起，看上去像多打了一个字符。
+   !important：xterm.css 的 .xterm .composition-view.active 与这条同特异性，
+   谁赢取决于打包后的先后顺序，不能赌。 */
+.pane :global(.composition-view) {
+  display: none !important;
+}
