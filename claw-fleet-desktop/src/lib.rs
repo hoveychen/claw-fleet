@@ -591,6 +591,7 @@ impl Backend for NullBackend {
             wiki_guidance_installed: false,
             model_guidance_installed: false,
             idle_hooks_installed: false,
+            wakeup_guard_installed: false,
         }
     }
     fn apply_hooks(&self) -> Result<(), String> {

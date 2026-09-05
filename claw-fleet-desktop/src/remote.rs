@@ -1592,6 +1592,7 @@ impl crate::backend::Backend for RemoteBackend {
             wiki_guidance_installed: false,
             model_guidance_installed: false,
             idle_hooks_installed: false,
+            wakeup_guard_installed: false,
         })
     }
 
