@@ -58,16 +58,21 @@ class NativeBridge {
   /// 语音识别的事件出口。由页面组件传进来 —— 事件要经 controller.runJavaScript
   /// 送回页面，而 controller 住在组件上。
   private onVoiceEvent: (json: string) => void;
+  /// 二次授权的结果出口。与 onVoiceEvent 同理:要经 controller.runJavaScript
+  /// 送回页面,而 controller 住在组件上。
+  private onVoicePermission: (granted: boolean) => void;
   private asr: SpeechAsr = new SpeechAsr();
 
   constructor(
     ctx: common.UIAbilityContext,
     onScanRequested: () => void,
     onVoiceEvent: (json: string) => void,
+    onVoicePermission: (granted: boolean) => void,
   ) {
     this.ctx = ctx;
     this.onScanRequested = onScanRequested;
     this.onVoiceEvent = onVoiceEvent;
+    this.onVoicePermission = onVoicePermission;
   }
 
   /// WebView 里 <a download> / createObjectURL 不会触发系统下载，交给
@@ -141,6 +146,20 @@ class NativeBridge {
   cancelVoice(): void {
     this.asr.cancel();
   }
+
+  /// 用户拒过麦克风之后的二次授权（web 侧 voiceHarmony.openPermissionSettings）。
+  ///
+  /// 页面上「没有麦克风权限」那条提示原本是死路：requestPermissionsFromUser 在
+  /// 拒绝过之后不再弹窗，而页面没有任何办法把用户送到能改的地方去。这个方法把
+  /// 系统的权限面板重新拉起来，结果经 window.__fleetVoicePermission 推回页面，
+  /// 页面据此直接接着开始录音——用户为「我要说话」这一个意图只需操作一次。
+  openVoiceSettings(): void {
+    this.asr.requestOnSetting(this.ctx).then((granted: boolean) => {
+      this.onVoicePermission(granted);
+    }).catch(() => {
+      this.onVoicePermission(false);
+    });
+  }
 }
 
 @Entry
@@ -181,6 +200,7 @@ struct WebShell {
     getContext(this) as common.UIAbilityContext,
     () => { this.startPairing(); },
     (json: string) => { this.deliverVoiceEvent(json); },
+    (granted: boolean) => { this.deliverVoicePermission(granted); },
   );
 
   aboutToAppear(): void {
@@ -299,6 +319,26 @@ struct WebShell {
   /// 这次识别、原生侧却还在往回推」这一类故障的唯一证据。之前这里只 catch 了
   /// 异常、把返回值扔了，于是真机上「弹了权限却一个字都出不来」查不出任何线索 ——
   /// 页面侧看起来什么都没发生，壳侧看起来一切正常。
+  /// 把二次授权的结果交给页面（voiceHarmony.ts 的 window.__fleetVoicePermission）。
+  ///
+  /// 同样打日志:这条推不回去的表现是「点了去授权、授权面板也弹了、回来界面却
+  /// 一动不动」,而那正是页面在等这个回调。
+  private deliverVoicePermission(granted: boolean): void {
+    if (!this.webReady) {
+      hilog.info(DOMAIN_W, TAG_W, 'voice-diag permission deliver skipped: web not ready');
+      return;
+    }
+    this.controller.runJavaScript(
+      `(function(){ if(!window.__fleetVoicePermission) return 'NO_HOOK';` +
+      ` window.__fleetVoicePermission(` + (granted ? 'true' : 'false') + `); return 'OK'; })()`,
+    ).then((r: string) => {
+      hilog.info(DOMAIN_W, TAG_W, 'voice-diag permission injected granted=%{public}s result=%{public}s',
+        granted ? 'true' : 'false', r);
+    }).catch((e: Error) => {
+      hilog.warn(DOMAIN_W, TAG_W, 'voice-diag permission deliver failed: %{public}s', e.message);
+    });
+  }
+
   private deliverVoiceEvent(json: string): void {
     if (!this.webReady) {
       hilog.info(DOMAIN_W, TAG_W, 'voice-diag deliver skipped: web not ready');
@@ -674,7 +714,7 @@ struct WebShell {
               // 语音输入。startVoice 的存在与否就是 web 侧 detectVoiceProvider
               // 的判据 —— 老壳配新 web 时这三个方法不在，页面会自动回落，
               // 不会调进一条不存在的实现。
-              'startVoice', 'stopVoice', 'cancelVoice',
+              'startVoice', 'stopVoice', 'cancelVoice', 'openVoiceSettings',
             ],
             controller: this.controller,
           })
