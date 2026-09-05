@@ -118,6 +118,10 @@ pub struct ServeOptions {
     /// Bind address. `None` keeps the historical behaviour: `FLEET_SERVE_HOST`
     /// if set, loopback otherwise.
     pub host: Option<String>,
+    /// Called once the listener is up, with the bind host and the port that was
+    /// *actually* bound. Exists because `--port 0` means the caller cannot know
+    /// the port it should print until after the bind, and `serve` never returns.
+    pub on_listen: Option<Box<dyn FnOnce(&str, u16) + Send>>,
 }
 
 impl Default for ServeOptions {
@@ -129,6 +133,7 @@ impl Default for ServeOptions {
             no_auth: false,
             web_assets: None,
             host: None,
+            on_listen: None,
         }
     }
 }
@@ -141,6 +146,7 @@ pub fn serve(opts: ServeOptions) {
         no_auth,
         web_assets: supplied_assets,
         host: requested_host,
+        on_listen,
     } = opts;
 
     // Inject Fleet's permissions allowlist into ~/.claude/settings.json so
@@ -774,6 +780,12 @@ pub fn serve(opts: ServeOptions) {
 
     let workers = worker_count();
     eprintln!("[fleet serve] {workers} request worker(s)");
+    // Last thing before the accept loop, i.e. after every other startup line:
+    // `fleet webui --lan` prints a QR code here, and a QR code that has been
+    // scrolled halfway off the top of the terminal cannot be scanned.
+    if let Some(cb) = on_listen {
+        cb(&host, actual_port);
+    }
     let server = Arc::new(server);
     for _ in 1..workers {
         let server = server.clone();

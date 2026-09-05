@@ -123,6 +123,11 @@ enum Commands {
         /// Env fallback: FLEET_WEBUI_HOST. Default: 127.0.0.1 (loopback).
         #[arg(long)]
         host: Option<String>,
+        /// Serve the phone on this LAN: bind 0.0.0.0, print the URLs and a
+        /// scannable QR code. This port has no authentication — anyone on the
+        /// network can start agent sessions.
+        #[arg(long)]
+        lan: bool,
         /// If set, the actual bound port is written to this file after bind.
         #[arg(long)]
         port_file: Option<std::path::PathBuf>,
@@ -1034,8 +1039,8 @@ fn main() {
         Commands::Serve { port, token, port_file } => {
             commands::serve::cmd_serve(port, token, port_file)
         }
-        Commands::WebUi { port, web_root, host, port_file } => {
-            commands::serve::cmd_webui(port, web_root, host, port_file)
+        Commands::WebUi { port, web_root, host, lan, port_file } => {
+            commands::serve::cmd_webui(port, web_root, host, lan, port_file)
         }
         Commands::Skill { action } => match action {
             SkillCommands::Install => commands::skill::cmd_skill_install(),

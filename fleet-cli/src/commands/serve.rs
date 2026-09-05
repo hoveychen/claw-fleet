@@ -36,15 +36,71 @@ const DEFAULT_WEBUI_HOST: &str = "127.0.0.1";
 /// Default port for `fleet webui`.
 const DEFAULT_WEBUI_PORT: u16 = 4571;
 
-/// `--host` wins, then `FLEET_WEBUI_HOST`, then loopback.
+/// The address `--lan` binds: every interface, so the phone can reach it.
+const LAN_WEBUI_HOST: &str = "0.0.0.0";
+
+/// `--host` wins, then `--lan`, then `FLEET_WEBUI_HOST`, then loopback.
 ///
 /// Deliberately *not* `FLEET_SERVE_HOST` (which `hooks_server::serve` reads for
 /// `fleet serve`): that one widens a token-gated API, this one widens a port with
 /// no authentication at all. One env var flipping both to `0.0.0.0` is exactly
 /// the accident worth keeping impossible.
-fn resolve_webui_host(flag: Option<String>, env: Option<String>) -> String {
-    flag.or_else(|| env.filter(|s| !s.is_empty()))
+///
+/// `--lan` outranks the env var because both flags were typed for *this* run
+/// while the env var is ambient; it loses to `--host` because someone naming an
+/// address means that address (a machine with several interfaces may want the
+/// phone on exactly one of them, and `--lan` still prints the QR for it).
+fn resolve_webui_host(flag: Option<String>, lan: bool, env: Option<String>) -> String {
+    flag.or_else(|| lan.then(|| LAN_WEBUI_HOST.to_string()))
+        .or_else(|| env.filter(|s| !s.is_empty()))
         .unwrap_or_else(|| DEFAULT_WEBUI_HOST.to_string())
+}
+
+/// The host another device types to reach a server bound to `bind_host`.
+///
+/// `0.0.0.0` is not an address anything can connect to, so it has to be
+/// resolved to this machine's LAN IP. Anything else was named explicitly and is
+/// already the answer. `None` means there is nothing worth printing: bound to
+/// every interface, but no non-loopback address exists (offline machine).
+fn advertised_host(bind_host: &str) -> Option<String> {
+    if bind_host == LAN_WEBUI_HOST || bind_host == "::" {
+        return claw_fleet_core::lan_access::lan_ipv4().map(|ip| ip.to_string());
+    }
+    Some(bind_host.to_string())
+}
+
+/// The `--lan` banner: both URLs and a QR code for the one you scan.
+///
+/// The QR points at the mobile UI (`/m/`) rather than the root when the bundle
+/// carries one. The root would also work — its index.html redirects coarse
+/// pointers to `/m/` — but "scan this with your phone" should not depend on a
+/// pointer-media heuristic being right about the device that scanned it.
+fn lan_banner(bind_host: &str, port: u16, has_mobile: bool) -> String {
+    let Some(host) = advertised_host(bind_host) else {
+        return "[fleet webui] --lan: no non-loopback address on this machine — is it offline?"
+            .to_string();
+    };
+    let root = format!("http://{host}:{port}/");
+    let scan = if has_mobile { format!("{root}m/") } else { root.clone() };
+
+    let mut out = String::from("\n[fleet webui] 同一局域网内可访问：\n");
+    out.push_str(&format!("  桌面 UI  {root}\n"));
+    if has_mobile {
+        out.push_str(&format!("  手机 UI  {scan}\n"));
+    } else {
+        out.push_str("  (这个 bundle 不含 /m/ 移动端产物，手机打开的也是桌面 UI)\n");
+    }
+    match claw_fleet_core::lan_access::qr_terminal(&scan) {
+        Ok(qr) => {
+            out.push_str(&format!("\n  扫这个二维码：{scan}\n\n"));
+            out.push_str(&qr);
+            out.push('\n');
+        }
+        // A URL this short cannot overflow a QR, so this is unreachable in
+        // practice — but printing the link without the code beats swallowing it.
+        Err(e) => out.push_str(&format!("  (二维码渲染失败：{e})\n")),
+    }
+    out
 }
 
 /// `--port` wins, then `FLEET_WEBUI_PORT`, then [`DEFAULT_WEBUI_PORT`].
@@ -88,9 +144,10 @@ pub(crate) fn cmd_webui(
     port: Option<u16>,
     web_root: Option<std::path::PathBuf>,
     host: Option<String>,
+    lan: bool,
     port_file: Option<std::path::PathBuf>,
 ) {
-    let host = resolve_webui_host(host, std::env::var("FLEET_WEBUI_HOST").ok());
+    let host = resolve_webui_host(host, lan, std::env::var("FLEET_WEBUI_HOST").ok());
     let port = match resolve_webui_port(port, std::env::var("FLEET_WEBUI_PORT").ok()) {
         Ok(p) => p,
         Err(e) => {
@@ -169,6 +226,11 @@ pub(crate) fn cmd_webui(
         );
     }
 
+    // Probed before the bundle is handed over, while it is still a local value:
+    // whether this build actually carries the mobile UI decides which URL the
+    // QR encodes. One lookup of one small file.
+    let has_mobile = lan && assets("/m/index.html").is_some();
+
     hooks_server::serve(ServeOptions {
         port,
         // Nothing presents a token here, and an empty one matches nothing —
@@ -178,6 +240,11 @@ pub(crate) fn cmd_webui(
         no_auth: true,
         web_assets: Some(assets),
         host: Some(host),
+        // Printed from the callback rather than here because `--port 0` means
+        // the port in the URL is not known until the listener is up.
+        on_listen: lan.then_some(Box::new(move |bound_host: &str, bound_port: u16| {
+            eprintln!("{}", lan_banner(bound_host, bound_port, has_mobile));
+        }) as Box<dyn FnOnce(&str, u16) + Send>),
     });
 }
 
@@ -188,18 +255,68 @@ mod tests {
     #[test]
     fn host_flag_beats_env_beats_default() {
         assert_eq!(
-            resolve_webui_host(Some("10.0.0.5".into()), Some("0.0.0.0".into())),
+            resolve_webui_host(Some("10.0.0.5".into()), false, Some("0.0.0.0".into())),
             "10.0.0.5"
         );
-        assert_eq!(resolve_webui_host(None, Some("0.0.0.0".into())), "0.0.0.0");
-        assert_eq!(resolve_webui_host(None, None), DEFAULT_WEBUI_HOST);
+        assert_eq!(resolve_webui_host(None, false, Some("0.0.0.0".into())), "0.0.0.0");
+        assert_eq!(resolve_webui_host(None, false, None), DEFAULT_WEBUI_HOST);
     }
 
     #[test]
     fn empty_host_env_is_not_a_value() {
         // Docker passes `-e FLEET_WEBUI_HOST` with no value as an empty string;
         // binding "" would fail, so it has to read as "unset".
-        assert_eq!(resolve_webui_host(None, Some(String::new())), DEFAULT_WEBUI_HOST);
+        assert_eq!(
+            resolve_webui_host(None, false, Some(String::new())),
+            DEFAULT_WEBUI_HOST
+        );
+    }
+
+    #[test]
+    fn lan_widens_the_bind_but_loses_to_an_explicit_host() {
+        assert_eq!(resolve_webui_host(None, true, None), LAN_WEBUI_HOST);
+        // Typed this run, so it outranks ambient deployment config.
+        assert_eq!(
+            resolve_webui_host(None, true, Some("127.0.0.1".into())),
+            LAN_WEBUI_HOST
+        );
+        // ...but naming an interface means that interface.
+        assert_eq!(
+            resolve_webui_host(Some("192.168.1.5".into()), true, None),
+            "192.168.1.5"
+        );
+    }
+
+    #[test]
+    fn advertised_host_resolves_wildcards_only() {
+        // A named address is already what the phone types.
+        assert_eq!(advertised_host("192.168.1.5").as_deref(), Some("192.168.1.5"));
+        // The wildcards are not connectable, so they resolve to the LAN IP —
+        // or to None on a machine that has none (CI containers, offline).
+        for wildcard in ["0.0.0.0", "::"] {
+            match advertised_host(wildcard) {
+                Some(ip) => assert_ne!(ip, wildcard),
+                None => {}
+            }
+        }
+    }
+
+    #[test]
+    fn lan_banner_carries_both_urls_and_a_qr() {
+        let out = lan_banner("192.168.1.5", 4571, true);
+        assert!(out.contains("http://192.168.1.5:4571/"));
+        assert!(out.contains("http://192.168.1.5:4571/m/"));
+        assert!(out.contains('█') || out.contains('▀') || out.contains('▄'));
+    }
+
+    #[test]
+    fn lan_banner_without_a_mobile_bundle_says_so() {
+        let out = lan_banner("192.168.1.5", 4571, false);
+        assert!(out.contains("http://192.168.1.5:4571/"));
+        // No /m/ URL advertised, and none in the QR either (the explanatory
+        // line mentions the path, hence matching on the URL rather than "/m/").
+        assert!(!out.contains(":4571/m/"));
+        assert!(out.contains("不含 /m/"));
     }
 
     #[test]
