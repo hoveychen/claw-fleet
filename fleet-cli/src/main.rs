@@ -347,9 +347,19 @@ enum Commands {
     /// guard / elicitation / plan-approval hooks + PRD / interaction / wiki /
     /// model CLAUDE.md guidance that a desktop Fleet installs via onboarding.
     /// `fleet serve` alone is only an HTTP probe + permissions/MCP injection;
-    /// this makes the container a *controlled* Fleet host. Intended for the
-    /// Fleet Cloud container (run before `fleet serve`); idempotent, so safe on
-    /// every start. Desktop users manage these modes via the app UI instead.
+    /// this makes the container a *controlled* Fleet host. Idempotent, so safe
+    /// on every start.
+    ///
+    /// Hidden from `fleet --help` because no user should ever have to type it.
+    /// All three ways of running Fleet install the control plane on their own:
+    /// the desktop app through its onboarding UI, the Fleet Cloud container
+    /// through `deploy/lean/entrypoint.sh` (which runs this before `fleet
+    /// serve`), and `fleet webui` through its own first-run install. Listing it
+    /// alongside the commands people do type invites the reading that the
+    /// documented Linux quickstart — curl, chmod, `fleet webui` — is missing a
+    /// step. It stays reachable by name as the manual repair entry point (a
+    /// partially failed install, or re-running it after changing locale/model).
+    #[command(hide = true)]
     Bootstrap {
         /// Locale for generated guidance (e.g. "en", "zh"). Defaults to
         /// $FLEET_LOCALE, else "en".
