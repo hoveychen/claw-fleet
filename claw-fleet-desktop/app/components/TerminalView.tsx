@@ -17,31 +17,21 @@ import { PageShell } from "./PageShell";
 import { EmptyState } from "./EmptyState";
 import { ProcTerminal } from "./ProcTerminal";
 import { distinctWorkspaces } from "./NewSessionForm";
-import { useProcStore, useSessionsStore } from "../store";
+import { procLabel } from "./procCommandLabel";
+import { useProcStore, useSessionsStore, useUIStore } from "../store";
 import type { ProcRecord } from "../types";
 import styles from "./MemoryView.module.css";
 import termStyles from "./TerminalView.module.css";
 
-/** 标签上显示的命令名：core 的默认 shell 显示成「shell」，其余取第一个词再截断
- *  —— 命令面板起的 `pnpm build` 也会出现在这里。
- *
- *  两种形状都要认：core 现在生成 `exec "/bin/zsh" -i`（绝对路径，见
- *  proc_runner::default_shell_command），而这次改动之前起的、仍活着的 pty 记录里
- *  存的是旧的 `exec "$SHELL" -i`。只认新形状会让老终端的标签显示成「exec」。 */
-export function procLabel(proc: ProcRecord, shellLabel: string): string {
-  const cmd = proc.command.trim();
-  if (/^exec\s+"[^"]*"\s+-i$/.test(cmd) || /^exec\s+"?\$SHELL/.test(cmd) || cmd === "cmd") {
-    return shellLabel;
-  }
-  const head = cmd.split(/\s+/)[0] ?? cmd;
-  return head.length > 16 ? `${head.slice(0, 15)}…` : head;
-}
 
 export function TerminalView() {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const procs = useProcStore((s) => s.procs);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
+
+  const terminalNav = useUIStore((s) => s.terminalNav);
+  const clearTerminalNav = useUIStore((s) => s.clearTerminalNav);
 
   const [selected, setSelected] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -57,6 +47,14 @@ export function TerminalView() {
     () => distinctWorkspaces(sessions, Number.MAX_SAFE_INTEGER),
     [sessions],
   );
+
+  // 仓库页「在终端打开」带过来的仓库。依赖 nonce 而非 workspacePath —— 从终端页
+  // 切回仓库、再点同一个仓库时 path 没变，只有 nonce 变，靠它这个 effect 才会重跑。
+  useEffect(() => {
+    if (!terminalNav) return;
+    setSelected(terminalNav.workspacePath);
+    clearTerminalNav();
+  }, [terminalNav?.nonce, terminalNav, clearTerminalNav]);
 
   // 轮询 proc 注册表：标签的存活状态、以及别处（命令面板、手机）起的 pty 都靠它
   // 进来。ProcTerminal 自己的输出轮询只认它挂着的那一个。

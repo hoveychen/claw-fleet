@@ -470,6 +470,27 @@
   color: var(--color-bg-card);
 }
 
+/* 「在终端打开」：跟 .proc_run_btn 同高同内距好在一行里对齐,但配色是中性的 —— 它
+   是这一行的次要出口,不该跟主操作「运行」抢同一份 accent 视觉重量。 */
+.proc_term_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.proc_term_btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-text-secondary);
+}
+
 .proc_error {
   font-size: 11px;
   color: var(--color-error);
