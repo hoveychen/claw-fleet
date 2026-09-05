@@ -61,6 +61,9 @@ pub struct GenerateImageResult {
     /// explain — a refusal, a clarifying question, or a note that it moved the
     /// file into the workspace.
     pub agent_message: String,
+    /// What the agent did during the turn, in order. See [`TurnEvent`] for the
+    /// one thing it cannot show you.
+    pub timeline: Vec<TurnEvent>,
 }
 
 /// `$CODEX_HOME/generated_images/<thread_id>` — where the built-in `image_gen`
@@ -167,6 +170,75 @@ pub fn build_edit_prompt(instruction: &str, attached: usize) -> String {
          unchanged.{refs} {PROMPT_RULES}\n\n{}",
         instruction.trim()
     )
+}
+
+/// One step the agent took during a turn, in stream order.
+///
+/// This is the answer to "what did it actually do in there" — the thing you
+/// need when a revision comes back wrong and you want to know whether the agent
+/// misread the instruction or the tool misbehaved.
+///
+/// **Known blind spot:** the `image_gen` call itself emits no event (verified
+/// against the live stream), so the timeline shows the agent reading its skill,
+/// running `sips`, and narrating — but never the generation parameters it
+/// passed. Those are unobservable from outside Codex.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TurnEvent {
+    /// `message` (the agent talking) or `command` (a shell command it ran).
+    pub kind: String,
+    /// The message text, or the command line.
+    pub text: String,
+}
+
+/// Truncation cap for a single command's captured output. A `sed` of the whole
+/// SKILL.md is ~10 KB of noise; the first line or two is what identifies it.
+const EVENT_TEXT_CAP: usize = 200;
+
+/// Every agent message and command execution in a `codex exec --json` capture,
+/// in stream order.
+///
+/// Lines that don't parse, or carry no `item`, are skipped rather than aborting
+/// — a turn's stream interleaves several event shapes and gains new ones across
+/// Codex versions.
+pub fn parse_turn_timeline(stdout: &str) -> Vec<TurnEvent> {
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        // Only `item.completed`: `item.started` carries the same command with a
+        // null exit code, so taking both would double every entry.
+        if v.get("type").and_then(|t| t.as_str()) != Some("item.completed") {
+            continue;
+        }
+        let Some(item) = v.get("item") else { continue };
+        let (kind, text) = match item.get("type").and_then(|t| t.as_str()) {
+            Some("agent_message") => ("message", item.get("text").and_then(|t| t.as_str())),
+            Some("command_execution") => ("command", item.get("command").and_then(|c| c.as_str())),
+            _ => continue,
+        };
+        let Some(text) = text.map(str::trim).filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        out.push(TurnEvent {
+            kind: kind.to_string(),
+            text: truncate(text, EVENT_TEXT_CAP),
+        });
+    }
+    out
+}
+
+/// Cap `s` at `max` characters, marking that it was cut. Character-based, not
+/// byte-based: a byte slice would panic mid-UTF-8 on a CJK prompt.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    format!("{}…", s.chars().take(max).collect::<String>())
 }
 
 /// Last `agent_message` item in a `codex exec --json` stdout capture.
@@ -389,6 +461,7 @@ fn finish_turn(
         thread_id,
         images,
         agent_message,
+        timeline: parse_turn_timeline(stdout),
     })
 }
 
@@ -537,6 +610,65 @@ mod tests {
             parse_last_agent_message(stdout).as_deref(),
             Some("done, saved it")
         );
+    }
+
+    #[test]
+    fn timeline_keeps_messages_and_commands_in_order() {
+        let stdout = concat!(
+            r#"{"type":"thread.started","thread_id":"abc"}"#,
+            "\n",
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"starting"}}"#,
+            "\n",
+            r#"{"type":"item.started","item":{"type":"command_execution","command":"sips -z 1024 1024 a.png","exit_code":null}}"#,
+            "\n",
+            r#"{"type":"item.completed","item":{"type":"command_execution","command":"sips -z 1024 1024 a.png","exit_code":0}}"#,
+            "\n",
+            r#"{"type":"item.completed","item":{"type":"reasoning","text":"hmm"}}"#,
+            "\n",
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"done"}}"#,
+            "\n",
+            r#"{"type":"turn.completed","usage":{}}"#,
+        );
+        let got = parse_turn_timeline(stdout);
+        assert_eq!(
+            got,
+            vec![
+                TurnEvent { kind: "message".into(), text: "starting".into() },
+                TurnEvent { kind: "command".into(), text: "sips -z 1024 1024 a.png".into() },
+                TurnEvent { kind: "message".into(), text: "done".into() },
+            ],
+            "item.started must not double the command; non-message/command items are skipped"
+        );
+    }
+
+    #[test]
+    fn timeline_truncates_on_char_boundaries_not_bytes() {
+        // A CJK command line would panic a byte-slice truncation.
+        let long = "画".repeat(EVENT_TEXT_CAP + 50);
+        let line = serde_json::json!({
+            "type": "item.completed",
+            "item": { "type": "command_execution", "command": long }
+        })
+        .to_string();
+        let got = parse_turn_timeline(&line);
+        assert_eq!(got.len(), 1);
+        assert_eq!(
+            got[0].text.chars().count(),
+            EVENT_TEXT_CAP + 1,
+            "capped text plus the ellipsis marker"
+        );
+        assert!(got[0].text.ends_with('…'));
+    }
+
+    #[test]
+    fn timeline_survives_garbage_and_empty_input() {
+        assert!(parse_turn_timeline("").is_empty());
+        assert!(parse_turn_timeline("not json\n{broken\n").is_empty());
+        // An item with no text/command contributes nothing rather than a blank row.
+        assert!(parse_turn_timeline(
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"   "}}"#
+        )
+        .is_empty());
     }
 
     #[test]
