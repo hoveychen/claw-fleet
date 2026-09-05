@@ -773,6 +773,14 @@ deferred listing does NOT qualify as absent.\n\
 /// Apply interaction mode: write the guidance file and inject the `@import`
 /// sentinel block into `~/.claude/CLAUDE.md`. Idempotent.
 pub fn apply_interaction_mode(user_title: &str, locale: &str) -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        apply_interaction_mode_inner(user_title, locale),
+        crate::control_plane_prefs::Feature::InteractionMode,
+        false,
+    )
+}
+
+fn apply_interaction_mode_inner(user_title: &str, locale: &str) -> Result<(), String> {
     let dir = claude_dir().ok_or("cannot determine home dir")?;
     fs::create_dir_all(&dir).map_err(|e| format!("create ~/.claude: {e}"))?;
 
@@ -805,6 +813,14 @@ pub fn apply_interaction_mode(user_title: &str, locale: &str) -> Result<(), Stri
 /// Remove interaction mode: strip the sentinel block and delete the guidance
 /// file. Idempotent (no-op if already clean).
 pub fn remove_interaction_mode() -> Result<(), String> {
+    crate::control_plane_prefs::note_intent(
+        remove_interaction_mode_inner(),
+        crate::control_plane_prefs::Feature::InteractionMode,
+        true,
+    )
+}
+
+fn remove_interaction_mode_inner() -> Result<(), String> {
     if let Some(claude_md) = claude_md_path() {
         if let Ok(existing) = fs::read_to_string(&claude_md) {
             let stripped = strip_sentinel_block(&existing);
