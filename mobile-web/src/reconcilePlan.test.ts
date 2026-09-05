@@ -2,13 +2,26 @@ import { describe, expect, it } from "vitest";
 import {
   DECISION_RECONCILE_ACTIVE_MS,
   DECISION_RECONCILE_IDLE_MS,
+  DECISION_RECONCILE_OFFLINE_MS,
   reconcilePlan,
 } from "./reconcilePlan";
 
 describe("reconcilePlan", () => {
-  it("does not poll while the desktop is offline", () => {
-    expect(reconcilePlan(false, false).poll).toBe(false);
-    expect(reconcilePlan(false, true).poll).toBe(false);
+  // Boss's weak-network bug: on the same-origin webui the SSE stream is the
+  // only thing that flips `agentOnline`, and requests ride a separate plain
+  // `fetch` that keeps working while the stream is down. Stopping the poll on
+  // `agentOnline === false` therefore removed the one channel that could still
+  // recover a card — the stream was dead AND nothing polled, so only a page
+  // reload brought cards back. Probe slowly instead of not at all.
+  it("still probes slowly while the desktop looks offline", () => {
+    expect(reconcilePlan(false, false)).toEqual({
+      poll: true,
+      intervalMs: DECISION_RECONCILE_OFFLINE_MS,
+    });
+    expect(reconcilePlan(false, true)).toEqual({
+      poll: true,
+      intervalMs: DECISION_RECONCILE_OFFLINE_MS,
+    });
   });
 
   it("polls fast while cards are open", () => {

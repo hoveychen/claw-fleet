@@ -11,6 +11,8 @@
  *  forever. See decisionReconcile.ts for the merge, App.tsx for the wiring. */
 export const DECISION_RECONCILE_ACTIVE_MS = 3_000;
 export const DECISION_RECONCILE_IDLE_MS = 15_000;
+/** Probe cadence while the desktop looks offline. */
+export const DECISION_RECONCILE_OFFLINE_MS = 30_000;
 
 export interface ReconcilePlan {
   /** Whether the reconcile loop should be scheduled at all. */
