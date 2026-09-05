@@ -69,11 +69,16 @@ function useKeyboardInset(): number {
   return inset;
 }
 
-/** 标签上显示的命令名：`exec "$SHELL" -i` 这种默认 shell 显示成「shell」，
- *  其余取第一个词，太长再截断。 */
+/** 标签上显示的命令名：默认 shell 显示成「shell」，其余取第一个词，太长再截断。
+ *
+ *  两种形状都要认：core 现在生成 `exec "/bin/zsh" -i`（绝对路径，见
+ *  proc_runner::default_shell_command），而那次改动之前起的、仍活着的 pty 记录里
+ *  存的是旧的 `exec "$SHELL" -i`。只认新形状会让老终端的标签显示成「exec」。 */
 function procLabel(proc: ProcRecord): string {
   const cmd = proc.command.trim();
-  if (/^exec\s+"?\$SHELL/.test(cmd) || cmd === "cmd") return t("shell");
+  if (/^exec\s+"[^"]*"\s+-i$/.test(cmd) || /^exec\s+"?\$SHELL/.test(cmd) || cmd === "cmd") {
+    return t("shell");
+  }
   const head = cmd.split(/\s+/)[0] ?? cmd;
   return head.length > 14 ? `${head.slice(0, 13)}…` : head;
 }
