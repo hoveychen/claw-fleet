@@ -785,6 +785,13 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     method: "GET",
     path: "/artifacts",
   }),
+  // Bytes for each entry come from `/session_image`, which `sessionImageUrl`
+  // addresses directly in the web build rather than through this table.
+  list_session_images: (a) => ({
+    method: "GET",
+    path: "/session_images",
+    query: { session: q(a.sessionId) },
+  }),
 
   artifact_usage: () => ({
     method: "GET",
