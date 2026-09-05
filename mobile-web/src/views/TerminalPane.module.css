@@ -6,8 +6,12 @@
   background: var(--color-bg);
 }
 
-/* xterm 自带的 .xterm-viewport 有滚动条；手机上隐藏它，靠手势滚。 */
-.pane :global(.xterm-viewport)::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+/* xterm 6 起视口换成了 VS Code 的 ScrollableElement：滚动条是自绘的 div
+   (.xterm-scrollable-element > .scrollbar)，不再是原生滚动条 —— 所以旧的
+   ::-webkit-scrollbar 规则已经没有作用对象，删掉了。自绘条是 Auto 可见，滚动时
+   才淡出来，正好当作「现在不在底部」的提示，留着。
+   手势滚动由 TerminalPane 自己接管：那个 widget 只认 wheel 和拖条，没有 touch。 */
+.pane :global(.xterm-scrollable-element > .scrollbar) {
+  /* 手机上拖 4px 宽的条不现实，别让它拦住落在同一列上的划动。 */
+  pointer-events: none;
 }
