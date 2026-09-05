@@ -114,7 +114,10 @@ export function DeviceConnection({
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   refreshRef.current = async () => {
     const client = clientRef.current;
-    if (!client?.isAuthed) return;
+    // 不再要求 `isAuthed`。它说的是「那条流/socket 此刻是开的」,而这次请求走的是
+    // 另一条通道 —— 同源形态下是普通 fetch,流断了主机往往仍然答得动。拿它当闸门
+    // 会让唯一一条能捞回漏掉卡片的路,恰好在最需要它的时候关上(见 reconcilePlan)。
+    if (!client) return;
     try {
       const snap = await client.request<PendingSnapshot>("pending_snapshot");
       dispatchRef.current({
@@ -124,8 +127,11 @@ export function DeviceConnection({
         agent: snap.agent,
         now: Date.now(),
       });
+      // 主机真答了这一次,那它就是在线的。反过来不成立:单次请求失败不足以判死,
+      // 「离线」这个信号仍然由流/socket 自己拥有。
+      dispatchRef.current({ deviceId, type: "agentOnline", online: true });
     } catch {
-      // 桌面端离线 —— 实时事件之后会补上
+      // 桌面端离线 —— 实时事件或下一轮探测之后会补上
     }
   };
 
@@ -231,7 +237,8 @@ export function DeviceConnection({
 
   // 待决策卡的前台兜底对账。decision_created / decision_resolved 都是无 ack 无
   // 重传的广播,弱网掉一帧就会漏一张卡;(重)连时那一次 refresh 也可能超时被吞。
-  // 这条循环是耐用的兜底:有卡时快(3s)、闲时慢(15s),节奏由 reconcilePlan 决定。
+  // 这条循环是耐用的兜底:有卡时快(3s)、闲时慢(15s)、看着离线时更慢(30s),节奏
+  // 由 reconcilePlan 决定 —— 离线那一档正是老板那台服务器上「只能刷新页面」的解药。
   useEffect(() => {
     const plan = reconcilePlan(agentOnline, hasPendingDecisions);
     if (!plan.poll) return;
