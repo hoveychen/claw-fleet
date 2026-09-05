@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, ListChecks, Coffee, ListTree, Package } from "lucide-react";
+import { Menu, Shield, ListChecks, Coffee, ListTree, Package, SquareTerminal } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { openSettingsWindow, runningProcTotal, useAuditStore, useConnectionStore, useDetailStore, useProcStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
@@ -23,6 +23,7 @@ import { PlansView } from "./PlansView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
 import { FilesView } from "./FilesView";
+import { TerminalView } from "./TerminalView";
 import { PluginsView } from "./PluginsView";
 import { MobileView } from "./MobileView";
 import { SessionCard } from "./SessionCard";
@@ -358,6 +359,13 @@ export function SessionList() {
         )}
       </button>
       <button
+        className={`${styles.nav_item} ${viewMode === "terminal" ? styles.nav_active : ""}`}
+        onClick={() => navTo("terminal")}
+      >
+        <span className={styles.nav_icon}><SquareTerminal size={14} strokeWidth={1.5} /></span>
+        <span className={styles.nav_label}>{t("view_terminal", "终端")}</span>
+      </button>
+      <button
         className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
         onClick={() => navTo("wiki")}
       >
@@ -650,6 +658,8 @@ export function SessionList() {
         <SkillsView />
       ) : viewMode === "files" ? (
         <FilesView />
+      ) : viewMode === "terminal" ? (
+        <TerminalView />
       ) : viewMode === "plugins" ? (
         <PluginsView />
       ) : viewMode === "mobile" ? (

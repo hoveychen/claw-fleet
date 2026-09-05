@@ -23,7 +23,10 @@ export function ProcTerminal({
    *  needs to know the proc exited (and with what code) doesn't have to run a
    *  second poll loop against the same log. */
   onRecord?: (record: ProcRecord) => void;
-  height?: number;
+  /** Fixed pixel height (the 命令 panel's inline rows) or a CSS length — the
+   *  终端 page passes `"100%"` to fill its pane. The ResizeObserver below
+   *  re-fits either way, so a stretched terminal reflows with the window. */
+  height?: number | string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Held in a ref so a caller passing an inline closure doesn't tear down and
