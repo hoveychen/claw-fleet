@@ -372,6 +372,14 @@ pub fn serve(opts: ServeOptions) {
         std::thread::spawn(move || {
             let mut prev_sessions_json = String::new();
             let mut prev_mobile_clients: usize = 0;
+            // Last keepalive comment written to the SSE clients. See
+            // `SseBroadcaster::ping` for why an idle stream still needs bytes:
+            // nginx's default `proxy_read_timeout` is 60s, and this loop only
+            // writes when something changed, so a quiet minute looks like a hung
+            // upstream and the stream gets reaped under the page's feet.
+            // 15s leaves a wide margin under that default without being chatty.
+            let mut last_ping = std::time::Instant::now();
+            const SSE_PING_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
             let mut prev_alert_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_guard_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_elicit_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -388,6 +396,14 @@ pub fn serve(opts: ServeOptions) {
                 // scanning so decisions still reach the mobile web.
                 if sse_bg.client_count() == 0 && !crate::mobile_relay::is_connected() {
                     continue;
+                }
+
+                // Keepalive. Also prunes readers that have gone away, which is
+                // what keeps `client_count` (and the consumer heartbeat below)
+                // from counting a departed page until the next real broadcast.
+                if last_ping.elapsed() >= SSE_PING_EVERY {
+                    sse_bg.ping();
+                    last_ping = std::time::Instant::now();
                 }
 
                 // A SSE client is connected — mark this serve as a live consumer
