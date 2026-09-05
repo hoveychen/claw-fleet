@@ -74,6 +74,18 @@ export interface VoiceInputProvider {
    */
   isAvailable(): Promise<boolean>;
   start(lang: string, handlers: VoiceHandlers): Promise<VoiceSession>;
+  /**
+   * 把用户送到能把麦克风权限打开的地方，并回答「现在授权了吗」。
+   *
+   * 可选,因为**只有原生壳做得到**:浏览器里没有任何 API 能打开站点权限设置,
+   * 那条路只能给一句指引文案。所以这里没有「所有 provider 都实现一个空壳」的
+   * 版本 —— 缺席就是缺席,UI 据此决定画一个真按钮还是一句话,不画按不动的按钮。
+   *
+   * 鸿蒙实现走 `requestPermissionOnSetting`:用户拒过一次之后
+   * `requestPermissionsFromUser` 就再也不弹了,这个 API 是官方给的二次授权入口,
+   * 而且它直接在应用内弹系统面板,比跳到设置里让用户自己找更短。
+   */
+  openPermissionSettings?(): Promise<boolean>;
 }
 
 /** 鸿蒙壳注入的原生桥对象名，与 nativeScan.ts 同一个。 */
