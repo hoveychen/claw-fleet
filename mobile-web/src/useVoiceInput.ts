@@ -74,6 +74,9 @@ export interface UseVoiceInput {
   stop(): void;
   /** 丢弃本次识别。 */
   cancel(): void;
+  /** 收掉错误提示回到待命。cancel 不做这件事：它只管收麦克风，报出去的错该
+   *  留在屏幕上，直到用户自己看过。 */
+  clearError(): void;
 }
 
 /**
@@ -182,5 +185,10 @@ export function useVoiceInput(lang: string, onText: (text: string) => void): Use
     setState((s) => (s === "listening" ? "idle" : s));
   }, []);
 
-  return { state, partial, error, start, stop, cancel };
+  const clearError = useCallback(() => {
+    setError(null);
+    setState((s) => (s === "error" ? "idle" : s));
+  }, []);
+
+  return { state, partial, error, start, stop, cancel, clearError };
 }
