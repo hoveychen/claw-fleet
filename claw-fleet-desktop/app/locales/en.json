@@ -2272,7 +2272,7 @@
   "history": {
     "title": "Tasks",
     "search_placeholder": "Search title, plan, full text…",
-    "enqueue_placeholder": "Session running — your message queues and continues after this turn…",
+    "enqueue_placeholder": "Session is running — your message queues and sends when this turn ends…",
     "empty": "No sessions yet — hit New Session in the top-right to launch one",
     "no_match": "No matching sessions",
     "untitled": "(untitled)",
@@ -2320,7 +2320,6 @@
     "select_hint": "Select a session on the left to view its detail",
     "empty_hint": "No sessions yet — start one from above",
     "enqueue_cancel": "Cancel this queued message",
-    "enqueue_placeholder": "Session is running — your message queues and sends when this turn ends…",
     "enqueue_queued_label": "Queued — sends automatically when this turn ends",
     "group_collapse": "Collapse relay chain",
     "group_expand": "Show earlier sessions in this relay chain",
@@ -2598,5 +2597,20 @@
   "mobile_direct_no_token": "No serve is running on this machine — an empty ~/.fleet/token is normal, the desktop app does not listen on HTTP. Direct connect points at another Fleet host you already run: enter its address and admin token (for a cloud container, that's FLEET_ADMIN_TOKEN).",
   "mobile_direct_qr_hint": "This code carries a token — do not share screenshots.",
   "mobile_direct_copy": "Copy direct link",
-  "mobile_direct_copy_hint": "Use this when scanning can't get in: paste it on the phone."
+  "mobile_direct_copy_hint": "Use this when scanning can't get in: paste it on the phone.",
+  "terminal": {
+    "title": "Terminal",
+    "shell": "shell",
+    "new": "New terminal",
+    "kill": "Stop",
+    "close": "Close",
+    "starting": "Starting a terminal…",
+    "none": "No terminal",
+    "exited": "Exited",
+    "exited_code": "Exited · code {{code}}",
+    "restart": "Restart",
+    "select_workspace": "Pick a repository to open a terminal in.",
+    "no_workspaces": "No repositories yet"
+  },
+  "view_terminal": "Terminal"
 }

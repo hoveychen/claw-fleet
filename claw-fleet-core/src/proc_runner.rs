@@ -214,11 +214,31 @@ fn require_dir() -> Result<PathBuf, String> {
 // Public API — spawn / list / kill / io (callers: LocalBackend + hooks_server)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The user's login shell, as an absolute path.
+///
+/// `SHELL` is set by whatever logged the user in — it is *not* exported by the
+/// shell itself. A Fleet launched from the Dock or Finder therefore often has no
+/// `SHELL` in its environment at all, which is why the filesystem fallback here
+/// is load-bearing rather than defensive padding.
+fn resolve_shell() -> String {
+    std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| {
+        if Path::new("/bin/zsh").exists() {
+            "/bin/zsh".into()
+        } else {
+            "/bin/sh".into()
+        }
+    })
+}
+
 /// What "open a terminal here" runs when the caller names no command.
 ///
-/// Unix: the host already execs `$SHELL -lc <command>` against a real pty, so
-/// re-execing the same shell with `-i` is what turns that into an interactive
-/// session — prompt, job control, `vim`, all of it.
+/// Unix: the host execs `<shell> -lc <command>` against a real pty, so
+/// re-execing the shell with `-i` is what turns that into an interactive
+/// session — prompt, job control, `vim`, all of it. The path is resolved **here**
+/// rather than written as `exec "$SHELL" -i`: the inner expansion happens inside
+/// the host's own shell, which inherits the same empty `SHELL` and expands it to
+/// nothing, and `exec "" -i` dies with `permission denied:` before any prompt
+/// appears. See `default_shell_command_names_a_real_shell_not_a_variable`.
 ///
 /// Windows has no ConPTY in this transport (see the module header): the command
 /// runs on plain pipes and sees a non-TTY, so `cmd` there gives echoed output
@@ -227,7 +247,7 @@ pub fn default_shell_command() -> String {
     if cfg!(windows) {
         "cmd".to_string()
     } else {
-        "exec \"$SHELL\" -i".to_string()
+        format!("exec \"{}\" -i", resolve_shell())
     }
 }
 
@@ -791,17 +811,11 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
         }
     }
 
-    // 2. Spawn `$SHELL -lc <command>` at the workspace cwd, as a session
+    // 2. Spawn `<shell> -lc <command>` at the workspace cwd, as a session
     //    leader with the pty slave as its controlling terminal. Login shell
     //    (-l) so the user's PATH/profile applies even when the spawner was a
     //    GUI app with a minimal environment.
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| {
-        if Path::new("/bin/zsh").exists() {
-            "/bin/zsh".into()
-        } else {
-            "/bin/sh".into()
-        }
-    });
+    let shell = resolve_shell();
     let stdio = |fd: &OwnedFd| -> Result<std::process::Stdio, String> {
         // Keep the duplicate close-on-exec as well. Command's child setup
         // moves it onto fd 0/1/2, which clears CLOEXEC for the intended stdio,
@@ -1038,6 +1052,78 @@ mod tests {
         };
         write_record(dir, &rec).unwrap();
         rec
+    }
+
+    /// The blank-command terminal must not defer the shell lookup to the shell
+    /// it is about to run inside. `SHELL` is set by whatever logged the user in,
+    /// not by the shell itself, so a GUI-launched Fleet (Dock / Finder, minimal
+    /// environment — see the desktop CLAUDE.md note on PATH) often has no
+    /// `SHELL` at all. `exec "$SHELL" -i` then expands to `exec "" -i` and the
+    /// terminal dies on `permission denied:` before showing a prompt:
+    ///
+    /// ```text
+    /// $ env -u SHELL /bin/zsh -lc 'exec "$SHELL" -i'
+    /// zsh:1: permission denied:
+    /// ```
+    ///
+    /// Resolving the path here (in the host's own environment, with a filesystem
+    /// fallback) is what makes the command self-contained.
+    #[cfg(unix)]
+    #[test]
+    fn default_shell_command_names_a_real_shell_not_a_variable() {
+        let cmd = default_shell_command();
+        assert!(
+            !cmd.contains("$SHELL"),
+            "blank-command shell defers to $SHELL, which is unset under a GUI \
+             launch: {cmd:?}"
+        );
+        // Whatever it names must actually be there to exec.
+        let path = cmd
+            .trim_start_matches("exec ")
+            .trim_start_matches('"')
+            .split('"')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            Path::new(&path).is_absolute() && Path::new(&path).exists(),
+            "not an executable shell path: {path:?} (from {cmd:?})"
+        );
+    }
+
+    /// End-to-end proof that the resolved command really yields an interactive
+    /// shell on a pty: feed it a line of stdin and read the result back.
+    #[cfg(unix)]
+    #[test]
+    fn default_shell_command_runs_an_interactive_shell() {
+        let dir = temp_dir("shell");
+        let rec = seed_record(&dir, &default_shell_command(), &std::env::temp_dir());
+
+        let dir2 = dir.clone();
+        let id = rec.id.clone();
+        let host = std::thread::spawn(move || run_host(&dir2, &id));
+
+        for _ in 0..100 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if sock_path(&dir, &rec.id).exists() {
+                break;
+            }
+        }
+        let payload = base64::engine::general_purpose::STANDARD
+            .encode(b"echo ok-from-shell\nexit\n");
+        send_control(&dir, &rec.id, &ControlMsg::Stdin { data_b64: payload }).unwrap();
+
+        host.join().unwrap().unwrap();
+        let chunk = proc_output_in(&dir, &rec.id, None).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(chunk.data_b64)
+            .unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            text.contains("ok-from-shell"),
+            "interactive shell produced no output: {text:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

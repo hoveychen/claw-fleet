@@ -27,6 +27,7 @@ export const RAILS: Partial<Record<ViewMode, RailConfig>> = {
   wiki: { storageKey: "wiki-rail-width", min: 170, max: 420, initial: 240 },
   skills: { storageKey: "skills-rail-width", min: 200, max: 640, initial: 340 },
   files: { storageKey: "files-rail-width", min: 200, max: 640, initial: 340 },
+  terminal: { storageKey: "terminal-rail-width", min: 200, max: 640, initial: 300 },
   plugins: { storageKey: "plugins-rail-width", min: 200, max: 640, initial: 340 },
   report: { storageKey: "report-rail-width", min: 240, max: 640, initial: 360 },
   plans: { storageKey: "plans-rail-width", min: 200, max: 640, initial: 300 },
