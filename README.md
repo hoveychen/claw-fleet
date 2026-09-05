@@ -45,7 +45,9 @@ Open **http://127.0.0.1:4571**. A phone on the same machine's URL gets the mobil
 
 To serve your own bundle instead of the built-in one — iterating on the frontend, or pinning a version — pass `--web-root <dir>` (or set `FLEET_WEB_ROOT`); a directory always wins over the embedded copy. The bundle is published separately as `claw-fleet-webui.tar.gz`, which is also how you run the browser UI on macOS or Windows.
 
-> `fleet webui` has **no authentication of its own** — it binds loopback by default, and these routes can start agent sessions. If you pass `--host 0.0.0.0` to reach it from another machine, put your own auth gateway in front of it.
+To open it from your phone on the same network, run `fleet webui --lan`: it binds every interface and prints both URLs plus a QR code you can scan straight out of the terminal.
+
+> `fleet webui` has **no authentication of its own** — it binds loopback by default, and these routes can start agent sessions. If you widen it with `--lan` or `--host 0.0.0.0` to reach it from another machine, put your own auth gateway in front of it (or trust everyone on that network to start agent sessions on your machine).
 
 ### Phone
 
