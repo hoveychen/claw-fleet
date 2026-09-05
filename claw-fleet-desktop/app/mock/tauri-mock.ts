@@ -614,10 +614,25 @@ async function handleIPC(
       return qaMode ? MOCK_QA_PLUGINS : [];
     case "list_marketplaces":
       return qaMode ? MOCK_QA_MARKETPLACES : [];
+    // Workspace procs (命令 panel + 终端 page). These used to answer with an
+    // empty list, which left the 终端 page drawing a bare black rectangle under
+    // ?mock — indistinguishable from a layout bug. Mock now serves a scripted
+    // pty instead; see MOCK_PTY_SCRIPT.
     case "list_workspace_procs":
-      return [];
+      return listMockProcs();
     case "clear_workspace_procs":
-      return 0;
+      return clearMockProcs(args.id as string | null, args.workspacePath as string | null);
+    case "run_workspace_proc":
+      return spawnMockProc(args.workspacePath as string, (args.command as string) ?? "");
+    case "read_workspace_proc_output":
+      return readMockProcOutput(args.id as string, args.offset as number | null);
+    // Keystrokes and resizes go nowhere: the scripted output is fixed, and
+    // echoing input would imply a shell that isn't there.
+    case "write_workspace_proc_input":
+    case "resize_workspace_proc":
+      return null;
+    case "kill_workspace_proc":
+      return killMockProc(args.id as string);
     case "search_sessions": {
       // Real-shaped FTS over the mock transcripts: match any message whose
       // JSON carries the query, so the search → open-with-query → fold
@@ -1141,6 +1156,123 @@ async function handleIPC(
       console.warn(`[mock] Unhandled invoke: ${cmd}`, args);
       return null;
   }
+}
+
+// ── Mock workspace procs ─────────────────────────────────────────────────────
+//
+// A scripted pty: one shell that already "ran" a couple of commands, so the 终端
+// page has a real xterm with real bytes in it. Output is handed out by offset
+// exactly like the backend does, which is what makes ProcTerminal's incremental
+// read loop behave the same here as against a live host.
+
+interface MockProc {
+  id: string;
+  workspacePath: string;
+  command: string;
+  status: "starting" | "running" | "exited";
+  childPid: number | null;
+  hostPid: number | null;
+  hostStartTime: number | null;
+  exitCode: number | null;
+  startedMs: number;
+  finishedMs: number | null;
+  cols: number;
+  rows: number;
+}
+
+/** ANSI-coloured prompt lines — the point is to prove the terminal renders
+ *  escape sequences, not just plain text. */
+const MOCK_PTY_SCRIPT =
+  "\x1b[1;32m➜\x1b[0m  \x1b[1;36mclaw-fleet\x1b[0m git:(\x1b[31mmain\x1b[0m) pnpm build\r\n" +
+  "\r\n> claw-fleet-desktop@0.0.0 build\r\n> tsc && vite build\r\n\r\n" +
+  "\x1b[32mvite v7.3.1\x1b[0m building for production...\r\n" +
+  "✓ 2418 modules transformed.\r\n" +
+  "dist/index.html                   0.71 kB │ gzip:  0.40 kB\r\n" +
+  "dist/assets/App-DJyZ5EeI.js     768.00 kB │ gzip: 212.84 kB\r\n" +
+  "\x1b[32m✓ built in 10.45s\x1b[0m\r\n\r\n" +
+  "\x1b[1;32m➜\x1b[0m  \x1b[1;36mclaw-fleet\x1b[0m git:(\x1b[31mmain\x1b[0m) ";
+
+let mockProcSeq = 0;
+const mockProcs: MockProc[] = [
+  {
+    id: "mock-proc-shell",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    // Matches what core's default_shell_command() produces, so procLabel()
+    // renders it as "shell" here just like it does against a real host.
+    command: 'exec "/bin/zsh" -i',
+    status: "running",
+    childPid: 40311,
+    hostPid: 40310,
+    hostStartTime: null,
+    exitCode: null,
+    startedMs: Date.now() - 90_000,
+    finishedMs: null,
+    cols: 120,
+    rows: 32,
+  },
+];
+
+function listMockProcs(): MockProc[] {
+  return [...mockProcs];
+}
+
+function spawnMockProc(workspacePath: string, command: string): MockProc {
+  const proc: MockProc = {
+    id: `mock-proc-${++mockProcSeq}`,
+    workspacePath,
+    command: command.trim() === "" ? 'exec "/bin/zsh" -i' : command,
+    status: "running",
+    childPid: 40400 + mockProcSeq,
+    hostPid: 40400 + mockProcSeq,
+    hostStartTime: null,
+    exitCode: null,
+    startedMs: Date.now(),
+    finishedMs: null,
+    cols: 120,
+    rows: 32,
+  };
+  mockProcs.unshift(proc);
+  return proc;
+}
+
+/** The script as UTF-8 bytes, which is what the real backend hands out.
+ *
+ *  Offsets are byte offsets there, and `➜` is three bytes — slicing the JS
+ *  string instead would drift from the real contract. It would also crash:
+ *  `btoa` throws InvalidCharacterError on any code point above 255, and
+ *  ProcTerminal treats a rejected read as "proc cleared", stops polling, and
+ *  leaves a permanently blank terminal with no error anywhere. */
+const MOCK_PTY_BYTES = new TextEncoder().encode(MOCK_PTY_SCRIPT);
+
+function readMockProcOutput(id: string, offset: number | null) {
+  const record = mockProcs.find((p) => p.id === id) ?? mockProcs[0];
+  const slice = MOCK_PTY_BYTES.subarray(Math.min(offset ?? 0, MOCK_PTY_BYTES.length));
+  let bin = "";
+  for (const b of slice) bin += String.fromCharCode(b);
+  return {
+    dataB64: btoa(bin),
+    nextOffset: MOCK_PTY_BYTES.length,
+    record,
+  };
+}
+
+function killMockProc(id: string): null {
+  const proc = mockProcs.find((p) => p.id === id);
+  if (proc) {
+    proc.status = "exited";
+    proc.exitCode = 143;
+    proc.finishedMs = Date.now();
+  }
+  return null;
+}
+
+function clearMockProcs(id: string | null, workspacePath: string | null): null {
+  const drop = (p: MockProc) =>
+    id ? p.id === id : p.status === "exited" && (!workspacePath || p.workspacePath === workspacePath);
+  for (let i = mockProcs.length - 1; i >= 0; i -= 1) {
+    if (drop(mockProcs[i])) mockProcs.splice(i, 1);
+  }
+  return null;
 }
 
 // ── Screenplay driver (for video recording pipeline) ────────────────────────

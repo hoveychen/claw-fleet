@@ -47,6 +47,7 @@ const ALL_KEYS = [
   "wiki-rail-width",
   "skills-rail-width",
   "files-rail-width",
+  "terminal-rail-width",
   "plugins-rail-width",
   "audit-rail-width",
   "report-rail-width",
