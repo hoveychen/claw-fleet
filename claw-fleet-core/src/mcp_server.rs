@@ -106,8 +106,26 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
     }
 }
 
-/// Build the `tools/list` result. The six always-on tools (the four UI tools
-/// plus `fleet__image` / `fleet__image_edit`) are always present; the six
+/// The tools every session sees, Fleet-owned or not: the four UI tools plus the
+/// two image tools. Exported as a registry for the same reason
+/// [`crate::mcp_control::CONTROL_TOOL_NAMES`] is — tests that want "how many
+/// tools should a session see" must read it from here rather than hardcode a
+/// count. Both halves have now drifted once: `fleet__inspect` / `fleet__control`
+/// broke the control half, and `fleet__image` / `fleet__image_edit` broke this
+/// one (the `fleet-cli` e2e check still said four and reddened main for three
+/// pushes). Adding a tool below without adding it to `tools_list_result` — or
+/// vice versa — fails `always_on_tool_names_match_the_advertised_list`.
+pub const ALWAYS_ON_TOOL_NAMES: [&str; 6] = [
+    "fleet__ask",
+    "fleet__render_a2ui",
+    "fleet__set_session_title",
+    "fleet__permission_prompt",
+    "fleet__image",
+    "fleet__image_edit",
+];
+
+/// Build the `tools/list` result. The six always-on tools ([`ALWAYS_ON_TOOL_NAMES`]
+/// — the four UI tools plus `fleet__image` / `fleet__image_edit`); the six
 /// control tools (plan / handoff / watch / loop / schedule / wiki) are appended
 /// ONLY for Fleet-owned sessions — a user's hand-launched `claude` never sees
 /// them and keeps using the `fleet` CLI. This makes "Fleet sessions go through
@@ -1181,7 +1199,11 @@ mod tests {
         // deterministically).
         let result = tools_list_result(false);
         let tools = result["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 6, "non-Fleet session sees only the always-on tools");
+        assert_eq!(
+            tools.len(),
+            ALWAYS_ON_TOOL_NAMES.len(),
+            "non-Fleet session sees only the always-on tools"
+        );
         let names: Vec<&str> = tools
             .iter()
             .map(|t| t["name"].as_str().unwrap())
@@ -1221,6 +1243,21 @@ mod tests {
         );
     }
 
+    /// The registry and the builder must name the same tools in the same order,
+    /// so a new always-on tool cannot be advertised without landing in
+    /// `ALWAYS_ON_TOOL_NAMES` — which is what every count assertion reads.
+    #[test]
+    fn always_on_tool_names_match_the_advertised_list() {
+        let result = tools_list_result(false);
+        let names: Vec<&str> = result["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ALWAYS_ON_TOOL_NAMES);
+    }
+
     #[test]
     fn fleet_owned_session_also_sees_the_control_tools() {
         // Conditional registration: a Fleet-owned session gets the four UI tools
@@ -1229,7 +1266,7 @@ mod tests {
         let tools = result["tools"].as_array().expect("tools array");
         assert_eq!(
             tools.len(),
-            6 + crate::mcp_control::CONTROL_TOOL_NAMES.len(),
+            ALWAYS_ON_TOOL_NAMES.len() + crate::mcp_control::CONTROL_TOOL_NAMES.len(),
             "Fleet-owned session sees always-on + control tools"
         );
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();

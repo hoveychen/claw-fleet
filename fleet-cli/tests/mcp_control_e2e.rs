@@ -82,11 +82,15 @@ fn tool_names(resp: &Value) -> Vec<String> {
         .collect()
 }
 
-/// Driven off core's own registry so a newly registered control tool can't
-/// drift out of this end-to-end check (it did once: `fleet__inspect` /
-/// `fleet__control` shipped and only the hardcoded copy here still said six).
+/// Both lists are driven off core's own registries so a newly registered tool
+/// can't drift out of this end-to-end check. Each half has broken once already:
+/// `fleet__inspect` / `fleet__control` shipped while the hardcoded control count
+/// here still said six, and `fleet__image` / `fleet__image_edit` shipped while
+/// the always-on count still said four.
 const CONTROL_TOOLS: [&str; claw_fleet_core::mcp_control::CONTROL_TOOL_NAMES.len()] =
     claw_fleet_core::mcp_control::CONTROL_TOOL_NAMES;
+const ALWAYS_ON_TOOLS: [&str; claw_fleet_core::mcp_server::ALWAYS_ON_TOOL_NAMES.len()] =
+    claw_fleet_core::mcp_server::ALWAYS_ON_TOOL_NAMES;
 
 #[test]
 fn non_fleet_session_sees_only_ui_tools_and_control_call_is_refused() {
@@ -105,7 +109,11 @@ fn non_fleet_session_sees_only_ui_tools_and_control_call_is_refused() {
     );
 
     let names = tool_names(&resps[0]);
-    assert_eq!(names.len(), 4, "non-Fleet session must see only the UI tools: {names:?}");
+    assert_eq!(
+        names.len(),
+        ALWAYS_ON_TOOLS.len(),
+        "non-Fleet session must see only the always-on tools: {names:?}"
+    );
     for c in CONTROL_TOOLS {
         assert!(!names.contains(&c.to_string()), "{c} must be hidden from non-Fleet sessions");
     }
@@ -135,12 +143,12 @@ fn fleet_session_sees_control_tools_and_plan_mutates_tasks_md() {
         ],
     );
 
-    // 1. All six control tools are advertised alongside the four UI tools.
+    // 1. Every control tool is advertised alongside the always-on ones.
     let names = tool_names(&resps[0]);
     assert_eq!(
         names.len(),
-        4 + CONTROL_TOOLS.len(),
-        "Fleet session must see UI + control tools: {names:?}"
+        ALWAYS_ON_TOOLS.len() + CONTROL_TOOLS.len(),
+        "Fleet session must see always-on + control tools: {names:?}"
     );
     for c in CONTROL_TOOLS {
         assert!(names.contains(&c.to_string()), "{c} must be advertised to Fleet sessions");
