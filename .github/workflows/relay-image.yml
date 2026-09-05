@@ -19,6 +19,8 @@ on:
       # mobile-web/** glob they carve out of.
       - '!mobile-web/android/**'
       - '!mobile-web/ios/**'
+      # 仓库根的跨包共享 TS：mobile-web 直接 import 它，改了必须重建 bundle。
+      - 'shared-ts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/relay-image.yml'
