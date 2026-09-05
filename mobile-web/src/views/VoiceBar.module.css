@@ -1,0 +1,171 @@
+/* 待命时的麦克风按钮。44px 而不是原来的 34px —— 它是这条行里唯一需要精确点中
+   的目标，iOS/Android 的触控目标建议都是 44。 */
+.mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border-strong);
+  background: none;
+  color: var(--color-text-dim);
+  border-radius: 999px;
+  /* 长按仍是可用路径，浏览器默认的长按选字 / 拖拽会打断它。 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.mic:active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* 录音条：接管输入框下面那一整行。它必须一眼看上去与「待命」完全不同 ——
+   原来的实现只是把一个 34px 图标换了个字形，用户根本分不出在不在录。 */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-soft);
+  border-radius: 999px;
+}
+
+/* 取消 / 重录：次要动作，不抢眼但够大。 */
+.act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  border-radius: 999px;
+}
+
+.stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--color-accent);
+  background: none;
+  color: var(--color-accent);
+  border-radius: 999px;
+}
+
+.send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 999px;
+}
+
+.send:disabled {
+  opacity: 0.55;
+}
+
+/* 波形。活性指示，不是音量表（见 VoiceBar.tsx 的注释）：安静时压平成一条线，
+   引擎在出字时才起伏。 */
+.wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  overflow: hidden;
+}
+
+.wave span {
+  flex: 1 1 auto;
+  min-width: 2px;
+  max-width: 3px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  opacity: 0.45;
+  transition: height 0.2s ease, opacity 0.2s ease;
+}
+
+.wave[data-speaking] span {
+  opacity: 0.9;
+  animation: voice-bar-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes voice-bar-pulse {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 20px;
+  }
+}
+
+/* 动效关掉时波形不能变成「什么都不显示」—— 它是「在录音」的主要信号。留一条
+   稳定的中等高度，颜色照常。 */
+@media (prefers-reduced-motion: reduce) {
+  .wave[data-speaking] span {
+    animation: none;
+    height: 12px;
+  }
+}
+
+.time {
+  flex: none;
+  font-size: var(--t-aux, 12px);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.finalizing {
+  flex: 1 1 auto;
+  padding-left: 6px;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-muted);
+}
+
+/* 错误：留在待命行里，但带一个能直接再来一次的入口。原来它只是一行没有出口的
+   小红字。 */
+.error {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 140px;
+  min-width: 0;
+  font-size: var(--t-aux, 12px);
+  color: var(--color-error);
+}
+
+.retryLink {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--color-accent);
+  font-size: inherit;
+  text-decoration: underline;
+}

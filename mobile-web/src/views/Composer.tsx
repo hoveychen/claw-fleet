@@ -18,12 +18,11 @@ import { dshEffortsFor, dshModelGroups, useDshModels } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import { HistoryLayer } from "../useNavStack";
 import { basename } from "./taskNotification";
-import { appendVoiceText } from "../voiceInput";
-import { useVoiceAvailable } from "../useVoiceInput";
+import { useVoiceRecorder, type VoiceRecorderApi } from "../useVoiceRecorder";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 import { AttachmentThumbs } from "./AttachmentThumb";
-import { VoiceButton } from "./VoiceButton";
+import { VoiceBar, VoiceMicButton } from "./VoiceBar";
 
 const MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
@@ -224,7 +223,7 @@ function AttachmentRow({
   onRemove,
   client,
   previews,
-  onVoiceText,
+  voice,
 }: {
   attachments: Attachment[];
   uploading: boolean;
@@ -232,12 +231,21 @@ function AttachmentRow({
   onRemove: (path: string) => void;
   client: FleetTransport | null;
   previews?: Map<string, string>;
-  /** 识别出的一段语音。挂在这一行是因为它和「附件」一样是输入的辅助入口，
-   *  而两个 composer 都已经在用这一行 —— 接在这里两处同时就有了。
-   *  不传则不显示语音按钮。 */
-  onVoiceText?: (text: string) => void;
+  /** 语音录音机。状态住在 composer 里而不是这一行里，因为录音时输入框本身也要
+   *  跟着变（实时转写直接上屏）—— 那是这一行够不着的兄弟节点。
+   *  不传则不显示语音入口。 */
+  voice?: VoiceRecorderApi;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // 录音时这一行整个让给录音条:附件缩略图和 📎 都退场。录音是一个有始有终的
+  // 模式,期间「顺手加个附件」既不是真需求,也会把这行挤成两截。
+  if (voice?.active) {
+    return (
+      <div className={styles.attachRow}>
+        <VoiceBar rec={voice} />
+      </div>
+    );
+  }
   return (
     <div className={styles.attachRow}>
       {/* Images show as thumbnails (tap to enlarge), everything else keeps the
@@ -266,7 +274,7 @@ function AttachmentRow({
           <Paperclip size={17} />
         )}
       </button>
-      {onVoiceText && <VoiceButton onText={onVoiceText} />}
+      {voice?.available && <VoiceMicButton rec={voice} />}
       <input
         ref={inputRef}
         type="file"
@@ -555,15 +563,21 @@ export function NewSessionSheet({
   );
   const deviceId = useDeviceScope();
   const patch = (p: Partial<typeof NEW_SESSION_DEFAULT>) => setDraft((d) => ({ ...d, ...p }));
+  // 语音写回用函数式更新:识别结果是异步到的,期间用户可能又敲了字,读闭包里的
+  // prompt 会把那几个字覆盖掉。onSend 里的 submit 是下面才声明的 const —— 箭头
+  // 函数体到点按之后才求值,那时它早就在了;hook 内部还按 ref 取最新的一版,所以
+  // 「停止并发送」等回最后一段定稿之后发的是新内容,不是按下那一刻的旧闭包。
+  const voice = useVoiceRecorder({
+    value: draft.prompt,
+    onChange: (next) => setDraft((d) => ({ ...d, prompt: next })),
+    onSend: () => void submit(),
+  });
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const { attachments, uploading, addFiles, remove, reset, previews } = useAttachments(
     client,
     NEW_SESSION_ATTACH_KEY,
   );
-  // 与语音按钮同一个探测结果，让 placeholder 的提示和按钮的显示条件一致。
-  const voiceReady = useVoiceAvailable() === "ready";
-
   // 分享进来的文件走一次正常上传。
   //
   // 必须等 `relayReady` 而不只是 `client` 非空：client 对象在连接建立前就存在，
@@ -784,13 +798,17 @@ export function NewSessionSheet({
         {/* placeholder 承担语音的说明职责（对齐 DeepSeek / 千问 的「发消息或按住
             说话」）—— 按钮变成纯图标后没地方写字了。用与按钮同一个探测结果开关，
             否则无 GMS 的安卓机上会提示一个不存在的按钮。 */}
+        {/* 录音时输入框显示 preview（已定稿 + 还在飘的那一段），并转成只读:
+            实时转写就上在真正的输入框里,多行、可滚、不截断 —— 原来它挤在附件行
+            末尾一行 12px 的灰字里,说到第八个字就被 ellipsis 吃掉了。 */}
         <textarea
           className={styles.promptInput}
           placeholder={
-            voiceReady ? t("要让 agent 做什么？也可按住语音键说") : t("要让 agent 做什么？")
+            voice.available ? t("要让 agent 做什么？也可点麦克风说") : t("要让 agent 做什么？")
           }
           rows={5}
-          value={prompt}
+          value={voice.recording ? voice.preview : prompt}
+          readOnly={voice.recording}
           onChange={(e) => patch({ prompt: e.target.value })}
         />
         <AttachmentRow
@@ -800,11 +818,7 @@ export function NewSessionSheet({
           onRemove={remove}
           client={client}
           previews={previews}
-          // 函数式更新:识别结果是异步到的,期间用户可能又敲了字。读闭包里的
-          // prompt 会把那几个字覆盖掉。
-          onVoiceText={(text) =>
-            setDraft((d) => ({ ...d, prompt: appendVoiceText(d.prompt, text) }))
-          }
+          voice={voice}
         />
         {toolChoices.length > 1 && (
           <div className={styles.optionRow}>
@@ -911,8 +925,11 @@ export function ResumeComposer({
     `resume:${session.id}:attachments`,
   );
   const [focused, setFocused] = useState(false);
-  // 与语音按钮同一个探测结果，让 placeholder 的提示和按钮的显示条件一致。
-  const voiceReady = useVoiceAvailable() === "ready";
+  const voice = useVoiceRecorder({
+    value: prompt,
+    onChange: setPrompt,
+    onSend: () => void submit(),
+  });
   // Folded only when the parent asked AND the user has nothing in flight here.
   const collapsed =
     !!hidden &&
@@ -1055,12 +1072,13 @@ export function ResumeComposer({
         placeholder={
           enqueueing
             ? t("会话运行中，发送后排队，本轮结束自动接上…")
-            : voiceReady
-              ? t("继续这个会话，也可按住语音键说…")
+            : voice.available
+              ? t("继续这个会话，也可点麦克风说…")
               : t("继续这个会话（留空 = continue）…")
         }
         rows={2}
-        value={prompt}
+        value={voice.recording ? voice.preview : prompt}
+        readOnly={voice.recording}
         onChange={(e) => setPrompt(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
@@ -1072,7 +1090,7 @@ export function ResumeComposer({
         onRemove={remove}
         client={client}
         previews={previews}
-        onVoiceText={(text) => setPrompt((p) => appendVoiceText(p, text))}
+        voice={voice}
       />
       <div className={styles.resumeActions}>
         {!enqueueing && (
