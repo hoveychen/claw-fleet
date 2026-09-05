@@ -17,16 +17,20 @@
 //! [`crate::codex_launch::parse_thread_started`] and read the directory. Zero
 //! prose parsing, zero ambiguity.
 //!
-//! **Host semantics.** Like [`crate::codex_launch::spawn_new_codex_session`],
-//! the Codex binary resolved by [`crate::codex_source::find_codex_binary`] is
-//! always the *local* one, and a registered remote workspace has a local mirror
-//! at the identical path (`remote_workspace::ensure_local_mirror`). Generation
-//! therefore always happens on this machine and output always lands in this
-//! machine's `$CODEX_HOME` — the same contract every other Fleet-driven Codex
-//! turn already follows. There is no second host to choose.
+//! **Host semantics.** This follows
+//! [`crate::codex_launch::spawn_new_codex_session`] exactly, including the
+//! `wrap_codex_launch` step: for a registered remote workspace the launch is
+//! routed through rca, so Codex sees the *real* remote tree rather than the
+//! empty local mirror. That matters as soon as the prompt references a
+//! workspace file (a reference image, an asset to match) — an unwrapped local
+//! Codex simply cannot read it.
+//!
+//! Output, however, always lands on *this* machine: rca routes syscalls under
+//! the workspace path, and `$CODEX_HOME` (`~/.codex`) is not under it. So there
+//! is exactly one place to look for generated files regardless of workspace
+//! kind.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Extensions the built-in tool can emit. `gpt-image-2` writes PNG in practice;
 /// the others are accepted so a format change upstream doesn't silently yield an
@@ -158,6 +162,35 @@ pub fn parse_last_agent_message(stdout: &str) -> Option<String> {
     last
 }
 
+/// Assemble the exact `(program, argv, env)` a generation turn launches with.
+///
+/// Split out from [`generate_image`] so the launch shape is testable without
+/// spending a turn — in particular that the rca wrap is applied. Skipping that
+/// wrap would hand Codex the *empty local mirror* of a remote workspace instead
+/// of the real remote tree, making any workspace file the prompt references
+/// (a reference image, an asset to match) invisible to it. Local workspaces
+/// pass through unchanged with no extra env.
+fn build_generate_launch(
+    codex: PathBuf,
+    workspace_path: &str,
+    description: &str,
+    model: Option<&str>,
+) -> Result<(PathBuf, Vec<String>, Vec<(String, String)>), String> {
+    let prompt = build_image_prompt(description);
+    // `workspace-write` (not read-only): the skill inspects its own SKILL.md and
+    // may run `sips`-style checks on what it produced.
+    // No decision-card / notify bridging here: this is a one-shot tool call, not
+    // a Fleet-owned session, so it must not register itself as one.
+    let args = crate::codex_launch::build_codex_exec_args(
+        workspace_path,
+        &prompt,
+        Some(model.unwrap_or(DEFAULT_ROUTING_MODEL)),
+        None,
+        &["-s".to_string(), "workspace-write".to_string()],
+    );
+    crate::codex_launch::wrap_codex_launch(codex, args, workspace_path)
+}
+
 /// Run one blocking generation turn and return whatever it produced.
 ///
 /// Blocking (not detached like [`crate::codex_launch::spawn_new_codex_session`])
@@ -191,24 +224,21 @@ pub fn generate_image(
             .to_string()
     })?;
 
-    let prompt = build_image_prompt(description);
-    // `workspace-write` (not read-only): the skill inspects its own SKILL.md and
-    // may run `sips`-style checks on what it produced.
-    // No decision-card / notify bridging here: this is a one-shot tool call, not
-    // a Fleet-owned session, so it must not register itself as one.
-    let args = crate::codex_launch::build_codex_exec_args(
-        workspace_path,
-        &prompt,
-        Some(model.unwrap_or(DEFAULT_ROUTING_MODEL)),
-        None,
-        &["-s".to_string(), "workspace-write".to_string()],
-    );
+    let (program, args, rca_envs) = build_generate_launch(codex, workspace_path, description, model)?;
 
-    let out = Command::new(&codex)
-        .args(&args)
+    let mut cmd = crate::process_util::command(&program);
+    cmd.args(&args)
         .current_dir(workspace_path)
+        // MUST be null: `codex exec` otherwise blocks reading stdin forever.
+        .stdin(std::process::Stdio::null());
+    crate::codex_launch::apply_codex_launch_env(&mut cmd);
+    for (k, v) in &rca_envs {
+        cmd.env(k, v);
+    }
+
+    let out = cmd
         .output()
-        .map_err(|e| format!("spawn {}: {e}", codex.display()))?;
+        .map_err(|e| format!("spawn {}: {e}", program.display()))?;
 
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let thread_id = stdout
@@ -340,6 +370,43 @@ mod tests {
         assert!(
             parse_last_agent_message(r#"{"type":"thread.started","thread_id":"abc"}"#).is_none(),
             "a stream with no agent_message yields None"
+        );
+    }
+
+    #[test]
+    fn launch_goes_through_the_rca_wrap_and_passes_local_through() {
+        // The wrap is the whole remote-parity contract: without it a remote
+        // workspace hands Codex an empty local mirror. Assert it is on the path
+        // (a local workspace must come back untouched, with no rca env).
+        let td = tempfile::tempdir().unwrap();
+        let ws = td.path().to_string_lossy().to_string();
+        let codex = PathBuf::from("/usr/local/bin/codex");
+        let (program, args, envs) =
+            build_generate_launch(codex.clone(), &ws, "draw a cat", None).expect("local launch");
+
+        assert_eq!(program, codex, "local workspace must not be re-programmed");
+        assert!(envs.is_empty(), "local workspace needs no rca env, got {envs:?}");
+        assert_eq!(args.first().map(String::as_str), Some("exec"));
+        assert!(args.iter().any(|a| a == "--json"), "must stay machine-readable");
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "-s" && w[1] == "workspace-write"),
+            "skill needs workspace-write to inspect its own output: {args:?}"
+        );
+        // The prompt is last, after `--`, and carries the wrapper.
+        let last = args.last().expect("prompt");
+        assert!(last.contains("image_gen") && last.contains("draw a cat"), "{last}");
+    }
+
+    #[test]
+    fn launch_defaults_to_the_cheap_routing_model() {
+        let td = tempfile::tempdir().unwrap();
+        let ws = td.path().to_string_lossy().to_string();
+        let (_, args, _) =
+            build_generate_launch(PathBuf::from("/usr/local/bin/codex"), &ws, "x", None).unwrap();
+        assert!(
+            args.iter().any(|a| a == DEFAULT_ROUTING_MODEL),
+            "generation quality comes from gpt-image-2 regardless, so the cheap tier drives: {args:?}"
         );
     }
 
