@@ -21,6 +21,7 @@ fn generates_a_real_image_and_locates_it_by_thread_id() {
         &workspace.path().to_string_lossy(),
         "A solid blue 1024x1024 square with a single white letter A centered in it. \
          Flat vector-poster look, no texture, no extra elements.",
+        &[],
         None,
     )
     .expect("generation must succeed");
@@ -55,4 +56,64 @@ fn generates_a_real_image_and_locates_it_by_thread_id() {
         result.images.len(),
         result.images
     );
+}
+
+/// The iterate story end to end: generate, then revise in the same thread and
+/// confirm round 2 reports only what round 2 made.
+///
+/// This is the assertion that unit tests cannot reach — `new_images_since` is
+/// provably correct on synthetic input, but whether Codex actually writes a
+/// follow-up turn's output into the *same* thread directory (rather than
+/// minting a new thread) is a fact about Codex, not about our code.
+#[test]
+#[ignore = "spends real image quota twice; run manually"]
+fn revision_in_the_same_thread_reports_only_the_new_image() {
+    let workspace = tempfile::tempdir().expect("tempdir");
+    let ws = workspace.path().to_string_lossy().to_string();
+
+    let first = codex_image::generate_image(
+        &ws,
+        "A flat vector poster: a solid orange 1024x1024 square, nothing else in it.",
+        &[],
+        None,
+    )
+    .expect("first generation must succeed");
+    println!("round 1: thread {} -> {:?}", first.thread_id, first.images);
+
+    let second = codex_image::edit_image(
+        &ws,
+        &first.thread_id,
+        "Make the square deep purple instead of orange. Change nothing else.",
+        &[],
+        None,
+    )
+    .expect("revision must succeed");
+    println!("round 2: {:?}", second.images);
+
+    assert_eq!(
+        second.thread_id, first.thread_id,
+        "a revision must stay in the same thread, not mint a new one"
+    );
+    assert!(!second.images.is_empty(), "round 2 produced nothing");
+
+    // The whole point of the before/after diff.
+    let round1: std::collections::HashSet<&str> =
+        first.images.iter().map(|i| i.path.as_str()).collect();
+    for img in &second.images {
+        assert!(
+            !round1.contains(img.path.as_str()),
+            "round 2 must not re-report round 1's {}",
+            img.path
+        );
+    }
+
+    // The timeline is the "what did it actually do" answer; a turn that ran
+    // commands but reports an empty timeline means the parser drifted.
+    assert!(
+        !second.timeline.is_empty(),
+        "expected some timeline events, got none"
+    );
+    for ev in &second.timeline {
+        println!("  [{}] {}", ev.kind, ev.text);
+    }
 }
